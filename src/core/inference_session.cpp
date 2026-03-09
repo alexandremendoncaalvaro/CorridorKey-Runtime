@@ -85,69 +85,108 @@ Result<FrameResult> InferenceSession::run(
     const Image& alpha_hint,
     const InferenceParams& params
 ) {
-    (void)rgb;
-    (void)alpha_hint;
-    (void)params;
-
-    // TODO: Implement actual inference logic (preprocessing, run, postprocessing)
-    return std::unexpected(Error{ ErrorCode::InferenceFailed, "Inference run not yet implemented" });
-}
-
-Result<std::vector<Ort::Value>> InferenceSession::prepare_input_tensors(
-    const Image& rgb, 
-    const Image& alpha_hint,
-    Ort::MemoryInfo& memory_info
-) {
-    if (m_input_node_dims.empty()) {
-        return std::unexpected(Error{ ErrorCode::InvalidParameters, "InferenceSession metadata is empty" });
-    }
+    (void)params; // Use params for post-processing later
 
     try {
+        Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+        // 1. Prepare Inputs
+        // We need to keep the converted NCHW data alive during the Run() call.
+        // These vectors hold the actual float data.
+        std::vector<std::vector<float>> input_buffers;
         std::vector<Ort::Value> input_tensors;
-        
-        // Assume RGB is Input 0 and AlphaHint is Input 1 (based on CorridorKey model structure)
+
         for (size_t i = 0; i < m_input_node_dims.size(); ++i) {
             auto shape = m_input_node_dims[i];
+            int64_t model_c = shape[1];
             int64_t model_h = shape[2];
             int64_t model_w = shape[3];
-            int64_t model_c = shape[1];
 
             const Image& source = (i == 0) ? rgb : alpha_hint;
             
-            // 1. Resize if needed
+            // Resize if needed
             Image resized = (source.width != (int)model_w || source.height != (int)model_h) 
                            ? ColorUtils::resize(source, (int)model_w, (int)model_h)
                            : source;
 
-            // 2. Convert HWC to NCHW and Normalize [0, 1]
+            // Convert HWC to NCHW
             std::vector<float> planar_data(model_c * model_h * model_w);
             for (int c = 0; c < model_c; ++c) {
                 for (int y = 0; y < model_h; ++y) {
                     for (int x = 0; x < model_w; ++x) {
                         int src_idx = (y * (int)model_w + x) * (int)source.channels + (c < (int)source.channels ? c : 0);
                         int dst_idx = c * (int)model_h * (int)model_w + y * (int)model_w + x;
-                        planar_data[dst_idx] = resized.data[src_idx]; // Image is already float
+                        planar_data[dst_idx] = resized.data[src_idx];
                     }
                 }
             }
-
-            // 3. Create Tensor
+            
+            // Move the data to the persistent container for this scope
+            input_buffers.push_back(std::move(planar_data));
+            
+            // Create the non-owning Ort::Value pointing to our managed buffer
             input_tensors.push_back(Ort::Value::CreateTensor<float>(
                 memory_info, 
-                planar_data.data(), planar_data.size(), 
+                input_buffers.back().data(), input_buffers.back().size(), 
                 shape.data(), shape.size()
             ));
-
-            // IMPORTANT: planar_data is local! Ort::Value::CreateTensor with pointers 
-            // is non-owning by default. For a real production run, we need to manage 
-            // the buffer lifetime.
-            // TODO: Refactor to maintain tensor buffer lifetime.
         }
 
-        return input_tensors;
+        // 2. Run Inference
+        auto output_tensors = m_session.Run(
+            Ort::RunOptions{nullptr},
+            m_input_node_names_ptr.data(),
+            input_tensors.data(),
+            input_tensors.size(),
+            m_output_node_names_ptr.data(),
+            m_output_node_names_ptr.size()
+        );
+
+        if (output_tensors.empty()) {
+            return std::unexpected(Error{ ErrorCode::InferenceFailed, "Model produced no output tensors" });
+        }
+
+        // 3. Process Outputs (NCHW to HWC)
+        // For now, we assume output 0 is the Alpha Matte (1-channel)
+        // CorridorKey model outputs vary, we'll refine this as we know the exact ONNX version.
+        auto& raw_output = output_tensors[0];
+        auto output_info = raw_output.GetTensorTypeAndShapeInfo();
+        auto output_shape = output_info.GetShape();
+        
+        int64_t out_c = output_shape[1];
+        int64_t out_h = output_shape[2];
+        int64_t out_w = output_shape[3];
+        float* out_data = raw_output.GetTensorMutableData<float>();
+
+        FrameResult result;
+        result.alpha.width = (int)out_w;
+        result.alpha.height = (int)out_h;
+        result.alpha.channels = (int)out_c;
+        result.alpha.data.resize(out_c * out_h * out_w);
+
+        // Convert NCHW to HWC for the output Image
+        for (int c = 0; c < out_c; ++c) {
+            for (int y = 0; y < out_h; ++y) {
+                for (int x = 0; x < out_w; ++x) {
+                    int src_idx = c * (int)out_h * (int)out_w + y * (int)out_w + x;
+                    int dst_idx = (y * (int)out_w + x) * (int)out_c + c;
+                    result.alpha.data[dst_idx] = out_data[src_idx];
+                }
+            }
+        }
+
+        // TODO: Map other outputs to foreground and composite
+        return result;
+
+    } catch (const Ort::Exception& e) {
+        return std::unexpected(Error{ ErrorCode::InferenceFailed, std::string("ONNX Runtime execution failed: ") + e.what() });
     } catch (const std::exception& e) {
-        return std::unexpected(Error{ ErrorCode::InferenceFailed, std::string("Tensor preparation failed: ") + e.what() });
+        return std::unexpected(Error{ ErrorCode::InferenceFailed, std::string("Inference error: ") + e.what() });
     }
 }
+
+// Remove the redundant prepare_input_tensors as logic is now in run() for better lifetime control
+// (Will remove from header next)
+
 
 } // namespace corridorkey
