@@ -1,0 +1,44 @@
+# Build
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# vcpkg (installed packages, not the manifest)
+vcpkg_installed/
+
+# Models (large, downloaded separately)
+models/*.onnx
+models/*.pth
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+coverage/
+
+# clang-tidy / compile commands
+compile_commands.json
+
+# OS
+.DS_Store
+*.swp
