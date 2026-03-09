@@ -319,7 +319,19 @@ our own types. This means:
 
 ---
 
-## 4. Adding New Code — Decision Tree
+## 4. Frontend-Agnostic Core Principles
+
+To ensure the library can be integrated into CLI, GUI, Web (WASM), or Server-side APIs without modification, the following rules apply:
+
+1. **No Global State:** The library must not use global or static variables. All state must be contained within an `Engine` or `Session` instance.
+2. **No Console I/O:** The library must never print to `stdout` or `stderr`. Logging must be handled via a callback-based logger or a standard logging interface that the consumer can redirect.
+3. **No Direct Thread Management:** While the library can use internal threading (via ONNX Runtime or worker pools), it should provide a way for the consumer to control or observe execution. Long-running tasks must support cancellation and progress reporting via callbacks.
+4. **Abstracted I/O:** The Core logic (`src/core/`) must not depend on the filesystem. It should work with memory buffers or abstract streams. Only `src/frame_io/` handles files, and it should be possible to bypass it for network-based or memory-based processing.
+5. **Contextual Errors:** Return rich error types (`std::expected<T, Error>`) instead of throwing exceptions or exit the program. This allows consumers to handle errors gracefully in their own UI.
+
+---
+
+## 5. Adding New Code — Decision Tree
 
 ```
 Is it a public API type or function?

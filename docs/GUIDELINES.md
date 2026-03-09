@@ -80,7 +80,52 @@ code. When a rule makes the code worse, document why you're breaking it.
 
 ---
 
-## 2. Testing Strategy
+## 2. API Design for Reusability
+
+To ensure the library remains a first-class citizen capable of evolving into various frontends, adhere to these API design rules:
+
+### 2.1 Interface Stability
+- **PIMPL Pattern (Pointer to Implementation):** Use PIMPL for the main `Engine` class. This hides implementation details (like ONNX Runtime types) from the public headers, ensuring ABI stability and keeping headers clean.
+- **Minimal Public Headers:** Only expose what is absolutely necessary. Keep `include/corridorkey/` lean.
+- **Resource Management:** Use RAII for all library objects. The user should not have to manually call `init()` or `cleanup()` for global states.
+
+### 2.2 Execution & Threading
+- **Non-Blocking Support:** Provide asynchronous versions of heavy operations or ensure they can be easily wrapped in a thread by the consumer.
+- **Progress Callbacks:** Long-running operations (like `process_sequence`) must accept a callback function to report progress and allow for cancellation.
+- **Thread Safety:** The `Engine` class should be thread-safe for concurrent read operations. Document any shared state that requires synchronization.
+
+### 2.3 Error Handling
+- **No `std::exit` or `abort`:** The library must never terminate the process.
+- **Explicit Results:** Use `std::expected<T, Error>` for all operations that can fail (I/O, model loading, inference).
+- Error Context: Provide descriptive error codes and messages that can be displayed in any UI (CLI or GUI).
+
+---
+
+## 3. Build System & Dependency Management
+
+To ensure absolute reproducibility and prevent "it works on my machine" issues, the following infrastructure rules apply:
+
+### 3.1 Dependency Pinning (vcpkg)
+- **Manifest Mode:** Always use `vcpkg.json`.
+- **Baseline Versioning:** A `vcpkg-configuration.json` file MUST be present in the root. It must specify a `builtin-baseline` (a Git commit hash from the official vcpkg repository). This ensures every developer and CI runner uses the exact same versions of ONNX Runtime, OpenEXR, and FFmpeg.
+- **Explicit Features:** When adding a dependency in `vcpkg.json`, explicitly list the required features (e.g., FFmpeg with `avcodec` and `swscale`) and provide a `$comment` explaining the usage.
+
+### 3.2 Modern CMake (Target-Based)
+- **No Global Commands:** Commands like `include_directories`, `link_directories`, or `add_definitions` are strictly prohibited.
+- **Target-Specific Configuration:** All settings (include paths, compile definitions, compiler flags) must be attached to targets via `target_include_directories`, `target_compile_definitions`, and `target_compile_options`.
+- **Visibility Control:** The library must be built with `CMAKE_CXX_VISIBILITY_PRESET hidden` and `VISIBILITY_INLINES_HIDDEN ON`. Only symbols explicitly marked with the `CORRIDORKEY_API` macro (generated via `GenerateExportHeader`) will be exported. This prevents internal library symbols (like ONNX Runtime) from leaking into the consumer's namespace.
+
+### 3.3 CMake Presets
+- **Source of Truth:** `CMakePresets.json` is the only supported way to configure the project. It must contain presets for `debug`, `release`, and `ci` environments.
+- **Zero-Manual-Setup:** Presets must automatically locate the vcpkg toolchain file. A developer should only need to run `cmake --preset debug` to get a working build.
+
+### 3.4 Compiler Rigor & Sanitizers
+- **Strict Warnings:** Use `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) or `/W4 /WX` (MSVC).
+- **Address Sanitizer (ASAN):** Enabled by default in the `debug` preset to catch memory leaks and buffer overflows early.
+
+---
+
+## 4. Testing Strategy
 
 ### 2.1 Test Pyramid
 

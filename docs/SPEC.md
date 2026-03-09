@@ -79,13 +79,31 @@ The CLI is a thin consumer of this library. This enables:
 - FFI bindings (Python, Rust, Go) if desired later
 
 ```cpp
-// Public API sketch (not final)
+// Public API sketch (frontend-agnostic, thread-safe, robust)
 namespace corridorkey {
+
+enum class ErrorCode {
+    Success = 0,
+    ModelLoadFailed,
+    InferenceFailed,
+    IoError,
+    InvalidParameters,
+    Cancelled
+};
+
+struct Error {
+    ErrorCode code;
+    std::string message;
+};
+
+// Result type for robust error handling
+template<typename T>
+using Result = std::expected<T, Error>;
 
 struct DeviceInfo {
     std::string name;
     int64_t available_memory_mb;
-    Backend backend;  // CoreML, TensorRT, CUDA, DirectML, CPU
+    Backend backend;
 };
 
 struct InferenceParams {
@@ -96,21 +114,34 @@ struct InferenceParams {
     bool input_is_linear = false;
 };
 
-struct FrameResult {
-    Image alpha;       // 1-channel, linear float
-    Image foreground;  // 3-channel, linear float
-    Image composite;   // 4-channel, premultiplied linear float
-};
+// Progress callback for long-running tasks
+using ProgressCallback = std::function<bool(float progress, const std::string& status)>;
 
 class Engine {
 public:
-    static Engine create(const std::filesystem::path& model_path,
-                         DeviceInfo device = auto_detect());
+    // Factory method for creating the engine (RAII)
+    static Result<std::unique_ptr<Engine>> create(const std::filesystem::path& model_path,
+                                                 DeviceInfo device = auto_detect());
 
-    FrameResult process_frame(const Image& rgb, const Image& alpha_hint,
-                              const InferenceParams& params = {});
+    ~Engine();
 
-    int recommended_resolution() const;  // based on available memory
+    // Core inference on raw memory buffers
+    Result<FrameResult> process_frame(const Image& rgb, const Image& alpha_hint,
+                                     const InferenceParams& params = {});
+
+    // Batch processing with progress reporting and cancellation
+    Result<void> process_sequence(const std::vector<std::filesystem::path>& inputs,
+                                 const std::vector<std::filesystem::path>& alpha_hints,
+                                 const std::filesystem::path& output_dir,
+                                 ProgressCallback on_progress = nullptr);
+
+    int recommended_resolution() const;
+
+private:
+    class Impl; // PIMPL pattern
+    std::unique_ptr<Impl> m_impl;
+
+    Engine(); // Private constructor used by factory
 };
 
 DeviceInfo auto_detect();
