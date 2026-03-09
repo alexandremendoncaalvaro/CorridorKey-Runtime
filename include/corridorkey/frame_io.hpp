@@ -3,37 +3,28 @@
 #include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
 #include <filesystem>
-#include <memory>
 
-namespace corridorkey {
+namespace corridorkey::frame_io {
 
 /**
- * @brief Interface for image and video I/O operations.
+ * @brief Read a single frame from disk.
+ * Returns an owned ImageBuffer.
  */
-class CORRIDORKEY_API FrameIO {
-public:
-    virtual ~FrameIO() = default;
+CORRIDORKEY_API Result<ImageBuffer> read_frame(const std::filesystem::path& path);
 
-    /**
-     * @brief Read a single frame from disk.
-     * Returns an owned ImageBuffer.
-     */
-    static Result<ImageBuffer> read_frame(const std::filesystem::path& path);
+/**
+ * @brief Write a single frame to disk.
+ * Takes a non-owning Image view.
+ */
+CORRIDORKEY_API Result<void> write_frame(const std::filesystem::path& path, const Image& image);
 
-    /**
-     * @brief Write a single frame to disk.
-     * Takes a non-owning Image view.
-     */
-    static Result<void> write_frame(const std::filesystem::path& path, const Image& image);
+/**
+ * @brief Save a full result (Alpha, FG, Processed, Comp) following the VFX-standard directory structure.
+ */
+CORRIDORKEY_API Result<void> save_result(
+    const std::filesystem::path& base_dir,
+    const std::string& filename,
+    const FrameResult& result
+);
 
-    /**
-     * @brief Save a full result (Alpha, FG, Processed, Comp) following the VFX-standard directory structure.
-     */
-    static Result<void> save_result(
-        const std::filesystem::path& base_dir,
-        const std::string& filename,
-        const FrameResult& result
-    );
-};
-
-} // namespace corridorkey
+} // namespace corridorkey::frame_io

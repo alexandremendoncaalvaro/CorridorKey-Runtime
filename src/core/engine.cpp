@@ -79,16 +79,16 @@ Result<void> Engine::process_sequence(
             // Save results of the finished frame (Writing)
             // The index of the finished frame is (i - max_in_flight)
             std::string filename = inputs[i - max_in_flight].filename().string();
-            auto save_res = FrameIO::save_result(output_dir, filename, *res);
+            auto save_res = frame_io::save_result(output_dir, filename, *res);
             if (!save_res) return save_res;
         }
 
         // 3. Dispatch next frame (Async Reading + Inference)
         pipeline.push_back(std::async(std::launch::async, [&, i]() -> Result<FrameResult> {
-            auto rgb_res = FrameIO::read_frame(inputs[i]);
+            auto rgb_res = frame_io::read_frame(inputs[i]);
             if (!rgb_res) return unexpected(rgb_res.error());
 
-            auto hint_res = FrameIO::read_frame(alpha_hints[i]);
+            auto hint_res = frame_io::read_frame(alpha_hints[i]);
             if (!hint_res) return unexpected(hint_res.error());
 
             return m_impl->session->run(rgb_res->view(), hint_res->view(), params);
@@ -103,7 +103,7 @@ Result<void> Engine::process_sequence(
         if (!res) return unexpected(res.error());
 
         std::string filename = inputs[finished_idx++].filename().string();
-        auto save_res = FrameIO::save_result(output_dir, filename, *res);
+        auto save_res = frame_io::save_result(output_dir, filename, *res);
         if (!save_res) return save_res;
     }
 
