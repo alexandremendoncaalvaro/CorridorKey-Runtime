@@ -46,7 +46,7 @@ workstations with high-end GPUs.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                        CLI (CLI11)                        │
+│                       CLI (cxxopts)                        │
 │              args, config, progress, output                │
 ├──────────────────────────────────────────────────────────┤
 │                    Public C++ API (libcorridorkey)         │
@@ -333,7 +333,7 @@ If the input image dimensions differ from the selected target resolution, the en
 | PNG I/O (8-bit) | stb_image | latest | header-only, vendored |
 | PNG I/O (16-bit) | libpng | 1.6+ | vcpkg |
 | Video I/O | FFmpeg | 7.x | vcpkg |
-| CLI | CLI11 | 2.x | header-only, vendored |
+| CLI | cxxopts | 3.x | vcpkg |
 | Testing | Catch2 | 3.x | vcpkg |
 
 ### 5.2 Platform Matrix

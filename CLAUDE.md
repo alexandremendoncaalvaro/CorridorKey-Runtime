@@ -19,6 +19,7 @@ It contains the non-negotiable rules for this project.
 - **SIMD Alignment:** Ensure 64-byte alignment for all image allocations.
 - Implementation goes in `src/` subdirectories by domain:
   - `src/cli/` — CLI only (main + arg parsing, no business logic)
+  - `src/common/` — shared internal utilities (STL-only, no external deps)
   - `src/core/` — inference engine, device detection, ONNX Runtime wrapper
   - `src/frame_io/` — EXR, PNG, video I/O (OpenEXR, stb, FFmpeg confined here)
   - `src/post_process/` — pure pixel math (color utils, despill, despeckle)

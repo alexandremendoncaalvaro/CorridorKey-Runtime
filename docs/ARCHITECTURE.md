@@ -126,19 +126,22 @@ All implementation code. Organized by domain, not by file type.
 src/
 ├── cli/                CLI application (thin consumer of the library)
 │   └── main.cpp
+├── common/             Shared internal utilities (no external deps, STL only)
+│   └── srgb_lut.hpp        sRGB ↔ linear LUT (singleton, immutable)
 ├── core/               Inference engine, device detection, session management
 │   ├── engine.cpp
 │   ├── inference_session.cpp
 │   ├── inference_session.hpp   (private header)
 │   └── device_detection.cpp
 ├── frame_io/           Image and video read/write
+│   ├── frame_io.cpp         Format dispatch
 │   ├── exr_io.cpp
 │   ├── png_io.cpp
 │   └── video_io.cpp
 └── post_process/       Color math, despill, despeckle
-    ├── color_utils.cpp
-    ├── despill.cpp
-    └── despeckle.cpp
+    ├── color_utils.cpp       sRGB, linear, premultiply, resize, planar
+    ├── despill.cpp           Green spill removal
+    └── despeckle.cpp         Morphological erosion + dilation
 ```
 
 **Rules:**
@@ -148,6 +151,11 @@ src/
   processing. It constructs an `Engine`, calls methods, and prints results.
   If you're writing an `if` that checks pixel values in `cli/`, you're in
   the wrong place.
+
+- **`src/common/`** — Shared internal utilities used across multiple `src/`
+  subdirectories. Only header-only, STL-dependent code with no external library
+  dependencies. Currently contains the `SrgbLut` singleton (immutable LUT,
+  thread-safe, justified exception to the "no global state" rule).
 
 - **`src/core/`** — The inference engine and hardware management. Wraps ONNX
   Runtime behind our own abstractions. External library types (OrtSession,
@@ -265,8 +273,7 @@ Vendored header-only third-party libraries.
 ```
 vendor/
 ├── stb_image.h              Image reading (PNG, etc.)
-├── stb_image_write.h        Image writing
-└── CLI11.hpp                CLI argument parsing
+└── stb_image_write.h        Image writing
 ```
 
 **Rules:**
@@ -399,8 +406,9 @@ Does it not fit anywhere above?
 1. **Do not create new top-level directories** without updating this document
    and getting approval in a PR.
 2. **Do not create new `src/` subdirectories** without updating this document.
-   The four subdirectories (`cli/`, `core/`, `frame_io/`, `post_process/`) are
-   deliberate. If something doesn't fit, it probably belongs in an existing one.
+   The five subdirectories (`cli/`, `common/`, `core/`, `frame_io/`,
+   `post_process/`) are deliberate. If something doesn't fit, it probably
+   belongs in an existing one.
 3. **Do not move files between layers** without updating this document and the
    relevant CMakeLists.txt files.
 4. **Do not add new vendored libraries** without justification. Prefer vcpkg
