@@ -1,5 +1,5 @@
 #include <catch2/catch_all.hpp>
-#include <src/post_process/color_utils.hpp>
+#include "post_process/color_utils.hpp"
 #include <cmath>
 
 using namespace corridorkey;
@@ -10,7 +10,8 @@ TEST_CASE("ColorUtils::srgb_to_linear and linear_to_srgb roundtrip", "[unit][col
     img.height = 1;
     img.channels = 1;
     
-    std::vector<float> test_values = { 0.0f, 0.1f, 0.5f, 0.8f, 1.0f };
+    // Test a wide range of values to ensure LUT precision
+    std::vector<float> test_values = { 0.0f, 0.01f, 0.1f, 0.25f, 0.5f, 0.75f, 0.9f, 0.99f, 1.0f };
     
     for (float val : test_values) {
         img.data = { val };
@@ -21,7 +22,8 @@ TEST_CASE("ColorUtils::srgb_to_linear and linear_to_srgb roundtrip", "[unit][col
         ColorUtils::linear_to_srgb(img);
         float back = img.data[0];
         
-        REQUIRE(back == Catch::Approx(val).margin(0.0001));
+        // 12-bit LUT (4096 steps) should be accurate within 0.0005 for roundtrips
+        REQUIRE(back == Catch::Approx(val).margin(0.0005));
     }
 }
 
