@@ -1,10 +1,10 @@
 #include <corridorkey/frame_io.hpp>
+#include "exr_io.hpp"
 #include <iostream>
 
 namespace corridorkey {
 
-// TODO: Include private headers for EXR, PNG, Video
-// #include "exr_io.hpp"
+// TODO: Include private headers for PNG, Video
 // #include "png_io.hpp"
 
 Result<Image> FrameIO::read_frame(const std::filesystem::path& path) {
@@ -12,8 +12,7 @@ Result<Image> FrameIO::read_frame(const std::filesystem::path& path) {
     
     // Dispatch based on extension
     if (ext == ".exr") {
-        // return read_exr(path);
-        return std::unexpected(Error{ ErrorCode::IoError, "EXR reading not yet implemented" });
+        return read_exr(path);
     } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
         // return read_stb(path);
         return std::unexpected(Error{ ErrorCode::IoError, "PNG/JPG reading not yet implemented" });
@@ -23,12 +22,10 @@ Result<Image> FrameIO::read_frame(const std::filesystem::path& path) {
 }
 
 Result<void> FrameIO::write_frame(const std::filesystem::path& path, const Image& image) {
-    (void)image;
     auto ext = path.extension().string();
 
     if (ext == ".exr") {
-        // return write_exr(path, image);
-        return std::unexpected(Error{ ErrorCode::IoError, "EXR writing not yet implemented" });
+        return write_exr(path, image);
     } else if (ext == ".png") {
         // return write_png(path, image);
         return std::unexpected(Error{ ErrorCode::IoError, "PNG writing not yet implemented" });
