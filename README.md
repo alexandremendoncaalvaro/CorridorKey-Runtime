@@ -32,7 +32,7 @@ as a single binary with zero Python dependencies.
 ### Build
 
 ```bash
-git clone https://github.com/<org>/CorridorKey-Runtime.git
+git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
 
 cmake --preset release

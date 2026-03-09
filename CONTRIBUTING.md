@@ -19,7 +19,7 @@ changes.
 
 ```bash
 # Clone
-git clone https://github.com/<org>/CorridorKey-Runtime.git
+git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
 
 # Install git hooks (mandatory)
