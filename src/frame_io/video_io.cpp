@@ -284,6 +284,12 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(
 Result<void> VideoWriter::write_frame(const Image& image) {
     auto* impl = m_impl.get();
 
+    // Resize temp buffer if needed (should match open dimensions, but safety first)
+    size_t required_size = static_cast<size_t>(image.width) * image.height * 3;
+    if (impl->rgb24_temp.size() < required_size) {
+        impl->rgb24_temp.resize(required_size);
+    }
+
     impl->sws_ctx.reset(sws_getCachedContext(
         impl->sws_ctx.release(),
         image.width, image.height, AV_PIX_FMT_RGB24,

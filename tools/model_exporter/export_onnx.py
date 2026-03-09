@@ -48,7 +48,7 @@ def export_resolution(args, resolution, repo_path):
                 dummy_x,
                 out_path,
                 export_params=True,
-                opset_version=17,
+                opset_version=16,          # Downgrade to 16 for ORT 1.16.3 compatibility
                 do_constant_folding=True,
                 input_names=['input_rgb_hint'],
                 output_names=['alpha', 'fg'],
