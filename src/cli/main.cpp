@@ -68,6 +68,20 @@ int main(int argc, char* argv[]) {
             print_info();
             return 0;
         } 
+
+        if (cmd == "download") {
+            std::string url = "https://example.com/models/GreenFormer.onnx"; // Placeholder URL
+            std::string dest = "models/GreenFormer.onnx";
+            std::cout << "Downloading model from " << url << "..." << std::endl;
+            std::string cmd_str = "curl -L " + url + " -o " + dest;
+            int ret = system(cmd_str.c_str());
+            if (ret == 0) {
+                std::cout << "Model downloaded successfully to " << dest << std::endl;
+            } else {
+                std::cerr << "Error downloading model." << std::endl;
+            }
+            return ret;
+        }
         
         if (cmd == "process") {
             if (!result.count("input") || !result.count("alpha-hint") || !result.count("output") || !result.count("model")) {
@@ -75,24 +89,56 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
-            // Implementation logic for processing...
-            std::cout << "Processing starting... (Pipeline Active)" << std::endl;
-            
+            std::filesystem::path input_path = result["input"].as<std::string>();
+            std::filesystem::path hint_path = result["alpha-hint"].as<std::string>();
+            std::filesystem::path output_path = result["output"].as<std::string>();
+            std::filesystem::path model_path = result["model"].as<std::string>();
+
             auto devices = list_devices();
             int device_idx = result["device"].as<int>();
-            if (device_idx < 0 || device_idx >= (int)devices.size()) {
-                std::cout << "Error: Invalid device index." << std::endl;
-                return 1;
-            }
-
-            auto engine_res = Engine::create(result["model"].as<std::string>(), devices[device_idx]);
+            auto engine_res = Engine::create(model_path, devices[device_idx]);
             if (!engine_res) {
                 std::cerr << "Engine Error: " << engine_res.error().message << std::endl;
                 return 1;
             }
+            auto engine = std::move(*engine_res);
 
-            // TODO: Wire the process_sequence call with real path lists
-            std::cout << "Using device: " << devices[device_idx].name << std::endl;
+            std::vector<std::filesystem::path> inputs;
+            std::vector<std::filesystem::path> hints;
+
+            if (std::filesystem::is_directory(input_path)) {
+                for (const auto& entry : std::filesystem::directory_iterator(input_path)) {
+                    if (entry.is_regular_file()) {
+                        inputs.push_back(entry.path());
+                        // Assume hints have same filename in hint directory
+                        hints.push_back(hint_path / entry.path().filename());
+                    }
+                }
+                std::sort(inputs.begin(), inputs.end());
+                std::sort(hints.begin(), hints.end());
+            } else {
+                inputs.push_back(input_path);
+                hints.push_back(hint_path);
+            }
+
+            std::cout << "Processing " << inputs.size() << " frames..." << std::endl;
+            
+            auto progress = [](float p, const std::string& status) -> bool {
+                int bar_width = 50;
+                std::cout << "\r[" << std::string(bar_width * p, '=') << std::string(bar_width * (1-p), ' ') << "] " 
+                          << int(p * 100.0) << "% " << status << std::flush;
+                return true;
+            };
+
+            auto process_res = engine->process_sequence(inputs, hints, output_path, progress);
+            std::cout << std::endl;
+
+            if (!process_res) {
+                std::cerr << "Error: " << process_res.error().message << std::endl;
+                return 1;
+            }
+
+            std::cout << "Done!" << std::endl;
             return 0;
         }
 
