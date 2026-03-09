@@ -1,5 +1,4 @@
 #include <corridorkey/engine.hpp>
-#include <iostream>
 
 #if defined(__APPLE__)
     #include <sys/types.h>

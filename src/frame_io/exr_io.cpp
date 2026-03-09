@@ -2,7 +2,6 @@
 #include <OpenEXR/ImfRgbaFile.h>
 #include <OpenEXR/ImfArray.h>
 #include <OpenEXR/ImfHeader.h>
-#include <iostream>
 
 namespace corridorkey {
 

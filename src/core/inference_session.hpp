@@ -13,7 +13,7 @@ namespace corridorkey {
  * @brief Private wrapper for an ONNX Runtime session.
  * This class isolates Ort types from the rest of the core.
  */
-class CORRIDORKEY_API InferenceSession {
+class InferenceSession {
 public:
     static Result<std::unique_ptr<InferenceSession>> create(
         const std::filesystem::path& model_path,
@@ -32,7 +32,7 @@ public:
      * @brief Run inference on a frame.
      */
     Result<FrameResult> run(
-        const Image& rgb, 
+        const Image& rgb,
         const Image& alpha_hint,
         const InferenceParams& params
     );
@@ -45,7 +45,7 @@ private:
 
     void configure_session_options();
     void extract_metadata();
-    
+
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 
@@ -60,6 +60,10 @@ private:
     std::vector<const char*> m_input_node_names_ptr;
     std::vector<const char*> m_output_node_names_ptr;
     std::vector<std::vector<int64_t>> m_input_node_dims;
+
+    // Pre-allocated buffer pools (reused across run() calls)
+    std::vector<ImageBuffer> m_resize_pool;
+    std::vector<ImageBuffer> m_planar_pool;
 };
 
 } // namespace corridorkey
