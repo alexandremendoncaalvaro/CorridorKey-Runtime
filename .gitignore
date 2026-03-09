@@ -16,6 +16,9 @@ Thumbs.db
 # vcpkg (installed packages, not the manifest)
 vcpkg_installed/
 
+# CMake user presets (local machine overrides, not committed)
+CMakeUserPresets.json
+
 # Models (large, downloaded separately)
 models/*.onnx
 models/*.pth
