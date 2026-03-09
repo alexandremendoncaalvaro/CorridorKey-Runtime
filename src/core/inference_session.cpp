@@ -29,13 +29,6 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 
         // Mapped Backend to Execution Provider (2026 standards)
         switch (device.backend) {
-            case Backend::CoreML: {
-#if defined(__APPLE__)
-                uint32_t coreml_flags = 0; // Use default (all devices: CPU, GPU, NATIVE_ANE)
-                Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(session_ptr->m_session_options, coreml_flags));
-#endif
-                break;
-            }
             case Backend::CUDA: {
                 OrtCUDAProviderOptions cuda_options;
                 cuda_options.device_id = 0;
