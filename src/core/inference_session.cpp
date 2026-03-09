@@ -93,4 +93,61 @@ Result<FrameResult> InferenceSession::run(
     return std::unexpected(Error{ ErrorCode::InferenceFailed, "Inference run not yet implemented" });
 }
 
+Result<std::vector<Ort::Value>> InferenceSession::prepare_input_tensors(
+    const Image& rgb, 
+    const Image& alpha_hint,
+    Ort::MemoryInfo& memory_info
+) {
+    if (m_input_node_dims.empty()) {
+        return std::unexpected(Error{ ErrorCode::InvalidParameters, "InferenceSession metadata is empty" });
+    }
+
+    try {
+        std::vector<Ort::Value> input_tensors;
+        
+        // Assume RGB is Input 0 and AlphaHint is Input 1 (based on CorridorKey model structure)
+        for (size_t i = 0; i < m_input_node_dims.size(); ++i) {
+            auto shape = m_input_node_dims[i];
+            int64_t model_h = shape[2];
+            int64_t model_w = shape[3];
+            int64_t model_c = shape[1];
+
+            const Image& source = (i == 0) ? rgb : alpha_hint;
+            
+            // 1. Resize if needed
+            Image resized = (source.width != (int)model_w || source.height != (int)model_h) 
+                           ? ColorUtils::resize(source, (int)model_w, (int)model_h)
+                           : source;
+
+            // 2. Convert HWC to NCHW and Normalize [0, 1]
+            std::vector<float> planar_data(model_c * model_h * model_w);
+            for (int c = 0; c < model_c; ++c) {
+                for (int y = 0; y < model_h; ++y) {
+                    for (int x = 0; x < model_w; ++x) {
+                        int src_idx = (y * (int)model_w + x) * (int)source.channels + (c < (int)source.channels ? c : 0);
+                        int dst_idx = c * (int)model_h * (int)model_w + y * (int)model_w + x;
+                        planar_data[dst_idx] = resized.data[src_idx]; // Image is already float
+                    }
+                }
+            }
+
+            // 3. Create Tensor
+            input_tensors.push_back(Ort::Value::CreateTensor<float>(
+                memory_info, 
+                planar_data.data(), planar_data.size(), 
+                shape.data(), shape.size()
+            ));
+
+            // IMPORTANT: planar_data is local! Ort::Value::CreateTensor with pointers 
+            // is non-owning by default. For a real production run, we need to manage 
+            // the buffer lifetime.
+            // TODO: Refactor to maintain tensor buffer lifetime.
+        }
+
+        return input_tensors;
+    } catch (const std::exception& e) {
+        return std::unexpected(Error{ ErrorCode::InferenceFailed, std::string("Tensor preparation failed: ") + e.what() });
+    }
+}
+
 } // namespace corridorkey

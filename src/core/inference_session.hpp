@@ -43,6 +43,15 @@ public:
 private:
     InferenceSession(DeviceInfo device);
 
+    /**
+     * @brief Prepare input tensors (normalization, HWC to NCHW).
+     */
+    Result<std::vector<Ort::Value>> prepare_input_tensors(
+        const Image& rgb, 
+        const Image& alpha_hint,
+        Ort::MemoryInfo& memory_info
+    );
+
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 
