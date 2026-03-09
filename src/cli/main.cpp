@@ -70,17 +70,11 @@ int main(int argc, char* argv[]) {
         } 
 
         if (cmd == "download") {
-            std::string url = "https://example.com/models/GreenFormer.onnx"; // Placeholder URL
-            std::string dest = "models/GreenFormer.onnx";
-            std::cout << "Downloading model from " << url << "..." << std::endl;
-            std::string cmd_str = "curl -L " + url + " -o " + dest;
-            int ret = system(cmd_str.c_str());
-            if (ret == 0) {
-                std::cout << "Model downloaded successfully to " << dest << std::endl;
-            } else {
-                std::cerr << "Error downloading model." << std::endl;
-            }
-            return ret;
+            std::cout << "Model download is not yet implemented.\n"
+                      << "For now, download models manually from HuggingFace:\n"
+                      << "  https://huggingface.co/corridorkey/models\n"
+                      << "Place the .onnx file in the 'models/' directory." << std::endl;
+            return 0;
         }
         
         if (cmd == "process") {
