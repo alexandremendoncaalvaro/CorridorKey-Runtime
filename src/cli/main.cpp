@@ -137,6 +137,13 @@ int main(int argc, char* argv[]) {
             std::filesystem::path output_path = result["output"].as<std::string>();
             std::filesystem::path model_path = result["model"].as<std::string>();
 
+            // Ensure output directory exists
+            if (std::filesystem::is_directory(output_path) || output_path.extension().empty()) {
+                std::filesystem::create_directories(output_path);
+            } else {
+                std::filesystem::create_directories(output_path.parent_path());
+            }
+
             InferenceParams params;
             params.target_resolution = result["resolution"].as<int>();
             params.despill_strength = result["despill"].as<float>();

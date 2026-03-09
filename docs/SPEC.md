@@ -597,29 +597,13 @@ Summary of what's covered there:
 
 ---
 
-## 9. Open Questions
+## 9. Future Roadmap
 
-Items to resolve during implementation:
-
-1. **Hiera ONNX export** — Will dynamo export work, or do we need the legacy
-   path? Only knowable by trying (Phase 0).
-
-2. **INT8 quality on this specific model** — The 0.5-1.5% estimate is for
-   general ViTs. The GreenFormer has a CNN refiner that may be more or less
-   sensitive. Needs empirical testing (Phase 0).
-
-3. **Apple Neural Engine utilization** — CoreML EP may or may not route ops to
-   the ANE. Needs profiling on actual hardware (Phase 3).
-
-4. **FFmpeg licensing** — FFmpeg with x264/x265 has GPL implications. May need
-   to limit to LGPL-compatible codecs or use system FFmpeg.
-
-5. **Alpha hint generation** — Should we include a simple traditional chroma
-   key (color threshold) as a built-in alpha hint generator? Low effort, high
-   usability gain. Deferred to post-Phase 2.
-
-6. **Model auto-download** — HuggingFace Hub CLI vs custom HTTP download?
-   Needs to work without Python.
+- [ ] **Tiling Inference (High-Res Support):** Implement a patch-based processing mode. Split 4K/8K images into overlapping tiles (e.g., 1024x1024), process each tile, and stitch them back with alpha feathering. This allows high-resolution processing on low-VRAM GPUs.
+- [x] **FFmpeg Integrated Pipeline:** Video processing is done in-RAM without temporary files.
+- [ ] **Chroma-Key Auto-Hint:** Built-in basic HSV/Chroma-keyer to generate the initial alpha hint internally, removing the need for an external hint video.
+- [x] **Hardware-Aware Tiers:** Adaptive resolution and model selection based on detected memory.
+- [ ] **GUI Wrapper:** A simple drag-and-drop interface (potentially using Dear ImGui) for users who prefer not to use the CLI.
 
 ---
 
