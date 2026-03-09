@@ -154,16 +154,30 @@ Result<FrameResult> InferenceSession::run(
             return unexpected(Error{ ErrorCode::InferenceFailed, "Model produced no output tensors" });
         }
 
-        // 3. Process Outputs (assume output 0 is Alpha Matte)
-        auto& raw_output = output_tensors[0];
-        auto shape = raw_output.GetTensorTypeAndShapeInfo().GetShape();
-        
+        // 3. Process Outputs
         FrameResult result;
-        result.alpha = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
         
-        ColorUtils::from_planar(raw_output.GetTensorData<float>(), result.alpha.view());
+        // Map Alpha (usually output 0)
+        if (output_tensors.size() > 0) {
+            auto shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
+            result.alpha = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
+            ColorUtils::from_planar(output_tensors[0].GetTensorData<float>(), result.alpha.view());
+        }
 
-        // TODO: Map other outputs (FG, Comp) using the same ImageBuffer pattern
+        // Map Foreground (usually output 1)
+        if (output_tensors.size() > 1) {
+            auto shape = output_tensors[1].GetTensorTypeAndShapeInfo().GetShape();
+            result.foreground = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
+            ColorUtils::from_planar(output_tensors[1].GetTensorData<float>(), result.foreground.view());
+        }
+
+        // Map Composite (usually output 2)
+        if (output_tensors.size() > 2) {
+            auto shape = output_tensors[2].GetTensorTypeAndShapeInfo().GetShape();
+            result.composite = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
+            ColorUtils::from_planar(output_tensors[2].GetTensorData<float>(), result.composite.view());
+        }
+
         return result;
 
     } catch (const Ort::Exception& e) {
