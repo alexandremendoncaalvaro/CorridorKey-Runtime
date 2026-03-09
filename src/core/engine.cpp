@@ -1,5 +1,8 @@
 #include <corridorkey/engine.hpp>
+#include <corridorkey/frame_io.hpp>
 #include "inference_session.hpp"
+#include <future>
+#include <deque>
 
 namespace corridorkey {
 
@@ -50,14 +53,60 @@ Result<void> Engine::process_sequence(
     const std::filesystem::path& output_dir,
     ProgressCallback on_progress
 ) {
-    (void)output_dir;
-    (void)on_progress;
-
     if (inputs.size() != alpha_hints.size()) {
         return unexpected(Error{ ErrorCode::InvalidParameters, "Inputs and alpha hints size mismatch" });
     }
 
-    // TODO: Implement sequence processing with FrameIO
+    size_t total_frames = inputs.size();
+    InferenceParams params;
+    
+    // Asynchronous Pipeline Settings
+    const size_t max_in_flight = 3; // Keep 3 frames in the pipeline
+    std::deque<std::future<Result<FrameResult>>> pipeline;
+
+    for (size_t i = 0; i < total_frames; ++i) {
+        // 1. Check for cancellation
+        if (on_progress && !on_progress(static_cast<float>(i) / total_frames, "Processing frame " + std::to_string(i))) {
+            return unexpected(Error{ ErrorCode::Cancelled, "Processing cancelled by user" });
+        }
+
+        // 2. Manage Pipeline (Limit concurrent frames to avoid RAM bloat)
+        if (pipeline.size() >= max_in_flight) {
+            auto res = pipeline.front().get();
+            pipeline.pop_front();
+            if (!res) return unexpected(res.error());
+            
+            // Save results of the finished frame (Writing)
+            // The index of the finished frame is (i - max_in_flight)
+            std::string filename = inputs[i - max_in_flight].filename().string();
+            auto save_res = FrameIO::save_result(output_dir, filename, *res);
+            if (!save_res) return save_res;
+        }
+
+        // 3. Dispatch next frame (Async Reading + Inference)
+        pipeline.push_back(std::async(std::launch::async, [&, i]() -> Result<FrameResult> {
+            auto rgb_res = FrameIO::read_frame(inputs[i]);
+            if (!rgb_res) return unexpected(rgb_res.error());
+
+            auto hint_res = FrameIO::read_frame(alpha_hints[i]);
+            if (!hint_res) return unexpected(hint_res.error());
+
+            return m_impl->session->run(rgb_res->view(), hint_res->view(), params);
+        }));
+    }
+
+    // 4. Drain the remaining pipeline
+    size_t finished_idx = total_frames - pipeline.size();
+    while (!pipeline.empty()) {
+        auto res = pipeline.front().get();
+        pipeline.pop_front();
+        if (!res) return unexpected(res.error());
+
+        std::string filename = inputs[finished_idx++].filename().string();
+        auto save_res = FrameIO::save_result(output_dir, filename, *res);
+        if (!save_res) return save_res;
+    }
+
     return {};
 }
 
