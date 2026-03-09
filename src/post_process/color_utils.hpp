@@ -23,6 +23,16 @@ public:
     static void composite_over_checker(Image& rgba);
     
     static Image resize(const Image& image, int new_width, int new_height);
+
+    /**
+     * @brief Convert interleaved HWC data to planar NCHW data.
+     */
+    static void to_planar(const Image& src, float* dst);
+
+    /**
+     * @brief Convert planar NCHW data back to interleaved HWC data.
+     */
+    static void from_planar(const float* src, Image& dst);
 };
 
 } // namespace corridorkey

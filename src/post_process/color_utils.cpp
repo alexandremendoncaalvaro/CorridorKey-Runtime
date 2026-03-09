@@ -107,4 +107,30 @@ Image ColorUtils::resize(const Image& image, int new_width, int new_height) {
     return result;
 }
 
+void ColorUtils::to_planar(const Image& src, float* dst) {
+    int w = src.width;
+    int h = src.height;
+    int c = src.channels;
+
+    for (int ch = 0; ch < c; ++ch) {
+        float* plane = dst + ch * w * h;
+        for (int i = 0; i < w * h; ++i) {
+            plane[i] = src.data[i * c + ch];
+        }
+    }
+}
+
+void ColorUtils::from_planar(const float* src, Image& dst) {
+    int w = dst.width;
+    int h = dst.height;
+    int c = dst.channels;
+
+    for (int ch = 0; ch < c; ++ch) {
+        const float* plane = src + ch * w * h;
+        for (int i = 0; i < w * h; ++i) {
+            dst.data[i * c + ch] = plane[i];
+        }
+    }
+}
+
 } // namespace corridorkey
