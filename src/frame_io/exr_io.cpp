@@ -41,8 +41,8 @@ Result<ImageBuffer> read_exr(const std::filesystem::path& path) {
 }
 
 Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
-    if (image.channels < 3) {
-        return unexpected(Error{ ErrorCode::InvalidParameters, "EXR write requires at least 3 channels (RGB)" });
+    if (image.channels < 1) {
+        return unexpected(Error{ ErrorCode::InvalidParameters, "EXR write requires at least 1 channel" });
     }
 
     try {
@@ -53,13 +53,18 @@ Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
         Imf::Array2D<Imf::Rgba> pixels(height, width);
         Imf::Rgba* dst_ptr = &pixels[0][0];
 
-        // Linearized conversion from Aligned Float RGB(A) to OpenEXR Rgba
+        // Linearized conversion from Aligned Float RGB(A) or Grayscale to OpenEXR Rgba
         size_t total_pixels = static_cast<size_t>(width) * height;
-        bool has_alpha = (image.channels == 4);
 
         for (size_t i = 0; i < total_pixels; ++i) {
             const float* src = &image.data[i * image.channels];
-            dst_ptr[i] = Imf::Rgba(src[0], src[1], src[2], has_alpha ? src[3] : 1.0f);
+            if (image.channels == 1) {
+                // Grayscale: map to R=G=B=val, A=1.0 or map to R=G=B=1.0, A=val (usually Alpha matte is just grayscale RGB)
+                dst_ptr[i] = Imf::Rgba(src[0], src[0], src[0], 1.0f);
+            } else {
+                bool has_alpha = (image.channels == 4);
+                dst_ptr[i] = Imf::Rgba(src[0], src[1], src[2], has_alpha ? src[3] : 1.0f);
+            }
         }
 
         file.setFrameBuffer(dst_ptr, 1, width);

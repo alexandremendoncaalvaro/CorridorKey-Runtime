@@ -114,6 +114,12 @@ void ColorUtils::from_planar(const float* src, Image dst) {
 void ColorUtils::composite_over_checker(Image rgba) {
     if (rgba.empty() || rgba.channels < 4) return;
 
+    // Checker params matching original Python: sRGB 0.15/0.55, checker_size=128
+    // Convert sRGB constants to linear (matching cu.srgb_to_linear(bg_srgb))
+    const auto& lut = SrgbLut::instance();
+    const float bg_dark = lut.to_linear(0.15f);
+    const float bg_light = lut.to_linear(0.55f);
+
     int h = rgba.height;
     int w = rgba.width;
     std::vector<int> rows(h);
@@ -122,9 +128,9 @@ void ColorUtils::composite_over_checker(Image rgba) {
     std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
         for (int x = 0; x < w; ++x) {
             float alpha = std::clamp(rgba(y, x, 3), 0.0f, 1.0f);
-            float bg = (((x >> 4) + (y >> 4)) % 2 == 0) ? 0.4f : 0.2f;
+            float bg = (((x / 128) + (y / 128)) % 2 == 0) ? bg_dark : bg_light;
             for (int c = 0; c < 3; ++c) {
-                rgba(y, x, c) = rgba(y, x, c) * alpha + bg * (1.0f - alpha);
+                rgba(y, x, c) = rgba(y, x, c) + bg * (1.0f - alpha);
             }
             rgba(y, x, 3) = 1.0f;
         }

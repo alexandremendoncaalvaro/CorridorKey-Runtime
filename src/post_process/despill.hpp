@@ -6,8 +6,11 @@ namespace corridorkey {
 
 /**
  * @brief Luminance-preserving green spill removal.
- * Reduces green channel based on alpha and average of R/B.
+ * Reduces green channel to avg(R,B), redistributing excess 50/50 to R and B.
+ * Operates in sRGB space (matching original Python pipeline).
+ * @param rgb RGB image to despill in-place
+ * @param strength 0.0 (no effect) to 1.0 (full despill), blended via linear interpolation
  */
-void despill(Image rgb, const Image alpha, float strength);
+void despill(Image rgb, float strength);
 
 } // namespace corridorkey

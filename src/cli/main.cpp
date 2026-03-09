@@ -4,6 +4,8 @@
 #include <iostream>
 #include <filesystem>
 #include <iomanip>
+#include <fstream>
+#include <cpr/cpr.h>
 
 using namespace corridorkey;
 
@@ -39,6 +41,11 @@ int main(int argc, char* argv[]) {
         ("m,model", "Path to GreenFormer ONNX model", cxxopts::value<std::string>())
         ("r,resolution", "Target resolution (0=auto, 512, 1024, etc.)", cxxopts::value<int>()->default_value("0"))
         ("d,device", "Device index from 'info' command", cxxopts::value<int>()->default_value("0"))
+        ("variant", "Model variant to download (fp32, fp16, int8, all)", cxxopts::value<std::string>())
+        ("despill", "Green spill removal strength (0.0 - 10.0)", cxxopts::value<float>()->default_value("1.0"))
+        ("no-despeckle", "Disable morphological cleanup")
+        ("despeckle-size", "Cleanup threshold in pixels", cxxopts::value<int>()->default_value("400"))
+        ("input-linear", "Input images are already in linear space")
         ("v,version", "Print version")
         ("h,help", "Print help");
 
@@ -70,10 +77,52 @@ int main(int argc, char* argv[]) {
         } 
 
         if (cmd == "download") {
-            std::cout << "Model download is not yet implemented.\n"
-                      << "For now, download models manually from HuggingFace:\n"
-                      << "  https://huggingface.co/corridorkey/models\n"
-                      << "Place the .onnx file in the 'models/' directory." << std::endl;
+            std::string variant = result.count("variant") ? result["variant"].as<std::string>() : "int8";
+            std::vector<std::string> variants_to_download;
+            
+            if (variant == "all") {
+                variants_to_download = {"int8", "fp16", "fp32"};
+            } else if (variant == "int8" || variant == "fp16" || variant == "fp32") {
+                variants_to_download.push_back(variant);
+            } else {
+                std::cerr << "Error: Invalid variant. Allowed values are 'int8', 'fp16', 'fp32', or 'all'." << std::endl;
+                return 1;
+            }
+
+            std::filesystem::create_directory("models");
+
+            for (const auto& v : variants_to_download) {
+                std::string filename = "corridorkey_" + v + ".onnx";
+                std::filesystem::path output_path = std::filesystem::path("models") / filename;
+                std::string url = "https://huggingface.co/corridorkey/models/resolve/main/" + filename;
+
+                std::cout << "Downloading " << filename << "..." << std::endl;
+                std::ofstream of(output_path, std::ios::binary);
+                
+                cpr::Response r = cpr::Download(of, cpr::Url{url}, cpr::ProgressCallback(
+                    [](size_t downloadTotal, size_t downloadNow, size_t /*uploadTotal*/, size_t /*uploadNow*/, intptr_t /*userdata*/) -> bool {
+                        if (downloadTotal > 0) {
+                            float p = static_cast<float>(downloadNow) / downloadTotal;
+                            int bar_width = 50;
+                            std::cout << "\r[" << std::string(bar_width * p, '=') << std::string(bar_width * (1-p), ' ') << "] " 
+                                      << int(p * 100.0) << "% " << std::flush;
+                        }
+                        return true;
+                    }));
+                
+                std::cout << std::endl;
+                of.close();
+                
+                if (r.status_code == 200) {
+                    std::cout << "Successfully downloaded " << filename << " to models/" << std::endl;
+                } else {
+                    std::cerr << "Failed to download " << filename << ". HTTP Status: " << r.status_code << std::endl;
+                    if (r.status_code == 401 || r.status_code == 404) {
+                        std::cerr << "Note: The HuggingFace repository may be private or not yet created." << std::endl;
+                    }
+                    std::filesystem::remove(output_path);
+                }
+            }
             return 0;
         }
         
@@ -88,6 +137,13 @@ int main(int argc, char* argv[]) {
             std::filesystem::path output_path = result["output"].as<std::string>();
             std::filesystem::path model_path = result["model"].as<std::string>();
 
+            InferenceParams params;
+            params.target_resolution = result["resolution"].as<int>();
+            params.despill_strength = result["despill"].as<float>();
+            params.auto_despeckle = !result.count("no-despeckle");
+            params.despeckle_size = result["despeckle-size"].as<int>();
+            params.input_is_linear = result.count("input-linear");
+
             auto devices = list_devices();
             int device_idx = result["device"].as<int>();
             auto engine_res = Engine::create(model_path, devices[device_idx]);
@@ -97,26 +153,16 @@ int main(int argc, char* argv[]) {
             }
             auto engine = std::move(*engine_res);
 
-            std::vector<std::filesystem::path> inputs;
-            std::vector<std::filesystem::path> hints;
+            std::cout << "Processing Engine Setup:\n"
+                      << " - Device: " << devices[device_idx].name << "\n"
+                      << " - Target Resolution: " << (params.target_resolution > 0 ? params.target_resolution : engine->recommended_resolution()) << "x" << (params.target_resolution > 0 ? params.target_resolution : engine->recommended_resolution()) << "\n";
 
-            if (std::filesystem::is_directory(input_path)) {
-                for (const auto& entry : std::filesystem::directory_iterator(input_path)) {
-                    if (entry.is_regular_file()) {
-                        inputs.push_back(entry.path());
-                        // Assume hints have same filename in hint directory
-                        hints.push_back(hint_path / entry.path().filename());
-                    }
-                }
-                std::sort(inputs.begin(), inputs.end());
-                std::sort(hints.begin(), hints.end());
-            } else {
-                inputs.push_back(input_path);
-                hints.push_back(hint_path);
-            }
+            auto is_video_file = [](const std::filesystem::path& p) {
+                std::string ext = p.extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                return ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv";
+            };
 
-            std::cout << "Processing " << inputs.size() << " frames..." << std::endl;
-            
             auto progress = [](float p, const std::string& status) -> bool {
                 int bar_width = 50;
                 std::cout << "\r[" << std::string(bar_width * p, '=') << std::string(bar_width * (1-p), ' ') << "] " 
@@ -124,12 +170,43 @@ int main(int argc, char* argv[]) {
                 return true;
             };
 
-            auto process_res = engine->process_sequence(inputs, hints, output_path, progress);
-            std::cout << std::endl;
+            if (std::filesystem::is_regular_file(input_path) && is_video_file(input_path)) {
+                std::cout << "Processing video..." << std::endl;
+                auto process_res = engine->process_video(input_path, hint_path, output_path, params, progress);
+                std::cout << std::endl;
 
-            if (!process_res) {
-                std::cerr << "Error: " << process_res.error().message << std::endl;
-                return 1;
+                if (!process_res) {
+                    std::cerr << "Error: " << process_res.error().message << std::endl;
+                    return 1;
+                }
+            } else {
+                std::vector<std::filesystem::path> inputs;
+                std::vector<std::filesystem::path> hints;
+
+                if (std::filesystem::is_directory(input_path)) {
+                    for (const auto& entry : std::filesystem::directory_iterator(input_path)) {
+                        if (entry.is_regular_file()) {
+                            inputs.push_back(entry.path());
+                            // Assume hints have same filename in hint directory
+                            hints.push_back(hint_path / entry.path().filename());
+                        }
+                    }
+                    std::sort(inputs.begin(), inputs.end());
+                    std::sort(hints.begin(), hints.end());
+                } else {
+                    inputs.push_back(input_path);
+                    hints.push_back(hint_path);
+                }
+
+                std::cout << "Processing " << inputs.size() << " frames..." << std::endl;
+                
+                auto process_res = engine->process_sequence(inputs, hints, output_path, params, progress);
+                std::cout << std::endl;
+
+                if (!process_res) {
+                    std::cerr << "Error: " << process_res.error().message << std::endl;
+                    return 1;
+                }
             }
 
             std::cout << "Done!" << std::endl;

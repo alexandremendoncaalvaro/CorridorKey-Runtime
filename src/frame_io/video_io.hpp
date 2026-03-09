@@ -39,7 +39,7 @@ public:
     static Result<std::unique_ptr<VideoWriter>> open(
         const std::filesystem::path& path,
         int width, int height, double fps,
-        const std::string& codec_name = "libx264"
+        const std::string& codec_name = "mpeg4"
     );
     ~VideoWriter();
 

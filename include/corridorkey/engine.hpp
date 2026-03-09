@@ -70,6 +70,7 @@ public:
      * @param inputs List of paths to input images.
      * @param alpha_hints List of paths to alpha hint images.
      * @param output_dir Directory where results will be saved.
+     * @param params Inference and post-processing parameters.
      * @param on_progress Optional callback for progress and cancellation.
      * @return Success or an error.
      */
@@ -77,6 +78,24 @@ public:
         const std::vector<std::filesystem::path>& inputs,
         const std::vector<std::filesystem::path>& alpha_hints,
         const std::filesystem::path& output_dir,
+        const InferenceParams& params = {},
+        ProgressCallback on_progress = nullptr
+    );
+
+    /**
+     * @brief Process a video file directly using FFmpeg.
+     * @param input_video Path to input video file.
+     * @param hint_video Path to alpha hint video file.
+     * @param output_video Path where the resulting video will be saved.
+     * @param params Inference and post-processing parameters.
+     * @param on_progress Optional callback for progress and cancellation.
+     * @return Success or an error.
+     */
+    Result<void> process_video(
+        const std::filesystem::path& input_video,
+        const std::filesystem::path& hint_video,
+        const std::filesystem::path& output_video,
+        const InferenceParams& params = {},
         ProgressCallback on_progress = nullptr
     );
 

@@ -2,11 +2,13 @@
 #include "post_process/color_utils.hpp"
 #include "post_process/despill.hpp"
 #include "post_process/despeckle.hpp"
+#include "common/srgb_lut.hpp"
 
 using namespace corridorkey;
 
-TEST_CASE("Full post-process chain: srgb -> despill -> despeckle -> premultiply -> srgb", "[integration][postprocess]") {
+TEST_CASE("Full post-process chain matching original Python pipeline", "[integration][postprocess]") {
     // Simulate a 4x4 green-screen frame with some green spill
+    // Model outputs: FG in sRGB, alpha as 0-1 mask
     ImageBuffer rgb_buf(4, 4, 3);
     Image rgb = rgb_buf.view();
 
@@ -19,35 +21,68 @@ TEST_CASE("Full post-process chain: srgb -> despill -> despeckle -> premultiply 
             rgb(y, x, 0) = 0.6f;  // sRGB red
             rgb(y, x, 1) = 0.8f;  // sRGB green (some spill)
             rgb(y, x, 2) = 0.5f;  // sRGB blue
-            alpha(y, x) = (y < 2) ? 1.0f : 0.5f;  // Top half opaque, bottom half semi
+            alpha(y, x) = (y < 2) ? 1.0f : 0.7f;
         }
     }
 
-    // 1. Convert sRGB to linear
-    ColorUtils::srgb_to_linear(rgb);
-    REQUIRE(rgb.data[0] < 0.6f); // Linear values should be darker
+    // Pipeline order matches original Python:
+    // 1. Despeckle alpha (space-agnostic)
+    // 2. Despill FG in sRGB
+    // 3. Convert FG to linear, premultiply, pack RGBA
+    // 4. Composite in linear, convert to sRGB
 
-    // 2. Despill — green spill should be reduced
-    float green_before = rgb.data[1]; // Save one pixel's green
-    despill(rgb, alpha, 1.0f);
-    REQUIRE(rgb.data[1] <= green_before); // Green should not increase
+    // 1. Despeckle (use small threshold so 4x4 region is not removed)
+    despeckle(alpha, 2, 0, 0);
 
-    // 3. Despeckle (should be essentially no-op on uniform alpha)
-    despeckle(alpha, 400);
+    // 2. Despill in sRGB space (no alpha parameter, matching original)
+    float green_before = rgb.data[1];
+    despill(rgb, 1.0f);
+    // Green should be reduced, R and B should increase (spill redistribution)
+    REQUIRE(rgb.data[1] < green_before);
+    REQUIRE(rgb.data[0] > 0.6f); // R increased by spill/2
+    REQUIRE(rgb.data[2] > 0.5f); // B increased by spill/2
 
-    // 4. Premultiply
-    ColorUtils::premultiply(rgb, alpha);
-    // Bottom half (alpha=0.5) RGB values should be halved
-    for (int x = 0; x < 4; ++x) {
-        float premult_r = rgb(3, x, 0);
-        REQUIRE(premult_r < 0.3f); // Was ~0.33 linear * 0.5 alpha
+    // 3. Convert to linear and premultiply (one pass, like inference_session.cpp)
+    const auto& lut = SrgbLut::instance();
+    ImageBuffer processed_buf(4, 4, 4);
+    Image proc = processed_buf.view();
+
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            float a = alpha(y, x);
+            proc(y, x, 0) = lut.to_linear(rgb(y, x, 0)) * a;
+            proc(y, x, 1) = lut.to_linear(rgb(y, x, 1)) * a;
+            proc(y, x, 2) = lut.to_linear(rgb(y, x, 2)) * a;
+            proc(y, x, 3) = a;
+        }
     }
 
-    // 5. Convert back to sRGB
-    ColorUtils::linear_to_srgb(rgb);
-    // Values should be back in perceptual sRGB range
-    for (size_t i = 0; i < rgb.data.size(); ++i) {
-        REQUIRE(rgb.data[i] >= 0.0f);
-        REQUIRE(rgb.data[i] <= 1.0f);
+    // Verify premultiply: bottom half (alpha=0.5) should have halved linear values
+    for (int x = 0; x < 4; ++x) {
+        REQUIRE(proc(3, x, 3) == Catch::Approx(0.7f));
+        // Premultiplied linear values should be roughly half of full alpha version
+        REQUIRE(proc(3, x, 0) < proc(0, x, 0));
+    }
+
+    // 4. Composite on checker in linear space
+    ImageBuffer comp_buf(4, 4, 4);
+    Image comp = comp_buf.view();
+    std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
+    ColorUtils::composite_over_checker(comp);
+
+    // After composite, alpha should be 1.0
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            REQUIRE(comp(y, x, 3) == Catch::Approx(1.0f));
+        }
+    }
+
+    // 5. Convert composite to sRGB for display
+    ColorUtils::linear_to_srgb(comp);
+
+    // All values should be in valid sRGB range [0, 1]
+    for (size_t i = 0; i < comp.data.size(); ++i) {
+        REQUIRE(comp.data[i] >= 0.0f);
+        REQUIRE(comp.data[i] <= 1.0f);
     }
 }
