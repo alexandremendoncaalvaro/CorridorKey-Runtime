@@ -42,6 +42,9 @@ coverage/
 # clang-tidy / compile commands
 compile_commands.json
 
+# Outputs
+outputs/
+
 # OS
 .DS_Store
 *.swp
