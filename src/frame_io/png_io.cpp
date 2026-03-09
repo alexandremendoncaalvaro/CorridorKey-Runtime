@@ -1,5 +1,5 @@
 #include "png_io.hpp"
-#include "core/perf_utils.hpp"
+#include "common/srgb_lut.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <vendor/stb_image.h>

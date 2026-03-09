@@ -9,7 +9,11 @@ namespace corridorkey {
 
 /**
  * @brief High-performance sRGB Lookup Table.
- * Optimized for L1 cache residency (4096 entries).
+ * 65536 entries (512KB total) for 16-bit precision. Fits in L2/L3 cache on modern CPUs.
+ *
+ * This singleton is a justified exception to the "no global state" rule:
+ * the LUT is immutable after construction, thread-safe, and const-only.
+ * Passing it by parameter would degrade the API without benefit.
  */
 class SrgbLut {
 public:
@@ -18,19 +22,14 @@ public:
         return lut;
     }
 
-    // Fast linear-to-srgb and srgb-to-linear via LUT or polynomial approximation
     inline float to_linear(float s) const {
-        if (s <= 0.0f) return 0.0f;
-        if (s >= 1.0f) return 1.0f;
-        return m_to_linear[static_cast<int>(s * 65535.0f)];
+        int idx = static_cast<int>(std::clamp(s, 0.0f, 1.0f) * 65535.0f);
+        return m_to_linear[idx];
     }
 
     inline float to_srgb(float l) const {
-        // Linear to sRGB is harder for LUT due to HDR range, 
-        // but for [0, 1] preview it works well.
-        if (l <= 0.0f) return 0.0f;
-        if (l >= 1.0f) return 1.0f;
-        return m_to_srgb[static_cast<int>(l * 65535.0f)];
+        int idx = static_cast<int>(std::clamp(l, 0.0f, 1.0f) * 65535.0f);
+        return m_to_srgb[idx];
     }
 
 private:
