@@ -1,0 +1,34 @@
+{
+    "$comment": "CorridorKey Runtime — High-Performance C++ Inference Engine",
+    "name": "corridorkey-runtime",
+    "version-string": "0.1.0",
+    "dependencies": [
+        {
+            "name": "onnxruntime",
+            "$comment": "Primary ML inference engine"
+        },
+        {
+            "name": "openexr",
+            "$comment": "VFX-standard 16/32-bit linear float image format"
+        },
+        {
+            "name": "libpng",
+            "$comment": "8/16-bit PNG image support"
+        },
+        {
+            "name": "ffmpeg",
+            "features": [
+                "avcodec",
+                "avformat",
+                "swscale",
+                "swresample"
+            ],
+            "$comment": "Video decode/encode with basic VFX-friendly features"
+        },
+        {
+            "name": "catch2",
+            "version>=": "3.5.0",
+            "$comment": "Modern testing framework (v3)"
+        }
+    ]
+}
