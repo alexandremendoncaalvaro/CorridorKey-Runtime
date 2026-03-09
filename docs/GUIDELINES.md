@@ -14,11 +14,11 @@ The codebase follows a layered architecture with strict dependency direction:
 
 ```
 CLI (main.cpp)
-  ↓ depends on
+  depends on
 Public API (include/corridorkey/)
-  ↓ depends on
+  depends on
 Core Logic (src/ — inference, post-process, frame I/O)
-  ↓ depends on
+  depends on
 External Libraries (ONNX Runtime, OpenEXR, FFmpeg)
 ```
 
@@ -32,687 +32,395 @@ Rules:
 
 ### 1.2 SOLID Principles
 
-| Principle | How we apply it |
-|-----------|----------------|
+| Principle | Application |
+|-----------|-------------|
 | **S** — Single Responsibility | Each class/file has one reason to change. `ExrReader` reads EXR. `Despill` does despill. No god objects. |
 | **O** — Open/Closed | New execution providers or image formats are added without modifying existing code — via interfaces and registration. |
 | **L** — Liskov Substitution | Any `ImageReader` implementation (EXR, PNG, Video) is interchangeable through the base interface without surprises. |
-| **I** — Interface Segregation | Clients depend only on the interfaces they use. The CLI doesn't see internal inference details. |
+| **I** — Interface Segregation | Clients depend only on the interfaces they use. The CLI does not see internal inference details. |
 | **D** — Dependency Inversion | `InferenceEngine` depends on an abstract `ISession`, not directly on ONNX Runtime types. External libs are behind wrappers. |
 
 ### 1.3 Object Calisthenics (adapted for C++)
 
-These are **guiding constraints**, not absolute laws. They push toward cleaner
-code. When a rule makes the code worse, document why you're breaking it.
+Guiding constraints, not absolute laws. They push toward cleaner code. When a
+rule makes the code worse, document why it is being broken.
 
 | Rule | C++ Adaptation | Enforced by |
 |------|---------------|-------------|
-| **1. One level of indentation per function** | Max 2 levels of nesting. Extract helper functions instead. | clang-tidy: readability-function-cognitive-complexity (threshold: 15) |
-| **2. Don't use else** | Prefer early returns, guard clauses, and std::optional/std::expected. Else is permitted for simple if/else pairs. | Code review |
-| **3. Wrap primitives** | Domain types: `Resolution`, `DespillStrength`, `AlphaValue` instead of raw int/float where semantics matter. Don't over-wrap trivially obvious parameters. | Code review |
-| **4. First-class collections** | Wrap collections that carry behavior: `FrameSequence` instead of `std::vector<Frame>` with external logic. Plain vectors are fine for simple data. | Code review |
-| **5. One dot per line** | Avoid long chains. Intermediate variables with descriptive names. Method chaining in builders is acceptable. | Code review |
-| **6. Don't abbreviate** | Full names: `alpha_hint`, not `ah`. `frame_count`, not `fc`. Standard abbreviations OK: `fps`, `rgb`, `exr`, `io`. | clang-tidy: readability-identifier-naming |
-| **7. Keep classes small** | Target: < 200 lines per .cpp file, < 100 lines per .hpp. Split when it grows. | CI check (script) |
-| **8. Max two instance variables** | Relaxed to: prefer small structs. When a class has > 5 members, consider if it should be split. | Code review |
-| **9. No getters/setters** | Prefer immutable value types (structs with public const members) or methods that express behavior. Trivial POD structs with public members are fine. | Code review |
+| One level of indentation per function | Max 2 levels of nesting. Extract helper functions instead. | clang-tidy: cognitive-complexity (threshold: 15) |
+| Don't use else | Prefer early returns, guard clauses, std::optional/std::expected. Else is permitted for simple if/else pairs. | Code review |
+| Wrap primitives | Domain types: `Resolution`, `DespillStrength` instead of raw int/float where semantics matter. Do not over-wrap trivially obvious parameters. | Code review |
+| First-class collections | Wrap collections that carry behavior: `FrameSequence` instead of `std::vector<Frame>` with external logic. Plain vectors are fine for simple data. | Code review |
+| One dot per line | Avoid long chains. Intermediate variables with descriptive names. Method chaining in builders is acceptable. | Code review |
+| Don't abbreviate | Full names: `alpha_hint`, not `ah`. `frame_count`, not `fc`. Standard abbreviations are acceptable: `fps`, `rgb`, `exr`, `io`. | clang-tidy: identifier-naming |
+| Keep classes small | Target: < 200 lines per .cpp, < 100 lines per .hpp. Split when it grows. | CI check |
+| Limit instance variables | Prefer small structs. When a class has > 5 members, consider splitting. | Code review |
+| No getters/setters | Prefer immutable value types or methods that express behavior. Trivial POD structs with public members are fine. | Code review |
 
-### 1.4 Additional Code Standards
+### 1.4 Code Standards
 
-- **Const correctness:** Everything that can be const, is const. Parameters,
-  local variables, member functions, return values.
+- **Const correctness:** Everything that can be const, is const.
 - **RAII everywhere:** No raw `new`/`delete`. Use `std::unique_ptr`,
   `std::shared_ptr`, stack allocation. FFmpeg/OpenEXR C resources wrapped
   in RAII handles.
 - **No raw owning pointers.** Non-owning observation via raw pointer or
   `std::span` is fine.
-- **Error handling:** Use return types (`std::expected<T, Error>` or
-  `std::optional<T>`) for expected failures. Exceptions only for truly
-  exceptional conditions (out of memory, corrupted file).
 - **No global mutable state.** Configuration passed explicitly through
   parameters or dependency injection.
-- **Naming conventions:**
-  - `snake_case` for functions, variables, namespaces, files
-  - `PascalCase` for types (classes, structs, enums, concepts)
-  - `UPPER_SNAKE_CASE` for compile-time constants and macros
-  - `m_` prefix for private member variables
-  - All names in English
+- **Naming conventions:** `snake_case` for functions/variables/namespaces/files,
+  `PascalCase` for types, `UPPER_SNAKE_CASE` for constants and macros,
+  `m_` prefix for private members. All names in English.
 
 ---
 
-## 2. API Design for Reusability
+## 2. API Design
 
-To ensure the library remains a first-class citizen capable of evolving into various frontends, adhere to these API design rules:
+The library exists to serve multiple frontends (CLI today, GUI or plugins in
+the future). These rules ensure the API remains stable and frontend-agnostic.
 
 ### 2.1 Interface Stability
-- **PIMPL Pattern (Pointer to Implementation):** Use PIMPL for the main `Engine` class. This hides implementation details (like ONNX Runtime types) from the public headers, ensuring ABI stability and keeping headers clean.
-- **Minimal Public Headers:** Only expose what is absolutely necessary. Keep `include/corridorkey/` lean.
-- **Resource Management:** Use RAII for all library objects. The user should not have to manually call `init()` or `cleanup()` for global states.
 
-### 2.2 Execution & Threading
-- **Non-Blocking Support:** Provide asynchronous versions of heavy operations or ensure they can be easily wrapped in a thread by the consumer.
-- **Progress Callbacks:** Long-running operations (like `process_sequence`) must accept a callback function to report progress and allow for cancellation.
-- **Thread Safety:** The `Engine` class should be thread-safe for concurrent read operations. Document any shared state that requires synchronization.
+- **PIMPL pattern** for the main `Engine` class. This hides implementation
+  details from public headers, ensuring ABI stability.
+- **Minimal public headers.** Only expose what external consumers need. Keep
+  `include/corridorkey/` lean.
+- **Symbol visibility** hidden by default. Only symbols marked with the
+  `CORRIDORKEY_API` macro are exported.
 
-### 2.3 Error Handling
-- **No `std::exit` or `abort`:** The library must never terminate the process.
-- **Explicit Results:** Use `std::expected<T, Error>` for all operations that can fail (I/O, model loading, inference).
-- Error Context: Provide descriptive error codes and messages that can be displayed in any UI (CLI or GUI).
+### 2.2 Error Handling
 
----
+- **No `std::exit` or `abort` in the library.** The library never terminates
+  the process.
+- **Explicit results** via `std::expected<T, Error>` for all operations that
+  can fail (I/O, model loading, inference).
+- Error types carry descriptive codes and messages usable in any UI.
 
-## 3. Build System & Dependency Management
+### 2.3 Execution and Threading
 
-To ensure absolute reproducibility and prevent "it works on my machine" issues, the following infrastructure rules apply:
-
-### 3.1 Dependency Pinning (vcpkg)
-- **Manifest Mode:** Always use `vcpkg.json`.
-- **Baseline Versioning:** A `vcpkg-configuration.json` file MUST be present in the root. It must specify a `builtin-baseline` (a Git commit hash from the official vcpkg repository). This ensures every developer and CI runner uses the exact same versions of ONNX Runtime, OpenEXR, and FFmpeg.
-- **Explicit Features:** When adding a dependency in `vcpkg.json`, explicitly list the required features (e.g., FFmpeg with `avcodec` and `swscale`) and provide a `$comment` explaining the usage.
-
-### 3.2 Modern CMake (Target-Based)
-- **No Global Commands:** Commands like `include_directories`, `link_directories`, or `add_definitions` are strictly prohibited.
-- **Target-Specific Configuration:** All settings (include paths, compile definitions, compiler flags) must be attached to targets via `target_include_directories`, `target_compile_definitions`, and `target_compile_options`.
-- **Visibility Control:** The library must be built with `CMAKE_CXX_VISIBILITY_PRESET hidden` and `VISIBILITY_INLINES_HIDDEN ON`. Only symbols explicitly marked with the `CORRIDORKEY_API` macro (generated via `GenerateExportHeader`) will be exported. This prevents internal library symbols (like ONNX Runtime) from leaking into the consumer's namespace.
-
-### 3.3 CMake Presets
-- **Source of Truth:** `CMakePresets.json` is the only supported way to configure the project. It must contain presets for `debug`, `release`, and `ci` environments.
-- **Zero-Manual-Setup:** Presets must automatically locate the vcpkg toolchain file. A developer should only need to run `cmake --preset debug` to get a working build.
-
-### 3.4 Compiler Rigor & Sanitizers
-- **Strict Warnings:** Use `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) or `/W4 /WX` (MSVC).
-- **Address Sanitizer (ASAN):** Enabled by default in the `debug` preset to catch memory leaks and buffer overflows early.
+- Long-running operations accept a `ProgressCallback` for progress reporting
+  and cancellation.
+- The `Engine` class is thread-safe for concurrent read operations.
+- The library does not print to stdout/stderr. Logging is via callback or
+  standard interface that the consumer can redirect.
 
 ---
 
-## 4. Testing Strategy
+## 3. Performance Standards
 
-### 2.1 Test Pyramid
+The C++ runtime exists because Python is too slow and too memory-hungry.
+These rules protect the performance advantage.
 
-```
-          ┌───────────┐
-          │  E2E (few) │   Full binary, real models, real files
-          ├───────────┤
-        ┌─┤Integration ├─┐  Multiple modules together
-        │ │  (moderate) │ │
-        │ ├─────────────┤ │
-        │ │    Unit      │ │  Single function/class in isolation
-        │ │   (many)     │ │
-        └─┴─────────────┴─┘
-```
+### 3.1 Memory and Data Locality
 
-We do NOT aim for 100% unit test coverage. We aim for **high-value coverage
-across the full pyramid** — every layer contributes confidence that the system
-works correctly.
+- **`ImageBuffer` for ownership, `Image` (std::span) for processing.** Do not
+  use `std::vector<float>` for pixel data.
+- **Zero heap allocations in hot loops.** Per-frame and per-pixel code must
+  not allocate.
+- **64-byte aligned allocation** for all pixel buffers (AVX-512 compatible).
+- **Row-major processing** (outer Y, inner X) for sequential memory access.
 
-### 2.2 Unit Tests
+### 3.2 Vectorization
 
-**Scope:** Single function or class, no external dependencies (no disk, no GPU,
-no model files).
+- Avoid branches inside pixel loops. Use `std::clamp`, `std::min`, `std::max`.
+- Keep loops simple enough for the compiler auto-vectorizer.
+- Prefer lookup tables over expensive math (`std::pow`, `std::exp`) in hot paths.
 
-**What to test:**
-- `color_utils`: sRGB↔linear conversion accuracy, edge cases (0.0, 1.0,
-  negative, > 1.0), round-trip consistency
-- `despill`: known input/output pairs, strength=0 passthrough, edge cases
-- `despeckle`: known patterns, empty input, single-pixel
-- `device_detection`: mock hardware info, tier classification logic
-- `resolution_selection`: memory→resolution mapping, edge cases
-- Value types: `Resolution`, `InferenceParams` construction and validation
+### 3.3 Zero-Copy
 
-**What NOT to unit test:**
-- Thin wrappers around external libraries (OpenEXR, FFmpeg) — tested at
-  integration level
-- Trivial constructors, getters on POD types
-- Private implementation details
-
-**Framework:** Catch2 v3
-
-### 2.3 Regression Tests
-
-**Scope:** Prevent specific bugs from reoccurring.
-
-**Process:**
-1. Bug is found and reported
-2. A failing test is written FIRST that reproduces the bug
-3. The fix is implemented
-4. Test passes and is committed with a descriptive name referencing the issue
-
-**Naming convention:** `test_regression_<issue_number>_<short_description>`
-
-**Regression tests are never deleted.** They are the project's scar tissue —
-proof we don't repeat mistakes.
-
-### 2.4 Integration Tests
-
-**Scope:** Multiple modules working together, may use real files but NOT real
-GPU inference (too slow, hardware-dependent).
-
-**What to test:**
-- FrameIO pipeline: read EXR → process in memory → write EXR → read back →
-  compare (round-trip)
-- FrameIO pipeline: read PNG → write PNG → compare
-- Video pipeline: decode MP4 frame → re-encode → decode → compare
-- PostProcess chain: full despill+despeckle+composite pipeline on known input
-- InferenceEngine: model loading, session creation, input/output shape
-  validation (with a tiny test model, not the real 300MB model)
-
-**Test fixtures:** Small reference files stored in `tests/fixtures/`. Kept
-under 1MB total in the repository. Larger test assets downloaded on demand
-(CI only).
-
-### 2.5 End-to-End Tests
-
-**Scope:** Full binary execution, real model, real files, real hardware.
-
-**What to test:**
-- `corridorkey process frame.png --alpha-hint hint.png -o out.png` produces
-  valid output matching reference within tolerance
-- `corridorkey process input.mp4 --alpha-hint hint.mp4 -o out.mp4` produces
-  playable video with correct frame count
-- `corridorkey info` prints device info without crashing
-- `corridorkey download --variant int8` downloads model successfully
-- Output directory structure matches spec (Matte/, FG/, Processed/, Comp/)
-
-**Execution:** E2E tests are slow and hardware-dependent. They run:
-- Locally: on demand (`ctest --label-regex e2e`)
-- CI: nightly, not on every push
-- Release: mandatory before any version tag
-
-### 2.6 Performance Tests (Benchmarks)
-
-Not part of the test pyramid but important for regression:
-
-- Frame processing time (per resolution, per EP, per model variant)
-- Memory usage peak
-- Startup time (model load + warm-up)
-- Video throughput (fps)
-
-Benchmarks are tracked over time. Significant regressions (> 20% slowdown)
-block the PR.
-
-### 2.7 Test Tags (Catch2)
-
-```
-[unit]          — Unit tests, fast, no I/O, no GPU
-[integration]   — Integration tests, may use disk, no GPU
-[e2e]           — End-to-end, needs real model + hardware
-[regression]    — Bug regression tests
-[benchmark]     — Performance benchmarks
-[color]         — Color math tests
-[frameio]       — Frame I/O tests
-[inference]     — Inference engine tests
-[device]        — Device detection tests
-```
-
-Run subsets:
-```bash
-ctest --label-regex unit          # fast, every commit
-ctest --label-regex integration   # moderate, every push
-ctest --label-regex e2e           # slow, nightly/release
-```
+- All processing functions take `Image` views (non-owning `std::span`).
+- Use move semantics for `ImageBuffer` and `FrameResult` to transfer ownership
+  without copying.
 
 ---
 
-## 3. Static Analysis & Formatting
+## 4. Build System
 
-### 3.1 Tools
+### 4.1 CMake
+
+- **Target-based only.** No global commands (`include_directories`,
+  `link_directories`, `add_definitions`). All configuration via
+  `target_include_directories`, `target_compile_definitions`,
+  `target_compile_options`.
+- **CMakePresets.json** is the source of truth for build configurations.
+  Contains presets for `debug`, `release`, and `ci`.
+- A developer runs `cmake --preset debug` and gets a working build.
+
+### 4.2 Dependencies (vcpkg)
+
+- **Manifest mode** via `vcpkg.json` with locked baseline in
+  `vcpkg-configuration.json`.
+- Every dependency has a `$comment` explaining why it exists.
+- Prefer header-only libraries for small utilities (vendored in `vendor/`).
+- Dependencies updated quarterly. Security patches applied immediately.
+
+### 4.3 Compiler Settings
+
+- **Strict warnings:** `-Wall -Wextra -Wpedantic -Werror` (GCC/Clang) or
+  `/W4 /WX` (MSVC).
+- **AddressSanitizer** enabled in the `debug` preset.
+
+---
+
+## 5. Static Analysis and Formatting
+
+### 5.1 Tools
 
 | Tool | Purpose | Config file |
 |------|---------|-------------|
-| **clang-format 18+** | Code formatting (whitespace, braces, includes) | `.clang-format` |
-| **clang-tidy 18+** | Static analysis, bug detection, style enforcement | `.clang-tidy` |
-| **cppcheck** | Additional static analysis (undefined behavior, leaks) | `cppcheck.cfg` |
-| **include-what-you-use** | Ensure headers are minimal and correct | CMake integration |
+| **clang-format 18+** | Code formatting | `.clang-format` |
+| **clang-tidy 18+** | Static analysis, style enforcement | `.clang-tidy` |
+| **cppcheck** | Undefined behavior, leaks, portability | integrated in CI |
+| **include-what-you-use** | Header minimality | CMake integration |
 
-### 3.2 clang-format Configuration
+### 5.2 clang-format
 
-Based on LLVM style with project-specific overrides:
+Based on LLVM style. Key decisions: 4 spaces, 100 column limit, attach braces,
+no single-line if/loops, includes regrouped (project first, third-party second,
+standard last), pointer/reference aligned left.
 
-```yaml
-# .clang-format
-BasedOnStyle: LLVM
-IndentWidth: 4
-ColumnLimit: 100
-BreakBeforeBraces: Attach
-AllowShortFunctionsOnASingleLine: Inline
-AllowShortIfStatementsOnASingleLine: Never
-AllowShortLoopsOnASingleLine: false
-IncludeBlocks: Regroup
-IncludeCategories:
-  - Regex: '^<corridorkey/'
-    Priority: 1
-  - Regex: '^<(onnxruntime|OpenEXR|Imath)/'
-    Priority: 2
-  - Regex: '^<'
-    Priority: 3
-  - Regex: '.*'
-    Priority: 4
-SortIncludes: CaseSensitive
-PointerAlignment: Left
-ReferenceAlignment: Left
-SpaceAfterCStyleCast: false
-```
+The authoritative configuration is `.clang-format` at the project root.
 
-### 3.3 clang-tidy Configuration
+### 5.3 clang-tidy
 
-Strict but practical. Every check is intentional.
+Enables check groups: bugprone, cert, cppcoreguidelines, misc, modernize,
+performance, readability, concurrency. Critical checks promoted to errors.
+Naming enforcement matches project conventions.
 
-```yaml
-# .clang-tidy
-Checks: >
-  -*,
-  bugprone-*,
-  -bugprone-easily-swappable-parameters,
-  cert-*,
-  -cert-err58-cpp,
-  cppcoreguidelines-*,
-  -cppcoreguidelines-avoid-magic-numbers,
-  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
-  -cppcoreguidelines-owning-memory,
-  misc-*,
-  -misc-non-private-member-variables-in-classes,
-  modernize-*,
-  -modernize-use-trailing-return-type,
-  performance-*,
-  readability-*,
-  -readability-magic-numbers,
-  -readability-identifier-length,
-  concurrency-*,
+The authoritative configuration is `.clang-tidy` at the project root.
 
-WarningsAsErrors: >
-  bugprone-*,
-  cert-*,
-  cppcoreguidelines-slicing,
-  cppcoreguidelines-no-malloc,
-  performance-unnecessary-copy-initialization,
-  readability-function-cognitive-complexity,
+### 5.4 cppcheck
 
-CheckOptions:
-  - key: readability-function-cognitive-complexity.Threshold
-    value: 15
-  - key: readability-identifier-naming.NamespaceCase
-    value: lower_case
-  - key: readability-identifier-naming.ClassCase
-    value: CamelCase
-  - key: readability-identifier-naming.FunctionCase
-    value: lower_case
-  - key: readability-identifier-naming.VariableCase
-    value: lower_case
-  - key: readability-identifier-naming.PrivateMemberSuffix
-    value: ''
-  - key: readability-identifier-naming.PrivateMemberPrefix
-    value: 'm_'
-  - key: readability-identifier-naming.ConstantCase
-    value: UPPER_CASE
-  - key: readability-identifier-naming.EnumConstantCase
-    value: CamelCase
-  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
-    value: true
-  - key: misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic
-    value: true
-
-HeaderFilterRegex: 'include/corridorkey/.*\.hpp$|src/.*\.hpp$'
-```
-
-### 3.4 cppcheck Configuration
-
-```
-# cppcheck.cfg (command-line flags)
---enable=warning,style,performance,portability
---suppress=missingIncludeSystem
---suppress=unmatchedSuppression
---error-exitcode=1
---inline-suppr
---std=c++20
-```
+Enables warning, style, performance, and portability checks. Fails on any
+issue. Integrated into the pre-push hook and CI pipeline.
 
 ---
 
-## 4. Pre-flight Checks (Git Hooks)
+## 6. Quality Gates
 
-### 4.1 Overview
+Nothing reaches the repository without passing automated checks.
 
-Nothing reaches the repository without passing quality gates. Two levels:
+### 6.1 Gate Levels
 
 ```
-Developer commits code
-        ↓
-  ┌─────────────────────┐
-  │  pre-commit hook     │  Fast checks (< 30s)
-  │  (runs on staged     │  - formatting
-  │   files only)        │  - lint (clang-tidy on changed files)
-  │                      │  - build check
-  └─────────────────────┘
-        ↓ pass
+Developer commits
+        |
+  pre-commit hook        Fast (< 30s)
+  (staged files only)    - clang-format
+                         - clang-tidy on changed files
+                         - file hygiene
+        |
   git commit created
-        ↓
+        |
   Developer pushes
-        ↓
-  ┌─────────────────────┐
-  │  pre-push hook       │  Thorough checks (< 5min)
-  │  (runs on full       │  - full build (debug + release)
-  │   codebase)          │  - all unit tests
-  │                      │  - all integration tests
-  │                      │  - cppcheck full scan
-  │                      │  - file size limits
-  └─────────────────────┘
-        ↓ pass
+        |
+  pre-push hook          Thorough (< 5min)
+  (full codebase)        - full debug build
+                         - all unit tests
+                         - all integration tests
+                         - cppcheck
+        |
   push to remote
-        ↓
-  ┌─────────────────────┐
-  │  CI pipeline         │  Full validation (< 15min)
-  │  (GitHub Actions)    │  - build on macOS, Linux, Windows
-  │                      │  - all tests (unit + integration)
-  │                      │  - clang-tidy full codebase
-  │                      │  - cppcheck full codebase
-  │                      │  - binary size check
-  │                      │  - IWYU check
-  └─────────────────────┘
+        |
+  CI pipeline            Complete (< 15min)
+  (GitHub Actions)       - build on macOS, Linux, Windows
+                         - all tests
+                         - clang-tidy + cppcheck full
+                         - IWYU, binary size check
 ```
 
-### 4.2 pre-commit Hook
+### 6.2 Pre-commit Hook
 
-Managed via [pre-commit](https://pre-commit.com/) framework:
+Managed via [pre-commit](https://pre-commit.com/). Configuration in
+`.pre-commit-config.yaml`. Checks: formatting, lint on changed files,
+trailing whitespace, YAML/JSON syntax, large file detection, direct commit
+to `main` blocked.
 
-```yaml
-# .pre-commit-config.yaml
-repos:
-  # Format check (fast — only checks, doesn't modify)
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v18.1.0
-    hooks:
-      - id: clang-format
-        args: [--dry-run, --Werror]
-        types_or: [c, c++]
+### 6.3 Pre-push Hook
 
-  # Lint (on changed files only)
-  - repo: https://github.com/cpp-linter/cpp-linter-hooks
-    rev: v0.7.0
-    hooks:
-      - id: clang-tidy
-        args: [--config-file=.clang-tidy, -p=build]
-        types_or: [c, c++]
+Shell script at `.githooks/pre-push`. Runs: full debug build, unit tests,
+integration tests, cppcheck. All must pass.
 
-  # Basic file hygiene
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
-    hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-json
-      - id: check-added-large-files
-        args: [--maxkb=500]
-      - id: no-commit-to-branch
-        args: [--branch, main]
-```
+### 6.4 CI Pipeline
 
-### 4.3 pre-push Hook
-
-A shell script that runs the full local validation:
-
-```bash
-#!/usr/bin/env bash
-# .githooks/pre-push
-set -euo pipefail
-
-echo "=== Pre-push checks ==="
-
-echo "[1/4] Building (Debug)..."
-cmake --build build/debug --parallel
-
-echo "[2/4] Running unit tests..."
-ctest --test-dir build/debug --label-regex unit --output-on-failure
-
-echo "[3/4] Running integration tests..."
-ctest --test-dir build/debug --label-regex integration --output-on-failure
-
-echo "[4/4] Running cppcheck..."
-cppcheck --project=build/debug/compile_commands.json \
-    --enable=warning,style,performance,portability \
-    --error-exitcode=1 --suppress=missingIncludeSystem
-
-echo "=== All pre-push checks passed ==="
-```
-
-### 4.4 CI Pipeline (GitHub Actions)
-
-```yaml
-# Summary of CI jobs (full config in .github/workflows/ci.yml)
-
-on: [push, pull_request]
-
-jobs:
-  build-and-test:
-    strategy:
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
-    steps:
-      - checkout
-      - setup vcpkg
-      - cmake configure + build (Debug)
-      - unit tests
-      - integration tests
-      - clang-tidy (full codebase)
-      - cppcheck (full codebase)
-
-  quality-gates:
-    steps:
-      - clang-format check (full codebase)
-      - file size limits (no .cpp > 200 lines, no .hpp > 100 lines — warning, not blocking)
-      - include-what-you-use
-      - binary size check (warn if > 20MB)
-
-  nightly:  # separate workflow, runs daily
-    steps:
-      - build (Release)
-      - e2e tests (with real model)
-      - benchmarks (track over time)
-```
+Configuration in `.github/workflows/`. Builds and tests on all platforms on
+every push and PR. Nightly: release build, E2E tests with real models,
+performance benchmarks tracked over time.
 
 ---
 
-## 5. Git Workflow
+## 7. Testing Strategy
 
-### 5.1 Branch Strategy
-
-```
-main              ← always stable, all checks pass
-  └── feat/xxx    ← feature branches, PR to main
-  └── fix/xxx     ← bug fix branches, PR to main
-  └── chore/xxx   ← maintenance (deps, CI, docs)
-```
-
-- **main** is protected: requires PR, passing CI, and review
-- Direct commits to main are blocked (enforced by pre-commit hook +
-  GitHub branch protection)
-- Squash merge preferred for clean history
-
-### 5.2 Commit Messages
-
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
+### 7.1 Pyramid
 
 ```
-feat: add EXR 16-bit read support
-fix: prevent NaN in despill with zero alpha
-test: add regression test for #42
-refactor: extract RAII wrapper for FFmpeg context
-chore: update ONNX Runtime to 1.25
-docs: add hardware tier table to README
-perf: parallelize frame decode pipeline
+         E2E (few)           Full binary, real models, real files
+       Integration           Multiple modules together
+     Unit (many)             Single function/class in isolation
 ```
 
-### 5.3 Setup for New Developers
+The goal is **high-value coverage across all layers**, not 100% unit test
+coverage.
 
-```bash
-# Clone and setup
-git clone <repo>
-cd CorridorKey-Runtime
+### 7.2 Unit Tests
 
-# Install pre-commit hooks
-pip install pre-commit   # or: brew install pre-commit
-pre-commit install
-pre-commit install --hook-type pre-push
+Single function or class, no external dependencies (no disk, no GPU, no model
+files). Must complete in under 1 second each. Framework: Catch2 v3.
 
-# Configure git to use project hooks
-git config core.hooksPath .githooks
+What to test: color math (sRGB/linear conversions, edge cases, round-trips),
+despill/despeckle with known input/output pairs, device detection logic,
+resolution selection, value type validation.
 
-# Build
-cmake --preset debug
-cmake --build build/debug --parallel
+What NOT to unit test: thin wrappers around external libraries, trivial
+constructors, private implementation details.
 
-# Test
-ctest --test-dir build/debug --label-regex unit
-```
+### 7.3 Regression Tests
+
+Prevent specific bugs from reoccurring. Process: write a failing test that
+reproduces the bug, then fix the bug. Naming:
+`test_regression_<issue_number>_<description>`.
+
+Regression tests are never deleted.
+
+### 7.4 Integration Tests
+
+Multiple modules working together. May use real files from `tests/fixtures/`
+(< 1MB total in repo). No GPU. Tests: file format round-trips (EXR, PNG,
+video), full post-process chains, model loading and session creation with
+a small test model.
+
+### 7.5 End-to-End Tests
+
+Full binary execution with real models, real files, real hardware. Slow and
+hardware-dependent. Run locally on demand, nightly in CI, mandatory before
+release.
+
+### 7.6 Performance Benchmarks
+
+Frame processing time, memory peak, startup time, video throughput. Tracked
+over time. Regressions > 20% block the PR.
+
+### 7.7 Test Tags
+
+| Tag | Scope | Schedule |
+|-----|-------|----------|
+| `[unit]` | Fast, no I/O, no GPU | Every commit |
+| `[integration]` | May use disk, no GPU | Every push, CI |
+| `[e2e]` | Real model + hardware | Nightly, release |
+| `[regression]` | Bug reproductions | Same as parent level |
+| `[benchmark]` | Performance tracking | Nightly |
+
+Domain tags (`[color]`, `[frameio]`, `[inference]`, `[device]`) are combined
+with level tags.
 
 ---
 
-## 6. Documentation Standards
+## 8. Git Workflow
 
-### 6.1 Core Principle
+### 8.1 Branch Strategy
+
+`main` is always stable. All checks pass. Protected: requires PR, passing CI,
+and review. Direct commits blocked. Squash merge preferred.
+
+Branch prefixes: `feat/`, `fix/`, `chore/`, `test/`, `refactor/`.
+
+### 8.2 Commit Messages
+
+[Conventional Commits](https://www.conventionalcommits.org/). Prefixes:
+`feat`, `fix`, `test`, `refactor`, `chore`, `docs`, `perf`.
+
+Short imperative sentence. Body (optional) explains why, not what.
+
+### 8.3 Developer Setup
+
+Development setup instructions are in `CONTRIBUTING.md`. That is the single
+source of truth for onboarding.
+
+---
+
+## 9. Documentation Standards
+
+### 9.1 Core Principle
 
 Documentation contains **definitions and decisions** — what the project is,
 what it does, how it works, and why. It serves as a reference for anyone
 building, using, or contributing to the project.
 
-### 6.2 What Documentation MUST Contain
+### 9.2 What Documentation MUST Contain
 
 - **Business context:** Every document and every major section starts with
-  *why* something exists and what problem it solves, before diving into
-  technical details.
+  why something exists and what problem it solves, before technical details.
 - **Definitions:** Concrete terms, types, interfaces, behaviors, constraints.
-  If something is decided, it is documented as a fact.
-- **Specifications of planned work:** Features and designs that are committed
-  and will be implemented. Documented as decisions, not wishes.
+- **Specifications of committed work:** Features and designs that are decided.
+  Documented as facts, not wishes.
 - **Current state:** What is built, how it works, how to use it.
 
-### 6.3 What Documentation MUST NOT Contain
+### 9.3 What Documentation MUST NOT Contain
 
-- **Speculation or unfounded plans.** If it is not decided, it does not go in
-  the docs. Use GitHub Issues for proposals and discussions.
-- **Historical logs.** Do not record when something was done, what changed, or
-  what was removed. Git history and GitHub PRs serve that purpose.
-- **Dates, version stamps, or status markers** (no "DRAFT v0.1", no
-  "Updated 2026-03-08"). The current state of the document IS the document.
-  Git tracks the rest.
-- **Source code in documentation.** Documentation describes behavior, interfaces,
-  and decisions. It does not contain implementation code. Pseudocode is
-  acceptable only when necessary to explain an algorithm or flow that cannot be
-  expressed clearly in prose. The place for code is in the codebase; the place
-  for documentation is in the docs. CLI usage examples in README are acceptable
-  because they document the user interface.
-- **Emoji.** Not in documentation, not in code comments, not in commit
-  messages. Plain, professional language.
-- **Filler text.** No "this section will be expanded later", no placeholders,
-  no TODO markers in documentation. If a section is not ready, it does not
-  exist yet.
+- **Speculation or unfounded plans.** Use GitHub Issues for proposals.
+- **Historical logs.** Git history and PRs serve that purpose.
+- **Dates, version stamps, or status markers.** The current state of the
+  document IS the document.
+- **Source code.** Pseudocode is acceptable only when necessary to explain an
+  algorithm that cannot be expressed clearly in prose. CLI usage examples in
+  README are acceptable because they document the user interface.
+- **Emoji.** Plain, professional language.
+- **Filler text.** No "this section will be expanded later", no placeholders.
+  If a section is not ready, it does not exist.
 - **Duplicated content.** Each piece of information lives in one place.
-  Other documents reference it, not copy it.
 
-### 6.4 Document Purposes
-
-Each document has a clear, non-overlapping scope:
+### 9.4 Document Purposes
 
 | Document | Scope | Audience |
 |----------|-------|----------|
-| `README.md` | What is this, how to install, how to use | Users and potential contributors |
-| `CONTRIBUTING.md` | How to set up dev environment, how to submit changes | Contributors |
-| `docs/SPEC.md` | What to build and why: architecture, components, interfaces, hardware tiers, model pipeline | Architects and developers |
-| `docs/GUIDELINES.md` | How to build it: code standards, testing, linting, git workflow (this document) | Developers |
-| `docs/ARCHITECTURE.md` | Where code lives: project structure, directory rules, dependency layers | Developers |
-| `CLAUDE.md` | Machine-readable summary of rules for AI-assisted development | AI tools |
+| `README.md` | What is this, how to install, how to use | Users, potential contributors |
+| `CONTRIBUTING.md` | Dev environment setup, how to submit changes | Contributors |
+| `docs/SPEC.md` | What to build and why | Architects, developers |
+| `docs/GUIDELINES.md` | How to build it (this document) | Developers |
+| `docs/ARCHITECTURE.md` | Where code lives | Developers |
+| `CLAUDE.md` | Machine-readable rule summary | AI tools |
 
-If information does not fit any of these, it either belongs in code comments
-(for implementation-level context) or in a GitHub Issue (for discussion).
+### 9.5 Living Documentation in Code
 
-### 6.5 Code Documentation (Living Documentation)
+The code is the primary source of truth. Documentation in code captures
+**intent and context** that the code alone cannot convey.
 
-The code is the primary source of truth for how things work. Documentation in
-code exists to capture **intent and context** that the code alone cannot convey.
+**Public API** (`include/corridorkey/`): Doxygen-style doc comments on every
+public function and class. States purpose, parameters, return value,
+preconditions, error conditions. This is the API reference — it lives in
+code because the code IS the contract.
 
-**Public API** (`include/corridorkey/`):
-- Every public function and class has a Doxygen-style doc comment that states
-  its purpose, parameters, return value, preconditions, and error conditions.
-- This is the API reference. It lives in the code because the code IS the
-  contract. When the interface changes, the documentation changes with it.
+**Internal code — document:**
+- Why a decision was made (business reason, performance trade-off, workaround)
+- Constraints not obvious from code (color space requirements, alignment)
+- References to external specifications (IEC 61966-2-1, OpenEXR conventions)
 
-**Internal code — what to document:**
-- **Why** a decision was made (business reason, performance trade-off,
-  workaround for a known issue in an external library).
-- **Constraints** that are not obvious from the code (color values must be in
-  linear space, not sRGB; buffer must be aligned to 16 bytes).
-- **References** to external specifications (sRGB transfer function per IEC
-  61966-2-1, OpenEXR channel naming conventions).
+**Internal code — do NOT document:**
+- What the code does (refactor to make it self-evident)
+- How the code works line by line (the code is readable)
+- Commented-out code (delete it, use version control)
+- TODO/FIXME/HACK (open a GitHub Issue)
+- Decorative comments (banners, dividers, ASCII art)
 
-**Internal code — what NOT to document:**
-- **What** the code does. If a comment restates the code in English, delete
-  the comment and rename the function or variable to be self-explanatory.
-- **How** the code works line by line. The code is readable; if it is not,
-  refactor it.
-- **Commented-out code.** Delete it. Version control is the archive.
-- **TODO/FIXME/HACK markers.** Open a GitHub Issue instead. The issue tracker
-  is the backlog, not the source code.
-- **Decorative comments** (section banners, ASCII art, dividers). The file
-  structure and naming provide organization.
+**Tests as documentation:** A well-named test documents a requirement more
+reliably than any comment, because it is verified on every build.
 
-**The test as documentation:**
-- Well-named tests are the most reliable documentation of behavior. A test
-  named `despill_preserves_luminance_for_neutral_colors` documents a
-  requirement more reliably than any comment, because it is verified on every
-  build.
-
-### 6.6 Writing Style
+### 9.6 Writing Style
 
 - Plain English, professional tone
-- Active voice, direct statements ("The engine loads the model" not "The model
-  is loaded by the engine")
-- Concrete and specific ("processes frames at 512x512 resolution" not
-  "processes frames at a suitable resolution")
-- Technical terms are defined on first use
-- Consistent terminology throughout (pick one term for a concept and use it
-  everywhere)
+- Active voice, direct statements
+- Concrete and specific
+- Technical terms defined on first use
+- Consistent terminology throughout
 
 ---
 
-## 7. Dependency Management
-
-### 7.1 Rules
-
-- Every external dependency must be justified in a comment in `vcpkg.json`
-- Prefer header-only libraries for small utilities (CLI11, stb)
-- Vendor header-only libs in `vendor/` with version noted
-- Lock vcpkg baseline in `vcpkg.json` for reproducible builds
-- Update dependencies quarterly, not continuously
-- Security vulnerabilities are patched immediately regardless of schedule
-
-### 7.2 vcpkg.json Structure
-
-```json
-{
-    "$comment": "Dependencies for CorridorKey Optimized",
-    "name": "corridorkey-runtime",
-    "version-string": "0.1.0",
-    "dependencies": [
-        { "name": "onnxruntime", "$comment": "ML inference runtime" },
-        { "name": "openexr", "$comment": "VFX-standard image format" },
-        { "name": "libpng", "$comment": "16-bit PNG support" },
-        { "name": "ffmpeg", "$comment": "Video decode/encode",
-          "features": ["avcodec", "avformat", "swscale"] },
-        { "name": "catch2", "$comment": "Testing framework" }
-    ],
-    "builtin-baseline": "<locked-commit-hash>"
-}
-```
-
----
-
-## 8. Security Considerations
+## 10. Security
 
 - No network access in the core library. Model download is a separate CLI
   command, not implicit.
 - Input validation at all system boundaries: file headers, resolution limits,
   parameter ranges.
 - No shell command execution from the library.
-- FFmpeg input is treated as untrusted (fuzzed file formats are a known
-  attack vector). Use FFmpeg's built-in limits and timeouts.
-- Dependency audit via `vcpkg` vulnerability scanning in CI.
+- FFmpeg input is treated as untrusted. Use FFmpeg's built-in limits and
+  timeouts.
+- Dependency audit via vcpkg vulnerability scanning in CI.

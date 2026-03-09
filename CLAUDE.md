@@ -7,12 +7,16 @@ It contains the non-negotiable rules for this project.
 
 - **Name:** CorridorKey Runtime
 - **Language:** C++20 (no modules)
-- **Build:** CMake 3.28+ with vcpkg manifest mode
+- **Build:** CMake 3.28+ with vcpkg manifest mode and CMake Presets
 - **License:** CC BY-NC-SA 4.0
 
 ## Structural Rules (enforced — see docs/ARCHITECTURE.md for details)
 
 - Public headers go in `include/corridorkey/` — this is the external API
+- Use **PIMPL Pattern** for main classes (like `Engine`) to ensure ABI stability
+- Use **Symbol Visibility (hidden by default)** — only export via `CORRIDORKEY_API` macro
+- **Zero-Copy Performance:** Use `std::span` (via `Image`) for processing and `ImageBuffer` for ownership. NEVER use `std::vector<float>` for large pixel data.
+- **SIMD Alignment:** Ensure 64-byte alignment for all image allocations.
 - Implementation goes in `src/` subdirectories by domain:
   - `src/cli/` — CLI only (main + arg parsing, no business logic)
   - `src/core/` — inference engine, device detection, ONNX Runtime wrapper
@@ -48,6 +52,14 @@ It contains the non-negotiable rules for this project.
 - Unit tests: no I/O, no GPU, < 1 second each
 - Test file naming: `test_<module>.cpp`
 
+## Build & Infrastructure
+
+- Use `CMakePresets.json` as the source of truth for all build configurations
+- Always use **vcpkg Manifest Mode** with `vcpkg-configuration.json` for baseline pinning
+- Strict Warnings: `-Wall -Wextra -Wpedantic -Werror` (or MSVC equivalent)
+- Enable **AddressSanitizer (ASAN)** in Debug presets
+- No global CMake commands (target-based approach only)
+
 ## Commit Style
 
 - Conventional Commits: `feat:`, `fix:`, `test:`, `refactor:`, `chore:`,
@@ -58,8 +70,6 @@ It contains the non-negotiable rules for this project.
 
 - Documentation contains **definitions and decisions**, not speculation,
   history, or unfounded plans
-- No source code in documentation. Pseudocode only when strictly necessary to
-  explain an algorithm. CLI usage examples are acceptable in README
 - No dates, version stamps, "DRAFT" markers, or changelogs in docs. Git
   handles history
 - No emoji anywhere: not in docs, not in code, not in commits
@@ -74,6 +84,8 @@ It contains the non-negotiable rules for this project.
 
 ## What NOT to Do
 
+- Do not use `std::vector` for image data (use `ImageBuffer`).
+- Do not use expensive math functions (`std::pow`, `std::exp`) inside hot pixel loops (use LUTs).
 - Do not add files to root unless they are project-level config
 - Do not put business logic in `src/cli/`
 - Do not leak external library types into `include/corridorkey/`
@@ -84,3 +96,5 @@ It contains the non-negotiable rules for this project.
 - Do not put source code in documentation files
 - Do not write comments that restate what the code does
 - Do not use emoji in any project artifact
+- Do not use `std::exit` or `abort` in the library; return `Result<T>` instead
+- Do not use global state or static variables in the library

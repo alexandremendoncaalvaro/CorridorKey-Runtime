@@ -107,6 +107,7 @@ struct DeviceInfo {
 };
 
 struct InferenceParams {
+    int target_resolution = 0;
     float despill_strength = 1.0f;
     bool auto_despeckle = true;
     int despeckle_size = 400;
@@ -306,28 +307,15 @@ CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 Auto-Detection Logic
+### 4.3 Resolution Selection Hierarchy
 
-```
-on startup:
-  1. detect available GPUs and their memory
-  2. select best execution provider:
-     macOS + Apple Silicon  → CoreML EP
-     NVIDIA Ampere+         → TensorRT RTX EP
-     NVIDIA older           → CUDA EP
-     Windows + any DX12 GPU → DirectML EP
-     fallback               → CPU EP
-  3. query available memory for selected device
-  4. pick highest resolution that fits:
-     available >= 10GB → 2048²
-     available >= 6GB  → 1024²
-     available >= 4GB  → 768²
-     available >= 2GB  → 512²
-  5. select model variant:
-     GPU with FP16 support → FP16 model
-     otherwise             → INT8 model
-  6. user can override any of these via CLI flags
-```
+To ensure both ease of use and professional control, the runtime selects the processing resolution based on this strict hierarchy:
+
+1. **User Override:** If `InferenceParams::target_resolution` is set (via CLI `--resolution`), it takes absolute precedence.
+2. **Hardware Recommendation:** If target is `0` (Auto), the runtime queries available memory and selects the highest "safe" resolution (512, 768, 1024, 2048) for the detected Tier.
+3. **Model Native:** If hardware detection is unavailable, the runtime falls back to the native resolution defined in the ONNX model metadata.
+
+If the input image dimensions differ from the selected target resolution, the engine performs high-performance bilinear scaling before inference and scales the results back if necessary.
 
 ---
 

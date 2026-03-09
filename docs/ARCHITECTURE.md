@@ -331,7 +331,18 @@ To ensure the library can be integrated into CLI, GUI, Web (WASM), or Server-sid
 
 ---
 
-## 5. Adding New Code — Decision Tree
+## 5. High-Performance Core Principles (2026 Standards)
+
+The project is designed for "Elite Performance" by adhering to these low-level engineering standards:
+
+1. **Zero-Copy Data Flow:** We use `std::span` (via the `Image` struct) for all image processing. Data is never copied when passed between modules. Ownership is strictly managed by `ImageBuffer`.
+2. **SIMD Alignment:** All image buffers are allocated with 64-byte alignment (AVX-512 compatible). This allows the compiler to generate optimal vector instructions without needing unaligned load penalties.
+3. **Data-Oriented Design (DOD):** We prioritize linear memory access. Operations on pixels are flattened to a single dimension where possible to maximize cache L1/L2 hits and enable prefetching.
+4. **Memory Mapping (Planned):** For large model files and video sequences, we prefer memory-mapped I/O to offload memory management to the OS kernel.
+
+---
+
+## 6. Adding New Code — Decision Tree
 
 ```
 Is it a public API type or function?
