@@ -10,7 +10,9 @@ changes.
 
 - C++20 compiler (GCC 12+, Clang 16+, or Apple Clang 15+)
 - [CMake 3.28+](https://cmake.org/download/)
-- [vcpkg](https://github.com/microsoft/vcpkg)
+- [Ninja](https://ninja-build.org/) build system
+- [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` environment
+  variable set (see below)
 - [pre-commit](https://pre-commit.com/) (`pip install pre-commit` or
   `brew install pre-commit`)
 - clang-format 18+ and clang-tidy 18+ (usually bundled with LLVM)
@@ -21,6 +23,16 @@ changes.
 # Clone
 git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
+
+# Install vcpkg (if you don't have it already)
+git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+~/vcpkg/bootstrap-vcpkg.sh   # Linux/macOS
+# ~/vcpkg/bootstrap-vcpkg.bat  # Windows
+
+# Set VCPKG_ROOT — required by CMakePresets.json
+# Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.) for persistence
+export VCPKG_ROOT="$HOME/vcpkg"
+# On Windows: set VCPKG_ROOT=%USERPROFILE%\vcpkg (System Environment Variables)
 
 # Install git hooks (mandatory)
 pre-commit install
@@ -40,6 +52,7 @@ ctest --test-dir build/debug --label-regex unit --output-on-failure
 |--------|----------|
 | `debug` | Development — assertions, debug symbols, sanitizers |
 | `release` | Distribution — optimized, no debug info |
+| `release-lto` | Distribution — with Link-Time Optimization |
 
 ## Code Standards
 
@@ -169,6 +182,7 @@ CorridorKey-Runtime/
   include/corridorkey/  Public API headers
   src/
     cli/                CLI entry point (thin consumer of the library)
+    common/             Shared internal utilities (STL-only)
     core/               Inference engine, device detection
     frame_io/           EXR, PNG, video read/write
     post_process/       Color math, despill, despeckle

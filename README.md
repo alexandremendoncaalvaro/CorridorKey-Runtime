@@ -27,7 +27,8 @@ as a single binary with zero Python dependencies.
 
 - C++20 compiler (GCC 12+, Clang 16+, MSVC 17.4+)
 - [CMake 3.28+](https://cmake.org/download/)
-- [vcpkg](https://github.com/microsoft/vcpkg)
+- [Ninja](https://ninja-build.org/) build system
+- [vcpkg](https://github.com/microsoft/vcpkg) package manager
 
 ### Build
 
@@ -35,6 +36,16 @@ as a single binary with zero Python dependencies.
 git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
 
+# 1. Install vcpkg (if you don't have it already)
+git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+~/vcpkg/bootstrap-vcpkg.sh   # Linux/macOS
+# ~/vcpkg/bootstrap-vcpkg.bat  # Windows
+
+# 2. Set VCPKG_ROOT (add to your shell profile for persistence)
+export VCPKG_ROOT="$HOME/vcpkg"  # Linux/macOS (add to ~/.bashrc or ~/.zshrc)
+# set VCPKG_ROOT=%USERPROFILE%\vcpkg  # Windows (add to System Environment Variables)
+
+# 3. Configure and build
 cmake --preset release
 cmake --build build/release --parallel
 ```
