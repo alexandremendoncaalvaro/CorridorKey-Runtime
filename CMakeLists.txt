@@ -27,7 +27,26 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # vcpkg is handled automatically by the toolchain file in CMakePresets.json
 # Find required packages
-find_package(onnxruntime REQUIRED)
+
+if(APPLE)
+    # On macOS, use the vendored ONNX Runtime with CoreML support
+    set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime")
+    
+    # Create the imported target manually since we are skipping find_package config
+    add_library(onnxruntime::onnxruntime SHARED IMPORTED)
+    set_target_properties(onnxruntime::onnxruntime PROPERTIES
+        IMPORTED_LOCATION "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.dylib"
+        INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_ROOT}/include"
+    )
+    
+    # Ensure the executable can find the dylib at runtime
+    set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_ROOT}/lib")
+    
+    message(STATUS "Using vendored ONNX Runtime with CoreML support at: ${ONNXRUNTIME_ROOT}")
+else()
+    find_package(onnxruntime REQUIRED)
+endif()
+
 find_package(OpenEXR REQUIRED)
 find_package(PNG REQUIRED)
 find_package(FFMPEG REQUIRED)

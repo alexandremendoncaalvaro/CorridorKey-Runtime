@@ -6,11 +6,19 @@
 add_library(corridorkey_core SHARED)
 
 # Private includes for internal implementation headers
-target_include_directories(corridorkey_core PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}  # Resolves "common/srgb_lut.hpp", "core/...", etc.
-    ${FFMPEG_INCLUDE_DIRS}
-    ${onnxruntime_INCLUDE_DIRS}
-)
+if(APPLE)
+    target_include_directories(corridorkey_core PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${FFMPEG_INCLUDE_DIRS}
+        "${CMAKE_SOURCE_DIR}/vendor/onnxruntime/include"
+    )
+else()
+    target_include_directories(corridorkey_core PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${FFMPEG_INCLUDE_DIRS}
+        ${onnxruntime_INCLUDE_DIRS}
+    )
+endif()
 
 # Strict compiler warnings (target-based, not global)
 if(MSVC)
@@ -59,17 +67,24 @@ if(BUILD_TESTING)
     get_target_property(_core_sources corridorkey_core SOURCES)
     target_sources(corridorkey_core_static PRIVATE ${_core_sources})
 
-    target_include_directories(corridorkey_core_static PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${FFMPEG_INCLUDE_DIRS}
-        ${onnxruntime_INCLUDE_DIRS}
-    )
+    if(APPLE)
+        target_include_directories(corridorkey_core_static PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${FFMPEG_INCLUDE_DIRS}
+            "${CMAKE_SOURCE_DIR}/vendor/onnxruntime/include"
+        )
+    else()
+        target_include_directories(corridorkey_core_static PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${FFMPEG_INCLUDE_DIRS}
+        )
+    endif()
 
     target_link_libraries(corridorkey_core_static
         PUBLIC
             corridorkey_headers
-        PRIVATE
             onnxruntime::onnxruntime
+        PRIVATE
             OpenEXR::OpenEXR
             PNG::PNG
             ${FFMPEG_LIBRARIES}

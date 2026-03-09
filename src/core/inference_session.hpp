@@ -7,6 +7,10 @@
 // Include ONNX Runtime (only in private headers)
 #include <onnxruntime/onnxruntime_cxx_api.h>
 
+#ifdef __APPLE__
+#include <onnxruntime/coreml_provider_factory.h>
+#endif
+
 namespace corridorkey {
 
 /**

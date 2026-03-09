@@ -43,6 +43,13 @@ void InferenceSession::configure_session_options() {
     m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
     switch (m_device.backend) {
+        case Backend::CoreML: {
+#ifdef __APPLE__
+            uint32_t coreml_flags = 0; // Default flags (Enable ANE, allow GPU/CPU fallback)
+            Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(m_session_options, coreml_flags));
+#endif
+            break;
+        }
         case Backend::CUDA: {
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = 0;

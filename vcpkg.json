@@ -5,7 +5,8 @@
     "dependencies": [
         {
             "name": "onnxruntime",
-            "$comment": "Primary ML inference engine"
+            "platform": "!osx",
+            "$comment": "Primary ML inference engine (Vendored on macOS for CoreML)"
         },
         {
             "name": "openexr",
