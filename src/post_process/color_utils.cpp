@@ -1,9 +1,16 @@
 #include <src/post_process/color_utils.hpp>
 #include <cmath>
 #include <algorithm>
-#include <execution>
 #include <array>
 #include <numeric>
+
+// Portability check for execution policy support
+#if __has_include(<execution>) && (defined(__cpp_lib_execution) || !defined(__clang__))
+#include <execution>
+#define EXEC_POLICY std::execution::par_unseq ,
+#else
+#define EXEC_POLICY
+#endif
 
 namespace corridorkey {
 
@@ -40,13 +47,13 @@ private:
 
 void ColorUtils::srgb_to_linear(Image& image) {
     const auto& lut = SrgbLut::instance();
-    std::for_each(std::execution::par_unseq, image.data.begin(), image.data.end(), [&](float& p) {
+    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(), [&](float& p) {
         p = lut.to_linear(p);
     });
 }
 
 void ColorUtils::linear_to_srgb(Image& image) {
-    std::for_each(std::execution::par_unseq, image.data.begin(), image.data.end(), [](float& p) {
+    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(), [](float& p) {
         if (p <= 0.0031308f) {
             p = p * 12.92f;
         } else {
@@ -64,12 +71,10 @@ void ColorUtils::premultiply(Image& rgb, const Image& alpha) {
     std::iota(indices.begin(), indices.end(), 0);
 
     // Flattened loop with parallel vector execution
-    std::for_each(std::execution::par_unseq, indices.begin(), indices.end(), [&](int i) {
+    std::for_each(EXEC_POLICY indices.begin(), indices.end(), [&](int i) {
         float a = alpha.data[i];
         float* p = &rgb.data[i * channels];
-        p[0] *= a;
-        p[1] *= a;
-        p[2] *= a;
+        p[0] *= a; p[1] *= a; p[2] *= a;
     });
 }
 
@@ -81,14 +86,12 @@ void ColorUtils::unpremultiply(Image& rgb, const Image& alpha) {
     std::vector<int> indices(total_pixels);
     std::iota(indices.begin(), indices.end(), 0);
 
-    std::for_each(std::execution::par_unseq, indices.begin(), indices.end(), [&](int i) {
+    std::for_each(EXEC_POLICY indices.begin(), indices.end(), [&](int i) {
         float a = alpha.data[i];
         if (a > 0.0001f) {
             float* p = &rgb.data[i * channels];
-            float inv_a = 1.0f / a; // Multiplication is faster than division
-            p[0] *= inv_a;
-            p[1] *= inv_a;
-            p[2] *= inv_a;
+            float inv_a = 1.0f / a;
+            p[0] *= inv_a; p[1] *= inv_a; p[2] *= inv_a;
         }
     });
 }
@@ -98,16 +101,12 @@ void ColorUtils::to_planar(const Image& src, float* dst) {
     int h = src.height;
     int c = src.channels;
 
-    std::vector<int> channels(c);
-    std::iota(channels.begin(), channels.end(), 0);
-
-    // Parallelize by channel for better cache usage on large images
-    std::for_each(std::execution::par_unseq, channels.begin(), channels.end(), [&](int ch) {
+    for (int ch = 0; ch < c; ++ch) {
         float* plane = dst + ch * w * h;
         for (int i = 0; i < w * h; ++i) {
             plane[i] = src.data[i * c + ch];
         }
-    });
+    }
 }
 
 void ColorUtils::from_planar(const float* src, Image& dst) {
@@ -115,15 +114,12 @@ void ColorUtils::from_planar(const float* src, Image& dst) {
     int h = dst.height;
     int c = dst.channels;
 
-    std::vector<int> channels(c);
-    std::iota(channels.begin(), channels.end(), 0);
-
-    std::for_each(std::execution::par_unseq, channels.begin(), channels.end(), [&](int ch) {
+    for (int ch = 0; ch < c; ++ch) {
         const float* plane = src + ch * w * h;
         for (int i = 0; i < w * h; ++i) {
             dst.data[i * c + ch] = plane[i];
         }
-    });
+    }
 }
 
 void ColorUtils::despill(Image& rgb, const Image& alpha, float strength) {
@@ -147,12 +143,8 @@ Image ColorUtils::resize(const Image& image, int new_width, int new_height) {
 
     float scale_x = (float)image.width / new_width;
     float scale_y = (float)image.height / new_height;
-    
-    std::vector<int> row_indices(new_height);
-    std::iota(row_indices.begin(), row_indices.end(), 0);
 
-    // Parallelize by rows for best CPU utilization
-    std::for_each(std::execution::par_unseq, row_indices.begin(), row_indices.end(), [&](int y) {
+    for (int y = 0; y < new_height; ++y) {
         float src_y = (y + 0.5f) * scale_y - 0.5f;
         int y0 = std::max(0, (int)std::floor(src_y));
         int y1 = std::min(y0 + 1, image.height - 1);
@@ -175,7 +167,7 @@ Image ColorUtils::resize(const Image& image, int new_width, int new_height) {
                 result.data[(y * new_width + x) * result.channels + c] = v0 * (1.0f - dy) + v1 * dy;
             }
         }
-    });
+    }
 
     return result;
 }
