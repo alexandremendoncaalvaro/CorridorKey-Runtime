@@ -72,9 +72,9 @@
             "output": {
                 "outputOnFailure": true
             },
-            "execution": {
-                "filter": {
-                    "include": "unit"
+            "filter": {
+                "include": {
+                    "name": "unit"
                 }
             }
         }
