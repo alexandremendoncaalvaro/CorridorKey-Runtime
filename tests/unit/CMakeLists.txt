@@ -5,6 +5,12 @@ add_executable(test_unit
     test_inference_session.cpp
 )
 
+target_include_directories(test_unit 
+    PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/post_process
+)
+
 target_link_libraries(test_unit 
     PRIVATE 
         corridorkey_core

@@ -46,6 +46,8 @@ find_package(Catch2 3 REQUIRED)
 
 # --- Project Structure ---
 
+include(CTest)
+
 # Public API headers
 add_library(corridorkey_headers INTERFACE)
 target_include_directories(corridorkey_headers INTERFACE
