@@ -29,6 +29,10 @@
             "name": "catch2",
             "version>=": "3.5.0",
             "$comment": "Modern testing framework (v3)"
+        },
+        {
+            "name": "cxxopts",
+            "$comment": "Lightweight CLI argument parser"
         }
     ]
 }

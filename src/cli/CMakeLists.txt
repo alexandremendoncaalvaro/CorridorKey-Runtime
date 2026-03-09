@@ -8,4 +8,5 @@ set_target_properties(corridorkey_cli PROPERTIES OUTPUT_NAME corridorkey)
 target_link_libraries(corridorkey_cli
     PRIVATE
         corridorkey_core
+        cxxopts::cxxopts
 )
