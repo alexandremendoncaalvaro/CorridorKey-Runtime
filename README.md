@@ -143,6 +143,22 @@ Output/
   Comp/        # Preview on checkerboard — PNG 8-bit sRGB
 ```
 
+## Project Status & Roadmap
+
+### ✅ Done
+- **Zero-Python Runtime:** Standalone C++ binary with no external ML environment needed.
+- **FFmpeg Integration:** Process `.mp4`/`.mov` files directly in RAM.
+- **Hardware-Aware Tiers:** Adaptive resolution (512px to 1024px) based on detected RAM/VRAM.
+- **Auto-Hinting:** Generates a guide matte internally if no manual alpha hint is provided.
+- **VFX-Grade I/O:** Support for 16-bit linear EXR and proper sRGB/Linear color math.
+
+### 🛠 In Progress / Planned
+- [ ] **CoreML & TensorRT:** Native GPU/Neural Engine acceleration (currently running on CPU fallback).
+- [ ] **Tiling Inference:** Support for 4K/8K processing on low-VRAM GPUs by segmenting frames.
+- [ ] **Model Auto-Download:** Automatic model fetching from HuggingFace via CLI.
+- [ ] **Unit Testing:** Comprehensive test suite for all post-processing math.
+- [ ] **GUI Interface:** Simple drag-and-drop tool for non-CLI users.
+
 ## Hardware Support
 
 | Tier | Example Hardware | Model | Resolution | Expected FPS |
