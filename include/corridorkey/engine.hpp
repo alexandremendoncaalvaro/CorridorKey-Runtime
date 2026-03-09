@@ -9,6 +9,16 @@
 namespace corridorkey {
 
 /**
+ * @brief Detect the best available hardware device.
+ */
+CORRIDORKEY_API DeviceInfo auto_detect();
+
+/**
+ * @brief List all available hardware devices for inference.
+ */
+CORRIDORKEY_API std::vector<DeviceInfo> list_devices();
+
+/**
  * @brief Progress callback for long-running tasks.
  * Return false to cancel the operation.
  */
@@ -88,15 +98,5 @@ private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
 };
-
-/**
- * @brief Detect the best available hardware device.
- */
-CORRIDORKEY_API DeviceInfo auto_detect();
-
-/**
- * @brief List all available hardware devices for inference.
- */
-CORRIDORKEY_API std::vector<DeviceInfo> list_devices();
 
 } // namespace corridorkey
