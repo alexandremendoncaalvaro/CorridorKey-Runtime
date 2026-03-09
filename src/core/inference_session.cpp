@@ -17,22 +17,34 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     }
 
     try {
-        auto session = std::unique_ptr<InferenceSession>(new InferenceSession(device));
+        auto session_ptr = std::unique_ptr<InferenceSession>(new InferenceSession(device));
 
         // Initialize Ort Environment
-        session->m_env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "CorridorKey");
+        session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "CorridorKey");
 
-        // Set Session Options (Execution Providers)
-        // TODO: Map Backend enum to Ort Execution Providers (CoreML, TensorRT, etc.)
+        // Set Session Options
+        session_ptr->m_session_options.SetIntraOpNumThreads(1);
+        session_ptr->m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+        // Mapped Backend to Execution Provider (Skeleton)
+        switch (device.backend) {
+            case Backend::CPU:
+                // CPU is always available
+                break;
+            default:
+                // Fallback to CPU for now
+                break;
+        }
         
         // Load and create the session
+        // Note: Ort::Session expects wchar_t* on Windows
 #ifdef _WIN32
-        session->m_session = Ort::Session(session->m_env, model_path.c_str(), session->m_session_options);
+        session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.wstring().c_str(), session_ptr->m_session_options);
 #else
-        session->m_session = Ort::Session(session->m_env, model_path.c_str(), session->m_session_options);
+        session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(), session_ptr->m_session_options);
 #endif
 
-        return session;
+        return session_ptr;
     } catch (const Ort::Exception& e) {
         return std::unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("ONNX Runtime session creation failed: ") + e.what() });
     } catch (const std::exception& e) {
