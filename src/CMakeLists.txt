@@ -8,6 +8,8 @@ add_library(corridorkey_core SHARED)
 # Private includes for internal implementation headers
 target_include_directories(corridorkey_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${FFMPEG_INCLUDE_DIRS}
+    ${onnxruntime_INCLUDE_DIRS}
 )
 
 # Link against public headers and external libraries
@@ -17,15 +19,17 @@ target_link_libraries(corridorkey_core
     PRIVATE
         onnxruntime::onnxruntime
         OpenEXR::OpenEXR
-        libpng::libpng
-        FFmpeg::avcodec
-        FFmpeg::avformat
-        FFmpeg::swscale
-        FFmpeg::swresample
+        PNG::PNG
+        ${FFMPEG_LIBRARIES}
 )
 
 # Set the compile definition for the export macro
 target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_EXPORTS)
+
+# Relax warnings for png_io.cpp because of stb library legacy code
+if(NOT MSVC)
+    set_source_files_properties(frame_io/png_io.cpp PROPERTIES COMPILE_FLAGS "-Wno-error")
+endif()
 
 # Organize subdirectories
 add_subdirectory(core)

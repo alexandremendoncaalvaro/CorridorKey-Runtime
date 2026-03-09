@@ -5,7 +5,7 @@
 #include <memory>
 
 // Include ONNX Runtime (only in private headers)
-#include <onnxruntime_cxx_api.h>
+#include <onnxruntime/onnxruntime_cxx_api.h>
 
 namespace corridorkey {
 

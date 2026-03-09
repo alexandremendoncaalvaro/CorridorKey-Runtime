@@ -39,8 +39,8 @@ endif()
 # Find required packages
 find_package(onnxruntime REQUIRED)
 find_package(OpenEXR REQUIRED)
-find_package(libpng REQUIRED)
-find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat swscale swresample)
+find_package(PNG REQUIRED)
+find_package(FFMPEG REQUIRED)
 find_package(Catch2 3 REQUIRED)
 
 # --- Project Structure ---
@@ -49,6 +49,7 @@ find_package(Catch2 3 REQUIRED)
 add_library(corridorkey_headers INTERFACE)
 target_include_directories(corridorkey_headers INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> # Allow #include "vendor/..."
     $<INSTALL_INTERFACE:include>
 )
 

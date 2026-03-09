@@ -1,11 +1,15 @@
 #include "video_io.hpp"
+#include "core/perf_utils.hpp"
 #include <iostream>
+#include <vector>
+#include <algorithm>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/mathematics.h>
 }
 
 namespace corridorkey {
@@ -13,11 +17,26 @@ namespace corridorkey {
 // --- RAII Helpers for FFmpeg 8.x ---
 
 struct AvDeleter {
-    void operator()(AVFormatContext* p) const { avformat_close_input(&p); }
-    void operator()(AVCodecContext* p) const { avcodec_free_context(&p); }
-    void operator()(AVFrame* p) const { av_frame_free(&p); }
-    void operator()(AVPacket* p) const { av_packet_free(&p); }
-    void operator()(SwsContext* p) const { sws_freeContext(p); }
+    void operator()(AVFormatContext* p) const { 
+        AVFormatContext* ptr = p;
+        avformat_close_input(&ptr); 
+    }
+    void operator()(AVCodecContext* p) const { 
+        AVCodecContext* ptr = p;
+        avcodec_free_context(&ptr); 
+    }
+    void operator()(AVFrame* p) const { 
+        AVFrame* ptr = p;
+        av_frame_free(&ptr); 
+    }
+    void operator()(AVPacket* p) const { 
+        AVPacket* ptr = p;
+        av_packet_free(&ptr); 
+    }
+    void operator()(SwsContext* p) const { 
+        sws_freeContext(p); 
+    }
+    // AVStream is NOT owned by unique_ptr, it's owned by AVFormatContext
 };
 
 template<typename T>
@@ -86,7 +105,6 @@ Result<ImageBuffer> VideoReader::read_next_frame() {
                     int h = impl->codec_ctx->height;
                     
                     ImageBuffer buffer(w, h, 3);
-                    Image view = buffer.view();
 
                     // Initialize or update Scaler
                     impl->sws_ctx.reset(sws_getCachedContext(
@@ -97,14 +115,6 @@ Result<ImageBuffer> VideoReader::read_next_frame() {
                     ));
 
                     // Zero-copy conversion directly into our aligned buffer!
-                    uint8_t* dst_data[1] = { reinterpret_cast<uint8_t*>(view.data.data()) };
-                    int dst_linesize[1] = { w * 3 * static_cast<int>(sizeof(float)) }; 
-                    
-                    // NOTE: FFmpeg's swscale expects 8-bit RGB by default for RGB24.
-                    // We need a custom conversion or tell swscale to output float.
-                    // For now, we'll convert to 8-bit then to float, but in a 2026 
-                    // architecture, we should use a custom SIMD kernel for YUV -> Float RGB.
-                    
                     // TODO: Implement optimized YUV -> Float RGB kernel to avoid intermediate 8-bit.
                     
                     av_packet_unref(impl->packet.get());
@@ -131,7 +141,7 @@ class VideoWriter::Impl {
 public:
     AvPtr<AVFormatContext> format_ctx;
     AvPtr<AVCodecContext> codec_ctx;
-    AvPtr<AVStream> stream;
+    AVStream* stream = nullptr; // Raw pointer (not owned)
     AvPtr<SwsContext> sws_ctx;
     AvPtr<AVFrame> frame;
     AvPtr<AVPacket> packet;

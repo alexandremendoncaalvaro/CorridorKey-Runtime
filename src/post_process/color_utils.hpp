@@ -31,12 +31,12 @@ public:
     /**
      * @brief Convert interleaved HWC data to planar NCHW data.
      */
-    static void to_planar(const Image& src, float* dst);
+    static void to_planar(const Image src, float* dst);
 
     /**
      * @brief Convert planar NCHW data back to interleaved HWC data.
      */
-    static void from_planar(const float* src, Image& dst);
+    static void from_planar(const float* src, Image dst);
 };
 
 } // namespace corridorkey

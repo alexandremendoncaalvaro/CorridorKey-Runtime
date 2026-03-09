@@ -1,4 +1,5 @@
-#include <src/core/inference_session.hpp>
+#include "inference_session.hpp"
+#include "post_process/color_utils.hpp"
 #include <iostream>
 
 namespace corridorkey {

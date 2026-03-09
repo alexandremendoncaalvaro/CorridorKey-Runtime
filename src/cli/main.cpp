@@ -1,5 +1,5 @@
-# CLI entry point skeleton
-# This will be refined as the library evolves.
+// CLI entry point skeleton
+// This will be refined as the library evolves.
 
 #include <corridorkey/api_export.hpp>
 #include <iostream>
