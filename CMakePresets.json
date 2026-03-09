@@ -40,6 +40,15 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "release-lto",
+            "displayName": "Release + LTO",
+            "description": "Release build with Link-Time Optimization for cross-file inlining",
+            "inherits": "release",
+            "cacheVariables": {
+                "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -50,6 +59,10 @@
         {
             "name": "release",
             "configurePreset": "release"
+        },
+        {
+            "name": "release-lto",
+            "configurePreset": "release-lto"
         }
     ],
     "testPresets": [
