@@ -7,10 +7,21 @@ add_library(corridorkey_core SHARED)
 
 # Private includes for internal implementation headers
 target_include_directories(corridorkey_core PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}  # Resolves "common/srgb_lut.hpp", "core/...", etc.
     ${FFMPEG_INCLUDE_DIRS}
     ${onnxruntime_INCLUDE_DIRS}
 )
+
+# Strict compiler warnings (target-based, not global)
+if(MSVC)
+    target_compile_options(corridorkey_core PRIVATE /W4 /WX /permissive-)
+else()
+    target_compile_options(corridorkey_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    if(ENABLE_ASAN)
+        target_compile_options(corridorkey_core PRIVATE -fsanitize=address)
+        target_link_options(corridorkey_core PRIVATE -fsanitize=address)
+    endif()
+endif()
 
 # Link against public headers and external libraries
 target_link_libraries(corridorkey_core

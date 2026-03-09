@@ -20,18 +20,8 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- Compiler Configuration ---
-
-if(MSVC)
-    add_compile_options(/W4 /WX /permissive-)
-else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
-    
-    # Address Sanitizer in Debug
-    if(ENABLE_ASAN)
-        add_compile_options(-fsanitize=address)
-        add_link_options(-fsanitize=address)
-    endif()
-endif()
+# Warning flags are applied per-target in src/CMakeLists.txt and tests/
+# (No global add_compile_options — target-based approach only)
 
 # --- Dependencies (vcpkg) ---
 

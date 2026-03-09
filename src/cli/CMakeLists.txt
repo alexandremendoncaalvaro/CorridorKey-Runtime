@@ -10,3 +10,10 @@ target_link_libraries(corridorkey_cli
         corridorkey_core
         cxxopts::cxxopts
 )
+
+# Target-based compiler warnings
+if(MSVC)
+    target_compile_options(corridorkey_cli PRIVATE /W4 /WX /permissive-)
+else()
+    target_compile_options(corridorkey_cli PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
