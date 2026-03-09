@@ -1,6 +1,7 @@
 #include "inference_session.hpp"
 #include "post_process/color_utils.hpp"
-#include <iostream>
+#include "post_process/despill.hpp"
+#include "post_process/despeckle.hpp"
 
 namespace corridorkey {
 
@@ -27,7 +28,6 @@ void InferenceSession::configure_session_options() {
             break;
         }
         case Backend::DirectML: {
-            // DirectML setup if needed
             break;
         }
         default:
@@ -37,8 +37,7 @@ void InferenceSession::configure_session_options() {
 
 void InferenceSession::extract_metadata() {
     Ort::AllocatorWithDefaultOptions allocator;
-    
-    // Inputs
+
     size_t num_input_nodes = m_session.GetInputCount();
     for (size_t i = 0; i < num_input_nodes; i++) {
         auto input_name_ptr = m_session.GetInputNameAllocated(i, allocator);
@@ -52,7 +51,6 @@ void InferenceSession::extract_metadata() {
         m_input_node_names_ptr.push_back(name.c_str());
     }
 
-    // Outputs
     size_t num_output_nodes = m_session.GetOutputCount();
     for (size_t i = 0; i < num_output_nodes; i++) {
         auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
@@ -92,7 +90,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 }
 
 Result<FrameResult> InferenceSession::run(
-    const Image& rgb, 
+    const Image& rgb,
     const Image& alpha_hint,
     const InferenceParams& params
 ) {
@@ -100,33 +98,39 @@ Result<FrameResult> InferenceSession::run(
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
 
-        std::vector<ImageBuffer> resized_buffers; 
-        std::vector<std::vector<float>> planar_buffers; 
+        // Resize pools to match input count (reuse across frames)
+        m_resize_pool.resize(m_input_node_dims.size());
+        m_planar_pool.resize(m_input_node_dims.size());
+
         std::vector<Ort::Value> input_tensors;
 
         for (size_t i = 0; i < m_input_node_dims.size(); ++i) {
             auto shape = m_input_node_dims[i];
             const Image& source = (i == 0) ? rgb : alpha_hint;
-            
+
             int64_t model_h = (shape[2] == -1) ? target_res : shape[2];
             int64_t model_w = (shape[3] == -1) ? target_res : shape[3];
 
             Image current_view = source;
             if (source.width != (int)model_w || source.height != (int)model_h) {
-                resized_buffers.push_back(ColorUtils::resize(source, (int)model_w, (int)model_h));
-                current_view = resized_buffers.back().view();
+                m_resize_pool[i] = ColorUtils::resize(source, (int)model_w, (int)model_h);
+                current_view = m_resize_pool[i].view();
             }
 
-            planar_buffers.emplace_back(shape[1] * model_h * model_w);
-            ColorUtils::to_planar(current_view, planar_buffers.back().data());
-            
+            // Reuse planar buffer if size matches, otherwise reallocate
+            size_t planar_size = static_cast<size_t>(shape[1]) * model_h * model_w;
+            if (m_planar_pool[i].view().data.size() != planar_size) {
+                m_planar_pool[i] = ImageBuffer(static_cast<int>(planar_size), 1, 1);
+            }
+            ColorUtils::to_planar(current_view, m_planar_pool[i].view().data.data());
+
             std::vector<int64_t> effective_shape = shape;
             effective_shape[2] = model_h;
             effective_shape[3] = model_w;
 
             input_tensors.push_back(Ort::Value::CreateTensor<float>(
-                memory_info, 
-                planar_buffers.back().data(), planar_buffers.back().size(), 
+                memory_info,
+                m_planar_pool[i].view().data.data(), planar_size,
                 effective_shape.data(), effective_shape.size()
             ));
         }
@@ -145,20 +149,61 @@ Result<FrameResult> InferenceSession::run(
         }
 
         FrameResult result;
+
+        // Extract alpha from output tensor 0
         if (output_tensors.size() > 0) {
             auto shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
             result.alpha = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
             ColorUtils::from_planar(output_tensors[0].GetTensorData<float>(), result.alpha.view());
         }
+
+        // Extract foreground from output tensor 1
         if (output_tensors.size() > 1) {
             auto shape = output_tensors[1].GetTensorTypeAndShapeInfo().GetShape();
             result.foreground = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
             ColorUtils::from_planar(output_tensors[1].GetTensorData<float>(), result.foreground.view());
         }
-        if (output_tensors.size() > 2) {
-            auto shape = output_tensors[2].GetTensorTypeAndShapeInfo().GetShape();
-            result.composite = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
-            ColorUtils::from_planar(output_tensors[2].GetTensorData<float>(), result.composite.view());
+
+        // Post-process: despill and despeckle
+        if (!result.alpha.view().empty() && !result.foreground.view().empty()) {
+            if (params.auto_despeckle) {
+                despeckle(result.alpha.view(), params.despeckle_size);
+            }
+            despill(result.foreground.view(), result.alpha.const_view(), params.despill_strength);
+        }
+
+        // Generate processed (premultiplied RGBA)
+        if (!result.alpha.view().empty() && !result.foreground.view().empty()) {
+            int w = result.foreground.view().width;
+            int h = result.foreground.view().height;
+            result.processed = ImageBuffer(w, h, 4);
+            Image proc = result.processed.view();
+            Image fg = result.foreground.const_view();
+            Image alpha_view = result.alpha.const_view();
+
+            ColorUtils::premultiply(fg, alpha_view);
+            for (int y = 0; y < h; ++y) {
+                for (int x = 0; x < w; ++x) {
+                    proc(y, x, 0) = fg(y, x, 0);
+                    proc(y, x, 1) = fg(y, x, 1);
+                    proc(y, x, 2) = fg(y, x, 2);
+                    proc(y, x, 3) = alpha_view(y, x);
+                }
+            }
+        }
+
+        // Generate composite (checkerboard preview)
+        if (!result.processed.view().empty()) {
+            int w = result.processed.view().width;
+            int h = result.processed.view().height;
+            result.composite = ImageBuffer(w, h, 4);
+            Image comp = result.composite.view();
+            Image proc = result.processed.const_view();
+
+            // Copy processed RGBA into composite
+            std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
+
+            ColorUtils::composite_over_checker(comp);
         }
 
         return result;

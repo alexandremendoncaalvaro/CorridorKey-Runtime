@@ -228,9 +228,10 @@ struct InferenceParams {
  * These hold buffers, but the FrameResult itself can be moved easily.
  */
 struct FrameResult {
-    ImageBuffer alpha;       
-    ImageBuffer foreground;  
-    ImageBuffer composite;   
+    ImageBuffer alpha;
+    ImageBuffer foreground;
+    ImageBuffer processed;   // Premultiplied RGBA (VFX output)
+    ImageBuffer composite;   // Preview on checkerboard (PNG)
 };
 
 } // namespace corridorkey
