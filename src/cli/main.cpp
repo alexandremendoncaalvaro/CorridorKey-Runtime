@@ -127,13 +127,13 @@ int main(int argc, char* argv[]) {
         }
         
         if (cmd == "process") {
-            if (!result.count("input") || !result.count("alpha-hint") || !result.count("output") || !result.count("model")) {
-                std::cout << "Error: 'process' command requires --input, --alpha-hint, --output, and --model." << std::endl;
+            if (!result.count("input") || !result.count("output") || !result.count("model")) {
+                std::cout << "Error: 'process' command requires --input, --output, and --model." << std::endl;
                 return 1;
             }
 
             std::filesystem::path input_path = result["input"].as<std::string>();
-            std::filesystem::path hint_path = result["alpha-hint"].as<std::string>();
+            std::filesystem::path hint_path = result.count("alpha-hint") ? result["alpha-hint"].as<std::string>() : "";
             std::filesystem::path output_path = result["output"].as<std::string>();
             std::filesystem::path model_path = result["model"].as<std::string>();
 

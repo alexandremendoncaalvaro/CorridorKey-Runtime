@@ -137,6 +137,34 @@ void ColorUtils::composite_over_checker(Image rgba) {
     });
 }
 
+void ColorUtils::generate_rough_matte(const Image rgb, Image alpha_hint) {
+    if (rgb.empty() || alpha_hint.empty()) return;
+
+    int h = rgb.height;
+    int w = rgb.width;
+    std::vector<int> rows(h);
+    std::iota(rows.begin(), rows.end(), 0);
+
+    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
+        for (int x = 0; x < w; ++x) {
+            float r = rgb(y, x, 0);
+            float g = rgb(y, x, 1);
+            float b = rgb(y, x, 2);
+
+            // Simple green screen threshold: g > r and g > b
+            // We look for pixels where green is significantly higher than others
+            float max_rb = std::max(r, b);
+            float green_diff = g - max_rb;
+            
+            // Map difference to a rough alpha: 
+            // If green is much higher, alpha goes to 0 (transparent)
+            // If not green, alpha stays 1 (opaque)
+            float mask = std::clamp(green_diff * 10.0f, 0.0f, 1.0f);
+            alpha_hint(y, x, 0) = 1.0f - mask;
+        }
+    });
+}
+
 ImageBuffer ColorUtils::resize(const Image image, int new_width, int new_height) {
     ImageBuffer result(new_width, new_height, image.channels);
     Image res_view = result.view();

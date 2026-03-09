@@ -19,6 +19,12 @@ public:
     static void composite_over_checker(Image rgba);
 
     /**
+     * @brief Generate a rough alpha matte using a basic green-screen threshold.
+     * Used as a fallback "hint" if no manual alpha hint is provided.
+     */
+    static void generate_rough_matte(const Image rgb, Image alpha_hint);
+
+    /**
      * @brief Resize an image using bilinear interpolation.
      * Returns an owned ImageBuffer.
      */

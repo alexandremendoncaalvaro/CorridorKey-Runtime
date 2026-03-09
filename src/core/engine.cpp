@@ -1,6 +1,7 @@
 #include <corridorkey/engine.hpp>
 #include <corridorkey/frame_io.hpp>
 #include "../frame_io/video_io.hpp"
+#include "../post_process/color_utils.hpp"
 #include "inference_session.hpp"
 #include <future>
 #include <deque>
@@ -55,7 +56,8 @@ Result<void> Engine::process_sequence(
     const InferenceParams& params,
     ProgressCallback on_progress
 ) {
-    if (inputs.size() != alpha_hints.size()) {
+    bool has_hints = !alpha_hints.empty();
+    if (has_hints && inputs.size() != alpha_hints.size()) {
         return unexpected(Error{ ErrorCode::InvalidParameters, "Inputs and alpha hints size mismatch" });
     }
 
@@ -86,14 +88,21 @@ Result<void> Engine::process_sequence(
         }
 
         // 3. Dispatch next frame (Async Reading + Inference)
-        pipeline.push_back(std::async(std::launch::async, [&, i]() -> Result<FrameResult> {
+        pipeline.push_back(std::async(std::launch::async, [&, i, has_hints]() -> Result<FrameResult> {
             auto rgb_res = frame_io::read_frame(inputs[i]);
             if (!rgb_res) return unexpected(rgb_res.error());
 
-            auto hint_res = frame_io::read_frame(alpha_hints[i]);
-            if (!hint_res) return unexpected(hint_res.error());
+            ImageBuffer hint_buf;
+            if (has_hints) {
+                auto hint_res = frame_io::read_frame(alpha_hints[i]);
+                if (!hint_res) return unexpected(hint_res.error());
+                hint_buf = std::move(*hint_res);
+            } else {
+                hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
+                ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view());
+            }
 
-            return m_impl->session->run(rgb_res->view(), hint_res->view(), params);
+            return m_impl->session->run(rgb_res->view(), hint_buf.view(), params);
         }));
     }
 
@@ -127,9 +136,13 @@ Result<void> Engine::process_video(
     if (!reader_rgb_res) return unexpected(reader_rgb_res.error());
     auto reader_rgb = std::move(*reader_rgb_res);
 
-    auto reader_hint_res = VideoReader::open(hint_video);
-    if (!reader_hint_res) return unexpected(reader_hint_res.error());
-    auto reader_hint = std::move(*reader_hint_res);
+    bool has_hint_video = !hint_video.empty();
+    std::unique_ptr<VideoReader> reader_hint;
+    if (has_hint_video) {
+        auto reader_hint_res = VideoReader::open(hint_video);
+        if (!reader_hint_res) return unexpected(reader_hint_res.error());
+        reader_hint = std::move(*reader_hint_res);
+    }
 
     // Default to processing target resolution or original resolution
     int out_w = reader_rgb->width();
@@ -151,9 +164,16 @@ Result<void> Engine::process_video(
         if (!rgb_res) return unexpected(rgb_res.error());
         if (rgb_res->view().empty()) break; // EOF
 
-        auto hint_res = reader_hint->read_next_frame();
-        if (!hint_res) return unexpected(hint_res.error());
-        if (hint_res->view().empty()) break; // EOF
+        ImageBuffer hint_buf;
+        if (has_hint_video) {
+            auto hint_res = reader_hint->read_next_frame();
+            if (!hint_res) return unexpected(hint_res.error());
+            if (hint_res->view().empty()) break; // EOF
+            hint_buf = std::move(*hint_res);
+        } else {
+            hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
+            ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view());
+        }
 
         if (on_progress) {
             float p = total_frames > 0 ? static_cast<float>(frame_idx) / total_frames : 0.0f;
@@ -164,7 +184,7 @@ Result<void> Engine::process_video(
 
         // We must move the ImageBuffers into the async lambda to keep them alive
         pipeline.push_back(std::async(std::launch::async, 
-            [this, rgb_buf = std::move(*rgb_res), hint_buf = std::move(*hint_res), params]() mutable -> Result<FrameResult> {
+            [this, rgb_buf = std::move(*rgb_res), hint_buf = std::move(hint_buf), params]() mutable -> Result<FrameResult> {
                 return m_impl->session->run(rgb_buf.view(), hint_buf.view(), params);
             }
         ));
