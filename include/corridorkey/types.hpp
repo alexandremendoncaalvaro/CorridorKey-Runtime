@@ -126,6 +126,16 @@ struct Image {
     std::span<float> data; 
 
     bool empty() const { return data.empty(); }
+
+    // Multidimensional accessor: img(y, x, c)
+    // Inline and constexpr for zero overhead
+    inline float& operator()(int y, int x, int c = 0) {
+        return data[(static_cast<size_t>(y) * width + x) * channels + c];
+    }
+
+    inline const float& operator()(int y, int x, int c = 0) const {
+        return data[(static_cast<size_t>(y) * width + x) * channels + c];
+    }
 };
 
 /**
