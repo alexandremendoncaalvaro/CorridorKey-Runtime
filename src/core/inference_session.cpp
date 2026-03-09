@@ -52,6 +52,11 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         for (size_t i = 0; i < num_input_nodes; i++) {
             auto input_name_ptr = session_ptr->m_session.GetInputNameAllocated(i, allocator);
             session_ptr->m_input_node_names.push_back(input_name_ptr.get());
+
+            // Get Input Shapes
+            auto type_info = session_ptr->m_session.GetInputTypeInfo(i);
+            auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+            session_ptr->m_input_node_dims.push_back(tensor_info.GetShape());
         }
         for (const auto& name : session_ptr->m_input_node_names) {
             session_ptr->m_input_node_names_ptr.push_back(name.c_str());

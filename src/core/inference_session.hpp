@@ -56,6 +56,7 @@ private:
     std::vector<std::string> m_output_node_names;
     std::vector<const char*> m_input_node_names_ptr;
     std::vector<const char*> m_output_node_names_ptr;
+    std::vector<std::vector<int64_t>> m_input_node_dims;
 };
 
 } // namespace corridorkey
