@@ -45,3 +45,9 @@ compile_commands.json
 # OS
 .DS_Store
 *.swp
+
+# Python Tools
+.venv/
+__pycache__/
+*.pyc
+uv.lock
