@@ -155,16 +155,17 @@ Result<FrameResult> InferenceSession::run(
                 m_planar_pool[0] = ImageBuffer(static_cast<int>(planar_size), 1, 1);
             }
 
-            // Manually interleave to planar: RRR...GGG...BBB...HHH...
+            // Manually interleave to planar and apply ImageNet normalization to RGB
+            // RGB mean: [0.485, 0.456, 0.406], std: [0.229, 0.224, 0.225]
             float* dst = m_planar_pool[0].view().data.data();
             size_t channel_stride = model_h * model_w;
             
             for (int y = 0; y < model_h; ++y) {
                 for (int x = 0; x < model_w; ++x) {
                     size_t idx = y * model_w + x;
-                    dst[0 * channel_stride + idx] = current_rgb(y, x, 0); // R
-                    dst[1 * channel_stride + idx] = current_rgb(y, x, 1); // G
-                    dst[2 * channel_stride + idx] = current_rgb(y, x, 2); // B
+                    dst[0 * channel_stride + idx] = (current_rgb(y, x, 0) - 0.485f) / 0.229f; // R
+                    dst[1 * channel_stride + idx] = (current_rgb(y, x, 1) - 0.456f) / 0.224f; // G
+                    dst[2 * channel_stride + idx] = (current_rgb(y, x, 2) - 0.406f) / 0.225f; // B
                     dst[3 * channel_stride + idx] = current_hint(y, x, 0); // Hint
                 }
             }
@@ -196,7 +197,22 @@ Result<FrameResult> InferenceSession::run(
                 if (m_planar_pool[i].view().data.size() != planar_size) {
                     m_planar_pool[i] = ImageBuffer(static_cast<int>(planar_size), 1, 1);
                 }
-                ColorUtils::to_planar(current_view, m_planar_pool[i].view().data.data());
+                
+                // Only RGB (i == 0) gets normalized, Hint (i == 1) does not
+                if (i == 0 && shape[1] == 3) {
+                    float* dst = m_planar_pool[i].view().data.data();
+                    size_t channel_stride = model_h * model_w;
+                    for (int y = 0; y < model_h; ++y) {
+                        for (int x = 0; x < model_w; ++x) {
+                            size_t idx = y * model_w + x;
+                            dst[0 * channel_stride + idx] = (current_view(y, x, 0) - 0.485f) / 0.229f; // R
+                            dst[1 * channel_stride + idx] = (current_view(y, x, 1) - 0.456f) / 0.224f; // G
+                            dst[2 * channel_stride + idx] = (current_view(y, x, 2) - 0.406f) / 0.225f; // B
+                        }
+                    }
+                } else {
+                    ColorUtils::to_planar(current_view, m_planar_pool[i].view().data.data());
+                }
 
                 std::vector<int64_t> effective_shape = {batch_size, shape[1], model_h, model_w};
 

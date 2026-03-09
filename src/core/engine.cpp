@@ -174,7 +174,7 @@ Result<void> Engine::process_video(
             pipeline.pop_front();
             if (!res) return unexpected(res.error());
 
-            auto write_res = writer->write_frame(res->processed.view());
+            auto write_res = writer->write_frame(res->composite.view());
             if (!write_res) return unexpected(write_res.error());
         }
 
@@ -187,7 +187,7 @@ Result<void> Engine::process_video(
         pipeline.pop_front();
         if (!res) return unexpected(res.error());
 
-        auto write_res = writer->write_frame(res->processed.view());
+        auto write_res = writer->write_frame(res->composite.view());
         if (!write_res) return unexpected(write_res.error());
     }
 

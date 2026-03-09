@@ -123,13 +123,12 @@ Result<ImageBuffer> VideoReader::read_next_frame() {
                               impl->frame->data, impl->frame->linesize, 0, h,
                               rgb_data, rgb_linesize);
 
-                    // Convert 8-bit sRGB -> float linear into aligned ImageBuffer
+                    // Convert 8-bit sRGB -> float sRGB into aligned ImageBuffer
                     ImageBuffer buffer(w, h, 3);
                     Image view = buffer.view();
-                    const auto& lut = SrgbLut::instance();
 
                     for (size_t i = 0; i < rgb_size; ++i) {
-                        view.data[i] = lut.to_linear(impl->rgb_temp[i] / 255.0f);
+                        view.data[i] = impl->rgb_temp[i] / 255.0f;
                     }
 
                     av_packet_unref(impl->packet.get());
@@ -243,7 +242,6 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(
 
 Result<void> VideoWriter::write_frame(const Image& image) {
     auto* impl = m_impl.get();
-    const auto& lut = SrgbLut::instance();
 
     impl->sws_ctx.reset(sws_getCachedContext(
         impl->sws_ctx.release(),
@@ -259,10 +257,18 @@ Result<void> VideoWriter::write_frame(const Image& image) {
         return unexpected(Error{ ErrorCode::IoError, "FFmpeg: Could not allocate frame buffer" });
     }
 
-    // Convert float linear -> 8-bit sRGB into pre-allocated buffer
-    for (size_t i = 0; i < image.data.size(); ++i) {
-        float srgb = lut.to_srgb(image.data[i]);
-        impl->rgb24_temp[i] = static_cast<uint8_t>(std::clamp(static_cast<int>(srgb * 255.0f + 0.5f), 0, 255));
+    // Convert float sRGB -> 8-bit sRGB into pre-allocated buffer
+    int channels = image.channels;
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            size_t src_idx = (y * image.width + x) * channels;
+            size_t dst_idx = (y * image.width + x) * 3;
+            for (int c = 0; c < 3; ++c) {
+                // If the input has less than 3 channels, use the first channel for all (grayscale)
+                float val = image.data[src_idx + std::min(c, channels - 1)];
+                impl->rgb24_temp[dst_idx + c] = static_cast<uint8_t>(std::clamp(static_cast<int>(val * 255.0f + 0.5f), 0, 255));
+            }
+        }
     }
 
     const uint8_t* src_data[1] = { impl->rgb24_temp.data() };
