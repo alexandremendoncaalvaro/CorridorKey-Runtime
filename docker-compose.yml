@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  corridorkey-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.nvidia
+    image: corridorkey-runtime:nvidia
+    container_name: corridorkey_inference
+    # Pass-through all available GPUs (requires NVIDIA Container Toolkit on host)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Map the current directory to /data inside the container
+    # This allows users to drop clips in ./input and get results in ./output
+    volumes:
+      - ./data:/data
+    # Prevent container from exiting immediately if run in detached mode
+    tty: true
+    # Default command mapping
+    command: ["process", "/data/input", "--alpha-hint", "/data/hint", "--output", "/data/output"]

@@ -41,6 +41,8 @@ cmake --build build/release --parallel
 
 ### Usage
 
+#### Native CLI
+
 ```bash
 # Download the model (first time only)
 corridorkey download --variant int8
@@ -56,6 +58,24 @@ corridorkey process ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/
 
 # Process a single frame
 corridorkey process frame.exr --alpha-hint hint.png --output result.exr
+```
+
+#### Docker (NVIDIA GPU)
+
+For isolated environments or cloud deployments, an NVIDIA-optimized Docker image is provided. This ensures perfect compatibility with CUDA and TensorRT without polluting your host system.
+
+**Prerequisite:** [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) must be installed.
+
+```bash
+# 1. Build the GPU image (compiles the C++ runtime)
+docker compose build
+
+# 2. Run inference using the default mapped directories
+# (Place your files in ./data/input and ./data/hint first)
+docker compose up
+
+# OR run an interactive shell inside the container
+docker compose run --rm corridorkey-gpu /bin/bash
 ```
 
 ### Output

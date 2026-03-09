@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1.4
+# ─────────────────────────────────────────────────────────────────────────────
+# Builder Stage
+# ─────────────────────────────────────────────────────────────────────────────
+FROM nvidia/cuda:12.6.1-cudnn-devel-ubuntu24.04 AS builder
+
+# Prevent interactive prompts during apt install
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    curl \
+    zip \
+    unzip \
+    tar \
+    pkg-config \
+    libtool \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up vcpkg
+ENV VCPKG_ROOT=/opt/vcpkg
+RUN git clone https://github.com/microsoft/vcpkg.git ${VCPKG_ROOT} \
+    && ${VCPKG_ROOT}/bootstrap-vcpkg.sh -disableMetrics
+
+# Set up project
+WORKDIR /workspace
+COPY . /workspace/
+
+# Note: In a real CI environment, we would inject the specific baseline or let CMake handle it.
+# We build in Release mode to enable O3 and LTO optimizations.
+RUN cmake --preset release -DVCPKG_ROOT=${VCPKG_ROOT} \
+    # The triplet ensures we build dependencies targeting Linux x64
+    -DVCPKG_TARGET_TRIPLET=x64-linux \
+    && cmake --build --preset release
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Runtime Stage
+# ─────────────────────────────────────────────────────────────────────────────
+# We use the runtime CUDA image (not devel) to keep the final size small
+FROM nvidia/cuda:12.6.1-cudnn-runtime-ubuntu24.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies (e.g., ffmpeg shared libraries if not statically linked)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libpng16-16t64 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the compiled CLI and core library from the builder
+COPY --from=builder /workspace/build/release/src/cli/corridorkey /usr/local/bin/corridorkey
+# If built as a shared library (.so), we need to copy it too. Vcpkg static linkage simplifies this.
+COPY --from=builder /workspace/build/release/src/libcorridorkey_core.so /usr/local/lib/
+
+# Update dynamic linker
+RUN ldconfig
+
+# Set default entrypoint
+ENTRYPOINT ["corridorkey"]
+CMD ["--help"]
