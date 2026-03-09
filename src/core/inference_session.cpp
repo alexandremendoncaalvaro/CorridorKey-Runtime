@@ -85,32 +85,43 @@ Result<FrameResult> InferenceSession::run(
     const Image& alpha_hint,
     const InferenceParams& params
 ) {
-    (void)params;
-
     try {
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
+        // Determine effective resolution
+        int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+
         // 1. Prepare Inputs
-        std::vector<std::vector<float>> input_buffers;
+        std::vector<ImageBuffer> resized_buffers; 
+        std::vector<std::vector<float>> planar_buffers; 
         std::vector<Ort::Value> input_tensors;
 
         for (size_t i = 0; i < m_input_node_dims.size(); ++i) {
             auto shape = m_input_node_dims[i];
             const Image& source = (i == 0) ? rgb : alpha_hint;
             
-            // Resize if model expects different resolution
-            Image resized = (source.width != (int)shape[3] || source.height != (int)shape[2]) 
-                           ? ColorUtils::resize(source, (int)shape[3], (int)shape[2])
-                           : source;
+            // Resolution hierarchy: User Override > Hardware Recommended > Model Native
+            int64_t model_h = (shape[2] == -1) ? target_res : shape[2];
+            int64_t model_w = (shape[3] == -1) ? target_res : shape[3];
 
-            // Convert HWC interleaved to NCHW planar
-            input_buffers.emplace_back(shape[1] * shape[2] * shape[3]);
-            ColorUtils::to_planar(resized, input_buffers.back().data());
+            Image current_view = source;
+            if (source.width != (int)model_w || source.height != (int)model_h) {
+                resized_buffers.push_back(ColorUtils::resize(source, (int)model_w, (int)model_h));
+                current_view = resized_buffers.back().view();
+            }
+
+            planar_buffers.emplace_back(shape[1] * model_h * model_w);
+            ColorUtils::to_planar(current_view, planar_buffers.back().data());
             
+            // Update shape for Dynamic ONNX models if needed
+            std::vector<int64_t> effective_shape = shape;
+            effective_shape[2] = model_h;
+            effective_shape[3] = model_w;
+
             input_tensors.push_back(Ort::Value::CreateTensor<float>(
                 memory_info, 
-                input_buffers.back().data(), input_buffers.back().size(), 
-                shape.data(), shape.size()
+                planar_buffers.back().data(), planar_buffers.back().size(), 
+                effective_shape.data(), effective_shape.size()
             ));
         }
 
@@ -133,13 +144,11 @@ Result<FrameResult> InferenceSession::run(
         auto shape = raw_output.GetTensorTypeAndShapeInfo().GetShape();
         
         FrameResult result;
-        result.alpha.width = (int)shape[3];
-        result.alpha.height = (int)shape[2];
-        result.alpha.channels = (int)shape[1];
-        result.alpha.data.resize(result.alpha.width * result.alpha.height * result.alpha.channels);
+        result.alpha = ImageBuffer((int)shape[3], (int)shape[2], (int)shape[1]);
+        
+        ColorUtils::from_planar(raw_output.GetTensorData<float>(), result.alpha.view());
 
-        ColorUtils::from_planar(raw_output.GetTensorData<float>(), result.alpha);
-
+        // TODO: Map other outputs (FG, Comp) using the same ImageBuffer pattern
         return result;
 
     } catch (const Ort::Exception& e) {

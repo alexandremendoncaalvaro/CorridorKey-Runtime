@@ -205,6 +205,7 @@ private:
  * @brief Parameters to control the inference and post-processing.
  */
 struct InferenceParams {
+    int target_resolution = 0; // 0 = Auto-detect based on hardware
     float despill_strength = 1.0f;
     bool auto_despeckle = true;
     int despeckle_size = 400;

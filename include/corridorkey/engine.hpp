@@ -72,6 +72,7 @@ public:
 
     /**
      * @brief Get the recommended resolution based on current hardware limits.
+     * Use this as a default value if InferenceParams::target_resolution is 0.
      */
     [[nodiscard]] int recommended_resolution() const;
 
