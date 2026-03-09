@@ -123,15 +123,107 @@ void ColorUtils::from_planar(const float* src, Image& dst) {
 }
 
 void ColorUtils::despill(Image& rgb, const Image& alpha, float strength) {
-    (void)rgb; (void)alpha; (void)strength;
+    if (rgb.empty() || alpha.empty() || rgb.width != alpha.width || rgb.height != alpha.height) return;
+
+    int total_pixels = rgb.width * rgb.height;
+    int channels = rgb.channels;
+    std::vector<int> indices(total_pixels);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // Simple but effective luminance-preserving green despill
+    std::for_each(EXEC_POLICY indices.begin(), indices.end(), [&](int i) {
+        float* p = &rgb.data[i * channels];
+        float a = alpha.data[i];
+
+        // Only despill where there is some foreground
+        if (a > 0.0f) {
+            float r = p[0];
+            float g = p[1];
+            float b = p[2];
+
+            // Average of red and blue as target for green
+            float target_g = (r + b) * 0.5f;
+            
+            if (g > target_g) {
+                // Blend based on strength
+                float despilled_g = target_g * strength + g * (1.0f - strength);
+                p[1] = std::min(g, despilled_g);
+            }
+        }
+    });
 }
 
 void ColorUtils::despeckle(Image& alpha, int size_threshold) {
-    (void)alpha; (void)size_threshold;
+    if (alpha.empty() || size_threshold <= 0) return;
+
+    int w = alpha.width;
+    int h = alpha.height;
+    
+    ImageBuffer temp_buffer(w, h, 1);
+    Image temp = temp_buffer.view();
+
+    std::vector<int> rows(h);
+    std::iota(rows.begin(), rows.end(), 0);
+
+    // 1. Erosion (3x3 min filter)
+    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
+        for (int x = 0; x < w; ++x) {
+            float min_val = 1.0f;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    int nx = std::clamp(x + dx, 0, w - 1);
+                    int ny = std::clamp(y + dy, 0, h - 1);
+                    min_val = std::min(min_val, alpha.data[ny * w + nx]);
+                }
+            }
+            temp.data[y * w + x] = min_val;
+        }
+    });
+
+    // 2. Dilation (3x3 max filter)
+    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
+        for (int x = 0; x < w; ++x) {
+            float max_val = 0.0f;
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    int nx = std::clamp(x + dx, 0, w - 1);
+                    int ny = std::clamp(y + dy, 0, h - 1);
+                    max_val = std::max(max_val, temp.data[ny * w + nx]);
+                }
+            }
+            alpha.data[y * w + x] = max_val;
+        }
+    });
 }
 
 void ColorUtils::composite_over_checker(Image& rgba) {
-    (void)rgba;
+    if (rgba.empty() || rgba.channels < 4) return;
+
+    int w = rgba.width;
+    int h = rgba.height;
+    std::vector<int> rows(h);
+    std::iota(rows.begin(), rows.end(), 0);
+
+    // Checkerboard pattern (16px squares)
+    const float gray1 = 0.2f;
+    const float gray2 = 0.4f;
+
+    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
+        for (int x = 0; x < w; ++x) {
+            float* p = &rgba.data[(y * w + x) * 4];
+            float alpha = p[3];
+
+            // Determine checker color
+            bool is_white = ((x / 16) + (y / 16)) % 2 == 0;
+            float bg = is_white ? gray2 : gray1;
+
+            // Simple over composite: result = fg * alpha + bg * (1 - alpha)
+            p[0] = p[0] * alpha + bg * (1.0f - alpha);
+            p[1] = p[1] * alpha + bg * (1.0f - alpha);
+            p[2] = p[2] * alpha + bg * (1.0f - alpha);
+            p[3] = 1.0f; // Preview is opaque
+        }
+    });
 }
 
 ImageBuffer ColorUtils::resize(const Image& image, int new_width, int new_height) {
