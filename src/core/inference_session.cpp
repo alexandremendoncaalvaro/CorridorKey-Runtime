@@ -27,13 +27,34 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         session_ptr->m_session_options.SetIntraOpNumThreads(1);
         session_ptr->m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-        // Mapped Backend to Execution Provider (Skeleton)
+        // Mapped Backend to Execution Provider (2026 standards)
         switch (device.backend) {
-            case Backend::CPU:
-                // CPU is always available
+            case Backend::CoreML: {
+#if defined(__APPLE__)
+                uint32_t coreml_flags = 0; // Use default (all devices: CPU, GPU, NATIVE_ANE)
+                Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(session_ptr->m_session_options, coreml_flags));
+#endif
                 break;
+            }
+            case Backend::CUDA: {
+                OrtCUDAProviderOptions cuda_options;
+                cuda_options.device_id = 0;
+                session_ptr->m_session_options.AppendExecutionProvider_CUDA(cuda_options);
+                break;
+            }
+            case Backend::TensorRT: {
+                OrtTensorRTProviderOptions trt_options;
+                trt_options.device_id = 0;
+                session_ptr->m_session_options.AppendExecutionProvider_TensorRT(trt_options);
+                break;
+            }
+            case Backend::DirectML: {
+                // DirectML is added via IDMLDevice if available, or simpler helper
+                // OrtSessionOptionsAppendExecutionProvider_DML(session_ptr->m_session_options, 0);
+                break;
+            }
             default:
-                // Fallback to CPU for now
+                // CPU is used as fallback automatically
                 break;
         }
         

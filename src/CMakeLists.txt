@@ -23,6 +23,10 @@ target_link_libraries(corridorkey_core
         ${FFMPEG_LIBRARIES}
 )
 
+if(APPLE)
+    target_link_libraries(corridorkey_core PRIVATE "-framework CoreML" "-framework Foundation")
+endif()
+
 # Set the compile definition for the export macro
 target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_EXPORTS)
 
