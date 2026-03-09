@@ -30,64 +30,108 @@ as a single binary with zero Python dependencies.
 - [Ninja](https://ninja-build.org/) build system
 - [vcpkg](https://github.com/microsoft/vcpkg) package manager
 
-### Build
+### 1. Install vcpkg
+
+Skip this step if you already have vcpkg installed and `VCPKG_ROOT` set.
+
+<details>
+<summary>Linux / macOS</summary>
+
+```bash
+git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+~/vcpkg/bootstrap-vcpkg.sh
+export VCPKG_ROOT="$HOME/vcpkg"
+```
+
+Add the `export` line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for persistence.
+
+</details>
+
+<details>
+<summary>Windows</summary>
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git %USERPROFILE%\vcpkg
+%USERPROFILE%\vcpkg\bootstrap-vcpkg.bat
+```
+
+Add `VCPKG_ROOT` as a System Environment Variable pointing to `%USERPROFILE%\vcpkg`.
+
+</details>
+
+### 2. Build
 
 ```bash
 git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
-
-# 1. Install vcpkg (if you don't have it already)
-git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
-~/vcpkg/bootstrap-vcpkg.sh   # Linux/macOS
-# ~/vcpkg/bootstrap-vcpkg.bat  # Windows
-
-# 2. Set VCPKG_ROOT (add to your shell profile for persistence)
-export VCPKG_ROOT="$HOME/vcpkg"  # Linux/macOS (add to ~/.bashrc or ~/.zshrc)
-# set VCPKG_ROOT=%USERPROFILE%\vcpkg  # Windows (add to System Environment Variables)
-
-# 3. Configure and build
 cmake --preset release
 cmake --build build/release --parallel
 ```
 
-### Usage
+### 3. Add to PATH (optional)
 
-#### Native CLI
+The binary is at `build/release/src/cli/corridorkey`. To use `corridorkey`
+from anywhere, add the build directory to your PATH:
 
 ```bash
-# Download the model (first time only)
+export PATH="$(pwd)/build/release/src/cli:$PATH"
+```
+
+Add the line above (with the full absolute path) to your shell profile for
+persistence. Alternatively, create a system-wide symlink (requires sudo):
+
+```bash
+sudo ln -s "$(pwd)/build/release/src/cli/corridorkey" /usr/local/bin/corridorkey
+```
+
+### Usage
+
+If you haven't added the binary to your PATH, replace `corridorkey` with `./build/release/src/cli/corridorkey` in the commands below.
+
+**Download the model** (int8 is recommended for most hardware):
+```bash
 corridorkey download --variant int8
+```
 
-# Show detected hardware
+**View detected hardware and capabilities**:
+```bash
 corridorkey info
+```
 
-# Process a video
+**Process a single video**:
+```bash
 corridorkey process input.mp4 --alpha-hint hint.mp4 --output output.mp4
+```
 
-# Process an image sequence
+**Process a directory of frames**:
+```bash
 corridorkey process ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/
+```
 
-# Process a single frame
+**Process a single EXR/PNG frame**:
+```bash
 corridorkey process frame.exr --alpha-hint hint.png --output result.exr
 ```
 
-#### Docker (NVIDIA GPU)
+<details>
+<summary>Docker (NVIDIA GPU)</summary>
 
-For isolated environments or cloud deployments, an NVIDIA-optimized Docker image is provided. This ensures perfect compatibility with CUDA and TensorRT without polluting your host system.
-
-**Prerequisite:** [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) must be installed.
+Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 
 ```bash
-# 1. Build the GPU image (compiles the C++ runtime)
 docker compose build
-
-# 2. Run inference using the default mapped directories
-# (Place your files in ./data/input and ./data/hint first)
 docker compose up
+```
 
-# OR run an interactive shell inside the container
+Place your files in `./data/input` and `./data/hint` before running.
+
+For an interactive shell:
+
+```bash
 docker compose run --rm corridorkey-gpu /bin/bash
 ```
+
+</details>
 
 ### Output
 

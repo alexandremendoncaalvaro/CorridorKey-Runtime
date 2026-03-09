@@ -476,9 +476,9 @@ Matches the original CorridorKey output structure for compatibility.
 **Goal:** Prove the model exports and produces correct results.
 
 Tasks:
-- [ ] Export GreenFormer to ONNX (dynamo=True, fallback to legacy)
+- [x] Export GreenFormer to ONNX (dynamo=True, fallback to legacy)
 - [ ] Validate ONNX output vs PyTorch (max error < 1e-5 per pixel)
-- [ ] Run onnxsim + transformer optimizer
+- [x] Run onnxsim + transformer optimizer
 - [ ] Quantize to FP16 and INT8
 - [ ] Measure quality loss on 10+ reference frames
 - [ ] Benchmark inference time (PyTorch vs ONNX FP32 vs FP16 vs INT8)
@@ -493,11 +493,11 @@ model + ONNX Runtime simultaneously for comparison.
 **Goal:** Minimal working pipeline — load model, process one frame, save output.
 
 Tasks:
-- [ ] CMake + vcpkg setup, builds on macOS
-- [ ] ONNX Runtime integration, load INT8 model
-- [ ] Minimal FrameIO (read PNG, write PNG)
-- [ ] InferenceEngine: load model, run single frame
-- [ ] Verify output matches Python reference
+- [x] CMake + vcpkg setup, builds on macOS
+- [x] ONNX Runtime integration, load INT8 model
+- [x] Minimal FrameIO (read PNG, write PNG)
+- [x] InferenceEngine: load model, run single frame
+- [x] Verify output matches Python reference
 - [ ] Cross-compile check on Linux (Machine C or D)
 
 **Deliverable:** Binary that processes one PNG frame + alpha hint → PNG output.
@@ -507,13 +507,13 @@ Tasks:
 **Goal:** Full feature parity with original CorridorKey inference.
 
 Tasks:
-- [ ] PostProcess: port color_utils.py (sRGB, despill, despeckle, premultiply)
-- [ ] FrameIO: EXR read/write (OpenEXR 3.4)
-- [ ] FrameIO: Video decode/encode (FFmpeg)
-- [ ] Image sequence processing (directory of frames)
-- [ ] Auto-detection: hardware, tier, resolution, model variant
-- [ ] CLI: all commands and flags
-- [ ] Output structure (Matte/, FG/, Processed/, Comp/)
+- [x] PostProcess: port color_utils.py (sRGB, despill, despeckle, premultiply)
+- [x] FrameIO: EXR read/write (OpenEXR 3.4)
+- [x] FrameIO: Video decode/encode (FFmpeg)
+- [x] Image sequence processing (directory of frames)
+- [x] Auto-detection: hardware, tier, resolution, model variant
+- [x] CLI: all commands and flags
+- [x] Output structure (Matte/, FG/, Processed/, Comp/)
 - [ ] Unit tests for all modules
 - [ ] Test on all 6 machines
 
