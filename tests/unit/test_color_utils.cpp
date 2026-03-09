@@ -76,3 +76,23 @@ TEST_CASE("ColorUtils::resize bilinear", "[unit][color]") {
         REQUIRE(resized.data[0] == Catch::Approx(0.5f));
     }
 }
+
+TEST_CASE("ColorUtils::generate_rough_matte", "[unit][color]") {
+    ImageBuffer rgb_buf(2, 1, 3);
+    Image rgb = rgb_buf.view();
+    
+    // Pixel 0: Pure green
+    rgb(0, 0, 0) = 0.0f; rgb(0, 0, 1) = 1.0f; rgb(0, 0, 2) = 0.0f;
+    // Pixel 1: Pure red
+    rgb(0, 1, 0) = 1.0f; rgb(0, 1, 1) = 0.0f; rgb(0, 1, 2) = 0.0f;
+    
+    ImageBuffer hint_buf(2, 1, 1);
+    Image hint = hint_buf.view();
+    
+    ColorUtils::generate_rough_matte(rgb, hint);
+    
+    // Pure green should be transparent (alpha 0) in hint
+    REQUIRE(hint(0, 0, 0) == Catch::Approx(0.0f));
+    // Pure red should be opaque (alpha 1) in hint
+    REQUIRE(hint(0, 1, 0) == Catch::Approx(1.0f));
+}

@@ -94,52 +94,79 @@ Result<std::unique_ptr<VideoReader>> VideoReader::open(const std::filesystem::pa
 Result<ImageBuffer> VideoReader::read_next_frame() {
     auto* impl = m_impl.get();
 
-    while (av_read_frame(impl->format_ctx.get(), impl->packet.get()) >= 0) {
-        if (impl->packet->stream_index == impl->stream_index) {
-            if (avcodec_send_packet(impl->codec_ctx.get(), impl->packet.get()) >= 0) {
-                int ret = avcodec_receive_frame(impl->codec_ctx.get(), impl->frame.get());
-                if (ret == 0) {
-                    int w = impl->codec_ctx->width;
-                    int h = impl->codec_ctx->height;
+    while (true) {
+        // 1. Try to receive a frame from the decoder first (draining)
+        int ret = avcodec_receive_frame(impl->codec_ctx.get(), impl->frame.get());
+        if (ret == 0) {
+            int w = impl->codec_ctx->width;
+            int h = impl->codec_ctx->height;
 
-                    // Initialize or update scaler
-                    impl->sws_ctx.reset(sws_getCachedContext(
-                        impl->sws_ctx.release(),
-                        w, h, impl->codec_ctx->pix_fmt,
-                        w, h, AV_PIX_FMT_RGB24,
-                        SWS_BILINEAR, nullptr, nullptr, nullptr
-                    ));
+            // Initialize or update scaler
+            impl->sws_ctx.reset(sws_getCachedContext(
+                impl->sws_ctx.release(),
+                w, h, impl->codec_ctx->pix_fmt,
+                w, h, AV_PIX_FMT_RGB24,
+                SWS_BILINEAR, nullptr, nullptr, nullptr
+            ));
 
-                    // Ensure reusable intermediate buffer is allocated
-                    size_t rgb_size = static_cast<size_t>(w) * h * 3;
-                    if (impl->rgb_temp.size() != rgb_size) {
-                        impl->rgb_temp.resize(rgb_size);
-                    }
-
-                    // Convert YUV -> 8-bit RGB via sws_scale
-                    uint8_t* rgb_data[1] = { impl->rgb_temp.data() };
-                    int rgb_linesize[1] = { w * 3 };
-                    sws_scale(impl->sws_ctx.get(),
-                              impl->frame->data, impl->frame->linesize, 0, h,
-                              rgb_data, rgb_linesize);
-
-                    // Convert 8-bit sRGB -> float sRGB into aligned ImageBuffer
-                    ImageBuffer buffer(w, h, 3);
-                    Image view = buffer.view();
-
-                    for (size_t i = 0; i < rgb_size; ++i) {
-                        view.data[i] = impl->rgb_temp[i] / 255.0f;
-                    }
-
-                    av_packet_unref(impl->packet.get());
-                    return std::move(buffer);
-                }
+            // Ensure reusable intermediate buffer is allocated
+            size_t rgb_size = static_cast<size_t>(w) * h * 3;
+            if (impl->rgb_temp.size() != rgb_size) {
+                impl->rgb_temp.resize(rgb_size);
             }
+
+            // Convert YUV -> 8-bit RGB via sws_scale
+            uint8_t* rgb_data[1] = { impl->rgb_temp.data() };
+            int rgb_linesize[1] = { w * 3 };
+            sws_scale(impl->sws_ctx.get(),
+                      impl->frame->data, impl->frame->linesize, 0, h,
+                      rgb_data, rgb_linesize);
+
+            // Convert 8-bit sRGB -> float sRGB into aligned ImageBuffer
+            ImageBuffer buffer(w, h, 3);
+            Image view = buffer.view();
+
+            for (size_t i = 0; i < rgb_size; ++i) {
+                view.data[i] = impl->rgb_temp[i] / 255.0f;
+            }
+
+            return std::move(buffer);
+        }
+
+        if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+            return unexpected(Error{ ErrorCode::IoError, "FFmpeg: Error receiving frame" });
+        }
+
+        // 2. Need more data? Read a packet.
+        if (av_read_frame(impl->format_ctx.get(), impl->packet.get()) < 0) {
+            // Signal EOF to decoder
+            avcodec_send_packet(impl->codec_ctx.get(), nullptr);
+            
+            // Try one last time to receive (flushing)
+            ret = avcodec_receive_frame(impl->codec_ctx.get(), impl->frame.get());
+            if (ret == 0) {
+                // ... same frame processing logic as above ...
+                // To keep it dry, we should probably factor this out, but for now:
+                int w = impl->codec_ctx->width;
+                int h = impl->codec_ctx->height;
+                impl->sws_ctx.reset(sws_getCachedContext(impl->sws_ctx.release(), w, h, impl->codec_ctx->pix_fmt, w, h, AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr));
+                size_t rgb_size = static_cast<size_t>(w) * h * 3;
+                impl->rgb_temp.resize(rgb_size);
+                uint8_t* rgb_data[1] = { impl->rgb_temp.data() };
+                int rgb_linesize[1] = { w * 3 };
+                sws_scale(impl->sws_ctx.get(), impl->frame->data, impl->frame->linesize, 0, h, rgb_data, rgb_linesize);
+                ImageBuffer buffer(w, h, 3);
+                for (size_t i = 0; i < rgb_size; ++i) buffer.view().data[i] = impl->rgb_temp[i] / 255.0f;
+                return std::move(buffer);
+            }
+            return ImageBuffer(); // Real EOF
+        }
+
+        if (impl->packet->stream_index == impl->stream_index) {
+            avcodec_send_packet(impl->codec_ctx.get(), impl->packet.get());
         }
         av_packet_unref(impl->packet.get());
     }
-
-    return ImageBuffer(); // EOF
 }
 
 int VideoReader::width() const { return m_impl->codec_ctx->width; }
@@ -172,6 +199,7 @@ public:
 
     // Pre-allocated temp buffer for float->uint8 conversion (reused per frame)
     std::vector<uint8_t> rgb24_temp;
+    int64_t frame_count = 0;
 
     Impl() : frame(av_frame_alloc()), packet(av_packet_alloc()) {}
 };
@@ -179,6 +207,16 @@ public:
 VideoWriter::VideoWriter() : m_impl(std::make_unique<Impl>()) {}
 VideoWriter::~VideoWriter() {
     if (m_impl && m_impl->codec_ctx) {
+        // Flush encoder
+        if (avcodec_send_frame(m_impl->codec_ctx.get(), nullptr) >= 0) {
+            while (avcodec_receive_packet(m_impl->codec_ctx.get(), m_impl->packet.get()) == 0) {
+                av_packet_rescale_ts(m_impl->packet.get(), m_impl->codec_ctx->time_base, m_impl->format_ctx->streams[0]->time_base);
+                m_impl->packet->stream_index = 0;
+                av_interleaved_write_frame(m_impl->format_ctx.get(), m_impl->packet.get());
+                av_packet_unref(m_impl->packet.get());
+            }
+        }
+
         av_write_trailer(m_impl->format_ctx.get());
         if (!(m_impl->format_ctx->oformat->flags & AVFMT_NOFILE)) {
             avio_closep(&m_impl->format_ctx->pb);
@@ -205,11 +243,17 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(
         return unexpected(Error{ ErrorCode::IoError, "FFmpeg: Codec not found: " + codec_name });
     }
 
+    AVStream* st = avformat_new_stream(impl->format_ctx.get(), nullptr);
+    if (!st) return unexpected(Error{ ErrorCode::IoError, "FFmpeg: Could not create stream" });
+    
     impl->codec_ctx.reset(avcodec_alloc_context3(codec));
     impl->codec_ctx->width = width;
     impl->codec_ctx->height = height;
-    impl->codec_ctx->time_base = av_inv_q(av_d2q(fps, 1000000));
+    impl->codec_ctx->time_base = av_inv_q(av_d2q(fps, 60000));
     impl->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+    
+    st->time_base = impl->codec_ctx->time_base;
+    st->avg_frame_rate = av_d2q(fps, 60000);
 
     if (impl->format_ctx->oformat->flags & AVFMT_GLOBALHEADER) {
         impl->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -219,10 +263,7 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(
         return unexpected(Error{ ErrorCode::IoError, "FFmpeg: Could not open encoder" });
     }
 
-    AVStream* st = avformat_new_stream(impl->format_ctx.get(), nullptr);
-    if (!st) return unexpected(Error{ ErrorCode::IoError, "FFmpeg: Could not create stream" });
     avcodec_parameters_from_context(st->codecpar, impl->codec_ctx.get());
-    st->time_base = impl->codec_ctx->time_base;
 
     if (!(impl->format_ctx->oformat->flags & AVFMT_NOFILE)) {
         if (avio_open(&impl->format_ctx->pb, path.string().c_str(), AVIO_FLAG_WRITE) < 0) {
@@ -274,6 +315,8 @@ Result<void> VideoWriter::write_frame(const Image& image) {
     const uint8_t* src_data[1] = { impl->rgb24_temp.data() };
     int src_linesize[1] = { image.width * 3 };
     sws_scale(impl->sws_ctx.get(), src_data, src_linesize, 0, image.height, impl->frame->data, impl->frame->linesize);
+
+    impl->frame->pts = impl->frame_count++;
 
     if (avcodec_send_frame(impl->codec_ctx.get(), impl->frame.get()) >= 0) {
         while (avcodec_receive_packet(impl->codec_ctx.get(), impl->packet.get()) == 0) {

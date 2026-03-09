@@ -3,6 +3,7 @@
 add_executable(test_integration
     test_exr_roundtrip.cpp
     test_png_roundtrip.cpp
+    test_video_roundtrip.cpp
     test_post_process_chain.cpp
 )
 
