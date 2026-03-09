@@ -1,2 +1,14 @@
-# Unit tests (no I/O, no GPU)
-# add_executable(test_unit test_main.cpp ...)
+# Unit tests for ColorUtils and other stateless logic
+
+add_executable(test_unit 
+    test_color_utils.cpp
+)
+
+target_link_libraries(test_unit 
+    PRIVATE 
+        corridorkey_core
+        Catch2::Catch2WithMain
+)
+
+add_test(NAME unit_tests COMMAND test_unit)
+set_tests_properties(unit_tests PROPERTIES LABELS "unit")
