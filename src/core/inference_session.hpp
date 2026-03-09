@@ -50,6 +50,12 @@ private:
     Ort::Env m_env{nullptr};
     Ort::Session m_session{nullptr};
     Ort::SessionOptions m_session_options;
+
+    // Input/Output metadata
+    std::vector<std::string> m_input_node_names;
+    std::vector<std::string> m_output_node_names;
+    std::vector<const char*> m_input_node_names_ptr;
+    std::vector<const char*> m_output_node_names_ptr;
 };
 
 } // namespace corridorkey

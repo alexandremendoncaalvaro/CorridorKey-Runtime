@@ -44,6 +44,29 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(), session_ptr->m_session_options);
 #endif
 
+        // Get Input and Output metadata
+        Ort::AllocatorWithDefaultOptions allocator;
+        
+        // Inputs
+        size_t num_input_nodes = session_ptr->m_session.GetInputCount();
+        for (size_t i = 0; i < num_input_nodes; i++) {
+            auto input_name_ptr = session_ptr->m_session.GetInputNameAllocated(i, allocator);
+            session_ptr->m_input_node_names.push_back(input_name_ptr.get());
+        }
+        for (const auto& name : session_ptr->m_input_node_names) {
+            session_ptr->m_input_node_names_ptr.push_back(name.c_str());
+        }
+
+        // Outputs
+        size_t num_output_nodes = session_ptr->m_session.GetOutputCount();
+        for (size_t i = 0; i < num_output_nodes; i++) {
+            auto output_name_ptr = session_ptr->m_session.GetOutputNameAllocated(i, allocator);
+            session_ptr->m_output_node_names.push_back(output_name_ptr.get());
+        }
+        for (const auto& name : session_ptr->m_output_node_names) {
+            session_ptr->m_output_node_names_ptr.push_back(name.c_str());
+        }
+
         return session_ptr;
     } catch (const Ort::Exception& e) {
         return std::unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("ONNX Runtime session creation failed: ") + e.what() });
