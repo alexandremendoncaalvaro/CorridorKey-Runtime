@@ -2,6 +2,7 @@
 
 add_executable(test_unit 
     test_color_utils.cpp
+    test_inference_session.cpp
 )
 
 target_link_libraries(test_unit 
