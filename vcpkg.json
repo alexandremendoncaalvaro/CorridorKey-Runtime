@@ -33,6 +33,10 @@
         {
             "name": "cxxopts",
             "$comment": "Lightweight CLI argument parser"
+        },
+        {
+            "name": "cpr",
+            "$comment": "C++ Requests for downloading models"
         }
     ]
 }

@@ -9,6 +9,7 @@ target_link_libraries(corridorkey_cli
     PRIVATE
         corridorkey_core
         cxxopts::cxxopts
+        cpr::cpr
 )
 
 # Target-based compiler warnings
