@@ -1,5 +1,5 @@
 #include <corridorkey/engine.hpp>
-#include <src/core/inference_session.hpp>
+#include "inference_session.hpp"
 
 namespace corridorkey {
 
