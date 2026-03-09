@@ -202,24 +202,39 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(
 
 Result<void> VideoWriter::write_frame(const Image& image) {
     auto* impl = m_impl.get();
+    const auto& lut = SrgbLut::instance();
     
-    // 1. Convert Image (Float RGB) to AVFrame (YUV420P)
+    // 1. Prepare Scaling Context
     impl->sws_ctx.reset(sws_getCachedContext(
         impl->sws_ctx.release(),
-        image.width, image.height, AV_PIX_FMT_RGB24, // Assumes RGB24 for now, need float support later
+        image.width, image.height, AV_PIX_FMT_RGB24,
         impl->codec_ctx->width, impl->codec_ctx->height, impl->codec_ctx->pix_fmt,
         SWS_BILINEAR, nullptr, nullptr, nullptr
     ));
 
-    // Prepare temp frame for encoding
+    // 2. Prepare Frame Buffer
     impl->frame->format = impl->codec_ctx->pix_fmt;
     impl->frame->width = impl->codec_ctx->width;
     impl->frame->height = impl->codec_ctx->height;
-    av_frame_get_buffer(impl->frame.get(), 0);
+    if (av_frame_get_buffer(impl->frame.get(), 0) < 0) {
+        return unexpected(Error{ ErrorCode::IoError, "FFmpeg: Could not allocate frame buffer" });
+    }
 
-    // Convert (Needs optimized Float->8bit RGB intermediate)
-    // ... logic for conversion ...
+    // 3. Convert Aligned Float Linear to Intermediate 8-bit RGB (Linearization)
+    // Optimization: We could use a custom SIMD kernel for direct Float -> YUV conversion in Phase 3.
+    std::vector<uint8_t> rgb24(static_cast<size_t>(image.width) * image.height * 3);
+    for (size_t i = 0; i < image.data.size(); ++i) {
+        // Linear to sRGB via LUT, then to 8-bit
+        float srgb = lut.to_srgb(image.data[i]);
+        rgb24[i] = static_cast<uint8_t>(std::clamp(static_cast<int>(srgb * 255.0f + 0.5f), 0, 255));
+    }
 
+    // 4. Scale to Destination Pixel Format (usually YUV420P)
+    const uint8_t* src_data[1] = { rgb24.data() };
+    int src_linesize[1] = { image.width * 3 };
+    sws_scale(impl->sws_ctx.get(), src_data, src_linesize, 0, image.height, impl->frame->data, impl->frame->linesize);
+
+    // 5. Encode and Write
     if (avcodec_send_frame(impl->codec_ctx.get(), impl->frame.get()) >= 0) {
         while (avcodec_receive_packet(impl->codec_ctx.get(), impl->packet.get()) == 0) {
             av_packet_rescale_ts(impl->packet.get(), impl->codec_ctx->time_base, impl->format_ctx->streams[0]->time_base);

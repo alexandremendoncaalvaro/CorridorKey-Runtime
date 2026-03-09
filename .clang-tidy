@@ -1,0 +1,15 @@
+---
+Checks: 'clang-diagnostic-*,clang-analyzer-*,modernize-*,performance-*,readability-*,bugprone-*,cppcoreguidelines-*'
+WarningsAsErrors: 'performance-*,bugprone-*,modernize-use-override,modernize-use-nullptr'
+CheckOptions:
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '15'
+  - key: performance-for-range-copy.WarnOnAllAutoCopies
+    value: 'true'
+  - key: readability-identifier-naming.ClassCase
+    value: PascalCase
+  - key: readability-identifier-naming.FunctionCase
+    value: snake_case
+  - key: readability-identifier-naming.PrivateMemberPrefix
+    value: m_
+...
