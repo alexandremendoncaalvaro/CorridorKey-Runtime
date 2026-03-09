@@ -1,5 +1,5 @@
 #include <catch2/catch_all.hpp>
-#include "inference_session.hpp"
+#include "core/inference_session.hpp"
 #include <filesystem>
 
 using namespace corridorkey;
