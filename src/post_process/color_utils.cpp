@@ -80,14 +80,16 @@ void ColorUtils::unpremultiply(Image& rgb, const Image& alpha) {
     std::vector<int> rows(rgb.height);
     std::iota(rows.begin(), rows.end(), 0);
 
+    // High-performance branchless unpremultiply
     std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
         for (int x = 0; x < rgb.width; ++x) {
             float a = alpha(y, x);
-            if (a > 0.0001f) {
-                float inv_a = 1.0f / a;
-                for (int c = 0; c < 3; ++c) {
-                    rgb(y, x, c) *= inv_a;
-                }
+            // Branchless protection against division by zero
+            // std::max ensures we never divide by less than 1e-6
+            float inv_a = 1.0f / std::max(1e-6f, a);
+            
+            for (int c = 0; c < 3; ++c) {
+                rgb(y, x, c) *= inv_a;
             }
         }
     });
@@ -135,16 +137,24 @@ void ColorUtils::despill(Image& rgb, const Image& alpha, float strength) {
     std::vector<int> rows(rgb.height);
     std::iota(rows.begin(), rows.end(), 0);
 
+    // High-performance branchless despill (2026 elite standard)
     std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
         for (int x = 0; x < rgb.width; ++x) {
+            float r = rgb(y, x, 0);
+            float g = rgb(y, x, 1);
+            float b = rgb(y, x, 2);
             float a = alpha(y, x);
-            if (a > 0.0f) {
-                float target_g = (rgb(y, x, 0) + rgb(y, x, 2)) * 0.5f;
-                if (rgb(y, x, 1) > target_g) {
-                    float despilled_g = target_g * strength + rgb(y, x, 1) * (1.0f - strength);
-                    rgb(y, x, 1) = std::min(rgb(y, x, 1), despilled_g);
-                }
-            }
+
+            // Target green is the average of R and B
+            float target_g = (r + b) * 0.5f;
+            
+            // Branchless: compute the reduction amount
+            // If g > target_g, diff is positive, otherwise 0
+            float diff = std::max(0.0f, g - target_g);
+            
+            // Apply reduction scaled by alpha and strength
+            // This math naturally results in 0 change if a == 0 or g <= target_g
+            rgb(y, x, 1) = g - (diff * strength * std::min(1.0f, a));
         }
     });
 }
@@ -193,14 +203,22 @@ void ColorUtils::composite_over_checker(Image& rgba) {
     std::vector<int> rows(rgba.height);
     std::iota(rows.begin(), rows.end(), 0);
 
+    // High-performance branchless composite (2026 elite standard)
     std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
         for (int x = 0; x < rgba.width; ++x) {
-            float alpha = rgba(y, x, 3);
-            float bg = (((x / 16) + (y / 16)) % 2 == 0) ? 0.4f : 0.2f;
-            for (int c = 0; c < 3; ++c) {
-                rgba(y, x, c) = rgba(y, x, c) * alpha + bg * (1.0f - alpha);
-            }
-            rgba(y, x, 3) = 1.0f;
+            float alpha = std::clamp(rgba(y, x, 3), 0.0f, 1.0f);
+            
+            // Branchless checkerboard: calculate pattern based on parity of coordinates
+            // (x >> 4) is equivalent to (x / 16) for positive integers
+            bool is_white = ((x >> 4) + (y >> 4)) % 2 == 0;
+            float bg = 0.2f + (0.2f * static_cast<float>(is_white));
+
+            // Pure arithmetic blend
+            float inv_alpha = 1.0f - alpha;
+            rgba(y, x, 0) = rgba(y, x, 0) * alpha + bg * inv_alpha;
+            rgba(y, x, 1) = rgba(y, x, 1) * alpha + bg * inv_alpha;
+            rgba(y, x, 2) = rgba(y, x, 2) * alpha + bg * inv_alpha;
+            rgba(y, x, 3) = 1.0f; 
         }
     });
 }
