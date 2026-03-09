@@ -599,6 +599,7 @@ Summary of what's covered there:
 
 ## 9. Future Roadmap
 
+- [ ] **CoreML / GPU Acceleration:** The current `onnxruntime` build via `vcpkg` on macOS lacks the CoreML Execution Provider. Future work includes switching to official ONNX binaries or custom vcpkg port overlays to enable the Apple Neural Engine.
 - [ ] **Tiling Inference (High-Res Support):** Implement a patch-based processing mode. Split 4K/8K images into overlapping tiles (e.g., 1024x1024), process each tile, and stitch them back with alpha feathering. This allows high-resolution processing on low-VRAM GPUs.
 - [x] **FFmpeg Integrated Pipeline:** Video processing is done in-RAM without temporary files.
 - [ ] **Chroma-Key Auto-Hint:** Built-in basic HSV/Chroma-keyer to generate the initial alpha hint internally, removing the need for an external hint video.
