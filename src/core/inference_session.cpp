@@ -117,11 +117,159 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     }
 }
 
+Result<FrameResult> InferenceSession::run_tiled(
+    const Image& rgb,
+    const Image& alpha_hint,
+    const InferenceParams& params,
+    int model_res
+) {
+    int w = rgb.width;
+    int h = rgb.height;
+    int tile_size = model_res;
+    int padding = params.tile_padding;
+    int stride = tile_size - 2 * padding;
+
+    // Allocate accumulators
+    ImageBuffer acc_alpha(w, h, 1);
+    ImageBuffer acc_fg(w, h, 3);
+    ImageBuffer acc_weight(w, h, 1);
+
+    std::fill(acc_alpha.view().data.begin(), acc_alpha.view().data.end(), 0.0f);
+    std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0f);
+    std::fill(acc_weight.view().data.begin(), acc_weight.view().data.end(), 0.0f);
+
+    // Pre-calculate weight mask (linear falloff at edges)
+    ImageBuffer weight_mask_buf(tile_size, tile_size, 1);
+    Image mask = weight_mask_buf.view();
+    for (int y = 0; y < tile_size; ++y) {
+        float wy = 1.0f;
+        if (y < padding) wy = static_cast<float>(y) / padding;
+        else if (y >= tile_size - padding) wy = static_cast<float>(tile_size - 1 - y) / padding;
+        
+        for (int x = 0; x < tile_size; ++x) {
+            float wx = 1.0f;
+            if (x < padding) wx = static_cast<float>(x) / padding;
+            else if (x >= tile_size - padding) wx = static_cast<float>(tile_size - 1 - x) / padding;
+            mask(y, x) = std::min(wx, wy);
+        }
+    }
+
+    // Iterate tiles
+    int nx = (w + stride - 1) / stride;
+    int ny = (h + stride - 1) / stride;
+
+    for (int ty = 0; ty < ny; ++ty) {
+        for (int tx = 0; tx < nx; ++tx) {
+            int x_start = tx * stride;
+            int y_start = ty * stride;
+            
+            // Center crop if last tile goes over edge
+            if (x_start + tile_size > w) x_start = std::max(0, w - tile_size);
+            if (y_start + tile_size > h) y_start = std::max(0, h - tile_size);
+
+            // Extract tile
+            ImageBuffer rgb_tile(tile_size, tile_size, 3);
+            ImageBuffer hint_tile(tile_size, tile_size, 1);
+            
+            for (int y = 0; y < tile_size; ++y) {
+                for (int x = 0; x < tile_size; ++x) {
+                    for (int c = 0; c < 3; ++c) rgb_tile.view()(y, x, c) = rgb(y_start + y, x_start + x, c);
+                    hint_tile.view()(y, x) = alpha_hint(y_start + y, x_start + x);
+                }
+            }
+
+            // Run inference on tile (recursive call but non-tiled params)
+            InferenceParams sub_params = params;
+            sub_params.enable_tiling = false; 
+            sub_params.target_resolution = tile_size; 
+            auto res = run(rgb_tile.view(), hint_tile.view(), sub_params);
+            if (!res) return unexpected(res.error());
+
+            // Accumulate
+            for (int y = 0; y < tile_size; ++y) {
+                for (int x = 0; x < tile_size; ++x) {
+                    int global_y = y_start + y;
+                    int global_x = x_start + x;
+                    if (global_y >= h || global_x >= w) continue;
+
+                    float w_val = mask(y, x);
+                    acc_weight.view()(global_y, global_x) += w_val;
+                    acc_alpha.view()(global_y, global_x) += res->alpha.view()(y, x) * w_val;
+                    for (int c = 0; c < 3; ++c) {
+                        acc_fg.view()(global_y, global_x, c) += res->foreground.view()(y, x, c) * w_val;
+                    }
+                }
+            }
+        }
+    }
+
+    // Normalize
+    for (int i = 0; i < w * h; ++i) {
+        float w_val = acc_weight.view().data[i];
+        if (w_val > 0.0001f) {
+            acc_alpha.view().data[i] /= w_val;
+            acc_fg.view().data[i*3] /= w_val;
+            acc_fg.view().data[i*3+1] /= w_val;
+            acc_fg.view().data[i*3+2] /= w_val;
+        }
+    }
+
+    // Final Post-Process on full image
+    FrameResult result;
+    result.alpha = std::move(acc_alpha);
+    result.foreground = std::move(acc_fg);
+
+    // Run standard post-process pipeline on full image
+    if (!result.alpha.view().empty() && !result.foreground.view().empty()) {
+        int w = result.foreground.view().width;
+        int h = result.foreground.view().height;
+
+        if (params.auto_despeckle) {
+            despeckle(result.alpha.view(), params.despeckle_size);
+        }
+        despill(result.foreground.view(), params.despill_strength);
+
+        const auto& lut = SrgbLut::instance();
+        Image fg = result.foreground.const_view();
+        Image alpha_view = result.alpha.const_view();
+
+        result.processed = ImageBuffer(w, h, 4);
+        Image proc = result.processed.view();
+
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float a = alpha_view(y, x);
+                proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
+                proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
+                proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
+                proc(y, x, 3) = a;
+            }
+        }
+
+        result.composite = ImageBuffer(w, h, 4);
+        Image comp = result.composite.view();
+        std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
+
+        ColorUtils::composite_over_checker(comp);
+        ColorUtils::linear_to_srgb(comp);
+    }
+
+    return result;
+}
+
 Result<FrameResult> InferenceSession::run(
     const Image& rgb,
     const Image& alpha_hint,
     const InferenceParams& params
 ) {
+    // Check for tiling request
+    int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+    
+    // Only tile if requested and input is significantly larger than model
+    if (params.enable_tiling && (rgb.width > target_res || rgb.height > target_res)) {
+        return run_tiled(rgb, alpha_hint, params, target_res);
+    }
+
     try {
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;

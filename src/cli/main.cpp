@@ -46,6 +46,8 @@ int main(int argc, char* argv[]) {
         ("no-despeckle", "Disable morphological cleanup")
         ("despeckle-size", "Cleanup threshold in pixels", cxxopts::value<int>()->default_value("400"))
         ("input-linear", "Input images are already in linear space")
+        ("tiled", "Enable tiling inference for high-res inputs")
+        ("tile-padding", "Padding for tile blending in pixels", cxxopts::value<int>()->default_value("32"))
         ("v,version", "Print version")
         ("h,help", "Print help");
 
@@ -150,6 +152,8 @@ int main(int argc, char* argv[]) {
             params.auto_despeckle = !result.count("no-despeckle");
             params.despeckle_size = result["despeckle-size"].as<int>();
             params.input_is_linear = result.count("input-linear");
+            params.enable_tiling = result.count("tiled");
+            params.tile_padding = result["tile-padding"].as<int>();
 
             auto devices = list_devices();
             int device_idx = result["device"].as<int>();

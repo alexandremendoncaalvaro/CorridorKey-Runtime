@@ -221,6 +221,10 @@ struct InferenceParams {
     int despeckle_size = 400;
     float refiner_scale = 1.0f;
     bool input_is_linear = false;
+    
+    // Tiling Inference (High-Res support)
+    bool enable_tiling = false;
+    int tile_padding = 32; // Overlap in pixels to blend seams
 };
 
 /**

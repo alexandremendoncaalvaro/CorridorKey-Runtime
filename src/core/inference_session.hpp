@@ -46,6 +46,16 @@ private:
     void configure_session_options();
     void extract_metadata();
 
+    /**
+     * @brief Helper for running tiling inference on large images.
+     */
+    Result<FrameResult> run_tiled(
+        const Image& rgb,
+        const Image& alpha_hint,
+        const InferenceParams& params,
+        int model_res
+    );
+
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 

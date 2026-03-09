@@ -514,7 +514,7 @@ Tasks:
 - [x] Auto-detection: hardware, tier, resolution, model variant
 - [x] CLI: all commands and flags
 - [x] Output structure (Matte/, FG/, Processed/, Comp/)
-- [ ] Unit tests for all modules
+- [x] Unit tests for all modules
 - [ ] Test on all 6 machines
 
 **Deliverable:** Feature-complete CLI binary.
