@@ -15,11 +15,12 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    # Map the current directory to /data inside the container
-    # This allows users to drop clips in ./input and get results in ./output
+    # Map the current directory to /app inside the container
     volumes:
-      - ./data:/data
+      - ./assets:/app/assets
+      - ./outputs:/app/outputs
+      - ./models:/app/models
     # Prevent container from exiting immediately if run in detached mode
     tty: true
-    # Default command mapping
-    command: ["process", "/data/input", "--alpha-hint", "/data/hint", "--output", "/data/output"]
+    # Default command mapping (example)
+    command: ["corridorkey", "process", "--input", "assets/video_samples/greenscreen_1769569137.mp4", "--output", "outputs/docker_result.mp4", "--model", "models/corridorkey_int8_512.onnx"]
