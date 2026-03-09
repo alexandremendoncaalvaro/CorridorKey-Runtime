@@ -51,5 +51,40 @@ add_subdirectory(core)
 add_subdirectory(frame_io)
 add_subdirectory(post_process)
 
-# Add source files to the target as they are created in subdirectories
-# (We will use target_sources in sub-CMakeLists.txt)
+# Static library for testing (exposes all symbols without CORRIDORKEY_API)
+if(BUILD_TESTING)
+    add_library(corridorkey_core_static STATIC)
+
+    # Share the same source files
+    get_target_property(_core_sources corridorkey_core SOURCES)
+    target_sources(corridorkey_core_static PRIVATE ${_core_sources})
+
+    target_include_directories(corridorkey_core_static PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${FFMPEG_INCLUDE_DIRS}
+        ${onnxruntime_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(corridorkey_core_static
+        PUBLIC
+            corridorkey_headers
+        PRIVATE
+            onnxruntime::onnxruntime
+            OpenEXR::OpenEXR
+            PNG::PNG
+            ${FFMPEG_LIBRARIES}
+    )
+
+    if(APPLE)
+        target_link_libraries(corridorkey_core_static PRIVATE "-framework CoreML" "-framework Foundation")
+    endif()
+
+    target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_EXPORTS)
+
+    if(NOT MSVC)
+        set_source_files_properties(frame_io/png_io.cpp PROPERTIES COMPILE_FLAGS "-Wno-error")
+        target_compile_options(corridorkey_core_static PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    else()
+        target_compile_options(corridorkey_core_static PRIVATE /W4 /WX /permissive-)
+    endif()
+endif()

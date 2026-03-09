@@ -6,14 +6,9 @@ add_executable(test_integration
     test_post_process_chain.cpp
 )
 
-target_include_directories(test_integration
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
-)
-
 target_link_libraries(test_integration
     PRIVATE
-        corridorkey_core
+        corridorkey_core_static
         Catch2::Catch2WithMain
 )
 

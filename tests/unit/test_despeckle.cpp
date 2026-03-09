@@ -13,12 +13,15 @@ TEST_CASE("despeckle removes small specks via erosion+dilation", "[unit][despeck
         alpha.data[i] = 1.0f;
     }
 
-    SECTION("Single black pixel gets filled by dilation after erosion") {
-        alpha(2, 2) = 0.0f; // Single black speck
+    SECTION("Single white pixel speck gets removed by erosion") {
+        // Start with all-black, add a single white speck
+        for (size_t i = 0; i < alpha.data.size(); ++i) {
+            alpha.data[i] = 0.0f;
+        }
+        alpha(2, 2) = 1.0f; // Single white speck in black background
         despeckle(alpha, 400);
-        // After erosion, surrounding pixels shrink, then dilation restores
-        // The single hole should be filled back
-        REQUIRE(alpha(2, 2) == Catch::Approx(1.0f));
+        // Erosion removes the isolated white pixel, dilation cannot restore it
+        REQUIRE(alpha(2, 2) == Catch::Approx(0.0f));
     }
 
     SECTION("All-zero image stays zero") {
