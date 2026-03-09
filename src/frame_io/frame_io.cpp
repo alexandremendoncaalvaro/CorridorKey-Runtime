@@ -39,13 +39,43 @@ Result<void> FrameIO::save_result(
     const std::string& filename,
     const FrameResult& result
 ) {
-    (void)base_dir;
-    (void)filename;
-    (void)result;
+    try {
+        // Define paths
+        auto matte_dir = base_dir / "Matte";
+        auto fg_dir = base_dir / "FG";
+        auto proc_dir = base_dir / "Processed";
+        auto comp_dir = base_dir / "Comp";
 
-    // TODO: Create the standard VFX structure (Matte/, FG/, Processed/, Comp/)
-    // and write the corresponding files.
-    return {};
+        // Create directories
+        std::filesystem::create_directories(matte_dir);
+        std::filesystem::create_directories(fg_dir);
+        std::filesystem::create_directories(proc_dir);
+        std::filesystem::create_directories(comp_dir);
+
+        // Change extension to .exr for main outputs
+        std::filesystem::path stem = std::filesystem::path(filename).stem();
+        
+        // 1. Save Alpha Matte (EXR)
+        auto matte_res = write_frame(matte_dir / stem.replace_extension(".exr"), result.alpha);
+        if (!matte_res) return matte_res;
+
+        // 2. Save Foreground (EXR)
+        auto fg_res = write_frame(fg_dir / stem.replace_extension(".exr"), result.foreground);
+        if (!fg_res) return fg_res;
+
+        // 3. Save Processed (EXR)
+        auto proc_res = write_frame(proc_dir / stem.replace_extension(".exr"), result.composite);
+        if (!proc_res) return proc_res;
+
+        // 4. Save Preview Comp (PNG)
+        // Note: For Comp, we'll need to implement PNG writing and linear->srgb conversion
+        auto comp_path = comp_dir / stem.replace_extension(".png");
+        // write_frame(comp_path, result.composite); // To be implemented with PNG and sRGB conversion
+
+        return {};
+    } catch (const std::exception& e) {
+        return unexpected(Error{ ErrorCode::IoError, std::string("Failed to save result structure: ") + e.what() });
+    }
 }
 
 } // namespace corridorkey
