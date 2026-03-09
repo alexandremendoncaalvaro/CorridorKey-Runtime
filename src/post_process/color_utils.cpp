@@ -1,10 +1,11 @@
-#include "post_process/color_utils.hpp"
-#include "core/perf_utils.hpp"
+#include <src/post_process/color_utils.hpp>
+#include <src/core/perf_utils.hpp>
 #include <cmath>
 #include <algorithm>
+#include <array>
 #include <numeric>
 
-// Execution policy wrapper for portability
+// Portability check for execution policy support
 #if __has_include(<execution>) && (defined(__cpp_lib_execution) || !defined(__clang__))
 #include <execution>
 #define EXEC_POLICY std::execution::par_unseq ,
@@ -14,60 +15,66 @@
 
 namespace corridorkey {
 
-void ColorUtils::srgb_to_linear(Image& image) {
+void ColorUtils::srgb_to_linear(Image image) {
     const auto& lut = SrgbLut::instance();
     std::for_each(EXEC_POLICY image.data.begin(), image.data.end(), [&](float& p) {
         p = lut.to_linear(p);
     });
 }
 
-void ColorUtils::linear_to_srgb(Image& image) {
+void ColorUtils::linear_to_srgb(Image image) {
     const auto& lut = SrgbLut::instance();
     std::for_each(EXEC_POLICY image.data.begin(), image.data.end(), [&](float& p) {
         p = lut.to_srgb(p);
     });
 }
 
-void ColorUtils::premultiply(Image& rgb, const Image& alpha) {
+void ColorUtils::premultiply(Image rgb, const Image alpha) {
     if (rgb.empty() || alpha.empty()) return;
     
     size_t pixels = static_cast<size_t>(rgb.width) * rgb.height;
     int channels = rgb.channels;
+    std::vector<int> indices(pixels);
+    std::iota(indices.begin(), indices.end(), 0);
 
-    // Linear loop for maximum SIMD throughput
-    for (size_t i = 0; i < pixels; ++i) {
+    // Flattened loop with parallel vector execution
+    std::for_each(EXEC_POLICY indices.begin(), indices.end(), [&](int i) {
         float a = alpha.data[i];
         float* p = &rgb.data[i * channels];
         p[0] *= a;
         p[1] *= a;
         p[2] *= a;
-    }
+    });
 }
 
-void ColorUtils::unpremultiply(Image& rgb, const Image& alpha) {
+void ColorUtils::unpremultiply(Image rgb, const Image alpha) {
     if (rgb.empty() || alpha.empty()) return;
     
     size_t pixels = static_cast<size_t>(rgb.width) * rgb.height;
     int channels = rgb.channels;
+    std::vector<int> indices(pixels);
+    std::iota(indices.begin(), indices.end(), 0);
 
-    for (size_t i = 0; i < pixels; ++i) {
-        float inv_a = 1.0f / std::max(1e-6f, alpha.data[i]);
-        float* p = &rgb.data[i * channels];
-        p[0] *= inv_a;
-        p[1] *= inv_a;
-        p[2] *= inv_a;
-    }
+    std::for_each(EXEC_POLICY indices.begin(), indices.end(), [&](int i) {
+        float a = alpha.data[i];
+        if (a > 0.0001f) {
+            float* p = &rgb.data[i * channels];
+            float inv_a = 1.0f / a;
+            p[0] *= inv_a;
+            p[1] *= inv_a;
+            p[2] *= inv_a;
+        }
+    });
 }
 
 void ColorUtils::to_planar(const Image src, float* dst) {
     int w = src.width;
     int h = src.height;
     int c = src.channels;
-    size_t plane_size = static_cast<size_t>(w) * h;
 
     for (int ch = 0; ch < c; ++ch) {
-        float* plane = dst + (ch * plane_size);
-        for (size_t i = 0; i < plane_size; ++i) {
+        float* plane = dst + (static_cast<size_t>(ch) * w * h);
+        for (int i = 0; i < w * h; ++i) {
             plane[i] = src.data[i * c + ch];
         }
     }
@@ -77,52 +84,29 @@ void ColorUtils::from_planar(const float* src, Image dst) {
     int w = dst.width;
     int h = dst.height;
     int c = dst.channels;
-    size_t plane_size = static_cast<size_t>(w) * h;
 
     for (int ch = 0; ch < c; ++ch) {
-        const float* plane = src + (ch * plane_size);
-        for (size_t i = 0; i < plane_size; ++i) {
+        const float* plane = src + (static_cast<size_t>(ch) * w * h);
+        for (int i = 0; i < w * h; ++i) {
             dst.data[i * c + ch] = plane[i];
         }
     }
 }
 
-void ColorUtils::despill(Image& rgb, const Image& alpha, float strength) {
+void ColorUtils::despill(Image rgb, const Image alpha, float strength) {
     if (rgb.empty() || alpha.empty()) return;
 
-    size_t pixels = static_cast<size_t>(rgb.width) * rgb.height;
-    int channels = rgb.channels;
-
-    for (size_t i = 0; i < pixels; ++i) {
-        float* p = &rgb.data[i * channels];
-        float target_g = (p[0] + p[2]) * 0.5f;
-        float diff = std::max(0.0f, p[1] - target_g);
-        p[1] -= diff * strength * std::min(1.0f, alpha.data[i]);
-    }
-}
-
-void ColorUtils::composite_over_checker(Image& rgba) {
-    if (rgba.empty() || rgba.channels < 4) return;
-
-    int w = rgba.width;
-    // Spatial awareness is needed for checkerboard pattern, but we flatten the X loop
-    for (int y = 0; y < rgba.height; ++y) {
-        int y_check = (y >> 4) & 1;
-        float* row = &rgba.data[static_cast<size_t>(y) * w * 4];
-        for (int x = 0; x < w; ++x) {
-            float* p = row + (x * 4);
-            float a = std::clamp(p[3], 0.0f, 1.0f);
-            float bg = (((x >> 4) & 1) == y_check) ? 0.4f : 0.2f;
-            
-            p[0] = p[0] * a + bg * (1.0f - a);
-            p[1] = p[1] * a + bg * (1.0f - a);
-            p[2] = p[2] * a + bg * (1.0f - a);
-            p[3] = 1.0f;
+    for (int y = 0; y < rgb.height; ++y) {
+        for (int x = 0; x < rgb.width; ++x) {
+            float a = alpha(y, x);
+            float target_g = (rgb(y, x, 0) + rgb(y, x, 2)) * 0.5f;
+            float diff = std::max(0.0f, rgb(y, x, 1) - target_g);
+            rgb(y, x, 1) -= diff * strength * std::min(1.0f, a);
         }
     }
 }
 
-void ColorUtils::despeckle(Image& alpha, int size_threshold) {
+void ColorUtils::despeckle(Image alpha, int size_threshold) {
     if (alpha.empty() || size_threshold <= 0) return;
 
     ImageBuffer temp_buffer(alpha.width, alpha.height, 1);
@@ -159,7 +143,22 @@ void ColorUtils::despeckle(Image& alpha, int size_threshold) {
     }
 }
 
-ImageBuffer ColorUtils::resize(const Image& image, int new_width, int new_height) {
+void ColorUtils::composite_over_checker(Image rgba) {
+    if (rgba.empty() || rgba.channels < 4) return;
+
+    for (int y = 0; y < rgba.height; ++y) {
+        for (int x = 0; x < rgba.width; ++x) {
+            float alpha = std::clamp(rgba(y, x, 3), 0.0f, 1.0f);
+            float bg = (((x >> 4) + (y >> 4)) % 2 == 0) ? 0.4f : 0.2f;
+            for (int c = 0; c < 3; ++c) {
+                rgba(y, x, c) = rgba(y, x, c) * alpha + bg * (1.0f - alpha);
+            }
+            rgba(y, x, 3) = 1.0f;
+        }
+    }
+}
+
+ImageBuffer ColorUtils::resize(const Image image, int new_width, int new_height) {
     ImageBuffer result(new_width, new_height, image.channels);
     Image res_view = result.view();
 

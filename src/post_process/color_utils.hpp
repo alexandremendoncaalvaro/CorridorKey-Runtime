@@ -1,5 +1,6 @@
 #pragma once
 
+#include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
 
 namespace corridorkey {
@@ -8,25 +9,25 @@ namespace corridorkey {
  * @brief Pure math functions for pixel data.
  * All functions work on raw float buffers in linear space.
  */
-class ColorUtils {
+class CORRIDORKEY_API ColorUtils {
 public:
-    static void srgb_to_linear(Image& image);
-    static void linear_to_srgb(Image& image);
+    static void srgb_to_linear(Image image);
+    static void linear_to_srgb(Image image);
     
-    static void premultiply(Image& rgb, const Image& alpha);
-    static void unpremultiply(Image& rgb, const Image& alpha);
+    static void premultiply(Image rgb, const Image alpha);
+    static void unpremultiply(Image rgb, const Image alpha);
     
-    static void despill(Image& rgb, const Image& alpha, float strength);
+    static void despill(Image rgb, const Image alpha, float strength);
     
-    static void despeckle(Image& alpha, int size_threshold);
+    static void despeckle(Image alpha, int size_threshold);
     
-    static void composite_over_checker(Image& rgba);
+    static void composite_over_checker(Image rgba);
     
     /**
      * @brief Resize an image using bilinear interpolation.
      * Returns an owned ImageBuffer.
      */
-    static ImageBuffer resize(const Image& image, int new_width, int new_height);
+    static ImageBuffer resize(const Image image, int new_width, int new_height);
 
     /**
      * @brief Convert interleaved HWC data to planar NCHW data.
