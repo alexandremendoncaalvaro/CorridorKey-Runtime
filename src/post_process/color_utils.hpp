@@ -21,6 +21,8 @@ public:
     static void despeckle(Image& alpha, int size_threshold);
     
     static void composite_over_checker(Image& rgba);
+    
+    static Image resize(const Image& image, int new_width, int new_height);
 };
 
 } // namespace corridorkey
