@@ -13,7 +13,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     DeviceInfo device
 ) {
     if (!std::filesystem::exists(model_path)) {
-        return std::unexpected(Error{ ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string() });
+        return unexpected(Error{ ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string() });
     }
 
     try {
@@ -74,9 +74,9 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 
         return session_ptr;
     } catch (const Ort::Exception& e) {
-        return std::unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("ONNX Runtime session creation failed: ") + e.what() });
+        return unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("ONNX Runtime session creation failed: ") + e.what() });
     } catch (const std::exception& e) {
-        return std::unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("Failed to initialize session: ") + e.what() });
+        return unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("Failed to initialize session: ") + e.what() });
     }
 }
 
@@ -125,7 +125,7 @@ Result<FrameResult> InferenceSession::run(
         );
 
         if (output_tensors.empty()) {
-            return std::unexpected(Error{ ErrorCode::InferenceFailed, "Model produced no output tensors" });
+            return unexpected(Error{ ErrorCode::InferenceFailed, "Model produced no output tensors" });
         }
 
         // 3. Process Outputs (assume output 0 is Alpha Matte)
@@ -143,9 +143,9 @@ Result<FrameResult> InferenceSession::run(
         return result;
 
     } catch (const Ort::Exception& e) {
-        return std::unexpected(Error{ ErrorCode::InferenceFailed, std::string("ONNX Runtime execution failed: ") + e.what() });
+        return unexpected(Error{ ErrorCode::InferenceFailed, std::string("ONNX Runtime execution failed: ") + e.what() });
     } catch (const std::exception& e) {
-        return std::unexpected(Error{ ErrorCode::InferenceFailed, std::string("Inference error: ") + e.what() });
+        return unexpected(Error{ ErrorCode::InferenceFailed, std::string("Inference error: ") + e.what() });
     }
 }
 

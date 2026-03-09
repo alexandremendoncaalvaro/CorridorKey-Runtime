@@ -23,7 +23,7 @@ Result<std::unique_ptr<Engine>> Engine::create(
 ) {
     auto session_res = InferenceSession::create(model_path, device);
     if (!session_res) {
-        return std::unexpected(session_res.error());
+        return unexpected(session_res.error());
     }
 
     auto engine = std::unique_ptr<Engine>(new Engine());
@@ -38,7 +38,7 @@ Result<FrameResult> Engine::process_frame(
     const InferenceParams& params
 ) {
     if (!m_impl->session) {
-        return std::unexpected(Error{ ErrorCode::ModelLoadFailed, "Engine not initialized" });
+        return unexpected(Error{ ErrorCode::ModelLoadFailed, "Engine not initialized" });
     }
 
     return m_impl->session->run(rgb, alpha_hint, params);
@@ -54,7 +54,7 @@ Result<void> Engine::process_sequence(
     (void)on_progress;
 
     if (inputs.size() != alpha_hints.size()) {
-        return std::unexpected(Error{ ErrorCode::InvalidParameters, "Inputs and alpha hints size mismatch" });
+        return unexpected(Error{ ErrorCode::InvalidParameters, "Inputs and alpha hints size mismatch" });
     }
 
     // TODO: Implement sequence processing with FrameIO
