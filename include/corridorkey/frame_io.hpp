@@ -16,13 +16,13 @@ public:
 
     /**
      * @brief Read a single frame from disk.
-     * Supports EXR, PNG, JPG.
+     * Returns an owned ImageBuffer.
      */
-    static Result<Image> read_frame(const std::filesystem::path& path);
+    static Result<ImageBuffer> read_frame(const std::filesystem::path& path);
 
     /**
      * @brief Write a single frame to disk.
-     * Supports EXR, PNG.
+     * Takes a non-owning Image view.
      */
     static Result<void> write_frame(const std::filesystem::path& path, const Image& image);
 

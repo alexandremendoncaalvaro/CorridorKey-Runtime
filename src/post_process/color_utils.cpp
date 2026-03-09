@@ -134,12 +134,9 @@ void ColorUtils::composite_over_checker(Image& rgba) {
     (void)rgba;
 }
 
-Image ColorUtils::resize(const Image& image, int new_width, int new_height) {
-    Image result;
-    result.width = new_width;
-    result.height = new_height;
-    result.channels = image.channels;
-    result.data.resize(new_width * new_height * image.channels);
+ImageBuffer ColorUtils::resize(const Image& image, int new_width, int new_height) {
+    ImageBuffer result(new_width, new_height, image.channels);
+    Image result_view = result.view();
 
     float scale_x = (float)image.width / new_width;
     float scale_y = (float)image.height / new_height;
@@ -164,7 +161,7 @@ Image ColorUtils::resize(const Image& image, int new_width, int new_height) {
 
                 float v0 = v00 * (1.0f - dx) + v10 * dx;
                 float v1 = v01 * (1.0f - dx) + v11 * dx;
-                result.data[(y * new_width + x) * result.channels + c] = v0 * (1.0f - dy) + v1 * dy;
+                result_view.data[(y * new_width + x) * result_view.channels + c] = v0 * (1.0f - dy) + v1 * dy;
             }
         }
     }

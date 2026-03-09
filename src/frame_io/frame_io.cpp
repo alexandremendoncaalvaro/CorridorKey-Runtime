@@ -7,7 +7,7 @@ namespace corridorkey {
 // TODO: Include private headers for PNG, Video
 // #include "png_io.hpp"
 
-Result<Image> FrameIO::read_frame(const std::filesystem::path& path) {
+Result<ImageBuffer> FrameIO::read_frame(const std::filesystem::path& path) {
     auto ext = path.extension().string();
     
     // Dispatch based on extension
@@ -15,10 +15,10 @@ Result<Image> FrameIO::read_frame(const std::filesystem::path& path) {
         return read_exr(path);
     } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
         // return read_stb(path);
-        return std::unexpected(Error{ ErrorCode::IoError, "PNG/JPG reading not yet implemented" });
+        return unexpected(Error{ ErrorCode::IoError, "PNG/JPG reading not yet implemented" });
     }
 
-    return std::unexpected(Error{ ErrorCode::IoError, "Unsupported file format: " + ext });
+    return unexpected(Error{ ErrorCode::IoError, "Unsupported file format: " + ext });
 }
 
 Result<void> FrameIO::write_frame(const std::filesystem::path& path, const Image& image) {
@@ -56,15 +56,15 @@ Result<void> FrameIO::save_result(
         std::filesystem::path stem = std::filesystem::path(filename).stem();
         
         // 1. Save Alpha Matte (EXR)
-        auto matte_res = write_frame(matte_dir / stem.replace_extension(".exr"), result.alpha);
+        auto matte_res = write_frame(matte_dir / stem.replace_extension(".exr"), result.alpha.const_view());
         if (!matte_res) return matte_res;
 
         // 2. Save Foreground (EXR)
-        auto fg_res = write_frame(fg_dir / stem.replace_extension(".exr"), result.foreground);
+        auto fg_res = write_frame(fg_dir / stem.replace_extension(".exr"), result.foreground.const_view());
         if (!fg_res) return fg_res;
 
         // 3. Save Processed (EXR)
-        auto proc_res = write_frame(proc_dir / stem.replace_extension(".exr"), result.composite);
+        auto proc_res = write_frame(proc_dir / stem.replace_extension(".exr"), result.composite.const_view());
         if (!proc_res) return proc_res;
 
         // 4. Save Preview Comp (PNG)

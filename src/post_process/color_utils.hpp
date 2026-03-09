@@ -22,7 +22,11 @@ public:
     
     static void composite_over_checker(Image& rgba);
     
-    static Image resize(const Image& image, int new_width, int new_height);
+    /**
+     * @brief Resize an image using bilinear interpolation.
+     * Returns an owned ImageBuffer.
+     */
+    static ImageBuffer resize(const Image& image, int new_width, int new_height);
 
     /**
      * @brief Convert interleaved HWC data to planar NCHW data.

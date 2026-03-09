@@ -6,7 +6,7 @@
 
 namespace corridorkey {
 
-Result<Image> read_exr(const std::filesystem::path& path) {
+Result<ImageBuffer> read_exr(const std::filesystem::path& path) {
     try {
         Imf::RgbaInputFile file(path.string().c_str());
         Imath::Box2i dw = file.dataWindow();
@@ -14,36 +14,35 @@ Result<Image> read_exr(const std::filesystem::path& path) {
         int width = dw.max.x - dw.min.x + 1;
         int height = dw.max.y - dw.min.y + 1;
 
+        // Allocate aligned storage for VFX processing
+        ImageBuffer buffer(width, height, 4);
+        Image view = buffer.view();
+
         Imf::Array2D<Imf::Rgba> pixels(height, width);
         file.setFrameBuffer(&pixels[0][0] - dw.min.x - dw.min.y * width, 1, width);
         file.readPixels(dw.min.y, dw.max.y);
 
-        Image img;
-        img.width = width;
-        img.height = height;
-        img.channels = 4;
-        img.data.resize(width * height * 4);
-
+        // Convert OpenEXR Half RGBA to Aligned Float RGBA
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 const Imf::Rgba& p = pixels[y][x];
                 int idx = (y * width + x) * 4;
-                img.data[idx + 0] = (float)p.r;
-                img.data[idx + 1] = (float)p.g;
-                img.data[idx + 2] = (float)p.b;
-                img.data[idx + 3] = (float)p.a;
+                view.data[idx + 0] = (float)p.r;
+                view.data[idx + 1] = (float)p.g;
+                view.data[idx + 2] = (float)p.b;
+                view.data[idx + 3] = (float)p.a;
             }
         }
 
-        return img;
+        return std::move(buffer);
     } catch (const std::exception& e) {
-        return std::unexpected(Error{ ErrorCode::IoError, std::string("Failed to read EXR: ") + e.what() });
+        return unexpected(Error{ ErrorCode::IoError, std::string("Failed to read EXR: ") + e.what() });
     }
 }
 
 Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
     if (image.channels < 3) {
-        return std::unexpected(Error{ ErrorCode::InvalidParameters, "EXR write requires at least 3 channels (RGB)" });
+        return unexpected(Error{ ErrorCode::InvalidParameters, "EXR write requires at least 3 channels (RGB)" });
     }
 
     try {
@@ -69,7 +68,7 @@ Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
 
         return {};
     } catch (const std::exception& e) {
-        return std::unexpected(Error{ ErrorCode::IoError, std::string("Failed to write EXR: ") + e.what() });
+        return unexpected(Error{ ErrorCode::IoError, std::string("Failed to write EXR: ") + e.what() });
     }
 }
 
