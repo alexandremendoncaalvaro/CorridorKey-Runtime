@@ -85,46 +85,28 @@ Result<FrameResult> InferenceSession::run(
     const Image& alpha_hint,
     const InferenceParams& params
 ) {
-    (void)params; // Use params for post-processing later
+    (void)params;
 
     try {
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
         // 1. Prepare Inputs
-        // We need to keep the converted NCHW data alive during the Run() call.
-        // These vectors hold the actual float data.
         std::vector<std::vector<float>> input_buffers;
         std::vector<Ort::Value> input_tensors;
 
         for (size_t i = 0; i < m_input_node_dims.size(); ++i) {
             auto shape = m_input_node_dims[i];
-            int64_t model_c = shape[1];
-            int64_t model_h = shape[2];
-            int64_t model_w = shape[3];
-
             const Image& source = (i == 0) ? rgb : alpha_hint;
             
-            // Resize if needed
-            Image resized = (source.width != (int)model_w || source.height != (int)model_h) 
-                           ? ColorUtils::resize(source, (int)model_w, (int)model_h)
+            // Resize if model expects different resolution
+            Image resized = (source.width != (int)shape[3] || source.height != (int)shape[2]) 
+                           ? ColorUtils::resize(source, (int)shape[3], (int)shape[2])
                            : source;
 
-            // Convert HWC to NCHW
-            std::vector<float> planar_data(model_c * model_h * model_w);
-            for (int c = 0; c < model_c; ++c) {
-                for (int y = 0; y < model_h; ++y) {
-                    for (int x = 0; x < model_w; ++x) {
-                        int src_idx = (y * (int)model_w + x) * (int)source.channels + (c < (int)source.channels ? c : 0);
-                        int dst_idx = c * (int)model_h * (int)model_w + y * (int)model_w + x;
-                        planar_data[dst_idx] = resized.data[src_idx];
-                    }
-                }
-            }
+            // Convert HWC interleaved to NCHW planar
+            input_buffers.emplace_back(shape[1] * shape[2] * shape[3]);
+            ColorUtils::to_planar(resized, input_buffers.back().data());
             
-            // Move the data to the persistent container for this scope
-            input_buffers.push_back(std::move(planar_data));
-            
-            // Create the non-owning Ort::Value pointing to our managed buffer
             input_tensors.push_back(Ort::Value::CreateTensor<float>(
                 memory_info, 
                 input_buffers.back().data(), input_buffers.back().size(), 
@@ -146,36 +128,18 @@ Result<FrameResult> InferenceSession::run(
             return std::unexpected(Error{ ErrorCode::InferenceFailed, "Model produced no output tensors" });
         }
 
-        // 3. Process Outputs (NCHW to HWC)
-        // For now, we assume output 0 is the Alpha Matte (1-channel)
-        // CorridorKey model outputs vary, we'll refine this as we know the exact ONNX version.
+        // 3. Process Outputs (assume output 0 is Alpha Matte)
         auto& raw_output = output_tensors[0];
-        auto output_info = raw_output.GetTensorTypeAndShapeInfo();
-        auto output_shape = output_info.GetShape();
+        auto shape = raw_output.GetTensorTypeAndShapeInfo().GetShape();
         
-        int64_t out_c = output_shape[1];
-        int64_t out_h = output_shape[2];
-        int64_t out_w = output_shape[3];
-        float* out_data = raw_output.GetTensorMutableData<float>();
-
         FrameResult result;
-        result.alpha.width = (int)out_w;
-        result.alpha.height = (int)out_h;
-        result.alpha.channels = (int)out_c;
-        result.alpha.data.resize(out_c * out_h * out_w);
+        result.alpha.width = (int)shape[3];
+        result.alpha.height = (int)shape[2];
+        result.alpha.channels = (int)shape[1];
+        result.alpha.data.resize(result.alpha.width * result.alpha.height * result.alpha.channels);
 
-        // Convert NCHW to HWC for the output Image
-        for (int c = 0; c < out_c; ++c) {
-            for (int y = 0; y < out_h; ++y) {
-                for (int x = 0; x < out_w; ++x) {
-                    int src_idx = c * (int)out_h * (int)out_w + y * (int)out_w + x;
-                    int dst_idx = (y * (int)out_w + x) * (int)out_c + c;
-                    result.alpha.data[dst_idx] = out_data[src_idx];
-                }
-            }
-        }
+        ColorUtils::from_planar(raw_output.GetTensorData<float>(), result.alpha);
 
-        // TODO: Map other outputs to foreground and composite
         return result;
 
     } catch (const Ort::Exception& e) {
