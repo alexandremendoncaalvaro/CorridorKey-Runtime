@@ -131,6 +131,20 @@
   considerado fechado; a proxima rodada precisa medir e reduzir esse custo sem
   perder resolucao nem qualidade.
 
+## Checkpoints medidos ja confirmados
+
+- Paralelizacao explicita do `despeckle` no fallback CPU melhorou o benchmark
+  sintetico limpo `int8_512`:
+  - `post_despeckle`: `2614.331 ms` -> `692.164 ms` total (`-73.5%`)
+  - `avg_latency_ms`: `1970.097 ms` -> `1674.577 ms` (`-15.0%`)
+  - `cold_latency_ms`: `3915.566 ms` -> `3426.698 ms` (`-12.5%`)
+- Cache de modelo otimizado por backend reduziu startup entre a primeira e a
+  segunda execucao sintetica CPU `int8_512`:
+  - `engine_create`: `473.243 ms` -> `110.579 ms` (`-76.6%`)
+  - `avg_latency_ms`: `2537.366 ms` -> `1725.103 ms` (`-32.0%`)
+  - `ort_run`: `21606.237 ms` -> `17264.443 ms` total (`-20.1%`)
+- Mesmo com esses ganhos, `ort_run` continua sendo o gargalo principal.
+
 ## Como retomar sem perder contexto
 
 - Primeiro, executar o baseline operacional:
@@ -140,6 +154,8 @@
   - `CORRIDORKEY_CORPUS_PROFILE=smoke` para validacao curta
   - `CORRIDORKEY_CORPUS_PROFILE=baseline` para o baseline de trabalho
   - `CORRIDORKEY_CORPUS_PROFILE=full` para a rodada completa do corpus
+- Para comparar uma rodada com outra, usar:
+  - `python3 scripts/compare_benchmarks.py before.json after.json`
 - Depois, gerar artefatos do corpus em pasta fora dos arquivos rastreados:
   - salvar `doctor`, `benchmark` e `process --json`
   - registrar qual asset foi usado, modelo, backend, preset e se houve fallback
