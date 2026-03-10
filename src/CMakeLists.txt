@@ -56,6 +56,7 @@ endif()
 
 # Organize subdirectories
 add_subdirectory(core)
+add_subdirectory(app)
 add_subdirectory(frame_io)
 add_subdirectory(post_process)
 

@@ -6,8 +6,11 @@
 #include <iomanip>
 #include <fstream>
 #include <cpr/cpr.h>
+#include "../app/job_orchestrator.hpp"
+#include "../app/hardware_profile.hpp"
 
 using namespace corridorkey;
+using namespace corridorkey::app;
 
 void print_info() {
     auto devices = list_devices();
@@ -31,27 +34,39 @@ void print_info() {
 }
 
 int main(int argc, char* argv[]) {
-    cxxopts::Options options("corridorkey", "High-performance neural green screen keyer runtime");
+    cxxopts::Options options("corridorkey", "CorridorKey Runtime - High-performance neural green screen keyer");
 
     options.add_options()
-        ("command", "Sub-command to run (info, process)", cxxopts::value<std::string>())
+        ("command", "Sub-command to run (info, process, download)", cxxopts::value<std::string>())
         ("i,input", "Input video or directory of frames", cxxopts::value<std::string>())
-        ("a,alpha-hint", "Alpha hint video or directory", cxxopts::value<std::string>())
-        ("o,output", "Output directory", cxxopts::value<std::string>())
-        ("m,model", "Path to GreenFormer ONNX model", cxxopts::value<std::string>())
-        ("r,resolution", "Target resolution (0=auto, 512, 1024, etc.)", cxxopts::value<int>()->default_value("0"))
-        ("d,device", "Device index or name (auto, cpu, coreml, cuda, dml)", cxxopts::value<std::string>()->default_value("auto"))
-        ("variant", "Model variant to download (fp32, fp16, int8, all)", cxxopts::value<std::string>())
-        ("despill", "Green spill removal strength (0.0 - 10.0)", cxxopts::value<float>()->default_value("1.0"))
-        ("no-despeckle", "Disable morphological cleanup")
-        ("despeckle-size", "Cleanup threshold in pixels", cxxopts::value<int>()->default_value("400"))
-        ("input-linear", "Input images are already in linear space")
-        ("tiled", "Enable tiling inference for high-res inputs")
-        ("tile-padding", "Padding for tile blending in pixels", cxxopts::value<int>()->default_value("32"))
+        ("a,alpha-hint", "Alpha hint video or directory (optional)", cxxopts::value<std::string>())
+        ("o,output", "Output directory or file", cxxopts::value<std::string>())
+        ("m,model", "Path to ONNX model file", cxxopts::value<std::string>())
+        ("r,resolution", "Resolution (0=auto, 512, 768, 1024)", cxxopts::value<int>()->default_value("0"))
+        ("d,device", "Device (auto, cpu, coreml, cuda, dml)", cxxopts::value<std::string>()->default_value("auto"))
+        ("variant", "Model variant (int8, fp16, fp32)", cxxopts::value<std::string>())
+        ("despill", "Green spill removal (0.0-1.0)", cxxopts::value<float>()->default_value("1.0"))
+        ("no-despeckle", "Disable cleanup")
+        ("tiled", "Enable tiling for high-res (4K+)")
         ("v,version", "Print version")
-        ("h,help", "Print help");
+        ("h,help", "Print detailed help");
 
     options.parse_positional({"command"});
+
+    if (argc <= 1) {
+        std::cout << "==========================================\n"
+                  << "      CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n"
+                  << "==========================================\n\n"
+                  << "Welcome! To use this tool, follow these steps:\n\n"
+                  << "1. Download a model (int8 is recommended):\n"
+                  << "   corridorkey download --variant int8\n\n"
+                  << "2. Process a video (Auto-detecting resolution/device):\n"
+                  << "   corridorkey process -i input.mp4 -o output.mp4 -m models/corridorkey_int8_512.onnx\n\n"
+                  << "3. For 4K videos or high-detail, use tiling:\n"
+                  << "   corridorkey process -i input.mp4 -o output.mp4 -m models/corridorkey_int8_768.onnx --tiled\n\n"
+                  << "Run 'corridorkey --help' for all options.\n" << std::endl;
+        return 0;
+    }
 
     try {
         auto result = options.parse(argc, argv);
@@ -67,7 +82,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (!result.count("command")) {
-            std::cout << "Error: No command specified. Use 'info' or 'process'." << std::endl;
+            std::cout << "Error: No command specified. Use 'info', 'download' or 'process'." << std::endl;
             return 1;
         }
 
@@ -102,7 +117,7 @@ int main(int argc, char* argv[]) {
                 std::ofstream of(output_path, std::ios::binary);
                 
                 cpr::Response r = cpr::Download(of, cpr::Url{url}, cpr::ProgressCallback(
-                    [](size_t downloadTotal, size_t downloadNow, size_t /*uploadTotal*/, size_t /*uploadNow*/, intptr_t /*userdata*/) -> bool {
+                    [](size_t downloadTotal, size_t downloadNow, size_t, size_t, intptr_t) -> bool {
                         if (downloadTotal > 0) {
                             float p = static_cast<float>(downloadNow) / downloadTotal;
                             int bar_width = 50;
@@ -134,42 +149,29 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
 
-            std::filesystem::path input_path = result["input"].as<std::string>();
-            std::filesystem::path hint_path = result.count("alpha-hint") ? result["alpha-hint"].as<std::string>() : "";
-            std::filesystem::path output_path = result["output"].as<std::string>();
-            std::filesystem::path model_path = result["model"].as<std::string>();
+            JobRequest req;
+            req.input_path = result["input"].as<std::string>();
+            req.hint_path = result.count("alpha-hint") ? result["alpha-hint"].as<std::string>() : "";
+            req.output_path = result["output"].as<std::string>();
+            req.model_path = result["model"].as<std::string>();
 
-            // Ensure output directory exists
-            if (std::filesystem::is_directory(output_path) || output_path.extension().empty()) {
-                std::filesystem::create_directories(output_path);
-            } else {
-                std::filesystem::create_directories(output_path.parent_path());
-            }
-
-            InferenceParams params;
-            params.target_resolution = result["resolution"].as<int>();
-            params.despill_strength = result["despill"].as<float>();
-            params.auto_despeckle = !result.count("no-despeckle");
-            params.despeckle_size = result["despeckle-size"].as<int>();
-            params.input_is_linear = result.count("input-linear");
-            params.enable_tiling = result.count("tiled");
-            params.tile_padding = result["tile-padding"].as<int>();
+            req.params.target_resolution = result["resolution"].as<int>();
+            req.params.despill_strength = result["despill"].as<float>();
+            req.params.auto_despeckle = !result.count("no-despeckle");
+            req.params.enable_tiling = result.count("tiled");
 
             auto devices = list_devices();
             std::string device_str = result["device"].as<std::string>();
-            DeviceInfo selected_device = devices[0]; // Default to auto/first
+            req.device = devices[0]; // Default to auto/first
 
             if (device_str != "auto") {
                 try {
-                    // Try parsing as index
                     int idx = std::stoi(device_str);
                     if (idx >= 0 && idx < (int)devices.size()) {
-                        selected_device = devices[idx];
+                        req.device = devices[idx];
                     }
                 } catch (...) {
-                    // Try parsing as name
                     std::transform(device_str.begin(), device_str.end(), device_str.begin(), ::tolower);
-                    bool found = false;
                     for (const auto& d : devices) {
                         std::string b_name;
                         switch (d.backend) {
@@ -181,33 +183,15 @@ int main(int argc, char* argv[]) {
                             default: b_name = ""; break;
                         }
                         if (b_name == device_str) {
-                            selected_device = d;
-                            found = true;
+                            req.device = d;
                             break;
                         }
-                    }
-                    if (!found) {
-                        std::cerr << "Warning: Device '" << device_str << "' not found. Falling back to default." << std::endl;
                     }
                 }
             }
 
-            auto engine_res = Engine::create(model_path, selected_device);
-            if (!engine_res) {
-                std::cerr << "Engine Error: " << engine_res.error().message << std::endl;
-                return 1;
-            }
-            auto engine = std::move(*engine_res);
-
             std::cout << "Processing Engine Setup:\n"
-                      << " - Device: " << selected_device.name << " [" << device_str << "]\n"
-                      << " - Target Resolution: " << (params.target_resolution > 0 ? params.target_resolution : engine->recommended_resolution()) << "x" << (params.target_resolution > 0 ? params.target_resolution : engine->recommended_resolution()) << "\n";
-
-            auto is_video_file = [](const std::filesystem::path& p) {
-                std::string ext = p.extension().string();
-                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                return ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv";
-            };
+                      << " - Device: " << req.device.name << " [" << device_str << "]\n";
 
             auto progress = [](float p, const std::string& status) -> bool {
                 int bar_width = 50;
@@ -216,57 +200,12 @@ int main(int argc, char* argv[]) {
                 return true;
             };
 
-            if (std::filesystem::is_regular_file(input_path) && is_video_file(input_path)) {
-                std::cout << "Processing video..." << std::endl;
-                auto process_res = engine->process_video(input_path, hint_path, output_path, params, progress);
-                std::cout << std::endl;
+            auto process_res = JobOrchestrator::run(req, progress);
+            std::cout << std::endl;
 
-                if (!process_res) {
-                    std::cerr << "Error: " << process_res.error().message << std::endl;
-                    return 1;
-                }
-            } else {
-                std::vector<std::filesystem::path> inputs;
-                std::vector<std::filesystem::path> hints;
-
-                auto is_image_file = [](const std::filesystem::path& p) {
-                    std::string ext = p.extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    return ext == ".png" || ext == ".exr" || ext == ".jpg" || ext == ".jpeg";
-                };
-
-                if (std::filesystem::is_directory(input_path)) {
-                    for (const auto& entry : std::filesystem::directory_iterator(input_path)) {
-                        if (entry.is_regular_file() && is_image_file(entry.path())) {
-                            inputs.push_back(entry.path());
-                            if (!hint_path.empty()) {
-                                hints.push_back(hint_path / entry.path().filename());
-                            }
-                        }
-                    }
-                    std::sort(inputs.begin(), inputs.end());
-                    if (!hints.empty()) std::sort(hints.begin(), hints.end());
-                } else {
-                    inputs.push_back(input_path);
-                    if (!hint_path.empty()) {
-                        hints.push_back(hint_path);
-                    }
-                }
-
-                if (inputs.empty()) {
-                    std::cerr << "Error: No valid image files found." << std::endl;
-                    return 1;
-                }
-
-                std::cout << "Processing " << inputs.size() << " frames..." << std::endl;
-                
-                auto process_res = engine->process_sequence(inputs, hints, output_path, params, progress);
-                std::cout << std::endl;
-
-                if (!process_res) {
-                    std::cerr << "Error: " << process_res.error().message << std::endl;
-                    return 1;
-                }
+            if (!process_res) {
+                std::cerr << "Error: " << process_res.error().message << std::endl;
+                return 1;
             }
 
             std::cout << "Done!" << std::endl;

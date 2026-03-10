@@ -8,32 +8,9 @@ namespace corridorkey {
 
 InferenceSession::InferenceSession(DeviceInfo device)
     : m_device(std::move(device)) {
-    
-    // Hardware Tier Logic
-    // HIGH: 10+ GB dedicated -> 1024
-    // MEDIUM: 12-16 GB unified -> 768
-    // LOW: < 12 GB -> 512
-    // CPU: -> 512
-
-    if (m_device.backend == Backend::CPU) {
-        m_recommended_resolution = 512;
-    } else if (m_device.backend == Backend::CoreML || m_device.backend == Backend::DirectML) {
-        // Unified or generic GPU
-        if (m_device.available_memory_mb >= 16000) {
-            m_recommended_resolution = 768;
-        } else {
-            m_recommended_resolution = 512;
-        }
-    } else {
-        // Dedicated GPUs (CUDA, TensorRT)
-        if (m_device.available_memory_mb >= 10000) {
-            m_recommended_resolution = 1024;
-        } else if (m_device.available_memory_mb >= 8000) {
-            m_recommended_resolution = 768;
-        } else {
-            m_recommended_resolution = 512;
-        }
-    }
+    // Default recommended resolution. High-level layers (App) 
+    // will typically override this via InferenceParams.
+    m_recommended_resolution = 512;
 }
 
 InferenceSession::~InferenceSession() = default;
@@ -62,9 +39,15 @@ void InferenceSession::configure_session_options() {
             m_session_options.AppendExecutionProvider_TensorRT(trt_options);
             break;
         }
+#ifdef _WIN32
         case Backend::DirectML: {
+            // DirectML is only available on Windows. We use the generic provider string.
+            std::unordered_map<std::string, std::string> dml_options;
+            dml_options["device_id"] = "0";
+            m_session_options.AppendExecutionProvider("DML", dml_options);
             break;
         }
+#endif
         default:
             break;
     }

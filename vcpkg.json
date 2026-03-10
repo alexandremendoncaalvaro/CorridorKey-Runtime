@@ -6,7 +6,10 @@
         {
             "name": "onnxruntime",
             "platform": "!osx",
-            "$comment": "Primary ML inference engine (Vendored on macOS for CoreML)"
+            "features": [
+                "directml"
+            ],
+            "$comment": "Primary ML inference engine (Vendored on macOS for CoreML, DML on Windows)"
         },
         {
             "name": "openexr",
