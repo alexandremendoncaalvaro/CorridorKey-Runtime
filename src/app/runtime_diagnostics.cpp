@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "../frame_io/video_io.hpp"
+#include "common/runtime_paths.hpp"
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -107,16 +108,6 @@ std::filesystem::path current_executable_path() {
     }
 #endif
     return {};
-}
-
-std::filesystem::path default_cache_dir() {
-#if defined(__APPLE__)
-    const char* home = std::getenv("HOME");
-    if (home != nullptr) {
-        return std::filesystem::path(home) / "Library" / "Caches" / "CorridorKey";
-    }
-#endif
-    return std::filesystem::temp_directory_path() / "corridorkey-cache";
 }
 
 bool is_path_writable(const std::filesystem::path& path) {
@@ -323,12 +314,27 @@ nlohmann::json inspect_video_stack() {
 }
 
 nlohmann::json inspect_cache() {
-    auto cache_dir = default_cache_dir();
+    auto cache_dir = common::default_cache_root();
     bool writable = is_path_writable(cache_dir);
+    auto optimized_models_dir = cache_dir / "optimized_models";
+
+    nlohmann::json optimized_models = nlohmann::json::array();
+    std::error_code error;
+    if (std::filesystem::exists(optimized_models_dir, error)) {
+        for (const auto& entry : std::filesystem::directory_iterator(optimized_models_dir, error)) {
+            if (error || !entry.is_regular_file()) {
+                continue;
+            }
+            optimized_models.push_back(entry.path().filename().string());
+        }
+    }
 
     nlohmann::json json;
     json["path"] = cache_dir.string();
     json["writable"] = writable;
+    json["optimized_models_dir"] = optimized_models_dir.string();
+    json["optimized_model_count"] = optimized_models.size();
+    json["optimized_models"] = optimized_models;
     json["healthy"] = writable;
     return json;
 }
