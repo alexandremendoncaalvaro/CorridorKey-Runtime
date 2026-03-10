@@ -31,18 +31,30 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(APPLE)
     # On macOS, use the vendored ONNX Runtime with CoreML support
     set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime")
+    set(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_ROOT}/lib")
+
+    if(EXISTS "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.dylib")
+        set(ONNXRUNTIME_DYLIB "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.dylib")
+    else()
+        file(GLOB ONNXRUNTIME_DYLIB_CANDIDATES "${ONNXRUNTIME_LIB_DIR}/libonnxruntime*.dylib")
+        list(FILTER ONNXRUNTIME_DYLIB_CANDIDATES EXCLUDE REGEX "\\.dSYM")
+        if(NOT ONNXRUNTIME_DYLIB_CANDIDATES)
+            message(FATAL_ERROR "Unable to locate vendored ONNX Runtime dylib in ${ONNXRUNTIME_LIB_DIR}")
+        endif()
+        list(GET ONNXRUNTIME_DYLIB_CANDIDATES 0 ONNXRUNTIME_DYLIB)
+    endif()
 
     # Create the imported target manually since we are skipping find_package config
     add_library(onnxruntime::onnxruntime SHARED IMPORTED)
     set_target_properties(onnxruntime::onnxruntime PROPERTIES
-        IMPORTED_LOCATION "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.dylib"
+        IMPORTED_LOCATION "${ONNXRUNTIME_DYLIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_ROOT}/include"
     )
 
     # Ensure the executable can find the dylib at runtime
-    set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_ROOT}/lib")
+    set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
 
-    message(STATUS "Using vendored ONNX Runtime with CoreML support at: ${ONNXRUNTIME_ROOT}")
+    message(STATUS "Using vendored ONNX Runtime with CoreML support at: ${ONNXRUNTIME_DYLIB}")
 else()
     find_package(onnxruntime REQUIRED)
 endif()

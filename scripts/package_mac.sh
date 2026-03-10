@@ -7,7 +7,20 @@ BIN_NAME="corridorkey"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release}"
 SIGN_IDENTITY="${CORRIDORKEY_SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${CORRIDORKEY_NOTARY_PROFILE:-}"
-RUNTIME_LIB="vendor/onnxruntime/lib/libonnxruntime.1.16.3.dylib"
+RUNTIME_DIR="vendor/onnxruntime/lib"
+
+if [ -f "$RUNTIME_DIR/libonnxruntime.dylib" ]; then
+    RUNTIME_LIB="$RUNTIME_DIR/libonnxruntime.dylib"
+else
+    RUNTIME_LIB="$(find "$RUNTIME_DIR" -maxdepth 1 -type f -name 'libonnxruntime*.dylib' | head -n 1)"
+fi
+
+if [ -z "${RUNTIME_LIB:-}" ] || [ ! -f "$RUNTIME_LIB" ]; then
+    echo "ERROR: Unable to locate vendored ONNX Runtime dylib in $RUNTIME_DIR"
+    exit 1
+fi
+
+RUNTIME_LIB_NAME="$(basename "$RUNTIME_LIB")"
 
 echo "[1/5] Cleaning and creating dist directory..."
 rm -rf "$DIST_DIR"
@@ -18,7 +31,9 @@ mkdir -p "$DIST_DIR/outputs"
 echo "[2/5] Copying binaries and libraries..."
 cp "${BUILD_DIR}/src/cli/corridorkey" "$DIST_DIR/bin/"
 cp "$RUNTIME_LIB" "$DIST_DIR/bin/"
-ln -sf "libonnxruntime.1.16.3.dylib" "$DIST_DIR/bin/libonnxruntime.dylib"
+if [ "$RUNTIME_LIB_NAME" != "libonnxruntime.dylib" ]; then
+    ln -sf "$RUNTIME_LIB_NAME" "$DIST_DIR/bin/libonnxruntime.dylib"
+fi
 
 for model in corridorkey_int8_512.onnx corridorkey_int8_768.onnx; do
     if [ -f "models/$model" ]; then
@@ -28,7 +43,7 @@ done
 
 echo "[3/5] Fixing library paths for portability..."
 # Make the binary look for the dylib in the same directory
-install_name_tool -change "@rpath/libonnxruntime.1.16.3.dylib" "@executable_path/libonnxruntime.1.16.3.dylib" "$DIST_DIR/bin/$BIN_NAME"
+install_name_tool -change "@rpath/$RUNTIME_LIB_NAME" "@executable_path/$RUNTIME_LIB_NAME" "$DIST_DIR/bin/$BIN_NAME"
 
 echo "[4/5] Adding documentation..."
 cat << 'README_EOF' > "$DIST_DIR/README.txt"
@@ -71,7 +86,7 @@ chmod +x "$DIST_DIR/smoke_test.sh"
 
 if [ -n "$SIGN_IDENTITY" ]; then
     echo "[4.5/5] Signing bundle..."
-    codesign --force --options runtime --sign "$SIGN_IDENTITY" "$DIST_DIR/bin/libonnxruntime.1.16.3.dylib"
+    codesign --force --options runtime --sign "$SIGN_IDENTITY" "$DIST_DIR/bin/$RUNTIME_LIB_NAME"
     codesign --force --options runtime --sign "$SIGN_IDENTITY" "$DIST_DIR/bin/$BIN_NAME"
 fi
 
