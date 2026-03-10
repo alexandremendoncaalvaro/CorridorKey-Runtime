@@ -1,6 +1,8 @@
 # Integration tests (with files, no GPU)
 
 add_executable(test_integration
+    test_doctor_report.cpp
+    test_engine_tiling.cpp
     test_exr_roundtrip.cpp
     test_png_roundtrip.cpp
     test_video_roundtrip.cpp
@@ -13,6 +15,8 @@ target_link_libraries(test_integration
         corridorkey_core_static
         Catch2::Catch2WithMain
 )
+
+target_compile_definitions(test_integration PRIVATE PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 
 if(NOT MSVC)
     target_compile_options(test_integration PRIVATE -Wall -Wextra -Wpedantic -Werror)
