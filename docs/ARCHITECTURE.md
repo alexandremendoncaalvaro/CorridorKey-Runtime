@@ -13,15 +13,29 @@
 
 ## 1. Architectural Philosophy
 
-This project aims to be a **robust, portable, and usable runtime** for high-quality green screen keying on consumer hardware. We follow a modular architecture that strictly separates the **Core** (business logic) from the **Application** (orchestration) and **Interfaces** (CLI, TUI, etc.).
+This project exists to ship CorridorKey inference as a **native, distributable,
+and integrable runtime** for real hardware. The architecture is designed around
+predictable operations, low-friction distribution, and reusable surfaces rather
+than around a generic multi-backend abstraction.
+
+We follow a modular architecture that strictly separates the **Core** (business
+logic) from the **Application** (orchestration) and **Interfaces** (CLI, GUI,
+sidecar, plugin hosts, and similar surfaces).
 
 **Key Principles:**
 
-1.  **Core Isolation:** Logic for inference, video processing, and math must never know about the user interface.
-2.  **CLI First:** The CLI is the primary contract. Any feature exposed to a future GUI must first exist in the CLI.
-3.  **Progressive Complexity:** We build solid foundations (Core -> App -> CLI) before adding fancy interfaces (TUI -> GUI).
-4.  **Real Modularization:** Components must be reusable. The core engine should be linkable into other C++ applications (like Blender or OBS plugins) without carrying CLI baggage.
-5.  **Bridge, Not Duplication:** The future desktop UI consumes the runtime through a sidecar/bridge contract. Business logic stays in Core/App, never in the GUI.
+1.  **Production Runtime First:** Native execution, diagnostics, and
+    distribution quality matter more than broad backend claims.
+2.  **Library First:** The engine is the product boundary. CLI, GUI, sidecar,
+    plugin, and pipeline integrations consume the same runtime instead of
+    reimplementing behavior.
+3.  **CLI As Operational Contract:** Any feature exposed to a future GUI or
+    embedded surface must first exist in the CLI or public library contract.
+4.  **Curated Platform Tracks:** macOS Apple Silicon is the current release
+    gate. Windows RTX is the next product track. Other platform paths stay
+    architecture-ready until validated.
+5.  **Bridge, Not Duplication:** User interfaces consume the runtime through
+    stable contracts. Business logic stays in Core/App.
 
 ---
 
@@ -33,10 +47,10 @@ our needs, combined with **Clean Architecture** layering.
 ### Layer 1: Core (`src/core`, `src/frame_io`, `src/post_process`)
 **Responsibility:** The engine, math, and I/O capabilities.
 *   **Inference:** ONNX Runtime wrapper, session management.
-*   **Hardware:** Device detection, backend selection (CPU/GPU/NPU).
+*   **Hardware:** Device detection and provider selection within the current product tracks.
 *   **Video Pipeline:** FFmpeg integration for direct memory processing.
 *   **Math:** Color space conversion, despill, despeckle algorithms.
-*   **Auto-Hinting:** Heuristic alpha generation.
+*   **Hint Handling:** External hint ingestion plus rough-matte fallback generation.
 
 **Rules:**
 *   Must not depend on CLI or App layers.
@@ -56,7 +70,7 @@ our needs, combined with **Clean Architecture** layering.
 **Responsibility:** Interacting with the user.
 *   **CLI:** The current primary interface. Parses arguments, configures the engine, and formats output.
 *   **Bridge contract:** JSON commands and NDJSON job events, including fallback diagnostics and stage timings, that a future Tauri sidecar can consume without parsing human-readable text.
-*   Additional interfaces (TUI/GUI) must remain thin clients over the same App/Core contracts.
+*   Additional interfaces (GUI, sidecar adapters, plugin hosts, pipeline embeddings) must remain thin clients over the same App/Core contracts.
 
 ---
 

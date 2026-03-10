@@ -1,3 +1,20 @@
+## Business context
+
+The desktop UI is not the first product deliverable. The first deliverable is a
+native runtime that is easy to install, predictable to operate, and stable to
+integrate.
+
+The frontend exists to make that runtime approachable for real users:
+
+- technical local operators who want to run without Python
+- Windows RTX users who want predictable performance and diagnostics
+- integrators who need a clean embedded surface later
+
+The GUI must therefore consume an already operational runtime contract instead
+of inventing workflow logic of its own.
+
+---
+
 ## Recommended stack
 
 - **Desktop shell:** Tauri 2
@@ -80,11 +97,11 @@ It must be a **guided workflow layer** on top of a **runtime-first / CLI-first**
 
 The implementation order is fixed:
 
-1. macOS runtime robustness
-2. portable macOS CLI distribution
+1. macOS production runtime
+2. Windows RTX product track
 3. stable sidecar/bridge contract
 4. desktop GUI implementation
-5. expansion to other architectures
+5. broader platform expansion
 
 Primary product goal:
 
@@ -96,6 +113,15 @@ Primary product goal:
 
 The frontend should make the runtime feel **obvious**, not merely powerful.
 Power must remain available, but through **progressive disclosure**.
+
+### Product audiences
+
+- **Technical local operator:** wants to install, run, diagnose, and export
+  without rebuilding a Python environment.
+- **Windows RTX operator:** wants predictable provider behavior, reproducible
+  benchmarks, and hardware-aware defaults.
+- **Integrator:** wants to evaluate the runtime as a future sidecar, plugin, or
+  embedded engine.
 
 ---
 
@@ -220,6 +246,7 @@ This layout should prioritize visual work first, without overwhelming the user w
 - choose backend
 - adjust advanced parameters
 - generate or import alpha/hints
+- inspect whether hints came from external assets or rough-matte fallback
 - annotate frames when required
 - start job
 - cancel job
@@ -269,6 +296,7 @@ This layout should prioritize visual work first, without overwhelming the user w
 - backend fallback reasons must be structured, not embedded only in log text
 - the GUI reads capabilities, model catalog, and preset catalog from the runtime instead of duplicating them
 - the GUI metrics and diagnostics surfaces consume runtime timings instead of deriving their own estimates
+- the GUI must surface whether an external alpha hint or rough-matte fallback is active
 
 The frontend must remain a **client** of the application/runtime bridge.
 No business logic should be duplicated in the UI.
@@ -287,6 +315,7 @@ The interface must always expose:
 - ETA or elapsed processing time
 - active backend
 - GPU/VRAM/runtime diagnostics when relevant
+- active hint source and fallback reason when relevant
 - current workflow step
 - next required action
 
