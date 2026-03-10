@@ -201,7 +201,7 @@ Result<void> Engine::process_video(
         frame_idx++;
     }
 
-    // Drain pipeline
+    // Drain pipeline and ensure all frames are written
     while (!pipeline.empty()) {
         auto res = pipeline.front().get();
         pipeline.pop_front();
@@ -210,6 +210,9 @@ Result<void> Engine::process_video(
         auto write_res = writer->write_frame(res->composite.view());
         if (!write_res) return unexpected(write_res.error());
     }
+
+    // Final flush of the encoder to capture remaining buffered frames
+    writer.reset(); // Destructor flushes the encoder
 
     if (on_progress) {
         on_progress(1.0f, "Done");
