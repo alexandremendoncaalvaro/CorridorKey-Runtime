@@ -165,6 +165,59 @@
     `batch-size 4`
   - O ganho adicional de `4` sobre `2` foi pequeno demais nesta maquina para
     justificar promover esse valor como default sem mais corpus e memoria real
+- A deteccao macOS agora faz fallback para a arquitetura compilada quando
+  `sysctl` falha no ambiente atual:
+  - `info --json` voltou a expor `apple_silicon: true`, `coreml_available:
+    true` e os devices `coreml` + `cpu`
+  - isso virou cobertura unit em `tests/unit/test_device_detection.cpp`
+- O proximo bloqueio real do trilho macOS nao e mais deteccao:
+  - a criacao de sessao `CoreML` continua falhando na build vendorizada atual
+  - o fallback estruturado agora mostra o motivo: `Error compiling model Failed
+    to create a working directory appropriate for URL`
+  - trocar `TMPDIR` para um path controlado do workspace nao resolveu
+  - antes de voltar a medir throughput no provider acelerado, o proximo corte
+    deve ser resolver ou contornar esse limite do `CoreML EP`
+- A investigacao local confirmou a causa do bloqueio:
+  - o vendor atual e `ONNX Runtime 1.16.3`
+  - o header local ainda expoe apenas `OrtSessionOptionsAppendExecutionProvider_CoreML`
+  - `ModelCacheDirectory` e os provider options novos de `CoreML` nao existem
+    nesse vendor
+- Trilha de retomada para o upgrade do vendor:
+  - source oficial clonado em `vendor/onnxruntime-src` na tag `v1.24.3`
+  - a build oficial precisa de Python `3.10+`; aqui ela esta sendo forcada com
+    `PATH="/Volumes/MacMini/mise/installs/python/3.13.12/bin:$PATH"`
+  - com `CMake 4.2`, foi necessario adicionar
+    `CMAKE_POLICY_VERSION_MINIMUM=3.5`
+  - a release `v1.24.3` tambem precisou de um patch local em
+    `onnxruntime/core/providers/coreml/model/model.mm` para envolver
+    `MLOptimizationHints` em `@available`, mantendo target `macOS 14+`
+  - comando de build atual:
+    `./build.sh --config Release --build_shared_lib --parallel --skip_tests --skip_submodule_sync --use_coreml --cmake_extra_defines CMAKE_OSX_ARCHITECTURES=arm64 CMAKE_OSX_DEPLOYMENT_TARGET=14.0 CMAKE_POLICY_VERSION_MINIMUM=3.5 onnxruntime_BUILD_UNIT_TESTS=OFF`
+  - depois que a `libonnxruntime` nova sair, os proximos passos sao:
+    1. trocar `vendor/onnxruntime`
+    2. validar `process --json -d coreml -i assets/corridor.png`
+    3. confirmar que o fallback por diretorio temporario desapareceu
+- Estado atual dessa trilha:
+  - o vendor local ja foi trocado para `ONNX Runtime 1.24.3`
+  - o runtime agora usa `ModelCacheDirectory` para `CoreML`, mas nao tenta mais
+    serializar modelo otimizado nesse backend
+  - a serializacao otimizada ficou restrita a `CPU`; isso virou cobertura unit
+    em `tests/unit/test_session_cache_policy.cpp`
+  - no ambiente sandbox do Codex, `process --json -d coreml` ainda cai para CPU
+    com erro de diretorio temporario
+  - fora do sandbox, o mesmo probe agora sobe em `CoreML` e conclui com
+    `backend_selected = coreml`
+  - o primeiro benchmark sintetico fora do sandbox mostrou que `CoreML` ainda
+    esta mais lento que `CPU` no `int8_512` desta maquina:
+    - `avg_latency_ms`: `2789.437 ms` em `coreml` vs `1500.269 ms` em `cpu`
+    - `cold_latency_ms`: `5847.240 ms` em `coreml` vs `3508.227 ms` em `cpu`
+    - `session_create_requested`: `1270.750 ms` em `coreml` vs `218.895 ms`
+      em `cpu`
+    - `ort_run`: `24496.280 ms` total em `coreml` vs `12902.352 ms` em `cpu`
+- Proximo corte depois deste ponto:
+  - medir `CoreML` em `benchmark --json` e `process --json` fora do sandbox
+  - comparar startup real, warmup e `ort_run` com o fallback `CPU`
+  - voltar para o workload 4K tiled com o provider acelerado funcional
 - Mesmo com esses ganhos, `ort_run` continua sendo o gargalo principal.
 - Ao medir o workload 4K tiled no ambiente sandbox atual, apareceu um bug real:
   o cache otimizado tentava gravar em um root nao permitido e falhava em
