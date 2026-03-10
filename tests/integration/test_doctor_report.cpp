@@ -22,6 +22,10 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["video"]["supported_encoders"].is_array());
     REQUIRE(report["video"].contains("portable_h264_available"));
     REQUIRE(report["cache"].contains("writable"));
+    REQUIRE(report["cache"].contains("configured_path"));
+    REQUIRE(report["cache"].contains("selected_path"));
+    REQUIRE(report["cache"].contains("fallback_in_use"));
+    REQUIRE(report["cache"]["candidates"].is_array());
     REQUIRE(report["cache"].contains("optimized_models_dir"));
     REQUIRE(report["cache"].contains("optimized_model_count"));
     REQUIRE(report["cache"]["optimized_models"].is_array());

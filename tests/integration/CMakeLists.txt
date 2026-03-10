@@ -1,6 +1,7 @@
 # Integration tests (with files, no GPU)
 
 add_executable(test_integration
+    test_cache_fallback.cpp
     test_doctor_report.cpp
     test_engine_tiling.cpp
     test_exr_roundtrip.cpp

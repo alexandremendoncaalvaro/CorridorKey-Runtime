@@ -110,25 +110,6 @@ std::filesystem::path current_executable_path() {
     return {};
 }
 
-bool is_path_writable(const std::filesystem::path& path) {
-    std::error_code error;
-    std::filesystem::create_directories(path, error);
-    if (error) {
-        return false;
-    }
-
-    auto probe = path / ".corridorkey-write-probe";
-    std::ofstream stream(probe);
-    if (!stream.good()) {
-        return false;
-    }
-
-    stream << "ok";
-    stream.close();
-    std::filesystem::remove(probe, error);
-    return true;
-}
-
 std::optional<std::filesystem::path> find_runtime_library(const std::filesystem::path& directory) {
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) {
@@ -314,11 +295,17 @@ nlohmann::json inspect_video_stack() {
 }
 
 nlohmann::json inspect_cache() {
-    auto cache_dir = common::default_cache_root();
-    bool writable = is_path_writable(cache_dir);
-    auto optimized_models_dir = cache_dir / "optimized_models";
+    auto configured_cache_dir = common::configured_cache_root();
+    auto selected_cache_dir = common::selected_cache_root();
+    auto effective_cache_dir = selected_cache_dir.value_or(configured_cache_dir);
+    auto optimized_models_dir = effective_cache_dir / "optimized_models";
 
     nlohmann::json optimized_models = nlohmann::json::array();
+    nlohmann::json candidates = nlohmann::json::array();
+    for (const auto& candidate : common::cache_root_candidates()) {
+        candidates.push_back(candidate.string());
+    }
+
     std::error_code error;
     if (std::filesystem::exists(optimized_models_dir, error)) {
         for (const auto& entry : std::filesystem::directory_iterator(optimized_models_dir, error)) {
@@ -330,12 +317,18 @@ nlohmann::json inspect_cache() {
     }
 
     nlohmann::json json;
-    json["path"] = cache_dir.string();
-    json["writable"] = writable;
+    json["path"] = effective_cache_dir.string();
+    json["configured_path"] = configured_cache_dir.string();
+    json["selected_path"] =
+        selected_cache_dir.has_value() ? selected_cache_dir->string() : std::string();
+    json["writable"] = selected_cache_dir.has_value();
+    json["fallback_in_use"] =
+        selected_cache_dir.has_value() && selected_cache_dir.value() != configured_cache_dir;
+    json["candidates"] = candidates;
     json["optimized_models_dir"] = optimized_models_dir.string();
     json["optimized_model_count"] = optimized_models.size();
     json["optimized_models"] = optimized_models;
-    json["healthy"] = writable;
+    json["healthy"] = selected_cache_dir.has_value();
     return json;
 }
 
