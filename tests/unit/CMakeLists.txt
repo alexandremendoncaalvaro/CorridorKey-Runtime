@@ -7,6 +7,7 @@ add_executable(test_unit
     test_device_detection.cpp
     test_inference_session.cpp
     test_runtime_contracts.cpp
+    test_stage_profiler.cpp
 )
 
 target_link_libraries(test_unit

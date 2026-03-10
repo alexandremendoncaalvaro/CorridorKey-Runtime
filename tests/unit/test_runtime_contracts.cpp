@@ -48,6 +48,7 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     event.backend = Backend::CPU;
     event.message = "Generic CPU";
     event.fallback = BackendFallbackInfo{Backend::CoreML, Backend::CPU, "CoreML session failed"};
+    event.timings.push_back(StageTiming{"ort_run", 12.5, 1, 3});
 
     auto json = to_json(event);
 
@@ -56,6 +57,10 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     REQUIRE(json["backend"] == "cpu");
     REQUIRE(json["fallback"]["requested_backend"] == "coreml");
     REQUIRE(json["fallback"]["selected_backend"] == "cpu");
+    REQUIRE(json["timings"][0]["name"] == "ort_run");
+    REQUIRE(json["timings"][0]["total_ms"] == Catch::Approx(12.5));
+    REQUIRE(json["timings"][0]["avg_ms"] == Catch::Approx(12.5));
+    REQUIRE(json["timings"][0]["ms_per_unit"] == Catch::Approx(12.5 / 3.0));
 }
 
 TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {
