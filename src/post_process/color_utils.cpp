@@ -2,197 +2,104 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
-#include <vector>
 
 #include "common/srgb_lut.hpp"
 
-#if __has_include(<execution>) && (defined(__cpp_lib_execution) || !defined(__clang__))
-#include <execution>
-#define EXEC_POLICY std::execution::par_unseq,
-#else
-#define EXEC_POLICY
-#endif
-
 namespace corridorkey {
 
-void ColorUtils::srgb_to_linear(Image image) {
-    const auto& lut = SrgbLut::instance();
-    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(),
-                  [&](float& p) { p = lut.to_linear(p); });
-}
-
-void ColorUtils::linear_to_srgb(Image image) {
-    const auto& lut = SrgbLut::instance();
-    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(),
-                  [&](float& p) { p = lut.to_srgb(p); });
-}
-
-void ColorUtils::premultiply(Image rgb, const Image alpha) {
-    if (rgb.empty() || alpha.empty()) return;
-
-    size_t pixels = static_cast<size_t>(rgb.width) * rgb.height;
-    int channels = rgb.channels;
-    std::vector<int> indices(pixels);
-    std::iota(indices.begin(), indices.end(), 0);
-
-    std::for_each(EXEC_POLICY indices.begin(), indices.end(), [&](int i) {
-        float a = alpha.data[i];
-        float* p = &rgb.data[i * channels];
-        p[0] *= a;
-        p[1] *= a;
-        p[2] *= a;
-    });
-}
-
-void ColorUtils::unpremultiply(Image rgb, const Image alpha) {
-    if (rgb.empty() || alpha.empty()) return;
-
-    size_t pixels = static_cast<size_t>(rgb.width) * rgb.height;
-    int channels = rgb.channels;
-    std::vector<int> indices(pixels);
-    std::iota(indices.begin(), indices.end(), 0);
-
-    std::for_each(EXEC_POLICY indices.begin(), indices.end(), [&](int i) {
-        float a = alpha.data[i];
-        if (a > 0.0001f) {
-            float* p = &rgb.data[i * channels];
-            float inv_a = 1.0f / a;
-            p[0] *= inv_a;
-            p[1] *= inv_a;
-            p[2] *= inv_a;
-        }
-    });
-}
-
-// Tiled HWC -> NCHW conversion for cache efficiency
-void ColorUtils::to_planar(const Image src, float* dst) {
-    int w = src.width;
-    int h = src.height;
-    int c = src.channels;
-
-    constexpr int TILE = 64;
-    for (int ty = 0; ty < h; ty += TILE) {
-        for (int tx = 0; tx < w; tx += TILE) {
-            int tile_h = std::min(TILE, h - ty);
-            int tile_w = std::min(TILE, w - tx);
-            for (int ch = 0; ch < c; ++ch) {
-                float* plane = dst + (static_cast<size_t>(ch) * w * h);
-                for (int y = ty; y < ty + tile_h; ++y) {
-                    for (int x = tx; x < tx + tile_w; ++x) {
-                        plane[y * w + x] = src.data[(static_cast<size_t>(y) * w + x) * c + ch];
-                    }
-                }
-            }
+void ColorUtils::premultiply(Image rgb, Image alpha) {
+    for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
+            const float alpha_val = alpha(y_pos, x_pos, 0);
+            rgb(y_pos, x_pos, 0) *= alpha_val;
+            rgb(y_pos, x_pos, 1) *= alpha_val;
+            rgb(y_pos, x_pos, 2) *= alpha_val;
         }
     }
 }
 
-// Tiled NCHW -> HWC conversion for cache efficiency
-void ColorUtils::from_planar(const float* src, Image dst) {
-    int w = dst.width;
-    int h = dst.height;
-    int c = dst.channels;
-
-    constexpr int TILE = 64;
-    for (int ty = 0; ty < h; ty += TILE) {
-        for (int tx = 0; tx < w; tx += TILE) {
-            int tile_h = std::min(TILE, h - ty);
-            int tile_w = std::min(TILE, w - tx);
-            for (int ch = 0; ch < c; ++ch) {
-                const float* plane = src + (static_cast<size_t>(ch) * w * h);
-                for (int y = ty; y < ty + tile_h; ++y) {
-                    for (int x = tx; x < tx + tile_w; ++x) {
-                        dst.data[(static_cast<size_t>(y) * w + x) * c + ch] = plane[y * w + x];
-                    }
-                }
+void ColorUtils::unpremultiply(Image rgb, Image alpha) {
+    for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
+            const float alpha_val = alpha(y_pos, x_pos, 0);
+            if (alpha_val > 0.0F) {
+                rgb(y_pos, x_pos, 0) /= alpha_val;
+                rgb(y_pos, x_pos, 1) /= alpha_val;
+                rgb(y_pos, x_pos, 2) /= alpha_val;
             }
         }
     }
 }
 
 void ColorUtils::composite_over_checker(Image rgba) {
-    if (rgba.empty() || rgba.channels < 4) return;
+    const SrgbLut& lut = SrgbLut::instance();
+    const float bg_dark = lut.to_linear(0.15F);
+    const float bg_light = lut.to_linear(0.55F);
 
-    // Checker params matching original Python: sRGB 0.15/0.55, checker_size=128
-    // Convert sRGB constants to linear (matching cu.srgb_to_linear(bg_srgb))
-    const auto& lut = SrgbLut::instance();
-    const float bg_dark = lut.to_linear(0.15f);
-    const float bg_light = lut.to_linear(0.55f);
+    const int height = rgba.height;
+    const int width = rgba.width;
 
-    int h = rgba.height;
-    int w = rgba.width;
-    std::vector<int> rows(h);
-    std::iota(rows.begin(), rows.end(), 0);
+    for (int y_pos = 0; y_pos < height; ++y_pos) {
+        for (int x_pos = 0; x_pos < width; ++x_pos) {
+            const float alpha = rgba(y_pos, x_pos, 3);
+            const bool is_dark = ((y_pos / 16) + (x_pos / 16)) % 2 == 0;
+            const float bg_val = is_dark ? bg_dark : bg_light;
 
-    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
-        for (int x = 0; x < w; ++x) {
-            float alpha = std::clamp(rgba(y, x, 3), 0.0f, 1.0f);
-            float bg = (((x / 128) + (y / 128)) % 2 == 0) ? bg_dark : bg_light;
-            for (int c = 0; c < 3; ++c) {
-                rgba(y, x, c) = rgba(y, x, c) + bg * (1.0f - alpha);
-            }
-            rgba(y, x, 3) = 1.0f;
+            rgba(y_pos, x_pos, 0) = rgba(y_pos, x_pos, 0) * alpha + bg_val * (1.0F - alpha);
+            rgba(y_pos, x_pos, 1) = rgba(y_pos, x_pos, 1) * alpha + bg_val * (1.0F - alpha);
+            rgba(y_pos, x_pos, 2) = rgba(y_pos, x_pos, 2) * alpha + bg_val * (1.0F - alpha);
+            rgba(y_pos, x_pos, 3) = 1.0F;
         }
-    });
+    }
 }
 
-void ColorUtils::generate_rough_matte(const Image rgb, Image alpha_hint) {
-    if (rgb.empty() || alpha_hint.empty()) return;
+void ColorUtils::generate_rough_matte(Image rgb, Image alpha_hint) {
+    const int height = rgb.height;
+    const int width = rgb.width;
 
-    int h = rgb.height;
-    int w = rgb.width;
-    std::vector<int> rows(h);
-    std::iota(rows.begin(), rows.end(), 0);
+    for (int y_pos = 0; y_pos < height; ++y_pos) {
+        for (int x_pos = 0; x_pos < width; ++x_pos) {
+            const float red = rgb(y_pos, x_pos, 0);
+            const float green = rgb(y_pos, x_pos, 1);
+            const float blue = rgb(y_pos, x_pos, 2);
 
-    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
-        for (int x = 0; x < w; ++x) {
-            float r = rgb(y, x, 0);
-            float g = rgb(y, x, 1);
-            float b = rgb(y, x, 2);
+            // Simple green-detecting heuristic
+            const float green_bias = green - std::max(red, blue);
+            float matte = 1.0F - std::clamp(green_bias * 2.0F, 0.0F, 1.0F);
 
-            // Simple green screen threshold: g > r and g > b
-            // We look for pixels where green is significantly higher than others
-            float max_rb = std::max(r, b);
-            float green_diff = g - max_rb;
-
-            // Map difference to a rough alpha:
-            // If green is much higher, alpha goes to 0 (transparent)
-            // If not green, alpha stays 1 (opaque)
-            float mask = std::clamp(green_diff * 10.0f, 0.0f, 1.0f);
-            alpha_hint(y, x, 0) = 1.0f - mask;
+            alpha_hint(y_pos, x_pos, 0) = matte;
         }
-    });
+    }
 }
 
-ImageBuffer ColorUtils::resize(const Image image, int new_width, int new_height) {
+ImageBuffer ColorUtils::resize(Image image, int new_width, int new_height) {
     ImageBuffer result(new_width, new_height, image.channels);
     Image res_view = result.view();
 
-    float scale_x = static_cast<float>(image.width) / new_width;
-    float scale_y = static_cast<float>(image.height) / new_height;
+    const float scale_x = static_cast<float>(image.width) / static_cast<float>(new_width);
+    const float scale_y = static_cast<float>(image.height) / static_cast<float>(new_height);
 
-    for (int y = 0; y < new_height; ++y) {
-        float src_y = (y + 0.5f) * scale_y - 0.5f;
-        int y0 = std::max(0, static_cast<int>(std::floor(src_y)));
-        int y1 = std::min(y0 + 1, image.height - 1);
-        float dy = src_y - y0;
+    for (int y_pos = 0; y_pos < new_height; ++y_pos) {
+        const float src_y = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
+        const int y0 = std::max(0, static_cast<int>(std::floor(src_y)));
+        const int y1 = std::min(y0 + 1, image.height - 1);
+        const float d_y = src_y - static_cast<float>(y0);
 
-        for (int x = 0; x < new_width; ++x) {
-            float src_x = (x + 0.5f) * scale_x - 0.5f;
-            int x0 = std::max(0, static_cast<int>(std::floor(src_x)));
-            int x1 = std::min(x0 + 1, image.width - 1);
-            float dx = src_x - x0;
+        for (int x_pos = 0; x_pos < new_width; ++x_pos) {
+            const float src_x = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
+            const int x0 = std::max(0, static_cast<int>(std::floor(src_x)));
+            const int x1 = std::min(x0 + 1, image.width - 1);
+            const float d_x = src_x - static_cast<float>(x0);
 
-            for (int c = 0; c < image.channels; ++c) {
-                float v00 = image(y0, x0, c);
-                float v10 = image(y0, x1, c);
-                float v01 = image(y1, x0, c);
-                float v11 = image(y1, x1, c);
+            for (int channel = 0; channel < image.channels; ++channel) {
+                const float v00 = image(y0, x0, channel);
+                const float v10 = image(y0, x1, channel);
+                const float v01 = image(y1, x0, channel);
+                const float v11 = image(y1, x1, channel);
 
-                float v0 = v00 * (1.0f - dx) + v10 * dx;
-                float v1 = v01 * (1.0f - dx) + v11 * dx;
-                res_view(y, x, c) = v0 * (1.0f - dy) + v1 * dy;
+                const float val_y0 = v00 * (1.0F - d_x) + v10 * d_x;
+                const float val_y1 = v01 * (1.0F - d_x) + v11 * d_x;
+                res_view(y_pos, x_pos, channel) = val_y0 * (1.0F - d_y) + val_y1 * d_y;
             }
         }
     }
@@ -200,27 +107,28 @@ ImageBuffer ColorUtils::resize(const Image image, int new_width, int new_height)
     return result;
 }
 
-std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(const Image image, int target_w, int target_h) {
-    float scale = std::min(static_cast<float>(target_w) / image.width,
-                           static_cast<float>(target_h) / image.height);
-    int new_w = static_cast<int>(image.width * scale);
-    int new_h = static_cast<int>(image.height * scale);
+std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(Image image, int target_width, int target_height) {
+    const float scale =
+        std::min(static_cast<float>(target_width) / static_cast<float>(image.width),
+                 static_cast<float>(target_height) / static_cast<float>(image.height));
+    const int new_w = static_cast<int>(static_cast<float>(image.width) * scale);
+    const int new_h = static_cast<int>(static_cast<float>(image.height) * scale);
 
     ImageBuffer resized = resize(image, new_w, new_h);
 
-    ImageBuffer result(target_w, target_h, image.channels);
-    std::fill(result.view().data.begin(), result.view().data.end(), 0.0f);
+    ImageBuffer result(target_width, target_height, image.channels);
+    std::fill(result.view().data.begin(), result.view().data.end(), 0.0F);
 
-    int pad_x = (target_w - new_w) / 2;
-    int pad_y = (target_h - new_h) / 2;
+    const int pad_x = (target_width - new_w) / 2;
+    const int pad_y = (target_height - new_h) / 2;
 
     Image dst = result.view();
     Image src = resized.view();
 
-    for (int y = 0; y < new_h; ++y) {
-        for (int x = 0; x < new_w; ++x) {
-            for (int c = 0; c < image.channels; ++c) {
-                dst(y + pad_y, x + pad_x, c) = src(y, x, c);
+    for (int y_pos = 0; y_pos < new_h; ++y_pos) {
+        for (int x_pos = 0; x_pos < new_w; ++x_pos) {
+            for (int channel = 0; channel < image.channels; ++channel) {
+                dst(y_pos + pad_y, x_pos + pad_x, channel) = src(y_pos, x_pos, channel);
             }
         }
     }
@@ -228,19 +136,65 @@ std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(const Image image, int target_w
     return std::make_pair(std::move(result), Rect{pad_x, pad_y, new_w, new_h});
 }
 
-ImageBuffer ColorUtils::crop(const Image image, int x_start, int y_start, int w, int h) {
-    ImageBuffer result(w, h, image.channels);
+ImageBuffer ColorUtils::crop(Image image, int x_start, int y_start, int width, int height) {
+    ImageBuffer result(width, height, image.channels);
     Image dst = result.view();
 
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            for (int c = 0; c < image.channels; ++c) {
-                dst(y, x, c) = image(y + y_start, x + x_start, c);
+    for (int y_pos = 0; y_pos < height; ++y_pos) {
+        for (int x_pos = 0; x_pos < width; ++x_pos) {
+            for (int channel = 0; channel < image.channels; ++channel) {
+                dst(y_pos, x_pos, channel) = image(y_pos + y_start, x_pos + x_start, channel);
             }
         }
     }
 
     return result;
+}
+
+void ColorUtils::to_planar(Image src, float* dst) {
+    const int height = src.height;
+    const int width = src.width;
+    const int channels = src.channels;
+    const size_t channel_stride = static_cast<size_t>(height) * width;
+
+    for (int channel = 0; channel < channels; ++channel) {
+        for (int y_pos = 0; y_pos < height; ++y_pos) {
+            for (int x_pos = 0; x_pos < width; ++x_pos) {
+                dst[static_cast<size_t>(channel) * channel_stride +
+                    (static_cast<size_t>(y_pos) * width + x_pos)] = src(y_pos, x_pos, channel);
+            }
+        }
+    }
+}
+
+void ColorUtils::from_planar(const float* src, Image dst) {
+    const int height = dst.height;
+    const int width = dst.width;
+    const int channels = dst.channels;
+    const size_t channel_stride = static_cast<size_t>(height) * width;
+
+    for (int channel = 0; channel < channels; ++channel) {
+        for (int y_pos = 0; y_pos < height; ++y_pos) {
+            for (int x_pos = 0; x_pos < width; ++x_pos) {
+                dst(y_pos, x_pos, channel) = src[static_cast<size_t>(channel) * channel_stride +
+                                                 (static_cast<size_t>(y_pos) * width + x_pos)];
+            }
+        }
+    }
+}
+
+void ColorUtils::srgb_to_linear(Image image) {
+    const SrgbLut& lut = SrgbLut::instance();
+    for (float& val : image.data) {
+        val = lut.to_linear(val);
+    }
+}
+
+void ColorUtils::linear_to_srgb(Image image) {
+    const SrgbLut& lut = SrgbLut::instance();
+    for (float& val : image.data) {
+        val = lut.to_srgb(val);
+    }
 }
 
 }  // namespace corridorkey
