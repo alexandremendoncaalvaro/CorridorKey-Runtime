@@ -41,6 +41,10 @@
         {
             "name": "cpr",
             "$comment": "C++ Requests for downloading models"
+        },
+        {
+            "name": "nlohmann-json",
+            "$comment": "JSON for modern C++ - used for structured CLI output"
         }
     ]
 }

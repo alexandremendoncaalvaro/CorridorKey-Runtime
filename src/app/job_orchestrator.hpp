@@ -3,8 +3,18 @@
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <string>
+#include <nlohmann/json.hpp>
 
 namespace corridorkey::app {
+
+/**
+ * @brief Structured result of a job.
+ */
+struct JobResult {
+    bool success;
+    std::string message;
+    nlohmann::json metadata;
+};
 
 /**
  * @brief Definition of a processing job.
@@ -31,6 +41,22 @@ public:
      * Handles file detection (video vs sequence) and engine initialization.
      */
     static Result<void> run(const JobRequest& request, ProgressCallback on_progress = nullptr);
+
+    /**
+     * @brief Get comprehensive hardware and system information as JSON.
+     * Used by CLI --json and future GUIs.
+     */
+    static nlohmann::json get_system_info();
+
+    /**
+     * @brief Run a diagnostic check on the system and models.
+     */
+    static nlohmann::json run_doctor(const std::filesystem::path& models_dir);
+
+    /**
+     * @brief Run a performance benchmark.
+     */
+    static nlohmann::json run_benchmark(const std::filesystem::path& model_path, const DeviceInfo& device);
 
 private:
     static bool is_video_file(const std::filesystem::path& p);

@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
     cxxopts::Options options("corridorkey", "CorridorKey Runtime - High-performance neural green screen keyer");
 
     options.add_options()
-        ("command", "Sub-command to run (info, process, download)", cxxopts::value<std::string>())
+        ("command", "Sub-command to run (info, process, download, doctor, benchmark)", cxxopts::value<std::string>())
         ("i,input", "Input video or directory of frames", cxxopts::value<std::string>())
         ("a,alpha-hint", "Alpha hint video or directory (optional)", cxxopts::value<std::string>())
         ("o,output", "Output directory or file", cxxopts::value<std::string>())
@@ -45,9 +45,11 @@ int main(int argc, char* argv[]) {
         ("r,resolution", "Resolution (0=auto, 512, 768, 1024)", cxxopts::value<int>()->default_value("0"))
         ("d,device", "Device (auto, cpu, coreml, cuda, dml)", cxxopts::value<std::string>()->default_value("auto"))
         ("variant", "Model variant (int8, fp16, fp32)", cxxopts::value<std::string>())
+        ("batch-size", "Number of frames to process in a single GPU call", cxxopts::value<int>()->default_value("1"))
         ("despill", "Green spill removal (0.0-1.0)", cxxopts::value<float>()->default_value("1.0"))
         ("no-despeckle", "Disable cleanup")
         ("tiled", "Enable tiling for high-res (4K+)")
+        ("json", "Output results in JSON format")
         ("v,version", "Print version")
         ("h,help", "Print detailed help");
 
@@ -70,6 +72,7 @@ int main(int argc, char* argv[]) {
 
     try {
         auto result = options.parse(argc, argv);
+        bool use_json = result.count("json");
 
         if (result.count("help")) {
             std::cout << options.help() << std::endl;
@@ -77,21 +80,72 @@ int main(int argc, char* argv[]) {
         }
 
         if (result.count("version")) {
-            std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << std::endl;
+            if (use_json) {
+                std::cout << nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}).dump() << std::endl;
+            } else {
+                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << std::endl;
+            }
             return 0;
         }
 
         if (!result.count("command")) {
-            std::cout << "Error: No command specified. Use 'info', 'download' or 'process'." << std::endl;
+            std::cout << "Error: No command specified. Use 'info', 'download', 'process', 'doctor' or 'benchmark'." << std::endl;
             return 1;
         }
 
         std::string cmd = result["command"].as<std::string>();
 
         if (cmd == "info") {
-            print_info();
+            if (use_json) {
+                std::cout << JobOrchestrator::get_system_info().dump(4) << std::endl;
+            } else {
+                print_info();
+            }
             return 0;
         } 
+
+        if (cmd == "doctor") {
+            std::filesystem::path models_dir = "models";
+            if (result.count("model")) {
+                models_dir = std::filesystem::path(result["model"].as<std::string>()).parent_path();
+            }
+            auto report = JobOrchestrator::run_doctor(models_dir);
+            if (use_json) {
+                std::cout << report.dump(4) << std::endl;
+            } else {
+                std::cout << "--- CorridorKey Doctor Report ---\n"
+                          << "Version: " << report["system"]["version"].get<std::string>() << "\n"
+                          << "Detected Devices: " << report["system"]["devices"].size() << "\n";
+                for (const auto& m : report["models"]) {
+                    if (m["found"].get<bool>()) {
+                        std::cout << " [OK] Model: " << m["variant"].get<std::string>() << "_" << m["resolution"].get<int>() << "\n";
+                    }
+                }
+            }
+            return 0;
+        }
+
+        if (cmd == "benchmark") {
+            if (!result.count("model")) {
+                std::cout << "Error: 'benchmark' requires a --model path." << std::endl;
+                return 1;
+            }
+            
+            auto devices = list_devices();
+            DeviceInfo selected_device = devices[0];
+            
+            auto report = JobOrchestrator::run_benchmark(result["model"].as<std::string>(), selected_device);
+            if (use_json) {
+                std::cout << report.dump(4) << std::endl;
+            } else {
+                std::cout << "--- Benchmark Results ---\n"
+                          << "Device: " << report["device"].get<std::string>() << "\n"
+                          << "Resolution: " << report["resolution"].get<int>() << "x" << report["resolution"].get<int>() << "\n"
+                          << "Avg Latency: " << report["avg_latency_ms"].get<float>() << " ms\n"
+                          << "Estimated FPS: " << report["fps"].get<float>() << "\n";
+            }
+            return 0;
+        }
 
         if (cmd == "download") {
             std::string variant = result.count("variant") ? result["variant"].as<std::string>() : "int8";
@@ -158,6 +212,7 @@ int main(int argc, char* argv[]) {
             req.params.target_resolution = result["resolution"].as<int>();
             req.params.despill_strength = result["despill"].as<float>();
             req.params.auto_despeckle = !result.count("no-despeckle");
+            req.params.batch_size = result["batch-size"].as<int>();
             req.params.enable_tiling = result.count("tiled");
 
             auto devices = list_devices();
@@ -190,25 +245,50 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            std::cout << "Processing Engine Setup:\n"
-                      << " - Device: " << req.device.name << " [" << device_str << "]\n";
+            if (!use_json) {
+                std::cout << "Processing Engine Setup:\n"
+                          << " - Device: " << req.device.name << " [" << device_str << "]\n";
+            }
 
-            auto progress = [](float p, const std::string& status) -> bool {
-                int bar_width = 50;
-                std::cout << "\r[" << std::string(bar_width * p, '=') << std::string(bar_width * (1-p), ' ') << "] " 
-                          << int(p * 100.0) << "% " << status << std::flush;
+            auto progress = [use_json](float p, const std::string& status) -> bool {
+                if (use_json) {
+                    nlohmann::json event;
+                    event["type"] = "progress";
+                    event["value"] = p;
+                    event["status"] = status;
+                    std::cout << event.dump() << std::endl;
+                } else {
+                    int bar_width = 50;
+                    std::cout << "\r[" << std::string(bar_width * p, '=') << std::string(bar_width * (1-p), ' ') << "] " 
+                              << int(p * 100.0) << "% " << status << std::flush;
+                }
                 return true;
             };
 
             auto process_res = JobOrchestrator::run(req, progress);
-            std::cout << std::endl;
+            if (!use_json) std::cout << std::endl;
 
             if (!process_res) {
-                std::cerr << "Error: " << process_res.error().message << std::endl;
+                if (use_json) {
+                    nlohmann::json err;
+                    err["type"] = "error";
+                    err["message"] = process_res.error().message;
+                    err["code"] = static_cast<int>(process_res.error().code);
+                    std::cout << err.dump() << std::endl;
+                } else {
+                    std::cerr << "Error: " << process_res.error().message << std::endl;
+                }
                 return 1;
             }
 
-            std::cout << "Done!" << std::endl;
+            if (use_json) {
+                nlohmann::json success;
+                success["type"] = "complete";
+                success["message"] = "Processing finished successfully";
+                std::cout << success.dump() << std::endl;
+            } else {
+                std::cout << "Done!" << std::endl;
+            }
             return 0;
         }
 

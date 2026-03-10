@@ -35,6 +35,7 @@ endif()
 target_link_libraries(corridorkey_core
     PUBLIC
         corridorkey_headers
+        nlohmann_json::nlohmann_json
     PRIVATE
         onnxruntime::onnxruntime
         OpenEXR::OpenEXR
@@ -85,6 +86,7 @@ if(BUILD_TESTING)
         PUBLIC
             corridorkey_headers
             onnxruntime::onnxruntime
+            nlohmann_json::nlohmann_json
         PRIVATE
             OpenEXR::OpenEXR
             PNG::PNG
