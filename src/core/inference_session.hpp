@@ -51,6 +51,20 @@ private:
     void extract_metadata();
 
     /**
+     * @brief Internal raw inference (no post-processing).
+     */
+    Result<FrameResult> infer_raw(
+        const Image& rgb,
+        const Image& alpha_hint,
+        const InferenceParams& params
+    );
+
+    /**
+     * @brief Apply despeckle, despill and composition to raw results.
+     */
+    void apply_post_process(FrameResult& result, const InferenceParams& params);
+
+    /**
      * @brief Helper for running tiling inference on large images.
      */
     Result<FrameResult> run_tiled(

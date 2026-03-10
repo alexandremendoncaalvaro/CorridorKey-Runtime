@@ -185,11 +185,8 @@ Result<FrameResult> InferenceSession::run_tiled(
                 }
             }
 
-            // Run inference on tile (recursive call but non-tiled params)
-            InferenceParams sub_params = params;
-            sub_params.enable_tiling = false; 
-            sub_params.target_resolution = tile_size; 
-            auto res = run(rgb_tile.view(), hint_tile.view(), sub_params);
+            // Run raw inference on tile
+            auto res = infer_raw(rgb_tile.view(), hint_tile.view(), params);
             if (!res) return unexpected(res.error());
 
             // Accumulate
@@ -221,62 +218,62 @@ Result<FrameResult> InferenceSession::run_tiled(
         }
     }
 
-    // Final Post-Process on full image
     FrameResult result;
     result.alpha = std::move(acc_alpha);
     result.foreground = std::move(acc_fg);
 
-    // Run standard post-process pipeline on full image
-    if (!result.alpha.view().empty() && !result.foreground.view().empty()) {
-        int w = result.foreground.view().width;
-        int h = result.foreground.view().height;
-
-        if (params.auto_despeckle) {
-            despeckle(result.alpha.view(), params.despeckle_size);
-        }
-        despill(result.foreground.view(), params.despill_strength);
-
-        const auto& lut = SrgbLut::instance();
-        Image fg = result.foreground.const_view();
-        Image alpha_view = result.alpha.const_view();
-
-        result.processed = ImageBuffer(w, h, 4);
-        Image proc = result.processed.view();
-
-        for (int y = 0; y < h; ++y) {
-            for (int x = 0; x < w; ++x) {
-                float a = alpha_view(y, x);
-                proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
-                proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
-                proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
-                proc(y, x, 3) = a;
-            }
-        }
-
-        result.composite = ImageBuffer(w, h, 4);
-        Image comp = result.composite.view();
-        std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
-
-        ColorUtils::composite_over_checker(comp);
-        ColorUtils::linear_to_srgb(comp);
-    }
+    // Apply post-process on the full stitched image
+    apply_post_process(result, params);
 
     return result;
 }
 
-Result<FrameResult> InferenceSession::run(
+void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params) {
+    if (result.alpha.view().empty() || result.foreground.view().empty()) return;
+
+    int w = result.foreground.view().width;
+    int h = result.foreground.view().height;
+
+    // 1. Despeckle alpha
+    if (params.auto_despeckle) {
+        despeckle(result.alpha.view(), params.despeckle_size);
+    }
+
+    // 2. Despill FG in sRGB space
+    despill(result.foreground.view(), params.despill_strength);
+
+    // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
+    const auto& lut = SrgbLut::instance();
+    Image fg = result.foreground.const_view();
+    Image alpha_view = result.alpha.const_view();
+
+    result.processed = ImageBuffer(w, h, 4);
+    Image proc = result.processed.view();
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            float a = alpha_view(y, x);
+            proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
+            proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
+            proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
+            proc(y, x, 3) = a;
+        }
+    }
+
+    // 4. Composite on checker (linear space), then convert to sRGB
+    result.composite = ImageBuffer(w, h, 4);
+    Image comp = result.composite.view();
+    std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
+
+    ColorUtils::composite_over_checker(comp);
+    ColorUtils::linear_to_srgb(comp);
+}
+
+Result<FrameResult> InferenceSession::infer_raw(
     const Image& rgb,
     const Image& alpha_hint,
     const InferenceParams& params
 ) {
-    // Check for tiling request
-    int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-    
-    // Only tile if requested and input is significantly larger than model
-    if (params.enable_tiling && (rgb.width > target_res || rgb.height > target_res)) {
-        return run_tiled(rgb, alpha_hint, params, target_res);
-    }
-
     try {
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
@@ -408,56 +405,30 @@ Result<FrameResult> InferenceSession::run(
             ColorUtils::from_planar(output_tensors[1].GetTensorData<float>(), result.foreground.view());
         }
 
-        // Post-process pipeline (matches original Python order):
-        // 1. Despeckle alpha (space-agnostic, operates on 0-1 mask)
-        // 2. Despill FG in sRGB (model output is sRGB)
-        // 3. Convert FG to linear, premultiply, pack RGBA
-        // 4. Composite on checker in linear, convert to sRGB
-        if (!result.alpha.view().empty() && !result.foreground.view().empty()) {
-            int w = result.foreground.view().width;
-            int h = result.foreground.view().height;
-
-            // 1. Despeckle alpha
-            if (params.auto_despeckle) {
-                despeckle(result.alpha.view(), params.despeckle_size);
-            }
-
-            // 2. Despill FG in sRGB space (no alpha involvement)
-            despill(result.foreground.view(), params.despill_strength);
-
-            // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
-            const auto& lut = SrgbLut::instance();
-            Image fg = result.foreground.const_view();
-            Image alpha_view = result.alpha.const_view();
-
-            result.processed = ImageBuffer(w, h, 4);
-            Image proc = result.processed.view();
-
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
-                    float a = alpha_view(y, x);
-                    proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
-                    proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
-                    proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
-                    proc(y, x, 3) = a;
-                }
-            }
-
-            // 4. Composite on checker (linear space), then convert to sRGB
-            result.composite = ImageBuffer(w, h, 4);
-            Image comp = result.composite.view();
-            std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
-
-            ColorUtils::composite_over_checker(comp);
-            ColorUtils::linear_to_srgb(comp);
-        }
-
         return result;
     } catch (const Ort::Exception& e) {
         return unexpected(Error{ ErrorCode::InferenceFailed, std::string("ONNX Runtime execution failed: ") + e.what() });
-    } catch (const std::exception& e) {
-        return unexpected(Error{ ErrorCode::InferenceFailed, std::string("Inference error: ") + e.what() });
     }
+}
+
+Result<FrameResult> InferenceSession::run(
+    const Image& rgb,
+    const Image& alpha_hint,
+    const InferenceParams& params
+) {
+    // Check for tiling request
+    int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+    
+    // Only tile if requested and input is significantly larger than model
+    if (params.enable_tiling && (rgb.width > target_res || rgb.height > target_res)) {
+        return run_tiled(rgb, alpha_hint, params, target_res);
+    }
+
+    auto result_res = infer_raw(rgb, alpha_hint, params);
+    if (!result_res) return result_res;
+
+    apply_post_process(*result_res, params);
+    return result_res;
 }
 
 } // namespace corridorkey

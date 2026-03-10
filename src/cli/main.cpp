@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
         ("o,output", "Output directory", cxxopts::value<std::string>())
         ("m,model", "Path to GreenFormer ONNX model", cxxopts::value<std::string>())
         ("r,resolution", "Target resolution (0=auto, 512, 1024, etc.)", cxxopts::value<int>()->default_value("0"))
-        ("d,device", "Device index from 'info' command", cxxopts::value<int>()->default_value("0"))
+        ("d,device", "Device index or name (auto, cpu, coreml, cuda, dml)", cxxopts::value<std::string>()->default_value("auto"))
         ("variant", "Model variant to download (fp32, fp16, int8, all)", cxxopts::value<std::string>())
         ("despill", "Green spill removal strength (0.0 - 10.0)", cxxopts::value<float>()->default_value("1.0"))
         ("no-despeckle", "Disable morphological cleanup")
@@ -156,8 +156,43 @@ int main(int argc, char* argv[]) {
             params.tile_padding = result["tile-padding"].as<int>();
 
             auto devices = list_devices();
-            int device_idx = result["device"].as<int>();
-            auto engine_res = Engine::create(model_path, devices[device_idx]);
+            std::string device_str = result["device"].as<std::string>();
+            DeviceInfo selected_device = devices[0]; // Default to auto/first
+
+            if (device_str != "auto") {
+                try {
+                    // Try parsing as index
+                    int idx = std::stoi(device_str);
+                    if (idx >= 0 && idx < (int)devices.size()) {
+                        selected_device = devices[idx];
+                    }
+                } catch (...) {
+                    // Try parsing as name
+                    std::transform(device_str.begin(), device_str.end(), device_str.begin(), ::tolower);
+                    bool found = false;
+                    for (const auto& d : devices) {
+                        std::string b_name;
+                        switch (d.backend) {
+                            case Backend::CPU: b_name = "cpu"; break;
+                            case Backend::CoreML: b_name = "coreml"; break;
+                            case Backend::CUDA: b_name = "cuda"; break;
+                            case Backend::TensorRT: b_name = "tensorrt"; break;
+                            case Backend::DirectML: b_name = "dml"; break;
+                            default: b_name = ""; break;
+                        }
+                        if (b_name == device_str) {
+                            selected_device = d;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        std::cerr << "Warning: Device '" << device_str << "' not found. Falling back to default." << std::endl;
+                    }
+                }
+            }
+
+            auto engine_res = Engine::create(model_path, selected_device);
             if (!engine_res) {
                 std::cerr << "Engine Error: " << engine_res.error().message << std::endl;
                 return 1;
@@ -165,7 +200,7 @@ int main(int argc, char* argv[]) {
             auto engine = std::move(*engine_res);
 
             std::cout << "Processing Engine Setup:\n"
-                      << " - Device: " << devices[device_idx].name << "\n"
+                      << " - Device: " << selected_device.name << " [" << device_str << "]\n"
                       << " - Target Resolution: " << (params.target_resolution > 0 ? params.target_resolution : engine->recommended_resolution()) << "x" << (params.target_resolution > 0 ? params.target_resolution : engine->recommended_resolution()) << "\n";
 
             auto is_video_file = [](const std::filesystem::path& p) {
@@ -194,19 +229,33 @@ int main(int argc, char* argv[]) {
                 std::vector<std::filesystem::path> inputs;
                 std::vector<std::filesystem::path> hints;
 
+                auto is_image_file = [](const std::filesystem::path& p) {
+                    std::string ext = p.extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    return ext == ".png" || ext == ".exr" || ext == ".jpg" || ext == ".jpeg";
+                };
+
                 if (std::filesystem::is_directory(input_path)) {
                     for (const auto& entry : std::filesystem::directory_iterator(input_path)) {
-                        if (entry.is_regular_file()) {
+                        if (entry.is_regular_file() && is_image_file(entry.path())) {
                             inputs.push_back(entry.path());
-                            // Assume hints have same filename in hint directory
-                            hints.push_back(hint_path / entry.path().filename());
+                            if (!hint_path.empty()) {
+                                hints.push_back(hint_path / entry.path().filename());
+                            }
                         }
                     }
                     std::sort(inputs.begin(), inputs.end());
-                    std::sort(hints.begin(), hints.end());
+                    if (!hints.empty()) std::sort(hints.begin(), hints.end());
                 } else {
                     inputs.push_back(input_path);
-                    hints.push_back(hint_path);
+                    if (!hint_path.empty()) {
+                        hints.push_back(hint_path);
+                    }
+                }
+
+                if (inputs.empty()) {
+                    std::cerr << "Error: No valid image files found." << std::endl;
+                    return 1;
                 }
 
                 std::cout << "Processing " << inputs.size() << " frames..." << std::endl;
