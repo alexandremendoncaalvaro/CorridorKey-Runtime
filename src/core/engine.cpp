@@ -34,6 +34,16 @@ Result<std::unique_ptr<Engine>> Engine::create(
     auto engine = std::unique_ptr<Engine>(new Engine());
     engine->m_impl->session = std::move(*session_res);
 
+    // Warm-up run (especially important for CoreML/TensorRT JIT compilation)
+    int res = engine->recommended_resolution();
+    ImageBuffer warm_rgb(res, res, 3);
+    ImageBuffer warm_hint(res, res, 1);
+    std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
+    std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
+    
+    // Non-blocking warm-up
+    engine->process_frame(warm_rgb.view(), warm_hint.view());
+
     return engine;
 }
 
@@ -49,6 +59,18 @@ Result<FrameResult> Engine::process_frame(
     return m_impl->session->run(rgb, alpha_hint, params);
 }
 
+Result<std::vector<FrameResult>> Engine::process_frame_batch(
+    const std::vector<Image>& rgbs,
+    const std::vector<Image>& alpha_hints,
+    const InferenceParams& params
+) {
+    if (!m_impl->session) {
+        return unexpected(Error{ ErrorCode::ModelLoadFailed, "Engine not initialized" });
+    }
+
+    return m_impl->session->run_batch(rgbs, alpha_hints, params);
+}
+
 Result<void> Engine::process_sequence(
     const std::vector<std::filesystem::path>& inputs,
     const std::vector<std::filesystem::path>& alpha_hints,
@@ -62,39 +84,27 @@ Result<void> Engine::process_sequence(
     }
 
     size_t total_frames = inputs.size();
+    int batch_size = std::max(1, params.batch_size);
 
-    
-    // Asynchronous Pipeline Settings
-    const size_t max_in_flight = 3; // Keep 3 frames in the pipeline
-    std::deque<std::future<Result<FrameResult>>> pipeline;
-
-    for (size_t i = 0; i < total_frames; ++i) {
-        // 1. Check for cancellation
-        if (on_progress && !on_progress(static_cast<float>(i) / total_frames, "Processing frame " + std::to_string(i))) {
+    for (size_t i = 0; i < total_frames; i += batch_size) {
+        size_t current_batch_size = std::min((size_t)batch_size, total_frames - i);
+        
+        if (on_progress && !on_progress(static_cast<float>(i) / total_frames, "Processing batch " + std::to_string(i / batch_size))) {
             return unexpected(Error{ ErrorCode::Cancelled, "Processing cancelled by user" });
         }
 
-        // 2. Manage Pipeline (Limit concurrent frames to avoid RAM bloat)
-        if (pipeline.size() >= max_in_flight) {
-            auto res = pipeline.front().get();
-            pipeline.pop_front();
-            if (!res) return unexpected(res.error());
-            
-            // Save results of the finished frame (Writing)
-            // The index of the finished frame is (i - max_in_flight)
-            std::string filename = inputs[i - max_in_flight].filename().string();
-            auto save_res = frame_io::save_result(output_dir, filename, *res);
-            if (!save_res) return save_res;
-        }
+        std::vector<ImageBuffer> rgb_bufs;
+        std::vector<ImageBuffer> hint_bufs;
+        std::vector<Image> rgb_views;
+        std::vector<Image> hint_views;
 
-        // 3. Dispatch next frame (Async Reading + Inference)
-        pipeline.push_back(std::async(std::launch::async, [&, i, has_hints]() -> Result<FrameResult> {
-            auto rgb_res = frame_io::read_frame(inputs[i]);
+        for (size_t b = 0; b < current_batch_size; ++b) {
+            auto rgb_res = frame_io::read_frame(inputs[i + b]);
             if (!rgb_res) return unexpected(rgb_res.error());
-
+            
             ImageBuffer hint_buf;
             if (has_hints) {
-                auto hint_res = frame_io::read_frame(alpha_hints[i]);
+                auto hint_res = frame_io::read_frame(alpha_hints[i + b]);
                 if (!hint_res) return unexpected(hint_res.error());
                 hint_buf = std::move(*hint_res);
             } else {
@@ -102,20 +112,20 @@ Result<void> Engine::process_sequence(
                 ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view());
             }
 
-            return m_impl->session->run(rgb_res->view(), hint_buf.view(), params);
-        }));
-    }
+            rgb_views.push_back(rgb_res->view());
+            hint_views.push_back(hint_buf.view());
+            rgb_bufs.push_back(std::move(*rgb_res));
+            hint_bufs.push_back(std::move(hint_buf));
+        }
 
-    // 4. Drain the remaining pipeline
-    size_t finished_idx = total_frames - pipeline.size();
-    while (!pipeline.empty()) {
-        auto res = pipeline.front().get();
-        pipeline.pop_front();
-        if (!res) return unexpected(res.error());
+        auto results = m_impl->session->run_batch(rgb_views, hint_views, params);
+        if (!results) return unexpected(results.error());
 
-        std::string filename = inputs[finished_idx++].filename().string();
-        auto save_res = frame_io::save_result(output_dir, filename, *res);
-        if (!save_res) return save_res;
+        for (size_t b = 0; b < current_batch_size; ++b) {
+            std::string filename = inputs[i + b].filename().string();
+            auto save_res = frame_io::save_result(output_dir, filename, (*results)[b]);
+            if (!save_res) return save_res;
+        }
     }
 
     return {};
@@ -144,7 +154,6 @@ Result<void> Engine::process_video(
         reader_hint = std::move(*reader_hint_res);
     }
 
-    // Default to processing target resolution or original resolution
     int out_w = reader_rgb->width();
     int out_h = reader_rgb->height();
 
@@ -153,66 +162,74 @@ Result<void> Engine::process_video(
     auto writer = std::move(*writer_res);
 
     int64_t total_frames = reader_rgb->total_frames();
+    int batch_size = std::max(1, params.batch_size);
     int64_t frame_idx = 0;
 
-    const size_t max_in_flight = 3;
-    std::deque<std::future<Result<FrameResult>>> pipeline;
+    struct Batch {
+        std::vector<ImageBuffer> rgb_bufs;
+        std::vector<ImageBuffer> hint_bufs;
+        std::vector<Image> rgb_views;
+        std::vector<Image> hint_views;
+    };
+
+    auto fetch_batch = [&](int size) -> Result<Batch> {
+        Batch b;
+        for (int i = 0; i < size; ++i) {
+            auto rgb_res = reader_rgb->read_next_frame();
+            if (!rgb_res || rgb_res->view().empty()) break;
+
+            ImageBuffer hint_buf;
+            if (has_hint_video) {
+                auto hint_res = reader_hint->read_next_frame();
+                if (!hint_res || hint_res->view().empty()) break;
+                hint_buf = std::move(*hint_res);
+            } else {
+                hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
+                ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view());
+            }
+
+            b.rgb_views.push_back(rgb_res->view());
+            b.hint_views.push_back(hint_buf.view());
+            b.rgb_bufs.push_back(std::move(*rgb_res));
+            b.hint_bufs.push_back(std::move(hint_buf));
+        }
+        return b;
+    };
+
+    // Initial pre-fetch
+    auto current_batch_future = std::async(std::launch::async, fetch_batch, batch_size);
 
     while (true) {
-        // Read next frame asynchronously
-        auto rgb_res = reader_rgb->read_next_frame();
-        if (!rgb_res) return unexpected(rgb_res.error());
-        if (rgb_res->view().empty()) break; // EOF
+        auto current_batch_res = current_batch_future.get();
+        if (!current_batch_res) return unexpected(current_batch_res.error());
+        Batch current_batch = std::move(*current_batch_res);
 
-        ImageBuffer hint_buf;
-        if (has_hint_video) {
-            auto hint_res = reader_hint->read_next_frame();
-            if (!hint_res) return unexpected(hint_res.error());
-            if (hint_res->view().empty()) break; // EOF
-            hint_buf = std::move(*hint_res);
-        } else {
-            hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
-            ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view());
-        }
+        if (current_batch.rgb_views.empty()) break;
+
+        // Start pre-fetching the NEXT batch immediately
+        current_batch_future = std::async(std::launch::async, fetch_batch, batch_size);
 
         if (on_progress) {
             float p = total_frames > 0 ? static_cast<float>(frame_idx) / total_frames : 0.0f;
-            if (!on_progress(p, "Processing frame " + std::to_string(frame_idx))) {
+            if (!on_progress(p, "Inference frames " + std::to_string(frame_idx))) {
                 return unexpected(Error{ ErrorCode::Cancelled, "Processing cancelled by user" });
             }
         }
 
-        // We must move the ImageBuffers into the async lambda to keep them alive
-        pipeline.push_back(std::async(std::launch::async, 
-            [this, rgb_buf = std::move(*rgb_res), hint_buf = std::move(hint_buf), params]() mutable -> Result<FrameResult> {
-                return m_impl->session->run(rgb_buf.view(), hint_buf.view(), params);
-            }
-        ));
+        // GPU Inference on the CURRENT batch
+        auto results = m_impl->session->run_batch(current_batch.rgb_views, current_batch.hint_views, params);
+        if (!results) return unexpected(results.error());
 
-        if (pipeline.size() >= max_in_flight) {
-            auto res = pipeline.front().get();
-            pipeline.pop_front();
-            if (!res) return unexpected(res.error());
-
-            auto write_res = writer->write_frame(res->composite.view());
+        // Sequential Write (FFmpeg encoding is usually CPU-bound but fast enough)
+        for (auto& res : *results) {
+            auto write_res = writer->write_frame(res.composite.view());
             if (!write_res) return unexpected(write_res.error());
         }
 
-        frame_idx++;
+        frame_idx += current_batch.rgb_views.size();
     }
 
-    // Drain pipeline and ensure all frames are written
-    while (!pipeline.empty()) {
-        auto res = pipeline.front().get();
-        pipeline.pop_front();
-        if (!res) return unexpected(res.error());
-
-        auto write_res = writer->write_frame(res->composite.view());
-        if (!write_res) return unexpected(write_res.error());
-    }
-
-    // Final flush of the encoder to capture remaining buffered frames
-    writer.reset(); // Destructor flushes the encoder
+    writer.reset(); // Final flush
 
     if (on_progress) {
         on_progress(1.0f, "Done");
