@@ -192,44 +192,49 @@ int main(int argc, char* argv[]) {
 
             std::filesystem::create_directory("models");
 
+            const std::vector<int> available_resolutions = {512, 768, 1024};
+
             for (const auto& v : variants_to_download) {
-                std::string filename = "corridorkey_" + v + ".onnx";
-                std::filesystem::path output_path = std::filesystem::path("models") / filename;
-                std::string url =
-                    "https://huggingface.co/corridorkey/models/resolve/main/" + filename;
+                for (const int resolution : available_resolutions) {
+                    std::string filename =
+                        "corridorkey_" + v + "_" + std::to_string(resolution) + ".onnx";
+                    std::filesystem::path output_path = std::filesystem::path("models") / filename;
+                    std::string url =
+                        "https://huggingface.co/corridorkey/models/resolve/main/" + filename;
 
-                std::cout << "Downloading " << filename << "..." << std::endl;
-                std::ofstream of(output_path, std::ios::binary);
+                    std::cout << "Downloading " << filename << "..." << std::endl;
+                    std::ofstream of(output_path, std::ios::binary);
 
-                cpr::Response r =
-                    cpr::Download(of, cpr::Url{url},
-                                  cpr::ProgressCallback([](size_t downloadTotal, size_t downloadNow,
-                                                           size_t, size_t, intptr_t) -> bool {
-                                      if (downloadTotal > 0) {
-                                          float p = static_cast<float>(downloadNow) / downloadTotal;
-                                          int bar_width = 50;
-                                          std::cout << "\r[" << std::string(bar_width * p, '=')
-                                                    << std::string(bar_width * (1 - p), ' ') << "] "
-                                                    << int(p * 100.0) << "% " << std::flush;
-                                      }
-                                      return true;
-                                  }));
+                    cpr::Response r = cpr::Download(
+                        of, cpr::Url{url},
+                        cpr::ProgressCallback([](size_t downloadTotal, size_t downloadNow, size_t,
+                                                 size_t, intptr_t) -> bool {
+                            if (downloadTotal > 0) {
+                                float p = static_cast<float>(downloadNow) / downloadTotal;
+                                int bar_width = 50;
+                                std::cout << "\r[" << std::string(bar_width * p, '=')
+                                          << std::string(bar_width * (1 - p), ' ') << "] "
+                                          << int(p * 100.0) << "% " << std::flush;
+                            }
+                            return true;
+                        }));
 
-                std::cout << std::endl;
-                of.close();
+                    std::cout << std::endl;
+                    of.close();
 
-                if (r.status_code == 200) {
-                    std::cout << "Successfully downloaded " << filename << " to models/"
-                              << std::endl;
-                } else {
-                    std::cerr << "Failed to download " << filename
-                              << ". HTTP Status: " << r.status_code << std::endl;
-                    if (r.status_code == 401 || r.status_code == 404) {
-                        std::cerr
-                            << "Note: The HuggingFace repository may be private or not yet created."
-                            << std::endl;
+                    if (r.status_code == 200) {
+                        std::cout << "Successfully downloaded " << filename << " to models/"
+                                  << std::endl;
+                    } else {
+                        std::cerr << "Failed to download " << filename
+                                  << ". HTTP Status: " << r.status_code << std::endl;
+                        if (r.status_code == 401 || r.status_code == 404) {
+                            std::cerr << "Note: The HuggingFace repository may be private or not "
+                                         "yet created."
+                                      << std::endl;
+                        }
+                        std::filesystem::remove(output_path);
                     }
-                    std::filesystem::remove(output_path);
                 }
             }
             return 0;
