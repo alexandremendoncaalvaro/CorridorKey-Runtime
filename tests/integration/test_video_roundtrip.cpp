@@ -69,4 +69,16 @@ TEST_CASE("VideoReader and VideoWriter roundtrip", "[integration][video]") {
 
         std::filesystem::remove(test_video);
     }
+
+    SECTION("Default encoder selection stays portable") {
+        auto default_encoder = default_video_encoder_for_path("portable_output.mp4");
+
+        REQUIRE_FALSE(default_encoder.empty());
+
+#if defined(__APPLE__)
+        if (is_videotoolbox_available()) {
+            REQUIRE(default_encoder == "h264_videotoolbox");
+        }
+#endif
+    }
 }
