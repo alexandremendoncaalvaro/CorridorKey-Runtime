@@ -8,41 +8,57 @@
 
 ## 1. Vision
 
-A high-performance, cross-platform C++ inference runtime for the
+A production-oriented native C++ runtime for the
 [CorridorKey](https://github.com/nikopueringer/CorridorKey) neural green screen
-keyer. Takes the trained GreenFormer model and makes it
-accessible on consumer hardware — from laptops with integrated graphics to
-workstations with high-end GPUs.
+keyer. The project packages model execution, diagnostics, validated model
+catalogs, and stable machine-readable contracts into a runtime that can be
+distributed, benchmarked, automated, and embedded on real hardware.
 
-The current release track is intentionally narrower than the long-term vision:
-the runtime must first become release-grade on macOS 14+ Apple Silicon,
-portable across third-party machines, and ready to serve a future GUI through a
-stable CLI/app-layer contract. Other platforms remain part of the architecture,
-but they are not release-gating in this phase.
+The product direction is explicit:
+
+- **macOS first** to close runtime quality, diagnostics, and portable
+  distribution on Apple Silicon
+- **Windows RTX next** as the next product track for predictable deployment on
+  consumer NVIDIA hardware
+- **GUI and integration surfaces after that**, all consuming the same
+  library-first runtime
+
+The project is architecture-ready beyond those tracks, but it does not market
+all platforms and providers as equally validated.
 
 ### 1.1 What This Is
 
-- A **C++ inference engine** that runs the existing CorridorKey model
-- Optimized for **multiple hardware tiers** via quantization and adaptive resolution
-- A single binary with **zero Python dependencies**
-- Designed as a **library with CLI**, ready for future GUI integration
+- A **native runtime engine** around the existing CorridorKey model
+- A **single-binary operational surface** with diagnostics, benchmark, and
+  stable JSON/NDJSON contracts
+- A **library-first product boundary** that supports CLI, future GUI, sidecar,
+  plugin, and pipeline integrations
+- A hardware-aware runtime with **curated provider tracks**, not a flat promise
+  of parity across every backend
 
 ### 1.2 What This Is NOT
 
 - Not a retraining or new model architecture
-- Not a port of GVM or VideoMaMa (alpha hints come from external sources)
-- Not a replacement for the original Python project (complementary)
+- Not a generic multi-backend framework with equal support for every provider
+- Not a reimplementation of a full Python workflow inside this repository
+- Not a first-party alpha-hint authoring suite in this phase
 
-### 1.3 Goals
+### 1.3 Intended Users
+
+- **Technical local operators** who want native execution without Python
+- **Windows RTX operators** who want predictable consumer-GPU deployment next
+- **Integrators** who need a reusable engine for apps, plugins, or pipelines
+
+### 1.4 Goals
 
 | Goal | Metric |
 |------|--------|
-| Run on 8GB unified memory (MacBook Air M1) | Process 512² frames without crash |
-| Run on 10GB GPU (RTX 3080) | Process 1024² frames |
-| Single binary distribution | No Python, no pip, no venv |
-| Startup time | < 2 seconds to first frame |
-| Quality parity with original | < 2% deviation on reference test set |
-| Video support | Decode/encode MP4/MOV directly |
+| Native local execution | No Python, no pip, no venv |
+| macOS production runtime | Corpus passes on 8 GB and 16 GB Apple Silicon tiers |
+| Windows RTX next | Product track is defined around TensorRT RTX and CPU fallback |
+| Operational predictability | `doctor`, `benchmark`, and `process --json` stay stable |
+| Quality parity with original model behavior | < 2% deviation on reference test set |
+| Video support | Decode/encode MP4/MOV directly with hardware-aware defaults |
 
 ---
 
@@ -67,10 +83,10 @@ but they are not release-gating in this phase.
 ├──────────────────────────────────────────────────────────┤
 │                     ONNX Runtime                           │
 │   ┌──────────┬───────────┬──────────┬──────────────────┐ │
-│   │ CoreML   │ TensorRT  │ DirectML │ CPU              │ │
-│   │ EP       │ RTX EP    │ EP       │ EP               │ │
-│   │ (macOS)  │ (NVIDIA)  │ (Win DX12│ (universal)      │ │
-│   │          │           │  any GPU)│                  │ │
+│   │ CoreML   │ TensorRT  │ CPU      │ Secondary        │ │
+│   │ EP       │ RTX EP    │ EP       │ Windows paths    │ │
+│   │ (macOS   │ (Windows  │ (compat. │ DirectML / WinML)│ │
+│   │  now)    │  RTX next)│  layer)  │                  │ │
 │   └──────────┴───────────┴──────────┴──────────────────┘ │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -83,6 +99,11 @@ The CLI is a thin consumer of this library. This enables:
 - Future GUI frontends (Qt, native macOS, Electron, etc.)
 - Integration into other C++ applications (Nuke plugins, DaVinci Resolve, etc.)
 - FFI bindings (Python, Rust, Go) if desired later
+
+Library-first is a product decision, not just a code organization preference.
+It is what allows the runtime to serve CLI automation today while staying ready
+for sidecars, GUIs, plugins, and pipeline embedding later without duplicating
+business logic.
 
 ```cpp
 // Public API sketch (frontend-agnostic, thread-safe, robust)
@@ -187,7 +208,7 @@ Responsibilities:
 - Manage ONNX Runtime session options and optimization levels
 
 Key design decisions:
-- **One model format (ONNX)**, multiple execution providers
+- **One model format (ONNX)**, with execution-provider tracks curated by phase
 - **Resolution is adaptive**: query available memory at startup and select among
   currently supported targets (512², 768², 1024²)
 - **Warm-up run**: first frame triggers JIT compilation (TensorRT RTX EP caches
@@ -314,17 +335,28 @@ CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 Release Focus
+### 4.3 Product Delivery Sequence
 
-The current implementation phase treats macOS 14+ on Apple Silicon as the only
-release-gating platform. That means:
+The product does not advance as a generic cross-platform matrix. It advances as
+curated delivery tracks.
 
-1. CoreML is the primary accelerated path.
-2. CPU is the mandatory compatibility fallback.
-3. `int8_512` and `int8_768` are the only model variants considered validated
-   and packageable for the portable macOS bundle.
-4. Inputs larger than the selected model resolution must use tiling before any
-   GUI work begins.
+1. **Current release gate:** macOS 14+ on Apple Silicon.
+   - CoreML is the primary accelerated path.
+   - CPU is the mandatory compatibility fallback.
+   - `int8_512` and `int8_768` are the only model variants considered validated
+     and packageable for the portable macOS bundle.
+   - Inputs larger than the selected model resolution must use tiling before
+     GUI work begins.
+2. **Next product track:** Windows 11 on NVIDIA RTX hardware.
+   - TensorRT RTX is the intended primary Windows path.
+   - CPU remains the mandatory compatibility fallback.
+   - Windows delivery is judged by installation predictability, diagnostics,
+     cache behavior, and validated hardware tiers, not by broad backend count.
+3. **Later integration surfaces:** GUI, sidecar, plugin, and pipeline embedding
+   consume the same library-first runtime once the current and next tracks are
+   stable.
+4. **Later architectural targets:** Linux and secondary provider paths stay
+   architecture-ready until the first two product tracks are validated.
 
 ### 4.4 Validation Corpus
 
@@ -370,12 +402,18 @@ If the input image dimensions differ from the selected target resolution, the en
 
 ### 5.2 Platform Matrix
 
-| Platform | Compiler | EP Available | Release status |
-|----------|----------|-------------|----------------|
-| macOS 14+ (ARM64) | Apple Clang 15+ | CoreML, CPU | Primary release target |
-| Windows 11 (x86_64) | MSVC 17.4+ | TensorRT RTX, CUDA, DirectML, CPU | Architecture-ready, deferred |
-| Linux (x86_64) | GCC 12+ / Clang 16+ | TensorRT RTX, CUDA, CPU | Architecture-ready, deferred |
-| Linux (ARM64) | GCC 12+ | CPU | Architecture-ready, deferred |
+| Platform | Compiler | Primary provider path | Product status |
+|----------|----------|-----------------------|----------------|
+| macOS 14+ (ARM64) | Apple Clang 15+ | CoreML, CPU fallback | Current release gate |
+| Windows 11 + NVIDIA RTX (x86_64) | MSVC 17.4+ | TensorRT RTX, CPU fallback | Next product track |
+| Windows 11 generic (x86_64) | MSVC 17.4+ | CPU; DirectML/WinML secondary | Exploratory, not the primary Windows product path |
+| Linux (x86_64) | GCC 12+ / Clang 16+ | CPU/CUDA architecture-ready | Deferred until macOS + Windows RTX are stable |
+| Linux (ARM64) | GCC 12+ | CPU | Deferred |
+
+Provider support is curated by phase. The product does not promise equivalent
+validation across all ONNX Runtime execution providers.
+For Windows, DirectML and WinML remain secondary paths in this specification;
+they are not the primary product promise for the next delivery track.
 
 ### 5.3 Project Layout
 
@@ -460,10 +498,10 @@ CorridorKey-Runtime/
 
 ```bash
 # Process a video file
-corridorkey process --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_512.onnx
+corridorkey process --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_768.onnx
 
 # Process an image sequence
-corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_512.onnx
+corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_768.onnx
 
 # Process a single frame
 corridorkey process --input frame.exr --alpha-hint hint.png --output result.exr --model models/corridorkey_int8_512.onnx
@@ -541,6 +579,36 @@ Matches the original CorridorKey output structure for compatibility.
 - `benchmark --json` reports `stage_timings` for engine creation, warmup,
   per-frame inference, tiling, decode, encode, and full benchmark duration.
 
+### 6.5 Operational Predictability
+
+Operational predictability is part of the product surface.
+
+- `doctor` verifies runtime health, available devices, model presence, and
+  default bundle expectations.
+- `benchmark` provides reproducible synthetic and workload-based measurements.
+- `models` and `presets` expose the validated catalogs instead of expecting
+  callers to hard-code product assumptions.
+- Hardware tiers are explicit and stable enough that `auto` behavior is
+  explainable per platform track.
+- Stage-level timings are emitted so users and future GUIs can identify
+  bottlenecks without reverse-engineering log text.
+
+### 6.6 AlphaHint Strategy
+
+AlphaHint is treated as an integration contract, not as a hidden internal
+detail.
+
+- Supported hint inputs are:
+  - a single hint frame for a single image
+  - a directory of hint frames for a directory or image sequence
+  - a hint video aligned with an input video
+- If no hint is provided, the runtime generates a rough matte internally.
+- External hints remain the preferred path when the user needs higher-quality
+  or more controlled results.
+- Rough matte fallback exists for smoke tests, low-friction usage, and simpler
+  cases, accepting that it may trade quality and control for convenience.
+- First-party hint authoring is out of scope for this phase.
+
 ---
 
 ## 7. Implementation Scope and Priorities
@@ -565,11 +633,11 @@ The current codebase already provides:
 
 Near-term priorities are:
 
-1. Reduce startup and warmup overhead on macOS Apple Silicon with measurement-driven fixes.
-2. Harden tiled high-resolution processing and seam-free output across the validation corpus.
-3. Finalize the portable macOS bundle workflow for third-party machines.
-4. Lock the bridge-facing JSON/NDJSON contract around measured runtime behavior.
-5. Expand regression coverage for provider fallback, tiling, and packaging failures.
+1. Close the macOS production-runtime gates around fallback, tiling, observability, and portable distribution.
+2. Use the validation corpus and benchmark telemetry to tune quality vs throughput on the current Apple Silicon track.
+3. Define and document the Windows RTX product track around TensorRT RTX, CPU fallback, installation expectations, and validated tiers.
+4. Keep the bridge-facing JSON/NDJSON contract stable so future GUI and integration surfaces can rely on the same runtime behavior.
+5. Expand regression coverage for provider fallback, hint handling, tiling, packaging, and hardware-tier policy.
 
 ---
 
@@ -626,13 +694,20 @@ Summary of what's covered there:
 
 ---
 
-## 9. Future Roadmap
+## 9. Product Roadmap
 
-1. **Phase 1 — macOS hardening:** validate CoreML-first execution, mandatory CPU fallback, tiling behavior, structured diagnostics, and corpus-based acceptance on Apple Silicon.
-2. **Phase 2 — portable macOS bundle:** ship a CLI-focused distribution with validated models, smoke tests, and a repeatable installation story for third-party machines.
-3. **Phase 3 — Tauri/sidecar contract:** lock the bridge around stable JSON commands (`info`, `doctor`, `benchmark`, `models`, `presets`) and NDJSON job events from `process --json`.
-4. **Phase 4 — GUI implementation:** build the desktop UI only after macOS runtime quality and bundle portability pass the release gates.
-5. **Phase 5 — platform expansion:** extend the validated release process to Windows and Linux after the macOS-first contract is stable.
+1. **Phase 1 — macOS production runtime:** validate CoreML-first execution,
+   mandatory CPU fallback, tiling behavior, structured diagnostics, benchmark
+   telemetry, and portable bundle acceptance on Apple Silicon.
+2. **Phase 2 — Windows RTX track:** define and implement the TensorRT RTX-based
+   Windows product path with CPU fallback, installation guidance, validated
+   tiers, and equivalent diagnostics.
+3. **Phase 3 — integration surfaces:** keep the sidecar contract stable and
+   build GUI, plugin, and pipeline-facing surfaces as thin consumers of the
+   same runtime.
+4. **Phase 4 — broader platform expansion:** extend validation to Linux and
+   secondary provider paths only after the macOS and Windows RTX tracks are
+   stable.
 
 ---
 
@@ -640,7 +715,9 @@ Summary of what's covered there:
 
 - [CorridorKey Original](https://github.com/nikopueringer/CorridorKey)
 - [ONNX Runtime Releases](https://github.com/microsoft/onnxruntime/releases)
+- [ONNX Runtime Install Docs](https://onnxruntime.ai/docs/install/)
 - [ONNX Runtime Execution Providers](https://onnxruntime.ai/docs/execution-providers/)
+- [ONNX Runtime EP Build Matrix](https://onnxruntime.ai/docs/build/eps.html)
 - [TensorRT RTX EP](https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html)
 - [CoreML EP](https://onnxruntime.ai/docs/execution-providers/CoreML-ExecutionProvider.html)
 - [ONNX Runtime Quantization](https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html)
