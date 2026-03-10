@@ -60,6 +60,11 @@
   - seleção e fallback de backend com diagnóstico estruturado
   - correção do caminho de vídeo para aceleração real no Mac
   - scheduler de tiling com merge sem seams e paralelismo controlado
+- Observabilidade e performance como gate de hardening:
+  - instrumentar `engine_create`, `warmup`, `decode`, `hint generation`, `batch prepare`, `ort_run`, `tile extract`, `tile infer`, `tile accumulate`, `post-process`, `encode` e `flush`
+  - fazer `benchmark` reutilizar o mesmo contrato de eventos/timings do `process --json`
+  - aceitar `benchmark` sintético e com workload real (`--input`) para medir startup, throughput e breakdown por etapa
+  - usar os timings agregados para decidir thread policy de CPU, paralelismo de pipeline e prioridades de otimização
 - Preparação para GUI:
   - consolidar saída JSON estável
   - adicionar `models` e `presets`
@@ -75,11 +80,13 @@
   - hardware profile do Mac
   - geometria de tiling, overlap e seam blending
   - emissão de eventos estruturados
+  - agregação e serialização estável de timings por etapa
 - Integration:
   - criação de sessão CoreML com modelo real
   - fallback forçado para CPU
   - seleção VideoToolbox vs software
   - bundle portátil executando fora da árvore de build
+  - benchmark de workload real emitindo breakdown consistente
 - Regression:
   - um teste por bug real de macOS: fallback quebrado, seam em tile, erro de provider, problema de lookup de dylib
 - E2E / gates para liberar GUI:
@@ -87,6 +94,7 @@
   - sem frame drop inesperado
   - sem artefato visível de seam nos casos 4K com tiling
   - `info`, `doctor`, `benchmark`, `models`, `presets` e `process --json` estáveis
+  - `benchmark` e evento `completed` reportam timings agregados suficientes para localizar gargalos sem profiler externo
   - métricas e frames de referência permanecem dentro das tolerâncias definidas na spec
 
 ## Assumptions e defaults
