@@ -185,6 +185,19 @@ nlohmann::json to_json(const RuntimeCapabilities& capabilities) {
     return json;
 }
 
+nlohmann::json to_json(const StageTiming& timing) {
+    nlohmann::json json;
+    json["name"] = timing.name;
+    json["total_ms"] = timing.total_ms;
+    json["sample_count"] = timing.sample_count;
+    json["work_units"] = timing.work_units;
+    json["avg_ms"] = timing.sample_count > 0 ? timing.total_ms / timing.sample_count : 0.0;
+    if (timing.work_units > 0) {
+        json["ms_per_unit"] = timing.total_ms / timing.work_units;
+    }
+    return json;
+}
+
 nlohmann::json to_json(const JobEvent& event) {
     nlohmann::json json;
     json["type"] = job_event_type_to_string(event.type);
@@ -204,6 +217,13 @@ nlohmann::json to_json(const JobEvent& event) {
     }
     if (event.fallback.has_value()) {
         json["fallback"] = to_json(*event.fallback);
+    }
+    if (!event.timings.empty()) {
+        nlohmann::json timings = nlohmann::json::array();
+        for (const auto& timing : event.timings) {
+            timings.push_back(to_json(timing));
+        }
+        json["timings"] = timings;
     }
     return json;
 }

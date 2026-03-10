@@ -57,8 +57,7 @@ class CORRIDORKEY_API JobOrchestrator {
     /**
      * @brief Run a performance benchmark.
      */
-    static nlohmann::json run_benchmark(const std::filesystem::path& model_path,
-                                        const DeviceInfo& device);
+    static nlohmann::json run_benchmark(const JobRequest& request);
 
     /**
      * @brief Get the built-in model catalog as stable JSON.

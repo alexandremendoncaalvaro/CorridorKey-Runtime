@@ -86,8 +86,85 @@ nlohmann::json event_to_json(const JobEvent& event) {
             backend_to_string_local(event.fallback->selected_backend);
         json["fallback"]["reason"] = event.fallback->reason;
     }
+    if (!event.timings.empty()) {
+        json["timings"] = nlohmann::json::array();
+        for (const auto& timing : event.timings) {
+            nlohmann::json timing_json;
+            timing_json["name"] = timing.name;
+            timing_json["total_ms"] = timing.total_ms;
+            timing_json["sample_count"] = timing.sample_count;
+            timing_json["work_units"] = timing.work_units;
+            timing_json["avg_ms"] =
+                timing.sample_count > 0 ? timing.total_ms / timing.sample_count : 0.0;
+            if (timing.work_units > 0) {
+                timing_json["ms_per_unit"] = timing.total_ms / timing.work_units;
+            }
+            json["timings"].push_back(std::move(timing_json));
+        }
+    }
 
     return json;
+}
+
+DeviceInfo select_device(const std::vector<DeviceInfo>& devices, std::string device_str) {
+    if (devices.empty()) {
+        return DeviceInfo{};
+    }
+
+    DeviceInfo selected_device = devices[0];
+    if (device_str == "auto") {
+        return selected_device;
+    }
+
+    try {
+        int idx = std::stoi(device_str);
+        if (idx >= 0 && idx < static_cast<int>(devices.size())) {
+            return devices[idx];
+        }
+    } catch (...) {
+    }
+
+    std::transform(device_str.begin(), device_str.end(), device_str.begin(), ::tolower);
+    for (const auto& device : devices) {
+        if (backend_to_string_local(device.backend) == device_str) {
+            return device;
+        }
+    }
+
+    return selected_device;
+}
+
+InferenceParams build_inference_params(const cxxopts::ParseResult& result) {
+    InferenceParams params;
+    params.target_resolution = result["resolution"].as<int>();
+    params.despill_strength = result["despill"].as<float>();
+    params.auto_despeckle = !result.count("no-despeckle");
+    params.batch_size = result["batch-size"].as<int>();
+    params.enable_tiling = result.count("tiled");
+    return params;
+}
+
+void print_stage_timings(const nlohmann::json& timings) {
+    if (!timings.is_array() || timings.empty()) {
+        return;
+    }
+
+    std::cout << "Stage timings:\n";
+    for (const auto& timing : timings) {
+        std::cout << " - " << timing["name"].get<std::string>() << ": "
+                  << timing["total_ms"].get<double>() << " ms";
+        if (timing.contains("avg_ms")) {
+            std::cout << " (avg " << timing["avg_ms"].get<double>() << " ms";
+            if (timing.contains("sample_count")) {
+                std::cout << " over " << timing["sample_count"].get<std::uint64_t>() << " samples";
+            }
+            std::cout << ")";
+        }
+        if (timing.contains("ms_per_unit")) {
+            std::cout << ", " << timing["ms_per_unit"].get<double>() << " ms/unit";
+        }
+        std::cout << "\n";
+    }
 }
 
 }  // namespace
@@ -276,20 +353,67 @@ int main(int argc, char* argv[]) {
             }
 
             auto devices = list_devices();
-            DeviceInfo selected_device = devices[0];
+            std::string device_str = result["device"].as<std::string>();
 
-            auto report =
-                JobOrchestrator::run_benchmark(result["model"].as<std::string>(), selected_device);
+            JobRequest benchmark_request;
+            benchmark_request.model_path = result["model"].as<std::string>();
+            benchmark_request.device = select_device(devices, device_str);
+            benchmark_request.params = build_inference_params(result);
+            if (result.count("input")) {
+                benchmark_request.input_path = result["input"].as<std::string>();
+            }
+            if (result.count("alpha-hint")) {
+                benchmark_request.hint_path = result["alpha-hint"].as<std::string>();
+            }
+            if (result.count("output")) {
+                benchmark_request.output_path = result["output"].as<std::string>();
+            }
+
+            auto report = JobOrchestrator::run_benchmark(benchmark_request);
+            if (report.contains("error")) {
+                if (use_json) {
+                    std::cout << report.dump(4) << std::endl;
+                } else {
+                    std::cerr << "Benchmark error: " << report["error"].get<std::string>()
+                              << std::endl;
+                }
+                return 1;
+            }
             if (use_json) {
                 std::cout << report.dump(4) << std::endl;
             } else {
                 std::cout << "--- Benchmark Results ---\n"
-                          << "Device: " << report["device"].get<std::string>() << "\n"
+                          << "Mode: " << report["mode"].get<std::string>() << "\n"
+                          << "Device: "
+                          << (report.contains("device")
+                                  ? report["device"].get<std::string>()
+                                  : report["requested_device"].get<std::string>())
+                          << "\n"
                           << "Backend: " << report["backend"].get<std::string>() << "\n"
-                          << "Resolution: " << report["resolution"].get<int>() << "x"
-                          << report["resolution"].get<int>() << "\n"
-                          << "Avg Latency: " << report["avg_latency_ms"].get<float>() << " ms\n"
-                          << "Estimated FPS: " << report["fps"].get<float>() << "\n";
+                          << "Requested device: " << report["requested_device"].get<std::string>()
+                          << "\n";
+                if (report["mode"] == "synthetic") {
+                    std::cout << "Resolution: " << report["resolution"].get<int>() << "x"
+                              << report["resolution"].get<int>() << "\n"
+                              << "Avg Latency: " << report["avg_latency_ms"].get<double>()
+                              << " ms\n"
+                              << "Estimated FPS: " << report["fps"].get<double>() << "\n";
+                } else {
+                    std::cout << "Input: " << report["input"].get<std::string>() << "\n"
+                              << "Total Duration: " << report["total_duration_ms"].get<double>()
+                              << " ms\n";
+                    if (report.contains("processed_units")) {
+                        std::cout << "Processed Units: "
+                                  << report["processed_units"].get<std::uint64_t>() << "\n"
+                                  << "Throughput: "
+                                  << report["throughput_units_per_second"].get<double>()
+                                  << " units/s\n";
+                    }
+                    if (report.contains("output_path")) {
+                        std::cout << "Output: " << report["output_path"].get<std::string>() << "\n";
+                    }
+                }
+                print_stage_timings(report["stage_timings"]);
             }
             return 0;
         }
@@ -373,55 +497,11 @@ int main(int argc, char* argv[]) {
                 result.count("alpha-hint") ? result["alpha-hint"].as<std::string>() : "";
             req.output_path = result["output"].as<std::string>();
             req.model_path = result["model"].as<std::string>();
-
-            req.params.target_resolution = result["resolution"].as<int>();
-            req.params.despill_strength = result["despill"].as<float>();
-            req.params.auto_despeckle = !result.count("no-despeckle");
-            req.params.batch_size = result["batch-size"].as<int>();
-            req.params.enable_tiling = result.count("tiled");
+            req.params = build_inference_params(result);
 
             auto devices = list_devices();
             std::string device_str = result["device"].as<std::string>();
-            req.device = devices[0];  // Default to auto/first
-
-            if (device_str != "auto") {
-                try {
-                    int idx = std::stoi(device_str);
-                    if (idx >= 0 && idx < (int)devices.size()) {
-                        req.device = devices[idx];
-                    }
-                } catch (...) {
-                    std::transform(device_str.begin(), device_str.end(), device_str.begin(),
-                                   ::tolower);
-                    for (const auto& d : devices) {
-                        std::string b_name;
-                        switch (d.backend) {
-                            case Backend::CPU:
-                                b_name = "cpu";
-                                break;
-                            case Backend::CoreML:
-                                b_name = "coreml";
-                                break;
-                            case Backend::CUDA:
-                                b_name = "cuda";
-                                break;
-                            case Backend::TensorRT:
-                                b_name = "tensorrt";
-                                break;
-                            case Backend::DirectML:
-                                b_name = "dml";
-                                break;
-                            default:
-                                b_name = "";
-                                break;
-                        }
-                        if (b_name == device_str) {
-                            req.device = d;
-                            break;
-                        }
-                    }
-                }
-            }
+            req.device = select_device(devices, device_str);
 
             if (!use_json) {
                 std::cout << "Processing Engine Setup:\n"

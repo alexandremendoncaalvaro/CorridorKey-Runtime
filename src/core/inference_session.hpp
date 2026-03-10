@@ -36,14 +36,15 @@ class InferenceSession {
      * @brief Run inference on a frame.
      */
     [[nodiscard]] Result<FrameResult> run(const Image& rgb, const Image& alpha_hint,
-                                          const InferenceParams& params);
+                                          const InferenceParams& params,
+                                          StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Run inference on a batch of frames.
      */
-    [[nodiscard]] Result<std::vector<FrameResult>> run_batch(const std::vector<Image>& rgbs,
-                                                             const std::vector<Image>& alpha_hints,
-                                                             const InferenceParams& params);
+    [[nodiscard]] Result<std::vector<FrameResult>> run_batch(
+        const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
+        const InferenceParams& params, StageTimingCallback on_stage = nullptr);
 
     [[nodiscard]] DeviceInfo device() const {
         return m_device;
@@ -62,25 +63,28 @@ class InferenceSession {
      * @brief Internal raw inference (no post-processing).
      */
     [[nodiscard]] Result<FrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params);
+                                                const InferenceParams& params,
+                                                StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Internal raw inference on a batch.
      */
     [[nodiscard]] Result<std::vector<FrameResult>> infer_batch_raw(
         const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
-        const InferenceParams& params);
+        const InferenceParams& params, StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Apply despeckle, despill and composition to raw results.
      */
-    void apply_post_process(FrameResult& result, const InferenceParams& params);
+    void apply_post_process(FrameResult& result, const InferenceParams& params,
+                            StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Helper for running tiling inference on large images.
      */
     [[nodiscard]] Result<FrameResult> run_tiled(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params, int model_res);
+                                                const InferenceParams& params, int model_res,
+                                                StageTimingCallback on_stage = nullptr);
 
     DeviceInfo m_device;
     int m_recommended_resolution = 512;

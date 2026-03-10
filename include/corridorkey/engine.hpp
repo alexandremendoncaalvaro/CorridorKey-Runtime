@@ -58,7 +58,8 @@ class CORRIDORKEY_API Engine {
      * @return A unique pointer to the initialized Engine or an error.
      */
     static Result<std::unique_ptr<Engine>> create(const std::filesystem::path& model_path,
-                                                  DeviceInfo device = auto_detect());
+                                                  DeviceInfo device = auto_detect(),
+                                                  StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Destructor (virtual for safety, though Engine is usually not inherited).
@@ -79,7 +80,8 @@ class CORRIDORKEY_API Engine {
      * @return The resulting images or an error.
      */
     Result<FrameResult> process_frame(const Image& rgb, const Image& alpha_hint,
-                                      const InferenceParams& params = {});
+                                      const InferenceParams& params = {},
+                                      StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Process a batch of RGB frames with alpha hints.
@@ -90,7 +92,8 @@ class CORRIDORKEY_API Engine {
      */
     Result<std::vector<FrameResult>> process_frame_batch(const std::vector<Image>& rgbs,
                                                          const std::vector<Image>& alpha_hints,
-                                                         const InferenceParams& params = {});
+                                                         const InferenceParams& params = {},
+                                                         StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Process a sequence of images from disk.
@@ -105,7 +108,8 @@ class CORRIDORKEY_API Engine {
                                   const std::vector<std::filesystem::path>& alpha_hints,
                                   const std::filesystem::path& output_dir,
                                   const InferenceParams& params = {},
-                                  ProgressCallback on_progress = nullptr);
+                                  ProgressCallback on_progress = nullptr,
+                                  StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Process a video file directly using FFmpeg.
@@ -120,7 +124,8 @@ class CORRIDORKEY_API Engine {
                                const std::filesystem::path& hint_video,
                                const std::filesystem::path& output_video,
                                const InferenceParams& params = {},
-                               ProgressCallback on_progress = nullptr);
+                               ProgressCallback on_progress = nullptr,
+                               StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Get the recommended resolution based on current hardware limits.

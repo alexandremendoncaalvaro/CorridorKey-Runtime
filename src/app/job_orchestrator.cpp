@@ -1,9 +1,11 @@
 #include "job_orchestrator.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <corridorkey/version.hpp>
 
+#include "common/stage_profiler.hpp"
 #include "hardware_profile.hpp"
 #include "runtime_contracts.hpp"
 
@@ -18,12 +20,78 @@ Result<void> emit_event(const JobEventCallback& callback, const JobEvent& event)
     return {};
 }
 
+std::vector<StageTiming> finalize_timings(common::StageProfiler& profiler,
+                                          const std::chrono::steady_clock::time_point& start,
+                                          bool& total_recorded) {
+    if (!total_recorded) {
+        auto end = std::chrono::steady_clock::now();
+        profiler.record("job_total", std::chrono::duration<double, std::milli>(end - start).count(),
+                        1);
+        total_recorded = true;
+    }
+
+    return profiler.snapshot();
+}
+
+std::filesystem::path make_benchmark_output_path(const JobRequest& request, bool video_input) {
+    auto temp_root = std::filesystem::temp_directory_path() / "corridorkey-benchmark";
+    std::filesystem::create_directories(temp_root);
+
+    auto token = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    auto stem = request.input_path.stem().string();
+    if (stem.empty()) {
+        stem = "synthetic";
+    }
+
+    if (video_input) {
+        return temp_root / (stem + "_" + token + ".mp4");
+    }
+
+    return temp_root / (stem + "_" + token);
+}
+
+std::uint64_t processed_units_from_timings(const std::vector<StageTiming>& timings) {
+    const std::array<std::string_view, 4> preferred_stages = {
+        "video_encode_frame",
+        "sequence_write_output",
+        "video_infer_batch",
+        "sequence_infer_batch",
+    };
+
+    for (std::string_view stage_name : preferred_stages) {
+        auto it = std::find_if(timings.begin(), timings.end(), [&](const StageTiming& timing) {
+            return timing.name == stage_name && timing.work_units > 0;
+        });
+        if (it != timings.end()) {
+            return it->work_units;
+        }
+    }
+
+    return 0;
+}
+
+void cleanup_benchmark_output(const std::filesystem::path& output_path) {
+    std::error_code error;
+    if (output_path.empty()) return;
+
+    if (std::filesystem::is_directory(output_path, error)) {
+        std::filesystem::remove_all(output_path, error);
+        return;
+    }
+
+    std::filesystem::remove(output_path, error);
+}
+
 }  // namespace
 
 Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on_progress,
                                   JobEventCallback on_event) {
     JobRequest req = request;
     bool emitted_fallback = false;
+    common::StageProfiler profiler;
+    auto stage_callback = [&](const StageTiming& timing) { profiler.record(timing); };
+    auto job_start = std::chrono::steady_clock::now();
+    bool total_recorded = false;
 
     auto started_event =
         JobEvent{JobEventType::JobStarted, "prepare", 0.0F, Backend::Auto, "Job accepted"};
@@ -32,12 +100,16 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
 
     // 1. Resolve Hardware Strategy if resolution is Auto (0)
     if (req.params.target_resolution <= 0) {
-        auto strategy = HardwareProfile::get_best_strategy(req.device);
-        req.params.target_resolution = strategy.target_resolution;
+        profiler.measure("hardware_strategy", [&]() {
+            auto strategy = HardwareProfile::get_best_strategy(req.device);
+            req.params.target_resolution = strategy.target_resolution;
+        });
     }
 
     // 2. Create Engine
-    auto engine_res = Engine::create(req.model_path, req.device);
+    auto engine_res = profiler.measure("engine_create", [&]() {
+        return Engine::create(req.model_path, req.device, stage_callback);
+    });
     if (!engine_res) {
         auto failed_event = JobEvent{
             JobEventType::Failed,
@@ -48,6 +120,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             "",
             engine_res.error(),
         };
+        failed_event.timings = finalize_timings(profiler, job_start, total_recorded);
         auto emit_res = emit_event(on_event, failed_event);
         if (!emit_res) return Unexpected(emit_res.error());
         return Unexpected(engine_res.error());
@@ -93,11 +166,13 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     }
 
     // 3. Prepare Output Directory
-    if (std::filesystem::is_directory(req.output_path) || req.output_path.extension().empty()) {
-        std::filesystem::create_directories(req.output_path);
-    } else {
-        std::filesystem::create_directories(req.output_path.parent_path());
-    }
+    profiler.measure("output_prepare", [&]() {
+        if (std::filesystem::is_directory(req.output_path) || req.output_path.extension().empty()) {
+            std::filesystem::create_directories(req.output_path);
+        } else {
+            std::filesystem::create_directories(req.output_path.parent_path());
+        }
+    });
 
     auto report_progress = [&](float progress, const std::string& status) -> bool {
         if (!emitted_fallback && engine->backend_fallback().has_value()) {
@@ -152,6 +227,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         if (engine->backend_fallback().has_value()) {
             failed_event.fallback = engine->backend_fallback();
         }
+        failed_event.timings = finalize_timings(profiler, job_start, total_recorded);
         auto emit_res = emit_event(on_event, failed_event);
         if (!emit_res) return Unexpected(emit_res.error());
         return Unexpected(error);
@@ -159,8 +235,10 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
 
     // 4. Dispatch to Video or Sequence
     if (std::filesystem::is_regular_file(req.input_path) && is_video_file(req.input_path)) {
-        auto result = engine->process_video(req.input_path, req.hint_path, req.output_path,
-                                            req.params, report_progress);
+        auto result = profiler.measure("video_pipeline", [&]() {
+            return engine->process_video(req.input_path, req.hint_path, req.output_path, req.params,
+                                         report_progress, stage_callback);
+        });
         if (!result) {
             return finalize_failure(result.error());
         }
@@ -175,31 +253,38 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             return ext == ".png" || ext == ".exr" || ext == ".jpg" || ext == ".jpeg";
         };
 
-        if (std::filesystem::is_directory(req.input_path)) {
-            for (const auto& entry : std::filesystem::directory_iterator(req.input_path)) {
-                if (entry.is_regular_file() && is_image_file(entry.path())) {
-                    inputs.push_back(entry.path());
-                    if (!req.hint_path.empty()) {
-                        hints.push_back(req.hint_path / entry.path().filename());
+        profiler.measure("sequence_collect_inputs", [&]() {
+            if (std::filesystem::is_directory(req.input_path)) {
+                for (const auto& entry : std::filesystem::directory_iterator(req.input_path)) {
+                    if (entry.is_regular_file() && is_image_file(entry.path())) {
+                        inputs.push_back(entry.path());
+                        if (!req.hint_path.empty()) {
+                            hints.push_back(req.hint_path / entry.path().filename());
+                        }
                     }
                 }
+                std::sort(inputs.begin(), inputs.end());
+                if (!hints.empty()) std::sort(hints.begin(), hints.end());
+            } else {
+                inputs.push_back(req.input_path);
+                if (!req.hint_path.empty()) {
+                    hints.push_back(req.hint_path);
+                }
             }
-            std::sort(inputs.begin(), inputs.end());
-            if (!hints.empty()) std::sort(hints.begin(), hints.end());
-        } else {
-            inputs.push_back(req.input_path);
-            if (!req.hint_path.empty()) {
-                hints.push_back(req.hint_path);
-            }
-        }
+        });
 
         if (inputs.empty()) {
             Error error{ErrorCode::InvalidParameters, "No valid input files found."};
             return finalize_failure(error);
         }
 
-        auto result =
-            engine->process_sequence(inputs, hints, req.output_path, req.params, report_progress);
+        auto result = profiler.measure(
+            "sequence_pipeline",
+            [&]() {
+                return engine->process_sequence(inputs, hints, req.output_path, req.params,
+                                                report_progress, stage_callback);
+            },
+            inputs.size());
         if (!result) {
             return finalize_failure(result.error());
         }
@@ -229,6 +314,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     if (engine->backend_fallback().has_value()) {
         completed_event.fallback = engine->backend_fallback();
     }
+    completed_event.timings = finalize_timings(profiler, job_start, total_recorded);
     auto emit_completed_res = emit_event(on_event, completed_event);
     if (!emit_completed_res) return Unexpected(emit_completed_res.error());
 
@@ -323,46 +409,147 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     return report;
 }
 
-nlohmann::json JobOrchestrator::run_benchmark(const std::filesystem::path& model_path,
-                                              const DeviceInfo& device) {
+nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     nlohmann::json results;
+    if (request.input_path.empty()) {
+        common::StageProfiler profiler;
+        auto stage_callback = [&](const StageTiming& timing) { profiler.record(timing); };
 
-    auto engine_res = Engine::create(model_path, device);
-    if (!engine_res) {
-        results["error"] = engine_res.error().message;
+        auto engine_res = profiler.measure("engine_create", [&]() {
+            return Engine::create(request.model_path, request.device, stage_callback);
+        });
+        if (!engine_res) {
+            results["error"] = engine_res.error().message;
+            return results;
+        }
+        auto engine = std::move(*engine_res);
+
+        InferenceParams params = request.params;
+        int res = params.target_resolution > 0 ? params.target_resolution
+                                               : engine->recommended_resolution();
+        ImageBuffer rgb_buf(res, res, 3);
+        ImageBuffer hint_buf(res, res, 1);
+        std::fill(rgb_buf.view().data.begin(), rgb_buf.view().data.end(), 0.0f);
+        std::fill(hint_buf.view().data.begin(), hint_buf.view().data.end(), 0.0f);
+
+        const int warmup_runs = 2;
+        const int benchmark_runs = 5;
+
+        for (int i = 0; i < warmup_runs; ++i) {
+            auto warmup_res = profiler.measure(
+                "benchmark_warmup_frame",
+                [&]() {
+                    return engine->process_frame(rgb_buf.view(), hint_buf.view(), params,
+                                                 stage_callback);
+                },
+                1);
+            if (!warmup_res) {
+                results["error"] = warmup_res.error().message;
+                return results;
+            }
+        }
+
+        auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < benchmark_runs; ++i) {
+            auto frame_res = profiler.measure(
+                "benchmark_frame_total",
+                [&]() {
+                    return engine->process_frame(rgb_buf.view(), hint_buf.view(), params,
+                                                 stage_callback);
+                },
+                1);
+            if (!frame_res) {
+                results["error"] = frame_res.error().message;
+                return results;
+            }
+        }
+        auto end = std::chrono::steady_clock::now();
+
+        double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
+        profiler.record("benchmark_total", total_ms, benchmark_runs);
+
+        results["mode"] = "synthetic";
+        results["model"] = request.model_path.filename().string();
+        results["resolution"] = res;
+        results["requested_device"] = request.device.name;
+        results["device"] = engine->current_device().name;
+        results["backend"] = backend_to_string(engine->current_device().backend);
+        results["warmup_runs"] = warmup_runs;
+        results["benchmark_runs"] = benchmark_runs;
+        results["avg_latency_ms"] = total_ms / benchmark_runs;
+        results["fps"] = total_ms > 0.0 ? (1000.0 * benchmark_runs) / total_ms : 0.0;
+        results["stage_timings"] = nlohmann::json::array();
+        for (const auto& timing : profiler.snapshot()) {
+            results["stage_timings"].push_back(to_json(timing));
+        }
+        if (engine->backend_fallback().has_value()) {
+            results["fallback"] = to_json(*engine->backend_fallback());
+        }
         return results;
     }
-    auto engine = std::move(*engine_res);
 
-    int res = engine->recommended_resolution();
-    ImageBuffer rgb_buf(res, res, 3);
-    ImageBuffer hint_buf(res, res, 1);
-
-    const int warmup_runs = 2;
-    const int benchmark_runs = 5;
-
-    for (int i = 0; i < warmup_runs; ++i) {
-        engine->process_frame(rgb_buf.view(), hint_buf.view());
+    JobRequest benchmark_request = request;
+    bool video_input = std::filesystem::is_regular_file(benchmark_request.input_path) &&
+                       is_video_file(benchmark_request.input_path);
+    bool cleanup_output = benchmark_request.output_path.empty();
+    if (cleanup_output) {
+        benchmark_request.output_path = make_benchmark_output_path(benchmark_request, video_input);
     }
 
-    auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < benchmark_runs; ++i) {
-        engine->process_frame(rgb_buf.view(), hint_buf.view());
+    std::vector<StageTiming> timings;
+    Backend selected_backend = Backend::Auto;
+    std::string selected_device_name = benchmark_request.device.name;
+    std::optional<BackendFallbackInfo> fallback;
+
+    auto start = std::chrono::steady_clock::now();
+    auto run_res = run(benchmark_request, nullptr, [&](const JobEvent& event) {
+        if (event.backend != Backend::Auto) {
+            selected_backend = event.backend;
+            if (!event.message.empty()) {
+                selected_device_name = event.message;
+            }
+        }
+        if (event.fallback.has_value()) {
+            fallback = event.fallback;
+        }
+        if (event.type == JobEventType::Completed || event.type == JobEventType::Failed ||
+            event.type == JobEventType::Cancelled) {
+            timings = event.timings;
+        }
+        return true;
+    });
+    auto end = std::chrono::steady_clock::now();
+
+    double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
+    std::uint64_t units = processed_units_from_timings(timings);
+
+    results["mode"] = "workload";
+    results["model"] = benchmark_request.model_path.filename().string();
+    results["input"] = benchmark_request.input_path.string();
+    results["requested_device"] = benchmark_request.device.name;
+    results["device"] = selected_device_name;
+    results["backend"] = backend_to_string(selected_backend);
+    results["total_duration_ms"] = total_ms;
+    if (units > 0) {
+        results["processed_units"] = units;
+        results["throughput_units_per_second"] = total_ms > 0.0 ? (1000.0 * units) / total_ms : 0.0;
     }
-    auto end = std::chrono::high_resolution_clock::now();
+    results["stage_timings"] = nlohmann::json::array();
+    for (const auto& timing : timings) {
+        results["stage_timings"].push_back(to_json(timing));
+    }
+    if (fallback.has_value()) {
+        results["fallback"] = to_json(*fallback);
+    }
+    if (!run_res) {
+        results["error"] = run_res.error().message;
+    }
+    if (!cleanup_output) {
+        results["output_path"] = benchmark_request.output_path.string();
+    }
 
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    float avg_ms = static_cast<float>(duration) / benchmark_runs;
-
-    results["model"] = model_path.filename().string();
-    results["resolution"] = res;
-    results["requested_device"] = device.name;
-    results["device"] = engine->current_device().name;
-    results["backend"] = backend_to_string(engine->current_device().backend);
-    results["avg_latency_ms"] = avg_ms;
-    results["fps"] = 1000.0f / avg_ms;
-    if (engine->backend_fallback().has_value()) {
-        results["fallback"] = to_json(*engine->backend_fallback());
+    if (cleanup_output) {
+        cleanup_benchmark_output(benchmark_request.output_path);
     }
 
     return results;

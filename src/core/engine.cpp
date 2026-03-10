@@ -5,6 +5,7 @@
 
 #include "../frame_io/video_io.hpp"
 #include "../post_process/color_utils.hpp"
+#include "common/stage_profiler.hpp"
 #include "inference_session.hpp"
 
 namespace corridorkey {
@@ -81,17 +82,20 @@ Engine::Engine(Engine&&) noexcept = default;
 Engine& Engine::operator=(Engine&&) noexcept = default;
 
 Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& model_path,
-                                               DeviceInfo device) {
+                                               DeviceInfo device, StageTimingCallback on_stage) {
     auto engine = std::unique_ptr<Engine>(new Engine());
     engine->m_impl->model_path = model_path;
 
     DeviceInfo requested_device = device.backend == Backend::Auto ? auto_detect() : device;
     engine->m_impl->cpu_fallback_device = build_cpu_fallback_device(requested_device);
 
-    auto session_res = InferenceSession::create(model_path, requested_device);
+    auto session_res = common::measure_stage(on_stage, "session_create_requested", [&]() {
+        return InferenceSession::create(model_path, requested_device);
+    });
     if (!session_res && engine->m_impl->cpu_fallback_device.has_value()) {
-        auto fallback_res =
-            InferenceSession::create(model_path, *engine->m_impl->cpu_fallback_device);
+        auto fallback_res = common::measure_stage(on_stage, "session_create_cpu_fallback", [&]() {
+            return InferenceSession::create(model_path, *engine->m_impl->cpu_fallback_device);
+        });
         if (!fallback_res) {
             return Unexpected(session_res.error());
         }
@@ -111,37 +115,41 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
     std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
     std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
 
-    // Non-blocking warm-up
-    engine->process_frame(warm_rgb.view(), warm_hint.view());
+    common::measure_stage(on_stage, "engine_warmup", [&]() {
+        engine->process_frame(warm_rgb.view(), warm_hint.view(), {}, on_stage);
+    });
 
     return engine;
 }
 
 Result<FrameResult> Engine::process_frame(const Image& rgb, const Image& alpha_hint,
-                                          const InferenceParams& params) {
+                                          const InferenceParams& params,
+                                          StageTimingCallback on_stage) {
     if (!m_impl->session) {
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
     return m_impl->run_with_cpu_fallback<FrameResult>(
-        [&]() { return m_impl->session->run(rgb, alpha_hint, params); });
+        [&]() { return m_impl->session->run(rgb, alpha_hint, params, on_stage); });
 }
 
 Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<Image>& rgbs,
                                                              const std::vector<Image>& alpha_hints,
-                                                             const InferenceParams& params) {
+                                                             const InferenceParams& params,
+                                                             StageTimingCallback on_stage) {
     if (!m_impl->session) {
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
     return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
-        [&]() { return m_impl->session->run_batch(rgbs, alpha_hints, params); });
+        [&]() { return m_impl->session->run_batch(rgbs, alpha_hints, params, on_stage); });
 }
 
 Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& inputs,
                                       const std::vector<std::filesystem::path>& alpha_hints,
                                       const std::filesystem::path& output_dir,
-                                      const InferenceParams& params, ProgressCallback on_progress) {
+                                      const InferenceParams& params, ProgressCallback on_progress,
+                                      StageTimingCallback on_stage) {
     bool has_hints = !alpha_hints.empty();
     if (has_hints && inputs.size() != alpha_hints.size()) {
         return Unexpected(
@@ -165,17 +173,24 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
         std::vector<Image> hint_views;
 
         for (size_t b = 0; b < current_batch_size; ++b) {
-            auto rgb_res = frame_io::read_frame(inputs[i + b]);
+            auto rgb_res = common::measure_stage(
+                on_stage, "sequence_read_input",
+                [&]() { return frame_io::read_frame(inputs[i + b]); }, 1);
             if (!rgb_res) return Unexpected(rgb_res.error());
 
             ImageBuffer hint_buf;
             if (has_hints) {
-                auto hint_res = frame_io::read_frame(alpha_hints[i + b]);
+                auto hint_res = common::measure_stage(
+                    on_stage, "sequence_read_hint",
+                    [&]() { return frame_io::read_frame(alpha_hints[i + b]); }, 1);
                 if (!hint_res) return Unexpected(hint_res.error());
                 hint_buf = std::move(*hint_res);
             } else {
                 hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
-                ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view());
+                common::measure_stage(
+                    on_stage, "sequence_generate_hint",
+                    [&]() { ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view()); },
+                    1);
             }
 
             rgb_views.push_back(rgb_res->view());
@@ -184,13 +199,21 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
             hint_bufs.push_back(std::move(hint_buf));
         }
 
-        auto results = m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
-            [&]() { return m_impl->session->run_batch(rgb_views, hint_views, params); });
+        auto results = common::measure_stage(
+            on_stage, "sequence_infer_batch",
+            [&]() {
+                return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>([&]() {
+                    return m_impl->session->run_batch(rgb_views, hint_views, params, on_stage);
+                });
+            },
+            current_batch_size);
         if (!results) return Unexpected(results.error());
 
         for (size_t b = 0; b < current_batch_size; ++b) {
             std::string filename = inputs[i + b].filename().string();
-            auto save_res = frame_io::save_result(output_dir, filename, (*results)[b]);
+            auto save_res = common::measure_stage(
+                on_stage, "sequence_write_output",
+                [&]() { return frame_io::save_result(output_dir, filename, (*results)[b]); }, 1);
             if (!save_res) return save_res;
         }
     }
@@ -201,19 +224,22 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
 Result<void> Engine::process_video(const std::filesystem::path& input_video,
                                    const std::filesystem::path& hint_video,
                                    const std::filesystem::path& output_video,
-                                   const InferenceParams& params, ProgressCallback on_progress) {
+                                   const InferenceParams& params, ProgressCallback on_progress,
+                                   StageTimingCallback on_stage) {
     if (!m_impl->session) {
         return Unexpected(Error{ErrorCode::InferenceFailed, "Engine not initialized"});
     }
 
-    auto reader_rgb_res = VideoReader::open(input_video);
+    auto reader_rgb_res = common::measure_stage(on_stage, "video_open_reader",
+                                                [&]() { return VideoReader::open(input_video); });
     if (!reader_rgb_res) return Unexpected(reader_rgb_res.error());
     auto reader_rgb = std::move(*reader_rgb_res);
 
     bool has_hint_video = !hint_video.empty();
     std::unique_ptr<VideoReader> reader_hint;
     if (has_hint_video) {
-        auto reader_hint_res = VideoReader::open(hint_video);
+        auto reader_hint_res = common::measure_stage(
+            on_stage, "video_open_hint_reader", [&]() { return VideoReader::open(hint_video); });
         if (!reader_hint_res) return Unexpected(reader_hint_res.error());
         reader_hint = std::move(*reader_hint_res);
     }
@@ -221,7 +247,9 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
     int out_w = reader_rgb->width();
     int out_h = reader_rgb->height();
 
-    auto writer_res = VideoWriter::open(output_video, out_w, out_h, reader_rgb->fps());
+    auto writer_res = common::measure_stage(on_stage, "video_open_writer", [&]() {
+        return VideoWriter::open(output_video, out_w, out_h, reader_rgb->fps());
+    });
     if (!writer_res) return Unexpected(writer_res.error());
     auto writer = std::move(*writer_res);
 
@@ -239,17 +267,23 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
     auto fetch_batch = [&](int size) -> Result<Batch> {
         Batch b;
         for (int i = 0; i < size; ++i) {
-            auto rgb_res = reader_rgb->read_next_frame();
+            auto rgb_res = common::measure_stage(
+                on_stage, "video_decode_frame", [&]() { return reader_rgb->read_next_frame(); }, 1);
             if (!rgb_res || rgb_res->view().empty()) break;
 
             ImageBuffer hint_buf;
             if (has_hint_video) {
-                auto hint_res = reader_hint->read_next_frame();
+                auto hint_res = common::measure_stage(
+                    on_stage, "video_decode_hint", [&]() { return reader_hint->read_next_frame(); },
+                    1);
                 if (!hint_res || hint_res->view().empty()) break;
                 hint_buf = std::move(*hint_res);
             } else {
                 hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
-                ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view());
+                common::measure_stage(
+                    on_stage, "video_generate_hint",
+                    [&]() { ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view()); },
+                    1);
             }
 
             b.rgb_views.push_back(rgb_res->view());
@@ -281,22 +315,28 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         }
 
         // GPU Inference on the CURRENT batch
-        auto results = m_impl->run_with_cpu_fallback<std::vector<FrameResult>>([&]() {
-            return m_impl->session->run_batch(current_batch.rgb_views, current_batch.hint_views,
-                                              params);
-        });
+        auto results = common::measure_stage(
+            on_stage, "video_infer_batch",
+            [&]() {
+                return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>([&]() {
+                    return m_impl->session->run_batch(current_batch.rgb_views,
+                                                      current_batch.hint_views, params, on_stage);
+                });
+            },
+            current_batch.rgb_views.size());
         if (!results) return Unexpected(results.error());
 
-        // Sequential Write (FFmpeg encoding is usually CPU-bound but fast enough)
         for (auto& res : *results) {
-            auto write_res = writer->write_frame(res.composite.view());
+            auto write_res = common::measure_stage(
+                on_stage, "video_encode_frame",
+                [&]() { return writer->write_frame(res.composite.view()); }, 1);
             if (!write_res) return Unexpected(write_res.error());
         }
 
         frame_idx += current_batch.rgb_views.size();
     }
 
-    writer.reset();  // Final flush
+    common::measure_stage(on_stage, "video_flush_writer", [&]() { writer.reset(); });
 
     if (on_progress) {
         on_progress(1.0f, "Done");

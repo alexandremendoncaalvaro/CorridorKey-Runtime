@@ -1,6 +1,7 @@
 #include "inference_session.hpp"
 
 #include "common/srgb_lut.hpp"
+#include "common/stage_profiler.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
@@ -113,7 +114,8 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 }
 
 Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params, int model_res) {
+                                                const InferenceParams& params, int model_res,
+                                                StageTimingCallback on_stage) {
     int w = rgb.width;
     int h = rgb.height;
     int tile_size = model_res;
@@ -132,22 +134,27 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
     // Pre-calculate weight mask (linear falloff at edges)
     ImageBuffer weight_mask_buf(tile_size, tile_size, 1);
     Image mask = weight_mask_buf.view();
-    for (int y = 0; y < tile_size; ++y) {
-        float wy = 1.0f;
-        if (y < padding)
-            wy = static_cast<float>(y) / padding;
-        else if (y >= tile_size - padding)
-            wy = static_cast<float>(tile_size - 1 - y) / padding;
+    common::measure_stage(
+        on_stage, "tile_prepare_weights",
+        [&]() {
+            for (int y = 0; y < tile_size; ++y) {
+                float wy = 1.0f;
+                if (y < padding)
+                    wy = static_cast<float>(y) / padding;
+                else if (y >= tile_size - padding)
+                    wy = static_cast<float>(tile_size - 1 - y) / padding;
 
-        for (int x = 0; x < tile_size; ++x) {
-            float wx = 1.0f;
-            if (x < padding)
-                wx = static_cast<float>(x) / padding;
-            else if (x >= tile_size - padding)
-                wx = static_cast<float>(tile_size - 1 - x) / padding;
-            mask(y, x) = std::min(wx, wy);
-        }
-    }
+                for (int x = 0; x < tile_size; ++x) {
+                    float wx = 1.0f;
+                    if (x < padding)
+                        wx = static_cast<float>(x) / padding;
+                    else if (x >= tile_size - padding)
+                        wx = static_cast<float>(tile_size - 1 - x) / padding;
+                    mask(y, x) = std::min(wx, wy);
+                }
+            }
+        },
+        1);
 
     // Iterate tiles
     int nx = (w + stride - 1) / stride;
@@ -162,63 +169,78 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
             if (x_start + tile_size > w) x_start = std::max(0, w - tile_size);
             if (y_start + tile_size > h) y_start = std::max(0, h - tile_size);
 
-            // Extract tile
             ImageBuffer rgb_tile(tile_size, tile_size, 3);
             ImageBuffer hint_tile(tile_size, tile_size, 1);
 
-            for (int y = 0; y < tile_size; ++y) {
-                for (int x = 0; x < tile_size; ++x) {
-                    for (int c = 0; c < 3; ++c)
-                        rgb_tile.view()(y, x, c) = rgb(y_start + y, x_start + x, c);
-                    hint_tile.view()(y, x) = alpha_hint(y_start + y, x_start + x);
-                }
-            }
+            common::measure_stage(
+                on_stage, "tile_extract",
+                [&]() {
+                    for (int y = 0; y < tile_size; ++y) {
+                        for (int x = 0; x < tile_size; ++x) {
+                            for (int c = 0; c < 3; ++c)
+                                rgb_tile.view()(y, x, c) = rgb(y_start + y, x_start + x, c);
+                            hint_tile.view()(y, x) = alpha_hint(y_start + y, x_start + x);
+                        }
+                    }
+                },
+                1);
 
-            // Run raw inference on tile
-            auto res = infer_raw(rgb_tile.view(), hint_tile.view(), params);
+            auto res = common::measure_stage(
+                on_stage, "tile_infer",
+                [&]() { return infer_raw(rgb_tile.view(), hint_tile.view(), params, on_stage); },
+                1);
             if (!res) return Unexpected(res.error());
 
-            // Accumulate
-            for (int y = 0; y < tile_size; ++y) {
-                for (int x = 0; x < tile_size; ++x) {
-                    int global_y = y_start + y;
-                    int global_x = x_start + x;
-                    if (global_y >= h || global_x >= w) continue;
+            common::measure_stage(
+                on_stage, "tile_accumulate",
+                [&]() {
+                    for (int y = 0; y < tile_size; ++y) {
+                        for (int x = 0; x < tile_size; ++x) {
+                            int global_y = y_start + y;
+                            int global_x = x_start + x;
+                            if (global_y >= h || global_x >= w) continue;
 
-                    float w_val = mask(y, x);
-                    acc_weight.view()(global_y, global_x) += w_val;
-                    acc_alpha.view()(global_y, global_x) += res->alpha.view()(y, x) * w_val;
-                    for (int c = 0; c < 3; ++c) {
-                        acc_fg.view()(global_y, global_x, c) +=
-                            res->foreground.view()(y, x, c) * w_val;
+                            float w_val = mask(y, x);
+                            acc_weight.view()(global_y, global_x) += w_val;
+                            acc_alpha.view()(global_y, global_x) += res->alpha.view()(y, x) * w_val;
+                            for (int c = 0; c < 3; ++c) {
+                                acc_fg.view()(global_y, global_x, c) +=
+                                    res->foreground.view()(y, x, c) * w_val;
+                            }
+                        }
                     }
+                },
+                1);
+        }
+    }
+
+    common::measure_stage(
+        on_stage, "tile_normalize",
+        [&]() {
+            for (int i = 0; i < w * h; ++i) {
+                float w_val = acc_weight.view().data[i];
+                if (w_val > 0.0001f) {
+                    acc_alpha.view().data[i] /= w_val;
+                    acc_fg.view().data[i * 3] /= w_val;
+                    acc_fg.view().data[i * 3 + 1] /= w_val;
+                    acc_fg.view().data[i * 3 + 2] /= w_val;
                 }
             }
-        }
-    }
-
-    // Normalize
-    for (int i = 0; i < w * h; ++i) {
-        float w_val = acc_weight.view().data[i];
-        if (w_val > 0.0001f) {
-            acc_alpha.view().data[i] /= w_val;
-            acc_fg.view().data[i * 3] /= w_val;
-            acc_fg.view().data[i * 3 + 1] /= w_val;
-            acc_fg.view().data[i * 3 + 2] /= w_val;
-        }
-    }
+        },
+        1);
 
     FrameResult result;
     result.alpha = std::move(acc_alpha);
     result.foreground = std::move(acc_fg);
 
-    // Apply post-process on the full stitched image
-    apply_post_process(result, params);
+    common::measure_stage(
+        on_stage, "tile_post_process", [&]() { apply_post_process(result, params, on_stage); }, 1);
 
     return result;
 }
 
-void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params) {
+void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params,
+                                          StageTimingCallback on_stage) {
     if (result.alpha.view().empty() || result.foreground.view().empty()) return;
 
     int w = result.foreground.view().width;
@@ -226,11 +248,14 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
 
     // 1. Despeckle alpha
     if (params.auto_despeckle) {
-        despeckle(result.alpha.view(), params.despeckle_size);
+        common::measure_stage(
+            on_stage, "post_despeckle",
+            [&]() { despeckle(result.alpha.view(), params.despeckle_size); }, 1);
     }
 
-    // 2. Despill FG in sRGB space
-    despill(result.foreground.view(), params.despill_strength);
+    common::measure_stage(
+        on_stage, "post_despill",
+        [&]() { despill(result.foreground.view(), params.despill_strength); }, 1);
 
     // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
     const auto& lut = SrgbLut::instance();
@@ -240,28 +265,38 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     result.processed = ImageBuffer(w, h, 4);
     Image proc = result.processed.view();
 
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            float a = alpha_view(y, x);
-            proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
-            proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
-            proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
-            proc(y, x, 3) = a;
-        }
-    }
+    common::measure_stage(
+        on_stage, "post_premultiply",
+        [&]() {
+            for (int y = 0; y < h; ++y) {
+                for (int x = 0; x < w; ++x) {
+                    float a = alpha_view(y, x);
+                    proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
+                    proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
+                    proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
+                    proc(y, x, 3) = a;
+                }
+            }
+        },
+        1);
 
     // 4. Composite on checker (linear space), then convert to sRGB
     result.composite = ImageBuffer(w, h, 4);
     Image comp = result.composite.view();
-    std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
-
-    ColorUtils::composite_over_checker(comp);
-    ColorUtils::linear_to_srgb(comp);
+    common::measure_stage(
+        on_stage, "post_composite",
+        [&]() {
+            std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
+            ColorUtils::composite_over_checker(comp);
+            ColorUtils::linear_to_srgb(comp);
+        },
+        1);
 }
 
 Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<Image>& rgbs,
                                                              const std::vector<Image>& alpha_hints,
-                                                             const InferenceParams& params) {
+                                                             const InferenceParams& params,
+                                                             StageTimingCallback on_stage) {
     if (rgbs.empty()) return std::vector<FrameResult>{};
 
     // Tiling logic for batch (simplified: if first image needs tiling, we don't batch but run tiled
@@ -272,25 +307,25 @@ Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<I
     if (params.enable_tiling && (rgbs[0].width > target_res || rgbs[0].height > target_res)) {
         std::vector<FrameResult> results;
         for (size_t i = 0; i < rgbs.size(); ++i) {
-            auto res = run_tiled(rgbs[i], alpha_hints[i], params, target_res);
+            auto res = run_tiled(rgbs[i], alpha_hints[i], params, target_res, on_stage);
             if (!res) return Unexpected(res.error());
             results.push_back(std::move(*res));
         }
         return results;
     }
 
-    auto results_res = infer_batch_raw(rgbs, alpha_hints, params);
+    auto results_res = infer_batch_raw(rgbs, alpha_hints, params, on_stage);
     if (!results_res) return results_res;
 
     for (auto& res : *results_res) {
-        apply_post_process(res, params);
+        apply_post_process(res, params, on_stage);
     }
     return results_res;
 }
 
 Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
     const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
-    const InferenceParams& params) {
+    const InferenceParams& params, StageTimingCallback on_stage) {
     if (rgbs.empty()) return std::vector<FrameResult>{};
 
     try {
@@ -321,27 +356,36 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             size_t image_stride = 4 * model_h * model_w;
             size_t channel_stride = model_h * model_w;
 
-            for (size_t b = 0; b < batch_size; ++b) {
-                auto [padded_rgb, rgb_roi] =
-                    ColorUtils::fit_pad(rgbs[b], (int)model_w, (int)model_h);
-                auto [padded_hint, hint_roi] =
-                    ColorUtils::fit_pad(alpha_hints[b], (int)model_w, (int)model_h);
-                rois[b] = rgb_roi;
+            common::measure_stage(
+                on_stage, "batch_prepare_inputs",
+                [&]() {
+                    for (size_t b = 0; b < batch_size; ++b) {
+                        auto [padded_rgb, rgb_roi] =
+                            ColorUtils::fit_pad(rgbs[b], (int)model_w, (int)model_h);
+                        auto [padded_hint, hint_roi] =
+                            ColorUtils::fit_pad(alpha_hints[b], (int)model_w, (int)model_h);
+                        (void)hint_roi;
+                        rois[b] = rgb_roi;
 
-                Image cur_rgb = padded_rgb.view();
-                Image cur_hint = padded_hint.view();
-                float* dst = dst_base + (b * image_stride);
+                        Image cur_rgb = padded_rgb.view();
+                        Image cur_hint = padded_hint.view();
+                        float* dst = dst_base + (b * image_stride);
 
-                for (int y = 0; y < model_h; ++y) {
-                    for (int x = 0; x < model_w; ++x) {
-                        size_t idx = y * model_w + x;
-                        dst[0 * channel_stride + idx] = (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
-                        dst[1 * channel_stride + idx] = (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
-                        dst[2 * channel_stride + idx] = (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
-                        dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
+                        for (int y = 0; y < model_h; ++y) {
+                            for (int x = 0; x < model_w; ++x) {
+                                size_t idx = y * model_w + x;
+                                dst[0 * channel_stride + idx] =
+                                    (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
+                                dst[1 * channel_stride + idx] =
+                                    (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
+                                dst[2 * channel_stride + idx] =
+                                    (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
+                                dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
+                            }
+                        }
                     }
-                }
-            }
+                },
+                batch_size);
 
             std::vector<int64_t> effective_shape = {(int64_t)batch_size, 4, model_h, model_w};
             input_tensors.push_back(
@@ -352,9 +396,15 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                                     "Non-concatenated models not yet supported with batching"});
         }
 
-        auto output_tensors = m_session.Run(
-            Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(), input_tensors.data(),
-            input_tensors.size(), m_output_node_names_ptr.data(), m_output_node_names_ptr.size());
+        auto output_tensors = common::measure_stage(
+            on_stage, "ort_run",
+            [&]() {
+                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                                     input_tensors.data(), input_tensors.size(),
+                                     m_output_node_names_ptr.data(),
+                                     m_output_node_names_ptr.size());
+            },
+            batch_size);
 
         if (output_tensors.empty()) {
             return Unexpected(
@@ -377,27 +427,33 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             fg_image_stride = fg_shape[1] * fg_shape[2] * fg_shape[3];
         }
 
-        for (size_t b = 0; b < batch_size; ++b) {
-            FrameResult& result = batch_results[b];
-            Rect& roi = rois[b];
+        common::measure_stage(
+            on_stage, "batch_extract_outputs",
+            [&]() {
+                for (size_t b = 0; b < batch_size; ++b) {
+                    FrameResult& result = batch_results[b];
+                    Rect& roi = rois[b];
 
-            // Extract alpha
-            ImageBuffer full_alpha((int)alpha_shape[3], (int)alpha_shape[2], (int)alpha_shape[1]);
-            ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride), full_alpha.view());
-            ImageBuffer cropped_alpha =
-                ColorUtils::crop(full_alpha.view(), roi.x_pos, roi.y_pos, roi.width, roi.height);
-            result.alpha = ColorUtils::resize(cropped_alpha.view(), rgbs[b].width, rgbs[b].height);
+                    ImageBuffer full_alpha((int)alpha_shape[3], (int)alpha_shape[2],
+                                           (int)alpha_shape[1]);
+                    ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride),
+                                            full_alpha.view());
+                    ImageBuffer cropped_alpha = ColorUtils::crop(full_alpha.view(), roi.x_pos,
+                                                                 roi.y_pos, roi.width, roi.height);
+                    result.alpha =
+                        ColorUtils::resize(cropped_alpha.view(), rgbs[b].width, rgbs[b].height);
 
-            // Extract foreground
-            if (fg_ptr != nullptr) {
-                ImageBuffer full_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
-                ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), full_fg.view());
-                ImageBuffer cropped_fg =
-                    ColorUtils::crop(full_fg.view(), roi.x_pos, roi.y_pos, roi.width, roi.height);
-                result.foreground =
-                    ColorUtils::resize(cropped_fg.view(), rgbs[b].width, rgbs[b].height);
-            }
-        }
+                    if (fg_ptr != nullptr) {
+                        ImageBuffer full_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
+                        ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), full_fg.view());
+                        ImageBuffer cropped_fg = ColorUtils::crop(full_fg.view(), roi.x_pos,
+                                                                  roi.y_pos, roi.width, roi.height);
+                        result.foreground =
+                            ColorUtils::resize(cropped_fg.view(), rgbs[b].width, rgbs[b].height);
+                    }
+                }
+            },
+            batch_size);
 
         return batch_results;
 
@@ -408,27 +464,29 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 }
 
 Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params) {
-    auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params);
+                                                const InferenceParams& params,
+                                                StageTimingCallback on_stage) {
+    auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
     if (!batch_res) return Unexpected(batch_res.error());
     return std::move((*batch_res)[0]);
 }
 
 Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,
-                                          const InferenceParams& params) {
+                                          const InferenceParams& params,
+                                          StageTimingCallback on_stage) {
     // Check for tiling request
     int target_res =
         params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
 
     // Only tile if requested and input is significantly larger than model
     if (params.enable_tiling && (rgb.width > target_res || rgb.height > target_res)) {
-        return run_tiled(rgb, alpha_hint, params, target_res);
+        return run_tiled(rgb, alpha_hint, params, target_res, on_stage);
     }
 
-    auto result_res = infer_raw(rgb, alpha_hint, params);
+    auto result_res = infer_raw(rgb, alpha_hint, params, on_stage);
     if (!result_res) return result_res;
 
-    apply_post_process(*result_res, params);
+    apply_post_process(*result_res, params, on_stage);
     return result_res;
 }
 

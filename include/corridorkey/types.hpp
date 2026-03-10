@@ -2,6 +2,7 @@
 
 #include <corridorkey/api_export.hpp>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -161,6 +162,21 @@ struct RuntimeCapabilities {
 };
 
 /**
+ * @brief Aggregated timing data for a named stage in the runtime pipeline.
+ */
+struct StageTiming {
+    std::string name = "";
+    double total_ms = 0.0;
+    std::uint64_t sample_count = 0;
+    std::uint64_t work_units = 0;
+};
+
+/**
+ * @brief Callback used by diagnostics to collect per-stage timing samples.
+ */
+using StageTimingCallback = std::function<void(const StageTiming& timing)>;
+
+/**
  * @brief Structured events emitted by long-running jobs.
  */
 enum class JobEventType : std::uint8_t {
@@ -186,6 +202,7 @@ struct JobEvent {
     std::string artifact_path = "";
     std::optional<Error> error = std::nullopt;
     std::optional<BackendFallbackInfo> fallback = std::nullopt;
+    std::vector<StageTiming> timings = {};
 };
 
 /**
