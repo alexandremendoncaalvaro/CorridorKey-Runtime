@@ -78,6 +78,14 @@ Responsible for:
 The frontend must not be treated as “GUI first”.
 It must be a **guided workflow layer** on top of a **runtime-first / CLI-first** architecture.
 
+The implementation order is fixed:
+
+1. macOS runtime robustness
+2. portable macOS CLI distribution
+3. stable sidecar/bridge contract
+4. desktop GUI implementation
+5. expansion to other architectures
+
 Primary product goal:
 
 - install
@@ -243,6 +251,21 @@ This layout should prioritize visual work first, without overwhelming the user w
 - standardized errors
 - consistent exit codes
 - clear separation between human-readable logs and structured data
+
+### Required machine-readable contract
+
+- `info`, `doctor`, `benchmark`, `models`, and `presets` return a single JSON document
+- `process --json` emits NDJSON events with:
+  - `job_started`
+  - `backend_selected`
+  - `progress`
+  - `warning`
+  - `artifact_written`
+  - `completed`
+  - `failed`
+  - `cancelled`
+- backend fallback reasons must be structured, not embedded only in log text
+- the GUI reads capabilities, model catalog, and preset catalog from the runtime instead of duplicating them
 
 The frontend must remain a **client** of the application/runtime bridge.
 No business logic should be duplicated in the UI.

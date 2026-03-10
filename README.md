@@ -98,6 +98,12 @@ corridorkey download --variant int8
 corridorkey info
 ```
 
+**Inspect validated models and presets**:
+```bash
+corridorkey models
+corridorkey presets
+```
+
 **Process a single video**:
 ```bash
 corridorkey process --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_512.onnx
@@ -153,10 +159,10 @@ Output/
 
 ## Priority Direction
 
-- Strengthen execution-provider reliability and platform validation for CoreML/CUDA/TensorRT/DirectML paths.
-- Expand regression coverage around CLI, model management, and post-processing edge cases.
-- Improve distribution workflows for binaries and model delivery.
-- Build a GUI layer on top of the existing library + CLI contract.
+- Release-grade macOS hardening on Apple Silicon, including CoreML-first execution with CPU fallback.
+- Portable macOS bundle workflows for third-party machines.
+- Stable CLI JSON/NDJSON contracts for the future Tauri sidecar and GUI.
+- GUI work only after macOS runtime quality and portability gates are passing.
 
 ## Hardware Support
 

@@ -14,6 +14,12 @@ keyer. Takes the trained GreenFormer model and makes it
 accessible on consumer hardware — from laptops with integrated graphics to
 workstations with high-end GPUs.
 
+The current release track is intentionally narrower than the long-term vision:
+the runtime must first become release-grade on macOS 14+ Apple Silicon,
+portable across third-party machines, and ready to serve a future GUI through a
+stable CLI/app-layer contract. Other platforms remain part of the architecture,
+but they are not release-gating in this phase.
+
 ### 1.1 What This Is
 
 - A **C++ inference engine** that runs the existing CorridorKey model
@@ -166,8 +172,9 @@ Responsible for all image and video decoding/encoding.
 | MP4/MOV/AVI/MKV | FFmpeg 7.x | Yes | Yes | Video decode/encode |
 
 Video I/O uses FFmpeg's C API with a thin RAII wrapper (~300 lines).
-Supports hardware-accelerated decode where available (VideoToolbox on macOS,
-NVDEC on NVIDIA).
+On macOS, the portable default output path is H.264 in MP4, using
+VideoToolbox encoding when available and falling back to software encoders
+without changing the user-facing workflow.
 
 #### 2.3.2 InferenceEngine
 
@@ -307,12 +314,37 @@ CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 Resolution Selection Hierarchy
+### 4.3 Release Focus
+
+The current implementation phase treats macOS 14+ on Apple Silicon as the only
+release-gating platform. That means:
+
+1. CoreML is the primary accelerated path.
+2. CPU is the mandatory compatibility fallback.
+3. `int8_512` and `int8_768` are the only model variants considered validated
+   and packageable for the portable macOS bundle.
+4. Inputs larger than the selected model resolution must use tiling before any
+   GUI work begins.
+
+### 4.4 Validation Corpus
+
+Release validation uses a fixed corpus already stored in the repository.
+
+| Asset | Expected mode |
+|------|---------------|
+| `assets/corridor.png` | smoke/simple path |
+| first 20 frames from `assets/image_samples/thelikelyandunfortunatedemiseofyourgpu/` | standard inference |
+| `assets/video_samples/greenscreen_1769569137.mp4` | standard inference |
+| `assets/video_samples/greenscreen_1769569320.mp4` | standard inference |
+| `assets/video_samples/100745-video-2160.mp4` | tiled high-resolution |
+| `assets/video_samples/mixkit-girl-dancing-with-her-earphones-on-a-green-background-28306-4k.mp4` | stress/performance run |
+
+### 4.5 Resolution Selection Hierarchy
 
 To ensure both ease of use and professional control, the runtime selects the processing resolution based on this strict hierarchy:
 
 1. **User Override:** If `InferenceParams::target_resolution` is set (via CLI `--resolution`), it takes absolute precedence.
-2. **Hardware Recommendation:** If target is `0` (Auto), the application layer maps the selected device profile to a safe resolution (`512`, `768`, or `1024`).
+2. **Hardware Recommendation:** If target is `0` (Auto), the application layer maps the selected device profile to a safe resolution. On release-gated macOS systems that means `512` for 8 GB-class machines and `768` for 16 GB-class machines.
 3. **Core Fallback:** If no profile is available, the core session uses a conservative fallback resolution (`512`).
 
 If the input image dimensions differ from the selected target resolution, the engine performs high-performance bilinear scaling before inference and scales the results back if necessary.
@@ -338,12 +370,12 @@ If the input image dimensions differ from the selected target resolution, the en
 
 ### 5.2 Platform Matrix
 
-| Platform | Compiler | EP Available |
-|----------|----------|-------------|
-| macOS 14+ (ARM64) | Apple Clang 15+ | CoreML, CPU |
-| Windows 11 (x86_64) | MSVC 17.4+ | TensorRT RTX, CUDA, DirectML, CPU |
-| Linux (x86_64) | GCC 12+ / Clang 16+ | TensorRT RTX, CUDA, CPU |
-| Linux (ARM64) | GCC 12+ | CPU |
+| Platform | Compiler | EP Available | Release status |
+|----------|----------|-------------|----------------|
+| macOS 14+ (ARM64) | Apple Clang 15+ | CoreML, CPU | Primary release target |
+| Windows 11 (x86_64) | MSVC 17.4+ | TensorRT RTX, CUDA, DirectML, CPU | Architecture-ready, deferred |
+| Linux (x86_64) | GCC 12+ / Clang 16+ | TensorRT RTX, CUDA, CPU | Architecture-ready, deferred |
+| Linux (ARM64) | GCC 12+ | CPU | Architecture-ready, deferred |
 
 ### 5.3 Project Layout
 
@@ -447,6 +479,10 @@ corridorkey doctor [--model models/corridorkey_int8_512.onnx]
 
 # Run quick benchmark using a specific model
 corridorkey benchmark --model models/corridorkey_int8_512.onnx
+
+# Inspect the stable model and preset catalogs
+corridorkey models
+corridorkey presets
 ```
 
 ### 6.2 Common Flags
@@ -532,6 +568,10 @@ Summary of what's covered there:
 
 | Criterion | Threshold |
 |-----------|-----------|
+| macOS corpus completes without crash | 100% |
+| CoreML auto-selection falls back to CPU with structured reason | 100% |
+| Portable bundle runs `info`, `doctor`, `models`, and `presets` outside the build tree | 100% |
+| Tiled 4K runs complete without visible seam artifacts in validation review | Required |
 | Pixel-level accuracy vs Python (FP32 model) | max abs error < 1e-4 |
 | Pixel-level accuracy vs Python (FP16 model) | max abs error < 1e-2 |
 | Pixel-level accuracy vs Python (INT8 model) | max abs error < 5e-2 |
@@ -553,11 +593,11 @@ Summary of what's covered there:
 
 ## 9. Future Roadmap
 
-- **Execution-provider validation:** tighten CoreML/CUDA/TensorRT/DirectML behavior and fallback guarantees across supported platforms.
-- **High-resolution workflows:** evolve tiling and memory strategy for reliable 4K/8K processing on constrained hardware.
-- **Auto-hint quality:** improve internal hint generation to reduce dependency on external alpha hints.
-- **Developer experience:** strengthen CI and release automation for repeatable cross-platform delivery.
-- **User experience:** provide a GUI wrapper that stays aligned with the existing library + CLI contract.
+1. **Phase 1 — macOS hardening:** validate CoreML-first execution, mandatory CPU fallback, tiling behavior, structured diagnostics, and corpus-based acceptance on Apple Silicon.
+2. **Phase 2 — portable macOS bundle:** ship a CLI-focused distribution with validated models, smoke tests, and a repeatable installation story for third-party machines.
+3. **Phase 3 — Tauri/sidecar contract:** lock the bridge around stable JSON commands (`info`, `doctor`, `benchmark`, `models`, `presets`) and NDJSON job events from `process --json`.
+4. **Phase 4 — GUI implementation:** build the desktop UI only after macOS runtime quality and bundle portability pass the release gates.
+5. **Phase 5 — platform expansion:** extend the validated release process to Windows and Linux after the macOS-first contract is stable.
 
 ---
 

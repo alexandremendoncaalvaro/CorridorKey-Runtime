@@ -21,6 +21,7 @@ This project aims to be a **robust, portable, and usable runtime** for high-qual
 2.  **CLI First:** The CLI is the primary contract. Any feature exposed to a future GUI must first exist in the CLI.
 3.  **Progressive Complexity:** We build solid foundations (Core -> App -> CLI) before adding fancy interfaces (TUI -> GUI).
 4.  **Real Modularization:** Components must be reusable. The core engine should be linkable into other C++ applications (like Blender or OBS plugins) without carrying CLI baggage.
+5.  **Bridge, Not Duplication:** The future desktop UI consumes the runtime through a sidecar/bridge contract. Business logic stays in Core/App, never in the GUI.
 
 ---
 
@@ -47,11 +48,13 @@ our needs, combined with **Clean Architecture** layering.
 *   Job definitions and validation.
 *   Preset management.
 *   Progress tracking and reporting.
+*   Structured diagnostics, capabilities, and model/preset catalogs.
 *   High-level strategy selection (e.g., Tiling vs Standard inference).
 
 ### Layer 3: Interfaces (`src/cli`)
 **Responsibility:** Interacting with the user.
 *   **CLI:** The current primary interface. Parses arguments, configures the engine, and formats output.
+*   **Bridge contract:** JSON commands and NDJSON job events that a future Tauri sidecar can consume without parsing human-readable text.
 *   Additional interfaces (TUI/GUI) must remain thin clients over the same App/Core contracts.
 
 ---
@@ -77,7 +80,7 @@ the library would include.
 ```
 include/corridorkey/
 ├── engine.hpp          Engine class — the main entry point
-├── types.hpp           Value types: Image, DeviceInfo, InferenceParams
+├── types.hpp           Value types: Image, DeviceInfo, InferenceParams, runtime contracts
 ├── frame_io.hpp        FrameIO interface
 └── version.hpp         Version macros
 ```
@@ -89,7 +92,8 @@ All implementation code. Organized by domain.
 ```
 src/
 ├── app/                Application orchestration layer
-│   └── job_orchestrator.cpp
+│   ├── job_orchestrator.cpp
+│   └── runtime_contracts.cpp
 ├── cli/                CLI application (thin consumer of the library)
 │   └── main.cpp
 ├── common/             Shared internal utilities (no external deps)
