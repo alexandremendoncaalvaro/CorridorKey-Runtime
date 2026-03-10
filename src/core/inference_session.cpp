@@ -5,6 +5,7 @@
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
+#include "session_policy.hpp"
 
 namespace corridorkey {
 
@@ -17,7 +18,7 @@ InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(devic
 InferenceSession::~InferenceSession() = default;
 
 void InferenceSession::configure_session_options() {
-    m_session_options.SetIntraOpNumThreads(1);
+    m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
     m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
     switch (m_device.backend) {
