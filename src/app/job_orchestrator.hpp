@@ -40,7 +40,8 @@ class CORRIDORKEY_API JobOrchestrator {
      * @brief Execute a job request.
      * Handles file detection (video vs sequence) and engine initialization.
      */
-    static Result<void> run(const JobRequest& request, ProgressCallback on_progress = nullptr);
+    static Result<void> run(const JobRequest& request, ProgressCallback on_progress = nullptr,
+                            JobEventCallback on_event = nullptr);
 
     /**
      * @brief Get comprehensive hardware and system information as JSON.
@@ -58,6 +59,16 @@ class CORRIDORKEY_API JobOrchestrator {
      */
     static nlohmann::json run_benchmark(const std::filesystem::path& model_path,
                                         const DeviceInfo& device);
+
+    /**
+     * @brief Get the built-in model catalog as stable JSON.
+     */
+    static nlohmann::json list_models();
+
+    /**
+     * @brief Get the built-in preset catalog as stable JSON.
+     */
+    static nlohmann::json list_presets();
 
    private:
     static bool is_video_file(const std::filesystem::path& p);

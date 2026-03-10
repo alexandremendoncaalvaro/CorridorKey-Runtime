@@ -38,7 +38,7 @@ class VideoWriter {
    public:
     static Result<std::unique_ptr<VideoWriter>> open(const std::filesystem::path& path, int width,
                                                      int height, double fps,
-                                                     const std::string& codec_name = "mpeg4");
+                                                     const std::string& codec_name = "");
     ~VideoWriter();
 
     Result<void> write_frame(const Image& image);
@@ -48,5 +48,15 @@ class VideoWriter {
     class Impl;
     std::unique_ptr<Impl> m_impl;
 };
+
+/**
+ * @brief Detect whether the current FFmpeg build can use VideoToolbox H.264 encoding.
+ */
+bool is_videotoolbox_available();
+
+/**
+ * @brief Select the default output encoder for a given path.
+ */
+std::string default_video_encoder_for_path(const std::filesystem::path& path);
 
 }  // namespace corridorkey

@@ -90,7 +90,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     try {
         auto session_ptr =
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
-        session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "CorridorKey");
+        session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_ERROR, "CorridorKey");
         session_ptr->configure_session_options();
 
 #ifdef _WIN32

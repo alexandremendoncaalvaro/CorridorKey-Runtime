@@ -19,10 +19,31 @@ CORRIDORKEY_API DeviceInfo auto_detect();
 CORRIDORKEY_API std::vector<DeviceInfo> list_devices();
 
 /**
+ * @brief Report runtime capabilities needed by diagnostics and future GUI bridges.
+ */
+CORRIDORKEY_API RuntimeCapabilities runtime_capabilities();
+
+/**
+ * @brief Built-in model catalog shared across CLI and GUI surfaces.
+ */
+CORRIDORKEY_API std::vector<ModelCatalogEntry> model_catalog();
+
+/**
+ * @brief Built-in processing presets shared across CLI and GUI surfaces.
+ */
+CORRIDORKEY_API std::vector<PresetDefinition> preset_catalog();
+
+/**
  * @brief Progress callback for long-running tasks.
  * Return false to cancel the operation.
  */
 using ProgressCallback = std::function<bool(float progress, const std::string& status)>;
+
+/**
+ * @brief Structured event callback for NDJSON output and future GUI bridges.
+ * Return false to cancel the operation.
+ */
+using JobEventCallback = std::function<bool(const JobEvent& event)>;
 
 /**
  * @brief The main inference engine for CorridorKey.
@@ -111,6 +132,11 @@ class CORRIDORKEY_API Engine {
      * @brief Get information about the device currently in use.
      */
     [[nodiscard]] DeviceInfo current_device() const;
+
+    /**
+     * @brief Get information about the last backend fallback, if one happened.
+     */
+    [[nodiscard]] std::optional<BackendFallbackInfo> backend_fallback() const;
 
    private:
     // Private constructor used by the factory method

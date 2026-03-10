@@ -18,12 +18,25 @@ DeviceInfo auto_detect() {
     device.available_memory_mb = 0;
 
 #if defined(__APPLE__)
-    // Detect Apple Silicon for CoreML
+    int is_arm64 = 0;
+    size_t arm64_size = sizeof(is_arm64);
+    bool apple_silicon =
+        sysctlbyname("hw.optional.arm64", &is_arm64, &arm64_size, NULL, 0) == 0 && is_arm64 == 1;
+
     char model[256];
     size_t size = sizeof(model);
     if (sysctlbyname("hw.model", model, &size, NULL, 0) == 0) {
-        device.name = std::string("Apple Silicon (") + model + ")";
+        if (apple_silicon) {
+            device.name = std::string("Apple Silicon (") + model + ")";
+            device.backend = Backend::CoreML;
+        } else {
+            device.name = std::string("Mac (") + model + ")";
+        }
+    } else if (apple_silicon) {
+        device.name = "Apple Silicon";
         device.backend = Backend::CoreML;
+    } else {
+        device.name = "Mac";
     }
 
     uint64_t mem;

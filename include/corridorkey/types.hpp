@@ -137,6 +137,58 @@ struct DeviceInfo {
 };
 
 /**
+ * @brief Structured information about an automatic backend fallback.
+ */
+struct BackendFallbackInfo {
+    Backend requested_backend = Backend::Auto;
+    Backend selected_backend = Backend::Auto;
+    std::string reason = "";
+};
+
+/**
+ * @brief Runtime capabilities exposed to the CLI, future GUI, and diagnostics.
+ */
+struct RuntimeCapabilities {
+    std::string platform = "";
+    bool apple_silicon = false;
+    bool coreml_available = false;
+    bool cpu_fallback_available = false;
+    bool videotoolbox_available = false;
+    bool tiling_supported = true;
+    bool batching_supported = true;
+    std::vector<Backend> supported_backends = {};
+    std::string default_video_encoder = "";
+};
+
+/**
+ * @brief Structured events emitted by long-running jobs.
+ */
+enum class JobEventType : std::uint8_t {
+    JobStarted,
+    BackendSelected,
+    Progress,
+    Warning,
+    ArtifactWritten,
+    Completed,
+    Failed,
+    Cancelled
+};
+
+/**
+ * @brief Structured event payload for CLI NDJSON and future GUI bridges.
+ */
+struct JobEvent {
+    JobEventType type = JobEventType::Progress;
+    std::string phase = "";
+    float progress = 0.0F;
+    Backend backend = Backend::Auto;
+    std::string message = "";
+    std::string artifact_path = "";
+    std::optional<Error> error = std::nullopt;
+    std::optional<BackendFallbackInfo> fallback = std::nullopt;
+};
+
+/**
  * @brief Simple rectangle for ROI operations.
  */
 struct Rect {
@@ -273,6 +325,31 @@ struct InferenceParams {
     // Tiling Inference (High-Res support)
     bool enable_tiling = false;
     int tile_padding = 32;  // Overlap in pixels to blend seams
+};
+
+/**
+ * @brief Built-in model catalog entry shared by CLI diagnostics and future GUIs.
+ */
+struct ModelCatalogEntry {
+    std::string variant = "";
+    int resolution = 0;
+    std::string filename = "";
+    std::string description = "";
+    std::string download_url = "";
+    bool validated_for_macos = false;
+    bool packaged_for_macos = false;
+};
+
+/**
+ * @brief Built-in processing preset shared by CLI diagnostics and future GUIs.
+ */
+struct PresetDefinition {
+    std::string id = "";
+    std::string name = "";
+    std::string description = "";
+    InferenceParams params = {};
+    std::string recommended_model = "";
+    bool default_for_macos = false;
 };
 
 /**

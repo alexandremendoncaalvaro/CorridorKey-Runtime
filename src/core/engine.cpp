@@ -12,9 +12,66 @@ namespace corridorkey {
 class Engine::Impl {
    public:
     std::unique_ptr<InferenceSession> session;
+    std::filesystem::path model_path;
+    std::optional<DeviceInfo> cpu_fallback_device;
+    std::optional<BackendFallbackInfo> fallback_info;
 
     Impl() = default;
+
+    bool can_fallback_to_cpu() const {
+        return cpu_fallback_device.has_value() && session != nullptr &&
+               session->device().backend != Backend::CPU;
+    }
+
+    Result<void> activate_cpu_fallback(const std::string& reason) {
+        if (!can_fallback_to_cpu()) {
+            return {};
+        }
+
+        Backend failed_backend = session->device().backend;
+        auto fallback_res = InferenceSession::create(model_path, *cpu_fallback_device);
+        if (!fallback_res) {
+            return Unexpected(fallback_res.error());
+        }
+
+        session = std::move(*fallback_res);
+        fallback_info = BackendFallbackInfo{failed_backend, session->device().backend, reason};
+        return {};
+    }
+
+    bool should_retry_on_cpu(const Error& error) const {
+        return error.code == ErrorCode::InferenceFailed ||
+               error.code == ErrorCode::HardwareNotSupported;
+    }
+
+    template <typename T, typename Operation>
+    Result<T> run_with_cpu_fallback(Operation&& operation) {
+        auto result = operation();
+        if (result || !can_fallback_to_cpu() || !should_retry_on_cpu(result.error())) {
+            return result;
+        }
+
+        auto fallback_res = activate_cpu_fallback(result.error().message);
+        if (!fallback_res) {
+            return result;
+        }
+
+        return operation();
+    }
 };
+
+namespace {
+
+std::optional<DeviceInfo> build_cpu_fallback_device(const DeviceInfo& device) {
+#if defined(__APPLE__)
+    if (device.backend == Backend::CoreML || device.backend == Backend::Auto) {
+        return DeviceInfo{"Generic CPU", device.available_memory_mb, Backend::CPU};
+    }
+#endif
+    return std::nullopt;
+}
+
+}  // namespace
 
 Engine::Engine() : m_impl(std::make_unique<Impl>()) {}
 
@@ -25,13 +82,27 @@ Engine& Engine::operator=(Engine&&) noexcept = default;
 
 Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& model_path,
                                                DeviceInfo device) {
-    auto session_res = InferenceSession::create(model_path, device);
-    if (!session_res) {
-        return Unexpected(session_res.error());
-    }
-
     auto engine = std::unique_ptr<Engine>(new Engine());
-    engine->m_impl->session = std::move(*session_res);
+    engine->m_impl->model_path = model_path;
+
+    DeviceInfo requested_device = device.backend == Backend::Auto ? auto_detect() : device;
+    engine->m_impl->cpu_fallback_device = build_cpu_fallback_device(requested_device);
+
+    auto session_res = InferenceSession::create(model_path, requested_device);
+    if (!session_res && engine->m_impl->cpu_fallback_device.has_value()) {
+        auto fallback_res =
+            InferenceSession::create(model_path, *engine->m_impl->cpu_fallback_device);
+        if (!fallback_res) {
+            return Unexpected(session_res.error());
+        }
+        engine->m_impl->session = std::move(*fallback_res);
+        engine->m_impl->fallback_info = BackendFallbackInfo{requested_device.backend, Backend::CPU,
+                                                            session_res.error().message};
+    } else if (!session_res) {
+        return Unexpected(session_res.error());
+    } else {
+        engine->m_impl->session = std::move(*session_res);
+    }
 
     // Warm-up run (especially important for CoreML/TensorRT JIT compilation)
     int res = engine->recommended_resolution();
@@ -52,7 +123,8 @@ Result<FrameResult> Engine::process_frame(const Image& rgb, const Image& alpha_h
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
-    return m_impl->session->run(rgb, alpha_hint, params);
+    return m_impl->run_with_cpu_fallback<FrameResult>(
+        [&]() { return m_impl->session->run(rgb, alpha_hint, params); });
 }
 
 Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<Image>& rgbs,
@@ -62,7 +134,8 @@ Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<I
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
-    return m_impl->session->run_batch(rgbs, alpha_hints, params);
+    return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
+        [&]() { return m_impl->session->run_batch(rgbs, alpha_hints, params); });
 }
 
 Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& inputs,
@@ -111,7 +184,8 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
             hint_bufs.push_back(std::move(hint_buf));
         }
 
-        auto results = m_impl->session->run_batch(rgb_views, hint_views, params);
+        auto results = m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
+            [&]() { return m_impl->session->run_batch(rgb_views, hint_views, params); });
         if (!results) return Unexpected(results.error());
 
         for (size_t b = 0; b < current_batch_size; ++b) {
@@ -207,8 +281,10 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         }
 
         // GPU Inference on the CURRENT batch
-        auto results =
-            m_impl->session->run_batch(current_batch.rgb_views, current_batch.hint_views, params);
+        auto results = m_impl->run_with_cpu_fallback<std::vector<FrameResult>>([&]() {
+            return m_impl->session->run_batch(current_batch.rgb_views, current_batch.hint_views,
+                                              params);
+        });
         if (!results) return Unexpected(results.error());
 
         // Sequential Write (FFmpeg encoding is usually CPU-bound but fast enough)
@@ -236,6 +312,10 @@ int Engine::recommended_resolution() const {
 DeviceInfo Engine::current_device() const {
     return m_impl->session ? m_impl->session->device()
                            : DeviceInfo{"Not Initialized", 0, Backend::Auto};
+}
+
+std::optional<BackendFallbackInfo> Engine::backend_fallback() const {
+    return m_impl ? m_impl->fallback_info : std::nullopt;
 }
 
 }  // namespace corridorkey

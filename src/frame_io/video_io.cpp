@@ -15,6 +15,42 @@ extern "C" {
 
 namespace corridorkey {
 
+namespace {
+
+bool encoder_exists(const char* codec_name) {
+    return codec_name != nullptr && avcodec_find_encoder_by_name(codec_name) != nullptr;
+}
+
+std::vector<std::string> preferred_encoders_for_path(const std::filesystem::path& path) {
+    std::vector<std::string> codecs;
+
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+#if defined(__APPLE__)
+    if ((extension == ".mp4" || extension == ".mov") && encoder_exists("h264_videotoolbox")) {
+        codecs.emplace_back("h264_videotoolbox");
+    }
+#endif
+
+    if (extension == ".mp4" || extension == ".mov") {
+        if (encoder_exists("libx264")) {
+            codecs.emplace_back("libx264");
+        }
+        if (encoder_exists("h264")) {
+            codecs.emplace_back("h264");
+        }
+    }
+
+    if (encoder_exists("mpeg4")) {
+        codecs.emplace_back("mpeg4");
+    }
+
+    return codecs;
+}
+
+}  // namespace
+
 // --- RAII Helpers for FFmpeg 8.x ---
 
 struct AvDeleter {
@@ -213,6 +249,22 @@ class VideoWriter::Impl {
     Impl() : frame(av_frame_alloc()), packet(av_packet_alloc()) {}
 };
 
+bool is_videotoolbox_available() {
+#if defined(__APPLE__)
+    return encoder_exists("h264_videotoolbox");
+#else
+    return false;
+#endif
+}
+
+std::string default_video_encoder_for_path(const std::filesystem::path& path) {
+    auto codecs = preferred_encoders_for_path(path);
+    if (!codecs.empty()) {
+        return codecs.front();
+    }
+    return "mpeg4";
+}
+
 VideoWriter::VideoWriter() : m_impl(std::make_unique<Impl>()) {}
 VideoWriter::~VideoWriter() {
     if (m_impl && m_impl->codec_ctx) {
@@ -246,32 +298,52 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
     }
     impl->format_ctx.reset(fmt_ptr);
 
-    const AVCodec* codec = avcodec_find_encoder_by_name(codec_name.c_str());
-    if (!codec) {
-        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Codec not found: " + codec_name});
+    std::vector<std::string> codec_candidates;
+    if (!codec_name.empty()) {
+        codec_candidates.push_back(codec_name);
+    } else {
+        codec_candidates = preferred_encoders_for_path(path);
+    }
+    if (codec_candidates.empty()) {
+        codec_candidates.push_back("mpeg4");
     }
 
     AVStream* st = avformat_new_stream(impl->format_ctx.get(), nullptr);
     if (!st) return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not create stream"});
 
-    impl->codec_ctx.reset(avcodec_alloc_context3(codec));
-    impl->codec_ctx->width = width;
-    impl->codec_ctx->height = height;
-    impl->codec_ctx->time_base = av_inv_q(av_d2q(fps, 60000));
-    impl->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+    std::string last_error = "FFmpeg: Could not open any output encoder";
+    for (const auto& candidate : codec_candidates) {
+        const AVCodec* codec = avcodec_find_encoder_by_name(candidate.c_str());
+        if (!codec) {
+            last_error = "FFmpeg: Codec not found: " + candidate;
+            continue;
+        }
 
-    st->time_base = impl->codec_ctx->time_base;
-    st->avg_frame_rate = av_d2q(fps, 60000);
+        impl->codec_ctx.reset(avcodec_alloc_context3(codec));
+        impl->codec_ctx->width = width;
+        impl->codec_ctx->height = height;
+        impl->codec_ctx->time_base = av_inv_q(av_d2q(fps, 60000));
+        impl->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
 
-    if (impl->format_ctx->oformat->flags & AVFMT_GLOBALHEADER) {
-        impl->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        st->time_base = impl->codec_ctx->time_base;
+        st->avg_frame_rate = av_d2q(fps, 60000);
+
+        if (impl->format_ctx->oformat->flags & AVFMT_GLOBALHEADER) {
+            impl->codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        }
+
+        if (avcodec_open2(impl->codec_ctx.get(), codec, nullptr) >= 0) {
+            avcodec_parameters_from_context(st->codecpar, impl->codec_ctx.get());
+            break;
+        }
+
+        last_error = "FFmpeg: Could not open encoder: " + candidate;
+        impl->codec_ctx.reset();
     }
 
-    if (avcodec_open2(impl->codec_ctx.get(), codec, nullptr) < 0) {
-        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not open encoder"});
+    if (!impl->codec_ctx) {
+        return Unexpected(Error{ErrorCode::IoError, last_error});
     }
-
-    avcodec_parameters_from_context(st->codecpar, impl->codec_ctx.get());
 
     if (!(impl->format_ctx->oformat->flags & AVFMT_NOFILE)) {
         if (avio_open(&impl->format_ctx->pb, path.string().c_str(), AVIO_FLAG_WRITE) < 0) {
