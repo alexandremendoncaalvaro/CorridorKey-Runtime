@@ -44,6 +44,7 @@ compile_commands.json
 
 # Outputs
 outputs/
+dist/
 
 # OS
 .DS_Store
