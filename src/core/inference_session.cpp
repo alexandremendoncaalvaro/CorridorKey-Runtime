@@ -1,5 +1,7 @@
 #include "inference_session.hpp"
 
+#include <unordered_map>
+
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
@@ -7,15 +9,38 @@
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
+#include "session_cache_policy.hpp"
 #include "session_policy.hpp"
 
 namespace corridorkey {
 
 namespace {
 
-bool should_use_offline_optimization_cache(Backend backend) {
-    return backend == Backend::CPU || backend == Backend::CoreML;
+#ifdef __APPLE__
+void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
+#if ORT_API_VERSION >= 24
+    std::unordered_map<std::string, std::string> provider_options = {
+        {kCoremlProviderOption_MLComputeUnits, "ALL"},
+        {kCoremlProviderOption_RequireStaticInputShapes, "1"},
+    };
+
+    if (auto cache_root = common::coreml_model_cache_root(); cache_root.has_value()) {
+        std::error_code error;
+        std::filesystem::create_directories(*cache_root, error);
+        if (!error) {
+            provider_options.emplace(kCoremlProviderOption_ModelCacheDirectory,
+                                     cache_root->string());
+        }
+    }
+
+    session_options.AppendExecutionProvider("CoreML", provider_options);
+#else
+    uint32_t coreml_flags = COREML_FLAG_ONLY_ALLOW_STATIC_INPUT_SHAPES;
+    Ort::ThrowOnError(
+        OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, coreml_flags));
+#endif
 }
+#endif
 
 void remove_cached_model(const std::filesystem::path& cache_path) {
     std::error_code error;
@@ -101,9 +126,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache)
     switch (m_device.backend) {
         case Backend::CoreML: {
 #ifdef __APPLE__
-            uint32_t coreml_flags = 0;  // Default flags (Enable ANE, allow GPU/CPU fallback)
-            Ort::ThrowOnError(
-                OrtSessionOptionsAppendExecutionProvider_CoreML(m_session_options, coreml_flags));
+            append_coreml_execution_provider(m_session_options);
 #endif
             break;
         }
@@ -176,7 +199,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         std::optional<std::filesystem::path> optimized_model_path;
         bool using_optimized_model_cache = false;
 
-        if (should_use_offline_optimization_cache(session_ptr->m_device.backend)) {
+        if (core::use_optimized_model_cache_for_backend(session_ptr->m_device.backend)) {
             optimized_model_path =
                 common::optimized_model_cache_path(model_path, session_ptr->m_device.backend);
             if (optimized_model_path.has_value()) {
@@ -211,7 +234,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         session_ptr->extract_metadata();
         return session_ptr;
     } catch (const Ort::Exception& e) {
-        if (should_use_offline_optimization_cache(requested_device.backend)) {
+        if (core::use_optimized_model_cache_for_backend(requested_device.backend)) {
             auto optimized_model_path =
                 common::optimized_model_cache_path(model_path, requested_device.backend);
             if (optimized_model_path.has_value() &&

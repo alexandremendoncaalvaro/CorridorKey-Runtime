@@ -299,6 +299,7 @@ nlohmann::json inspect_cache() {
     auto selected_cache_dir = common::selected_cache_root();
     auto effective_cache_dir = selected_cache_dir.value_or(configured_cache_dir);
     auto optimized_models_dir = effective_cache_dir / "optimized_models";
+    auto coreml_ep_dir = common::coreml_model_cache_root();
 
     nlohmann::json optimized_models = nlohmann::json::array();
     nlohmann::json candidates = nlohmann::json::array();
@@ -328,6 +329,8 @@ nlohmann::json inspect_cache() {
     json["optimized_models_dir"] = optimized_models_dir.string();
     json["optimized_model_count"] = optimized_models.size();
     json["optimized_models"] = optimized_models;
+    json["coreml_ep_cache_dir"] =
+        coreml_ep_dir.has_value() ? coreml_ep_dir->string() : std::string();
     json["healthy"] = selected_cache_dir.has_value();
     return json;
 }

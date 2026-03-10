@@ -29,5 +29,6 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["cache"].contains("optimized_models_dir"));
     REQUIRE(report["cache"].contains("optimized_model_count"));
     REQUIRE(report["cache"]["optimized_models"].is_array());
+    REQUIRE(report["cache"].contains("coreml_ep_cache_dir"));
     REQUIRE(report["summary"].contains("validated_models_present"));
 }

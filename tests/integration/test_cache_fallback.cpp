@@ -96,6 +96,8 @@ TEST_CASE("session creation falls back to writable cache root when configured ca
     REQUIRE(report["cache"]["fallback_in_use"].get<bool>());
     REQUIRE_FALSE(report["cache"]["selected_path"].get<std::string>().empty());
     REQUIRE(report["cache"]["selected_path"] != locked_cache_dir.string());
+    REQUIRE(report["cache"]["coreml_ep_cache_dir"].get<std::string>().rfind(
+                report["cache"]["selected_path"].get<std::string>(), 0) == 0);
 
     auto session_res =
         InferenceSession::create(model_path, DeviceInfo{"Generic CPU", 0, Backend::CPU});

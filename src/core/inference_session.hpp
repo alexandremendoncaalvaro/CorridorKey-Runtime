@@ -7,10 +7,18 @@
 #include <vector>
 
 // Include ONNX Runtime (only in private headers)
+#if __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
 #include <onnxruntime/onnxruntime_cxx_api.h>
+#else
+#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#endif
 
 #ifdef __APPLE__
+#if __has_include(<onnxruntime/coreml_provider_factory.h>)
 #include <onnxruntime/coreml_provider_factory.h>
+#else
+#include <onnxruntime/core/providers/coreml/coreml_provider_factory.h>
+#endif
 #endif
 
 namespace corridorkey {

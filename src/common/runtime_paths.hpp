@@ -178,4 +178,13 @@ inline std::optional<std::filesystem::path> optimized_model_cache_path(
     return optimized_models_dir / cache_name;
 }
 
+inline std::optional<std::filesystem::path> coreml_model_cache_root() {
+    auto cache_root = selected_cache_root();
+    if (!cache_root.has_value()) {
+        return std::nullopt;
+    }
+
+    return *cache_root / "coreml_ep";
+}
+
 }  // namespace corridorkey::common
