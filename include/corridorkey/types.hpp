@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #include <malloc.h>
 #endif
 
@@ -21,7 +21,7 @@ inline constexpr size_t MEMORY_ALIGNMENT = 64;
 /**
  * @brief Error codes for library operations.
  */
-enum class ErrorCode {
+enum class ErrorCode : std::uint8_t {
     Success = 0,
     ModelLoadFailed,
     InferenceFailed,
@@ -35,42 +35,42 @@ enum class ErrorCode {
  * @brief Rich error information.
  */
 struct Error {
-    ErrorCode code;
-    std::string message;
+    ErrorCode code = ErrorCode::Success;
+    std::string message = "";
 };
 
 /**
  * @brief Result type for robust error handling (C++20 compatible).
  * Simple polyfill for std::expected.
  */
-template <typename E>
-struct unexpected {
-    E error;
-    explicit unexpected(E e) : error(std::move(e)) {}
+template <typename T>
+struct Unexpected {
+    T error_value;
+    explicit Unexpected(T err) : error_value(std::move(err)) {}
 };
 
 template <typename T>
 class Result {
    public:
     Result(T val) : m_data(std::move(val)) {}
-    Result(unexpected<Error> err) : m_data(std::move(err.error)) {}
+    Result(Unexpected<Error> err) : m_data(std::move(err.error_value)) {}
     Result(Error err) : m_data(std::move(err)) {}
 
-    bool has_value() const {
+    [[nodiscard]] bool has_value() const {
         return std::holds_alternative<T>(m_data);
     }
-    bool has_error() const {
+    [[nodiscard]] bool has_error() const {
         return std::holds_alternative<Error>(m_data);
     }
 
-    const T& value() const {
+    [[nodiscard]] const T& value() const {
         return std::get<T>(m_data);
     }
-    T& value() {
+    [[nodiscard]] T& value() {
         return std::get<T>(m_data);
     }
 
-    const Error& error() const {
+    [[nodiscard]] const Error& error() const {
         return std::get<Error>(m_data);
     }
 
@@ -87,7 +87,7 @@ class Result {
         return &value();
     }
 
-    operator bool() const {
+    explicit operator bool() const {
         return has_value();
     }
 
@@ -99,48 +99,51 @@ class Result {
 template <>
 class Result<void> {
    public:
-    Result() : m_error(std::nullopt) {}
-    Result(unexpected<Error> err) : m_error(std::move(err.error)) {}
+    Result() = default;
+    Result(Unexpected<Error> err) : m_error(std::move(err.error_value)) {}
     Result(Error err) : m_error(std::move(err)) {}
 
-    bool has_value() const {
+    [[nodiscard]] bool has_value() const {
         return !m_error.has_value();
     }
-    bool has_error() const {
+    [[nodiscard]] bool has_error() const {
         return m_error.has_value();
     }
 
-    const Error& error() const {
+    [[nodiscard]] const Error& error() const {
         return *m_error;
     }
 
-    operator bool() const {
+    explicit operator bool() const {
         return has_value();
     }
 
    private:
-    std::optional<Error> m_error;
+    std::optional<Error> m_error = std::nullopt;
 };
 
 /**
  * @brief Hardware backends supported by the runtime.
  */
-enum class Backend { Auto, CPU, CUDA, TensorRT, CoreML, DirectML };
+enum class Backend : std::uint8_t { Auto, CPU, CUDA, TensorRT, CoreML, DirectML };
 
 /**
  * @brief Information about a detected hardware device.
  */
 struct DeviceInfo {
-    std::string name;
-    int64_t available_memory_mb;
-    Backend backend;
+    std::string name = "";
+    int64_t available_memory_mb = 0;
+    Backend backend = Backend::Auto;
 };
 
 /**
  * @brief Simple rectangle for ROI operations.
  */
 struct Rect {
-    int x, y, width, height;
+    int x_pos = 0;
+    int y_pos = 0;
+    int width = 0;
+    int height = 0;
 };
 
 /**
@@ -151,20 +154,19 @@ struct Image {
     int width = 0;
     int height = 0;
     int channels = 0;
-    std::span<float> data;
+    std::span<float> data = {};
 
-    bool empty() const {
+    [[nodiscard]] bool empty() const {
         return data.empty();
     }
 
     // Multidimensional accessor: img(y, x, c)
-    // Inline and constexpr for zero overhead
-    inline float& operator()(int y, int x, int c = 0) {
-        return data[(static_cast<size_t>(y) * width + x) * channels + c];
+    inline float& operator()(int y_pos, int x_pos, int channel = 0) {
+        return data[(static_cast<size_t>(y_pos) * width + x_pos) * channels + channel];
     }
 
-    inline const float& operator()(int y, int x, int c = 0) const {
-        return data[(static_cast<size_t>(y) * width + x) * channels + c];
+    inline const float& operator()(int y_pos, int x_pos, int channel = 0) const {
+        return data[(static_cast<size_t>(y_pos) * width + x_pos) * channels + channel];
     }
 };
 
@@ -173,15 +175,17 @@ struct Image {
  */
 class ImageBuffer {
    public:
-    ImageBuffer() : m_width(0), m_height(0), m_channels(0), m_ptr(nullptr) {}
+    ImageBuffer() : m_width(0), m_height(0), m_channels(0), m_ptr(nullptr), m_data({}) {}
 
-    ImageBuffer(int w, int h, int c) : m_width(w), m_height(h), m_channels(c) {
-        size_t size = static_cast<size_t>(w) * h * c;
+    ImageBuffer(int width, int height, int channels)
+        : m_width(width), m_height(height), m_channels(channels) {
+        const size_t size = static_cast<size_t>(width) * height * channels;
         if (size == 0) {
             m_ptr = nullptr;
+            m_data = {};
             return;
         }
-#if defined(_WIN32)
+#ifdef _WIN32
         m_ptr = static_cast<float*>(_aligned_malloc(size * sizeof(float), MEMORY_ALIGNMENT));
 #else
         if (posix_memalign(reinterpret_cast<void**>(&m_ptr), MEMORY_ALIGNMENT,
@@ -189,12 +193,14 @@ class ImageBuffer {
             m_ptr = nullptr;
         }
 #endif
-        m_data = std::span<float>(m_ptr, size);
+        if (m_ptr != nullptr) {
+            m_data = std::span<float>(m_ptr, size);
+        }
     }
 
     ~ImageBuffer() {
-        if (m_ptr) {
-#if defined(_WIN32)
+        if (m_ptr != nullptr) {
+#ifdef _WIN32
             _aligned_free(m_ptr);
 #else
             free(m_ptr);
@@ -217,8 +223,8 @@ class ImageBuffer {
 
     ImageBuffer& operator=(ImageBuffer&& other) noexcept {
         if (this != &other) {
-            if (m_ptr) {
-#if defined(_WIN32)
+            if (m_ptr != nullptr) {
+#ifdef _WIN32
                 _aligned_free(m_ptr);
 #else
                 free(m_ptr);
@@ -235,17 +241,19 @@ class ImageBuffer {
         return *this;
     }
 
-    Image view() {
+    [[nodiscard]] Image view() {
         return {m_width, m_height, m_channels, m_data};
     }
-    Image const_view() const {
+    [[nodiscard]] Image const_view() const {
         return {m_width, m_height, m_channels, m_data};
     }
 
    private:
-    int m_width, m_height, m_channels;
-    float* m_ptr;
-    std::span<float> m_data;
+    int m_width = 0;
+    int m_height = 0;
+    int m_channels = 0;
+    float* m_ptr = nullptr;
+    std::span<float> m_data = {};
 };
 
 /**
@@ -253,10 +261,10 @@ class ImageBuffer {
  */
 struct InferenceParams {
     int target_resolution = 0;  // 0 = Auto-detect based on hardware
-    float despill_strength = 1.0f;
+    float despill_strength = 1.0F;
     bool auto_despeckle = true;
     int despeckle_size = 400;
-    float refiner_scale = 1.0f;
+    float refiner_scale = 1.0F;
     bool input_is_linear = false;
 
     // Batching (GPU efficiency)
