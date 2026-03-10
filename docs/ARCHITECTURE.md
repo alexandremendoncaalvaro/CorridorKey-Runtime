@@ -48,13 +48,14 @@ our needs, combined with **Clean Architecture** layering.
 *   Job definitions and validation.
 *   Preset management.
 *   Progress tracking and reporting.
+*   Stage timing aggregation and benchmark reporting.
 *   Structured diagnostics, capabilities, and model/preset catalogs.
 *   High-level strategy selection (e.g., Tiling vs Standard inference).
 
 ### Layer 3: Interfaces (`src/cli`)
 **Responsibility:** Interacting with the user.
 *   **CLI:** The current primary interface. Parses arguments, configures the engine, and formats output.
-*   **Bridge contract:** JSON commands and NDJSON job events that a future Tauri sidecar can consume without parsing human-readable text.
+*   **Bridge contract:** JSON commands and NDJSON job events, including fallback diagnostics and stage timings, that a future Tauri sidecar can consume without parsing human-readable text.
 *   Additional interfaces (TUI/GUI) must remain thin clients over the same App/Core contracts.
 
 ---
@@ -97,7 +98,8 @@ src/
 ├── cli/                CLI application (thin consumer of the library)
 │   └── main.cpp
 ├── common/             Shared internal utilities (no external deps)
-│   └── srgb_lut.hpp
+│   ├── srgb_lut.hpp
+│   └── stage_profiler.hpp
 ├── core/               Inference engine, device detection
 │   ├── engine.cpp
 │   ├── inference_session.cpp

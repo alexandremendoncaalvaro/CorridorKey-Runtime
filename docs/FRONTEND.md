@@ -255,6 +255,7 @@ This layout should prioritize visual work first, without overwhelming the user w
 ### Required machine-readable contract
 
 - `info`, `doctor`, `benchmark`, `models`, and `presets` return a single JSON document
+- `benchmark` returns mode, backend selection, optional fallback details, and `stage_timings`
 - `process --json` emits NDJSON events with:
   - `job_started`
   - `backend_selected`
@@ -264,8 +265,10 @@ This layout should prioritize visual work first, without overwhelming the user w
   - `completed`
   - `failed`
   - `cancelled`
+- terminal `process --json` events carry aggregated `timings` for the full job
 - backend fallback reasons must be structured, not embedded only in log text
 - the GUI reads capabilities, model catalog, and preset catalog from the runtime instead of duplicating them
+- the GUI metrics and diagnostics surfaces consume runtime timings instead of deriving their own estimates
 
 The frontend must remain a **client** of the application/runtime bridge.
 No business logic should be duplicated in the UI.

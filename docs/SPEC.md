@@ -477,12 +477,19 @@ corridorkey download [--variant fp32|fp16|int8|all]
 # Run diagnostics over available devices and model files
 corridorkey doctor [--model models/corridorkey_int8_512.onnx]
 
-# Run quick benchmark using a specific model
+# Run a synthetic benchmark using a specific model
 corridorkey benchmark --model models/corridorkey_int8_512.onnx
+
+# Run a real-workload benchmark against a source file
+corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --model models/corridorkey_int8_768.onnx
 
 # Inspect the stable model and preset catalogs
 corridorkey models
 corridorkey presets
+
+# Consume the stable structured contracts
+corridorkey info --json
+corridorkey process --json --input input.mp4 --output output.mp4 --model models/corridorkey_int8_768.onnx
 ```
 
 ### 6.2 Common Flags
@@ -510,6 +517,30 @@ Output/
 
 Matches the original CorridorKey output structure for compatibility.
 
+### 6.4 Structured CLI Contract
+
+- `info`, `doctor`, `benchmark`, `models`, and `presets` return one JSON
+  document when `--json` is requested.
+- `process --json` emits NDJSON events in this order as needed:
+  - `job_started`
+  - `backend_selected`
+  - `progress`
+  - `warning`
+  - `artifact_written`
+  - `completed`
+  - `failed`
+  - `cancelled`
+- `backend_selected` includes the chosen backend and carries structured fallback
+  information when `auto` or an explicit backend request drops to CPU.
+- Terminal job events (`completed`, `failed`, `cancelled`) include aggregated
+  stage timings so CLI automation and the future GUI can inspect where time was
+  spent.
+- `benchmark --json` supports:
+  - `synthetic` mode for model-only throughput/latency checks
+  - `workload` mode for full pipeline measurement on a real input
+- `benchmark --json` reports `stage_timings` for engine creation, warmup,
+  per-frame inference, tiling, decode, encode, and full benchmark duration.
+
 ---
 
 ## 7. Implementation Scope and Priorities
@@ -524,18 +555,21 @@ The current codebase already provides:
 - Full processing pipeline for single frames, image sequences, and video.
 - Post-processing stack (sRGB/linear conversion, despill, despeckle, compositing).
 - Hardware-aware resolution strategy in the application layer.
-- CLI commands for processing, diagnostics, benchmarking, and model download.
+- Stable runtime capability, model catalog, and preset catalog contracts.
+- CLI commands for processing, diagnostics, benchmarking, catalogs, and model download.
+- Structured JSON/NDJSON output for automation and the future sidecar bridge.
+- Stage-level timing telemetry for synthetic benchmarks and real workloads.
 - Unit, integration, e2e, and regression test targets.
 
 ### 7.2 Priority Work Queue
 
 Near-term priorities are:
 
-1. Validate and harden execution-provider behavior across supported platforms.
-2. Expand deterministic regression coverage for known edge cases and bug fixes.
-3. Formalize cross-platform CI workflows and align quality gates with documentation.
-4. Improve distribution ergonomics for binaries and model management.
-5. Refine performance with measurement-driven profiling and benchmarks.
+1. Reduce startup and warmup overhead on macOS Apple Silicon with measurement-driven fixes.
+2. Harden tiled high-resolution processing and seam-free output across the validation corpus.
+3. Finalize the portable macOS bundle workflow for third-party machines.
+4. Lock the bridge-facing JSON/NDJSON contract around measured runtime behavior.
+5. Expand regression coverage for provider fallback, tiling, and packaging failures.
 
 ---
 
@@ -571,6 +605,7 @@ Summary of what's covered there:
 | macOS corpus completes without crash | 100% |
 | CoreML auto-selection falls back to CPU with structured reason | 100% |
 | Portable bundle runs `info`, `doctor`, `models`, and `presets` outside the build tree | 100% |
+| `benchmark --json` and terminal `process --json` events expose stable stage timings | 100% |
 | Tiled 4K runs complete without visible seam artifacts in validation review | Required |
 | Pixel-level accuracy vs Python (FP32 model) | max abs error < 1e-4 |
 | Pixel-level accuracy vs Python (FP16 model) | max abs error < 1e-2 |
