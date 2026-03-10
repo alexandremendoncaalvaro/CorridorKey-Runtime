@@ -5,12 +5,7 @@
 #include <numeric>
 #include <vector>
 
-#if __has_include(<execution>) && (defined(__cpp_lib_execution) || !defined(__clang__))
-#include <execution>
-#define EXEC_POLICY std::execution::par_unseq,
-#else
-#define EXEC_POLICY
-#endif
+#include "common/parallel_for.hpp"
 
 namespace corridorkey {
 namespace {
@@ -118,19 +113,18 @@ void dilate_binary(std::vector<uint8_t>& mask, int w, int h, int radius) {
     auto offsets = make_elliptical_kernel(radius);
     std::vector<uint8_t> result(mask.size(), 0);
 
-    std::vector<int> rows(h);
-    std::iota(rows.begin(), rows.end(), 0);
-
-    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
-        for (int x = 0; x < w; ++x) {
-            if (result[y * w + x] == 255) continue;
-            for (const auto& [dy, dx] : offsets) {
-                int ny = y + dy;
-                int nx = x + dx;
-                if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
-                    if (mask[ny * w + nx] == 255) {
-                        result[y * w + x] = 255;
-                        break;
+    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = 0; x < w; ++x) {
+                if (result[y * w + x] == 255) continue;
+                for (const auto& [dy, dx] : offsets) {
+                    int ny = y + dy;
+                    int nx = x + dx;
+                    if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
+                        if (mask[ny * w + nx] == 255) {
+                            result[y * w + x] = 255;
+                            break;
+                        }
                     }
                 }
             }
@@ -138,6 +132,18 @@ void dilate_binary(std::vector<uint8_t>& mask, int w, int h, int radius) {
     });
 
     mask = std::move(result);
+}
+
+void threshold_mask(const Image& alpha, std::vector<uint8_t>& mask) {
+    common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(alpha.width);
+            for (int x = 0; x < alpha.width; ++x) {
+                size_t index = row_offset + static_cast<size_t>(x);
+                mask[index] = alpha.data[index] > 0.5f ? 255 : 0;
+            }
+        }
+    });
 }
 
 // 1D Gaussian kernel (OpenCV formula: sigma = 0.3*((ksize-1)*0.5 - 1) + 0.8 when sigma=0)
@@ -165,29 +171,69 @@ void gaussian_blur(std::vector<float>& data, int w, int h, int half_size) {
     std::vector<float> temp(data.size());
 
     // Horizontal pass
-    std::vector<int> rows(h);
-    std::iota(rows.begin(), rows.end(), 0);
-
-    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
-        for (int x = 0; x < w; ++x) {
-            float sum = 0.0f;
-            for (int k = 0; k < ksize; ++k) {
-                int sx = std::clamp(x + k - half_size, 0, w - 1);
-                sum += data[y * w + sx] * kernel[k];
+    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int k = 0; k < ksize; ++k) {
+                    int sx = std::clamp(x + k - half_size, 0, w - 1);
+                    sum += data[y * w + sx] * kernel[k];
+                }
+                temp[y * w + x] = sum;
             }
-            temp[y * w + x] = sum;
         }
     });
 
     // Vertical pass
-    std::for_each(EXEC_POLICY rows.begin(), rows.end(), [&](int y) {
-        for (int x = 0; x < w; ++x) {
-            float sum = 0.0f;
-            for (int k = 0; k < ksize; ++k) {
-                int sy = std::clamp(y + k - half_size, 0, h - 1);
-                sum += temp[sy * w + x] * kernel[k];
+    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int k = 0; k < ksize; ++k) {
+                    int sy = std::clamp(y + k - half_size, 0, h - 1);
+                    sum += temp[sy * w + x] * kernel[k];
+                }
+                data[y * w + x] = sum;
             }
-            data[y * w + x] = sum;
+        }
+    });
+}
+
+void filter_components(const std::vector<int>& labels, const std::vector<int>& areas,
+                       std::vector<uint8_t>& cleaned, int w, int h, int area_threshold) {
+    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(w);
+            for (int x = 0; x < w; ++x) {
+                size_t index = row_offset + static_cast<size_t>(x);
+                int label = labels[index];
+                cleaned[index] = (label >= 0 && areas[label] >= area_threshold) ? 255 : 0;
+            }
+        }
+    });
+}
+
+void convert_cleaned_to_safe_zone(const std::vector<uint8_t>& cleaned,
+                                  std::vector<float>& safe_zone, int w, int h) {
+    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(w);
+            for (int x = 0; x < w; ++x) {
+                size_t index = row_offset + static_cast<size_t>(x);
+                safe_zone[index] = cleaned[index] / 255.0f;
+            }
+        }
+    });
+}
+
+void apply_safe_zone(Image alpha, const std::vector<float>& safe_zone) {
+    common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(alpha.width);
+            for (int x = 0; x < alpha.width; ++x) {
+                size_t index = row_offset + static_cast<size_t>(x);
+                alpha.data[index] *= safe_zone[index];
+            }
         }
     });
 }
@@ -203,9 +249,7 @@ void despeckle(Image alpha, int area_threshold, int dilation, int blur_size) {
 
     // Step 1: Threshold alpha at 0.5 to binary mask
     std::vector<uint8_t> mask(n);
-    for (int i = 0; i < n; ++i) {
-        mask[i] = (alpha.data[i] > 0.5f) ? 255 : 0;
-    }
+    threshold_mask(alpha, mask);
 
     // Step 2: Find connected components and filter by area
     std::vector<int> labels;
@@ -213,26 +257,18 @@ void despeckle(Image alpha, int area_threshold, int dilation, int blur_size) {
     find_components(mask, w, h, labels, areas);
 
     std::vector<uint8_t> cleaned(n, 0);
-    for (int i = 0; i < n; ++i) {
-        if (labels[i] >= 0 && areas[labels[i]] >= area_threshold) {
-            cleaned[i] = 255;
-        }
-    }
+    filter_components(labels, areas, cleaned, w, h, area_threshold);
 
     // Step 3: Dilate with elliptical kernel
     dilate_binary(cleaned, w, h, dilation);
 
     // Step 4: Gaussian blur for smooth edges
     std::vector<float> safe_zone(n);
-    for (int i = 0; i < n; ++i) {
-        safe_zone[i] = cleaned[i] / 255.0f;
-    }
+    convert_cleaned_to_safe_zone(cleaned, safe_zone, w, h);
     gaussian_blur(safe_zone, w, h, blur_size);
 
     // Step 5: Multiply original alpha by safe zone
-    for (int i = 0; i < n; ++i) {
-        alpha.data[i] *= safe_zone[i];
-    }
+    apply_safe_zone(alpha, safe_zone);
 }
 
 }  // namespace corridorkey

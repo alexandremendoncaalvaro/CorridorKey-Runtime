@@ -1,6 +1,7 @@
 #include "inference_session.hpp"
 
 #include "common/parallel_for.hpp"
+#include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
 #include "post_process/color_utils.hpp"
@@ -11,6 +12,15 @@
 namespace corridorkey {
 
 namespace {
+
+bool should_use_offline_optimization_cache(Backend backend) {
+    return backend == Backend::CPU || backend == Backend::CoreML;
+}
+
+void remove_cached_model(const std::filesystem::path& cache_path) {
+    std::error_code error;
+    std::filesystem::remove(cache_path, error);
+}
 
 void extract_tile_rows(const Image& source_rgb, const Image& source_hint, Image rgb_tile,
                        Image hint_tile, int y_start, int x_start, int y_begin, int y_end) {
@@ -82,9 +92,11 @@ InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(devic
 
 InferenceSession::~InferenceSession() = default;
 
-void InferenceSession::configure_session_options() {
+void InferenceSession::configure_session_options(bool use_optimized_model_cache) {
     m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
-    m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    m_session_options.SetGraphOptimizationLevel(use_optimized_model_cache
+                                                    ? GraphOptimizationLevel::ORT_DISABLE_ALL
+                                                    : GraphOptimizationLevel::ORT_ENABLE_ALL);
 
     switch (m_device.backend) {
         case Backend::CoreML: {
@@ -154,23 +166,81 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
     }
 
+    DeviceInfo requested_device = device;
+
     try {
         auto session_ptr =
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
         session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_ERROR, "CorridorKey");
-        session_ptr->configure_session_options();
+        std::filesystem::path session_model_path = model_path;
+        std::filesystem::path optimized_model_path;
+        bool using_optimized_model_cache = false;
+
+        if (should_use_offline_optimization_cache(session_ptr->m_device.backend)) {
+            optimized_model_path =
+                common::optimized_model_cache_path(model_path, session_ptr->m_device.backend);
+            std::error_code error;
+            std::filesystem::create_directories(optimized_model_path.parent_path(), error);
+            if (!error && std::filesystem::exists(optimized_model_path, error)) {
+                session_model_path = optimized_model_path;
+                using_optimized_model_cache = true;
+            }
+        }
+
+        session_ptr->configure_session_options(using_optimized_model_cache);
+        if (!using_optimized_model_cache && !optimized_model_path.empty()) {
+#ifdef _WIN32
+            session_ptr->m_session_options.SetOptimizedModelFilePath(
+                optimized_model_path.wstring().c_str());
+#else
+            session_ptr->m_session_options.SetOptimizedModelFilePath(optimized_model_path.c_str());
+#endif
+        }
 
 #ifdef _WIN32
-        session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.wstring().c_str(),
-                                              session_ptr->m_session_options);
-#else
         session_ptr->m_session =
-            Ort::Session(session_ptr->m_env, model_path.c_str(), session_ptr->m_session_options);
+            Ort::Session(session_ptr->m_env, session_model_path.wstring().c_str(),
+                         session_ptr->m_session_options);
+#else
+        session_ptr->m_session = Ort::Session(session_ptr->m_env, session_model_path.c_str(),
+                                              session_ptr->m_session_options);
 #endif
 
         session_ptr->extract_metadata();
         return session_ptr;
     } catch (const Ort::Exception& e) {
+        if (should_use_offline_optimization_cache(requested_device.backend)) {
+            auto optimized_model_path =
+                common::optimized_model_cache_path(model_path, requested_device.backend);
+            if (std::filesystem::exists(optimized_model_path)) {
+                remove_cached_model(optimized_model_path);
+                try {
+                    auto session_ptr =
+                        std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
+                    session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_ERROR, "CorridorKey");
+                    session_ptr->configure_session_options(false);
+#ifdef _WIN32
+                    session_ptr->m_session_options.SetOptimizedModelFilePath(
+                        optimized_model_path.wstring().c_str());
+#else
+                    session_ptr->m_session_options.SetOptimizedModelFilePath(
+                        optimized_model_path.c_str());
+#endif
+#ifdef _WIN32
+                    session_ptr->m_session =
+                        Ort::Session(session_ptr->m_env, model_path.wstring().c_str(),
+                                     session_ptr->m_session_options);
+#else
+                    session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(),
+                                                          session_ptr->m_session_options);
+#endif
+                    session_ptr->extract_metadata();
+                    return session_ptr;
+                } catch (const Ort::Exception&) {
+                    remove_cached_model(optimized_model_path);
+                }
+            }
+        }
         return Unexpected(Error{ErrorCode::ModelLoadFailed,
                                 std::string("ONNX Runtime session creation failed: ") + e.what()});
     } catch (const std::exception& e) {

@@ -56,7 +56,7 @@ class InferenceSession {
    private:
     explicit InferenceSession(DeviceInfo device);
 
-    void configure_session_options();
+    void configure_session_options(bool use_optimized_model_cache = false);
     void extract_metadata();
 
     /**
