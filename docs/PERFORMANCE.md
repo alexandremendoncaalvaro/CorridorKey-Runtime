@@ -379,9 +379,9 @@ Not all optimization opportunities are always worthwhile:
 
 # 🎓 **SENIOR CODE REVIEW: Performance Optimization Audit**
 
-**Reviewer:** Senior C++ Engineer (25 years systems optimization)  
-**Reviewed Against:** FFmpeg, ONNX Runtime, llama.cpp, Cosmopolitan Libc  
-**Verdict:** ~40% of initial recommendations valid; 60% are hype or over-engineered  
+**Reviewer:** Senior C++ Engineer (25 years systems optimization)
+**Reviewed Against:** FFmpeg, ONNX Runtime, llama.cpp, Cosmopolitan Libc
+**Verdict:** ~40% of initial recommendations valid; 60% are hype or over-engineered
 
 ---
 
@@ -442,7 +442,7 @@ FFmpeg's philosophy (25 years, billions of deployments):
 // No explicit SIMD in C code. Instead:
 // src/libavfilter/x86/vf_removegrain.asm defines portable macro:
 // INIT_XMM sse2, INIT_YMM avx2, etc.
-// 
+//
 // Compiler calls correct variant based on detected CPU.
 // Fallback: plain C version always works.
 ```
@@ -495,7 +495,7 @@ llama.cpp's philosophy:
    - Quantized matmul kernels are the hot path.
    - Standard libm functions are rarely called; use lookup tables for sigmoid, etc.
 
-2. **Thread pool, no work-stealing.** 
+2. **Thread pool, no work-stealing.**
    - Simple: nthreads = num_cpus. No oversubscription.
    - No dynamic load balancing; static partitioning.
 
@@ -584,13 +584,13 @@ ImageBufferPool with ring buffers, adaptive sizing, 3 allocation strategies
 # CMakeLists.txt
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(
-        -O3 
-        -march=native 
+        -O3
+        -march=native
         -ffast-math
         -finline-limit=1000  # Not 10000; balance
     )
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)  # LTO
-    
+
     # CPU-specific hints (let compiler choose)
     if(APPLE)
         add_compile_options(-mcpu=apple-m1)
@@ -684,7 +684,7 @@ perf report
 
 1. **DO:** Compilation flags + buffer pooling + built-in profiling
 2. **PROFILE:** Measure real bottlenecks
-3. **THEN:** Choose from Tier 2 based on results 
+3. **THEN:** Choose from Tier 2 based on results
 4. **IGNORE:** PGO, fused ops, intrinsics-everywhere until profiler demands it
 
 

@@ -35,7 +35,7 @@ QUICK START:
 4. Process your video:
    ./bin/corridorkey process -i input.mp4 -o outputs/result.mp4 -m models/corridorkey_int8_512.onnx
 
-NOTE: If you get a "Developer cannot be verified" error, 
+NOTE: If you get a "Developer cannot be verified" error,
 right-click the 'bin/corridorkey' file and select 'Open' once.
 README_EOF
 
