@@ -173,27 +173,29 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
         session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_ERROR, "CorridorKey");
         std::filesystem::path session_model_path = model_path;
-        std::filesystem::path optimized_model_path;
+        std::optional<std::filesystem::path> optimized_model_path;
         bool using_optimized_model_cache = false;
 
         if (should_use_offline_optimization_cache(session_ptr->m_device.backend)) {
             optimized_model_path =
                 common::optimized_model_cache_path(model_path, session_ptr->m_device.backend);
-            std::error_code error;
-            std::filesystem::create_directories(optimized_model_path.parent_path(), error);
-            if (!error && std::filesystem::exists(optimized_model_path, error)) {
-                session_model_path = optimized_model_path;
-                using_optimized_model_cache = true;
+            if (optimized_model_path.has_value()) {
+                std::error_code error;
+                std::filesystem::create_directories(optimized_model_path->parent_path(), error);
+                if (!error && std::filesystem::exists(*optimized_model_path, error)) {
+                    session_model_path = *optimized_model_path;
+                    using_optimized_model_cache = true;
+                }
             }
         }
 
         session_ptr->configure_session_options(using_optimized_model_cache);
-        if (!using_optimized_model_cache && !optimized_model_path.empty()) {
+        if (!using_optimized_model_cache && optimized_model_path.has_value()) {
 #ifdef _WIN32
             session_ptr->m_session_options.SetOptimizedModelFilePath(
-                optimized_model_path.wstring().c_str());
+                optimized_model_path->wstring().c_str());
 #else
-            session_ptr->m_session_options.SetOptimizedModelFilePath(optimized_model_path.c_str());
+            session_ptr->m_session_options.SetOptimizedModelFilePath(optimized_model_path->c_str());
 #endif
         }
 
@@ -212,8 +214,9 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         if (should_use_offline_optimization_cache(requested_device.backend)) {
             auto optimized_model_path =
                 common::optimized_model_cache_path(model_path, requested_device.backend);
-            if (std::filesystem::exists(optimized_model_path)) {
-                remove_cached_model(optimized_model_path);
+            if (optimized_model_path.has_value() &&
+                std::filesystem::exists(*optimized_model_path)) {
+                remove_cached_model(*optimized_model_path);
                 try {
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
@@ -221,10 +224,10 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                     session_ptr->configure_session_options(false);
 #ifdef _WIN32
                     session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path.wstring().c_str());
+                        optimized_model_path->wstring().c_str());
 #else
                     session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path.c_str());
+                        optimized_model_path->c_str());
 #endif
 #ifdef _WIN32
                     session_ptr->m_session =
@@ -237,7 +240,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                     session_ptr->extract_metadata();
                     return session_ptr;
                 } catch (const Ort::Exception&) {
-                    remove_cached_model(optimized_model_path);
+                    remove_cached_model(*optimized_model_path);
                 }
             }
         }
@@ -252,11 +255,19 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& alpha_hint,
                                                 const InferenceParams& params, int model_res,
                                                 StageTimingCallback on_stage) {
+    struct PendingTile {
+        int x_start = 0;
+        int y_start = 0;
+        Image rgb_view = {};
+        Image hint_view = {};
+    };
+
     int w = rgb.width;
     int h = rgb.height;
     int tile_size = model_res;
     int padding = params.tile_padding;
     int stride = tile_size - 2 * padding;
+    int tile_batch_size = m_device.backend == Backend::CPU ? std::max(1, params.batch_size) : 1;
 
     // Allocate accumulators
     ImageBuffer acc_alpha(w, h, 1);
@@ -300,19 +311,65 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
         m_tiled_weight_padding = padding;
     }
 
-    if (m_tiled_buffer_size != tile_size) {
-        m_tiled_rgb_buffer = ImageBuffer(tile_size, tile_size, 3);
-        m_tiled_hint_buffer = ImageBuffer(tile_size, tile_size, 1);
+    if (m_tiled_buffer_size != tile_size || m_tiled_pool_capacity != tile_batch_size) {
+        m_tiled_rgb_pool.clear();
+        m_tiled_hint_pool.clear();
+        m_tiled_rgb_pool.reserve(static_cast<size_t>(tile_batch_size));
+        m_tiled_hint_pool.reserve(static_cast<size_t>(tile_batch_size));
+        for (int i = 0; i < tile_batch_size; ++i) {
+            m_tiled_rgb_pool.emplace_back(tile_size, tile_size, 3);
+            m_tiled_hint_pool.emplace_back(tile_size, tile_size, 1);
+        }
         m_tiled_buffer_size = tile_size;
+        m_tiled_pool_capacity = tile_batch_size;
     }
-
     Image mask = m_tiled_weight_mask.view();
-    Image rgb_tile = m_tiled_rgb_buffer.view();
-    Image hint_tile = m_tiled_hint_buffer.view();
 
     // Iterate tiles
     int nx = (w + stride - 1) / stride;
     int ny = (h + stride - 1) / stride;
+    std::vector<PendingTile> pending_tiles;
+    pending_tiles.reserve(static_cast<size_t>(tile_batch_size));
+
+    auto flush_pending_tiles = [&]() -> Result<void> {
+        if (pending_tiles.empty()) {
+            return {};
+        }
+
+        std::vector<Image> rgb_tiles;
+        std::vector<Image> hint_tiles;
+        rgb_tiles.reserve(pending_tiles.size());
+        hint_tiles.reserve(pending_tiles.size());
+        for (const auto& tile : pending_tiles) {
+            rgb_tiles.push_back(tile.rgb_view);
+            hint_tiles.push_back(tile.hint_view);
+        }
+
+        auto batch_results = common::measure_stage(
+            on_stage, "tile_infer",
+            [&]() { return infer_batch_raw(rgb_tiles, hint_tiles, params, on_stage); },
+            pending_tiles.size());
+        if (!batch_results) {
+            return Unexpected(batch_results.error());
+        }
+
+        for (size_t tile_index = 0; tile_index < pending_tiles.size(); ++tile_index) {
+            auto& tile = pending_tiles[tile_index];
+            common::measure_stage(
+                on_stage, "tile_accumulate",
+                [&]() {
+                    common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
+                        accumulate_tile_rows(mask, (*batch_results)[tile_index], acc_alpha.view(),
+                                             acc_fg.view(), acc_weight.view(), tile.y_start,
+                                             tile.x_start, h, w, y_begin, y_end);
+                    });
+                },
+                1);
+        }
+
+        pending_tiles.clear();
+        return {};
+    };
 
     for (int ty = 0; ty < ny; ++ty) {
         for (int tx = 0; tx < nx; ++tx) {
@@ -322,6 +379,10 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
             // Center crop if last tile goes over edge
             if (x_start + tile_size > w) x_start = std::max(0, w - tile_size);
             if (y_start + tile_size > h) y_start = std::max(0, h - tile_size);
+
+            size_t tile_slot = pending_tiles.size();
+            Image rgb_tile = m_tiled_rgb_pool[tile_slot].view();
+            Image hint_tile = m_tiled_hint_pool[tile_slot].view();
 
             common::measure_stage(
                 on_stage, "tile_extract",
@@ -333,22 +394,19 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
                 },
                 1);
 
-            auto res = common::measure_stage(
-                on_stage, "tile_infer",
-                [&]() { return infer_raw(rgb_tile, hint_tile, params, on_stage); }, 1);
-            if (!res) return Unexpected(res.error());
-
-            common::measure_stage(
-                on_stage, "tile_accumulate",
-                [&]() {
-                    common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
-                        accumulate_tile_rows(mask, *res, acc_alpha.view(), acc_fg.view(),
-                                             acc_weight.view(), y_start, x_start, h, w, y_begin,
-                                             y_end);
-                    });
-                },
-                1);
+            pending_tiles.push_back(PendingTile{x_start, y_start, rgb_tile, hint_tile});
+            if (pending_tiles.size() == static_cast<size_t>(tile_batch_size)) {
+                auto flush_res = flush_pending_tiles();
+                if (!flush_res) {
+                    return Unexpected(flush_res.error());
+                }
+            }
         }
+    }
+
+    auto flush_res = flush_pending_tiles();
+    if (!flush_res) {
+        return Unexpected(flush_res.error());
     }
 
     common::measure_stage(
