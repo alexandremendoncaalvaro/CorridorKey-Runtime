@@ -32,7 +32,7 @@ workstations with high-end GPUs.
 | Goal | Metric |
 |------|--------|
 | Run on 8GB unified memory (MacBook Air M1) | Process 512² frames without crash |
-| Run on 10GB GPU (RTX 3080) | Process 1024-2048² frames |
+| Run on 10GB GPU (RTX 3080) | Process 1024² frames |
 | Single binary distribution | No Python, no pip, no venv |
 | Startup time | < 2 seconds to first frame |
 | Quality parity with original | < 2% deviation on reference test set |
@@ -59,7 +59,7 @@ workstations with high-end GPUs.
 │   │             │              │ - premultiply        │    │
 │   └─────────────┴──────────────┴────────────────────┘    │
 ├──────────────────────────────────────────────────────────┤
-│                  ONNX Runtime 1.24+                        │
+│                     ONNX Runtime                           │
 │   ┌──────────┬───────────┬──────────┬──────────────────┐ │
 │   │ CoreML   │ TensorRT  │ DirectML │ CPU              │ │
 │   │ EP       │ RTX EP    │ EP       │ EP               │ │
@@ -181,8 +181,8 @@ Responsibilities:
 
 Key design decisions:
 - **One model format (ONNX)**, multiple execution providers
-- **Resolution is adaptive**: query available memory at startup, pick the highest
-  resolution that fits (512², 768², 1024², 1536², 2048²)
+- **Resolution is adaptive**: query available memory at startup and select among
+  currently supported targets (512², 768², 1024²)
 - **Warm-up run**: first frame triggers JIT compilation (TensorRT RTX EP caches
   this for subsequent runs)
 
@@ -241,11 +241,11 @@ ONNX FP16 (~150MB)
 
 | Variant | Size | Target | Quality |
 |---------|------|--------|---------|
-| `corridorkey_fp32.onnx` | ~300MB | Reference/validation | 100% (baseline) |
-| `corridorkey_fp16.onnx` | ~150MB | GPUs with FP16 (RTX 3080, Apple Silicon) | ~99.5% |
-| `corridorkey_int8.onnx` | ~75MB | Universal (CPU, low-VRAM GPU) | ~98-99% |
+| `corridorkey_fp32_512.onnx` / `corridorkey_fp32_768.onnx` / `corridorkey_fp32_1024.onnx` | ~276-297MB | Reference/validation | 100% (baseline) |
+| `corridorkey_fp16_512.onnx` / `corridorkey_fp16_768.onnx` / `corridorkey_fp16_1024.onnx` | ~138-149MB | GPUs with FP16 support | ~99.5% |
+| `corridorkey_int8_512.onnx` / `corridorkey_int8_768.onnx` / `corridorkey_int8_1024.onnx` | ~76-97MB | Universal (CPU, low-VRAM GPU) | ~98-99% |
 
-All variants hosted on HuggingFace. CLI auto-downloads on first run.
+Model files are downloaded explicitly through `corridorkey download`.
 
 ### 3.4 Hiera-Specific Concerns
 
@@ -270,7 +270,7 @@ Mitigation:
 ```
 Tier   │ VRAM/RAM Available │ Model     │ Resolution │ Expected FPS
 ───────┼────────────────────┼───────────┼────────────┼─────────────
-HIGH   │ 10+ GB dedicated   │ FP16      │ 1024-2048² │ 2-5 fps
+HIGH   │ 10+ GB dedicated   │ FP16      │ 1024²      │ 2-5 fps
 MEDIUM │ 12-16 GB unified   │ INT8      │ 512-768²   │ 1-3 fps
 LOW    │ 6-8 GB             │ INT8      │ 512²       │ 0.5-2 fps
 CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
@@ -285,7 +285,7 @@ CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
 │    Role: Primary development machine                            │
 ├─────────────────────────────────────────────────────────────────┤
 │ B: PC RTX 3080 (10GB VRAM, 32GB RAM) → HIGH tier               │
-│    EP: TensorRT RTX | Model: FP16 | Res: 1024-2048²            │
+│    EP: TensorRT RTX | Model: FP16 | Res: 1024²                 │
 │    Role: NVIDIA testing, model export & quantization            │
 ├─────────────────────────────────────────────────────────────────┤
 │ C: PC RX 480 (8GB, Bluefin Linux) → CPU tier                   │
@@ -312,8 +312,8 @@ CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
 To ensure both ease of use and professional control, the runtime selects the processing resolution based on this strict hierarchy:
 
 1. **User Override:** If `InferenceParams::target_resolution` is set (via CLI `--resolution`), it takes absolute precedence.
-2. **Hardware Recommendation:** If target is `0` (Auto), the runtime queries available memory and selects the highest "safe" resolution (512, 768, 1024, 2048) for the detected Tier.
-3. **Model Native:** If hardware detection is unavailable, the runtime falls back to the native resolution defined in the ONNX model metadata.
+2. **Hardware Recommendation:** If target is `0` (Auto), the application layer maps the selected device profile to a safe resolution (`512`, `768`, or `1024`).
+3. **Core Fallback:** If no profile is available, the core session uses a conservative fallback resolution (`512`).
 
 If the input image dimensions differ from the selected target resolution, the engine performs high-performance bilinear scaling before inference and scales the results back if necessary.
 
@@ -328,11 +328,11 @@ If the input image dimensions differ from the selected target resolution, the en
 | Language | C++20 | (no modules) | — |
 | Build | CMake | 3.28+ | — |
 | Package manager | vcpkg | latest | manifest mode |
-| ML inference | ONNX Runtime | 1.24+ | vcpkg |
+| ML inference | ONNX Runtime | vendored 1.16.3 on macOS, vcpkg on non-macOS | mixed |
 | EXR I/O | OpenEXR + Imath | 3.4+ | vcpkg |
 | PNG I/O (8-bit) | stb_image | latest | header-only, vendored |
 | PNG I/O (16-bit) | libpng | 1.6+ | vcpkg |
-| Video I/O | FFmpeg | 7.x | vcpkg |
+| Video I/O | FFmpeg | 8.x | vcpkg |
 | CLI | cxxopts | 3.x | vcpkg |
 | Testing | Catch2 | 3.x | vcpkg |
 
@@ -361,7 +361,7 @@ CorridorKey-Runtime/
 ├── CONTRIBUTING.md                   # Developer onboarding
 │
 ├── .github/
-│   ├── workflows/                    # CI/CD pipelines
+│   ├── workflows/                    # CI/CD workflows (optional, may be empty)
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   └── ISSUE_TEMPLATE/
 │       ├── bug_report.md
@@ -371,7 +371,9 @@ CorridorKey-Runtime/
 │
 ├── docs/
 │   ├── SPEC.md                       # This document
-│   └── GUIDELINES.md                 # Engineering standards
+│   ├── GUIDELINES.md                 # Engineering standards
+│   ├── ARCHITECTURE.md               # Structural rules
+│   └── brainstorm/                   # Exploratory notes (non-normative)
 │
 ├── include/
 │   └── corridorkey/                  # Public API headers
@@ -404,16 +406,18 @@ CorridorKey-Runtime/
 │
 ├── models/                           # ONNX models (gitignored, downloaded)
 │
-├── scripts/                          # Model export & optimization (Python)
-│   ├── export_onnx.py
-│   ├── optimize_model.py
-│   ├── quantize_model.py
-│   └── validate_model.py
+├── scripts/                          # Project automation scripts (hooks, packaging, checks)
 │
-└── vendor/                           # Vendored header-only libs
+├── tools/
+│   └── model_exporter/               # Model export & optimization (Python)
+│       ├── export_onnx.py
+│       ├── optimize_model.py
+│       └── quantize_model.py
+│
+└── vendor/                           # Vendored third-party assets
     ├── stb_image.h
     ├── stb_image_write.h
-    └── CLI11.hpp
+    └── onnxruntime/
 ```
 
 ---
@@ -424,35 +428,38 @@ CorridorKey-Runtime/
 
 ```bash
 # Process a video file
-corridorkey process input.mp4 --alpha-hint hint.mp4 --output output.mp4
+corridorkey process --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_512.onnx
 
 # Process an image sequence
-corridorkey process ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/
+corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_512.onnx
 
 # Process a single frame
-corridorkey process frame.exr --alpha-hint hint.png --output result.exr
+corridorkey process --input frame.exr --alpha-hint hint.png --output result.exr --model models/corridorkey_int8_512.onnx
 
 # Show detected hardware and recommended settings
 corridorkey info
 
-# Download model files
+# Download model files (512/768/1024 for selected variant)
 corridorkey download [--variant fp32|fp16|int8|all]
+
+# Run diagnostics over available devices and model files
+corridorkey doctor [--model models/corridorkey_int8_512.onnx]
+
+# Run quick benchmark using a specific model
+corridorkey benchmark --model models/corridorkey_int8_512.onnx
 ```
 
 ### 6.2 Common Flags
 
 ```
---device <auto|cpu|cuda|coreml|directml>   Override device selection
---resolution <auto|512|768|1024|2048>       Override processing resolution
+--device <auto|cpu|cuda|coreml|dml|index>   Override device selection
+--resolution <0|512|768|1024>               Override processing resolution
 --model <path>                              Custom model path
---despill <0.0-10.0>                        Green spill removal (default: 1.0)
+--despill <0.0-1.0>                         Green spill removal (default: 1.0)
 --no-despeckle                              Disable morphological cleanup
---despeckle-size <pixels>                   Cleanup threshold (default: 400)
---input-linear                              Input is linear (not sRGB)
---output-format <exr|png|mp4>               Output format override
---quality <int8|fp16|fp32>                  Model quality level
---verbose                                   Detailed logging
---benchmark                                 Print timing per frame
+--batch-size <int>                          Number of frames per inference call
+--tiled                                     Enable tiled inference for large frames
+--json                                      Emit structured JSON output
 ```
 
 ### 6.3 Output Structure (Image Sequence Mode)
@@ -469,83 +476,30 @@ Matches the original CorridorKey output structure for compatibility.
 
 ---
 
-## 7. Implementation Phases
+## 7. Implementation Scope and Priorities
 
-### Phase 0: Model Validation (Machine B — RTX 3080)
+### 7.1 Implemented Scope
 
-**Goal:** Prove the model exports and produces correct results.
+The current codebase already provides:
 
-Tasks:
-- [x] Export GreenFormer to ONNX (dynamo=True, fallback to legacy)
-- [ ] Validate ONNX output vs PyTorch (max error < 1e-5 per pixel)
-- [x] Run onnxsim + transformer optimizer
-- [ ] Quantize to FP16 and INT8
-- [ ] Measure quality loss on 10+ reference frames
-- [ ] Benchmark inference time (PyTorch vs ONNX FP32 vs FP16 vs INT8)
+- CMake + vcpkg project setup with debug/release presets.
+- ONNX Runtime integration with execution-provider selection paths.
+- Frame I/O for EXR, PNG, and video decode/encode through FFmpeg.
+- Full processing pipeline for single frames, image sequences, and video.
+- Post-processing stack (sRGB/linear conversion, despill, despeckle, compositing).
+- Hardware-aware resolution strategy in the application layer.
+- CLI commands for processing, diagnostics, benchmarking, and model download.
+- Unit, integration, e2e, and regression test targets.
 
-**Deliverable:** Validated ONNX models (FP32, FP16, INT8) + quality report.
+### 7.2 Priority Work Queue
 
-**Why Machine B:** Only machine with enough VRAM (10GB) to load the PyTorch
-model + ONNX Runtime simultaneously for comparison.
+Near-term priorities are:
 
-### Phase 1: C++ Skeleton (Machine A — Mac Mini M4)
-
-**Goal:** Minimal working pipeline — load model, process one frame, save output.
-
-Tasks:
-- [x] CMake + vcpkg setup, builds on macOS
-- [x] ONNX Runtime integration, load INT8 model
-- [x] Minimal FrameIO (read PNG, write PNG)
-- [x] InferenceEngine: load model, run single frame
-- [x] Verify output matches Python reference
-- [ ] Cross-compile check on Linux (Machine C or D)
-
-**Deliverable:** Binary that processes one PNG frame + alpha hint → PNG output.
-
-### Phase 2: Complete Pipeline (Machine A, tested on all)
-
-**Goal:** Full feature parity with original CorridorKey inference.
-
-Tasks:
-- [x] PostProcess: port color_utils.py (sRGB, despill, despeckle, premultiply)
-- [x] FrameIO: EXR read/write (OpenEXR 3.4)
-- [x] FrameIO: Video decode/encode (FFmpeg)
-- [x] Image sequence processing (directory of frames)
-- [x] Auto-detection: hardware, tier, resolution, model variant
-- [x] CLI: all commands and flags
-- [x] Output structure (Matte/, FG/, Processed/, Comp/)
-- [x] Unit tests for all modules
-- [ ] Test on all 6 machines
-
-**Deliverable:** Feature-complete CLI binary.
-
-### Phase 3: Optimization (All machines)
-
-**Goal:** Maximize performance per platform.
-
-Tasks:
-- [ ] TensorRT RTX EP integration + cache (Machine B)
-- [ ] CoreML EP tuning (Machines A, E, F)
-- [ ] DirectML EP testing (Machine B or C with Windows)
-- [ ] Multi-threaded frame pipeline (decode → infer → postprocess → encode)
-- [ ] Memory profiling and optimization
-- [ ] Resolution auto-scaling refinement
-- [ ] Benchmark suite across all machines
-
-**Deliverable:** Performance-optimized binary + benchmark report.
-
-### Phase 4: Distribution
-
-**Goal:** Easy to install, easy to use.
-
-Tasks:
-- [ ] Pre-built binaries (GitHub Releases) for macOS ARM64, Windows x64, Linux x64
-- [ ] Model hosting on HuggingFace with auto-download
-- [ ] README with installation and usage guide
-- [ ] CI/CD (GitHub Actions): build + test on all platforms
-- [ ] Homebrew formula (macOS), optional
-
-**Deliverable:** Public release on GitHub.
+1. Validate and harden execution-provider behavior across supported platforms.
+2. Expand deterministic regression coverage for known edge cases and bug fixes.
+3. Formalize cross-platform CI workflows and align quality gates with documentation.
+4. Improve distribution ergonomics for binaries and model management.
+5. Refine performance with measurement-driven profiling and benchmarks.
 
 ---
 
@@ -560,19 +514,19 @@ Summary of what's covered there:
 
 | Level | Scope | Runs when |
 |-------|-------|-----------|
-| **Unit** | Single function/class, no I/O, no GPU | Every commit (pre-push hook) |
-| **Regression** | Specific bug reproductions, never deleted | Every commit (pre-push hook) |
-| **Integration** | Multi-module, real files, no GPU | Every push (pre-push hook + CI) |
-| **E2E** | Full binary, real model, real hardware | Nightly CI + release |
-| **Benchmarks** | Performance tracking, regression detection | Nightly CI |
+| **Unit** | Single function/class, no I/O, no GPU | Every push (pre-push hook) |
+| **Regression** | Specific bug reproductions, never deleted | Every push (pre-push hook) |
+| **Integration** | Multi-module, real files, no GPU | Every push (pre-push hook) |
+| **E2E** | Full binary, real model, real hardware | On demand / release validation |
+| **Benchmarks** | Performance tracking, regression detection | On demand |
 
 ### 8.2 Static Analysis & Pre-flight
 
 | Gate | Tools | When |
 |------|-------|------|
-| **pre-commit** | clang-format, clang-tidy (changed files), file hygiene | Before every commit |
-| **pre-push** | Full build, unit tests, integration tests, cppcheck | Before every push |
-| **CI** | All of the above + cross-platform build + IWYU | Every PR |
+| **pre-commit** | clang-format, file hygiene | Before every commit |
+| **pre-push** | Full build, unit tests, integration tests | Before every push |
+| **CI** | Optional cross-platform build and test workflows | When configured |
 
 ### 8.3 Acceptance Criteria
 
@@ -599,19 +553,18 @@ Summary of what's covered there:
 
 ## 9. Future Roadmap
 
-- [ ] **CoreML / GPU Acceleration:** The current `onnxruntime` build via `vcpkg` on macOS lacks the CoreML Execution Provider. Future work includes switching to official ONNX binaries or custom vcpkg port overlays to enable the Apple Neural Engine.
-- [ ] **Tiling Inference (High-Res Support):** Implement a patch-based processing mode. Split 4K/8K images into overlapping tiles (e.g., 1024x1024), process each tile, and stitch them back with alpha feathering. This allows high-resolution processing on low-VRAM GPUs.
-- [x] **FFmpeg Integrated Pipeline:** Video processing is done in-RAM without temporary files.
-- [ ] **Chroma-Key Auto-Hint:** Built-in basic HSV/Chroma-keyer to generate the initial alpha hint internally, removing the need for an external hint video.
-- [x] **Hardware-Aware Tiers:** Adaptive resolution and model selection based on detected memory.
-- [ ] **GUI Wrapper:** A simple drag-and-drop interface (potentially using Dear ImGui) for users who prefer not to use the CLI.
+- **Execution-provider validation:** tighten CoreML/CUDA/TensorRT/DirectML behavior and fallback guarantees across supported platforms.
+- **High-resolution workflows:** evolve tiling and memory strategy for reliable 4K/8K processing on constrained hardware.
+- **Auto-hint quality:** improve internal hint generation to reduce dependency on external alpha hints.
+- **Developer experience:** strengthen CI and release automation for repeatable cross-platform delivery.
+- **User experience:** provide a GUI wrapper that stays aligned with the existing library + CLI contract.
 
 ---
 
 ## 10. References
 
 - [CorridorKey Original](https://github.com/nikopueringer/CorridorKey)
-- [ONNX Runtime 1.24](https://github.com/microsoft/onnxruntime/releases)
+- [ONNX Runtime Releases](https://github.com/microsoft/onnxruntime/releases)
 - [ONNX Runtime Execution Providers](https://onnxruntime.ai/docs/execution-providers/)
 - [TensorRT RTX EP](https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html)
 - [CoreML EP](https://onnxruntime.ai/docs/execution-providers/CoreML-ExecutionProvider.html)

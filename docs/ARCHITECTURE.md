@@ -42,18 +42,17 @@ our needs, combined with **Clean Architecture** layering.
 *   Must not print to stdout/stderr (use callbacks/results).
 *   Must return rich error types (`Result<T>`).
 
-### Layer 2: Application (`src/app` - *Planned*)
+### Layer 2: Application (`src/app`)
 **Responsibility:** Orchestration of the Core into coherent jobs.
 *   Job definitions and validation.
 *   Preset management.
 *   Progress tracking and reporting.
 *   High-level strategy selection (e.g., Tiling vs Standard inference).
 
-### Layer 3: Interfaces (`src/cli`, `src/tui` - *Planned*)
+### Layer 3: Interfaces (`src/cli`)
 **Responsibility:** Interacting with the user.
 *   **CLI:** The current primary interface. Parses arguments, configures the engine, and formats output.
-*   **TUI:** Future terminal UI for interactive use.
-*   **GUI:** Future graphical interface.
+*   Additional interfaces (TUI/GUI) must remain thin clients over the same App/Core contracts.
 
 ---
 
@@ -89,6 +88,8 @@ All implementation code. Organized by domain.
 
 ```
 src/
+├── app/                Application orchestration layer
+│   └── job_orchestrator.cpp
 ├── cli/                CLI application (thin consumer of the library)
 │   └── main.cpp
 ├── common/             Shared internal utilities (no external deps)
@@ -114,6 +115,7 @@ tests/
 ├── unit/               Fast, isolated logic tests (Catch2)
 ├── integration/        Multi-module tests (Roundtrip video/image)
 ├── e2e/                Full binary tests with real models
+├── regression/         Bug reproduction tests
 └── fixtures/           Reference files
 ```
 

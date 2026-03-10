@@ -88,7 +88,7 @@ sudo ln -s "$(pwd)/build/release/src/cli/corridorkey" /usr/local/bin/corridorkey
 
 If you haven't added the binary to your PATH, replace `corridorkey` with `./build/release/src/cli/corridorkey` in the commands below.
 
-**Download the model** (int8 is recommended for most hardware):
+**Download model files** (downloads 512/768/1024 variants for the selected quality):
 ```bash
 corridorkey download --variant int8
 ```
@@ -100,17 +100,17 @@ corridorkey info
 
 **Process a single video**:
 ```bash
-corridorkey process input.mp4 --alpha-hint hint.mp4 --output output.mp4
+corridorkey process --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_512.onnx
 ```
 
 **Process a directory of frames**:
 ```bash
-corridorkey process ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/
+corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_512.onnx
 ```
 
 **Process a single EXR/PNG frame**:
 ```bash
-corridorkey process frame.exr --alpha-hint hint.png --output result.exr
+corridorkey process --input frame.exr --alpha-hint hint.png --output result.exr --model models/corridorkey_int8_512.onnx
 ```
 
 <details>
@@ -143,33 +143,32 @@ Output/
   Comp/        # Preview on checkerboard — PNG 8-bit sRGB
 ```
 
-## Project Status & Roadmap
+## Current Scope
 
-### ✅ Done
 - **Zero-Python Runtime:** Standalone C++ binary with no external ML environment needed.
 - **FFmpeg Integration:** Process `.mp4`/`.mov` files directly in RAM.
-- **Hardware-Aware Tiers:** Adaptive resolution (512px to 1024px) based on detected RAM/VRAM.
-- **Auto-Hinting:** Generates a guide matte internally if no manual alpha hint is provided.
-- **VFX-Grade I/O:** Support for 16-bit linear EXR and proper sRGB/Linear color math.
+- **Hardware-Aware Tiers:** Adaptive resolution strategy based on detected memory profile.
+- **Auto-Hinting Fallback:** Generates a rough guide matte when no manual alpha hint is provided.
+- **VFX-Oriented I/O:** EXR + PNG outputs with sRGB/linear conversion and premultiplied output buffers.
 
-### 🛠 In Progress / Planned
-- [ ] **CoreML & TensorRT:** Native GPU/Neural Engine acceleration (currently running on CPU fallback).
-- [ ] **Tiling Inference:** Support for 4K/8K processing on low-VRAM GPUs by segmenting frames.
-- [ ] **Model Auto-Download:** Automatic model fetching from HuggingFace via CLI.
-- [ ] **Unit Testing:** Comprehensive test suite for all post-processing math.
-- [ ] **GUI Interface:** Simple drag-and-drop tool for non-CLI users.
+## Priority Direction
+
+- Strengthen execution-provider reliability and platform validation for CoreML/CUDA/TensorRT/DirectML paths.
+- Expand regression coverage around CLI, model management, and post-processing edge cases.
+- Improve distribution workflows for binaries and model delivery.
+- Build a GUI layer on top of the existing library + CLI contract.
 
 ## Hardware Support
 
 | Tier | Example Hardware | Model | Resolution | Expected FPS |
 |------|-----------------|-------|------------|-------------|
-| High | RTX 3080+ (10GB+) | FP16 | 1024-2048px | 2-5 fps |
+| High | RTX 3080+ (10GB+) | FP16 | 1024px | 2-5 fps |
 | Medium | MacBook M1 Pro (16GB) | INT8 | 512-768px | 1-3 fps |
 | Low | MacBook Air M1 (8GB) | INT8 | 512px | 0.5-2 fps |
 | CPU | Any x86/ARM (16GB+) | INT8 | 512px | 0.1-0.5 fps |
 
 The runtime auto-detects your hardware and selects the best configuration.
-Override with `--device`, `--resolution`, and `--quality` flags.
+Override with `--device`, `--resolution`, and `--model` flags.
 
 ## Documentation
 

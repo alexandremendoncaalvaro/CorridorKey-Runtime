@@ -1,10 +1,11 @@
-# Performance Optimization Strategy
+# Performance Brainstorm Notes
 
-> This document defines performance optimization priorities, techniques, and expected gains for CorridorKey Runtime.
-> It serves as a reference for implementation decisions and profiling targets.
+> This document is exploratory brainstorming, not a finalized specification.
+> It captures early ideas from code review and external research to guide future validation.
 >
-> **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) — structural principles |
-> [GUIDELINES.md](GUIDELINES.md) — code standards | [SPEC.md](SPEC.md) — technical design
+> **Related context:** [ARCHITECTURE.md](../ARCHITECTURE.md) — structural principles |
+> [GUIDELINES.md](../GUIDELINES.md) — code standards |
+> [SPEC.md](../SPEC.md) — technical design
 
 ---
 

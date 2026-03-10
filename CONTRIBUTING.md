@@ -35,8 +35,7 @@ export VCPKG_ROOT="$HOME/vcpkg"
 # On Windows: set VCPKG_ROOT=%USERPROFILE%\vcpkg (System Environment Variables)
 
 # Install git hooks (mandatory)
-pre-commit install
-pre-commit install --hook-type pre-push
+./scripts/setup_gates.sh
 
 # Build (debug mode for development)
 cmake --preset debug
@@ -119,13 +118,12 @@ hooks:
 
 **On commit (< 30s):**
 - clang-format (staged files)
-- clang-tidy (staged files)
-- File hygiene (trailing whitespace, large files, no commits to main)
+- File hygiene (trailing whitespace, large files, YAML checks)
 
 **On push (< 5min):**
-- Full debug build
-- All unit and integration tests
-- cppcheck full scan
+- Full release build
+- Unit tests
+- Integration tests
 
 If a hook fails, fix the issue and try again. Do **not** bypass hooks with
 `--no-verify`.
@@ -162,7 +160,7 @@ perf: parallelize frame decode pipeline
 2. Make your changes, ensuring all hooks pass
 3. Push your branch and open a PR
 4. Fill in the PR template
-5. Wait for CI to pass and a review
+5. Ensure local quality gates pass and request review
 6. Squash merge to main
 
 ### What We Value in PRs

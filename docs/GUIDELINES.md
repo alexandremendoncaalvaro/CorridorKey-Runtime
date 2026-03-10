@@ -169,7 +169,7 @@ These rules protect the performance advantage.
 |------|---------|-------------|
 | **clang-format 18+** | Code formatting | `.clang-format` |
 | **clang-tidy 18+** | Static analysis, style enforcement | `.clang-tidy` |
-| **cppcheck** | Undefined behavior, leaks, portability | integrated in CI |
+| **cppcheck** | Undefined behavior, leaks, portability | optional local/CI gate |
 | **include-what-you-use** | Header minimality | CMake integration |
 
 ### 5.2 clang-format
@@ -190,8 +190,8 @@ The authoritative configuration is `.clang-tidy` at the project root.
 
 ### 5.4 cppcheck
 
-Enables warning, style, performance, and portability checks. Fails on any
-issue. Integrated into the pre-push hook and CI pipeline.
+Enables warning, style, performance, and portability checks. Run it as an
+explicit quality gate in local verification scripts or CI workflows.
 
 ---
 
@@ -206,7 +206,6 @@ Developer commits
         |
   pre-commit hook        Fast (< 30s)
   (staged files only)    - clang-format
-                         - clang-tidy on changed files
                          - file hygiene
         |
   git commit created
@@ -214,37 +213,31 @@ Developer commits
   Developer pushes
         |
   pre-push hook          Thorough (< 5min)
-  (full codebase)        - full debug build
+  (full codebase)        - full release build
                          - all unit tests
                          - all integration tests
-                         - cppcheck
         |
   push to remote
         |
-  CI pipeline            Complete (< 15min)
-  (GitHub Actions)       - build on macOS, Linux, Windows
-                         - all tests
-                         - clang-tidy + cppcheck full
-                         - IWYU, binary size check
+  CI pipeline            Optional (if configured)
+  (GitHub Actions)       - cross-platform build and test
 ```
 
 ### 6.2 Pre-commit Hook
 
 Managed via [pre-commit](https://pre-commit.com/). Configuration in
-`.pre-commit-config.yaml`. Checks: formatting, lint on changed files,
-trailing whitespace, YAML/JSON syntax, large file detection, direct commit
-to `main` blocked.
+`.pre-commit-config.yaml`. Checks: formatting, trailing whitespace,
+YAML syntax, and large file detection.
 
 ### 6.3 Pre-push Hook
 
-Shell script at `.githooks/pre-push`. Runs: full debug build, unit tests,
-integration tests, cppcheck. All must pass.
+Shell script at `.githooks/pre-push`. Runs: full release build, unit tests,
+and integration tests. All must pass.
 
 ### 6.4 CI Pipeline
 
-Configuration in `.github/workflows/`. Builds and tests on all platforms on
-every push and PR. Nightly: release build, E2E tests with real models,
-performance benchmarks tracked over time.
+When configured in `.github/workflows/`, CI should build and test on supported
+platforms while preserving the same quality baseline used locally.
 
 ---
 
@@ -318,8 +311,8 @@ with level tags.
 
 ### 8.1 Branch Strategy
 
-`main` is always stable. All checks pass. Protected: requires PR, passing CI,
-and review. Direct commits blocked. Squash merge preferred.
+`main` is the integration branch. Keep it releasable by merging only after
+local quality gates pass and review is complete.
 
 Branch prefixes: `feat/`, `fix/`, `chore/`, `test/`, `refactor/`.
 
