@@ -22,7 +22,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     // 2. Create Engine
     auto engine_res = Engine::create(req.model_path, req.device);
     if (!engine_res) {
-        return unexpected(engine_res.error());
+        return Unexpected(engine_res.error());
     }
     auto engine = std::move(*engine_res);
 
@@ -68,7 +68,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     }
 
     if (inputs.empty()) {
-        return unexpected(Error{ErrorCode::InvalidParameters, "No valid input files found."});
+        return Unexpected(Error{ErrorCode::InvalidParameters, "No valid input files found."});
     }
 
     return engine->process_sequence(inputs, hints, req.output_path, req.params, on_progress);

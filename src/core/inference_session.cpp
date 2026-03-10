@@ -83,7 +83,7 @@ void InferenceSession::extract_metadata() {
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     const std::filesystem::path& model_path, DeviceInfo device) {
     if (!std::filesystem::exists(model_path)) {
-        return unexpected(
+        return Unexpected(
             Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
     }
 
@@ -104,10 +104,10 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         session_ptr->extract_metadata();
         return session_ptr;
     } catch (const Ort::Exception& e) {
-        return unexpected(Error{ErrorCode::ModelLoadFailed,
+        return Unexpected(Error{ErrorCode::ModelLoadFailed,
                                 std::string("ONNX Runtime session creation failed: ") + e.what()});
     } catch (const std::exception& e) {
-        return unexpected(Error{ErrorCode::ModelLoadFailed,
+        return Unexpected(Error{ErrorCode::ModelLoadFailed,
                                 std::string("Failed to initialize session: ") + e.what()});
     }
 }
@@ -176,7 +176,7 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
 
             // Run raw inference on tile
             auto res = infer_raw(rgb_tile.view(), hint_tile.view(), params);
-            if (!res) return unexpected(res.error());
+            if (!res) return Unexpected(res.error());
 
             // Accumulate
             for (int y = 0; y < tile_size; ++y) {
@@ -273,7 +273,7 @@ Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<I
         std::vector<FrameResult> results;
         for (size_t i = 0; i < rgbs.size(); ++i) {
             auto res = run_tiled(rgbs[i], alpha_hints[i], params, target_res);
-            if (!res) return unexpected(res.error());
+            if (!res) return Unexpected(res.error());
             results.push_back(std::move(*res));
         }
         return results;
@@ -348,7 +348,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 Ort::Value::CreateTensor<float>(memory_info, dst_base, total_planar_size,
                                                 effective_shape.data(), effective_shape.size()));
         } else {
-            return unexpected(Error{ErrorCode::HardwareNotSupported,
+            return Unexpected(Error{ErrorCode::HardwareNotSupported,
                                     "Non-concatenated models not yet supported with batching"});
         }
 
@@ -357,7 +357,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             input_tensors.size(), m_output_node_names_ptr.data(), m_output_node_names_ptr.size());
 
         if (output_tensors.empty()) {
-            return unexpected(
+            return Unexpected(
                 Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
         }
 
@@ -385,15 +385,15 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             ImageBuffer full_alpha((int)alpha_shape[3], (int)alpha_shape[2], (int)alpha_shape[1]);
             ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride), full_alpha.view());
             ImageBuffer cropped_alpha =
-                ColorUtils::crop(full_alpha.view(), roi.x, roi.y, roi.width, roi.height);
+                ColorUtils::crop(full_alpha.view(), roi.x_pos, roi.y_pos, roi.width, roi.height);
             result.alpha = ColorUtils::resize(cropped_alpha.view(), rgbs[b].width, rgbs[b].height);
 
             // Extract foreground
-            if (fg_ptr) {
+            if (fg_ptr != nullptr) {
                 ImageBuffer full_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
                 ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), full_fg.view());
                 ImageBuffer cropped_fg =
-                    ColorUtils::crop(full_fg.view(), roi.x, roi.y, roi.width, roi.height);
+                    ColorUtils::crop(full_fg.view(), roi.x_pos, roi.y_pos, roi.width, roi.height);
                 result.foreground =
                     ColorUtils::resize(cropped_fg.view(), rgbs[b].width, rgbs[b].height);
             }
@@ -402,7 +402,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         return batch_results;
 
     } catch (const Ort::Exception& e) {
-        return unexpected(Error{ErrorCode::InferenceFailed,
+        return Unexpected(Error{ErrorCode::InferenceFailed,
                                 std::string("ONNX Runtime execution failed: ") + e.what()});
     }
 }
@@ -410,7 +410,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
                                                 const InferenceParams& params) {
     auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params);
-    if (!batch_res) return unexpected(batch_res.error());
+    if (!batch_res) return Unexpected(batch_res.error());
     return std::move((*batch_res)[0]);
 }
 

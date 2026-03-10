@@ -67,20 +67,20 @@ Result<std::unique_ptr<VideoReader>> VideoReader::open(const std::filesystem::pa
     AVFormatContext* fmt_ptr = nullptr;
 
     if (avformat_open_input(&fmt_ptr, path.string().c_str(), nullptr, nullptr) < 0) {
-        return unexpected(
+        return Unexpected(
             Error{ErrorCode::IoError, "FFmpeg: Could not open file " + path.string()});
     }
     reader->m_impl->format_ctx.reset(fmt_ptr);
 
     if (avformat_find_stream_info(reader->m_impl->format_ctx.get(), nullptr) < 0) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not find stream info"});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not find stream info"});
     }
 
     const AVCodec* codec = nullptr;
     reader->m_impl->stream_index = av_find_best_stream(reader->m_impl->format_ctx.get(),
                                                        AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
     if (reader->m_impl->stream_index < 0) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not find video stream"});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not find video stream"});
     }
 
     reader->m_impl->codec_ctx.reset(avcodec_alloc_context3(codec));
@@ -91,7 +91,7 @@ Result<std::unique_ptr<VideoReader>> VideoReader::open(const std::filesystem::pa
     reader->m_impl->codec_ctx->thread_count = 0;  // Auto threads
 
     if (avcodec_open2(reader->m_impl->codec_ctx.get(), codec, nullptr) < 0) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not open codec"});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not open codec"});
     }
 
     return std::move(reader);
@@ -136,7 +136,7 @@ Result<ImageBuffer> VideoReader::read_next_frame() {
         }
 
         if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
-            return unexpected(Error{ErrorCode::IoError, "FFmpeg: Error receiving frame"});
+            return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Error receiving frame"});
         }
 
         // 2. Need more data? Read a packet.
@@ -242,17 +242,17 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
 
     AVFormatContext* fmt_ptr = nullptr;
     if (avformat_alloc_output_context2(&fmt_ptr, nullptr, nullptr, path.string().c_str()) < 0) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not create output context"});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not create output context"});
     }
     impl->format_ctx.reset(fmt_ptr);
 
     const AVCodec* codec = avcodec_find_encoder_by_name(codec_name.c_str());
     if (!codec) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Codec not found: " + codec_name});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Codec not found: " + codec_name});
     }
 
     AVStream* st = avformat_new_stream(impl->format_ctx.get(), nullptr);
-    if (!st) return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not create stream"});
+    if (!st) return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not create stream"});
 
     impl->codec_ctx.reset(avcodec_alloc_context3(codec));
     impl->codec_ctx->width = width;
@@ -268,19 +268,19 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
     }
 
     if (avcodec_open2(impl->codec_ctx.get(), codec, nullptr) < 0) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not open encoder"});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not open encoder"});
     }
 
     avcodec_parameters_from_context(st->codecpar, impl->codec_ctx.get());
 
     if (!(impl->format_ctx->oformat->flags & AVFMT_NOFILE)) {
         if (avio_open(&impl->format_ctx->pb, path.string().c_str(), AVIO_FLAG_WRITE) < 0) {
-            return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not open output file"});
+            return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not open output file"});
         }
     }
 
     if (avformat_write_header(impl->format_ctx.get(), nullptr) < 0) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not write header"});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not write header"});
     }
 
     // Pre-allocate temp buffer for the writer's lifetime
@@ -307,7 +307,7 @@ Result<void> VideoWriter::write_frame(const Image& image) {
     impl->frame->width = impl->codec_ctx->width;
     impl->frame->height = impl->codec_ctx->height;
     if (av_frame_get_buffer(impl->frame.get(), 0) < 0) {
-        return unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not allocate frame buffer"});
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Could not allocate frame buffer"});
     }
 
     // Convert float sRGB -> 8-bit sRGB into pre-allocated buffer

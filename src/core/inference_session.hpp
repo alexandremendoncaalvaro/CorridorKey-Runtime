@@ -3,6 +3,8 @@
 #include <corridorkey/types.hpp>
 #include <filesystem>
 #include <memory>
+#include <string>
+#include <vector>
 
 // Include ONNX Runtime (only in private headers)
 #include <onnxruntime/onnxruntime_cxx_api.h>
@@ -33,25 +35,25 @@ class InferenceSession {
     /**
      * @brief Run inference on a frame.
      */
-    Result<FrameResult> run(const Image& rgb, const Image& alpha_hint,
-                            const InferenceParams& params);
+    [[nodiscard]] Result<FrameResult> run(const Image& rgb, const Image& alpha_hint,
+                                          const InferenceParams& params);
 
     /**
      * @brief Run inference on a batch of frames.
      */
-    Result<std::vector<FrameResult>> run_batch(const std::vector<Image>& rgbs,
-                                               const std::vector<Image>& alpha_hints,
-                                               const InferenceParams& params);
+    [[nodiscard]] Result<std::vector<FrameResult>> run_batch(const std::vector<Image>& rgbs,
+                                                             const std::vector<Image>& alpha_hints,
+                                                             const InferenceParams& params);
 
-    DeviceInfo device() const {
+    [[nodiscard]] DeviceInfo device() const {
         return m_device;
     }
-    int recommended_resolution() const {
+    [[nodiscard]] int recommended_resolution() const {
         return m_recommended_resolution;
     }
 
    private:
-    InferenceSession(DeviceInfo device);
+    explicit InferenceSession(DeviceInfo device);
 
     void configure_session_options();
     void extract_metadata();
@@ -59,15 +61,15 @@ class InferenceSession {
     /**
      * @brief Internal raw inference (no post-processing).
      */
-    Result<FrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
-                                  const InferenceParams& params);
+    [[nodiscard]] Result<FrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
+                                                const InferenceParams& params);
 
     /**
      * @brief Internal raw inference on a batch.
      */
-    Result<std::vector<FrameResult>> infer_batch_raw(const std::vector<Image>& rgbs,
-                                                     const std::vector<Image>& alpha_hints,
-                                                     const InferenceParams& params);
+    [[nodiscard]] Result<std::vector<FrameResult>> infer_batch_raw(
+        const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
+        const InferenceParams& params);
 
     /**
      * @brief Apply despeckle, despill and composition to raw results.
@@ -77,8 +79,8 @@ class InferenceSession {
     /**
      * @brief Helper for running tiling inference on large images.
      */
-    Result<FrameResult> run_tiled(const Image& rgb, const Image& alpha_hint,
-                                  const InferenceParams& params, int model_res);
+    [[nodiscard]] Result<FrameResult> run_tiled(const Image& rgb, const Image& alpha_hint,
+                                                const InferenceParams& params, int model_res);
 
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
@@ -89,15 +91,15 @@ class InferenceSession {
     Ort::SessionOptions m_session_options;
 
     // Input/Output metadata
-    std::vector<std::string> m_input_node_names;
-    std::vector<std::string> m_output_node_names;
-    std::vector<const char*> m_input_node_names_ptr;
-    std::vector<const char*> m_output_node_names_ptr;
-    std::vector<std::vector<int64_t>> m_input_node_dims;
+    std::vector<std::string> m_input_node_names = {};
+    std::vector<std::string> m_output_node_names = {};
+    std::vector<const char*> m_input_node_names_ptr = {};
+    std::vector<const char*> m_output_node_names_ptr = {};
+    std::vector<std::vector<int64_t>> m_input_node_dims = {};
 
     // Pre-allocated buffer pools (reused across run() calls)
-    std::vector<ImageBuffer> m_resize_pool;
-    std::vector<ImageBuffer> m_planar_pool;
+    std::vector<ImageBuffer> m_resize_pool = {};
+    std::vector<ImageBuffer> m_planar_pool = {};
 };
 
 }  // namespace corridorkey

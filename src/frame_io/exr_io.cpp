@@ -37,14 +37,14 @@ Result<ImageBuffer> read_exr(const std::filesystem::path& path) {
 
         return std::move(buffer);
     } catch (const std::exception& e) {
-        return unexpected(
+        return Unexpected(
             Error{ErrorCode::IoError, std::string("Failed to read EXR: ") + e.what()});
     }
 }
 
 Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
     if (image.channels < 1) {
-        return unexpected(
+        return Unexpected(
             Error{ErrorCode::InvalidParameters, "EXR write requires at least 1 channel"});
     }
 
@@ -76,7 +76,7 @@ Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
 
         return {};
     } catch (const std::exception& e) {
-        return unexpected(
+        return Unexpected(
             Error{ErrorCode::IoError, std::string("Failed to write EXR: ") + e.what()});
     }
 }

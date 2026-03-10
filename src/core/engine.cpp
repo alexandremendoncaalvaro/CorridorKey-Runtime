@@ -27,7 +27,7 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
                                                DeviceInfo device) {
     auto session_res = InferenceSession::create(model_path, device);
     if (!session_res) {
-        return unexpected(session_res.error());
+        return Unexpected(session_res.error());
     }
 
     auto engine = std::unique_ptr<Engine>(new Engine());
@@ -49,7 +49,7 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
 Result<FrameResult> Engine::process_frame(const Image& rgb, const Image& alpha_hint,
                                           const InferenceParams& params) {
     if (!m_impl->session) {
-        return unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
+        return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
     return m_impl->session->run(rgb, alpha_hint, params);
@@ -59,7 +59,7 @@ Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<I
                                                              const std::vector<Image>& alpha_hints,
                                                              const InferenceParams& params) {
     if (!m_impl->session) {
-        return unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
+        return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
     return m_impl->session->run_batch(rgbs, alpha_hints, params);
@@ -71,7 +71,7 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
                                       const InferenceParams& params, ProgressCallback on_progress) {
     bool has_hints = !alpha_hints.empty();
     if (has_hints && inputs.size() != alpha_hints.size()) {
-        return unexpected(
+        return Unexpected(
             Error{ErrorCode::InvalidParameters, "Inputs and alpha hints size mismatch"});
     }
 
@@ -83,7 +83,7 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
 
         if (on_progress && !on_progress(static_cast<float>(i) / total_frames,
                                         "Processing batch " + std::to_string(i / batch_size))) {
-            return unexpected(Error{ErrorCode::Cancelled, "Processing cancelled by user"});
+            return Unexpected(Error{ErrorCode::Cancelled, "Processing cancelled by user"});
         }
 
         std::vector<ImageBuffer> rgb_bufs;
@@ -93,12 +93,12 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
 
         for (size_t b = 0; b < current_batch_size; ++b) {
             auto rgb_res = frame_io::read_frame(inputs[i + b]);
-            if (!rgb_res) return unexpected(rgb_res.error());
+            if (!rgb_res) return Unexpected(rgb_res.error());
 
             ImageBuffer hint_buf;
             if (has_hints) {
                 auto hint_res = frame_io::read_frame(alpha_hints[i + b]);
-                if (!hint_res) return unexpected(hint_res.error());
+                if (!hint_res) return Unexpected(hint_res.error());
                 hint_buf = std::move(*hint_res);
             } else {
                 hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
@@ -112,7 +112,7 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
         }
 
         auto results = m_impl->session->run_batch(rgb_views, hint_views, params);
-        if (!results) return unexpected(results.error());
+        if (!results) return Unexpected(results.error());
 
         for (size_t b = 0; b < current_batch_size; ++b) {
             std::string filename = inputs[i + b].filename().string();
@@ -129,18 +129,18 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
                                    const std::filesystem::path& output_video,
                                    const InferenceParams& params, ProgressCallback on_progress) {
     if (!m_impl->session) {
-        return unexpected(Error{ErrorCode::InferenceFailed, "Engine not initialized"});
+        return Unexpected(Error{ErrorCode::InferenceFailed, "Engine not initialized"});
     }
 
     auto reader_rgb_res = VideoReader::open(input_video);
-    if (!reader_rgb_res) return unexpected(reader_rgb_res.error());
+    if (!reader_rgb_res) return Unexpected(reader_rgb_res.error());
     auto reader_rgb = std::move(*reader_rgb_res);
 
     bool has_hint_video = !hint_video.empty();
     std::unique_ptr<VideoReader> reader_hint;
     if (has_hint_video) {
         auto reader_hint_res = VideoReader::open(hint_video);
-        if (!reader_hint_res) return unexpected(reader_hint_res.error());
+        if (!reader_hint_res) return Unexpected(reader_hint_res.error());
         reader_hint = std::move(*reader_hint_res);
     }
 
@@ -148,7 +148,7 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
     int out_h = reader_rgb->height();
 
     auto writer_res = VideoWriter::open(output_video, out_w, out_h, reader_rgb->fps());
-    if (!writer_res) return unexpected(writer_res.error());
+    if (!writer_res) return Unexpected(writer_res.error());
     auto writer = std::move(*writer_res);
 
     int64_t total_frames = reader_rgb->total_frames();
@@ -191,7 +191,7 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
 
     while (true) {
         auto current_batch_res = current_batch_future.get();
-        if (!current_batch_res) return unexpected(current_batch_res.error());
+        if (!current_batch_res) return Unexpected(current_batch_res.error());
         Batch current_batch = std::move(*current_batch_res);
 
         if (current_batch.rgb_views.empty()) break;
@@ -202,19 +202,19 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         if (on_progress) {
             float p = total_frames > 0 ? static_cast<float>(frame_idx) / total_frames : 0.0f;
             if (!on_progress(p, "Inference frames " + std::to_string(frame_idx))) {
-                return unexpected(Error{ErrorCode::Cancelled, "Processing cancelled by user"});
+                return Unexpected(Error{ErrorCode::Cancelled, "Processing cancelled by user"});
             }
         }
 
         // GPU Inference on the CURRENT batch
         auto results =
             m_impl->session->run_batch(current_batch.rgb_views, current_batch.hint_views, params);
-        if (!results) return unexpected(results.error());
+        if (!results) return Unexpected(results.error());
 
         // Sequential Write (FFmpeg encoding is usually CPU-bound but fast enough)
         for (auto& res : *results) {
             auto write_res = writer->write_frame(res.composite.view());
-            if (!write_res) return unexpected(write_res.error());
+            if (!write_res) return Unexpected(write_res.error());
         }
 
         frame_idx += current_batch.rgb_views.size();

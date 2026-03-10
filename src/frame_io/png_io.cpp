@@ -18,7 +18,7 @@ Result<ImageBuffer> read_stb(const std::filesystem::path& path) {
     unsigned char* data = stbi_load(path.string().c_str(), &width, &height, &channels, 0);
 
     if (!data) {
-        return unexpected(Error{ErrorCode::IoError,
+        return Unexpected(Error{ErrorCode::IoError,
                                 "STB failed to load image: " + std::string(stbi_failure_reason())});
     }
 
@@ -38,7 +38,7 @@ Result<ImageBuffer> read_stb(const std::filesystem::path& path) {
 
 Result<void> write_png(const std::filesystem::path& path, const Image& image) {
     if (image.empty()) {
-        return unexpected(Error{ErrorCode::InvalidParameters, "Cannot write empty image to PNG"});
+        return Unexpected(Error{ErrorCode::InvalidParameters, "Cannot write empty image to PNG"});
     }
 
     const auto& lut = SrgbLut::instance();
@@ -55,7 +55,7 @@ Result<void> write_png(const std::filesystem::path& path, const Image& image) {
                                  srgb_data.data(), image.width * image.channels);
 
     if (!success) {
-        return unexpected(Error{ErrorCode::IoError, "STB failed to write PNG"});
+        return Unexpected(Error{ErrorCode::IoError, "STB failed to write PNG"});
     }
 
     return {};

@@ -14,7 +14,7 @@ Result<ImageBuffer> read_frame(const std::filesystem::path& path) {
         return read_stb(path);
     }
 
-    return unexpected(Error{ErrorCode::IoError, "Unsupported file format: " + ext});
+    return Unexpected(Error{ErrorCode::IoError, "Unsupported file format: " + ext});
 }
 
 Result<void> write_frame(const std::filesystem::path& path, const Image& image) {
@@ -26,7 +26,7 @@ Result<void> write_frame(const std::filesystem::path& path, const Image& image) 
         return write_png(path, image);
     }
 
-    return unexpected(Error{ErrorCode::IoError, "Unsupported output format: " + ext});
+    return Unexpected(Error{ErrorCode::IoError, "Unsupported output format: " + ext});
 }
 
 Result<void> save_result(const std::filesystem::path& base_dir, const std::string& filename,
@@ -62,7 +62,7 @@ Result<void> save_result(const std::filesystem::path& base_dir, const std::strin
 
         return {};
     } catch (const std::exception& e) {
-        return unexpected(
+        return Unexpected(
             Error{ErrorCode::IoError, std::string("Failed to save result structure: ") + e.what()});
     }
 }
