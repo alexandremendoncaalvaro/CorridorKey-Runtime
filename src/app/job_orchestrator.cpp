@@ -8,6 +8,7 @@
 #include "common/stage_profiler.hpp"
 #include "hardware_profile.hpp"
 #include "runtime_contracts.hpp"
+#include "runtime_diagnostics.hpp"
 
 namespace corridorkey::app {
 
@@ -380,31 +381,38 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     nlohmann::json report;
     report["timestamp"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
-    // Check Hardware
     report["system"] = get_system_info();
+    auto health = inspect_operational_health(models_dir);
+    report["executable"] = health["executable"];
+    report["bundle"] = health["bundle"];
+    report["video"] = health["video"];
+    report["cache"] = health["cache"];
 
-    // Check Models
     nlohmann::json models = nlohmann::json::array();
-    std::vector<std::string> variants = {"int8", "fp16", "fp32"};
-    std::vector<int> resolutions = {512, 768, 1024};
-
-    for (const auto& v : variants) {
-        for (int r : resolutions) {
-            std::string filename = "corridorkey_" + v + "_" + std::to_string(r) + ".onnx";
-            std::filesystem::path p = models_dir / filename;
-            nlohmann::json mj;
-            mj["variant"] = v;
-            mj["resolution"] = r;
-            mj["path"] = p.string();
-            mj["found"] = std::filesystem::exists(p);
-            if (mj["found"]) {
-                mj["size_bytes"] = std::filesystem::file_size(p);
-            }
-            models.push_back(mj);
+    bool validated_models_present = true;
+    for (const auto& model : model_catalog()) {
+        std::filesystem::path path = models_dir / model.filename;
+        nlohmann::json entry = to_json(model);
+        entry["path"] = path.string();
+        entry["found"] = std::filesystem::exists(path);
+        if (entry["found"]) {
+            entry["size_bytes"] = std::filesystem::file_size(path);
         }
+        if (!model.validated_platforms.empty() && model.packaged_for_macos) {
+            validated_models_present = validated_models_present && entry["found"].get<bool>();
+        }
+        models.push_back(entry);
     }
     report["models"] = models;
     report["presets"] = list_presets();
+    report["summary"]["bundle_healthy"] = report["bundle"]["healthy"];
+    report["summary"]["video_healthy"] = report["video"]["healthy"];
+    report["summary"]["cache_healthy"] = report["cache"]["healthy"];
+    report["summary"]["validated_models_present"] = validated_models_present;
+    report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
+                                   report["summary"]["video_healthy"].get<bool>() &&
+                                   report["summary"]["cache_healthy"].get<bool>() &&
+                                   validated_models_present;
 
     return report;
 }
@@ -432,10 +440,32 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         std::fill(rgb_buf.view().data.begin(), rgb_buf.view().data.end(), 0.0f);
         std::fill(hint_buf.view().data.begin(), hint_buf.view().data.end(), 0.0f);
 
+        double cold_latency_ms = 0.0;
         const int warmup_runs = 2;
         const int benchmark_runs = 5;
+        std::vector<double> warmup_latencies;
+        std::vector<double> benchmark_latencies;
+
+        {
+            auto cold_start = std::chrono::steady_clock::now();
+            auto cold_res = profiler.measure(
+                "benchmark_cold_frame",
+                [&]() {
+                    return engine->process_frame(rgb_buf.view(), hint_buf.view(), params,
+                                                 stage_callback);
+                },
+                1);
+            if (!cold_res) {
+                results["error"] = cold_res.error().message;
+                return results;
+            }
+            auto cold_end = std::chrono::steady_clock::now();
+            cold_latency_ms =
+                std::chrono::duration<double, std::milli>(cold_end - cold_start).count();
+        }
 
         for (int i = 0; i < warmup_runs; ++i) {
+            auto warmup_start = std::chrono::steady_clock::now();
             auto warmup_res = profiler.measure(
                 "benchmark_warmup_frame",
                 [&]() {
@@ -447,10 +477,14 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
                 results["error"] = warmup_res.error().message;
                 return results;
             }
+            auto warmup_end = std::chrono::steady_clock::now();
+            warmup_latencies.push_back(
+                std::chrono::duration<double, std::milli>(warmup_end - warmup_start).count());
         }
 
         auto start = std::chrono::steady_clock::now();
         for (int i = 0; i < benchmark_runs; ++i) {
+            auto frame_start = std::chrono::steady_clock::now();
             auto frame_res = profiler.measure(
                 "benchmark_frame_total",
                 [&]() {
@@ -462,6 +496,9 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
                 results["error"] = frame_res.error().message;
                 return results;
             }
+            auto frame_end = std::chrono::steady_clock::now();
+            benchmark_latencies.push_back(
+                std::chrono::duration<double, std::milli>(frame_end - frame_start).count());
         }
         auto end = std::chrono::steady_clock::now();
 
@@ -476,8 +513,11 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["backend"] = backend_to_string(engine->current_device().backend);
         results["warmup_runs"] = warmup_runs;
         results["benchmark_runs"] = benchmark_runs;
+        results["cold_latency_ms"] = cold_latency_ms;
         results["avg_latency_ms"] = total_ms / benchmark_runs;
         results["fps"] = total_ms > 0.0 ? (1000.0 * benchmark_runs) / total_ms : 0.0;
+        results["latency_ms"]["warmup"] = summarize_latency_samples(warmup_latencies);
+        results["latency_ms"]["steady_state"] = summarize_latency_samples(benchmark_latencies);
         results["stage_timings"] = nlohmann::json::array();
         for (const auto& timing : profiler.snapshot()) {
             results["stage_timings"].push_back(to_json(timing));
@@ -533,6 +573,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     if (units > 0) {
         results["processed_units"] = units;
         results["throughput_units_per_second"] = total_ms > 0.0 ? (1000.0 * units) / total_ms : 0.0;
+        results["avg_unit_latency_ms"] = total_ms / static_cast<double>(units);
     }
     results["stage_timings"] = nlohmann::json::array();
     for (const auto& timing : timings) {

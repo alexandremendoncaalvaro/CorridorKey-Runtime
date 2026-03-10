@@ -45,8 +45,8 @@ DeviceInfo auto_detect() {
         device.available_memory_mb = static_cast<int64_t>(mem / (1024 * 1024));
     }
 #elif defined(_WIN32)
-    device.name = "Windows Device";
-    device.backend = Backend::DirectML;
+    device.name = "Windows CPU Baseline";
+    device.backend = Backend::CPU;
     MEMORYSTATUSEX status;
     status.dwLength = sizeof(status);
     GlobalMemoryStatusEx(&status);

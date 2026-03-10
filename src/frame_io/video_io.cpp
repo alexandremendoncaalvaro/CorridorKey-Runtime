@@ -265,6 +265,10 @@ std::string default_video_encoder_for_path(const std::filesystem::path& path) {
     return "mpeg4";
 }
 
+std::vector<std::string> available_video_encoders_for_path(const std::filesystem::path& path) {
+    return preferred_encoders_for_path(path);
+}
+
 VideoWriter::VideoWriter() : m_impl(std::make_unique<Impl>()) {}
 VideoWriter::~VideoWriter() {
     if (m_impl && m_impl->codec_ctx) {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <utility>
 
 #include "../frame_io/video_io.hpp"
 
@@ -11,16 +12,23 @@ namespace corridorkey {
 namespace {
 
 ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
-                                   const std::string& description, bool validated_for_macos,
-                                   bool packaged_for_macos) {
+                                   const std::string& description, const std::string& intended_use,
+                                   bool validated_for_macos, bool packaged_for_macos,
+                                   std::vector<std::string> validated_platforms,
+                                   std::vector<std::string> intended_platforms,
+                                   std::vector<std::string> validated_hardware_tiers) {
     ModelCatalogEntry entry;
     entry.variant = variant;
     entry.resolution = resolution;
     entry.filename = "corridorkey_" + variant + "_" + std::to_string(resolution) + ".onnx";
     entry.description = description;
     entry.download_url = "https://huggingface.co/corridorkey/models/resolve/main/" + entry.filename;
+    entry.intended_use = intended_use;
     entry.validated_for_macos = validated_for_macos;
     entry.packaged_for_macos = packaged_for_macos;
+    entry.validated_platforms = std::move(validated_platforms);
+    entry.intended_platforms = std::move(intended_platforms);
+    entry.validated_hardware_tiers = std::move(validated_hardware_tiers);
     return entry;
 }
 
@@ -59,21 +67,28 @@ RuntimeCapabilities runtime_capabilities() {
 std::vector<ModelCatalogEntry> model_catalog() {
     return {
         make_model_entry("int8", 512, "Validated macOS default for preview and 8 GB machines.",
-                         true, true),
+                         "portable_preview", true, true, {"macos_apple_silicon"},
+                         {"macos_apple_silicon"}, {"apple_silicon_8gb"}),
         make_model_entry("int8", 768, "Validated macOS default for 16 GB Apple Silicon systems.",
-                         true, true),
+                         "portable_default", true, true, {"macos_apple_silicon"},
+                         {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
         make_model_entry("int8", 1024, "Available for manual testing on high-memory systems.",
-                         false, false),
+                         "manual_high_resolution_validation", false, false, {},
+                         {"macos_apple_silicon"}, {}),
         make_model_entry("fp16", 512, "GPU-focused reference variant for non-macOS expansion.",
-                         false, false),
-        make_model_entry("fp16", 768, "Higher quality GPU-focused reference variant.", false,
-                         false),
-        make_model_entry("fp16", 1024, "Maximum GPU-focused reference variant.", false, false),
-        make_model_entry("fp32", 512, "Reference validation variant.", false, false),
-        make_model_entry("fp32", 768, "Higher resolution reference validation variant.", false,
-                         false),
-        make_model_entry("fp32", 1024, "Maximum resolution reference validation variant.", false,
-                         false),
+                         "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
+        make_model_entry("fp16", 768, "Higher quality GPU-focused reference variant.",
+                         "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
+        make_model_entry("fp16", 1024, "Maximum GPU-focused reference variant.",
+                         "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
+        make_model_entry("fp32", 512, "Reference validation variant.", "reference_validation",
+                         false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
+        make_model_entry("fp32", 768, "Higher resolution reference validation variant.",
+                         "reference_validation", false, false, {},
+                         {"macos_apple_silicon", "windows_rtx"}, {}),
+        make_model_entry("fp32", 1024, "Maximum resolution reference validation variant.",
+                         "reference_validation", false, false, {},
+                         {"macos_apple_silicon", "windows_rtx"}, {}),
     };
 }
 
@@ -85,7 +100,11 @@ std::vector<PresetDefinition> preset_catalog() {
             "Fast validation preset for smoke tests and low-memory systems.",
             InferenceParams{512, 1.0F, true, 400, 1.0F, false, 1, false, 32},
             "corridorkey_int8_512.onnx",
+            "smoke_preview",
             false,
+            {"macos_apple_silicon"},
+            {"macos_apple_silicon"},
+            {"apple_silicon_8gb"},
         },
         PresetDefinition{
             "mac-balanced",
@@ -93,7 +112,11 @@ std::vector<PresetDefinition> preset_catalog() {
             "Default Apple Silicon preset with automatic resolution and tiling support.",
             InferenceParams{0, 1.0F, true, 400, 1.0F, false, 1, true, 32},
             "corridorkey_int8_768.onnx",
+            "portable_default",
             true,
+            {"macos_apple_silicon"},
+            {"macos_apple_silicon"},
+            {"apple_silicon_16gb"},
         },
         PresetDefinition{
             "mac-max-quality",
@@ -101,7 +124,11 @@ std::vector<PresetDefinition> preset_catalog() {
             "Validated high-quality preset for larger inputs using tiled inference.",
             InferenceParams{768, 1.0F, true, 400, 1.0F, false, 1, true, 64},
             "corridorkey_int8_768.onnx",
+            "native_resolution_examples",
             false,
+            {"macos_apple_silicon"},
+            {"macos_apple_silicon"},
+            {"apple_silicon_16gb_plus"},
         },
     };
 }
@@ -235,8 +262,12 @@ nlohmann::json to_json(const ModelCatalogEntry& model) {
     json["filename"] = model.filename;
     json["description"] = model.description;
     json["download_url"] = model.download_url;
+    json["intended_use"] = model.intended_use;
     json["validated_for_macos"] = model.validated_for_macos;
     json["packaged_for_macos"] = model.packaged_for_macos;
+    json["validated_platforms"] = model.validated_platforms;
+    json["intended_platforms"] = model.intended_platforms;
+    json["validated_hardware_tiers"] = model.validated_hardware_tiers;
     return json;
 }
 
@@ -257,7 +288,11 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     json["name"] = preset.name;
     json["description"] = preset.description;
     json["recommended_model"] = preset.recommended_model;
+    json["intended_use"] = preset.intended_use;
     json["default_for_macos"] = preset.default_for_macos;
+    json["validated_platforms"] = preset.validated_platforms;
+    json["intended_platforms"] = preset.intended_platforms;
+    json["validated_hardware_tiers"] = preset.validated_hardware_tiers;
     json["params"] = params;
     return json;
 }

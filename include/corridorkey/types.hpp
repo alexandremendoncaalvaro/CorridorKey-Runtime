@@ -353,8 +353,12 @@ struct ModelCatalogEntry {
     std::string filename = "";
     std::string description = "";
     std::string download_url = "";
+    std::string intended_use = "";
     bool validated_for_macos = false;
     bool packaged_for_macos = false;
+    std::vector<std::string> validated_platforms = {};
+    std::vector<std::string> intended_platforms = {};
+    std::vector<std::string> validated_hardware_tiers = {};
 };
 
 /**
@@ -366,7 +370,11 @@ struct PresetDefinition {
     std::string description = "";
     InferenceParams params = {};
     std::string recommended_model = "";
+    std::string intended_use = "";
     bool default_for_macos = false;
+    std::vector<std::string> validated_platforms = {};
+    std::vector<std::string> intended_platforms = {};
+    std::vector<std::string> validated_hardware_tiers = {};
 };
 
 /**

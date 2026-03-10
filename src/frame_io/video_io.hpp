@@ -3,6 +3,7 @@
 #include <corridorkey/types.hpp>
 #include <filesystem>
 #include <memory>
+#include <vector>
 
 namespace corridorkey {
 
@@ -58,5 +59,10 @@ bool is_videotoolbox_available();
  * @brief Select the default output encoder for a given path.
  */
 std::string default_video_encoder_for_path(const std::filesystem::path& path);
+
+/**
+ * @brief Enumerate encoder candidates for a given output path in priority order.
+ */
+std::vector<std::string> available_video_encoders_for_path(const std::filesystem::path& path);
 
 }  // namespace corridorkey
