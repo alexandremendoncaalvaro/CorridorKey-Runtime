@@ -30,3 +30,14 @@ TEST_CASE("list_devices includes at least one device", "[unit][device]") {
         REQUIRE(has_cpu);
     }
 }
+
+TEST_CASE("arm64 macOS builds prefer CoreML detection", "[unit][device]") {
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+    auto device = auto_detect();
+
+    REQUIRE(device.backend == Backend::CoreML);
+    REQUIRE(device.name.find("Apple Silicon") != std::string::npos);
+#else
+    SUCCEED("Apple Silicon-specific detection is not applicable on this build.");
+#endif
+}
