@@ -1,41 +1,68 @@
 # CorridorKey Runtime
 
-A high-performance C++ inference runtime for the
-[CorridorKey](https://github.com/nikopueringer/CorridorKey) neural green screen
-keyer.
+CorridorKey Runtime is a production-oriented native engine for CorridorKey
+inference. It packages model execution, diagnostics, validated model catalogs,
+and stable machine-readable contracts into a distributable C++ runtime for real
+hardware.
 
-CorridorKey Runtime takes the trained GreenFormer model and makes it accessible
-on consumer hardware as a single binary with zero Python dependencies.
+This repository is not trying to reproduce a generic Python workflow in another
+language. It exists to make CorridorKey usable as a native, predictable, and
+integrable engine that can be installed, benchmarked, automated, and embedded
+without rebuilding the surrounding stack each time.
 
-The current release track is intentionally narrow: macOS 14+ on Apple Silicon
-is the only release-gating platform in this phase. Windows and Linux remain
-part of the architecture, but they are not treated as release-ready targets
-yet.
+The delivery sequence is explicit:
+
+- **macOS first** to close runtime quality, diagnostics, and portable
+  distribution on Apple Silicon
+- **Windows RTX next** as the next product track for predictable consumer GPU
+  deployment
+- **GUI, sidecar, and embedded integrations after that**, all consuming the
+  same library-first runtime contracts
+
+## Who This Is For
+
+- **Technical local operators** who want to run CorridorKey without Python,
+  virtual environments, or ad hoc setup.
+- **Windows RTX users** who care about predictable installation, provider
+  behavior, and reproducible performance on consumer GPUs.
+- **Integrators** who want a native engine they can embed into an application,
+  plugin, sidecar, or pipeline without re-implementing business logic.
+
+## Why This Exists vs. Original Workflow
+
+- **Native execution:** single-binary workflow with a C++ core and no Python
+  runtime dependency.
+- **Low-friction distribution:** portable CLI packaging, validated model
+  catalogs, and explicit hardware tracks.
+- **Operational predictability:** `doctor`, `benchmark`, JSON/NDJSON contracts,
+  fallback reasons, and stage timings make runtime behavior inspectable.
+- **Library-first integration:** CLI, future GUI, sidecar, and embedded use
+  cases all sit on the same engine instead of copying behavior across surfaces.
 
 ## Features
 
-- **macOS-first release track:** CoreML-first execution on Apple Silicon with
-  mandatory CPU fallback
-- **Portable CLI contract:** `info`, `doctor`, `benchmark`, `models`, and
-  `presets` expose stable JSON; `process --json` emits NDJSON job events
-- **Measured diagnostics:** synthetic and real-workload benchmarking with
-  stage-level timings
-- **Validated model catalog:** `int8_512` and `int8_768` are the packaged
-  macOS defaults in this phase
-- **VFX-grade output:** 16-bit EXR, proper sRGB/linear color math,
-  premultiplied alpha
-- **Video support:** FFmpeg pipeline with H.264-in-MP4 as the portable macOS
-  default and VideoToolbox when available
-- **Library + CLI:** core engine is a reusable C++ library; CLI is a thin
-  interface layer
+- **macOS production track:** CoreML-first execution on Apple Silicon with
+  mandatory CPU fallback.
+- **Windows RTX next:** TensorRT RTX is the planned primary Windows product
+  track after macOS release gates are closed.
+- **Operational tooling:** `doctor`, `benchmark`, `models`, `presets`, and
+  `process --json` expose stable machine-readable diagnostics.
+- **Validated model catalog:** `int8_512` and `int8_768` are the packaged macOS
+  defaults in the current phase.
+- **Measured runtime behavior:** stage-level timings cover engine creation,
+  warmup, inference, tiling, decode, encode, and full-job execution.
+- **Library + CLI:** the runtime is reusable as a C++ library and exposed
+  through a thin CLI contract.
 
 ## Quick Start
 
-### Prerequisites
+Validated runtime path today: **macOS 14+ on Apple Silicon**.
 
-Validated platform for this phase: macOS 14+ on Apple Silicon.
-Other platforms are still part of the long-term architecture, but the current
-documentation and acceptance gates are written around macOS.
+Windows RTX is the next product track already documented in the roadmap, but it
+is **not** the current release gate yet. Linux remains architecture-ready and
+deferred until macOS and Windows RTX are both clear.
+
+### Prerequisites
 
 - C++20 compiler (GCC 12+, Clang 16+, MSVC 17.4+)
 - [CMake 3.28+](https://cmake.org/download/)
@@ -44,7 +71,7 @@ documentation and acceptance gates are written around macOS.
 
 ### 1. Install vcpkg
 
-Skip this step if you already have vcpkg installed and `VCPKG_ROOT` set.
+Skip this step if `VCPKG_ROOT` is already set.
 
 <details>
 <summary>Linux / macOS</summary>
@@ -55,8 +82,6 @@ git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
 export VCPKG_ROOT="$HOME/vcpkg"
 ```
 
-Add the `export` line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for persistence.
-
 </details>
 
 <details>
@@ -66,8 +91,6 @@ Add the `export` line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for 
 git clone https://github.com/microsoft/vcpkg.git %USERPROFILE%\vcpkg
 %USERPROFILE%\vcpkg\bootstrap-vcpkg.bat
 ```
-
-Add `VCPKG_ROOT` as a System Environment Variable pointing to `%USERPROFILE%\vcpkg`.
 
 </details>
 
@@ -82,93 +105,74 @@ cmake --build build/release --parallel
 
 ### 3. Add to PATH (optional)
 
-The binary is at `build/release/src/cli/corridorkey`. To use `corridorkey`
-from anywhere, add the build directory to your PATH:
-
 ```bash
 export PATH="$(pwd)/build/release/src/cli:$PATH"
 ```
 
-Add the line above (with the full absolute path) to your shell profile for
-persistence. Alternatively, create a system-wide symlink (requires sudo):
+If you prefer a symlink:
 
 ```bash
 sudo ln -s "$(pwd)/build/release/src/cli/corridorkey" /usr/local/bin/corridorkey
 ```
 
-### Usage
+## Usage
 
-If you haven't added the binary to your PATH, replace `corridorkey` with `./build/release/src/cli/corridorkey` in the commands below.
+If `corridorkey` is not on your `PATH`, replace it with
+`./build/release/src/cli/corridorkey`.
 
-**Download model files** (downloads 512/768/1024 variants for the selected quality):
+**Download model files**:
+
 ```bash
 corridorkey download --variant int8
 ```
 
-**View detected hardware, capabilities, and recommended defaults**:
+**Inspect runtime capabilities and hardware recommendation**:
+
 ```bash
 corridorkey info --json
+corridorkey doctor --json --model models/corridorkey_int8_768.onnx
 ```
 
 **Inspect validated models and presets**:
+
 ```bash
 corridorkey models --json
 corridorkey presets --json
 ```
 
-**Run a synthetic benchmark and inspect stage timings**:
+**Run a synthetic benchmark with timings**:
+
 ```bash
 corridorkey benchmark --json --model models/corridorkey_int8_512.onnx --device cpu
 ```
 
-**Run a real-workload benchmark against a source file**:
+**Run a real-workload benchmark**:
+
 ```bash
 corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --model models/corridorkey_int8_768.onnx
 ```
 
-**Process a single video**:
+**Process a single video with NDJSON events**:
+
 ```bash
 corridorkey process --json --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_768.onnx
 ```
 
 **Process a directory of frames**:
+
 ```bash
 corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_768.onnx
 ```
 
-**Process a single EXR/PNG frame**:
-```bash
-corridorkey process --input frame.exr --alpha-hint hint.png --output result.exr --model models/corridorkey_int8_512.onnx
-```
-
 **Use tiled inference for larger inputs**:
+
 ```bash
 corridorkey process --input input_4k.mp4 --output output_4k.mp4 --model models/corridorkey_int8_768.onnx --tiled
 ```
 
-<details>
-<summary>Docker (NVIDIA GPU)</summary>
-
-Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-
-```bash
-docker compose build
-docker compose up
-```
-
-Place your files in `./data/input` and `./data/hint` before running.
-
-For an interactive shell:
-
-```bash
-docker compose run --rm corridorkey-gpu /bin/bash
-```
-
-</details>
-
 ### Output
 
-```
+```text
 Output/
   Matte/       # Alpha channel — EXR 16-bit linear
   FG/          # Foreground straight color — EXR 16-bit linear
@@ -176,16 +180,29 @@ Output/
   Comp/        # Preview on checkerboard — PNG 8-bit sRGB
 ```
 
+## AlphaHint Strategy
+
+Alpha hints are part of the product contract, not an afterthought.
+
+- The runtime accepts hints as a single frame, an image sequence, or a video
+  input.
+- If no hint is provided, the runtime falls back to its internal rough matte
+  generation path.
+- External hints remain the preferred path for higher-quality and more
+  controlled results.
+- Rough matte fallback exists for smoke tests, low-friction usage, and simpler
+  cases, not as a replacement for dedicated hint workflows.
+
 ## Machine-Readable Interfaces
 
 - `info`, `doctor`, `benchmark`, `models`, and `presets` return a single JSON
   document when `--json` is present.
-- `benchmark --json` supports two modes:
-  - `synthetic` for controlled throughput/latency checks without external I/O
-  - `workload` for full pipeline measurement against a real image sequence or
-    video input
-- `benchmark --json` reports `stage_timings`, backend selection, and structured
-  fallback details when they occur.
+- `benchmark --json` supports:
+  - `synthetic` for controlled throughput and latency checks without external
+    I/O
+  - `workload` for end-to-end measurement on a real image sequence or video
+- `benchmark --json` reports backend selection, structured fallback details,
+  and `stage_timings`.
 - `process --json` emits NDJSON events:
   - `job_started`
   - `backend_selected`
@@ -198,41 +215,43 @@ Output/
 - Terminal `process --json` events include aggregated stage timings for the
   full job.
 
-## Current Scope
+## Operational Promise
 
-- **Zero-Python Runtime:** Standalone C++ binary with no external ML environment needed.
-- **FFmpeg Integration:** Process `.mp4`/`.mov` files directly in RAM.
-- **Hardware-Aware Tiers:** Adaptive resolution strategy based on detected memory profile.
-- **Auto-Hinting Fallback:** Generates a rough guide matte when no manual alpha hint is provided.
-- **VFX-Oriented I/O:** EXR + PNG outputs with sRGB/linear conversion and premultiplied output buffers.
-- **Runtime Observability:** Stage-level timings for engine creation, warmup, inference, I/O, and full-job execution.
+- **Consistent hardware tiers:** on the current macOS release track, `auto`
+  maps to `512` on 8 GB-class Macs and `768` on 16 GB-class Macs.
+- **Observable execution:** warmup, inference, tiling, decode, encode, and
+  full-job timings are inspectable without an external profiler.
+- **Curated provider support:** the product validates a few provider tracks
+  deeply instead of claiming broad parity across every ONNX Runtime backend.
+- **Stable automation contract:** JSON and NDJSON outputs are part of the
+  product surface, not debug-only output.
 
-## Priority Direction
+## Delivery Sequence
 
-- Release-grade macOS hardening on Apple Silicon, including CoreML-first execution with CPU fallback.
-- Portable macOS bundle workflows for third-party machines.
-- Stable CLI JSON/NDJSON contracts for the future Tauri sidecar and GUI.
-- GUI work only after macOS runtime quality and portability gates are passing.
+1. **macOS production runtime:** CoreML-first execution, CPU fallback, tiling,
+   corpus validation, and portable CLI bundle.
+2. **Windows RTX next:** TensorRT RTX-focused Windows track with predictable
+   installation, diagnostics, and validated tiers.
+3. **Integration surfaces:** sidecar, GUI, plugin, and pipeline consumers over
+   the same library-first contracts.
+4. **Broader platform expansion:** Linux and secondary providers after macOS
+   and Windows RTX are both well-defined.
 
 ## Platform Status
 
-| Platform | Backends | Status | Notes |
-|----------|----------|--------|-------|
-| macOS 14+ Apple Silicon | CoreML, CPU | Release-gating | `auto` prefers CoreML and falls back to CPU with a structured reason |
-| Windows | DirectML, CPU | Architectural target | Not release-gating in this phase |
-| Linux | CPU | Architectural target | Not release-gating in this phase |
-
-The application layer auto-detects available hardware and recommends the safest
-validated configuration for the current machine. In this phase, `auto`
-resolution maps to `512` on 8 GB-class Macs and `768` on 16 GB-class Macs.
-Override with `--device`, `--resolution`, and `--model` when you need an
-explicit path.
+| Platform | Primary path | Status | Notes |
+|----------|--------------|--------|-------|
+| macOS 14+ Apple Silicon | CoreML + CPU fallback | Current release gate | `auto` prefers CoreML and falls back to CPU with a structured reason |
+| Windows 11 + NVIDIA RTX | TensorRT RTX + CPU fallback | Next product track | Planned next delivery track after macOS gates |
+| Windows 11 general | CPU; DirectML/WinML secondary | Exploratory | Not treated as the primary Windows product path |
+| Linux | Architecture-ready later | Deferred | Not a current productized track |
 
 ## Documentation
 
-- [Technical Specification](docs/SPEC.md) — Architecture, design decisions,
-  implementation phases
-- [Architecture](docs/ARCHITECTURE.md) — Layering, directory map, bridge rules
+- [Technical Specification](docs/SPEC.md) — Product direction, contracts,
+  technical decisions, delivery phases
+- [Architecture](docs/ARCHITECTURE.md) — Library-first structure and dependency
+  rules
 - [Frontend](docs/FRONTEND.md) — GUI constraints and sidecar contract
 - [Engineering Guidelines](docs/GUIDELINES.md) — Code standards, testing
   strategy, linting, git hooks
@@ -246,15 +265,15 @@ and how to submit changes.
 
 [CC BY-NC-SA 4.0](LICENSE) — Same license as the original CorridorKey project.
 
-You may use this software to process commercial video. You may not repackage and
-sell the software itself or offer it as a paid service. See
+You may use this software to process commercial video. You may not repackage
+and sell the software itself or offer it as a paid service. See
 [LICENSE](LICENSE) for full terms.
 
 ## Credits
 
 - [CorridorKey](https://github.com/nikopueringer/CorridorKey) by Niko Pueringer
   / Corridor Digital — the original neural green screen keyer
-- [ONNX Runtime](https://onnxruntime.ai/) by Microsoft — cross-platform ML
-  inference
+- [ONNX Runtime](https://onnxruntime.ai/) by Microsoft — model execution and
+  execution-provider infrastructure
 - [OpenEXR](https://openexr.com/) by Academy Software Foundation — VFX image
   format

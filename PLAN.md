@@ -1,106 +1,124 @@
-# Plano da Spec: macOS robusto primeiro, GUI-ready depois
+# Direcao de produto: engine nativa, distribuivel e integravel
 
 ## Resumo
 
-- Reposicionar a spec para tratar **macOS 14+ em Apple Silicon** como a única plataforma com critério de aceite de release nesta fase.
-- Sequência obrigatória da roadmap: **1. robustez real no Mac**, **2. distribuição portátil no Mac**, **3. contrato da bridge para GUI**, **4. implementação da GUI**, **5. outras arquiteturas**.
-- A GUI continua sendo cliente fino sobre runtime/app layer; ela **não começa** antes de o Mac passar pelos gates de qualidade, fallback, tiling e empacotamento.
-- A validação passa a usar um **corpus fixo do repositório**, não amostras ad hoc.
+- O produto deve ser comunicado como **engine nativa de producao** para
+  executar CorridorKey com previsibilidade operacional em hardware real.
+- A sequencia de entrega deixa de parecer aberta ou distante:
+  **1. macOS first**, **2. Windows RTX next**, **3. superficies de integracao**,
+  **4. expansao ampla de plataforma**.
+- O foco imediato continua sendo fechar o runtime de producao no macOS, mas a
+  documentacao precisa mostrar que Windows RTX ja e o proximo trilho explicito
+  do produto.
+- O valor central nao e "suportar muitos backends"; e entregar **instalacao
+  simples, diagnostico confiavel, benchmark reproduzivel, contratos estaveis e
+  comportamento consistente por tier de hardware**.
 
-## Mudanças principais na spec e nas interfaces
+## Posicionamento do produto
 
-- Atualizar `docs/SPEC.md` para substituir a roadmap genérica por fases com gates explícitos:
-  - Fase 1: hardening do runtime no macOS.
-  - Fase 2: bundle portátil para terceiros.
-  - Fase 3: contrato Tauri/sidecar.
-  - Fase 4: GUI.
-  - Fase 5: expansão para Windows/Linux.
-- Alinhar `docs/ARCHITECTURE.md` e `docs/FRONTEND.md` com a regra: GUI usa **bridge sidecar/Tauri**, sem lógica de negócio duplicada.
-- Formalizar política de backend no Mac:
-  - `auto` no macOS = **CoreML primeiro, CPU como fallback obrigatório**.
-  - Fallback deve ocorrer em falha de detecção, criação de sessão, incompatibilidade do modelo ou erro de execução.
-  - Todo fallback deve expor motivo estruturado para CLI/GUI.
-- Definir interfaces estáveis para a bridge:
-  - `process --json` vira **stream NDJSON** com eventos `job_started`, `backend_selected`, `progress`, `warning`, `artifact_written`, `completed`, `failed`, `cancelled`.
-  - `info`, `doctor`, `benchmark`, `models` e `presets` retornam JSON único e estável.
-- Adicionar ao contrato de runtime/app os tipos conceituais:
-  - `RuntimeCapabilities`: backends detectados, suporte a CoreML, CPU fallback, VideoToolbox, tiling e batching.
-  - `JobEvent`: fase, progresso, backend escolhido, motivo de fallback, timings, artefatos e erros.
-  - `ModelCatalogEntry` e `PresetDefinition` para GUI e CLI usarem o mesmo catálogo.
-- Manter a API pública de processamento enxuta; nesta fase, as ampliações públicas ficam restritas a **diagnóstico, capabilities e eventos estruturados**, não a knobs novos de baixo nível.
-- Fixar a política de qualidade/performance para Mac:
-  - Modelos validados e empacotados na fase 1: `int8_512` e `int8_768`.
-  - `auto` usa `512` em 8 GB e `768` em 16 GB ou mais.
-  - Inputs maiores usam **tiling**; não promover `1024` como caminho padrão no Mac antes de validação real.
-- Fixar a política de paralelismo:
-  - No CoreML, começar com **1 sessão de inferência em voo por modelo**.
-  - Paralelizar decode, pré-processamento, montagem de tiles, pós-processamento e escrita.
-  - Só liberar inferência concorrente se benchmarks no corpus provarem ganho sem regressão de estabilidade/memória.
-- Fixar a política de vídeo no Mac:
-  - Usar **VideoToolbox** quando disponível, com fallback para software.
-  - Receita de saída padrão para portabilidade: **H.264 em MP4**.
-  - HEVC e opções mais agressivas ficam como presets avançados, não como default.
-- Fixar o corpus de validação na spec com os assets já existentes:
-  - `assets/corridor.png`
-  - primeiros 20 frames de `assets/image_samples/thelikelyandunfortunatedemiseofyourgpu`
-  - `greenscreen_1769569137.mp4`
-  - `greenscreen_1769569320.mp4`
-  - `100745-video-2160.mp4`
-  - `mixkit-girl-dancing-with-her-earphones-on-a-green-background-28306-4k.mp4`
-- Para cada item do corpus, a spec deve declarar modo esperado:
-  - smoke/simple path
-  - standard inference
-  - tiled high-resolution
-  - stress/performance run
+- O projeto nao deve soar como "port cross-platform" do CorridorKey.
+- A mensagem principal passa a ser:
+  **CorridorKey como engine nativa, distribuivel e integravel, pensada para
+  hardware real e uso reproduzivel em produto.**
+- `library-first` permanece pilar central:
+  CLI, GUI futura, sidecar, plugin e integracao em pipeline usam o mesmo core.
+- `doctor`, `benchmark`, `models`, `presets`, `process --json` e telemetria por
+  etapa deixam de ser acessorios e passam a ser parte da promessa do produto.
 
-## Plano de implementação derivado da spec
+## Trilhos de plataforma
 
-- Hardening de runtime no macOS:
-  - detecção real de capabilities Apple Silicon/CoreML/VideoToolbox
-  - seleção e fallback de backend com diagnóstico estruturado
-  - correção do caminho de vídeo para aceleração real no Mac
-  - scheduler de tiling com merge sem seams e paralelismo controlado
-- Observabilidade e performance como gate de hardening:
-  - instrumentar `engine_create`, `warmup`, `decode`, `hint generation`, `batch prepare`, `ort_run`, `tile extract`, `tile infer`, `tile accumulate`, `post-process`, `encode` e `flush`
-  - fazer `benchmark` reutilizar o mesmo contrato de eventos/timings do `process --json`
-  - aceitar `benchmark` sintético e com workload real (`--input`) para medir startup, throughput e breakdown por etapa
-  - usar os timings agregados para decidir thread policy de CPU, paralelismo de pipeline e prioridades de otimização
-- Preparação para GUI:
-  - consolidar saída JSON estável
-  - adicionar `models` e `presets`
-  - padronizar eventos, estados, cancelamento e artefatos
-- Distribuição:
-  - bundle CLI portátil com binário, dylibs, modelos validados e smoke tests em máquina limpa
-  - codesign/notarização entram como próxima etapa imediata, mas não bloqueiam o fechamento do runtime
+- **Agora: macOS 14+ Apple Silicon**
+  - CoreML como caminho principal
+  - CPU como fallback obrigatorio
+  - `int8_512` e `int8_768` como modelos validados e empacotados
+  - bundle CLI portatil como primeiro artefato externo
+- **Depois: Windows 11 + NVIDIA RTX**
+  - TensorRT RTX como caminho principal de produto
+  - CPU como fallback obrigatorio
+  - DirectML e WinML tratados como secundarios ou exploratorios
+  - foco em instalacao previsivel, diagnostico, cache e benchmark reproduzivel
+- **Mais tarde**
+  - GUI e sidecar como consumidores finos do runtime
+  - Linux e outros caminhos so depois de macOS + Windows RTX estarem claros e
+    validados
 
-## Plano de testes e aceite
+## Sequencia de entrega
 
-- Unit:
-  - policy de backend/fallback
-  - hardware profile do Mac
-  - geometria de tiling, overlap e seam blending
-  - emissão de eventos estruturados
-  - agregação e serialização estável de timings por etapa
-- Integration:
-  - criação de sessão CoreML com modelo real
-  - fallback forçado para CPU
-  - seleção VideoToolbox vs software
-  - bundle portátil executando fora da árvore de build
-  - benchmark de workload real emitindo breakdown consistente
-- Regression:
-  - um teste por bug real de macOS: fallback quebrado, seam em tile, erro de provider, problema de lookup de dylib
-- E2E / gates para liberar GUI:
-  - corpus completo roda sem crash
-  - sem frame drop inesperado
-  - sem artefato visível de seam nos casos 4K com tiling
-  - `info`, `doctor`, `benchmark`, `models`, `presets` e `process --json` estáveis
-  - `benchmark` e evento `completed` reportam timings agregados suficientes para localizar gargalos sem profiler externo
-  - métricas e frames de referência permanecem dentro das tolerâncias definidas na spec
+### Fase 1 — macOS production runtime
 
-## Assumptions e defaults
+- robustez real de backend e fallback
+- performance observavel guiada por benchmark
+- tiling confiavel para high-resolution
+- bundle CLI portatil para terceiros
+- corpus validado e exemplos de qualidade
 
-- Plataforma primária desta fase: **macOS 14+ Apple Silicon**.
-- Primeiro deliverable externo: **bundle CLI portátil**, não `.app`.
-- A bridge **Tauri/sidecar** será definida agora na spec, mas a GUI só começa depois dos gates do Mac.
-- O corpus de qualidade é **fixo e versionado no projeto**.
-- Outras arquiteturas ficam explicitamente **depois** do fechamento da trilha macOS + contrato da GUI.
+### Fase 2 — Windows RTX track
+
+- contrato de provider e instalacao para RTX consumer
+- estrategia de cache, compilacao e diagnostico para TensorRT RTX
+- tiers e modelos validados para hardware RTX
+- `doctor` e `benchmark` equivalentes ao trilho macOS
+
+### Fase 3 — integration surfaces
+
+- contrato sidecar/Tauri estabilizado sobre JSON/NDJSON ja existentes
+- GUI como cliente fino do runtime
+- abertura explicita para plugin e pipeline embedding
+
+### Fase 4 — broader platform expansion
+
+- Linux e demais caminhos depois de macOS e Windows RTX
+- validacao adicional apenas quando houver proposta de valor clara
+
+## Backlog imediato
+
+- Fechar os gates de macOS:
+  - fallback CoreML -> CPU robusto e explicado estruturalmente
+  - warmup/startup, tiling e video medidos por etapa
+  - bundle portatil rodando fora da arvore de build
+  - corpus completo sem crash e sem seams visiveis em 4K tiled
+- Preparar o trilho Windows RTX na documentacao e na arquitetura:
+  - provider principal definido
+  - recorte de hardware alvo definido
+  - comportamento operacional esperado definido
+- Preservar contratos e observabilidade como superficie publica:
+  - JSON unico para `info`, `doctor`, `benchmark`, `models`, `presets`
+  - NDJSON estavel em `process --json`
+  - timings agregados suficientes para localizar gargalos
+
+## AlphaHint como parte do valor percebido
+
+- O runtime aceita hints externos como contrato estavel:
+  frame, diretorio de frames ou video.
+- Rough matte interno continua existindo como fallback de conveniencia.
+- A documentacao deve deixar claro:
+  - quando hint externo e preferivel
+  - o que acontece quando hint esta ausente
+  - o impacto esperado em qualidade e throughput
+- Esta fase nao inclui prometer um sistema first-party completo de geracao de
+  hints.
+
+## Criterios de aceite desta direcao
+
+- A abertura dos docs nao pode mais fazer o projeto parecer um framework
+  multi-backend generico.
+- O leitor precisa entender rapidamente:
+  - o que e o produto
+  - para quem ele existe
+  - por que nao e apenas uma reimplementacao tecnica
+  - o que esta sendo entregue agora
+  - o que vem logo em seguida
+- macOS deve aparecer como foco atual.
+- Windows RTX deve aparecer como proximo foco ja definido.
+- GUI deve aparecer como superficie posterior sobre contratos estaveis.
+- AlphaHint, contratos de entrada/saida e metricas observaveis precisam ficar
+  explicitos nos docs principais.
+
+## Defaults adotados
+
+- Plataforma com release gate atual: **macOS 14+ Apple Silicon**.
+- Proximo trilho explicito de produto: **Windows 11 + NVIDIA RTX**.
+- Provider principal de Windows next: **TensorRT RTX**.
+- DirectML e WinML nao sao promovidos como eixo principal nesta fase.
+- AlphaHint e tratado como **contrato externo + fallback interno**, nao como
+  produto de autoria nesta etapa.
