@@ -29,17 +29,15 @@ using ProgressCallback = std::function<bool(float progress, const std::string& s
  * Implements the PIMPL pattern to hide ONNX Runtime details.
  */
 class CORRIDORKEY_API Engine {
-public:
+   public:
     /**
      * @brief Factory method to create and initialize the engine.
      * @param model_path Path to the ONNX model file.
      * @param device The device to use for inference. Defaults to auto-detection.
      * @return A unique pointer to the initialized Engine or an error.
      */
-    static Result<std::unique_ptr<Engine>> create(
-        const std::filesystem::path& model_path,
-        DeviceInfo device = auto_detect()
-    );
+    static Result<std::unique_ptr<Engine>> create(const std::filesystem::path& model_path,
+                                                  DeviceInfo device = auto_detect());
 
     /**
      * @brief Destructor (virtual for safety, though Engine is usually not inherited).
@@ -59,11 +57,19 @@ public:
      * @param params Inference and post-processing parameters.
      * @return The resulting images or an error.
      */
-    Result<FrameResult> process_frame(
-        const Image& rgb, 
-        const Image& alpha_hint,
-        const InferenceParams& params = {}
-    );
+    Result<FrameResult> process_frame(const Image& rgb, const Image& alpha_hint,
+                                      const InferenceParams& params = {});
+
+    /**
+     * @brief Process a batch of RGB frames with alpha hints.
+     * @param rgbs List of input RGB images.
+     * @param alpha_hints List of alpha hint images.
+     * @param params Inference and post-processing parameters.
+     * @return List of results or an error.
+     */
+    Result<std::vector<FrameResult>> process_frame_batch(const std::vector<Image>& rgbs,
+                                                         const std::vector<Image>& alpha_hints,
+                                                         const InferenceParams& params = {});
 
     /**
      * @brief Process a sequence of images from disk.
@@ -74,13 +80,11 @@ public:
      * @param on_progress Optional callback for progress and cancellation.
      * @return Success or an error.
      */
-    Result<void> process_sequence(
-        const std::vector<std::filesystem::path>& inputs,
-        const std::vector<std::filesystem::path>& alpha_hints,
-        const std::filesystem::path& output_dir,
-        const InferenceParams& params = {},
-        ProgressCallback on_progress = nullptr
-    );
+    Result<void> process_sequence(const std::vector<std::filesystem::path>& inputs,
+                                  const std::vector<std::filesystem::path>& alpha_hints,
+                                  const std::filesystem::path& output_dir,
+                                  const InferenceParams& params = {},
+                                  ProgressCallback on_progress = nullptr);
 
     /**
      * @brief Process a video file directly using FFmpeg.
@@ -91,13 +95,11 @@ public:
      * @param on_progress Optional callback for progress and cancellation.
      * @return Success or an error.
      */
-    Result<void> process_video(
-        const std::filesystem::path& input_video,
-        const std::filesystem::path& hint_video,
-        const std::filesystem::path& output_video,
-        const InferenceParams& params = {},
-        ProgressCallback on_progress = nullptr
-    );
+    Result<void> process_video(const std::filesystem::path& input_video,
+                               const std::filesystem::path& hint_video,
+                               const std::filesystem::path& output_video,
+                               const InferenceParams& params = {},
+                               ProgressCallback on_progress = nullptr);
 
     /**
      * @brief Get the recommended resolution based on current hardware limits.
@@ -110,7 +112,7 @@ public:
      */
     [[nodiscard]] DeviceInfo current_device() const;
 
-private:
+   private:
     // Private constructor used by the factory method
     Engine();
 
@@ -118,4 +120,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace corridorkey
+}  // namespace corridorkey

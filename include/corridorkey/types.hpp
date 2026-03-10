@@ -1,13 +1,13 @@
 #pragma once
 
 #include <corridorkey/api_export.hpp>
-#include <string>
-#include <vector>
 #include <cstdint>
 #include <memory>
-#include <variant>
 #include <optional>
 #include <span>
+#include <string>
+#include <variant>
+#include <vector>
 
 #if defined(_WIN32)
 #include <malloc.h>
@@ -43,68 +43,89 @@ struct Error {
  * @brief Result type for robust error handling (C++20 compatible).
  * Simple polyfill for std::expected.
  */
-template<typename E>
+template <typename E>
 struct unexpected {
     E error;
     explicit unexpected(E e) : error(std::move(e)) {}
 };
 
-template<typename T>
+template <typename T>
 class Result {
-public:
+   public:
     Result(T val) : m_data(std::move(val)) {}
     Result(unexpected<Error> err) : m_data(std::move(err.error)) {}
     Result(Error err) : m_data(std::move(err)) {}
 
-    bool has_value() const { return std::holds_alternative<T>(m_data); }
-    bool has_error() const { return std::holds_alternative<Error>(m_data); }
+    bool has_value() const {
+        return std::holds_alternative<T>(m_data);
+    }
+    bool has_error() const {
+        return std::holds_alternative<Error>(m_data);
+    }
 
-    const T& value() const { return std::get<T>(m_data); }
-    T& value() { return std::get<T>(m_data); }
+    const T& value() const {
+        return std::get<T>(m_data);
+    }
+    T& value() {
+        return std::get<T>(m_data);
+    }
 
-    const Error& error() const { return std::get<Error>(m_data); }
+    const Error& error() const {
+        return std::get<Error>(m_data);
+    }
 
-    T& operator*() { return value(); }
-    const T& operator*() const { return value(); }
-    T* operator->() { return &value(); }
-    const T* operator->() const { return &value(); }
+    T& operator*() {
+        return value();
+    }
+    const T& operator*() const {
+        return value();
+    }
+    T* operator->() {
+        return &value();
+    }
+    const T* operator->() const {
+        return &value();
+    }
 
-    operator bool() const { return has_value(); }
+    operator bool() const {
+        return has_value();
+    }
 
-private:
+   private:
     std::variant<T, Error> m_data;
 };
 
 // Specialization for Result<void>
-template<>
+template <>
 class Result<void> {
-public:
+   public:
     Result() : m_error(std::nullopt) {}
     Result(unexpected<Error> err) : m_error(std::move(err.error)) {}
     Result(Error err) : m_error(std::move(err)) {}
 
-    bool has_value() const { return !m_error.has_value(); }
-    bool has_error() const { return m_error.has_value(); }
+    bool has_value() const {
+        return !m_error.has_value();
+    }
+    bool has_error() const {
+        return m_error.has_value();
+    }
 
-    const Error& error() const { return *m_error; }
+    const Error& error() const {
+        return *m_error;
+    }
 
-    operator bool() const { return has_value(); }
+    operator bool() const {
+        return has_value();
+    }
 
-private:
+   private:
     std::optional<Error> m_error;
 };
 
 /**
  * @brief Hardware backends supported by the runtime.
  */
-enum class Backend {
-    Auto,
-    CPU,
-    CUDA,
-    TensorRT,
-    CoreML,
-    DirectML
-};
+enum class Backend { Auto, CPU, CUDA, TensorRT, CoreML, DirectML };
 
 /**
  * @brief Information about a detected hardware device.
@@ -130,9 +151,11 @@ struct Image {
     int width = 0;
     int height = 0;
     int channels = 0;
-    std::span<float> data; 
+    std::span<float> data;
 
-    bool empty() const { return data.empty(); }
+    bool empty() const {
+        return data.empty();
+    }
 
     // Multidimensional accessor: img(y, x, c)
     // Inline and constexpr for zero overhead
@@ -149,11 +172,10 @@ struct Image {
  * @brief Owned image data with guaranteed SIMD alignment.
  */
 class ImageBuffer {
-public:
+   public:
     ImageBuffer() : m_width(0), m_height(0), m_channels(0), m_ptr(nullptr) {}
 
-    ImageBuffer(int w, int h, int c) 
-        : m_width(w), m_height(h), m_channels(c) {
+    ImageBuffer(int w, int h, int c) : m_width(w), m_height(h), m_channels(c) {
         size_t size = static_cast<size_t>(w) * h * c;
         if (size == 0) {
             m_ptr = nullptr;
@@ -162,7 +184,8 @@ public:
 #if defined(_WIN32)
         m_ptr = static_cast<float*>(_aligned_malloc(size * sizeof(float), MEMORY_ALIGNMENT));
 #else
-        if (posix_memalign(reinterpret_cast<void**>(&m_ptr), MEMORY_ALIGNMENT, size * sizeof(float)) != 0) {
+        if (posix_memalign(reinterpret_cast<void**>(&m_ptr), MEMORY_ALIGNMENT,
+                           size * sizeof(float)) != 0) {
             m_ptr = nullptr;
         }
 #endif
@@ -182,9 +205,12 @@ public:
     ImageBuffer(const ImageBuffer&) = delete;
     ImageBuffer& operator=(const ImageBuffer&) = delete;
 
-    ImageBuffer(ImageBuffer&& other) noexcept 
-        : m_width(other.m_width), m_height(other.m_height), m_channels(other.m_channels),
-          m_ptr(other.m_ptr), m_data(other.m_data) {
+    ImageBuffer(ImageBuffer&& other) noexcept
+        : m_width(other.m_width),
+          m_height(other.m_height),
+          m_channels(other.m_channels),
+          m_ptr(other.m_ptr),
+          m_data(other.m_data) {
         other.m_ptr = nullptr;
         other.m_data = {};
     }
@@ -209,10 +235,14 @@ public:
         return *this;
     }
 
-    Image view() { return { m_width, m_height, m_channels, m_data }; }
-    Image const_view() const { return { m_width, m_height, m_channels, m_data }; }
+    Image view() {
+        return {m_width, m_height, m_channels, m_data};
+    }
+    Image const_view() const {
+        return {m_width, m_height, m_channels, m_data};
+    }
 
-private:
+   private:
     int m_width, m_height, m_channels;
     float* m_ptr;
     std::span<float> m_data;
@@ -222,16 +252,19 @@ private:
  * @brief Parameters to control the inference and post-processing.
  */
 struct InferenceParams {
-    int target_resolution = 0; // 0 = Auto-detect based on hardware
+    int target_resolution = 0;  // 0 = Auto-detect based on hardware
     float despill_strength = 1.0f;
     bool auto_despeckle = true;
     int despeckle_size = 400;
     float refiner_scale = 1.0f;
     bool input_is_linear = false;
-    
+
+    // Batching (GPU efficiency)
+    int batch_size = 1;
+
     // Tiling Inference (High-Res support)
     bool enable_tiling = false;
-    int tile_padding = 32; // Overlap in pixels to blend seams
+    int tile_padding = 32;  // Overlap in pixels to blend seams
 };
 
 /**
@@ -241,8 +274,8 @@ struct InferenceParams {
 struct FrameResult {
     ImageBuffer alpha;
     ImageBuffer foreground;
-    ImageBuffer processed;   // Premultiplied RGBA (VFX output)
-    ImageBuffer composite;   // Preview on checkerboard (PNG)
+    ImageBuffer processed;  // Premultiplied RGBA (VFX output)
+    ImageBuffer composite;  // Preview on checkerboard (PNG)
 };
 
-} // namespace corridorkey
+}  // namespace corridorkey

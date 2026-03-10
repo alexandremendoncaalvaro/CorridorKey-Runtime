@@ -1,4 +1,5 @@
 #include "despeckle.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -6,7 +7,7 @@
 
 #if __has_include(<execution>) && (defined(__cpp_lib_execution) || !defined(__clang__))
 #include <execution>
-#define EXEC_POLICY std::execution::par_unseq ,
+#define EXEC_POLICY std::execution::par_unseq,
 #else
 #define EXEC_POLICY
 #endif
@@ -43,8 +44,8 @@ struct UnionFind {
 
 // 8-connected component labeling using union-find
 // Returns label map and area per label
-void find_components(const std::vector<uint8_t>& mask, int w, int h,
-                     std::vector<int>& labels, std::vector<int>& areas) {
+void find_components(const std::vector<uint8_t>& mask, int w, int h, std::vector<int>& labels,
+                     std::vector<int>& areas) {
     int n = w * h;
     UnionFind uf(n);
     labels.resize(n, -1);
@@ -57,8 +58,8 @@ void find_components(const std::vector<uint8_t>& mask, int w, int h,
             labels[idx] = idx;
 
             // Check 4 already-visited neighbors (up-left, up, up-right, left)
-            constexpr int dy[] = {-1, -1, -1,  0};
-            constexpr int dx[] = {-1,  0,  1, -1};
+            constexpr int dy[] = {-1, -1, -1, 0};
+            constexpr int dx[] = {-1, 0, 1, -1};
             for (int d = 0; d < 4; ++d) {
                 int ny = y + dy[d];
                 int nx = x + dx[d];
@@ -92,8 +93,8 @@ void find_components(const std::vector<uint8_t>& mask, int w, int h,
 }
 
 // Generate elliptical structuring element offsets
-std::vector<std::pair<int,int>> make_elliptical_kernel(int radius) {
-    std::vector<std::pair<int,int>> offsets;
+std::vector<std::pair<int, int>> make_elliptical_kernel(int radius) {
+    std::vector<std::pair<int, int>> offsets;
     int ksize = 2 * radius + 1;
     float center = static_cast<float>(radius);
     float r_sq = (center + 0.5f) * (center + 0.5f);
@@ -191,7 +192,7 @@ void gaussian_blur(std::vector<float>& data, int w, int h, int half_size) {
     });
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 void despeckle(Image alpha, int area_threshold, int dilation, int blur_size) {
     if (alpha.empty() || area_threshold <= 0) return;
@@ -234,4 +235,4 @@ void despeckle(Image alpha, int area_threshold, int dilation, int blur_size) {
     }
 }
 
-} // namespace corridorkey
+}  // namespace corridorkey

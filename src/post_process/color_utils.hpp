@@ -9,7 +9,7 @@ namespace corridorkey {
  * All functions work on raw float buffers in linear space.
  */
 class ColorUtils {
-public:
+   public:
     static void srgb_to_linear(Image image);
     static void linear_to_srgb(Image image);
 
@@ -34,7 +34,8 @@ public:
      * @brief Resize image maintaining aspect ratio and padding to reach target size (Letterbox).
      * Returns the padded image and the original valid area (ROI).
      */
-    static std::pair<ImageBuffer, struct Rect> fit_pad(const Image image, int target_w, int target_h);
+    static std::pair<ImageBuffer, struct Rect> fit_pad(const Image image, int target_w,
+                                                       int target_h);
 
     /**
      * @brief Crop an image using a defined rectangle.
@@ -54,4 +55,4 @@ public:
     static void from_planar(const float* src, Image dst);
 };
 
-} // namespace corridorkey
+}  // namespace corridorkey

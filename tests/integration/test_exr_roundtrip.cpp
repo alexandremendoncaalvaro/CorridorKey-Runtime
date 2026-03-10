@@ -14,8 +14,8 @@ TEST_CASE("EXR roundtrip: write then read preserves data", "[integration][exr]")
         for (int x = 0; x < 4; ++x) {
             view(y, x, 0) = static_cast<float>(x) / 3.0f;  // R gradient
             view(y, x, 1) = static_cast<float>(y) / 3.0f;  // G gradient
-            view(y, x, 2) = 0.5f;                            // B constant
-            view(y, x, 3) = 1.0f;                            // A opaque
+            view(y, x, 2) = 0.5f;                          // B constant
+            view(y, x, 3) = 1.0f;                          // A opaque
         }
     }
 

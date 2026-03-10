@@ -18,11 +18,9 @@ namespace corridorkey {
  * This class isolates Ort types from the rest of the core.
  */
 class InferenceSession {
-public:
-    static Result<std::unique_ptr<InferenceSession>> create(
-        const std::filesystem::path& model_path,
-        DeviceInfo device
-    );
+   public:
+    static Result<std::unique_ptr<InferenceSession>> create(const std::filesystem::path& model_path,
+                                                            DeviceInfo device);
 
     ~InferenceSession();
 
@@ -35,16 +33,24 @@ public:
     /**
      * @brief Run inference on a frame.
      */
-    Result<FrameResult> run(
-        const Image& rgb,
-        const Image& alpha_hint,
-        const InferenceParams& params
-    );
+    Result<FrameResult> run(const Image& rgb, const Image& alpha_hint,
+                            const InferenceParams& params);
 
-    DeviceInfo device() const { return m_device; }
-    int recommended_resolution() const { return m_recommended_resolution; }
+    /**
+     * @brief Run inference on a batch of frames.
+     */
+    Result<std::vector<FrameResult>> run_batch(const std::vector<Image>& rgbs,
+                                               const std::vector<Image>& alpha_hints,
+                                               const InferenceParams& params);
 
-private:
+    DeviceInfo device() const {
+        return m_device;
+    }
+    int recommended_resolution() const {
+        return m_recommended_resolution;
+    }
+
+   private:
     InferenceSession(DeviceInfo device);
 
     void configure_session_options();
@@ -53,11 +59,15 @@ private:
     /**
      * @brief Internal raw inference (no post-processing).
      */
-    Result<FrameResult> infer_raw(
-        const Image& rgb,
-        const Image& alpha_hint,
-        const InferenceParams& params
-    );
+    Result<FrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
+                                  const InferenceParams& params);
+
+    /**
+     * @brief Internal raw inference on a batch.
+     */
+    Result<std::vector<FrameResult>> infer_batch_raw(const std::vector<Image>& rgbs,
+                                                     const std::vector<Image>& alpha_hints,
+                                                     const InferenceParams& params);
 
     /**
      * @brief Apply despeckle, despill and composition to raw results.
@@ -67,12 +77,8 @@ private:
     /**
      * @brief Helper for running tiling inference on large images.
      */
-    Result<FrameResult> run_tiled(
-        const Image& rgb,
-        const Image& alpha_hint,
-        const InferenceParams& params,
-        int model_res
-    );
+    Result<FrameResult> run_tiled(const Image& rgb, const Image& alpha_hint,
+                                  const InferenceParams& params, int model_res);
 
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
@@ -94,4 +100,4 @@ private:
     std::vector<ImageBuffer> m_planar_pool;
 };
 
-} // namespace corridorkey
+}  // namespace corridorkey

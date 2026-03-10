@@ -1,9 +1,11 @@
 #include <catch2/catch_all.hpp>
+
 #include "post_process/despeckle.hpp"
 
 using namespace corridorkey;
 
-TEST_CASE("despeckle removes small components via connected-component analysis", "[unit][despeckle]") {
+TEST_CASE("despeckle removes small components via connected-component analysis",
+          "[unit][despeckle]") {
     // 10x10 alpha: large connected region + isolated speck
     ImageBuffer alpha_buf(10, 10, 1);
     Image alpha = alpha_buf.view();

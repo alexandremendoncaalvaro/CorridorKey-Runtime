@@ -20,4 +20,4 @@ namespace corridorkey {
  */
 void despeckle(Image alpha, int area_threshold, int dilation = 25, int blur_size = 5);
 
-} // namespace corridorkey
+}  // namespace corridorkey

@@ -19,12 +19,10 @@ CORRIDORKEY_API Result<ImageBuffer> read_frame(const std::filesystem::path& path
 CORRIDORKEY_API Result<void> write_frame(const std::filesystem::path& path, const Image& image);
 
 /**
- * @brief Save a full result (Alpha, FG, Processed, Comp) following the VFX-standard directory structure.
+ * @brief Save a full result (Alpha, FG, Processed, Comp) following the VFX-standard directory
+ * structure.
  */
-CORRIDORKEY_API Result<void> save_result(
-    const std::filesystem::path& base_dir,
-    const std::string& filename,
-    const FrameResult& result
-);
+CORRIDORKEY_API Result<void> save_result(const std::filesystem::path& base_dir,
+                                         const std::string& filename, const FrameResult& result);
 
-} // namespace corridorkey::frame_io
+}  // namespace corridorkey::frame_io

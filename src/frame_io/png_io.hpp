@@ -11,4 +11,4 @@ namespace corridorkey {
 Result<ImageBuffer> read_stb(const std::filesystem::path& path);
 Result<void> write_png(const std::filesystem::path& path, const Image& image);
 
-} // namespace corridorkey
+}  // namespace corridorkey

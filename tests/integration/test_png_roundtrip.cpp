@@ -4,7 +4,8 @@
 
 using namespace corridorkey;
 
-TEST_CASE("PNG roundtrip: write then read preserves data within 8-bit precision", "[integration][png]") {
+TEST_CASE("PNG roundtrip: write then read preserves data within 8-bit precision",
+          "[integration][png]") {
     auto tmp_path = std::filesystem::temp_directory_path() / "corridorkey_test_roundtrip.png";
 
     // Create a small test image (4x4 RGB) in linear space

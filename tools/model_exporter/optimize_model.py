@@ -5,7 +5,7 @@ import numpy as np
 
 def simplify_and_optimize(input_model_path: str, output_model_path: str, fp16: bool = False):
     print(f"\n[Info] Optimizing {input_model_path} -> {output_model_path}")
-    
+
     # 1. Run ONNX Simplifier
     import onnx
     from onnxsim import simplify
@@ -26,13 +26,13 @@ def simplify_and_optimize(input_model_path: str, output_model_path: str, fp16: b
 
     print("  -> Running ONNXRuntime Transformer Optimizer...")
     from onnxruntime.transformers.optimizer import optimize_model
-    
+
     try:
         # GreenFormer uses a Hiera Vision Transformer, which falls under 'vit'
         opt_model = optimize_model(
             temp_simp_path,
             model_type='vit',
-            opt_level=1, 
+            opt_level=1,
             use_gpu=False,
             only_onnxruntime=False
         )
@@ -60,7 +60,7 @@ def main():
     args = parser.parse_args()
 
     models_dir = os.path.abspath(args.dir)
-    
+
     resolutions = [512, 768, 1024]
 
     for res in resolutions:
@@ -78,7 +78,7 @@ def main():
 
         # Create optimized FP16
         simplify_and_optimize(raw_path, fp16_opt_path, fp16=True)
-        
+
         # Overwrite raw FP32 with optimized FP32 for distribution
         os.replace(fp32_opt_path, raw_path)
 

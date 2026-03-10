@@ -1,8 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
-#include <algorithm>
 #include <cstdint>
 
 namespace corridorkey {
@@ -16,7 +16,7 @@ namespace corridorkey {
  * Passing it by parameter would degrade the API without benefit.
  */
 class SrgbLut {
-public:
+   public:
     static const SrgbLut& instance() {
         static SrgbLut lut;
         return lut;
@@ -32,16 +32,17 @@ public:
         return m_to_srgb[idx];
     }
 
-private:
+   private:
     SrgbLut() {
         for (int i = 0; i <= 65535; ++i) {
             float p = i / 65535.0f;
             m_to_linear[i] = (p <= 0.04045f) ? (p / 12.92f) : std::pow((p + 0.055f) / 1.055f, 2.4f);
-            m_to_srgb[i] = (p <= 0.0031308f) ? (p * 12.92f) : (1.055f * std::pow(p, 1.0f / 2.4f) - 0.055f);
+            m_to_srgb[i] =
+                (p <= 0.0031308f) ? (p * 12.92f) : (1.055f * std::pow(p, 1.0f / 2.4f) - 0.055f);
         }
     }
     std::array<float, 65536> m_to_linear;
     std::array<float, 65536> m_to_srgb;
 };
 
-} // namespace corridorkey
+}  // namespace corridorkey

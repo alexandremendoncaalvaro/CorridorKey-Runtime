@@ -1,7 +1,8 @@
 #include "exr_io.hpp"
-#include <OpenEXR/ImfRgbaFile.h>
+
 #include <OpenEXR/ImfArray.h>
 #include <OpenEXR/ImfHeader.h>
+#include <OpenEXR/ImfRgbaFile.h>
 
 namespace corridorkey {
 
@@ -24,7 +25,7 @@ Result<ImageBuffer> read_exr(const std::filesystem::path& path) {
         // Convert OpenEXR Half RGBA to Aligned Float RGBA (Linearized)
         size_t total_pixels = static_cast<size_t>(width) * height;
         const Imf::Rgba* src_ptr = &pixels[0][0];
-        
+
         for (size_t i = 0; i < total_pixels; ++i) {
             const Imf::Rgba& p = src_ptr[i];
             float* dst = &view.data[i * 4];
@@ -36,13 +37,15 @@ Result<ImageBuffer> read_exr(const std::filesystem::path& path) {
 
         return std::move(buffer);
     } catch (const std::exception& e) {
-        return unexpected(Error{ ErrorCode::IoError, std::string("Failed to read EXR: ") + e.what() });
+        return unexpected(
+            Error{ErrorCode::IoError, std::string("Failed to read EXR: ") + e.what()});
     }
 }
 
 Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
     if (image.channels < 1) {
-        return unexpected(Error{ ErrorCode::InvalidParameters, "EXR write requires at least 1 channel" });
+        return unexpected(
+            Error{ErrorCode::InvalidParameters, "EXR write requires at least 1 channel"});
     }
 
     try {
@@ -59,7 +62,8 @@ Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
         for (size_t i = 0; i < total_pixels; ++i) {
             const float* src = &image.data[i * image.channels];
             if (image.channels == 1) {
-                // Grayscale: map to R=G=B=val, A=1.0 or map to R=G=B=1.0, A=val (usually Alpha matte is just grayscale RGB)
+                // Grayscale: map to R=G=B=val, A=1.0 or map to R=G=B=1.0, A=val (usually Alpha
+                // matte is just grayscale RGB)
                 dst_ptr[i] = Imf::Rgba(src[0], src[0], src[0], 1.0f);
             } else {
                 bool has_alpha = (image.channels == 4);
@@ -72,8 +76,9 @@ Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
 
         return {};
     } catch (const std::exception& e) {
-        return unexpected(Error{ ErrorCode::IoError, std::string("Failed to write EXR: ") + e.what() });
+        return unexpected(
+            Error{ErrorCode::IoError, std::string("Failed to write EXR: ") + e.what()});
     }
 }
 
-} // namespace corridorkey
+}  // namespace corridorkey

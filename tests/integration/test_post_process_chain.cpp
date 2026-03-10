@@ -1,12 +1,14 @@
 #include <catch2/catch_all.hpp>
-#include "post_process/color_utils.hpp"
-#include "post_process/despill.hpp"
-#include "post_process/despeckle.hpp"
+
 #include "common/srgb_lut.hpp"
+#include "post_process/color_utils.hpp"
+#include "post_process/despeckle.hpp"
+#include "post_process/despill.hpp"
 
 using namespace corridorkey;
 
-TEST_CASE("Full post-process chain matching original Python pipeline", "[integration][postprocess]") {
+TEST_CASE("Full post-process chain matching original Python pipeline",
+          "[integration][postprocess]") {
     // Simulate a 4x4 green-screen frame with some green spill
     // Model outputs: FG in sRGB, alpha as 0-1 mask
     ImageBuffer rgb_buf(4, 4, 3);
@@ -39,8 +41,8 @@ TEST_CASE("Full post-process chain matching original Python pipeline", "[integra
     despill(rgb, 1.0f);
     // Green should be reduced, R and B should increase (spill redistribution)
     REQUIRE(rgb.data[1] < green_before);
-    REQUIRE(rgb.data[0] > 0.6f); // R increased by spill/2
-    REQUIRE(rgb.data[2] > 0.5f); // B increased by spill/2
+    REQUIRE(rgb.data[0] > 0.6f);  // R increased by spill/2
+    REQUIRE(rgb.data[2] > 0.5f);  // B increased by spill/2
 
     // 3. Convert to linear and premultiply (one pass, like inference_session.cpp)
     const auto& lut = SrgbLut::instance();

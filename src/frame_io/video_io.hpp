@@ -10,7 +10,7 @@ namespace corridorkey {
  * @brief Simple RAII reader for video files using FFmpeg 8.x.
  */
 class VideoReader {
-public:
+   public:
     static Result<std::unique_ptr<VideoReader>> open(const std::filesystem::path& path);
     ~VideoReader();
 
@@ -25,7 +25,7 @@ public:
     double fps() const;
     int64_t total_frames() const;
 
-private:
+   private:
     VideoReader();
     class Impl;
     std::unique_ptr<Impl> m_impl;
@@ -35,20 +35,18 @@ private:
  * @brief Simple RAII writer for video files.
  */
 class VideoWriter {
-public:
-    static Result<std::unique_ptr<VideoWriter>> open(
-        const std::filesystem::path& path,
-        int width, int height, double fps,
-        const std::string& codec_name = "mpeg4"
-    );
+   public:
+    static Result<std::unique_ptr<VideoWriter>> open(const std::filesystem::path& path, int width,
+                                                     int height, double fps,
+                                                     const std::string& codec_name = "mpeg4");
     ~VideoWriter();
 
     Result<void> write_frame(const Image& image);
 
-private:
+   private:
     VideoWriter();
     class Impl;
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace corridorkey
+}  // namespace corridorkey

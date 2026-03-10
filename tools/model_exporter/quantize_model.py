@@ -5,7 +5,7 @@ import numpy as np
 
 def quantize_int8(input_model_path: str, output_model_path: str):
     print(f"\n[Info] Quantizing to INT8: {input_model_path} -> {output_model_path}")
-    
+
     from onnxruntime.quantization import quantize_dynamic, QuantType
 
     try:

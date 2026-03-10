@@ -1,12 +1,13 @@
 #include "despill.hpp"
-#include <cmath>
+
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <vector>
 
 #if __has_include(<execution>) && (defined(__cpp_lib_execution) || !defined(__clang__))
 #include <execution>
-#define EXEC_POLICY std::execution::par_unseq ,
+#define EXEC_POLICY std::execution::par_unseq,
 #else
 #define EXEC_POLICY
 #endif
@@ -49,4 +50,4 @@ void despill(Image rgb, float strength) {
     });
 }
 
-} // namespace corridorkey
+}  // namespace corridorkey

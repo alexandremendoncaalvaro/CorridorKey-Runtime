@@ -2,8 +2,8 @@
 
 #include <corridorkey/engine.hpp>
 #include <filesystem>
-#include <string>
 #include <nlohmann/json.hpp>
+#include <string>
 
 namespace corridorkey::app {
 
@@ -22,10 +22,10 @@ struct JobResult {
  */
 struct JobRequest {
     std::filesystem::path input_path;
-    std::filesystem::path hint_path;   // Can be empty for auto-hinting
+    std::filesystem::path hint_path;  // Can be empty for auto-hinting
     std::filesystem::path output_path;
     std::filesystem::path model_path;
-    
+
     InferenceParams params;
     DeviceInfo device;
 };
@@ -35,7 +35,7 @@ struct JobRequest {
  * This is the primary entry point for the CLI and future TUIs.
  */
 class CORRIDORKEY_API JobOrchestrator {
-public:
+   public:
     /**
      * @brief Execute a job request.
      * Handles file detection (video vs sequence) and engine initialization.
@@ -56,10 +56,11 @@ public:
     /**
      * @brief Run a performance benchmark.
      */
-    static nlohmann::json run_benchmark(const std::filesystem::path& model_path, const DeviceInfo& device);
+    static nlohmann::json run_benchmark(const std::filesystem::path& model_path,
+                                        const DeviceInfo& device);
 
-private:
+   private:
     static bool is_video_file(const std::filesystem::path& p);
 };
 
-} // namespace corridorkey::app
+}  // namespace corridorkey::app

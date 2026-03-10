@@ -1,14 +1,14 @@
 #include "inference_session.hpp"
+
 #include "common/srgb_lut.hpp"
 #include "post_process/color_utils.hpp"
-#include "post_process/despill.hpp"
 #include "post_process/despeckle.hpp"
+#include "post_process/despill.hpp"
 
 namespace corridorkey {
 
-InferenceSession::InferenceSession(DeviceInfo device)
-    : m_device(std::move(device)) {
-    // Default recommended resolution. High-level layers (App) 
+InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {
+    // Default recommended resolution. High-level layers (App)
     // will typically override this via InferenceParams.
     m_recommended_resolution = 512;
 }
@@ -22,8 +22,9 @@ void InferenceSession::configure_session_options() {
     switch (m_device.backend) {
         case Backend::CoreML: {
 #ifdef __APPLE__
-            uint32_t coreml_flags = 0; // Default flags (Enable ANE, allow GPU/CPU fallback)
-            Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CoreML(m_session_options, coreml_flags));
+            uint32_t coreml_flags = 0;  // Default flags (Enable ANE, allow GPU/CPU fallback)
+            Ort::ThrowOnError(
+                OrtSessionOptionsAppendExecutionProvider_CoreML(m_session_options, coreml_flags));
 #endif
             break;
         }
@@ -80,39 +81,39 @@ void InferenceSession::extract_metadata() {
 }
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
-    const std::filesystem::path& model_path,
-    DeviceInfo device
-) {
+    const std::filesystem::path& model_path, DeviceInfo device) {
     if (!std::filesystem::exists(model_path)) {
-        return unexpected(Error{ ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string() });
+        return unexpected(
+            Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
     }
 
     try {
-        auto session_ptr = std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
+        auto session_ptr =
+            std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
         session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "CorridorKey");
         session_ptr->configure_session_options();
 
 #ifdef _WIN32
-        session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.wstring().c_str(), session_ptr->m_session_options);
+        session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.wstring().c_str(),
+                                              session_ptr->m_session_options);
 #else
-        session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(), session_ptr->m_session_options);
+        session_ptr->m_session =
+            Ort::Session(session_ptr->m_env, model_path.c_str(), session_ptr->m_session_options);
 #endif
 
         session_ptr->extract_metadata();
         return session_ptr;
     } catch (const Ort::Exception& e) {
-        return unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("ONNX Runtime session creation failed: ") + e.what() });
+        return unexpected(Error{ErrorCode::ModelLoadFailed,
+                                std::string("ONNX Runtime session creation failed: ") + e.what()});
     } catch (const std::exception& e) {
-        return unexpected(Error{ ErrorCode::ModelLoadFailed, std::string("Failed to initialize session: ") + e.what() });
+        return unexpected(Error{ErrorCode::ModelLoadFailed,
+                                std::string("Failed to initialize session: ") + e.what()});
     }
 }
 
-Result<FrameResult> InferenceSession::run_tiled(
-    const Image& rgb,
-    const Image& alpha_hint,
-    const InferenceParams& params,
-    int model_res
-) {
+Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& alpha_hint,
+                                                const InferenceParams& params, int model_res) {
     int w = rgb.width;
     int h = rgb.height;
     int tile_size = model_res;
@@ -133,13 +134,17 @@ Result<FrameResult> InferenceSession::run_tiled(
     Image mask = weight_mask_buf.view();
     for (int y = 0; y < tile_size; ++y) {
         float wy = 1.0f;
-        if (y < padding) wy = static_cast<float>(y) / padding;
-        else if (y >= tile_size - padding) wy = static_cast<float>(tile_size - 1 - y) / padding;
-        
+        if (y < padding)
+            wy = static_cast<float>(y) / padding;
+        else if (y >= tile_size - padding)
+            wy = static_cast<float>(tile_size - 1 - y) / padding;
+
         for (int x = 0; x < tile_size; ++x) {
             float wx = 1.0f;
-            if (x < padding) wx = static_cast<float>(x) / padding;
-            else if (x >= tile_size - padding) wx = static_cast<float>(tile_size - 1 - x) / padding;
+            if (x < padding)
+                wx = static_cast<float>(x) / padding;
+            else if (x >= tile_size - padding)
+                wx = static_cast<float>(tile_size - 1 - x) / padding;
             mask(y, x) = std::min(wx, wy);
         }
     }
@@ -152,7 +157,7 @@ Result<FrameResult> InferenceSession::run_tiled(
         for (int tx = 0; tx < nx; ++tx) {
             int x_start = tx * stride;
             int y_start = ty * stride;
-            
+
             // Center crop if last tile goes over edge
             if (x_start + tile_size > w) x_start = std::max(0, w - tile_size);
             if (y_start + tile_size > h) y_start = std::max(0, h - tile_size);
@@ -160,10 +165,11 @@ Result<FrameResult> InferenceSession::run_tiled(
             // Extract tile
             ImageBuffer rgb_tile(tile_size, tile_size, 3);
             ImageBuffer hint_tile(tile_size, tile_size, 1);
-            
+
             for (int y = 0; y < tile_size; ++y) {
                 for (int x = 0; x < tile_size; ++x) {
-                    for (int c = 0; c < 3; ++c) rgb_tile.view()(y, x, c) = rgb(y_start + y, x_start + x, c);
+                    for (int c = 0; c < 3; ++c)
+                        rgb_tile.view()(y, x, c) = rgb(y_start + y, x_start + x, c);
                     hint_tile.view()(y, x) = alpha_hint(y_start + y, x_start + x);
                 }
             }
@@ -183,7 +189,8 @@ Result<FrameResult> InferenceSession::run_tiled(
                     acc_weight.view()(global_y, global_x) += w_val;
                     acc_alpha.view()(global_y, global_x) += res->alpha.view()(y, x) * w_val;
                     for (int c = 0; c < 3; ++c) {
-                        acc_fg.view()(global_y, global_x, c) += res->foreground.view()(y, x, c) * w_val;
+                        acc_fg.view()(global_y, global_x, c) +=
+                            res->foreground.view()(y, x, c) * w_val;
                     }
                 }
             }
@@ -195,9 +202,9 @@ Result<FrameResult> InferenceSession::run_tiled(
         float w_val = acc_weight.view().data[i];
         if (w_val > 0.0001f) {
             acc_alpha.view().data[i] /= w_val;
-            acc_fg.view().data[i*3] /= w_val;
-            acc_fg.view().data[i*3+1] /= w_val;
-            acc_fg.view().data[i*3+2] /= w_val;
+            acc_fg.view().data[i * 3] /= w_val;
+            acc_fg.view().data[i * 3 + 1] /= w_val;
+            acc_fg.view().data[i * 3 + 2] /= w_val;
         }
     }
 
@@ -252,126 +259,167 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     ColorUtils::linear_to_srgb(comp);
 }
 
-Result<FrameResult> InferenceSession::infer_raw(
-    const Image& rgb,
-    const Image& alpha_hint,
-    const InferenceParams& params
-) {
+Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<Image>& rgbs,
+                                                             const std::vector<Image>& alpha_hints,
+                                                             const InferenceParams& params) {
+    if (rgbs.empty()) return std::vector<FrameResult>{};
+
+    // Tiling logic for batch (simplified: if first image needs tiling, we don't batch but run tiled
+    // one by one) Actually, tiling should be handled at a higher level if we want to batch tiles.
+    // For now, let's keep it simple: tiling disables batching.
+    int target_res =
+        params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+    if (params.enable_tiling && (rgbs[0].width > target_res || rgbs[0].height > target_res)) {
+        std::vector<FrameResult> results;
+        for (size_t i = 0; i < rgbs.size(); ++i) {
+            auto res = run_tiled(rgbs[i], alpha_hints[i], params, target_res);
+            if (!res) return unexpected(res.error());
+            results.push_back(std::move(*res));
+        }
+        return results;
+    }
+
+    auto results_res = infer_batch_raw(rgbs, alpha_hints, params);
+    if (!results_res) return results_res;
+
+    for (auto& res : *results_res) {
+        apply_post_process(res, params);
+    }
+    return results_res;
+}
+
+Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
+    const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
+    const InferenceParams& params) {
+    if (rgbs.empty()) return std::vector<FrameResult>{};
+
     try {
-        Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+        Ort::MemoryInfo memory_info =
+            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        int target_res =
+            params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+        size_t batch_size = rgbs.size();
 
-        // The Python export outputs a single tensor with 4 channels (RGB + Hint)
-        // Check if the model expects 1 input (concatenated) or 2 inputs
         bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
-
         std::vector<Ort::Value> input_tensors;
-        m_planar_pool.resize(is_concatenated ? 1 : m_input_node_dims.size());
 
-        Rect roi = { 0, 0, rgb.width, rgb.height };
+        // Tracking valid areas for each image in batch
+        std::vector<Rect> rois(batch_size);
 
         if (is_concatenated) {
             auto shape = m_input_node_dims[0];
-            int64_t batch_size = shape[0] < 0 ? 1 : shape[0];
             int64_t model_h = shape[2] < 0 ? target_res : shape[2];
             int64_t model_w = shape[3] < 0 ? target_res : shape[3];
 
-            Image current_rgb = rgb;
-            Image current_hint = alpha_hint;
-
-            // Preserve Aspect Ratio using Padding
-            m_resize_pool.resize(2);
-            auto [padded_rgb, rgb_roi] = ColorUtils::fit_pad(rgb, (int)model_w, (int)model_h);
-            auto [padded_hint, hint_roi] = ColorUtils::fit_pad(alpha_hint, (int)model_w, (int)model_h);
-            
-            m_resize_pool[0] = std::move(padded_rgb);
-            m_resize_pool[1] = std::move(padded_hint);
-            current_rgb = m_resize_pool[0].view();
-            current_hint = m_resize_pool[1].view();
-            roi = rgb_roi; // Store the valid area to crop back later
-
-            size_t planar_size = 4 * model_h * model_w;
-            if (m_planar_pool[0].view().data.size() != planar_size) {
-                m_planar_pool[0] = ImageBuffer(static_cast<int>(planar_size), 1, 1);
+            size_t total_planar_size = batch_size * 4 * model_h * model_w;
+            m_planar_pool.resize(1);
+            if (m_planar_pool[0].view().data.size() != total_planar_size) {
+                m_planar_pool[0] = ImageBuffer(static_cast<int>(total_planar_size), 1, 1);
             }
 
-            // Manually interleave to planar and apply ImageNet normalization to RGB
-            // RGB mean: [0.485, 0.456, 0.406], std: [0.229, 0.224, 0.225]
-            float* dst = m_planar_pool[0].view().data.data();
+            float* dst_base = m_planar_pool[0].view().data.data();
+            size_t image_stride = 4 * model_h * model_w;
             size_t channel_stride = model_h * model_w;
-            
-            for (int y = 0; y < model_h; ++y) {
-                for (int x = 0; x < model_w; ++x) {
-                    size_t idx = y * model_w + x;
-                    dst[0 * channel_stride + idx] = (current_rgb(y, x, 0) - 0.485f) / 0.229f; // R
-                    dst[1 * channel_stride + idx] = (current_rgb(y, x, 1) - 0.456f) / 0.224f; // G
-                    dst[2 * channel_stride + idx] = (current_rgb(y, x, 2) - 0.406f) / 0.225f; // B
-                    dst[3 * channel_stride + idx] = current_hint(y, x, 0); // Hint
+
+            for (size_t b = 0; b < batch_size; ++b) {
+                auto [padded_rgb, rgb_roi] =
+                    ColorUtils::fit_pad(rgbs[b], (int)model_w, (int)model_h);
+                auto [padded_hint, hint_roi] =
+                    ColorUtils::fit_pad(alpha_hints[b], (int)model_w, (int)model_h);
+                rois[b] = rgb_roi;
+
+                Image cur_rgb = padded_rgb.view();
+                Image cur_hint = padded_hint.view();
+                float* dst = dst_base + (b * image_stride);
+
+                for (int y = 0; y < model_h; ++y) {
+                    for (int x = 0; x < model_w; ++x) {
+                        size_t idx = y * model_w + x;
+                        dst[0 * channel_stride + idx] = (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
+                        dst[1 * channel_stride + idx] = (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
+                        dst[2 * channel_stride + idx] = (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
+                        dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
+                    }
                 }
             }
 
-            std::vector<int64_t> effective_shape = {batch_size, 4, model_h, model_w};
-            input_tensors.push_back(Ort::Value::CreateTensor<float>(
-                memory_info,
-                dst, planar_size,
-                effective_shape.data(), effective_shape.size()
-            ));
+            std::vector<int64_t> effective_shape = {(int64_t)batch_size, 4, model_h, model_w};
+            input_tensors.push_back(
+                Ort::Value::CreateTensor<float>(memory_info, dst_base, total_planar_size,
+                                                effective_shape.data(), effective_shape.size()));
         } else {
-            // ... (legacy multi-input path, unlikely for CorridorKey but kept for safety)
-            // For now let's simplify and only focus on the primary path
-            return unexpected(Error{ ErrorCode::HardwareNotSupported, "Non-concatenated models not yet supported with padding" });
+            return unexpected(Error{ErrorCode::HardwareNotSupported,
+                                    "Non-concatenated models not yet supported with batching"});
         }
 
         auto output_tensors = m_session.Run(
-            Ort::RunOptions{nullptr},
-            m_input_node_names_ptr.data(),
-            input_tensors.data(),
-            input_tensors.size(),
-            m_output_node_names_ptr.data(),
-            m_output_node_names_ptr.size()
-        );
+            Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(), input_tensors.data(),
+            input_tensors.size(), m_output_node_names_ptr.data(), m_output_node_names_ptr.size());
 
         if (output_tensors.empty()) {
-            return unexpected(Error{ ErrorCode::InferenceFailed, "Model produced no output tensors" });
+            return unexpected(
+                Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
         }
 
-        FrameResult result;
+        std::vector<FrameResult> batch_results(batch_size);
 
-        // Extract alpha and crop back to original aspect ratio
-        if (output_tensors.size() > 0) {
-            auto shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
-            ImageBuffer full_alpha((int)shape[3], (int)shape[2], (int)shape[1]);
-            ColorUtils::from_planar(output_tensors[0].GetTensorData<float>(), full_alpha.view());
-            
-            // Resize ROI back to match original input size exactly
-            ImageBuffer cropped = ColorUtils::crop(full_alpha.view(), roi.x, roi.y, roi.width, roi.height);
-            result.alpha = ColorUtils::resize(cropped.view(), rgb.width, rgb.height);
+        float* alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
+        float* fg_ptr =
+            output_tensors.size() > 1 ? output_tensors[1].GetTensorMutableData<float>() : nullptr;
+
+        auto alpha_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
+        size_t alpha_image_stride = alpha_shape[1] * alpha_shape[2] * alpha_shape[3];
+
+        std::vector<int64_t> fg_shape;
+        size_t fg_image_stride = 0;
+        if (fg_ptr) {
+            fg_shape = output_tensors[1].GetTensorTypeAndShapeInfo().GetShape();
+            fg_image_stride = fg_shape[1] * fg_shape[2] * fg_shape[3];
         }
 
-        // Extract foreground and crop back
-        if (output_tensors.size() > 1) {
-            auto shape = output_tensors[1].GetTensorTypeAndShapeInfo().GetShape();
-            ImageBuffer full_fg((int)shape[3], (int)shape[2], (int)shape[1]);
-            ColorUtils::from_planar(output_tensors[1].GetTensorData<float>(), full_fg.view());
-            
-            ImageBuffer cropped = ColorUtils::crop(full_fg.view(), roi.x, roi.y, roi.width, roi.height);
-            result.foreground = ColorUtils::resize(cropped.view(), rgb.width, rgb.height);
+        for (size_t b = 0; b < batch_size; ++b) {
+            FrameResult& result = batch_results[b];
+            Rect& roi = rois[b];
+
+            // Extract alpha
+            ImageBuffer full_alpha((int)alpha_shape[3], (int)alpha_shape[2], (int)alpha_shape[1]);
+            ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride), full_alpha.view());
+            ImageBuffer cropped_alpha =
+                ColorUtils::crop(full_alpha.view(), roi.x, roi.y, roi.width, roi.height);
+            result.alpha = ColorUtils::resize(cropped_alpha.view(), rgbs[b].width, rgbs[b].height);
+
+            // Extract foreground
+            if (fg_ptr) {
+                ImageBuffer full_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
+                ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), full_fg.view());
+                ImageBuffer cropped_fg =
+                    ColorUtils::crop(full_fg.view(), roi.x, roi.y, roi.width, roi.height);
+                result.foreground =
+                    ColorUtils::resize(cropped_fg.view(), rgbs[b].width, rgbs[b].height);
+            }
         }
 
-        return result;
+        return batch_results;
+
     } catch (const Ort::Exception& e) {
-        return unexpected(Error{ ErrorCode::InferenceFailed, std::string("ONNX Runtime execution failed: ") + e.what() });
+        return unexpected(Error{ErrorCode::InferenceFailed,
+                                std::string("ONNX Runtime execution failed: ") + e.what()});
     }
 }
 
-Result<FrameResult> InferenceSession::run(
-    const Image& rgb,
-    const Image& alpha_hint,
-    const InferenceParams& params
-) {
+Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
+                                                const InferenceParams& params) {
+    auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params);
+    if (!batch_res) return unexpected(batch_res.error());
+    return std::move((*batch_res)[0]);
+}
+
+Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,
+                                          const InferenceParams& params) {
     // Check for tiling request
-    int target_res = params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-    
+    int target_res =
+        params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+
     // Only tile if requested and input is significantly larger than model
     if (params.enable_tiling && (rgb.width > target_res || rgb.height > target_res)) {
         return run_tiled(rgb, alpha_hint, params, target_res);
@@ -384,4 +432,4 @@ Result<FrameResult> InferenceSession::run(
     return result_res;
 }
 
-} // namespace corridorkey
+}  // namespace corridorkey

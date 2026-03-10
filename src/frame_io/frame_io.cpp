@@ -1,4 +1,5 @@
 #include <corridorkey/frame_io.hpp>
+
 #include "exr_io.hpp"
 #include "png_io.hpp"
 
@@ -13,7 +14,7 @@ Result<ImageBuffer> read_frame(const std::filesystem::path& path) {
         return read_stb(path);
     }
 
-    return unexpected(Error{ ErrorCode::IoError, "Unsupported file format: " + ext });
+    return unexpected(Error{ErrorCode::IoError, "Unsupported file format: " + ext});
 }
 
 Result<void> write_frame(const std::filesystem::path& path, const Image& image) {
@@ -25,14 +26,11 @@ Result<void> write_frame(const std::filesystem::path& path, const Image& image) 
         return write_png(path, image);
     }
 
-    return unexpected(Error{ ErrorCode::IoError, "Unsupported output format: " + ext });
+    return unexpected(Error{ErrorCode::IoError, "Unsupported output format: " + ext});
 }
 
-Result<void> save_result(
-    const std::filesystem::path& base_dir,
-    const std::string& filename,
-    const FrameResult& result
-) {
+Result<void> save_result(const std::filesystem::path& base_dir, const std::string& filename,
+                         const FrameResult& result) {
     try {
         auto matte_dir = base_dir / "Matte";
         auto fg_dir = base_dir / "FG";
@@ -64,8 +62,9 @@ Result<void> save_result(
 
         return {};
     } catch (const std::exception& e) {
-        return unexpected(Error{ ErrorCode::IoError, std::string("Failed to save result structure: ") + e.what() });
+        return unexpected(
+            Error{ErrorCode::IoError, std::string("Failed to save result structure: ") + e.what()});
     }
 }
 
-} // namespace corridorkey::frame_io
+}  // namespace corridorkey::frame_io

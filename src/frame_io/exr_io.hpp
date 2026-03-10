@@ -11,4 +11,4 @@ namespace corridorkey {
 Result<ImageBuffer> read_exr(const std::filesystem::path& path);
 Result<void> write_exr(const std::filesystem::path& path, const Image& image);
 
-} // namespace corridorkey
+}  // namespace corridorkey

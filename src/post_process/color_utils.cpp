@@ -1,13 +1,15 @@
 #include "color_utils.hpp"
-#include "common/srgb_lut.hpp"
-#include <cmath>
+
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <vector>
 
+#include "common/srgb_lut.hpp"
+
 #if __has_include(<execution>) && (defined(__cpp_lib_execution) || !defined(__clang__))
 #include <execution>
-#define EXEC_POLICY std::execution::par_unseq ,
+#define EXEC_POLICY std::execution::par_unseq,
 #else
 #define EXEC_POLICY
 #endif
@@ -16,16 +18,14 @@ namespace corridorkey {
 
 void ColorUtils::srgb_to_linear(Image image) {
     const auto& lut = SrgbLut::instance();
-    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(), [&](float& p) {
-        p = lut.to_linear(p);
-    });
+    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(),
+                  [&](float& p) { p = lut.to_linear(p); });
 }
 
 void ColorUtils::linear_to_srgb(Image image) {
     const auto& lut = SrgbLut::instance();
-    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(), [&](float& p) {
-        p = lut.to_srgb(p);
-    });
+    std::for_each(EXEC_POLICY image.data.begin(), image.data.end(),
+                  [&](float& p) { p = lut.to_srgb(p); });
 }
 
 void ColorUtils::premultiply(Image rgb, const Image alpha) {
@@ -155,8 +155,8 @@ void ColorUtils::generate_rough_matte(const Image rgb, Image alpha_hint) {
             // We look for pixels where green is significantly higher than others
             float max_rb = std::max(r, b);
             float green_diff = g - max_rb;
-            
-            // Map difference to a rough alpha: 
+
+            // Map difference to a rough alpha:
             // If green is much higher, alpha goes to 0 (transparent)
             // If not green, alpha stays 1 (opaque)
             float mask = std::clamp(green_diff * 10.0f, 0.0f, 1.0f);
@@ -201,12 +201,13 @@ ImageBuffer ColorUtils::resize(const Image image, int new_width, int new_height)
 }
 
 std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(const Image image, int target_w, int target_h) {
-    float scale = std::min(static_cast<float>(target_w) / image.width, static_cast<float>(target_h) / image.height);
+    float scale = std::min(static_cast<float>(target_w) / image.width,
+                           static_cast<float>(target_h) / image.height);
     int new_w = static_cast<int>(image.width * scale);
     int new_h = static_cast<int>(image.height * scale);
 
     ImageBuffer resized = resize(image, new_w, new_h);
-    
+
     ImageBuffer result(target_w, target_h, image.channels);
     std::fill(result.view().data.begin(), result.view().data.end(), 0.0f);
 
@@ -224,7 +225,7 @@ std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(const Image image, int target_w
         }
     }
 
-    return std::make_pair(std::move(result), Rect{ pad_x, pad_y, new_w, new_h });
+    return std::make_pair(std::move(result), Rect{pad_x, pad_y, new_w, new_h});
 }
 
 ImageBuffer ColorUtils::crop(const Image image, int x_start, int y_start, int w, int h) {
@@ -242,4 +243,4 @@ ImageBuffer ColorUtils::crop(const Image image, int x_start, int y_start, int w,
     return result;
 }
 
-} // namespace corridorkey
+}  // namespace corridorkey

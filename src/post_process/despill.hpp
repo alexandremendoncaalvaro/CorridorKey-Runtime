@@ -13,4 +13,4 @@ namespace corridorkey {
  */
 void despill(Image rgb, float strength);
 
-} // namespace corridorkey
+}  // namespace corridorkey

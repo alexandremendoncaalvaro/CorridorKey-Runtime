@@ -1,4 +1,5 @@
 #include "png_io.hpp"
+
 #include "common/srgb_lut.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -7,8 +8,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <vendor/stb_image_write.h>
 
-#include <vector>
 #include <algorithm>
+#include <vector>
 
 namespace corridorkey {
 
@@ -17,7 +18,8 @@ Result<ImageBuffer> read_stb(const std::filesystem::path& path) {
     unsigned char* data = stbi_load(path.string().c_str(), &width, &height, &channels, 0);
 
     if (!data) {
-        return unexpected(Error{ ErrorCode::IoError, "STB failed to load image: " + std::string(stbi_failure_reason()) });
+        return unexpected(Error{ErrorCode::IoError,
+                                "STB failed to load image: " + std::string(stbi_failure_reason())});
     }
 
     ImageBuffer buffer(width, height, channels);
@@ -36,7 +38,7 @@ Result<ImageBuffer> read_stb(const std::filesystem::path& path) {
 
 Result<void> write_png(const std::filesystem::path& path, const Image& image) {
     if (image.empty()) {
-        return unexpected(Error{ ErrorCode::InvalidParameters, "Cannot write empty image to PNG" });
+        return unexpected(Error{ErrorCode::InvalidParameters, "Cannot write empty image to PNG"});
     }
 
     const auto& lut = SrgbLut::instance();
@@ -45,16 +47,18 @@ Result<void> write_png(const std::filesystem::path& path, const Image& image) {
     // Linearized conversion from Aligned Float Linear to 8-bit sRGB
     for (size_t i = 0; i < image.data.size(); ++i) {
         float srgb = lut.to_srgb(image.data[i]);
-        srgb_data[i] = static_cast<unsigned char>(std::clamp(static_cast<int>(srgb * 255.0f + 0.5f), 0, 255));
+        srgb_data[i] =
+            static_cast<unsigned char>(std::clamp(static_cast<int>(srgb * 255.0f + 0.5f), 0, 255));
     }
 
-    int success = stbi_write_png(path.string().c_str(), image.width, image.height, image.channels, srgb_data.data(), image.width * image.channels);
+    int success = stbi_write_png(path.string().c_str(), image.width, image.height, image.channels,
+                                 srgb_data.data(), image.width * image.channels);
 
     if (!success) {
-        return unexpected(Error{ ErrorCode::IoError, "STB failed to write PNG" });
+        return unexpected(Error{ErrorCode::IoError, "STB failed to write PNG"});
     }
 
     return {};
 }
 
-} // namespace corridorkey
+}  // namespace corridorkey
