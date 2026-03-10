@@ -333,6 +333,22 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
 
     // Initial pre-fetch
     auto current_batch_future = std::async(std::launch::async, fetch_batch, batch_size);
+    std::future<Result<void>> pending_encode;
+    bool has_pending_encode = false;
+
+    auto wait_for_pending_encode = [&]() -> Result<void> {
+        if (!has_pending_encode) {
+            return {};
+        }
+
+        auto encode_res = common::measure_stage(on_stage, "video_wait_for_encode",
+                                                [&]() { return pending_encode.get(); });
+        has_pending_encode = false;
+        if (!encode_res) {
+            return Unexpected(encode_res.error());
+        }
+        return {};
+    };
 
     while (true) {
         auto current_batch_res = current_batch_future.get();
@@ -363,14 +379,33 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
             current_batch.rgb_views.size());
         if (!results) return Unexpected(results.error());
 
-        for (auto& res : *results) {
-            auto write_res = common::measure_stage(
-                on_stage, "video_encode_frame",
-                [&]() { return writer->write_frame(res.composite.view()); }, 1);
-            if (!write_res) return Unexpected(write_res.error());
+        auto pending_res = wait_for_pending_encode();
+        if (!pending_res) {
+            return Unexpected(pending_res.error());
         }
 
+        auto frames_to_encode = std::move(*results);
+        has_pending_encode = true;
+        pending_encode = std::async(
+            std::launch::async,
+            [frames = std::move(frames_to_encode), &writer, on_stage]() mutable -> Result<void> {
+                for (auto& res : frames) {
+                    auto write_res = common::measure_stage(
+                        on_stage, "video_encode_frame",
+                        [&]() { return writer->write_frame(res.composite.view()); }, 1);
+                    if (!write_res) {
+                        return Unexpected(write_res.error());
+                    }
+                }
+                return {};
+            });
+
         frame_idx += current_batch.rgb_views.size();
+    }
+
+    auto final_encode_res = wait_for_pending_encode();
+    if (!final_encode_res) {
+        return Unexpected(final_encode_res.error());
     }
 
     common::measure_stage(on_stage, "video_flush_writer", [&]() { writer.reset(); });

@@ -1,5 +1,6 @@
 #include "inference_session.hpp"
 
+#include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
 #include "post_process/color_utils.hpp"
@@ -8,6 +9,70 @@
 #include "session_policy.hpp"
 
 namespace corridorkey {
+
+namespace {
+
+void extract_tile_rows(const Image& source_rgb, const Image& source_hint, Image rgb_tile,
+                       Image hint_tile, int y_start, int x_start, int y_begin, int y_end) {
+    for (int y = y_begin; y < y_end; ++y) {
+        for (int x = 0; x < rgb_tile.width; ++x) {
+            for (int channel = 0; channel < rgb_tile.channels; ++channel) {
+                rgb_tile(y, x, channel) = source_rgb(y_start + y, x_start + x, channel);
+            }
+            hint_tile(y, x) = source_hint(y_start + y, x_start + x);
+        }
+    }
+}
+
+void accumulate_tile_rows(const Image& mask, const FrameResult& tile_result, Image acc_alpha,
+                          Image acc_fg, Image acc_weight, int y_start, int x_start,
+                          int image_height, int image_width, int y_begin, int y_end) {
+    Image tile_alpha = tile_result.alpha.const_view();
+    Image tile_foreground = tile_result.foreground.const_view();
+
+    for (int y = y_begin; y < y_end; ++y) {
+        int global_y = y_start + y;
+        if (global_y >= image_height) {
+            break;
+        }
+
+        for (int x = 0; x < mask.width; ++x) {
+            int global_x = x_start + x;
+            if (global_x >= image_width) {
+                break;
+            }
+
+            float weight = mask(y, x);
+            acc_weight(global_y, global_x) += weight;
+            acc_alpha(global_y, global_x) += tile_alpha(y, x) * weight;
+            for (int channel = 0; channel < 3; ++channel) {
+                acc_fg(global_y, global_x, channel) += tile_foreground(y, x, channel) * weight;
+            }
+        }
+    }
+}
+
+void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weight, int y_begin,
+                            int y_end) {
+    for (int y = y_begin; y < y_end; ++y) {
+        size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(acc_alpha.width);
+        for (int x = 0; x < acc_alpha.width; ++x) {
+            size_t pixel_index = row_offset + static_cast<size_t>(x);
+            float weight = acc_weight.data[pixel_index];
+            if (weight <= 0.0001f) {
+                continue;
+            }
+
+            acc_alpha.data[pixel_index] /= weight;
+            size_t fg_index = pixel_index * 3;
+            acc_fg.data[fg_index] /= weight;
+            acc_fg.data[fg_index + 1] /= weight;
+            acc_fg.data[fg_index + 2] /= weight;
+        }
+    }
+}
+
+}  // namespace
 
 InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {
     // Default recommended resolution. High-level layers (App)
@@ -132,30 +197,48 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
     std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0f);
     std::fill(acc_weight.view().data.begin(), acc_weight.view().data.end(), 0.0f);
 
-    // Pre-calculate weight mask (linear falloff at edges)
-    ImageBuffer weight_mask_buf(tile_size, tile_size, 1);
-    Image mask = weight_mask_buf.view();
-    common::measure_stage(
-        on_stage, "tile_prepare_weights",
-        [&]() {
-            for (int y = 0; y < tile_size; ++y) {
-                float wy = 1.0f;
-                if (y < padding)
-                    wy = static_cast<float>(y) / padding;
-                else if (y >= tile_size - padding)
-                    wy = static_cast<float>(tile_size - 1 - y) / padding;
+    if (m_tiled_weight_mask.view().width != tile_size || m_tiled_weight_padding != padding) {
+        m_tiled_weight_mask = ImageBuffer(tile_size, tile_size, 1);
+        Image mask_view = m_tiled_weight_mask.view();
+        common::measure_stage(
+            on_stage, "tile_prepare_weights",
+            [&]() {
+                common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
+                    for (int y = y_begin; y < y_end; ++y) {
+                        float wy = 1.0f;
+                        if (padding > 0 && y < padding) {
+                            wy = static_cast<float>(y) / static_cast<float>(padding);
+                        } else if (padding > 0 && y >= tile_size - padding) {
+                            wy =
+                                static_cast<float>(tile_size - 1 - y) / static_cast<float>(padding);
+                        }
 
-                for (int x = 0; x < tile_size; ++x) {
-                    float wx = 1.0f;
-                    if (x < padding)
-                        wx = static_cast<float>(x) / padding;
-                    else if (x >= tile_size - padding)
-                        wx = static_cast<float>(tile_size - 1 - x) / padding;
-                    mask(y, x) = std::min(wx, wy);
-                }
-            }
-        },
-        1);
+                        for (int x = 0; x < tile_size; ++x) {
+                            float wx = 1.0f;
+                            if (padding > 0 && x < padding) {
+                                wx = static_cast<float>(x) / static_cast<float>(padding);
+                            } else if (padding > 0 && x >= tile_size - padding) {
+                                wx = static_cast<float>(tile_size - 1 - x) /
+                                     static_cast<float>(padding);
+                            }
+                            mask_view(y, x) = std::min(wx, wy);
+                        }
+                    }
+                });
+            },
+            1);
+        m_tiled_weight_padding = padding;
+    }
+
+    if (m_tiled_buffer_size != tile_size) {
+        m_tiled_rgb_buffer = ImageBuffer(tile_size, tile_size, 3);
+        m_tiled_hint_buffer = ImageBuffer(tile_size, tile_size, 1);
+        m_tiled_buffer_size = tile_size;
+    }
+
+    Image mask = m_tiled_weight_mask.view();
+    Image rgb_tile = m_tiled_rgb_buffer.view();
+    Image hint_tile = m_tiled_hint_buffer.view();
 
     // Iterate tiles
     int nx = (w + stride - 1) / stride;
@@ -170,46 +253,29 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
             if (x_start + tile_size > w) x_start = std::max(0, w - tile_size);
             if (y_start + tile_size > h) y_start = std::max(0, h - tile_size);
 
-            ImageBuffer rgb_tile(tile_size, tile_size, 3);
-            ImageBuffer hint_tile(tile_size, tile_size, 1);
-
             common::measure_stage(
                 on_stage, "tile_extract",
                 [&]() {
-                    for (int y = 0; y < tile_size; ++y) {
-                        for (int x = 0; x < tile_size; ++x) {
-                            for (int c = 0; c < 3; ++c)
-                                rgb_tile.view()(y, x, c) = rgb(y_start + y, x_start + x, c);
-                            hint_tile.view()(y, x) = alpha_hint(y_start + y, x_start + x);
-                        }
-                    }
+                    common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
+                        extract_tile_rows(rgb, alpha_hint, rgb_tile, hint_tile, y_start, x_start,
+                                          y_begin, y_end);
+                    });
                 },
                 1);
 
             auto res = common::measure_stage(
                 on_stage, "tile_infer",
-                [&]() { return infer_raw(rgb_tile.view(), hint_tile.view(), params, on_stage); },
-                1);
+                [&]() { return infer_raw(rgb_tile, hint_tile, params, on_stage); }, 1);
             if (!res) return Unexpected(res.error());
 
             common::measure_stage(
                 on_stage, "tile_accumulate",
                 [&]() {
-                    for (int y = 0; y < tile_size; ++y) {
-                        for (int x = 0; x < tile_size; ++x) {
-                            int global_y = y_start + y;
-                            int global_x = x_start + x;
-                            if (global_y >= h || global_x >= w) continue;
-
-                            float w_val = mask(y, x);
-                            acc_weight.view()(global_y, global_x) += w_val;
-                            acc_alpha.view()(global_y, global_x) += res->alpha.view()(y, x) * w_val;
-                            for (int c = 0; c < 3; ++c) {
-                                acc_fg.view()(global_y, global_x, c) +=
-                                    res->foreground.view()(y, x, c) * w_val;
-                            }
-                        }
-                    }
+                    common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
+                        accumulate_tile_rows(mask, *res, acc_alpha.view(), acc_fg.view(),
+                                             acc_weight.view(), y_start, x_start, h, w, y_begin,
+                                             y_end);
+                    });
                 },
                 1);
         }
@@ -218,15 +284,10 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
     common::measure_stage(
         on_stage, "tile_normalize",
         [&]() {
-            for (int i = 0; i < w * h; ++i) {
-                float w_val = acc_weight.view().data[i];
-                if (w_val > 0.0001f) {
-                    acc_alpha.view().data[i] /= w_val;
-                    acc_fg.view().data[i * 3] /= w_val;
-                    acc_fg.view().data[i * 3 + 1] /= w_val;
-                    acc_fg.view().data[i * 3 + 2] /= w_val;
-                }
-            }
+            common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+                normalize_accumulators(acc_alpha.view(), acc_fg.view(), acc_weight.view(), y_begin,
+                                       y_end);
+            });
         },
         1);
 
@@ -269,15 +330,17 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     common::measure_stage(
         on_stage, "post_premultiply",
         [&]() {
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
-                    float a = alpha_view(y, x);
-                    proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
-                    proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
-                    proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
-                    proc(y, x, 3) = a;
+            common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+                for (int y = y_begin; y < y_end; ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        float a = alpha_view(y, x);
+                        proc(y, x, 0) = lut.to_linear(fg(y, x, 0)) * a;
+                        proc(y, x, 1) = lut.to_linear(fg(y, x, 1)) * a;
+                        proc(y, x, 2) = lut.to_linear(fg(y, x, 2)) * a;
+                        proc(y, x, 3) = a;
+                    }
                 }
-            }
+            });
         },
         1);
 

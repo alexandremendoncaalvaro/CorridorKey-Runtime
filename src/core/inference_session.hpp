@@ -104,6 +104,11 @@ class InferenceSession {
     // Pre-allocated buffer pools (reused across run() calls)
     std::vector<ImageBuffer> m_resize_pool = {};
     std::vector<ImageBuffer> m_planar_pool = {};
+    ImageBuffer m_tiled_rgb_buffer = {};
+    ImageBuffer m_tiled_hint_buffer = {};
+    ImageBuffer m_tiled_weight_mask = {};
+    int m_tiled_buffer_size = 0;
+    int m_tiled_weight_padding = -1;
 };
 
 }  // namespace corridorkey
