@@ -2,6 +2,7 @@
 #include <corridorkey/frame_io.hpp>
 #include <deque>
 #include <future>
+#include <mutex>
 
 #include "../frame_io/video_io.hpp"
 #include "../post_process/color_utils.hpp"
@@ -16,6 +17,8 @@ class Engine::Impl {
     std::filesystem::path model_path;
     std::optional<DeviceInfo> cpu_fallback_device;
     std::optional<BackendFallbackInfo> fallback_info;
+    std::once_flag warmup_once;
+    std::optional<Error> warmup_error;
 
     Impl() = default;
 
@@ -58,6 +61,31 @@ class Engine::Impl {
         }
 
         return operation();
+    }
+
+    Result<void> ensure_warmup(StageTimingCallback on_stage) {
+        std::call_once(warmup_once, [&]() {
+            int res = session != nullptr ? session->recommended_resolution() : 512;
+            ImageBuffer warm_rgb(res, res, 3);
+            ImageBuffer warm_hint(res, res, 1);
+            std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
+            std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
+
+            auto warmup_frame = common::measure_stage(on_stage, "engine_warmup", [&]() {
+                return run_with_cpu_fallback<FrameResult>([&]() {
+                    return session->run(warm_rgb.view(), warm_hint.view(), {}, on_stage);
+                });
+            });
+            if (!warmup_frame) {
+                warmup_error = warmup_frame.error();
+            }
+        });
+
+        if (warmup_error.has_value()) {
+            return Unexpected(*warmup_error);
+        }
+
+        return {};
     }
 };
 
@@ -108,17 +136,6 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
         engine->m_impl->session = std::move(*session_res);
     }
 
-    // Warm-up run (especially important for CoreML/TensorRT JIT compilation)
-    int res = engine->recommended_resolution();
-    ImageBuffer warm_rgb(res, res, 3);
-    ImageBuffer warm_hint(res, res, 1);
-    std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
-    std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
-
-    common::measure_stage(on_stage, "engine_warmup", [&]() {
-        engine->process_frame(warm_rgb.view(), warm_hint.view(), {}, on_stage);
-    });
-
     return engine;
 }
 
@@ -127,6 +144,11 @@ Result<FrameResult> Engine::process_frame(const Image& rgb, const Image& alpha_h
                                           StageTimingCallback on_stage) {
     if (!m_impl->session) {
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
+    }
+
+    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    if (!warmup_res) {
+        return Unexpected(warmup_res.error());
     }
 
     return m_impl->run_with_cpu_fallback<FrameResult>(
@@ -139,6 +161,11 @@ Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<I
                                                              StageTimingCallback on_stage) {
     if (!m_impl->session) {
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
+    }
+
+    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    if (!warmup_res) {
+        return Unexpected(warmup_res.error());
     }
 
     return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
@@ -154,6 +181,11 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
     if (has_hints && inputs.size() != alpha_hints.size()) {
         return Unexpected(
             Error{ErrorCode::InvalidParameters, "Inputs and alpha hints size mismatch"});
+    }
+
+    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    if (!warmup_res) {
+        return Unexpected(warmup_res.error());
     }
 
     size_t total_frames = inputs.size();
@@ -228,6 +260,11 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
                                    StageTimingCallback on_stage) {
     if (!m_impl->session) {
         return Unexpected(Error{ErrorCode::InferenceFailed, "Engine not initialized"});
+    }
+
+    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    if (!warmup_res) {
+        return Unexpected(warmup_res.error());
     }
 
     auto reader_rgb_res = common::measure_stage(on_stage, "video_open_reader",

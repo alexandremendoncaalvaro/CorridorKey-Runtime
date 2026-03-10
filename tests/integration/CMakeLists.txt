@@ -5,6 +5,7 @@ add_executable(test_integration
     test_png_roundtrip.cpp
     test_video_roundtrip.cpp
     test_post_process_chain.cpp
+    test_engine_warmup.cpp
 )
 
 target_link_libraries(test_integration
