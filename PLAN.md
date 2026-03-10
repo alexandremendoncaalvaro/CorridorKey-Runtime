@@ -136,6 +136,10 @@
 - Primeiro, executar o baseline operacional:
   - `./build/release/src/cli/corridorkey doctor --json`
   - `./build/release/src/cli/corridorkey benchmark --json -m models/corridorkey_int8_512.onnx -d cpu`
+- Para uma retomada reproduzivel, usar `scripts/run_corpus.sh`:
+  - `CORRIDORKEY_CORPUS_PROFILE=smoke` para validacao curta
+  - `CORRIDORKEY_CORPUS_PROFILE=baseline` para o baseline de trabalho
+  - `CORRIDORKEY_CORPUS_PROFILE=full` para a rodada completa do corpus
 - Depois, gerar artefatos do corpus em pasta fora dos arquivos rastreados:
   - salvar `doctor`, `benchmark` e `process --json`
   - registrar qual asset foi usado, modelo, backend, preset e se houve fallback
