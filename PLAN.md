@@ -114,6 +114,13 @@
     uso
 - O bundle macOS ja empacota binario, dylib, modelos validados, smoke test e
   suporte opcional a assinatura/notarizacao via ambiente.
+- O cache de modelos otimizados agora escolhe um root gravavel de forma
+  resiliente:
+  - respeita `CORRIDORKEY_CACHE_DIR` quando gravavel
+  - faz fallback automatico para um cache temporario quando o root configurado
+    ou padrao nao pode ser usado
+  - `doctor --json` explicita `configured_path`, `selected_path`,
+    `fallback_in_use` e os candidatos avaliados
 - O caminho tiled ja usa reuso de buffers, cache de weight mask e paralelismo
   controlado nas etapas CPU ao redor da inferencia.
 - A suite atual passa com:
@@ -127,6 +134,9 @@
 - `post_despeckle` ainda aparece como custo material no caminho CPU.
 - Warmup e first-frame continuam relevantes e precisam de investigacao propria
   no trilho CoreML.
+- Falhas de permissao no cache otimizado nao podem mais bloquear criacao de
+  sessao; esse caso deve degradar para outro root gravavel ou desabilitar o
+  cache de forma limpa.
 - O caminho 4K nativo com `int8_768` + `--tiled` ainda e pesado demais para ser
   considerado fechado; a proxima rodada precisa medir e reduzir esse custo sem
   perder resolucao nem qualidade.
@@ -143,7 +153,23 @@
   - `engine_create`: `473.243 ms` -> `110.579 ms` (`-76.6%`)
   - `avg_latency_ms`: `2537.366 ms` -> `1725.103 ms` (`-32.0%`)
   - `ort_run`: `21606.237 ms` -> `17264.443 ms` total (`-20.1%`)
+- Medicao controlada 4K com `process --json` no frame
+  `build/runtime_inputs/100745-video-2160-frame0.png`, `int8_768`, `cpu`,
+  `--tiled`:
+  - `batch-size 2` reduziu `job_total` de `180226.274 ms` para
+    `171322.677 ms` (`-4.94%`)
+  - `batch-size 4` reduziu `job_total` para `170744.913 ms` (`-5.26%`), mas
+    aumentou `batch_prepare_inputs` em `+111.34%` e `batch_extract_outputs` em
+    `+48.92%`
+  - `tile_infer` caiu de `45` chamadas para `23` com `batch-size 2` e `12` com
+    `batch-size 4`
+  - O ganho adicional de `4` sobre `2` foi pequeno demais nesta maquina para
+    justificar promover esse valor como default sem mais corpus e memoria real
 - Mesmo com esses ganhos, `ort_run` continua sendo o gargalo principal.
+- Ao medir o workload 4K tiled no ambiente sandbox atual, apareceu um bug real:
+  o cache otimizado tentava gravar em um root nao permitido e falhava em
+  `session_create`. Esse caso agora virou regressao coberta em teste de
+  integracao.
 
 ## Como retomar sem perder contexto
 
