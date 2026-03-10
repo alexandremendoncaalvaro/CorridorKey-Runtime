@@ -200,4 +200,46 @@ ImageBuffer ColorUtils::resize(const Image image, int new_width, int new_height)
     return result;
 }
 
+std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(const Image image, int target_w, int target_h) {
+    float scale = std::min(static_cast<float>(target_w) / image.width, static_cast<float>(target_h) / image.height);
+    int new_w = static_cast<int>(image.width * scale);
+    int new_h = static_cast<int>(image.height * scale);
+
+    ImageBuffer resized = resize(image, new_w, new_h);
+    
+    ImageBuffer result(target_w, target_h, image.channels);
+    std::fill(result.view().data.begin(), result.view().data.end(), 0.0f);
+
+    int pad_x = (target_w - new_w) / 2;
+    int pad_y = (target_h - new_h) / 2;
+
+    Image dst = result.view();
+    Image src = resized.view();
+
+    for (int y = 0; y < new_h; ++y) {
+        for (int x = 0; x < new_w; ++x) {
+            for (int c = 0; c < image.channels; ++c) {
+                dst(y + pad_y, x + pad_x, c) = src(y, x, c);
+            }
+        }
+    }
+
+    return std::make_pair(std::move(result), Rect{ pad_x, pad_y, new_w, new_h });
+}
+
+ImageBuffer ColorUtils::crop(const Image image, int x_start, int y_start, int w, int h) {
+    ImageBuffer result(w, h, image.channels);
+    Image dst = result.view();
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            for (int c = 0; c < image.channels; ++c) {
+                dst(y, x, c) = image(y + y_start, x + x_start, c);
+            }
+        }
+    }
+
+    return result;
+}
+
 } // namespace corridorkey

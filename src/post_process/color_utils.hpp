@@ -31,6 +31,17 @@ public:
     static ImageBuffer resize(const Image image, int new_width, int new_height);
 
     /**
+     * @brief Resize image maintaining aspect ratio and padding to reach target size (Letterbox).
+     * Returns the padded image and the original valid area (ROI).
+     */
+    static std::pair<ImageBuffer, struct Rect> fit_pad(const Image image, int target_w, int target_h);
+
+    /**
+     * @brief Crop an image using a defined rectangle.
+     */
+    static ImageBuffer crop(const Image image, int x, int y, int w, int h);
+
+    /**
      * @brief Convert interleaved HWC data to planar NCHW data.
      * Uses 64x64 tiling for cache efficiency.
      */
