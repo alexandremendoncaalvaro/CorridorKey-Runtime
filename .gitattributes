@@ -1,1 +1,4 @@
 assets/video_samples/*.mp4 filter=lfs diff=lfs merge=lfs -text
+assets/image_samples/**/*.png filter=lfs diff=lfs merge=lfs -text
+assets/image_samples/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+assets/image_samples/**/*.exr filter=lfs diff=lfs merge=lfs -text
