@@ -1,0 +1,19 @@
+#!/bin/bash
+set -e
+
+echo "--- Pre-push Quality Gate ---"
+
+# 1. Check Build
+echo "Building project (Release)..."
+cmake --preset release
+cmake --build build/release --parallel
+
+# 2. Run Unit Tests
+echo "Running Unit Tests..."
+./build/release/tests/unit/test_unit
+
+# 3. Run Integration Tests
+echo "Running Integration Tests..."
+./build/release/tests/integration/test_integration
+
+echo "✅ All local checks passed. Pushing to remote..."

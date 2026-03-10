@@ -1,0 +1,43 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  macos-build:
+    name: macOS (Apple Silicon)
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        lfs: true
+
+    - name: Install vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git $HOME/vcpkg
+        $HOME/vcpkg/bootstrap-vcpkg.sh
+        echo "VCPKG_ROOT=$HOME/vcpkg" >> $GITHUB_ENV
+
+    - name: Setup ONNX Runtime (Vendored)
+      run: |
+        mkdir -p vendor/onnxruntime
+        curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-osx-universal2-1.16.3.tgz
+        tar -xzf ort.tgz -C vendor/onnxruntime --strip-components=1
+        rm ort.tgz
+
+    - name: Configure CMake
+      run: cmake --preset release -DCMAKE_MAKE_PROGRAM=ninja
+
+    - name: Build
+      run: cmake --build build/release --parallel
+
+    - name: Run Unit Tests
+      run: ./build/release/tests/unit/test_unit
+
+    - name: Run Integration Tests
+      run: ./build/release/tests/integration/test_integration
