@@ -116,6 +116,13 @@ struct DeviceInfo {
 };
 
 /**
+ * @brief Simple rectangle for ROI operations.
+ */
+struct Rect {
+    int x, y, width, height;
+};
+
+/**
  * @brief Simple image view for passing data without copies.
  * Inspired by std::mdspan, this holds a pointer to data and dimensions.
  */
