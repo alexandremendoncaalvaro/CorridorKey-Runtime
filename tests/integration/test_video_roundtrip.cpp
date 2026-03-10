@@ -1,7 +1,8 @@
 #include <catch2/catch_all.hpp>
+#include <filesystem>
+
 #include "../../src/frame_io/video_io.hpp"
 #include "post_process/color_utils.hpp"
-#include <filesystem>
 
 using namespace corridorkey;
 
@@ -24,13 +25,13 @@ TEST_CASE("VideoReader and VideoWriter roundtrip", "[integration][video]") {
                 float r = static_cast<float>(i) / num_frames;
                 for (size_t j = 0; j < frame.view().data.size(); j += 3) {
                     frame.view().data[j] = r;
-                    frame.view().data[j+1] = 0.5f;
-                    frame.view().data[j+2] = 1.0f - r;
+                    frame.view().data[j + 1] = 0.5f;
+                    frame.view().data[j + 2] = 1.0f - r;
                 }
                 auto write_res = writer->write_frame(frame.view());
                 REQUIRE(write_res.has_value());
             }
-        } // Writer closed here
+        }  // Writer closed here
 
         REQUIRE(std::filesystem::exists(test_video));
         REQUIRE(std::filesystem::file_size(test_video) > 0);
@@ -57,7 +58,7 @@ TEST_CASE("VideoReader and VideoWriter roundtrip", "[integration][video]") {
                 // Check color (with tolerance due to video compression)
                 float expected_r = static_cast<float>(i) / num_frames;
                 // MPEG4 compression can be quite lossy, so we use a generous margin
-                REQUIRE(frame.view()(h/2, w/2, 0) == Catch::Approx(expected_r).margin(0.15));
+                REQUIRE(frame.view()(h / 2, w / 2, 0) == Catch::Approx(expected_r).margin(0.15));
             }
 
             // Next frame should be empty (EOF)
