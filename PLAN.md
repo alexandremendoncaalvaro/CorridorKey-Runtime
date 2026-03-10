@@ -86,6 +86,66 @@
   - NDJSON estavel em `process --json`
   - timings agregados suficientes para localizar gargalos
 
+## Metodo de evolucao e pesquisa
+
+- Toda otimizacao precisa partir de **medicao do pipeline real**.
+- A ordem obrigatoria de trabalho passa a ser:
+  - capturar `doctor --json`, `benchmark --json` e `process --json`
+  - identificar o gargalo dominante por etapa
+  - pesquisar a solucao na stack real usada pelo projeto
+  - implementar a menor mudanca possivel
+  - reexecutar o corpus e aceitar apenas ganhos mensuraveis
+- Fontes prioritarias para cada etapa:
+  - ONNX Runtime oficial para threading, profiling, graph optimization,
+    CoreML EP, TensorRT RTX EP e I/O binding
+  - FFmpeg oficial para decode/encode e VideoToolbox
+  - documentacao oficial da Apple para profiling no macOS
+- O projeto nao deve adotar otimizações por intuicao, folklore de performance
+  ou tecnicas transferidas de outras stacks sem validacao no corpus.
+
+## Estado atual validado
+
+- O runtime ja expoe observabilidade suficiente para investigacao guiada por
+  evidencia:
+  - `doctor --json` inclui bundle, cache, video e modelos validados
+  - `benchmark --json` separa cold start, warmup, throughput e timings por
+    etapa
+  - `models --json` e `presets --json` carregam plataforma, tier e intencao de
+    uso
+- O bundle macOS ja empacota binario, dylib, modelos validados, smoke test e
+  suporte opcional a assinatura/notarizacao via ambiente.
+- O caminho tiled ja usa reuso de buffers, cache de weight mask e paralelismo
+  controlado nas etapas CPU ao redor da inferencia.
+- A suite atual passa com:
+  - `cmake --build build/debug --parallel`
+  - `ctest --test-dir build/debug --output-on-failure`
+
+## Gargalos verificados que dirigem a proxima rodada
+
+- No benchmark sintetico CPU `int8_512`, `ort_run` continua sendo o custo
+  dominante.
+- `post_despeckle` ainda aparece como custo material no caminho CPU.
+- Warmup e first-frame continuam relevantes e precisam de investigacao propria
+  no trilho CoreML.
+- O caminho 4K nativo com `int8_768` + `--tiled` ainda e pesado demais para ser
+  considerado fechado; a proxima rodada precisa medir e reduzir esse custo sem
+  perder resolucao nem qualidade.
+
+## Como retomar sem perder contexto
+
+- Primeiro, executar o baseline operacional:
+  - `./build/release/src/cli/corridorkey doctor --json`
+  - `./build/release/src/cli/corridorkey benchmark --json -m models/corridorkey_int8_512.onnx -d cpu`
+- Depois, gerar artefatos do corpus em pasta fora dos arquivos rastreados:
+  - salvar `doctor`, `benchmark` e `process --json`
+  - registrar qual asset foi usado, modelo, backend, preset e se houve fallback
+- So entao escolher o proximo corte tecnico.
+- Ordem da proxima execucao:
+  - startup/CoreML e first-frame
+  - `ort_run` e configuracao de sessao/modelo
+  - `post_despeckle` no fallback CPU
+  - throughput do caminho 4K tiled
+
 ## AlphaHint como parte do valor percebido
 
 - O runtime aceita hints externos como contrato estavel:
