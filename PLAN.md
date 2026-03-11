@@ -206,8 +206,8 @@
 
 - O primeiro backend acelerado real do Mac deve ser **MLX com
   `.safetensors`**, tratado como trilho de produto proprio.
-- O spike atual de `.mlxfn` fica preservado apenas como **bridge path** para
-  integracao nativa posterior.
+- O pack Apple de shipping passa a ser tratado como **`corridorkey_mlx.safetensors`
+  + bridge exports `.mlxfn` curados por plataforma**.
 - O trilho `PyTorch -> Core ML` direto continua necessario, mas muda de papel:
   - deixa de ser a primeira tentativa de aceleracao do runtime
   - passa a ser o candidato principal para o **artefato final distribuivel**
@@ -223,7 +223,7 @@
 - O repositório agora tem um helper reproduzível para preparar o pack Apple:
   - `scripts/prepare_mlx_model_pack.py`
   - cobre download do release oficial, conversao de `.pth -> .safetensors` e
-    exportacao opcional de bridge `.mlxfn`
+    exportacao dos bridge exports exigidos pelo bundle (`512` e `1024`)
 - A descoberta do SDK do MLX no CMake foi endurecida para priorizar:
   - `CORRIDORKEY_MLX_CMAKE_DIR`
   - `CORRIDORKEY_MLX_PYTHON`
@@ -234,18 +234,18 @@
   esperado no `doctor --json` ficou validado:
   - `mlx.probe_available = true`
   - `mlx.primary_pack_ready = true`
-  - `mlx.bridge_ready = true` quando `corridorkey_mlx_bridge_512.mlxfn` esta
-    presente
+  - `mlx.bridge_ready = true` quando os bridge exports empacotados estao
+    presentes e importaveis
   - `mlx.backend_integrated = true` quando o runtime esta linkado com MLX e o
-    bridge esta importavel
+    pack Apple empacotado executa corretamente
   - `summary.apple_acceleration_probe_ready = true`
-- A execucao do backend MLX dentro do runtime agora ficou validada no trilho
-  de bridge `.mlxfn`:
+- A execucao do backend MLX dentro do runtime agora ficou validada no pack
+  Apple de shipping:
   - `corridorkey process --json -d mlx -i assets/corridor.png -o ... -m models/corridorkey_mlx.safetensors`
     completou com sucesso
-  - `doctor --json` agora marca `integration_mode = experimental_mlxfn_bridge`
-  - o bridge continua sendo caminho **experimental de integracao**, nao o
-    artefato final de shipping para o Mac
+  - `doctor --json` agora marca `integration_mode = mlx_pack_with_bridge_exports`
+  - os bridge exports continuam sendo um detalhe interno do pack Apple, nao o
+    artefato publico principal do Mac
 - O contrato operacional do Mac foi simplificado para nao carregar defaults
   legados:
   - `auto` agora e **model-aware** no runtime
@@ -261,15 +261,23 @@
   - isso quebrava bridges fixos como `corridorkey_mlx_bridge_512.mlxfn`
   - a resolucao automatica agora respeita `engine->recommended_resolution()`
     quando o backend selecionado e `MLX`
-- O runtime agora prefere o menor bridge disponivel quando o usuario aponta
-  para `corridorkey_mlx.safetensors`
-  - prioridade atual: `512`, depois `768`, depois `1024`
-  - racional: a trilha `.mlxfn` e um bridge experimental, entao o default
-    precisa privilegiar first-frame latency previsivel
+- O runtime agora escolhe o bridge export pelo tier real de memoria:
+  - `>= 16 GB`: `1024`, depois `768`, depois `512`
+  - `>= 12 GB`: `768`, depois `512`, depois `1024`
+  - abaixo disso: `512`, depois `768`, depois `1024`
 - Benchmark atual validado do runtime:
   - `MLX` synthetic `512`: `avg_latency_ms = 601.189`
   - `CPU` synthetic `512` (`corridorkey_int8_512.onnx`): `avg_latency_ms = 1050.283`
   - ganho observado do trilho MLX atual: aproximadamente `1.75x`
+- Validacao externa do bundle Mac agora passa fora da arvore de build:
+  - `scripts/validate_mac_release.sh` recria o zip, extrai o bundle, roda o
+    smoke test, valida `doctor`, gera benchmark sintetico, benchmark 4K por
+    frame, `process --json` 4K e confirma preservacao de resolucao
+  - ultimo resumo validado:
+    - `bundle_healthy = true`
+    - `doctor_healthy = true`
+    - `frame_4k_backend = mlx`
+    - `output_matches_input_resolution = true`
 
 ### Criterios de escolha entre MLX e Core ML direto
 

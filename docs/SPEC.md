@@ -389,8 +389,9 @@ Two Apple-specific acceleration tracks are approved for evaluation:
      `corridorkey_mlx.safetensors`
    - acceptable for this runtime because MLX offers C++, C, and Python-facing
      APIs and supports function export/import across frontends
-   - function export/import via `.mlxfn` is treated as a bridge for later
-     native integration, not as the primary shipping artifact in this phase
+   - the shipping Mac pack may include curated `.mlxfn` bridge exports as an
+     internal execution layer while keeping `.safetensors` as the public Apple
+     artifact family
 2. **Direct PyTorch -> Core ML conversion**
    - favored for the final distributable Apple artifact because Apple
      recommends direct conversion from PyTorch to Core ML and recommends
@@ -419,11 +420,10 @@ Current product implication:
   `.safetensors` artifact family** as the operational default.
 - Direct `PyTorch -> Core ML` stays active as the candidate final
   distributable Apple artifact.
-- `.mlxfn` remains a bridge mechanism for later native integration work, not
-  the primary artifact family for the first accelerated Mac delivery.
-- The current runtime may execute an **experimental `.mlxfn` bridge path** for
-  diagnostics and native bring-up, but this does not change the shipping
-  artifact decision for macOS.
+- The current shipping runtime executes the Apple pack through curated
+  `.mlxfn` bridge exports bundled with the MLX pack.
+- `.mlxfn` remains an internal execution detail, not the public Apple model
+  artifact family exposed by the catalog.
 
 Selection criteria for the shipping macOS accelerated path:
 

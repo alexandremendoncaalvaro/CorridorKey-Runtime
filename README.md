@@ -110,9 +110,10 @@ The current Mac conclusion is no longer hypothetical:
 - The current `ONNX -> ORT CoreML EP` path remains a **diagnostic baseline**
   only. It still partitions onto CPU with the current ONNX artifacts and is
   not the preferred Mac acceleration track.
-- MLX function export/import has been proven as a **bridge path** for future
-  native integration. A 512-resolution wrapper export to `.mlxfn` succeeded,
-  but `.mlxfn` is not treated as the primary shipping model pack today.
+- The packaged Mac runtime now ships the official `corridorkey_mlx.safetensors`
+  weights together with bundled `.mlxfn` bridge exports. The pack stays the
+  public Apple artifact; the bridge exports are the execution layer used by the
+  runtime today.
 
 The immediate Mac implementation path is now:
 
@@ -126,15 +127,20 @@ The immediate Mac implementation path is now:
 ### Preparing The MLX Model Pack
 
 The repository now includes a helper to materialize the Apple model pack and
-an optional bridge export:
+the bridge exports required by the runtime bundle:
 
 ```bash
 source .venv-macos-mlx/bin/activate
 python scripts/prepare_mlx_model_pack.py \
   --output-dir models \
-  --tag v1.0.0 \
-  --export-mlxfn models/corridorkey_mlx_bridge_512.mlxfn
+  --tag v1.0.0
 ```
+
+By default this prepares:
+
+- `corridorkey_mlx.safetensors`
+- `corridorkey_mlx_bridge_512.mlxfn`
+- `corridorkey_mlx_bridge_1024.mlxfn`
 
 For local builds, CMake now tries these MLX discovery paths in order:
 
@@ -149,23 +155,21 @@ should report:
 
 - `mlx.probe_available = true`
 - `mlx.primary_pack_ready = true`
-- `mlx.bridge_ready = true` when the optional `.mlxfn` export is present
-- `mlx.backend_integrated = true` when the runtime can execute the bridge path
+- `mlx.bridge_ready = true` when the bundled bridge exports are present
+- `mlx.backend_integrated = true` when the runtime can execute the packaged MLX path
 - `summary.apple_acceleration_probe_ready = true`
-- `summary.apple_acceleration_backend_integrated = true` when the bridge path
-  is linked and importable
+- `summary.apple_acceleration_backend_integrated = true` when the packaged MLX
+  path is linked and importable
 
-The current native execution path is intentionally labeled
-`experimental_mlxfn_bridge` in `doctor --json`: it is the working MLX runtime
-path today, but still an intermediate bridge on the way to a cleaner shipping
-artifact.
+The current native execution path is labeled `mlx_pack_with_bridge_exports` in
+`doctor --json`. That is the current shipping runtime path for Apple Silicon.
 
 On this machine, the current runtime benchmark at synthetic `512` reports:
 
 - `MLX`: `avg_latency_ms = 601.189`
 - `CPU int8_512`: `avg_latency_ms = 1050.283`
 
-That puts the current experimental MLX runtime path at roughly `1.75x` the
+That puts the current MLX runtime path at roughly `1.75x` the
 throughput of the CPU baseline at the same synthetic resolution.
 
 ### Prerequisites
