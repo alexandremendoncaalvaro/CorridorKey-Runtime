@@ -142,6 +142,25 @@ std::optional<std::filesystem::path> find_runtime_library(const std::filesystem:
     return std::nullopt;
 }
 
+std::optional<std::filesystem::path> find_exact_library(const std::filesystem::path& directory,
+                                                        const std::string& filename) {
+    std::error_code error;
+    if (!std::filesystem::exists(directory, error)) {
+        return std::nullopt;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
+        if (error || !entry.is_regular_file()) {
+            continue;
+        }
+        if (entry.path().filename() == filename) {
+            return entry.path();
+        }
+    }
+
+    return std::nullopt;
+}
+
 std::vector<std::string> dependency_references(const std::filesystem::path& executable_path) {
     std::vector<std::string> references;
 #if defined(__APPLE__)
@@ -233,12 +252,25 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     std::filesystem::path smoke_test_path = bundle_root / "smoke_test.sh";
 
     auto runtime_library = find_runtime_library(executable_dir);
+    auto core_library = find_exact_library(executable_dir, "libcorridorkey_core.dylib");
+    auto mlx_library = find_exact_library(executable_dir, "libmlx.dylib");
     auto references = dependency_references(executable_path);
-    bool runtime_reference_found =
+    bool core_reference_found =
         std::any_of(references.begin(), references.end(), [](const std::string& reference) {
+            return reference.find("libcorridorkey_core.dylib") != std::string::npos;
+        });
+    auto core_references = core_library.has_value() ? dependency_references(*core_library)
+                                                    : std::vector<std::string>{};
+    bool runtime_reference_found = std::any_of(
+        core_references.begin(), core_references.end(), [](const std::string& reference) {
             return reference.find("libonnxruntime") != std::string::npos ||
                    reference.find("onnxruntime.dll") != std::string::npos;
         });
+    bool mlx_reference_found = std::any_of(
+        core_references.begin(), core_references.end(), [](const std::string& reference) {
+            return reference.find("libmlx.dylib") != std::string::npos;
+        });
+    auto mlx_metallib = find_exact_library(executable_dir, "mlx.metallib");
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_present = true;
@@ -259,6 +291,20 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         packaged_models.push_back(entry);
     }
 
+    nlohmann::json mlx_bridge_artifacts = nlohmann::json::array();
+    bool mlx_bridge_present = false;
+    std::error_code directory_error;
+    if (std::filesystem::exists(models_dir, directory_error)) {
+        for (const auto& entry : std::filesystem::directory_iterator(models_dir, directory_error)) {
+            if (directory_error || !entry.is_regular_file() ||
+                entry.path().extension() != ".mlxfn") {
+                continue;
+            }
+            mlx_bridge_artifacts.push_back(entry.path().filename().string());
+            mlx_bridge_present = true;
+        }
+    }
+
     bool packaged_layout_detected =
         executable_dir.filename() == "bin" && std::filesystem::exists(readme_path) &&
         std::filesystem::exists(smoke_test_path) && std::filesystem::exists(expected_models_dir);
@@ -272,11 +318,24 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["runtime_library_found"] = runtime_library.has_value();
     json["runtime_library_path"] = runtime_library.has_value() ? runtime_library->string() : "";
     json["runtime_library_referenced"] = runtime_reference_found;
+    json["core_library_found"] = core_library.has_value();
+    json["core_library_path"] = core_library.has_value() ? core_library->string() : "";
+    json["core_library_referenced"] = core_reference_found;
+    json["mlx_library_found"] = mlx_library.has_value();
+    json["mlx_library_path"] = mlx_library.has_value() ? mlx_library->string() : "";
+    json["mlx_library_referenced"] = mlx_reference_found;
+    json["mlx_metallib_found"] = mlx_metallib.has_value();
+    json["mlx_metallib_path"] = mlx_metallib.has_value() ? mlx_metallib->string() : "";
+    json["mlx_bridge_present"] = mlx_bridge_present;
+    json["mlx_bridge_artifacts"] = mlx_bridge_artifacts;
     json["dependency_references"] = references;
+    json["core_dependency_references"] = core_references;
     json["packaged_models"] = packaged_models;
     json["signature"] = inspect_signature(executable_path);
     json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
-                      runtime_reference_found && packaged_models_present;
+                      runtime_reference_found && core_library.has_value() && core_reference_found &&
+                      mlx_library.has_value() && mlx_reference_found && mlx_metallib.has_value() &&
+                      mlx_bridge_present && packaged_models_present;
     return json;
 }
 
@@ -413,7 +472,7 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
     json["probe_available"] = core::mlx_probe_available();
     json["primary_pack_ready"] = false;
     json["bridge_ready"] = false;
-    json["integration_mode"] = "experimental_mlxfn_bridge";
+    json["integration_mode"] = "mlx_pack_with_bridge_exports";
     json["backend_integrated"] = false;
     json["healthy"] = false;
     json["models"] = nlohmann::json::array();

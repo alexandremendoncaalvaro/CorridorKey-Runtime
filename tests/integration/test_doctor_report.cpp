@@ -21,6 +21,13 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
 
     REQUIRE(report["bundle"].contains("healthy"));
     REQUIRE(report["bundle"].contains("signature"));
+    REQUIRE(report["bundle"].contains("core_library_found"));
+    REQUIRE(report["bundle"].contains("core_library_referenced"));
+    REQUIRE(report["bundle"].contains("mlx_library_found"));
+    REQUIRE(report["bundle"].contains("mlx_library_referenced"));
+    REQUIRE(report["bundle"].contains("mlx_metallib_found"));
+    REQUIRE(report["bundle"].contains("mlx_bridge_present"));
+    REQUIRE(report["bundle"]["mlx_bridge_artifacts"].is_array());
     REQUIRE(report["video"]["supported_encoders"].is_array());
     REQUIRE(report["video"].contains("portable_h264_available"));
     REQUIRE(report["cache"].contains("writable"));
@@ -53,6 +60,7 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["mlx"].contains("models"));
     REQUIRE(report["mlx"].contains("primary_artifacts"));
     REQUIRE(report["mlx"].contains("bridge_artifacts"));
+    REQUIRE(report["mlx"]["integration_mode"] == "mlx_pack_with_bridge_exports");
     REQUIRE(report["mlx"]["models"].is_array());
     if (!report["mlx"]["primary_artifacts"].empty()) {
         auto entry = report["mlx"]["primary_artifacts"].front();
