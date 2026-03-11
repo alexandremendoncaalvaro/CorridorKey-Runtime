@@ -109,6 +109,15 @@ if(APPLE)
 
         find_package(MLX CONFIG QUIET)
         if(MLX_FOUND)
+            if(TARGET mlx)
+                # The packaged MLX target hardcodes framework paths under
+                # /Applications/Xcode-latest.app, which is not present on
+                # machines using Command Line Tools only. Replace those
+                # interface links with portable framework directives.
+                set_property(TARGET mlx PROPERTY INTERFACE_LINK_LIBRARIES
+                    "-framework Metal;-framework Foundation;-framework QuartzCore;-framework Accelerate"
+                )
+            endif()
             message(STATUS "MLX probe support enabled")
         else()
             message(STATUS "MLX probe support unavailable; continuing without MLX integration")
