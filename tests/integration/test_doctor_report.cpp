@@ -46,17 +46,28 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     }
     REQUIRE(report["mlx"].contains("applicable"));
     REQUIRE(report["mlx"].contains("probe_available"));
+    REQUIRE(report["mlx"].contains("primary_pack_ready"));
+    REQUIRE(report["mlx"].contains("bridge_ready"));
+    REQUIRE(report["mlx"].contains("integration_mode"));
+    REQUIRE(report["mlx"].contains("backend_integrated"));
     REQUIRE(report["mlx"].contains("models"));
+    REQUIRE(report["mlx"].contains("primary_artifacts"));
+    REQUIRE(report["mlx"].contains("bridge_artifacts"));
     REQUIRE(report["mlx"]["models"].is_array());
-    if (!report["mlx"]["models"].empty()) {
-        auto entry = report["mlx"]["models"].front();
+    if (!report["mlx"]["primary_artifacts"].empty()) {
+        auto entry = report["mlx"]["primary_artifacts"].front();
         REQUIRE(entry.contains("filename"));
         REQUIRE(entry.contains("artifact_family"));
         REQUIRE(entry.contains("recommended_backend"));
-        REQUIRE(entry.contains("importable"));
+        REQUIRE(entry.contains("probe_ready"));
         REQUIRE(entry.contains("error"));
+    }
+    if (report["mlx"]["bridge_ready"].get<bool>()) {
+        REQUIRE(report["mlx"]["backend_integrated"].get<bool>());
     }
     REQUIRE(report["summary"].contains("coreml_healthy"));
     REQUIRE(report["summary"].contains("apple_acceleration_probe_ready"));
+    REQUIRE(report["summary"].contains("apple_acceleration_bridge_ready"));
+    REQUIRE(report["summary"].contains("apple_acceleration_backend_integrated"));
     REQUIRE(report["summary"].contains("validated_models_present"));
 }

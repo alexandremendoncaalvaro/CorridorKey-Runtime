@@ -411,24 +411,28 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
     nlohmann::json json;
     json["applicable"] = false;
     json["probe_available"] = core::mlx_probe_available();
+    json["primary_pack_ready"] = false;
+    json["bridge_ready"] = false;
+    json["integration_mode"] = "experimental_mlxfn_bridge";
+    json["backend_integrated"] = false;
     json["healthy"] = false;
-    json["all_candidate_models_importable"] = false;
     json["models"] = nlohmann::json::array();
+    json["primary_artifacts"] = nlohmann::json::array();
+    json["bridge_artifacts"] = nlohmann::json::array();
 
 #if defined(__APPLE__)
     json["applicable"] = true;
 
-    bool all_candidate_models_importable = true;
-    bool any_candidate_model_found = false;
+    bool any_primary_found = false;
+    bool all_primary_probe_ready = true;
 
     for (const auto& model : model_catalog()) {
-        if (model.artifact_family != "mlxfn") {
+        if (model.recommended_backend != "mlx") {
             continue;
         }
 
         std::filesystem::path model_path = models_dir / model.filename;
         bool found = std::filesystem::exists(model_path);
-        any_candidate_model_found = any_candidate_model_found || found;
 
         nlohmann::json entry;
         entry["filename"] = model.filename;
@@ -437,28 +441,72 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
         entry["recommended_backend"] = model.recommended_backend;
         entry["validated_platforms"] = model.validated_platforms;
         entry["validated_hardware_tiers"] = model.validated_hardware_tiers;
-        entry["importable"] = false;
+        entry["probe_ready"] = false;
         entry["error"] = "";
 
         if (!found) {
-            all_candidate_models_importable = false;
             json["models"].push_back(entry);
+            if (model.artifact_family == "safetensors") {
+                all_primary_probe_ready = false;
+                json["primary_artifacts"].push_back(entry);
+            }
             continue;
         }
 
-        auto probe_res = core::probe_mlx_function(model_path);
-        entry["importable"] = probe_res.has_value();
-        if (!probe_res) {
-            entry["error"] = probe_res.error().message;
-            all_candidate_models_importable = false;
+        entry["size_bytes"] = std::filesystem::file_size(model_path);
+
+        if (model.artifact_family == "safetensors") {
+            any_primary_found = true;
+            auto probe_res = core::probe_mlx_weights(model_path);
+            entry["probe_ready"] = probe_res.has_value();
+            entry["metadata_readable"] = probe_res.has_value();
+            if (!probe_res) {
+                entry["error"] = probe_res.error().message;
+                all_primary_probe_ready = false;
+            }
+            json["primary_artifacts"].push_back(entry);
         }
 
         json["models"].push_back(entry);
     }
 
-    json["all_candidate_models_importable"] = all_candidate_models_importable;
-    json["healthy"] =
-        core::mlx_probe_available() && any_candidate_model_found && all_candidate_models_importable;
+    bool any_bridge_found = false;
+    bool all_bridge_importable = true;
+    std::error_code error;
+    if (std::filesystem::exists(models_dir, error)) {
+        for (const auto& item : std::filesystem::directory_iterator(models_dir, error)) {
+            if (error || !item.is_regular_file() || item.path().extension() != ".mlxfn") {
+                continue;
+            }
+
+            any_bridge_found = true;
+            nlohmann::json entry;
+            entry["filename"] = item.path().filename().string();
+            entry["found"] = true;
+            entry["artifact_family"] = "mlxfn";
+            entry["recommended_backend"] = "mlx";
+            entry["probe_ready"] = false;
+            entry["importable"] = false;
+            entry["size_bytes"] = std::filesystem::file_size(item.path(), error);
+            entry["error"] = "";
+
+            auto probe_res = core::probe_mlx_function(item.path());
+            entry["probe_ready"] = probe_res.has_value();
+            entry["importable"] = probe_res.has_value();
+            if (!probe_res) {
+                entry["error"] = probe_res.error().message;
+                all_bridge_importable = false;
+            }
+
+            json["bridge_artifacts"].push_back(entry);
+            json["models"].push_back(entry);
+        }
+    }
+
+    json["primary_pack_ready"] = any_primary_found && all_primary_probe_ready;
+    json["bridge_ready"] = core::mlx_probe_available() && any_bridge_found && all_bridge_importable;
+    json["backend_integrated"] = json["bridge_ready"];
+    json["healthy"] = json["backend_integrated"] && json["primary_pack_ready"];
 #endif
 
     return json;

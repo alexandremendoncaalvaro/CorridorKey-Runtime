@@ -218,6 +218,50 @@
   - fallback investigativo
   - nunca como trilho principal da reestruturacao do Mac
 
+### Estado operacional validado do trilho MLX
+
+- O repositório agora tem um helper reproduzível para preparar o pack Apple:
+  - `scripts/prepare_mlx_model_pack.py`
+  - cobre download do release oficial, conversao de `.pth -> .safetensors` e
+    exportacao opcional de bridge `.mlxfn`
+- A descoberta do SDK do MLX no CMake foi endurecida para priorizar:
+  - `CORRIDORKEY_MLX_CMAKE_DIR`
+  - `CORRIDORKEY_MLX_PYTHON`
+  - `VIRTUAL_ENV`
+  - `.venv-macos-mlx`
+  - `Python3_EXECUTABLE`
+- Com o model pack preparado em `models/` e o build reconfigurado, o estado
+  esperado no `doctor --json` ficou validado:
+  - `mlx.probe_available = true`
+  - `mlx.primary_pack_ready = true`
+  - `mlx.bridge_ready = true` quando `corridorkey_mlx_bridge_512.mlxfn` esta
+    presente
+  - `mlx.backend_integrated = true` quando o runtime esta linkado com MLX e o
+    bridge esta importavel
+  - `summary.apple_acceleration_probe_ready = true`
+- A execucao do backend MLX dentro do runtime agora ficou validada no trilho
+  de bridge `.mlxfn`:
+  - `corridorkey process --json -d mlx -i assets/corridor.png -o ... -m models/corridorkey_mlx.safetensors`
+    completou com sucesso
+  - `doctor --json` agora marca `integration_mode = experimental_mlxfn_bridge`
+  - o bridge continua sendo caminho **experimental de integracao**, nao o
+    artefato final de shipping para o Mac
+- O bug real da rodada foi identificado e corrigido:
+  - o `JobOrchestrator` estava resolvendo `target_resolution` antes de criar o
+    engine
+  - isso quebrava bridges fixos como `corridorkey_mlx_bridge_512.mlxfn`
+  - a resolucao automatica agora respeita `engine->recommended_resolution()`
+    quando o backend selecionado e `MLX`
+- O runtime agora prefere o menor bridge disponivel quando o usuario aponta
+  para `corridorkey_mlx.safetensors`
+  - prioridade atual: `512`, depois `768`, depois `1024`
+  - racional: a trilha `.mlxfn` e um bridge experimental, entao o default
+    precisa privilegiar first-frame latency previsivel
+- Benchmark atual validado do runtime:
+  - `MLX` synthetic `512`: `avg_latency_ms = 601.189`
+  - `CPU` synthetic `512` (`corridorkey_int8_512.onnx`): `avg_latency_ms = 1050.283`
+  - ganho observado do trilho MLX atual: aproximadamente `1.75x`
+
 ### Criterios de escolha entre MLX e Core ML direto
 
 - roda o corpus de release sem crash e sem seams

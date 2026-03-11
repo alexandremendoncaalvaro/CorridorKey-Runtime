@@ -421,6 +421,9 @@ Current product implication:
   distributable Apple artifact.
 - `.mlxfn` remains a bridge mechanism for later native integration work, not
   the primary artifact family for the first accelerated Mac delivery.
+- The current runtime may execute an **experimental `.mlxfn` bridge path** for
+  diagnostics and native bring-up, but this does not change the shipping
+  artifact decision for macOS.
 
 Selection criteria for the shipping macOS accelerated path:
 

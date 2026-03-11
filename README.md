@@ -122,6 +122,51 @@ The immediate Mac implementation path should therefore be:
    candidate final distributable Apple artifact once the runtime surface is
    proven on MLX.
 
+### Preparing The MLX Model Pack
+
+The repository now includes a helper to materialize the Apple model pack and
+an optional bridge export:
+
+```bash
+source .venv-macos-mlx/bin/activate
+python scripts/prepare_mlx_model_pack.py \
+  --output-dir models \
+  --tag v1.0.0 \
+  --export-mlxfn models/corridorkey_mlx_bridge_512.mlxfn
+```
+
+For local builds, CMake now tries these MLX discovery paths in order:
+
+1. `CORRIDORKEY_MLX_CMAKE_DIR`
+2. `CORRIDORKEY_MLX_PYTHON`
+3. active `VIRTUAL_ENV`
+4. repository-local `.venv-macos-mlx`
+5. default `Python3_EXECUTABLE`
+
+After configuring and building with MLX available, `corridorkey doctor --json`
+should report:
+
+- `mlx.probe_available = true`
+- `mlx.primary_pack_ready = true`
+- `mlx.bridge_ready = true` when the optional `.mlxfn` export is present
+- `mlx.backend_integrated = true` when the runtime can execute the bridge path
+- `summary.apple_acceleration_probe_ready = true`
+- `summary.apple_acceleration_backend_integrated = true` when the bridge path
+  is linked and importable
+
+The current native execution path is intentionally labeled
+`experimental_mlxfn_bridge` in `doctor --json`: it is sufficient for runtime
+bring-up and first benchmarks, but it is still a bridge on the way to the
+shipping Mac artifact.
+
+On this machine, the current runtime benchmark at synthetic `512` reports:
+
+- `MLX`: `avg_latency_ms = 601.189`
+- `CPU int8_512`: `avg_latency_ms = 1050.283`
+
+That puts the current experimental MLX runtime path at roughly `1.75x` the
+throughput of the CPU baseline at the same synthetic resolution.
+
 ### Prerequisites
 
 - C++20 compiler (GCC 12+, Clang 16+, MSVC 17.4+)
