@@ -11,6 +11,7 @@
 
 #include "../app/hardware_profile.hpp"
 #include "../app/job_orchestrator.hpp"
+#include "device_selection.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -106,34 +107,6 @@ nlohmann::json event_to_json(const JobEvent& event) {
     }
 
     return json;
-}
-
-DeviceInfo select_device(const std::vector<DeviceInfo>& devices, std::string device_str) {
-    if (devices.empty()) {
-        return DeviceInfo{};
-    }
-
-    DeviceInfo selected_device = devices[0];
-    if (device_str == "auto") {
-        return selected_device;
-    }
-
-    try {
-        int idx = std::stoi(device_str);
-        if (idx >= 0 && idx < static_cast<int>(devices.size())) {
-            return devices[idx];
-        }
-    } catch (...) {
-    }
-
-    std::transform(device_str.begin(), device_str.end(), device_str.begin(), ::tolower);
-    for (const auto& device : devices) {
-        if (backend_to_string_local(device.backend) == device_str) {
-            return device;
-        }
-    }
-
-    return selected_device;
 }
 
 InferenceParams build_inference_params(const cxxopts::ParseResult& result) {
@@ -362,7 +335,7 @@ int main(int argc, char* argv[]) {
 
             JobRequest benchmark_request;
             benchmark_request.model_path = result["model"].as<std::string>();
-            benchmark_request.device = select_device(devices, device_str);
+            benchmark_request.device = cli::select_device(devices, device_str);
             benchmark_request.params = build_inference_params(result);
             if (result.count("input")) {
                 benchmark_request.input_path = result["input"].as<std::string>();
@@ -506,7 +479,7 @@ int main(int argc, char* argv[]) {
 
             auto devices = list_devices();
             std::string device_str = result["device"].as<std::string>();
-            req.device = select_device(devices, device_str);
+            req.device = cli::select_device(devices, device_str);
 
             if (!use_json) {
                 std::cout << "Processing Engine Setup:\n"

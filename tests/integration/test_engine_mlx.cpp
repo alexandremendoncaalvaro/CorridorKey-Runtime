@@ -52,7 +52,37 @@ TEST_CASE("mlx bridge executes a single frame through the runtime", "[integratio
 #endif
 }
 
-TEST_CASE("mlx safetensors pack prefers the lowest bridge resolution by default",
+TEST_CASE("mlx safetensors pack prefers a larger bridge on 16 GB Apple Silicon",
+          "[integration][mlx]") {
+#if !defined(__APPLE__)
+    SUCCEED("MLX runtime execution is only applicable on macOS.");
+#else
+    if (!core::mlx_probe_available()) {
+        SUCCEED("MLX runtime support is not linked in this build.");
+        return;
+    }
+
+    const auto safetensors_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx.safetensors";
+    const auto bridge_512 =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
+    const auto bridge_1024 =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_1024.mlxfn";
+    if (!std::filesystem::exists(safetensors_path) || !std::filesystem::exists(bridge_512) ||
+        !std::filesystem::exists(bridge_1024)) {
+        SUCCEED("MLX pack or bridge artifacts are not available locally.");
+        return;
+    }
+
+    auto engine =
+        Engine::create(safetensors_path, DeviceInfo{"Apple Silicon MLX", 16000, Backend::MLX});
+    REQUIRE(engine.has_value());
+    REQUIRE(engine.value()->current_device().backend == Backend::MLX);
+    REQUIRE(engine.value()->recommended_resolution() == 1024);
+#endif
+}
+
+TEST_CASE("mlx safetensors pack keeps the 512 bridge on lower-memory systems",
           "[integration][mlx]") {
 #if !defined(__APPLE__)
     SUCCEED("MLX runtime execution is only applicable on macOS.");
@@ -72,9 +102,8 @@ TEST_CASE("mlx safetensors pack prefers the lowest bridge resolution by default"
     }
 
     auto engine =
-        Engine::create(safetensors_path, DeviceInfo{"Apple Silicon MLX", 16000, Backend::MLX});
+        Engine::create(safetensors_path, DeviceInfo{"Apple Silicon MLX", 8000, Backend::MLX});
     REQUIRE(engine.has_value());
-    REQUIRE(engine.value()->current_device().backend == Backend::MLX);
     REQUIRE(engine.value()->recommended_resolution() == 512);
 #endif
 }

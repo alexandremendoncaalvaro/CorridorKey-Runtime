@@ -8,7 +8,8 @@ namespace corridorkey::core {
 
 class MlxSession {
    public:
-    static Result<std::unique_ptr<MlxSession>> create(const std::filesystem::path& model_path);
+    static Result<std::unique_ptr<MlxSession>> create(const std::filesystem::path& model_path,
+                                                      const DeviceInfo& device);
 
     ~MlxSession();
 

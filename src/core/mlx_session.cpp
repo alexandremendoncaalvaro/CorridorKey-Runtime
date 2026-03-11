@@ -26,20 +26,30 @@ std::optional<int> bridge_resolution_from_filename(const std::filesystem::path& 
     return std::stoi(match[1].str());
 }
 
-std::vector<std::filesystem::path> bridge_candidates(const std::filesystem::path& model_path) {
+std::vector<int> bridge_resolution_order_for_device(const DeviceInfo& device) {
+    if (device.available_memory_mb >= 16000) {
+        return {1024, 768, 512};
+    }
+    if (device.available_memory_mb >= 12000) {
+        return {768, 512, 1024};
+    }
+    return {512, 768, 1024};
+}
+
+std::vector<std::filesystem::path> bridge_candidates(const std::filesystem::path& model_path,
+                                                     const DeviceInfo& device) {
     std::vector<std::filesystem::path> candidates;
     auto stem = model_path.stem().string();
     auto parent = model_path.parent_path();
-    // Prefer the smallest bridge first. The .mlxfn path is currently an
-    // experimental runtime bridge, so bounded first-frame latency matters more
-    // than silently selecting the largest available export.
-    for (int resolution : {512, 768, 1024}) {
+    // Prefer larger bridge exports on higher-memory Apple Silicon systems.
+    for (int resolution : bridge_resolution_order_for_device(device)) {
         candidates.push_back(parent / (stem + "_bridge_" + std::to_string(resolution) + ".mlxfn"));
     }
     return candidates;
 }
 
-Result<std::filesystem::path> resolve_executable_artifact(const std::filesystem::path& model_path) {
+Result<std::filesystem::path> resolve_executable_artifact(const std::filesystem::path& model_path,
+                                                          const DeviceInfo& device) {
     if (!std::filesystem::exists(model_path)) {
         return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                        "MLX model artifact not found: " + model_path.string()}};
@@ -50,7 +60,7 @@ Result<std::filesystem::path> resolve_executable_artifact(const std::filesystem:
     }
 
     if (model_path.extension() == ".safetensors") {
-        for (const auto& candidate : bridge_candidates(model_path)) {
+        for (const auto& candidate : bridge_candidates(model_path, device)) {
             if (std::filesystem::exists(candidate)) {
                 return candidate;
             }
@@ -58,8 +68,8 @@ Result<std::filesystem::path> resolve_executable_artifact(const std::filesystem:
 
         return Unexpected<Error>{
             Error{ErrorCode::ModelLoadFailed,
-                  "MLX weights pack requires a bridge .mlxfn artifact. Run "
-                  "scripts/prepare_mlx_model_pack.py with --export-mlxfn to create one."}};
+                  "MLX weights pack requires bridge exports. Run "
+                  "scripts/prepare_mlx_model_pack.py to materialize the Apple model pack."}};
     }
 
     return Unexpected<Error>{
@@ -94,14 +104,16 @@ MlxSession::~MlxSession() = default;
 MlxSession::MlxSession(MlxSession&&) noexcept = default;
 MlxSession& MlxSession::operator=(MlxSession&&) noexcept = default;
 
-Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::path& model_path) {
+Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::path& model_path,
+                                                       const DeviceInfo& device) {
 #if !CORRIDORKEY_WITH_MLX
     (void)model_path;
+    (void)device;
     return Unexpected<Error>{
         Error{ErrorCode::HardwareNotSupported,
               "MLX backend is not linked in this build. Reconfigure CMake with MLX available."}};
 #else
-    auto executable_artifact_res = resolve_executable_artifact(model_path);
+    auto executable_artifact_res = resolve_executable_artifact(model_path, device);
     if (!executable_artifact_res) {
         return Unexpected(executable_artifact_res.error());
     }

@@ -205,7 +205,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         auto session_ptr =
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
         if (requested_device.backend == Backend::MLX) {
-            auto mlx_session_res = core::MlxSession::create(model_path);
+            auto mlx_session_res = core::MlxSession::create(model_path, requested_device);
             if (!mlx_session_res) {
                 return Unexpected(mlx_session_res.error());
             }
