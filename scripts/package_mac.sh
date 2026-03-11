@@ -35,7 +35,7 @@ if [ "$RUNTIME_LIB_NAME" != "libonnxruntime.dylib" ]; then
     ln -sf "$RUNTIME_LIB_NAME" "$DIST_DIR/bin/libonnxruntime.dylib"
 fi
 
-for model in corridorkey_int8_512.onnx corridorkey_int8_768.onnx; do
+for model in corridorkey_int8_512.onnx corridorkey_mlx.safetensors corridorkey_mlx_bridge_512.mlxfn; do
     if [ -f "models/$model" ]; then
         cp "models/$model" "$DIST_DIR/models/"
     fi
@@ -59,12 +59,18 @@ QUICK START:
    ./smoke_test.sh
 4. Benchmark the bundle:
    ./bin/corridorkey benchmark --json -m models/corridorkey_int8_512.onnx
-5. Process your video:
+5. If the Apple pack is present, process with MLX:
+   ./bin/corridorkey process -i input.mp4 -o outputs/result.mp4 -m models/corridorkey_mlx.safetensors --tiled
+6. Otherwise use the CPU baseline:
    ./bin/corridorkey process -i input.mp4 -o outputs/result.mp4 -m models/corridorkey_int8_512.onnx
 
-If the validated models are not bundled, place them in ./models before running
-process or benchmark. When the bundle is signed and notarized, Gatekeeper should
-accept it without the manual "Open" workaround.
+If the Apple pack is not bundled, place these prepared files in ./models before
+running MLX jobs:
+- corridorkey_mlx.safetensors
+- corridorkey_mlx_bridge_512.mlxfn
+
+When the bundle is signed and notarized, Gatekeeper should accept it without
+the manual "Open" workaround.
 README_EOF
 
 cat << 'SMOKE_EOF' > "$DIST_DIR/smoke_test.sh"
@@ -80,6 +86,9 @@ cd "$SCRIPT_DIR"
 ./bin/corridorkey presets --json > /dev/null
 if [ -f "./models/corridorkey_int8_512.onnx" ]; then
     ./bin/corridorkey benchmark --json -m ./models/corridorkey_int8_512.onnx > /dev/null
+fi
+if [ -f "./models/corridorkey_mlx.safetensors" ] && [ -f "./models/corridorkey_mlx_bridge_512.mlxfn" ]; then
+    ./bin/corridorkey benchmark --json -m ./models/corridorkey_mlx.safetensors -d mlx > /dev/null
 fi
 SMOKE_EOF
 chmod +x "$DIST_DIR/smoke_test.sh"
