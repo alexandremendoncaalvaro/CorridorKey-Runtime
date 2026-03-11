@@ -99,15 +99,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     auto started_res = emit_event(on_event, started_event);
     if (!started_res) return Unexpected(started_res.error());
 
-    // 1. Resolve Hardware Strategy if resolution is Auto (0)
-    if (req.params.target_resolution <= 0) {
-        profiler.measure("hardware_strategy", [&]() {
-            auto strategy = HardwareProfile::get_best_strategy(req.device);
-            req.params.target_resolution = strategy.target_resolution;
-        });
-    }
-
-    // 2. Create Engine
+    // 1. Create Engine
     auto engine_res = profiler.measure("engine_create", [&]() {
         return Engine::create(req.model_path, req.device, stage_callback);
     });
@@ -127,6 +119,18 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         return Unexpected(engine_res.error());
     }
     auto engine = std::move(*engine_res);
+
+    if (req.params.target_resolution <= 0) {
+        profiler.measure("hardware_strategy", [&]() {
+            if (engine->current_device().backend == Backend::MLX) {
+                req.params.target_resolution = engine->recommended_resolution();
+                return;
+            }
+
+            auto strategy = HardwareProfile::get_best_strategy(engine->current_device());
+            req.params.target_resolution = strategy.target_resolution;
+        });
+    }
 
     auto backend_event = JobEvent{
         JobEventType::BackendSelected, "prepare", 0.0F, engine->current_device().backend,
@@ -166,7 +170,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         if (!emit_warning_res) return Unexpected(emit_warning_res.error());
     }
 
-    // 3. Prepare Output Directory
+    // 2. Prepare Output Directory
     profiler.measure("output_prepare", [&]() {
         if (std::filesystem::is_directory(req.output_path) || req.output_path.extension().empty()) {
             std::filesystem::create_directories(req.output_path);
@@ -234,7 +238,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         return Unexpected(error);
     };
 
-    // 4. Dispatch to Video or Sequence
+    // 3. Dispatch to Video or Sequence
     if (std::filesystem::is_regular_file(req.input_path) && is_video_file(req.input_path)) {
         auto result = profiler.measure("video_pipeline", [&]() {
             return engine->process_video(req.input_path, req.hint_path, req.output_path, req.params,
@@ -358,6 +362,9 @@ nlohmann::json JobOrchestrator::get_system_info() {
             case Backend::DirectML:
                 backend_name = "dml";
                 break;
+            case Backend::MLX:
+                backend_name = "mlx";
+                break;
             default:
                 backend_name = "unknown";
                 break;
@@ -413,7 +420,13 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["summary"]["coreml_healthy"] =
         !report["coreml"]["applicable"].get<bool>() || report["coreml"]["healthy"].get<bool>();
     report["summary"]["apple_acceleration_probe_ready"] =
-        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["healthy"].get<bool>();
+        !report["mlx"]["applicable"].get<bool>() ||
+        (report["mlx"]["probe_available"].get<bool>() &&
+         report["mlx"]["primary_pack_ready"].get<bool>());
+    report["summary"]["apple_acceleration_bridge_ready"] =
+        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["bridge_ready"].get<bool>();
+    report["summary"]["apple_acceleration_backend_integrated"] =
+        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["backend_integrated"].get<bool>();
     report["summary"]["validated_models_present"] = validated_models_present;
     report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
                                    report["summary"]["video_healthy"].get<bool>() &&

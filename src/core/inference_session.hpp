@@ -23,6 +23,10 @@
 
 namespace corridorkey {
 
+namespace core {
+class MlxSession;
+}
+
 struct SessionCreateOptions {
     bool disable_cpu_ep_fallback = false;
     OrtLoggingLevel log_severity = ORT_LOGGING_LEVEL_ERROR;
@@ -115,6 +119,7 @@ class InferenceSession {
     std::vector<const char*> m_input_node_names_ptr = {};
     std::vector<const char*> m_output_node_names_ptr = {};
     std::vector<std::vector<int64_t>> m_input_node_dims = {};
+    std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
 
     // Pre-allocated buffer pools (reused across run() calls)
     std::vector<ImageBuffer> m_resize_pool = {};

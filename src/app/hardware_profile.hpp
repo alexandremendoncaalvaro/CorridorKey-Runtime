@@ -20,6 +20,13 @@ class HardwareProfile {
             return {512, "int8"};
         }
 
+        if (device.backend == Backend::MLX) {
+            if (device.available_memory_mb >= 16000) {
+                return {1024, "mlx"};
+            }
+            return {512, "mlx"};
+        }
+
         if (device.backend == Backend::CoreML || device.backend == Backend::DirectML) {
             // Unified or generic GPU
             if (device.available_memory_mb >= 16000) {

@@ -10,4 +10,5 @@ TEST_CASE("session policy uses backend-aware intra-op threads", "[unit][inferenc
     REQUIRE(core::intra_op_threads_for_backend(Backend::CoreML) == 1);
     REQUIRE(core::intra_op_threads_for_backend(Backend::TensorRT) == 1);
     REQUIRE(core::intra_op_threads_for_backend(Backend::DirectML) == 1);
+    REQUIRE(core::intra_op_threads_for_backend(Backend::MLX) == 1);
 }

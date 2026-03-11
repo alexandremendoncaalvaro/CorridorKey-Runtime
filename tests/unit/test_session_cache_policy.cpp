@@ -8,5 +8,6 @@ using namespace corridorkey;
 TEST_CASE("optimized model cache is disabled for CoreML sessions", "[unit][session-cache]") {
     REQUIRE(core::use_optimized_model_cache_for_backend(Backend::CPU));
     REQUIRE_FALSE(core::use_optimized_model_cache_for_backend(Backend::CoreML));
+    REQUIRE_FALSE(core::use_optimized_model_cache_for_backend(Backend::MLX));
     REQUIRE_FALSE(core::use_optimized_model_cache_for_backend(Backend::Auto));
 }

@@ -3,6 +3,7 @@
 add_executable(test_integration
     test_cache_fallback.cpp
     test_doctor_report.cpp
+    test_engine_mlx.cpp
     test_engine_tiling.cpp
     test_exr_roundtrip.cpp
     test_png_roundtrip.cpp

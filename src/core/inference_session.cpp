@@ -6,6 +6,7 @@
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
+#include "mlx_session.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
@@ -159,6 +160,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             break;
         }
 #endif
+        case Backend::MLX:
         default:
             break;
     }
@@ -202,6 +204,16 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     try {
         auto session_ptr =
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
+        if (requested_device.backend == Backend::MLX) {
+            auto mlx_session_res = core::MlxSession::create(model_path);
+            if (!mlx_session_res) {
+                return Unexpected(mlx_session_res.error());
+            }
+            session_ptr->m_recommended_resolution = (*mlx_session_res)->model_resolution();
+            session_ptr->m_mlx_session = std::move(*mlx_session_res);
+            return session_ptr;
+        }
+
         session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
         std::filesystem::path session_model_path = model_path;
         std::optional<std::filesystem::path> optimized_model_path;
@@ -550,6 +562,25 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
     const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
     const InferenceParams& params, StageTimingCallback on_stage) {
     if (rgbs.empty()) return std::vector<FrameResult>{};
+    if (m_mlx_session != nullptr) {
+        if (params.target_resolution > 0 && params.target_resolution != m_recommended_resolution) {
+            return Unexpected<Error>{Error{
+                ErrorCode::InvalidParameters,
+                "The current MLX bridge has a fixed resolution. Use --resolution 0 or prepare a "
+                "matching bridge artifact."}};
+        }
+
+        std::vector<FrameResult> results;
+        results.reserve(rgbs.size());
+        for (size_t index = 0; index < rgbs.size(); ++index) {
+            auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index], on_stage);
+            if (!result) {
+                return Unexpected(result.error());
+            }
+            results.push_back(std::move(*result));
+        }
+        return results;
+    }
 
     try {
         Ort::MemoryInfo memory_info =
