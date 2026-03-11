@@ -13,6 +13,9 @@
 - O valor central nao e "suportar muitos backends"; e entregar **instalacao
   simples, diagnostico confiavel, benchmark reproduzivel, contratos estaveis e
   comportamento consistente por tier de hardware**.
+- O runtime e unificado, mas o **artefato de modelo passa a ser curado por
+  plataforma**. O produto nao assume mais que um mesmo ONNX empacotado sera o
+  caminho certo para Apple Silicon e para Windows RTX.
 
 ## Posicionamento do produto
 
@@ -28,12 +31,17 @@
 ## Trilhos de plataforma
 
 - **Agora: macOS 14+ Apple Silicon**
-  - CoreML como caminho principal
+  - contratos de runtime unificados
+  - `int8_512` e `int8_768` como baseline de compatibilidade e diagnostico
   - CPU como fallback obrigatorio
-  - `int8_512` e `int8_768` como modelos validados e empacotados
+  - aceleracao Mac passa a exigir **artefato especifico de plataforma**
+  - trilhos aprovados para avaliacao: `MLX` e conversao direta para `Core ML`
+  - `ONNX int8 -> ORT CoreML` deixa de ser plano principal e vira baseline de
+    diagnostico/compatibilidade
   - bundle CLI portatil como primeiro artefato externo
 - **Depois: Windows 11 + NVIDIA RTX**
   - TensorRT RTX como caminho principal de produto
+  - artefato ONNX/RTX proprio para a plataforma
   - CPU como fallback obrigatorio
   - DirectML e WinML tratados como secundarios ou exploratorios
   - foco em instalacao previsivel, diagnostico, cache e benchmark reproduzivel
@@ -72,8 +80,15 @@
 
 ## Backlog imediato
 
-- Fechar os gates de macOS:
-  - fallback CoreML -> CPU robusto e explicado estruturalmente
+- Fechar a decisao do trilho acelerado para macOS:
+  - tratar `ONNX int8 -> ORT CoreML` atual apenas como baseline investigativo
+  - avaliar `MLX` contra conversao direta `PyTorch -> Core ML`
+  - comparar instalacao, empacotamento, integracao no runtime, qualidade,
+    throughput e previsibilidade operacional
+  - escolher um caminho principal antes de voltar a otimizar throughput em
+    baixo nivel
+- Fechar os gates de macOS no caminho escolhido:
+  - fallback acelerado -> CPU robusto e explicado estruturalmente
   - warmup/startup, tiling e video medidos por etapa
   - bundle portatil rodando fora da arvore de build
   - corpus completo sem crash e sem seams visiveis em 4K tiled
@@ -81,10 +96,137 @@
   - provider principal definido
   - recorte de hardware alvo definido
   - comportamento operacional esperado definido
+- Definir a superficie de conversao/empacotamento de modelos:
+  - checkpoint fonte canonico
+  - empacotamento por target (`mac-mlx`, `mac-coreml`, `win-rtx`, `cpu`)
+  - validacao por corpus e catalogo versionado no runtime
 - Preservar contratos e observabilidade como superficie publica:
   - JSON unico para `info`, `doctor`, `benchmark`, `models`, `presets`
   - NDJSON estavel em `process --json`
   - timings agregados suficientes para localizar gargalos
+
+## Comparacao objetiva dos trilhos acelerados do Mac
+
+### Evidencia externa que sustenta a comparacao
+
+- O repositorio original do CorridorKey ja separa o Mac do restante:
+  - `Torch` em Linux/Windows
+  - `MLX` em Apple Silicon
+  - auto mode preferindo `MLX` no Apple Silicon quando disponivel
+- O repositorio `corridorkey-mlx` ja tem:
+  - conversao de checkpoint `PyTorch -> MLX`
+  - pesos `.safetensors`
+  - e2e parity
+  - fase de benchmark marcada como concluida
+- A documentacao oficial do `MLX` confirma:
+  - API C++ completa
+  - API C
+  - memoria unificada
+  - exportacao/importacao de funcoes entre Python e C++
+- A Apple recomenda converter de `PyTorch` para `Core ML` **diretamente**,
+  sem usar ONNX como etapa obrigatoria.
+- A Apple tambem documenta que a quantizacao padrao do PyTorch nao e a melhor
+  para hardware Apple; o caminho recomendado passa por
+  `coremltools.optimize.torch`.
+
+### Matriz de decisao atual
+
+- **MLX**
+  - melhor candidato para chegar mais rapido a um Mac acelerado funcional
+  - mais alinhado com o caminho ja validado pelo projeto original
+  - favorecido por memoria unificada e stack nativa Apple Silicon
+  - nao exige insistir no grafo `ONNX int8` atual
+  - risco principal: a implementacao CorridorKey disponivel hoje e Python-first,
+    entao a integracao no nosso runtime C++ vai exigir um adapter nativo, uma
+    trilha via export/import de funcoes do MLX, ou uma reimplementacao pontual
+- **PyTorch -> Core ML direto**
+  - melhor candidato para o artefato final de distribuicao nativa no Mac
+  - mais alinhado com a recomendacao oficial da Apple para conversao
+  - conversa melhor com empacotamento `.mlpackage` / compilacao e uso em app
+  - evita a limitacao atual de cobertura parcial do `CoreML EP` via ONNX
+  - risco principal: a conversao precisa ser validada no checkpoint real do
+    CorridorKey e o caminho de conversao ainda pode exigir ajustes de grafo,
+    tracing/export e tratamento de ops
+- **ONNX int8 -> ORT CoreML atual**
+  - permanece util como baseline de compatibilidade e diagnostico
+  - nao deve mais ser tratado como trilho principal de aceleracao Mac
+  - a evidencia atual mostra cobertura parcial de grafo e performance pior que
+    CPU em workload relevante
+
+### Recomendacao operacional provisoria
+
+- Se a meta imediata for **provar aceleracao real no Mac**:
+  - priorizar `MLX`
+- Se a meta imediata for **fechar o artefato final de produto distribuivel no
+  Mac**:
+  - avaliar em paralelo a conversao direta `PyTorch -> Core ML`
+- O caminho recomendado por ora e:
+  1. usar `MLX` para validar rapidamente o trilho acelerado Apple Silicon
+  2. fazer um spike controlado de conversao `PyTorch -> Core ML`
+  3. escolher o caminho de shipping do Mac com base no corpus e no bundle
+
+### Conclusao validada da rodada MLX
+
+- O release oficial de `corridorkey-mlx` publica pesos em
+  `corridorkey_mlx.safetensors`; esse e o artefato real de curto prazo para o
+  trilho Mac, nao `.onnx` e nem `.mlxfn`.
+- O downloader instalado localmente ainda aponta para um owner default
+  incorreto, mas o release oficial existe e foi baixado com override explicito
+  de repositorio.
+- Benchmark sintetico com pesos oficiais:
+  - `512`: `compiled` melhor que `eager`
+    - `eager`: `401.980 ms` first, `406.333 ms` steady
+    - `compiled`: `373.016 ms` first, `351.343 ms` steady
+  - `1024`: `compiled` pior que `eager` neste ambiente
+    - `eager`: `1887.215 ms` first, `1886.611 ms` steady
+    - `compiled`: `1956.788 ms` first, `3129.624 ms` steady
+  - conclusao: `mx.compile` nao pode ser promovido como default cego; precisa
+    de tuning por resolucao e validacao no corpus
+- Workload real 4K no frame
+  `build/runtime_inputs/mixkit-4k-frame0.png` com hint coarse controlado:
+  - `MLX tiled_1024`: `load_ms = 3630.719`, `run_ms = 52354.714`,
+    `peak_memory_mb = 3487.092`
+  - runtime atual `CPU` com `corridorkey_int8_768.onnx`, `--tiled` e
+    `--batch-size 2`, no mesmo frame e no mesmo hint:
+    `job_total = 110488.172 ms`
+  - ganho observado: `MLX` ficou `2.11x` mais rapido que o baseline CPU desta
+    maquina no caso real controlado
+- O path `ONNX -> ORT CoreML EP` continua fora da disputa principal:
+  - segue pior que CPU nos workloads medidos
+  - o provider ainda particiona o grafo atual para CPU
+- A ponte nativa futura tambem foi validada:
+  - exportacao `MLX -> .mlxfn` funcionou em `512`
+  - arquivo gerado: `build/mlx_eval/corridorkey_512.mlxfn`
+  - tamanho: `288931878` bytes
+  - importacao e execucao do wrapper funcionaram
+  - isso prova que existe ponte real para integracao nativa futura, mas nao
+    muda o artefato primario imediato do Mac
+
+### Decisao de reestruturacao que segue desta rodada
+
+- O primeiro backend acelerado real do Mac deve ser **MLX com
+  `.safetensors`**, tratado como trilho de produto proprio.
+- O spike atual de `.mlxfn` fica preservado apenas como **bridge path** para
+  integracao nativa posterior.
+- O trilho `PyTorch -> Core ML` direto continua necessario, mas muda de papel:
+  - deixa de ser a primeira tentativa de aceleracao do runtime
+  - passa a ser o candidato principal para o **artefato final distribuivel**
+    no bundle do Mac
+- O caminho `ONNX/CoreML EP` fica restrito a:
+  - diagnostico
+  - comparacao
+  - fallback investigativo
+  - nunca como trilho principal da reestruturacao do Mac
+
+### Criterios de escolha entre MLX e Core ML direto
+
+- roda o corpus de release sem crash e sem seams
+- preserva qualidade visual e tamanho de saida
+- integra no runtime/library-first sem Python no artefato distribuido
+- cabe num bundle instalavel por terceiros com friccao controlada
+- permite diagnostico e fallback claros em `doctor`, `benchmark` e
+  `process --json`
+- entrega throughput melhor que o baseline CPU no hardware alvo
 
 ## Metodo de evolucao e pesquisa
 
@@ -214,10 +356,38 @@
     - `session_create_requested`: `1270.750 ms` em `coreml` vs `218.895 ms`
       em `cpu`
     - `ort_run`: `24496.280 ms` total em `coreml` vs `12902.352 ms` em `cpu`
+- O primeiro workload real `4K tiled` no frame
+  `build/runtime_inputs/100745-video-2160-frame0.png` confirmou que `CoreML`
+  ainda nao esta entregando ganho real sobre `CPU`:
+  - `coreml`: `job_total = 160143.254 ms`
+  - `cpu --batch-size 2`: `job_total = 150022.264 ms`
+  - `coreml` tambem ficou pior em startup e warmup:
+    - `engine_create`: `1480.884 ms` vs `369.753 ms`
+    - `engine_warmup`: `6823.230 ms` vs `3652.920 ms`
+  - o `sample` do processo `coreml` mostrou tempo dominante dentro de kernels
+    `MLAS` de `CPU` no `onnxruntime`, nao em stack real de aceleracao `CoreML`
+- A causa mais provavel agora esta validada por diagnostico do proprio runtime:
+  - o `CoreML EP` esta assumindo apenas parte do grafo e deixando o restante no
+    `CPU`
+  - o `doctor --json` agora faz um probe por modelo com
+    `session.disable_cpu_ep_fallback=1`
+  - resultado atual do probe:
+    - `corridorkey_int8_512.onnx`: falha
+    - `corridorkey_int8_768.onnx`: falha
+    - erro: `This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user.`
 - Proximo corte depois deste ponto:
-  - medir `CoreML` em `benchmark --json` e `process --json` fora do sandbox
-  - comparar startup real, warmup e `ort_run` com o fallback `CPU`
-  - voltar para o workload 4K tiled com o provider acelerado funcional
+  - formalizar a decisao de produto: **artefatos por plataforma sao
+    obrigatorios**
+  - usar o caminho `ONNX/CoreML` atual apenas para diagnostico do problema,
+    nao como meta principal de aceleracao Mac
+  - comparar `MLX` e conversao direta `PyTorch -> Core ML` com base em fonte
+    oficial e no repositorio original do CorridorKey
+  - executar primeiro um spike `MLX`, porque ele e o candidato mais forte para
+    provar aceleracao real no Apple Silicon
+  - em seguida executar um spike de conversao direta `PyTorch -> Core ML` para
+    decidir o artefato final de shipping do Mac
+  - so depois escolher o trilho acelerado principal do Mac e retomar tuning de
+    throughput
 - Mesmo com esses ganhos, `ort_run` continua sendo o gargalo principal.
 - Ao medir o workload 4K tiled no ambiente sandbox atual, apareceu um bug real:
   o cache otimizado tentava gravar em um root nao permitido e falhava em
@@ -226,9 +396,20 @@
 
 ## Como retomar sem perder contexto
 
+- Primeiro, lembrar a decisao de arquitetura:
+  - runtime e contratos unificados
+  - artefatos e backends acelerados sao curados por plataforma
+  - `ONNX int8 -> ORT CoreML` atual e baseline de diagnostico, nao plano
+    principal de aceleracao Mac
 - Primeiro, executar o baseline operacional:
   - `./build/release/src/cli/corridorkey doctor --json`
   - `./build/release/src/cli/corridorkey benchmark --json -m models/corridorkey_int8_512.onnx -d cpu`
+- Antes de qualquer nova otimizacao no Mac, responder estas perguntas:
+  - `MLX` consegue entregar uma integracao library-first viavel para o produto?
+  - a conversao direta `PyTorch -> Core ML` produz um artefato melhor para
+    distribuicao do que o `ONNX int8` atual?
+  - qual trilho deixa instalacao, bundle e suporte mais previsiveis?
+  - qual dos dois bate o baseline CPU no corpus real do Mac?
 - Para uma retomada reproduzivel, usar `scripts/run_corpus.sh`:
   - `CORRIDORKEY_CORPUS_PROFILE=smoke` para validacao curta
   - `CORRIDORKEY_CORPUS_PROFILE=baseline` para o baseline de trabalho
@@ -240,6 +421,8 @@
   - registrar qual asset foi usado, modelo, backend, preset e se houve fallback
 - So entao escolher o proximo corte tecnico.
 - Ordem da proxima execucao:
+  - probe de compatibilidade `CoreML` por modelo
+  - `Model Usability Checker` e particionamento do grafo
   - startup/CoreML e first-frame
   - `ort_run` e configuracao de sessao/modelo
   - `post_despeckle` no fallback CPU

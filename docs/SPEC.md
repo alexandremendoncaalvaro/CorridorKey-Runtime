@@ -26,6 +26,10 @@ The product direction is explicit:
 The project is architecture-ready beyond those tracks, but it does not market
 all platforms and providers as equally validated.
 
+The runtime contract is shared across those tracks. The model artifact is not.
+Each product track may ship and validate a different converted model pack when
+that is required to extract predictable performance from the target hardware.
+
 ### 1.1 What This Is
 
 - A **native runtime engine** around the existing CorridorKey model
@@ -35,6 +39,9 @@ all platforms and providers as equally validated.
   plugin, and pipeline integrations
 - A hardware-aware runtime with **curated provider tracks**, not a flat promise
   of parity across every backend
+- A **platform-specific model-pack strategy** where Apple Silicon, RTX, and CPU
+  fallback are allowed to use different converted artifacts under the same
+  runtime contract
 
 ### 1.2 What This Is NOT
 
@@ -54,9 +61,10 @@ all platforms and providers as equally validated.
 | Goal | Metric |
 |------|--------|
 | Native local execution | No Python, no pip, no venv |
-| macOS production runtime | Corpus passes on 8 GB and 16 GB Apple Silicon tiers |
+| macOS production runtime | Corpus passes on 8 GB and 16 GB Apple Silicon tiers with an Apple-specific accelerated artifact path |
 | Windows RTX next | Product track is defined around TensorRT RTX and CPU fallback |
 | Operational predictability | `doctor`, `benchmark`, and `process --json` stay stable |
+| Platform-specific optimization | Separate model packs per product track without changing the runtime contract |
 | Quality parity with original model behavior | < 2% deviation on reference test set |
 | Video support | Decode/encode MP4/MOV directly with hardware-aware defaults |
 
@@ -81,13 +89,13 @@ all platforms and providers as equally validated.
 │   │             │              │ - premultiply        │    │
 │   └─────────────┴──────────────┴────────────────────┘    │
 ├──────────────────────────────────────────────────────────┤
-│                     ONNX Runtime                           │
-│   ┌──────────┬───────────┬──────────┬──────────────────┐ │
-│   │ CoreML   │ TensorRT  │ CPU      │ Secondary        │ │
-│   │ EP       │ RTX EP    │ EP       │ Windows paths    │ │
-│   │ (macOS   │ (Windows  │ (compat. │ DirectML / WinML)│ │
-│   │  now)    │  RTX next)│  layer)  │                  │ │
-│   └──────────┴───────────┴──────────┴──────────────────┘ │
+│              Execution backends and model packs              │
+│   ┌────────────┬───────────────┬──────────┬──────────────┐ │
+│   │ Apple      │ Windows RTX   │ CPU      │ Secondary    │ │
+│   │ model pack │ model pack    │ baseline │ exploratory  │ │
+│   │ (MLX or    │ (ONNX / TRT   │ (ONNX)   │ paths        │ │
+│   │ Core ML)   │ RTX)          │          │              │ │
+│   └────────────┴───────────────┴──────────┴──────────────┘ │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -309,7 +317,7 @@ CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ A: Mac Mini M4 (16GB)          → MEDIUM tier                    │
-│    EP: CoreML | Model: INT8 | Res: 512-768²                    │
+│    Track: Apple-specific accelerated pack | Res: 512-768²      │
 │    Role: Primary development machine                            │
 ├─────────────────────────────────────────────────────────────────┤
 │ B: PC RTX 3080 (10GB VRAM, 32GB RAM) → HIGH tier               │
@@ -326,11 +334,11 @@ CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
 │    Role: Worst-case hardware testing                            │
 ├─────────────────────────────────────────────────────────────────┤
 │ E: MacBook M1 Pro (16GB) → MEDIUM tier                          │
-│    EP: CoreML | Model: INT8 | Res: 512-768²                    │
+│    Track: Apple-specific accelerated pack | Res: 512-768²      │
 │    Role: Older Apple Silicon testing                            │
 ├─────────────────────────────────────────────────────────────────┤
 │ F: MacBook Air M1 (8GB) → LOW tier (FLOOR TEST)                │
-│    EP: CoreML | Model: INT8 | Res: 512²                        │
+│    Track: Apple-specific accelerated pack | Res: 512²          │
 │    Role: If it runs here, it runs anywhere                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -341,14 +349,19 @@ The product does not advance as a generic cross-platform matrix. It advances as
 curated delivery tracks.
 
 1. **Current release gate:** macOS 14+ on Apple Silicon.
-   - CoreML is the primary accelerated path.
+   - The runtime contract is shared, but the accelerated artifact may differ
+     from Windows and CPU bundles.
    - CPU is the mandatory compatibility fallback.
-   - `int8_512` and `int8_768` are the only model variants considered validated
-     and packageable for the portable macOS bundle.
+   - `int8_512` and `int8_768` are the current compatibility and diagnostics
+     baseline packs, not the final assumption for Apple acceleration.
+   - The approved Mac acceleration evaluation paths are `MLX` and direct
+     `PyTorch -> Core ML` conversion from the source checkpoint.
    - Inputs larger than the selected model resolution must use tiling before
      GUI work begins.
 2. **Next product track:** Windows 11 on NVIDIA RTX hardware.
    - TensorRT RTX is the intended primary Windows path.
+   - The Windows accelerated artifact is allowed to remain ONNX-derived even if
+     the Mac artifact family diverges.
    - CPU remains the mandatory compatibility fallback.
    - Windows delivery is judged by installation predictability, diagnostics,
      cache behavior, and validated hardware tiers, not by broad backend count.
@@ -357,6 +370,66 @@ curated delivery tracks.
    stable.
 4. **Later architectural targets:** Linux and secondary provider paths stay
    architecture-ready until the first two product tracks are validated.
+
+### 4.3.1 Apple Silicon Acceleration Decision
+
+The runtime contract is fixed across macOS, Windows RTX, and CPU fallback. The
+accelerated Apple artifact is not fixed yet.
+
+The current ONNX `int8` packs remain valid for compatibility, diagnostics, and
+CPU fallback, but they are not assumed to be the final accelerated Mac path.
+
+Two Apple-specific acceleration tracks are approved for evaluation:
+
+1. **MLX**
+   - favored for short-path Apple Silicon acceleration because the upstream
+     CorridorKey project already prefers MLX on Apple Silicon and publishes a
+     dedicated checkpoint conversion path
+   - the currently validated artifact family for this path is
+     `corridorkey_mlx.safetensors`
+   - acceptable for this runtime because MLX offers C++, C, and Python-facing
+     APIs and supports function export/import across frontends
+   - function export/import via `.mlxfn` is treated as a bridge for later
+     native integration, not as the primary shipping artifact in this phase
+2. **Direct PyTorch -> Core ML conversion**
+   - favored for the final distributable Apple artifact because Apple
+     recommends direct conversion from PyTorch to Core ML and recommends
+     `coremltools.optimize.torch` over default PyTorch quantization choices for
+     Apple hardware
+
+The ONNX `CoreML EP` path remains a diagnostic baseline only until it proves
+full-graph or otherwise clearly superior execution on the release corpus.
+
+Validated Apple Silicon finding from the current evaluation wave:
+
+- Official MLX weights are published as `corridorkey_mlx.safetensors`.
+- On the release-machine class used for validation, the official MLX engine
+  running `tiled_1024` on a real 4K greenscreen frame with a controlled coarse
+  hint completed in `52354.714 ms` with `3487.092 MB` peak memory.
+- The current runtime CPU baseline on the same frame and same hint completed in
+  `110488.172 ms`, making the validated MLX path roughly `2.11x` faster on
+  that workload.
+- The current ONNX `CoreML EP` path remains slower than the CPU baseline with
+  the existing ONNX artifacts because it still partitions part of the graph
+  onto CPU.
+
+Current product implication:
+
+- The first real accelerated Mac runtime path should integrate **MLX with the
+  official `.safetensors` artifact family**.
+- Direct `PyTorch -> Core ML` stays active as the candidate final
+  distributable Apple artifact.
+- `.mlxfn` remains a bridge mechanism for later native integration work, not
+  the primary artifact family for the first accelerated Mac delivery.
+
+Selection criteria for the shipping macOS accelerated path:
+
+- corpus completion without crash
+- no visible seam artifacts on tiled 4K validation
+- throughput improvement over CPU baseline on Apple Silicon
+- no Python dependency in the distributed artifact
+- stable diagnostics and fallback reporting in the runtime contracts
+- portable packaging viability for third-party installation
 
 ### 4.4 Validation Corpus
 
@@ -392,7 +465,7 @@ If the input image dimensions differ from the selected target resolution, the en
 | Language | C++20 | (no modules) | — |
 | Build | CMake | 3.28+ | — |
 | Package manager | vcpkg | latest | manifest mode |
-| ML inference | ONNX Runtime | vendored 1.16.3 on macOS, vcpkg on non-macOS | mixed |
+| ML inference | ONNX Runtime | vendored 1.24.3 on macOS, vcpkg on non-macOS | mixed |
 | EXR I/O | OpenEXR + Imath | 3.4+ | vcpkg |
 | PNG I/O (8-bit) | stb_image | latest | header-only, vendored |
 | PNG I/O (16-bit) | libpng | 1.6+ | vcpkg |
@@ -400,11 +473,21 @@ If the input image dimensions differ from the selected target resolution, the en
 | CLI | cxxopts | 3.x | vcpkg |
 | Testing | Catch2 | 3.x | vcpkg |
 
+### 5.1.1 Model-Pack Toolchains
+
+The runtime binary stays native C++, but model preparation is track-specific.
+
+| Product track | Preferred artifact family | Toolchain direction |
+|---------------|---------------------------|---------------------|
+| macOS Apple Silicon | Apple-specific accelerated pack | `MLX` or direct `PyTorch -> Core ML` conversion |
+| Windows RTX | ONNX-derived RTX pack | ONNX export plus `TensorRT RTX` runtime/cache |
+| CPU compatibility | ONNX baseline pack | ONNX Runtime CPU EP |
+
 ### 5.2 Platform Matrix
 
 | Platform | Compiler | Primary provider path | Product status |
 |----------|----------|-----------------------|----------------|
-| macOS 14+ (ARM64) | Apple Clang 15+ | CoreML, CPU fallback | Current release gate |
+| macOS 14+ (ARM64) | Apple Clang 15+ | Apple-specific accelerated pack, CPU fallback | Current release gate |
 | Windows 11 + NVIDIA RTX (x86_64) | MSVC 17.4+ | TensorRT RTX, CPU fallback | Next product track |
 | Windows 11 generic (x86_64) | MSVC 17.4+ | CPU; DirectML/WinML secondary | Exploratory, not the primary Windows product path |
 | Linux (x86_64) | GCC 12+ / Clang 16+ | CPU/CUDA architecture-ready | Deferred until macOS + Windows RTX are stable |
@@ -414,6 +497,9 @@ Provider support is curated by phase. The product does not promise equivalent
 validation across all ONNX Runtime execution providers.
 For Windows, DirectML and WinML remain secondary paths in this specification;
 they are not the primary product promise for the next delivery track.
+For macOS, the product does not assume the accelerated Apple artifact must stay
+inside ONNX Runtime if a platform-native pack yields better coverage,
+installation, and predictability.
 
 ### 5.3 Project Layout
 
@@ -634,10 +720,11 @@ The current codebase already provides:
 Near-term priorities are:
 
 1. Close the macOS production-runtime gates around fallback, tiling, observability, and portable distribution.
-2. Use the validation corpus and benchmark telemetry to tune quality vs throughput on the current Apple Silicon track.
-3. Define and document the Windows RTX product track around TensorRT RTX, CPU fallback, installation expectations, and validated tiers.
-4. Keep the bridge-facing JSON/NDJSON contract stable so future GUI and integration surfaces can rely on the same runtime behavior.
-5. Expand regression coverage for provider fallback, hint handling, tiling, packaging, and hardware-tier policy.
+2. Choose the Apple-specific accelerated artifact strategy before continuing low-level performance work: `MLX` versus direct `PyTorch -> Core ML`.
+3. Use the validation corpus and benchmark telemetry to tune quality vs throughput on the chosen Apple Silicon track.
+4. Define and document the Windows RTX product track around TensorRT RTX, CPU fallback, installation expectations, and validated tiers.
+5. Keep the bridge-facing JSON/NDJSON contract stable so future GUI and integration surfaces can rely on the same runtime behavior.
+6. Expand regression coverage for provider fallback, hint handling, tiling, packaging, and hardware-tier policy.
 
 ---
 
@@ -671,7 +758,8 @@ Summary of what's covered there:
 | Criterion | Threshold |
 |-----------|-----------|
 | macOS corpus completes without crash | 100% |
-| CoreML auto-selection falls back to CPU with structured reason | 100% |
+| macOS accelerated artifact path is explicitly selected and validated per packaged model family | 100% |
+| Accelerated Apple path falls back to CPU with structured reason | 100% |
 | Portable bundle runs `info`, `doctor`, `models`, and `presets` outside the build tree | 100% |
 | `benchmark --json` and terminal `process --json` events expose stable stage timings | 100% |
 | Tiled 4K runs complete without visible seam artifacts in validation review | Required |
@@ -696,9 +784,10 @@ Summary of what's covered there:
 
 ## 9. Product Roadmap
 
-1. **Phase 1 — macOS production runtime:** validate CoreML-first execution,
-   mandatory CPU fallback, tiling behavior, structured diagnostics, benchmark
-   telemetry, and portable bundle acceptance on Apple Silicon.
+1. **Phase 1 — macOS production runtime:** choose and validate the
+   Apple-specific accelerated artifact path, keep CPU fallback mandatory, close
+   tiling behavior, structured diagnostics, benchmark telemetry, and portable
+   bundle acceptance on Apple Silicon.
 2. **Phase 2 — Windows RTX track:** define and implement the TensorRT RTX-based
    Windows product path with CPU fallback, installation guidance, validated
    tiers, and equivalent diagnostics.
@@ -720,6 +809,10 @@ Summary of what's covered there:
 - [ONNX Runtime EP Build Matrix](https://onnxruntime.ai/docs/build/eps.html)
 - [TensorRT RTX EP](https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html)
 - [CoreML EP](https://onnxruntime.ai/docs/execution-providers/CoreML-ExecutionProvider.html)
+- [ONNX Runtime Model Usability Checker](https://onnxruntime.ai/docs/tutorials/mobile/helpers/model-usability-checker.html)
 - [ONNX Runtime Quantization](https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html)
+- [Apple Core ML Tools - Convert from PyTorch](https://apple.github.io/coremltools/docs-guides/source/convert-pytorch.html)
+- [Apple Core ML Tools FAQ](https://apple.github.io/coremltools/docs-guides/source/faqs.html)
+- [MLX](https://github.com/ml-explore/mlx)
 - [OpenEXR 3.4](https://openexr.com/en/latest/news.html)
 - [vcpkg](https://github.com/microsoft/vcpkg)

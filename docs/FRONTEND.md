@@ -13,6 +13,10 @@ The frontend exists to make that runtime approachable for real users:
 The GUI must therefore consume an already operational runtime contract instead
 of inventing workflow logic of its own.
 
+The GUI also must not assume one backend or one model artifact for every
+machine. It consumes a curated runtime catalog that can differ between Apple
+Silicon, Windows RTX, and CPU-only fallback tracks.
+
 ---
 
 ## Recommended stack
@@ -74,6 +78,7 @@ Responsible for:
 - start/cancel/status job actions
 - integration between UI and runtime
 - diagnostics and hardware/runtime reporting
+- validated model-pack and platform-track reporting
 
 ### 4. Desktop UI
 
@@ -113,6 +118,10 @@ Primary product goal:
 
 The frontend should make the runtime feel **obvious**, not merely powerful.
 Power must remain available, but through **progressive disclosure**.
+
+That includes showing the user the validated path for their machine instead of
+dumping a flat list of backends or model files. The UI should present a curated
+platform track, preset intent, and fallback state.
 
 ### Product audiences
 

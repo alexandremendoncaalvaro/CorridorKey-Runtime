@@ -34,7 +34,11 @@ sidecar, plugin hosts, and similar surfaces).
 4.  **Curated Platform Tracks:** macOS Apple Silicon is the current release
     gate. Windows RTX is the next product track. Other platform paths stay
     architecture-ready until validated.
-5.  **Bridge, Not Duplication:** User interfaces consume the runtime through
+5.  **Shared Runtime, Curated Artifacts:** The runtime contract stays stable
+    across product tracks, while model artifacts and backend adapters may
+    diverge by platform when that is necessary for performance and
+    predictability.
+6.  **Bridge, Not Duplication:** User interfaces consume the runtime through
     stable contracts. Business logic stays in Core/App.
 
 ---
@@ -46,7 +50,8 @@ our needs, combined with **Clean Architecture** layering.
 
 ### Layer 1: Core (`src/core`, `src/frame_io`, `src/post_process`)
 **Responsibility:** The engine, math, and I/O capabilities.
-*   **Inference:** ONNX Runtime wrapper, session management.
+*   **Inference:** Backend adapters and session management for the currently
+    approved product tracks.
 *   **Hardware:** Device detection and provider selection within the current product tracks.
 *   **Video Pipeline:** FFmpeg integration for direct memory processing.
 *   **Math:** Color space conversion, despill, despeckle algorithms.
@@ -56,6 +61,8 @@ our needs, combined with **Clean Architecture** layering.
 *   Must not depend on CLI or App layers.
 *   Must not print to stdout/stderr (use callbacks/results).
 *   Must return rich error types (`Result<T>`).
+*   Must treat model artifacts as platform-curated inputs rather than assuming a
+    single serialized model format is optimal everywhere.
 
 ### Layer 2: Application (`src/app`)
 **Responsibility:** Orchestration of the Core into coherent jobs.
@@ -65,6 +72,7 @@ our needs, combined with **Clean Architecture** layering.
 *   Stage timing aggregation and benchmark reporting.
 *   Structured diagnostics, capabilities, and model/preset catalogs.
 *   High-level strategy selection (e.g., Tiling vs Standard inference).
+*   Platform-track selection between compatible model packs and fallback paths.
 
 ### Layer 3: Interfaces (`src/cli`)
 **Responsibility:** Interacting with the user.
