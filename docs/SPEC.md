@@ -415,8 +415,8 @@ Validated Apple Silicon finding from the current evaluation wave:
 
 Current product implication:
 
-- The first real accelerated Mac runtime path should integrate **MLX with the
-  official `.safetensors` artifact family**.
+- The first real accelerated Mac runtime path now runs **MLX with the official
+  `.safetensors` artifact family** as the operational default.
 - Direct `PyTorch -> Core ML` stays active as the candidate final
   distributable Apple artifact.
 - `.mlxfn` remains a bridge mechanism for later native integration work, not
@@ -452,7 +452,7 @@ Release validation uses a fixed corpus already stored in the repository.
 To ensure both ease of use and professional control, the runtime selects the processing resolution based on this strict hierarchy:
 
 1. **User Override:** If `InferenceParams::target_resolution` is set (via CLI `--resolution`), it takes absolute precedence.
-2. **Hardware Recommendation:** If target is `0` (Auto), the application layer maps the selected device profile to a safe resolution. On release-gated macOS systems that means `512` for 8 GB-class machines and `768` for 16 GB-class machines.
+2. **Hardware Recommendation:** If target is `0` (Auto), the application layer maps the selected device profile to a safe resolution. On release-gated macOS systems that means the current MLX runtime path uses the engine-recommended bridge resolution (`512` today), while CPU ONNX baselines stay conservative per hardware tier.
 3. **Core Fallback:** If no profile is available, the core session uses a conservative fallback resolution (`512`).
 
 If the input image dimensions differ from the selected target resolution, the engine performs high-performance bilinear scaling before inference and scales the results back if necessary.
@@ -586,11 +586,11 @@ CorridorKey-Runtime/
 ### 6.1 Commands
 
 ```bash
-# Process a video file
-corridorkey process --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_768.onnx
+# Process a video file on Apple Silicon
+corridorkey process --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_mlx.safetensors --tiled
 
-# Process an image sequence
-corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_768.onnx
+# Process an image sequence with the CPU baseline
+corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_512.onnx
 
 # Process a single frame
 corridorkey process --input frame.exr --alpha-hint hint.png --output result.exr --model models/corridorkey_int8_512.onnx
@@ -598,17 +598,20 @@ corridorkey process --input frame.exr --alpha-hint hint.png --output result.exr 
 # Show detected hardware and recommended settings
 corridorkey info
 
-# Download model files (512/768/1024 for selected variant)
+# Download ONNX model files (512/768/1024 for selected variant)
 corridorkey download [--variant fp32|fp16|int8|all]
 
+# Prepare the Apple Silicon MLX pack
+python scripts/prepare_mlx_model_pack.py --output-dir models
+
 # Run diagnostics over available devices and model files
-corridorkey doctor [--model models/corridorkey_int8_512.onnx]
+corridorkey doctor [--model models/corridorkey_mlx.safetensors]
 
 # Run a synthetic benchmark using a specific model
 corridorkey benchmark --model models/corridorkey_int8_512.onnx
 
 # Run a real-workload benchmark against a source file
-corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --model models/corridorkey_int8_768.onnx
+corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --model models/corridorkey_mlx.safetensors --device mlx
 
 # Inspect the stable model and preset catalogs
 corridorkey models
@@ -616,13 +619,13 @@ corridorkey presets
 
 # Consume the stable structured contracts
 corridorkey info --json
-corridorkey process --json --input input.mp4 --output output.mp4 --model models/corridorkey_int8_768.onnx
+corridorkey process --json --input input.mp4 --output output.mp4 --model models/corridorkey_mlx.safetensors --tiled
 ```
 
 ### 6.2 Common Flags
 
 ```
---device <auto|cpu|cuda|coreml|dml|index>   Override device selection
+--device <auto|cpu|mlx|cuda|coreml|dml|index>   Override device selection
 --resolution <0|512|768|1024>               Override processing resolution
 --model <path>                              Custom model path
 --despill <0.0-1.0>                         Green spill removal (default: 1.0)

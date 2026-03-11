@@ -48,16 +48,17 @@ The delivery sequence is explicit:
 
 - **Platform-specific model packs:** the runtime stays library-first and stable
   while each hardware track can use a different converted artifact.
-- **macOS Apple Silicon track:** CPU-compatible ONNX packs are the current
-  baseline, while the accelerated Mac pack is treated as an Apple-specific
-  artifact track instead of a reused Windows artifact.
+- **macOS Apple Silicon track:** MLX is now the default operational path for
+  Apple model packs, while ONNX remains the CPU-compatible compatibility and
+  diagnostics baseline.
 - **Windows RTX next:** TensorRT RTX is the planned primary Windows product
   track, with its own RTX-oriented artifact strategy after macOS release gates
   are closed.
 - **Operational tooling:** `doctor`, `benchmark`, `models`, `presets`, and
   `process --json` expose stable machine-readable diagnostics.
-- **Validated model catalog:** `int8_512` and `int8_768` are the packaged macOS
-  baseline packs in the current phase.
+- **Validated model catalog:** the packaged macOS set now centers on
+  `corridorkey_mlx.safetensors` for Apple acceleration and `int8_512` for CPU
+  smoke and fallback checks.
 - **Measured runtime behavior:** stage-level timings cover engine creation,
   warmup, inference, tiling, decode, encode, and full-job execution.
 - **Library + CLI:** the runtime is reusable as a C++ library and exposed
@@ -65,8 +66,9 @@ The delivery sequence is explicit:
 
 ## Quick Start
 
-Validated runtime path today: **macOS 14+ on Apple Silicon** with CPU baseline
-execution, structured diagnostics, and a curated model catalog.
+Validated runtime path today: **macOS 14+ on Apple Silicon** with MLX-first
+execution for Apple model packs, CPU fallback for ONNX baselines, structured
+diagnostics, and a curated model catalog.
 
 Windows RTX is the next product track already documented in the roadmap, but it
 is **not** the current release gate yet. Linux remains architecture-ready and
@@ -77,9 +79,9 @@ deferred until macOS and Windows RTX are both clear.
 The product boundary is the runtime and its contracts. Model packs are curated
 per platform track.
 
-- **Baseline ONNX packs:** `corridorkey_int8_512.onnx` and
-  `corridorkey_int8_768.onnx` remain the current compatibility and diagnostics
-  baseline in this repository.
+- **Baseline ONNX packs:** `corridorkey_int8_512.onnx` remains the packaged CPU
+  smoke and fallback baseline, while `corridorkey_int8_768.onnx` stays
+  available as a manual CPU compatibility baseline for 16 GB-class Macs.
 - **macOS Apple Silicon accelerated pack:** treated as an Apple-specific model
   pack, not as a requirement to reuse the same ONNX artifact shipped for other
   targets. The approved Mac evaluation paths are `MLX` and direct `Core ML`
@@ -112,10 +114,9 @@ The current Mac conclusion is no longer hypothetical:
   native integration. A 512-resolution wrapper export to `.mlxfn` succeeded,
   but `.mlxfn` is not treated as the primary shipping model pack today.
 
-The immediate Mac implementation path should therefore be:
+The immediate Mac implementation path is now:
 
-1. Integrate **MLX with the official `.safetensors` artifact** as the first
-   real accelerated Apple Silicon track.
+1. Run Apple model packs through **MLX by default** on macOS.
 2. Keep `ONNX/CoreML EP` for compatibility diagnostics and CPU fallback
    investigation only.
 3. Evaluate **direct `PyTorch -> Core ML` conversion** in parallel as the
@@ -155,9 +156,9 @@ should report:
   is linked and importable
 
 The current native execution path is intentionally labeled
-`experimental_mlxfn_bridge` in `doctor --json`: it is sufficient for runtime
-bring-up and first benchmarks, but it is still a bridge on the way to the
-shipping Mac artifact.
+`experimental_mlxfn_bridge` in `doctor --json`: it is the working MLX runtime
+path today, but still an intermediate bridge on the way to a cleaner shipping
+artifact.
 
 On this machine, the current runtime benchmark at synthetic `512` reports:
 
@@ -225,17 +226,23 @@ sudo ln -s "$(pwd)/build/release/src/cli/corridorkey" /usr/local/bin/corridorkey
 If `corridorkey` is not on your `PATH`, replace it with
 `./build/release/src/cli/corridorkey`.
 
-**Download model files**:
+**Download ONNX baseline packs**:
 
 ```bash
 corridorkey download --variant int8
+```
+
+**Prepare the Apple Silicon MLX pack**:
+
+```bash
+python scripts/prepare_mlx_model_pack.py --output-dir models
 ```
 
 **Inspect runtime capabilities and hardware recommendation**:
 
 ```bash
 corridorkey info --json
-corridorkey doctor --json --model models/corridorkey_int8_768.onnx
+corridorkey doctor --json --model models/corridorkey_mlx.safetensors
 ```
 
 **Inspect validated models and presets**:
@@ -251,28 +258,28 @@ corridorkey presets --json
 corridorkey benchmark --json --model models/corridorkey_int8_512.onnx --device cpu
 ```
 
-**Run a real-workload benchmark**:
+**Run a real-workload benchmark on the Apple path**:
 
 ```bash
-corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --model models/corridorkey_int8_768.onnx
+corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --model models/corridorkey_mlx.safetensors --device mlx
 ```
 
-**Process a single video with NDJSON events**:
+**Process a single video with NDJSON events on Apple Silicon**:
 
 ```bash
-corridorkey process --json --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_int8_768.onnx
+corridorkey process --json --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_mlx.safetensors --tiled
 ```
 
-**Process a directory of frames**:
+**Process a directory of frames with the CPU baseline**:
 
 ```bash
-corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_768.onnx
+corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_512.onnx
 ```
 
-**Use tiled inference for larger inputs**:
+**Use tiled inference for larger inputs on the Apple path**:
 
 ```bash
-corridorkey process --input input_4k.mp4 --output output_4k.mp4 --model models/corridorkey_int8_768.onnx --tiled
+corridorkey process --input input_4k.mp4 --output output_4k.mp4 --model models/corridorkey_mlx.safetensors --tiled
 ```
 
 ### Output
@@ -323,7 +330,9 @@ Alpha hints are part of the product contract, not an afterthought.
 ## Operational Promise
 
 - **Consistent hardware tiers:** on the current macOS release track, `auto`
-  maps to `512` on 8 GB-class Macs and `768` on 16 GB-class Macs.
+  is model-aware. Apple MLX packs resolve to the MLX backend at the engine's
+  recommended resolution, while ONNX baselines stay on CPU with conservative
+  per-tier resolution defaults.
 - **Observable execution:** warmup, inference, tiling, decode, encode, and
   full-job timings are inspectable without an external profiler.
 - **Curated provider support:** the product validates a few provider tracks
@@ -349,7 +358,7 @@ Alpha hints are part of the product contract, not an afterthought.
 
 | Platform | Primary path | Status | Notes |
 |----------|--------------|--------|-------|
-| macOS 14+ Apple Silicon | CPU baseline today; Apple-specific accelerated pack curated separately | Current release gate | Runtime contracts are fixed; accelerated Mac artifacts are not assumed to match Windows |
+| macOS 14+ Apple Silicon | MLX-first Apple model packs; CPU ONNX fallback and diagnostics | Current release gate | Runtime contracts are fixed; accelerated Mac artifacts are not assumed to match Windows |
 | Windows 11 + NVIDIA RTX | TensorRT RTX + CPU fallback | Next product track | Planned next delivery track after macOS gates, with a separate RTX-oriented model pack |
 | Windows 11 general | CPU; DirectML/WinML secondary | Exploratory | Not treated as the primary Windows product path |
 | Linux | Architecture-ready later | Deferred | Not a current productized track |

@@ -246,6 +246,15 @@
   - `doctor --json` agora marca `integration_mode = experimental_mlxfn_bridge`
   - o bridge continua sendo caminho **experimental de integracao**, nao o
     artefato final de shipping para o Mac
+- O contrato operacional do Mac foi simplificado para nao carregar defaults
+  legados:
+  - `auto` agora e **model-aware** no runtime
+  - `corridorkey_mlx.safetensors` e `.mlxfn` resolvem para `MLX`
+  - `.onnx` no Mac resolve para `CPU`, nao para `CoreML`
+  - `mac-balanced` aponta para `corridorkey_mlx.safetensors`
+  - `doctor.summary.healthy` depende de `apple_acceleration_healthy`, nao de
+    `coreml_healthy`
+  - `int8_768` deixou de ser artefato empacotado padrao do bundle Mac
 - O bug real da rodada foi identificado e corrigido:
   - o `JobOrchestrator` estava resolvendo `target_resolution` antes de criar o
     engine
