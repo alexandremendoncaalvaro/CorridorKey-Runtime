@@ -79,6 +79,23 @@ TEST_CASE("mlx safetensors pack prefers the lowest bridge resolution by default"
 #endif
 }
 
+TEST_CASE("auto device resolution selects mlx for apple model packs", "[integration][mlx]") {
+#if !defined(__APPLE__)
+    SUCCEED("MLX runtime execution is only applicable on macOS.");
+#else
+    const auto safetensors_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx.safetensors";
+    if (!std::filesystem::exists(safetensors_path)) {
+        SUCCEED("MLX pack artifact is not available locally.");
+        return;
+    }
+
+    auto engine = Engine::create(safetensors_path, DeviceInfo{"Auto", 0, Backend::Auto});
+    REQUIRE(engine.has_value());
+    REQUIRE(engine.value()->current_device().backend == Backend::MLX);
+#endif
+}
+
 TEST_CASE("job orchestrator keeps auto resolution compatible with mlx bridge",
           "[integration][mlx][regression]") {
 #if !defined(__APPLE__)

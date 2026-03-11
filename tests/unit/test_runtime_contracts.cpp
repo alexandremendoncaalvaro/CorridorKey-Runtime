@@ -41,7 +41,7 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     auto int8_768 = find_model("corridorkey_int8_768.onnx");
     REQUIRE(int8_768 != models.end());
     REQUIRE(int8_768->validated_for_macos);
-    REQUIRE(int8_768->packaged_for_macos);
+    REQUIRE_FALSE(int8_768->packaged_for_macos);
     REQUIRE(int8_768->validated_hardware_tiers == std::vector<std::string>{"apple_silicon_16gb"});
 
     auto int8_1024 = find_model("corridorkey_int8_1024.onnx");
@@ -50,6 +50,8 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
 
     auto mlx_pack = find_model("corridorkey_mlx.safetensors");
     REQUIRE(mlx_pack != models.end());
+    REQUIRE(mlx_pack->validated_for_macos);
+    REQUIRE(mlx_pack->packaged_for_macos);
     REQUIRE(mlx_pack->artifact_family == "safetensors");
     REQUIRE(mlx_pack->recommended_backend == "mlx");
     REQUIRE(mlx_pack->intended_use == "apple_acceleration_primary");
@@ -88,8 +90,8 @@ TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {
 
     REQUIRE(default_it != presets.end());
     REQUIRE(default_it->params.enable_tiling);
-    REQUIRE(default_it->recommended_model == "corridorkey_int8_768.onnx");
-    REQUIRE(default_it->intended_use == "portable_default");
+    REQUIRE(default_it->recommended_model == "corridorkey_mlx.safetensors");
+    REQUIRE(default_it->intended_use == "apple_acceleration_primary");
     std::vector<std::string> preset_platforms = {"macos_apple_silicon"};
     REQUIRE(default_it->validated_platforms == preset_platforms);
 }

@@ -21,9 +21,6 @@ class HardwareProfile {
         }
 
         if (device.backend == Backend::MLX) {
-            if (device.available_memory_mb >= 16000) {
-                return {1024, "mlx"};
-            }
             return {512, "mlx"};
         }
 

@@ -427,11 +427,13 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
         !report["mlx"]["applicable"].get<bool>() || report["mlx"]["bridge_ready"].get<bool>();
     report["summary"]["apple_acceleration_backend_integrated"] =
         !report["mlx"]["applicable"].get<bool>() || report["mlx"]["backend_integrated"].get<bool>();
+    report["summary"]["apple_acceleration_healthy"] =
+        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["healthy"].get<bool>();
     report["summary"]["validated_models_present"] = validated_models_present;
     report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
                                    report["summary"]["video_healthy"].get<bool>() &&
                                    report["summary"]["cache_healthy"].get<bool>() &&
-                                   report["summary"]["coreml_healthy"].get<bool>() &&
+                                   report["summary"]["apple_acceleration_healthy"].get<bool>() &&
                                    validated_models_present;
 
     return report;

@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cctype>
 #include <corridorkey/engine.hpp>
 #include <corridorkey/frame_io.hpp>
 #include <deque>
@@ -8,6 +10,7 @@
 #include "../post_process/color_utils.hpp"
 #include "common/stage_profiler.hpp"
 #include "inference_session.hpp"
+#include "mlx_probe.hpp"
 
 namespace corridorkey {
 
@@ -91,6 +94,35 @@ class Engine::Impl {
 
 namespace {
 
+bool is_mlx_artifact(const std::filesystem::path& model_path) {
+    auto extension = model_path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return extension == ".safetensors" || extension == ".mlxfn";
+}
+
+DeviceInfo resolve_auto_device_for_model(const std::filesystem::path& model_path) {
+#if defined(__APPLE__)
+    DeviceInfo detected = auto_detect();
+
+    if (is_mlx_artifact(model_path)) {
+        return DeviceInfo{"Apple Silicon MLX", detected.available_memory_mb, Backend::MLX};
+    }
+
+    auto extension = model_path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (extension == ".onnx") {
+        return DeviceInfo{"Generic CPU", detected.available_memory_mb, Backend::CPU};
+    }
+
+    return detected;
+#else
+    (void)model_path;
+    return auto_detect();
+#endif
+}
+
 std::optional<DeviceInfo> build_cpu_fallback_device(const DeviceInfo& device) {
 #if defined(__APPLE__)
     if (device.backend == Backend::CoreML || device.backend == Backend::Auto) {
@@ -114,7 +146,8 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
     auto engine = std::unique_ptr<Engine>(new Engine());
     engine->m_impl->model_path = model_path;
 
-    DeviceInfo requested_device = device.backend == Backend::Auto ? auto_detect() : device;
+    DeviceInfo requested_device =
+        device.backend == Backend::Auto ? resolve_auto_device_for_model(model_path) : device;
     engine->m_impl->cpu_fallback_device = build_cpu_fallback_device(requested_device);
 
     auto session_res = common::measure_stage(on_stage, "session_create_requested", [&]() {

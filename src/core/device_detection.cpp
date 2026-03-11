@@ -88,18 +88,22 @@ DeviceInfo auto_detect() {
 std::vector<DeviceInfo> list_devices() {
     std::vector<DeviceInfo> devices;
     DeviceInfo detected = auto_detect();
-    devices.push_back(detected);
-
 #if defined(__APPLE__)
     if (detect_apple_silicon() && core::mlx_probe_available()) {
         devices.push_back({"Apple Silicon MLX", detected.available_memory_mb, Backend::MLX});
     }
-#endif
 
-    // Always include CPU as a fallback option
-    if (devices.back().backend != Backend::CPU) {
+    devices.push_back({"Generic CPU", detected.available_memory_mb, Backend::CPU});
+
+    if (detected.backend == Backend::CoreML) {
+        devices.push_back(detected);
+    }
+#else
+    devices.push_back(detected);
+    if (detected.backend != Backend::CPU) {
         devices.push_back({"Generic CPU", detected.available_memory_mb, Backend::CPU});
     }
+#endif
 
     return devices;
 }

@@ -209,12 +209,12 @@ int main(int argc, char* argv[]) {
                                        cxxopts::value<std::string>())(
         "a,alpha-hint", "Alpha hint video or directory (optional)", cxxopts::value<std::string>())(
         "o,output", "Output directory or file", cxxopts::value<std::string>())(
-        "m,model", "Path to ONNX model file", cxxopts::value<std::string>())(
+        "m,model", "Path to model pack or exported artifact", cxxopts::value<std::string>())(
         "r,resolution", "Resolution (0=auto, 512, 768, 1024)",
         cxxopts::value<int>()->default_value("0"))(
         "d,device", "Device (auto, cpu, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
-        "variant", "Model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
+        "variant", "ONNX model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",
         cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
                                                    cxxopts::value<float>()->default_value("1.0"))(
@@ -229,14 +229,15 @@ int main(int argc, char* argv[]) {
                   << "      CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n"
                   << "==========================================\n\n"
                   << "Welcome! To use this tool, follow these steps:\n\n"
-                  << "1. Download a model (int8 is recommended):\n"
+                  << "1. Prepare the Apple Silicon pack or download an ONNX baseline:\n"
+                  << "   python scripts/prepare_mlx_model_pack.py --output-dir models\n"
                   << "   corridorkey download --variant int8\n\n"
-                  << "2. Process a video (Auto-detecting resolution/device):\n"
+                  << "2. Process a video on Apple Silicon (Auto-selecting MLX for MLX packs):\n"
+                  << "   corridorkey process -i input.mp4 -o output.mp4 -m "
+                     "models/corridorkey_mlx.safetensors --tiled\n\n"
+                  << "3. Process a video with the CPU baseline:\n"
                   << "   corridorkey process -i input.mp4 -o output.mp4 -m "
                      "models/corridorkey_int8_512.onnx\n\n"
-                  << "3. For 4K videos or high-detail, use tiling:\n"
-                  << "   corridorkey process -i input.mp4 -o output.mp4 -m "
-                     "models/corridorkey_int8_768.onnx --tiled\n\n"
                   << "4. Inspect validated models and presets:\n"
                   << "   corridorkey models\n"
                   << "   corridorkey presets\n\n"

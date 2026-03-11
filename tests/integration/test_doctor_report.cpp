@@ -69,5 +69,6 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["summary"].contains("apple_acceleration_probe_ready"));
     REQUIRE(report["summary"].contains("apple_acceleration_bridge_ready"));
     REQUIRE(report["summary"].contains("apple_acceleration_backend_integrated"));
+    REQUIRE(report["summary"].contains("apple_acceleration_healthy"));
     REQUIRE(report["summary"].contains("validated_models_present"));
 }
