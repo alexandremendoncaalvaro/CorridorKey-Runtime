@@ -29,6 +29,8 @@ std::string backend_to_string_local(Backend backend) {
             return "tensorrt";
         case Backend::DirectML:
             return "dml";
+        case Backend::MLX:
+            return "mlx";
         default:
             return "auto";
     }
@@ -210,7 +212,7 @@ int main(int argc, char* argv[]) {
         "m,model", "Path to ONNX model file", cxxopts::value<std::string>())(
         "r,resolution", "Resolution (0=auto, 512, 768, 1024)",
         cxxopts::value<int>()->default_value("0"))(
-        "d,device", "Device (auto, cpu, coreml, cuda, dml)",
+        "d,device", "Device (auto, cpu, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "variant", "Model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",

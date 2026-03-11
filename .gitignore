@@ -22,6 +22,8 @@ CMakeUserPresets.json
 # Models (large, downloaded separately)
 models/*.onnx
 models/*.pth
+models/*.safetensors
+models/*.mlxfn
 
 # Compiled objects
 *.o

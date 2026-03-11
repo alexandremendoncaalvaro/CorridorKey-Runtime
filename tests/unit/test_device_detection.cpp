@@ -1,6 +1,8 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
 
+#include "core/mlx_probe.hpp"
+
 using namespace corridorkey;
 
 TEST_CASE("auto_detect returns valid device info", "[unit][device]") {
@@ -29,6 +31,19 @@ TEST_CASE("list_devices includes at least one device", "[unit][device]") {
     if (devices.front().backend != Backend::CPU) {
         REQUIRE(has_cpu);
     }
+
+#if defined(__APPLE__)
+    if (core::mlx_probe_available()) {
+        bool has_mlx = false;
+        for (const auto& device : devices) {
+            if (device.backend == Backend::MLX) {
+                has_mlx = true;
+                break;
+            }
+        }
+        REQUIRE(has_mlx);
+    }
+#endif
 }
 
 TEST_CASE("arm64 macOS builds prefer CoreML detection", "[unit][device]") {

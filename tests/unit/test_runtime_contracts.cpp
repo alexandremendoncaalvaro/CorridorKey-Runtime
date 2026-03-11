@@ -48,11 +48,12 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     REQUIRE(int8_1024 != models.end());
     REQUIRE_FALSE(int8_1024->validated_for_macos);
 
-    auto mlx_2048 = find_model("corridorkey_mlx_2048.mlxfn");
-    REQUIRE(mlx_2048 != models.end());
-    REQUIRE(mlx_2048->artifact_family == "mlxfn");
-    REQUIRE(mlx_2048->recommended_backend == "mlx");
-    REQUIRE(mlx_2048->intended_platforms == std::vector<std::string>{"macos_apple_silicon"});
+    auto mlx_pack = find_model("corridorkey_mlx.safetensors");
+    REQUIRE(mlx_pack != models.end());
+    REQUIRE(mlx_pack->artifact_family == "safetensors");
+    REQUIRE(mlx_pack->recommended_backend == "mlx");
+    REQUIRE(mlx_pack->intended_use == "apple_acceleration_primary");
+    REQUIRE(mlx_pack->intended_platforms == std::vector<std::string>{"macos_apple_silicon"});
 }
 
 TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {

@@ -58,6 +58,9 @@ RuntimeCapabilities runtime_capabilities() {
             capabilities.apple_silicon = true;
             capabilities.coreml_available = true;
         }
+        if (device.backend == Backend::MLX) {
+            capabilities.apple_silicon = true;
+        }
         if (device.backend == Backend::CPU) {
             capabilities.cpu_fallback_available = true;
         }
@@ -84,11 +87,10 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Available for manual testing on high-memory systems.",
                          "manual_high_resolution_validation", false, false, {},
                          {"macos_apple_silicon"}, {}),
-        make_model_entry(
-            "mlx", 2048, "corridorkey_mlx_2048.mlxfn", "mlxfn", "mlx",
-            "Apple Silicon acceleration evaluation pack exported for MLX import in C++.",
-            "apple_acceleration_evaluation", false, false, {}, {"macos_apple_silicon"},
-            {"apple_silicon_16gb"}),
+        make_model_entry("mlx", 2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
+                         "Official Apple Silicon model pack for the first native MLX backend.",
+                         "apple_acceleration_primary", false, false, {}, {"macos_apple_silicon"},
+                         {"apple_silicon_16gb"}),
         make_model_entry("fp16", 512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
                          "GPU-focused reference variant for non-macOS expansion.",
                          "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
@@ -167,6 +169,8 @@ std::string backend_to_string(Backend backend) {
             return "tensorrt";
         case Backend::DirectML:
             return "dml";
+        case Backend::MLX:
+            return "mlx";
         default:
             return "auto";
     }

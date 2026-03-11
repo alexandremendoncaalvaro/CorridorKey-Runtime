@@ -7,6 +7,8 @@ project(CorridorKey-Runtime
 )
 
 option(CORRIDORKEY_ENABLE_MLX "Enable optional MLX probe support on Apple platforms" ON)
+set(CORRIDORKEY_MLX_CMAKE_DIR "" CACHE PATH "Optional MLX CMake package directory")
+set(CORRIDORKEY_MLX_PYTHON "" CACHE FILEPATH "Optional Python interpreter used to discover MLX")
 
 # --- Project Rules & Standards ---
 
@@ -59,18 +61,50 @@ if(APPLE)
     message(STATUS "Using vendored ONNX Runtime with CoreML support at: ${ONNXRUNTIME_DYLIB}")
 
     if(CORRIDORKEY_ENABLE_MLX)
-        find_package(Python3 COMPONENTS Interpreter QUIET)
-        if(Python3_Interpreter_FOUND)
-            execute_process(
-                COMMAND "${Python3_EXECUTABLE}" -m mlx --cmake-dir
-                RESULT_VARIABLE CORRIDORKEY_MLX_CMAKE_DIR_RESULT
-                OUTPUT_VARIABLE CORRIDORKEY_MLX_CMAKE_DIR
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                ERROR_QUIET
-            )
-            if(CORRIDORKEY_MLX_CMAKE_DIR_RESULT EQUAL 0 AND NOT CORRIDORKEY_MLX_CMAKE_DIR STREQUAL "")
-                list(APPEND CMAKE_PREFIX_PATH "${CORRIDORKEY_MLX_CMAKE_DIR}")
+        set(_corridorkey_mlx_package_dir "${CORRIDORKEY_MLX_CMAKE_DIR}")
+        if(_corridorkey_mlx_package_dir STREQUAL "")
+            set(_corridorkey_mlx_python_candidates "")
+            if(NOT CORRIDORKEY_MLX_PYTHON STREQUAL "")
+                list(APPEND _corridorkey_mlx_python_candidates "${CORRIDORKEY_MLX_PYTHON}")
             endif()
+            if(DEFINED ENV{VIRTUAL_ENV})
+                list(APPEND _corridorkey_mlx_python_candidates "$ENV{VIRTUAL_ENV}/bin/python")
+            endif()
+            if(EXISTS "${CMAKE_SOURCE_DIR}/.venv-macos-mlx/bin/python")
+                list(APPEND _corridorkey_mlx_python_candidates
+                     "${CMAKE_SOURCE_DIR}/.venv-macos-mlx/bin/python")
+            endif()
+
+            find_package(Python3 COMPONENTS Interpreter QUIET)
+            if(Python3_Interpreter_FOUND)
+                list(APPEND _corridorkey_mlx_python_candidates "${Python3_EXECUTABLE}")
+            endif()
+
+            list(REMOVE_DUPLICATES _corridorkey_mlx_python_candidates)
+
+            foreach(_corridorkey_mlx_python IN LISTS _corridorkey_mlx_python_candidates)
+                if(NOT EXISTS "${_corridorkey_mlx_python}")
+                    continue()
+                endif()
+
+                execute_process(
+                    COMMAND "${_corridorkey_mlx_python}" -m mlx --cmake-dir
+                    RESULT_VARIABLE CORRIDORKEY_MLX_CMAKE_DIR_RESULT
+                    OUTPUT_VARIABLE _corridorkey_mlx_package_dir_candidate
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET
+                )
+                if(CORRIDORKEY_MLX_CMAKE_DIR_RESULT EQUAL 0 AND
+                   NOT _corridorkey_mlx_package_dir_candidate STREQUAL "")
+                    set(_corridorkey_mlx_package_dir "${_corridorkey_mlx_package_dir_candidate}")
+                    message(STATUS "Resolved MLX CMake package with ${_corridorkey_mlx_python}")
+                    break()
+                endif()
+            endforeach()
+        endif()
+
+        if(NOT _corridorkey_mlx_package_dir STREQUAL "")
+            list(APPEND CMAKE_PREFIX_PATH "${_corridorkey_mlx_package_dir}")
         endif()
 
         find_package(MLX CONFIG QUIET)

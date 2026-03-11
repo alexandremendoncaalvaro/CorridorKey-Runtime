@@ -34,6 +34,8 @@ inline std::string backend_token(Backend backend) {
             return "tensorrt";
         case Backend::DirectML:
             return "dml";
+        case Backend::MLX:
+            return "mlx";
         default:
             return "auto";
     }

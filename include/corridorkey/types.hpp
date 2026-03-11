@@ -126,7 +126,7 @@ class Result<void> {
 /**
  * @brief Hardware backends supported by the runtime.
  */
-enum class Backend : std::uint8_t { Auto, CPU, CUDA, TensorRT, CoreML, DirectML };
+enum class Backend : std::uint8_t { Auto, CPU, CUDA, TensorRT, CoreML, DirectML, MLX };
 
 /**
  * @brief Information about a detected hardware device.

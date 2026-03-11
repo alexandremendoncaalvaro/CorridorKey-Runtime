@@ -6,6 +6,7 @@
 namespace corridorkey::core {
 
 bool mlx_probe_available();
+Result<void> probe_mlx_weights(const std::filesystem::path& weights_path);
 Result<void> probe_mlx_function(const std::filesystem::path& function_path);
 
 }  // namespace corridorkey::core

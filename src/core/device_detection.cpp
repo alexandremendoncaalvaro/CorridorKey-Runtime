@@ -1,5 +1,7 @@
 #include <corridorkey/engine.hpp>
 
+#include "mlx_probe.hpp"
+
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -85,11 +87,18 @@ DeviceInfo auto_detect() {
 
 std::vector<DeviceInfo> list_devices() {
     std::vector<DeviceInfo> devices;
-    devices.push_back(auto_detect());
+    DeviceInfo detected = auto_detect();
+    devices.push_back(detected);
+
+#if defined(__APPLE__)
+    if (detect_apple_silicon() && core::mlx_probe_available()) {
+        devices.push_back({"Apple Silicon MLX", detected.available_memory_mb, Backend::MLX});
+    }
+#endif
 
     // Always include CPU as a fallback option
     if (devices.back().backend != Backend::CPU) {
-        devices.push_back({"Generic CPU", devices.back().available_memory_mb, Backend::CPU});
+        devices.push_back({"Generic CPU", detected.available_memory_mb, Backend::CPU});
     }
 
     return devices;
