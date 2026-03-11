@@ -15,6 +15,8 @@ TEST_CASE("runtime capabilities expose stable diagnostics", "[unit][runtime]") {
     REQUIRE(capabilities.cpu_fallback_available);
     REQUIRE(capabilities.supported_backends.size() == devices.size());
     REQUIRE_FALSE(capabilities.default_video_encoder.empty());
+    auto json = to_json(capabilities);
+    REQUIRE(json.contains("mlx_probe_available"));
 }
 
 TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
@@ -31,6 +33,8 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     REQUIRE(int8_512->validated_for_macos);
     REQUIRE(int8_512->packaged_for_macos);
     REQUIRE(int8_512->intended_use == "portable_preview");
+    REQUIRE(int8_512->artifact_family == "onnx");
+    REQUIRE(int8_512->recommended_backend == "cpu");
     std::vector<std::string> validated_platforms = {"macos_apple_silicon"};
     REQUIRE(int8_512->validated_platforms == validated_platforms);
 
@@ -43,6 +47,12 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     auto int8_1024 = find_model("corridorkey_int8_1024.onnx");
     REQUIRE(int8_1024 != models.end());
     REQUIRE_FALSE(int8_1024->validated_for_macos);
+
+    auto mlx_2048 = find_model("corridorkey_mlx_2048.mlxfn");
+    REQUIRE(mlx_2048 != models.end());
+    REQUIRE(mlx_2048->artifact_family == "mlxfn");
+    REQUIRE(mlx_2048->recommended_backend == "mlx");
+    REQUIRE(mlx_2048->intended_platforms == std::vector<std::string>{"macos_apple_silicon"});
 }
 
 TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {

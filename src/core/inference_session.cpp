@@ -16,6 +16,8 @@ namespace corridorkey {
 
 namespace {
 
+constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
+
 #ifdef __APPLE__
 void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
 #if ORT_API_VERSION >= 24
@@ -117,11 +119,17 @@ InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(devic
 
 InferenceSession::~InferenceSession() = default;
 
-void InferenceSession::configure_session_options(bool use_optimized_model_cache) {
+void InferenceSession::configure_session_options(bool use_optimized_model_cache,
+                                                 const SessionCreateOptions& options) {
     m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
     m_session_options.SetGraphOptimizationLevel(use_optimized_model_cache
                                                     ? GraphOptimizationLevel::ORT_DISABLE_ALL
                                                     : GraphOptimizationLevel::ORT_ENABLE_ALL);
+    m_session_options.SetLogSeverityLevel(options.log_severity);
+
+    if (options.disable_cpu_ep_fallback && m_device.backend != Backend::CPU) {
+        m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
+    }
 
     switch (m_device.backend) {
         case Backend::CoreML: {
@@ -183,7 +191,7 @@ void InferenceSession::extract_metadata() {
 }
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
-    const std::filesystem::path& model_path, DeviceInfo device) {
+    const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options) {
     if (!std::filesystem::exists(model_path)) {
         return Unexpected(
             Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
@@ -194,7 +202,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     try {
         auto session_ptr =
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
-        session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_ERROR, "CorridorKey");
+        session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
         std::filesystem::path session_model_path = model_path;
         std::optional<std::filesystem::path> optimized_model_path;
         bool using_optimized_model_cache = false;
@@ -212,7 +220,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             }
         }
 
-        session_ptr->configure_session_options(using_optimized_model_cache);
+        session_ptr->configure_session_options(using_optimized_model_cache, options);
         if (!using_optimized_model_cache && optimized_model_path.has_value()) {
 #ifdef _WIN32
             session_ptr->m_session_options.SetOptimizedModelFilePath(
@@ -243,8 +251,8 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 try {
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
-                    session_ptr->m_env = Ort::Env(ORT_LOGGING_LEVEL_ERROR, "CorridorKey");
-                    session_ptr->configure_session_options(false);
+                    session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
+                    session_ptr->configure_session_options(false, options);
 #ifdef _WIN32
                     session_ptr->m_session_options.SetOptimizedModelFilePath(
                         optimized_model_path->wstring().c_str());

@@ -6,6 +6,8 @@ project(CorridorKey-Runtime
     LANGUAGES CXX
 )
 
+option(CORRIDORKEY_ENABLE_MLX "Enable optional MLX probe support on Apple platforms" ON)
+
 # --- Project Rules & Standards ---
 
 set(CMAKE_CXX_STANDARD 20)
@@ -55,6 +57,29 @@ if(APPLE)
     set(CMAKE_BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
 
     message(STATUS "Using vendored ONNX Runtime with CoreML support at: ${ONNXRUNTIME_DYLIB}")
+
+    if(CORRIDORKEY_ENABLE_MLX)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            execute_process(
+                COMMAND "${Python3_EXECUTABLE}" -m mlx --cmake-dir
+                RESULT_VARIABLE CORRIDORKEY_MLX_CMAKE_DIR_RESULT
+                OUTPUT_VARIABLE CORRIDORKEY_MLX_CMAKE_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+            if(CORRIDORKEY_MLX_CMAKE_DIR_RESULT EQUAL 0 AND NOT CORRIDORKEY_MLX_CMAKE_DIR STREQUAL "")
+                list(APPEND CMAKE_PREFIX_PATH "${CORRIDORKEY_MLX_CMAKE_DIR}")
+            endif()
+        endif()
+
+        find_package(MLX CONFIG QUIET)
+        if(MLX_FOUND)
+            message(STATUS "MLX probe support enabled")
+        else()
+            message(STATUS "MLX probe support unavailable; continuing without MLX integration")
+        endif()
+    endif()
 else()
     find_package(onnxruntime REQUIRED)
 endif()

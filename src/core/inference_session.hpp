@@ -23,6 +23,11 @@
 
 namespace corridorkey {
 
+struct SessionCreateOptions {
+    bool disable_cpu_ep_fallback = false;
+    OrtLoggingLevel log_severity = ORT_LOGGING_LEVEL_ERROR;
+};
+
 /**
  * @brief Private wrapper for an ONNX Runtime session.
  * This class isolates Ort types from the rest of the core.
@@ -30,7 +35,8 @@ namespace corridorkey {
 class InferenceSession {
    public:
     static Result<std::unique_ptr<InferenceSession>> create(const std::filesystem::path& model_path,
-                                                            DeviceInfo device);
+                                                            DeviceInfo device,
+                                                            SessionCreateOptions options = {});
 
     ~InferenceSession();
 
@@ -64,7 +70,8 @@ class InferenceSession {
    private:
     explicit InferenceSession(DeviceInfo device);
 
-    void configure_session_options(bool use_optimized_model_cache = false);
+    void configure_session_options(bool use_optimized_model_cache,
+                                   const SessionCreateOptions& options);
     void extract_metadata();
 
     /**

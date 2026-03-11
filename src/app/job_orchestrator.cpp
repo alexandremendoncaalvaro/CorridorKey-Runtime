@@ -387,6 +387,8 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["bundle"] = health["bundle"];
     report["video"] = health["video"];
     report["cache"] = health["cache"];
+    report["coreml"] = health["coreml"];
+    report["mlx"] = health["mlx"];
 
     nlohmann::json models = nlohmann::json::array();
     bool validated_models_present = true;
@@ -408,10 +410,15 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["summary"]["bundle_healthy"] = report["bundle"]["healthy"];
     report["summary"]["video_healthy"] = report["video"]["healthy"];
     report["summary"]["cache_healthy"] = report["cache"]["healthy"];
+    report["summary"]["coreml_healthy"] =
+        !report["coreml"]["applicable"].get<bool>() || report["coreml"]["healthy"].get<bool>();
+    report["summary"]["apple_acceleration_probe_ready"] =
+        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["healthy"].get<bool>();
     report["summary"]["validated_models_present"] = validated_models_present;
     report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
                                    report["summary"]["video_healthy"].get<bool>() &&
                                    report["summary"]["cache_healthy"].get<bool>() &&
+                                   report["summary"]["coreml_healthy"].get<bool>() &&
                                    validated_models_present;
 
     return report;

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <utility>
 
+#include "../core/mlx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 
 namespace corridorkey {
@@ -12,6 +13,8 @@ namespace corridorkey {
 namespace {
 
 ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
+                                   const std::string& filename, const std::string& artifact_family,
+                                   const std::string& recommended_backend,
                                    const std::string& description, const std::string& intended_use,
                                    bool validated_for_macos, bool packaged_for_macos,
                                    std::vector<std::string> validated_platforms,
@@ -20,7 +23,9 @@ ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
     ModelCatalogEntry entry;
     entry.variant = variant;
     entry.resolution = resolution;
-    entry.filename = "corridorkey_" + variant + "_" + std::to_string(resolution) + ".onnx";
+    entry.filename = filename;
+    entry.artifact_family = artifact_family;
+    entry.recommended_backend = recommended_backend;
     entry.description = description;
     entry.download_url = "https://huggingface.co/corridorkey/models/resolve/main/" + entry.filename;
     entry.intended_use = intended_use;
@@ -58,6 +63,7 @@ RuntimeCapabilities runtime_capabilities() {
         }
     }
 
+    capabilities.mlx_probe_available = core::mlx_probe_available();
     capabilities.videotoolbox_available = is_videotoolbox_available();
     capabilities.default_video_encoder = default_video_encoder_for_path("output.mp4");
 
@@ -66,29 +72,41 @@ RuntimeCapabilities runtime_capabilities() {
 
 std::vector<ModelCatalogEntry> model_catalog() {
     return {
-        make_model_entry("int8", 512, "Validated macOS default for preview and 8 GB machines.",
+        make_model_entry("int8", 512, "corridorkey_int8_512.onnx", "onnx", "cpu",
+                         "Validated macOS default for preview and 8 GB machines.",
                          "portable_preview", true, true, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_8gb"}),
-        make_model_entry("int8", 768, "Validated macOS default for 16 GB Apple Silicon systems.",
+        make_model_entry("int8", 768, "corridorkey_int8_768.onnx", "onnx", "cpu",
+                         "Validated macOS default for 16 GB Apple Silicon systems.",
                          "portable_default", true, true, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
-        make_model_entry("int8", 1024, "Available for manual testing on high-memory systems.",
+        make_model_entry("int8", 1024, "corridorkey_int8_1024.onnx", "onnx", "cpu",
+                         "Available for manual testing on high-memory systems.",
                          "manual_high_resolution_validation", false, false, {},
                          {"macos_apple_silicon"}, {}),
-        make_model_entry("fp16", 512, "GPU-focused reference variant for non-macOS expansion.",
+        make_model_entry(
+            "mlx", 2048, "corridorkey_mlx_2048.mlxfn", "mlxfn", "mlx",
+            "Apple Silicon acceleration evaluation pack exported for MLX import in C++.",
+            "apple_acceleration_evaluation", false, false, {}, {"macos_apple_silicon"},
+            {"apple_silicon_16gb"}),
+        make_model_entry("fp16", 512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
+                         "GPU-focused reference variant for non-macOS expansion.",
                          "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
-        make_model_entry("fp16", 768, "Higher quality GPU-focused reference variant.",
-                         "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
-        make_model_entry("fp16", 1024, "Maximum GPU-focused reference variant.",
-                         "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
-        make_model_entry("fp32", 512, "Reference validation variant.", "reference_validation",
+        make_model_entry("fp16", 768, "corridorkey_fp16_768.onnx", "onnx", "tensorrt",
+                         "Higher quality GPU-focused reference variant.", "windows_rtx_reference",
+                         false, false, {}, {"windows_rtx"}, {}),
+        make_model_entry("fp16", 1024, "corridorkey_fp16_1024.onnx", "onnx", "tensorrt",
+                         "Maximum GPU-focused reference variant.", "windows_rtx_reference", false,
+                         false, {}, {"windows_rtx"}, {}),
+        make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
+                         "Reference validation variant.", "reference_validation", false, false, {},
+                         {"macos_apple_silicon", "windows_rtx"}, {}),
+        make_model_entry("fp32", 768, "corridorkey_fp32_768.onnx", "onnx", "cpu",
+                         "Higher resolution reference validation variant.", "reference_validation",
                          false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
-        make_model_entry("fp32", 768, "Higher resolution reference validation variant.",
-                         "reference_validation", false, false, {},
-                         {"macos_apple_silicon", "windows_rtx"}, {}),
-        make_model_entry("fp32", 1024, "Maximum resolution reference validation variant.",
-                         "reference_validation", false, false, {},
-                         {"macos_apple_silicon", "windows_rtx"}, {}),
+        make_model_entry("fp32", 1024, "corridorkey_fp32_1024.onnx", "onnx", "cpu",
+                         "Maximum resolution reference validation variant.", "reference_validation",
+                         false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
     };
 }
 
@@ -197,6 +215,7 @@ nlohmann::json to_json(const RuntimeCapabilities& capabilities) {
     json["platform"] = capabilities.platform;
     json["apple_silicon"] = capabilities.apple_silicon;
     json["coreml_available"] = capabilities.coreml_available;
+    json["mlx_probe_available"] = capabilities.mlx_probe_available;
     json["cpu_fallback_available"] = capabilities.cpu_fallback_available;
     json["videotoolbox_available"] = capabilities.videotoolbox_available;
     json["tiling_supported"] = capabilities.tiling_supported;
@@ -260,6 +279,8 @@ nlohmann::json to_json(const ModelCatalogEntry& model) {
     json["variant"] = model.variant;
     json["resolution"] = model.resolution;
     json["filename"] = model.filename;
+    json["artifact_family"] = model.artifact_family;
+    json["recommended_backend"] = model.recommended_backend;
     json["description"] = model.description;
     json["download_url"] = model.download_url;
     json["intended_use"] = model.intended_use;

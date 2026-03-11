@@ -186,6 +186,8 @@ void print_info() {
     std::cout << "Capabilities:\n"
               << " - CoreML: "
               << (info["capabilities"]["coreml_available"].get<bool>() ? "yes" : "no") << "\n"
+              << " - MLX probe: "
+              << (info["capabilities"]["mlx_probe_available"].get<bool>() ? "yes" : "no") << "\n"
               << " - CPU fallback: "
               << (info["capabilities"]["cpu_fallback_available"].get<bool>() ? "yes" : "no") << "\n"
               << " - VideoToolbox: "

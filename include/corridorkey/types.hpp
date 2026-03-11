@@ -153,6 +153,7 @@ struct RuntimeCapabilities {
     std::string platform = "";
     bool apple_silicon = false;
     bool coreml_available = false;
+    bool mlx_probe_available = false;
     bool cpu_fallback_available = false;
     bool videotoolbox_available = false;
     bool tiling_supported = true;
@@ -351,6 +352,8 @@ struct ModelCatalogEntry {
     std::string variant = "";
     int resolution = 0;
     std::string filename = "";
+    std::string artifact_family = "";
+    std::string recommended_backend = "";
     std::string description = "";
     std::string download_url = "";
     std::string intended_use = "";

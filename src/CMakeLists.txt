@@ -47,6 +47,13 @@ if(APPLE)
     target_link_libraries(corridorkey_core PRIVATE "-framework CoreML" "-framework Foundation")
 endif()
 
+if(APPLE AND MLX_FOUND)
+    target_link_libraries(corridorkey_core PRIVATE mlx)
+    target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_WITH_MLX=1)
+else()
+    target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_WITH_MLX=0)
+endif()
+
 # Set the compile definition for the export macro
 target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_EXPORTS)
 
@@ -95,6 +102,13 @@ if(BUILD_TESTING)
 
     if(APPLE)
         target_link_libraries(corridorkey_core_static PRIVATE "-framework CoreML" "-framework Foundation")
+    endif()
+
+    if(APPLE AND MLX_FOUND)
+        target_link_libraries(corridorkey_core_static PRIVATE mlx)
+        target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_WITH_MLX=1)
+    else()
+        target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_WITH_MLX=0)
     endif()
 
     target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_EXPORTS)

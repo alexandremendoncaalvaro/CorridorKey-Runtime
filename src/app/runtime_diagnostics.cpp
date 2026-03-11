@@ -12,6 +12,8 @@
 #include <string_view>
 #include <utility>
 
+#include "../core/inference_session.hpp"
+#include "../core/mlx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 #include "common/runtime_paths.hpp"
 
@@ -335,6 +337,133 @@ nlohmann::json inspect_cache() {
     return json;
 }
 
+nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& models_dir) {
+    nlohmann::json json;
+    json["applicable"] = false;
+    json["available"] = false;
+    json["probe_policy"] = "session.disable_cpu_ep_fallback=1";
+    json["healthy"] = false;
+    json["all_packaged_models_supported"] = false;
+    json["models"] = nlohmann::json::array();
+
+#if defined(__APPLE__)
+    json["applicable"] = true;
+
+    auto detected_device = auto_detect();
+    bool coreml_available = detected_device.backend == Backend::CoreML;
+    json["available"] = coreml_available;
+    json["detected_device"] = detected_device.name;
+
+    if (!coreml_available) {
+        return json;
+    }
+
+    DeviceInfo probe_device = detected_device;
+    probe_device.backend = Backend::CoreML;
+
+    bool all_packaged_models_supported = true;
+    bool any_packaged_model_found = false;
+
+    for (const auto& model : model_catalog()) {
+        if (!model.packaged_for_macos) {
+            continue;
+        }
+
+        std::filesystem::path model_path = models_dir / model.filename;
+        bool found = std::filesystem::exists(model_path);
+        any_packaged_model_found = any_packaged_model_found || found;
+
+        nlohmann::json entry;
+        entry["filename"] = model.filename;
+        entry["found"] = found;
+        entry["validated_platforms"] = model.validated_platforms;
+        entry["validated_hardware_tiers"] = model.validated_hardware_tiers;
+        entry["full_graph_supported"] = false;
+        entry["error"] = "";
+
+        if (!found) {
+            all_packaged_models_supported = false;
+            json["models"].push_back(entry);
+            continue;
+        }
+
+        auto probe_res = InferenceSession::create(
+            model_path, probe_device,
+            SessionCreateOptions{.disable_cpu_ep_fallback = true,
+                                 .log_severity = ORT_LOGGING_LEVEL_WARNING});
+        entry["full_graph_supported"] = probe_res.has_value();
+        if (!probe_res) {
+            entry["error"] = probe_res.error().message;
+            all_packaged_models_supported = false;
+        }
+
+        json["models"].push_back(entry);
+    }
+
+    json["all_packaged_models_supported"] = all_packaged_models_supported;
+    json["healthy"] = any_packaged_model_found && all_packaged_models_supported;
+#endif
+
+    return json;
+}
+
+nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
+    nlohmann::json json;
+    json["applicable"] = false;
+    json["probe_available"] = core::mlx_probe_available();
+    json["healthy"] = false;
+    json["all_candidate_models_importable"] = false;
+    json["models"] = nlohmann::json::array();
+
+#if defined(__APPLE__)
+    json["applicable"] = true;
+
+    bool all_candidate_models_importable = true;
+    bool any_candidate_model_found = false;
+
+    for (const auto& model : model_catalog()) {
+        if (model.artifact_family != "mlxfn") {
+            continue;
+        }
+
+        std::filesystem::path model_path = models_dir / model.filename;
+        bool found = std::filesystem::exists(model_path);
+        any_candidate_model_found = any_candidate_model_found || found;
+
+        nlohmann::json entry;
+        entry["filename"] = model.filename;
+        entry["found"] = found;
+        entry["artifact_family"] = model.artifact_family;
+        entry["recommended_backend"] = model.recommended_backend;
+        entry["validated_platforms"] = model.validated_platforms;
+        entry["validated_hardware_tiers"] = model.validated_hardware_tiers;
+        entry["importable"] = false;
+        entry["error"] = "";
+
+        if (!found) {
+            all_candidate_models_importable = false;
+            json["models"].push_back(entry);
+            continue;
+        }
+
+        auto probe_res = core::probe_mlx_function(model_path);
+        entry["importable"] = probe_res.has_value();
+        if (!probe_res) {
+            entry["error"] = probe_res.error().message;
+            all_candidate_models_importable = false;
+        }
+
+        json["models"].push_back(entry);
+    }
+
+    json["all_candidate_models_importable"] = all_candidate_models_importable;
+    json["healthy"] =
+        core::mlx_probe_available() && any_candidate_model_found && all_candidate_models_importable;
+#endif
+
+    return json;
+}
+
 nlohmann::json latency_summary(const std::vector<double>& samples) {
     nlohmann::json json;
     json["count"] = samples.size();
@@ -379,6 +508,8 @@ nlohmann::json inspect_operational_health(const std::filesystem::path& models_di
     json["bundle"] = inspect_bundle(models_dir, executable_path);
     json["video"] = inspect_video_stack();
     json["cache"] = inspect_cache();
+    json["coreml"] = inspect_coreml_execution_provider(models_dir);
+    json["mlx"] = inspect_mlx_model_pack(models_dir);
     return json;
 }
 

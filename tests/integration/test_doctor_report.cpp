@@ -13,6 +13,8 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report.contains("bundle"));
     REQUIRE(report.contains("video"));
     REQUIRE(report.contains("cache"));
+    REQUIRE(report.contains("coreml"));
+    REQUIRE(report.contains("mlx"));
     REQUIRE(report.contains("summary"));
     REQUIRE(report["models"].is_array());
     REQUIRE(report["presets"].is_array());
@@ -30,5 +32,31 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["cache"].contains("optimized_model_count"));
     REQUIRE(report["cache"]["optimized_models"].is_array());
     REQUIRE(report["cache"].contains("coreml_ep_cache_dir"));
+    REQUIRE(report["coreml"].contains("applicable"));
+    REQUIRE(report["coreml"].contains("available"));
+    REQUIRE(report["coreml"].contains("probe_policy"));
+    REQUIRE(report["coreml"].contains("models"));
+    REQUIRE(report["coreml"]["models"].is_array());
+    if (!report["coreml"]["models"].empty()) {
+        auto entry = report["coreml"]["models"].front();
+        REQUIRE(entry.contains("filename"));
+        REQUIRE(entry.contains("found"));
+        REQUIRE(entry.contains("full_graph_supported"));
+        REQUIRE(entry.contains("error"));
+    }
+    REQUIRE(report["mlx"].contains("applicable"));
+    REQUIRE(report["mlx"].contains("probe_available"));
+    REQUIRE(report["mlx"].contains("models"));
+    REQUIRE(report["mlx"]["models"].is_array());
+    if (!report["mlx"]["models"].empty()) {
+        auto entry = report["mlx"]["models"].front();
+        REQUIRE(entry.contains("filename"));
+        REQUIRE(entry.contains("artifact_family"));
+        REQUIRE(entry.contains("recommended_backend"));
+        REQUIRE(entry.contains("importable"));
+        REQUIRE(entry.contains("error"));
+    }
+    REQUIRE(report["summary"].contains("coreml_healthy"));
+    REQUIRE(report["summary"].contains("apple_acceleration_probe_ready"));
     REQUIRE(report["summary"].contains("validated_models_present"));
 }
