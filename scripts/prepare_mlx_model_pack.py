@@ -39,15 +39,14 @@ def parse_args() -> argparse.Namespace:
         help="Optional existing safetensors file to copy into the output directory.",
     )
     parser.add_argument(
-        "--export-mlxfn",
-        type=Path,
-        help="Optional path for a bridge .mlxfn export using the prepared safetensors weights.",
+        "--bridge-resolutions",
+        default="512,1024",
+        help="Comma-separated bridge export resolutions bundled with the Apple model pack.",
     )
     parser.add_argument(
-        "--export-size",
-        type=int,
-        default=512,
-        help="Resolution used when exporting the optional .mlxfn bridge.",
+        "--skip-bridge-export",
+        action="store_true",
+        help="Skip bridge export when only the safetensors weights are needed.",
     )
     parser.add_argument(
         "--force",
@@ -93,6 +92,20 @@ def export_bridge(weights_path: Path, export_path: Path, export_size: int) -> No
     mx.export_function(str(export_path), bridge_forward, example)
 
 
+def parse_bridge_resolutions(value: str) -> list[int]:
+    resolutions: list[int] = []
+    for item in value.split(","):
+        text = item.strip()
+        if not text:
+            continue
+        resolution = int(text)
+        if resolution <= 0:
+            raise ValueError("bridge resolutions must be positive integers")
+        if resolution not in resolutions:
+            resolutions.append(resolution)
+    return resolutions
+
+
 def main() -> int:
     args = parse_args()
 
@@ -130,13 +143,19 @@ def main() -> int:
         "source": source,
     }
 
-    if args.export_mlxfn is not None:
-        if args.export_mlxfn.exists() and not args.force:
-            pass
-        else:
-            export_bridge(weights_path, args.export_mlxfn, args.export_size)
-        result["mlxfn_path"] = str(args.export_mlxfn.resolve())
-        result["export_size"] = args.export_size
+    if not args.skip_bridge_export:
+        bridge_exports = []
+        for resolution in parse_bridge_resolutions(args.bridge_resolutions):
+            export_path = output_dir / f"{weights_path.stem}_bridge_{resolution}.mlxfn"
+            if not export_path.exists() or args.force:
+                export_bridge(weights_path, export_path, resolution)
+            bridge_exports.append(
+                {
+                    "path": str(export_path.resolve()),
+                    "resolution": resolution,
+                }
+            )
+        result["bridge_exports"] = bridge_exports
 
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
