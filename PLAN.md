@@ -16,6 +16,9 @@
 - O runtime e unificado, mas o **artefato de modelo passa a ser curado por
   plataforma**. O produto nao assume mais que um mesmo ONNX empacotado sera o
   caminho certo para Apple Silicon e para Windows RTX.
+- Python continua permitido apenas nas ferramentas internas de conversao e
+  preparo de release. O artefato distribuido para usuarios finais nao pode
+  depender de Python para instalar ou executar.
 
 ## Posicionamento do produto
 

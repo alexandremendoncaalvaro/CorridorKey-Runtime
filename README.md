@@ -136,6 +136,12 @@ python scripts/prepare_mlx_model_pack.py \
   --tag v1.0.0
 ```
 
+This step is **maintainer-facing**, not part of the user workflow for official
+releases. Python is allowed here because this script lives in the release/tool
+pipeline. The portable macOS bundle is expected to ship with the prepared MLX
+pack already included, so end users do not need Python to install or run the
+runtime.
+
 By default this prepares:
 
 - `corridorkey_mlx.safetensors`

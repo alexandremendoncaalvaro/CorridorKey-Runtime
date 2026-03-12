@@ -352,6 +352,8 @@ curated delivery tracks.
    - The runtime contract is shared, but the accelerated artifact may differ
      from Windows and CPU bundles.
    - CPU is the mandatory compatibility fallback.
+   - Python is allowed only in maintainer-facing conversion and packaging
+     tools. Official macOS bundles must not require Python to install or run.
    - `int8_512` and `int8_768` are the current compatibility and diagnostics
      baseline packs, not the final assumption for Apple acceleration.
    - The approved Mac acceleration evaluation paths are `MLX` and direct
@@ -601,7 +603,7 @@ corridorkey info
 # Download ONNX model files (512/768/1024 for selected variant)
 corridorkey download [--variant fp32|fp16|int8|all]
 
-# Prepare the Apple Silicon MLX pack
+# Prepare the Apple Silicon MLX pack (maintainer/release pipeline only)
 python scripts/prepare_mlx_model_pack.py --output-dir models
 
 # Run diagnostics over available devices and model files
