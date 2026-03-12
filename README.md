@@ -15,14 +15,13 @@ language. It exists to make CorridorKey usable as a native, predictable, and
 integrable engine that can be installed, benchmarked, automated, and embedded
 without rebuilding the surrounding stack each time.
 
-The delivery sequence is explicit:
+The current delivery shape is explicit:
 
-- **macOS first** to close runtime quality, diagnostics, and portable
-  distribution on Apple Silicon
-- **Windows RTX next** as the next product track for predictable consumer GPU
-  deployment
-- **GUI, sidecar, and embedded integrations after that**, all consuming the
-  same library-first runtime contracts
+- **macOS Apple Silicon** ships as a portable MLX-first runtime track
+- **Windows RTX** ships as a portable TensorRT RTX runtime track with CPU
+  fallback
+- **GUI, sidecar, and embedded integrations come after that**, all consuming
+  the same library-first runtime contracts
 
 ## Who This Is For
 
@@ -51,14 +50,15 @@ The delivery sequence is explicit:
 - **macOS Apple Silicon track:** MLX is now the default operational path for
   Apple model packs, while ONNX remains the CPU-compatible compatibility and
   diagnostics baseline.
-- **Windows RTX next:** TensorRT RTX is the planned primary Windows product
-  track, with its own RTX-oriented artifact strategy after macOS release gates
-  are closed.
+- **Windows RTX track:** TensorRT RTX is now the primary Windows product path,
+  with curated FP16 ONNX model packs, packaged runtime DLLs, and structured CPU
+  fallback.
 - **Operational tooling:** `doctor`, `benchmark`, `models`, `presets`, and
   `process --json` expose stable machine-readable diagnostics.
-- **Validated model catalog:** the packaged macOS set now centers on
-  `corridorkey_mlx.safetensors` for Apple acceleration and `int8_512` for CPU
-  smoke and fallback checks.
+- **Validated model catalog:** the packaged macOS set centers on
+  `corridorkey_mlx.safetensors`, while the packaged Windows RTX set centers on
+  `corridorkey_fp16_768.onnx`, `corridorkey_fp16_1024.onnx`, and
+  `corridorkey_int8_512.onnx` for fallback.
 - **Measured runtime behavior:** stage-level timings cover engine creation,
   warmup, inference, tiling, decode, encode, and full-job execution.
 - **Library + CLI:** the runtime is reusable as a C++ library and exposed
@@ -66,13 +66,18 @@ The delivery sequence is explicit:
 
 ## Quick Start
 
-Validated runtime path today: **macOS 14+ on Apple Silicon** with MLX-first
-execution for Apple model packs, CPU fallback for ONNX baselines, structured
-diagnostics, and a curated model catalog.
+Validated runtime paths today:
 
-Windows RTX is the next product track already documented in the roadmap, but it
-is **not** the current release gate yet. Linux remains architecture-ready and
-deferred until macOS and Windows RTX are both clear.
+- **macOS 14+ on Apple Silicon:** MLX-first execution for Apple model packs,
+  CPU fallback for ONNX baselines, structured diagnostics, and a curated model
+  catalog.
+- **Windows 11 x64 on NVIDIA RTX 30xx+:** TensorRT RTX execution with packaged
+  runtime DLLs, curated FP16 ONNX packs, `doctor` diagnostics, and CPU
+  fallback.
+
+Linux remains architecture-ready and deferred until the current macOS and
+Windows release tracks are both stable enough to stop consuming the majority of
+runtime validation effort.
 
 ## Model Packs and Platform Tracks
 
@@ -291,6 +296,69 @@ For the official macOS bundle, the user-facing flow is now:
 The bundle already includes the packaged Apple model pack. End users do not
 need to pick `--model`, `--device`, or `--tiled` for the common path.
 
+## Windows RTX Preview Testing
+
+This section is the best starting point for Windows testers using the portable
+GitHub release.
+
+Current preview scope:
+
+- Supported hardware: **NVIDIA RTX 30xx or newer**
+- Preferred OS target: **Windows 11 x64**
+- Runtime path: **TensorRT RTX first, CPU fallback available**
+- User expectation: **no separate CorridorKey, ONNX Runtime, TensorRT RTX, or
+  CUDA Toolkit installation**
+- External dependency that still exists: **compatible NVIDIA driver on the
+  target machine**
+
+First-run flow from the release zip:
+
+```powershell
+cd CorridorKey_Windows_RTX_v0.1.4
+.\corridorkey.cmd doctor
+.\smoke_test.bat
+.\corridorkey.cmd process input.mp4 output.mp4
+.\corridorkey.cmd process input_4k.mp4 output_4k.mp4 --preset max
+```
+
+Useful commands for testers:
+
+```powershell
+.\corridorkey.cmd doctor
+.\corridorkey.cmd benchmark
+.\corridorkey.cmd process input.mp4 output.mp4
+.\corridorkey.cmd process input_4k.mp4 output_4k.mp4 --preset max
+.\corridorkey.cmd process --json --input input.mp4 --output output.mp4
+```
+
+What we want reported back from testers:
+
+- GPU model and VRAM
+- NVIDIA driver version
+- whether `doctor` passed with `bundle_healthy=true`
+- whether the app opened and processed a real file
+- rough runtime for a short clip or 4K sample
+- crashes, stalls, fallback to CPU, incorrect output, or visual artifacts
+
+Current known Windows limitation:
+
+- the portable video path still reports `mpeg4` as the default encoder in the
+  current release bundle
+- `doctor` can still report `video_healthy=false` even when the TensorRT RTX
+  inference path and bundle health are correct
+
+For the official Windows bundle, the user-facing flow is now:
+
+```powershell
+.\corridorkey.cmd doctor
+.\smoke_test.bat
+.\corridorkey.cmd process input.mp4 output.mp4
+.\corridorkey.cmd process input_4k.mp4 output_4k.mp4 --preset max
+```
+
+The bundle already includes the packaged Windows RTX runtime DLLs and validated
+model set. End users do not need to point the runtime at a local SDK install.
+
 From source builds, maintainers can still use the lower-level commands below.
 
 **Download ONNX baseline packs**:
@@ -430,23 +498,22 @@ Alpha hints are part of the product contract, not an afterthought.
 
 ## Delivery Sequence
 
-1. **macOS production runtime:** choose and validate the Apple-specific
-   accelerated model-pack path, keep CPU fallback predictable, close tiling,
-   corpus validation, and portable CLI bundle.
-2. **Windows RTX next:** TensorRT RTX-focused Windows track with predictable
-   installation, diagnostics, validated tiers, and its own RTX-oriented model
-   pack.
+1. **macOS portable runtime:** Apple Silicon track with MLX-first execution,
+   curated Apple model packs, diagnostics, and CPU fallback.
+2. **Windows RTX portable runtime:** TensorRT RTX-focused Windows track with
+   curated FP16 ONNX packs, packaged runtime DLLs, diagnostics, and CPU
+   fallback.
 3. **Integration surfaces:** sidecar, GUI, plugin, and pipeline consumers over
    the same library-first contracts.
-4. **Broader platform expansion:** Linux and secondary providers after macOS
-   and Windows RTX are both well-defined.
+4. **Broader platform expansion:** Linux and secondary providers after the
+   current macOS and Windows runtime tracks are stable.
 
 ## Platform Status
 
 | Platform | Primary path | Status | Notes |
 |----------|--------------|--------|-------|
-| macOS 14+ Apple Silicon | MLX-first Apple model packs; CPU ONNX fallback and diagnostics | Current release gate | Runtime contracts are fixed; accelerated Mac artifacts are not assumed to match Windows |
-| Windows 11 + NVIDIA RTX | TensorRT RTX + CPU fallback | Next product track | Planned next delivery track after macOS gates, with a separate RTX-oriented model pack |
+| macOS 14+ Apple Silicon | MLX-first Apple model packs; CPU ONNX fallback and diagnostics | Current release track | Runtime contracts are fixed; accelerated Mac artifacts are not assumed to match Windows |
+| Windows 11 + NVIDIA RTX | TensorRT RTX + CPU fallback | Current release track | Portable bundle ships curated runtime DLLs and RTX-oriented ONNX model packs |
 | Windows 11 general | CPU; DirectML/WinML secondary | Exploratory | Not treated as the primary Windows product path |
 | Linux | Architecture-ready later | Deferred | Not a current productized track |
 
