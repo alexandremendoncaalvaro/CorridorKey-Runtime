@@ -46,6 +46,11 @@ std::string trim_copy(std::string value) {
     return value;
 }
 
+bool is_metadata_sidecar(const std::filesystem::path& path) {
+    auto filename = path.filename().string();
+    return filename == ".DS_Store" || filename.rfind("._", 0) == 0;
+}
+
 std::string shell_escape(const std::filesystem::path& path) {
     std::string value = path.string();
     std::string escaped = "'";
@@ -384,17 +389,20 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     std::error_code directory_error;
     if (std::filesystem::exists(models_dir, directory_error)) {
         for (const auto& entry : std::filesystem::directory_iterator(models_dir, directory_error)) {
-            if (directory_error || !entry.is_regular_file() ||
-                entry.path().extension() != ".mlxfn") {
-                if (directory_error || !entry.is_regular_file() ||
-                    entry.path().extension() != ".onnx" ||
-                    entry.path().stem().string().find("_ctx") == std::string::npos) {
-                    continue;
-                }
+            if (directory_error || !entry.is_regular_file() || is_metadata_sidecar(entry.path())) {
+                continue;
+            }
 
+            if (entry.path().extension() == ".onnx" &&
+                entry.path().stem().string().find("_ctx") != std::string::npos) {
                 compiled_context_models.push_back(entry.path().filename().string());
                 continue;
             }
+
+            if (entry.path().extension() != ".mlxfn") {
+                continue;
+            }
+
             mlx_bridge_artifacts.push_back(entry.path().filename().string());
             mlx_bridge_present = true;
         }
@@ -556,7 +564,7 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
     bool any_packaged_model_found = false;
 
     for (const auto& model : model_catalog()) {
-        if (!model.packaged_for_macos) {
+        if (!model.packaged_for_macos || model.artifact_family != "onnx") {
             continue;
         }
 
@@ -670,6 +678,9 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
     if (std::filesystem::exists(models_dir, error)) {
         for (const auto& item : std::filesystem::directory_iterator(models_dir, error)) {
             if (error || !item.is_regular_file() || item.path().extension() != ".mlxfn") {
+                continue;
+            }
+            if (is_metadata_sidecar(item.path())) {
                 continue;
             }
 

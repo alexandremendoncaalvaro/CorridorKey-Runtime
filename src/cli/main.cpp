@@ -20,6 +20,7 @@
 #include "../app/runtime_contracts.hpp"
 #include "../common/runtime_paths.hpp"
 #include "device_selection.hpp"
+#include "process_paths.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -710,21 +711,21 @@ int main(int argc, char* argv[]) {
         }
 
         if (cmd == "process") {
-            if (args.size() > 2) {
-                std::cout << "Error: 'process' accepts at most two positional paths: input and "
-                             "output."
-                          << std::endl;
+            auto resolved_paths = cli::resolve_process_paths(
+                result.count("input") ? std::optional<std::filesystem::path>{std::filesystem::path(
+                                            result["input"].as<std::string>())}
+                                      : std::nullopt,
+                result.count("output") ? std::optional<std::filesystem::path>{std::filesystem::path(
+                                             result["output"].as<std::string>())}
+                                       : std::nullopt,
+                args);
+            if (!resolved_paths) {
+                std::cout << "Error: " << resolved_paths.error().message << std::endl;
                 return 1;
             }
 
-            std::filesystem::path input_path =
-                result.count("input") ? std::filesystem::path(result["input"].as<std::string>())
-                                      : (args.empty() ? std::filesystem::path{}
-                                                      : std::filesystem::path(args.front()));
-            std::filesystem::path output_path =
-                result.count("output")
-                    ? std::filesystem::path(result["output"].as<std::string>())
-                    : (args.size() >= 2 ? std::filesystem::path(args[1]) : std::filesystem::path{});
+            std::filesystem::path input_path = resolved_paths->input_path;
+            std::filesystem::path output_path = resolved_paths->output_path;
 
             if (input_path.empty()) {
                 std::cout << "Error: 'process' requires an input path." << std::endl;

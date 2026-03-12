@@ -1,11 +1,32 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
 #include <corridorkey/frame_io.hpp>
+#include <filesystem>
 
+#include "../../src/frame_io/video_io.hpp"
 #include "app/job_orchestrator.hpp"
 #include "core/mlx_probe.hpp"
 
 using namespace corridorkey;
+
+namespace {
+
+class CurrentPathGuard {
+   public:
+    explicit CurrentPathGuard(const std::filesystem::path& next_path)
+        : m_original(std::filesystem::current_path()) {
+        std::filesystem::current_path(next_path);
+    }
+
+    ~CurrentPathGuard() {
+        std::filesystem::current_path(m_original);
+    }
+
+   private:
+    std::filesystem::path m_original;
+};
+
+}  // namespace
 
 TEST_CASE("mlx bridge executes a single frame through the runtime", "[integration][mlx]") {
 #if !defined(__APPLE__)
@@ -169,5 +190,68 @@ TEST_CASE("job orchestrator keeps auto resolution compatible with mlx bridge",
     auto result = app::JobOrchestrator::run(request);
     REQUIRE(result.has_value());
     REQUIRE(std::filesystem::exists(output_path / "Comp" / "input.png"));
+#endif
+}
+
+TEST_CASE("job orchestrator accepts a flat video output filename",
+          "[integration][mlx][regression]") {
+#if !defined(__APPLE__)
+    SUCCEED("MLX runtime execution is only applicable on macOS.");
+#else
+    if (!core::mlx_probe_available()) {
+        SUCCEED("MLX runtime support is not linked in this build.");
+        return;
+    }
+
+    const auto model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx.safetensors";
+    if (!std::filesystem::exists(model_path)) {
+        SUCCEED("MLX model pack is not available locally.");
+        return;
+    }
+
+    const auto temp_root = std::filesystem::temp_directory_path() / "corridorkey-flat-output-video";
+    std::filesystem::remove_all(temp_root);
+    std::filesystem::create_directories(temp_root);
+    const auto input_path = temp_root / "input.mp4";
+    const auto output_path = std::filesystem::path("output.mp4");
+
+    {
+        auto writer_res = VideoWriter::open(input_path, 64, 64, 12.0);
+        REQUIRE(writer_res.has_value());
+        auto writer = std::move(*writer_res);
+
+        ImageBuffer frame(64, 64, 3);
+        for (int frame_index = 0; frame_index < 2; ++frame_index) {
+            for (int y_pos = 0; y_pos < 64; ++y_pos) {
+                for (int x_pos = 0; x_pos < 64; ++x_pos) {
+                    frame.view()(y_pos, x_pos, 0) = 0.1F;
+                    frame.view()(y_pos, x_pos, 1) = frame_index == 0 ? 0.8F : 0.6F;
+                    frame.view()(y_pos, x_pos, 2) = 0.1F;
+                }
+            }
+
+            auto write_res = writer->write_frame(frame.view());
+            REQUIRE(write_res.has_value());
+        }
+    }
+
+    app::JobRequest request;
+    request.input_path = input_path;
+    request.output_path = output_path;
+    request.model_path = model_path;
+    request.device = DeviceInfo{"Apple Silicon MLX", 16000, Backend::MLX};
+    request.params.target_resolution = 0;
+
+    {
+        CurrentPathGuard guard(temp_root);
+        auto result = app::JobOrchestrator::run(request);
+        REQUIRE(result.has_value());
+    }
+
+    REQUIRE(std::filesystem::exists(temp_root / output_path));
+    REQUIRE(std::filesystem::file_size(temp_root / output_path) > 0);
+
+    std::filesystem::remove_all(temp_root);
 #endif
 }

@@ -100,7 +100,7 @@
 
 - O que ja esta fechado e nao deve ser reaberto no inicio da trilha Windows:
   - o primeiro track de release do Mac esta funcionalmente fechado
-  - o bundle portatil macOS ja existe e foi publicado como `v0.1.0`
+  - o bundle portatil macOS ja existe e ja foi publicado como pre-release
   - o caminho principal do Mac e **MLX-first**
   - `ONNX/CoreML` fica como baseline de diagnostico e comparacao, nao como
     trilho principal de aceleracao
