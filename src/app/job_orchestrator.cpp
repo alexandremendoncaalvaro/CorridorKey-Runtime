@@ -83,6 +83,36 @@ void cleanup_benchmark_output(const std::filesystem::path& output_path) {
     std::filesystem::remove(output_path, error);
 }
 
+Result<void> prepare_output_path(const std::filesystem::path& output_path) {
+    std::error_code error;
+
+    if (output_path.empty()) {
+        return Unexpected(Error{ErrorCode::InvalidParameters, "Output path must not be empty."});
+    }
+
+    if (std::filesystem::is_directory(output_path, error) || output_path.extension().empty()) {
+        if (!std::filesystem::create_directories(output_path, error) && error) {
+            return Unexpected(Error{ErrorCode::IoError,
+                                    "Could not create output directory: " + output_path.string() +
+                                        " (" + error.message() + ")"});
+        }
+        return {};
+    }
+
+    auto parent = output_path.parent_path();
+    if (parent.empty()) {
+        return {};
+    }
+
+    if (!std::filesystem::create_directories(parent, error) && error) {
+        return Unexpected(
+            Error{ErrorCode::IoError, "Could not create output directory: " + parent.string() +
+                                          " (" + error.message() + ")"});
+    }
+
+    return {};
+}
+
 }  // namespace
 
 Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on_progress,
@@ -171,13 +201,23 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     }
 
     // 2. Prepare Output Directory
-    profiler.measure("output_prepare", [&]() {
-        if (std::filesystem::is_directory(req.output_path) || req.output_path.extension().empty()) {
-            std::filesystem::create_directories(req.output_path);
-        } else {
-            std::filesystem::create_directories(req.output_path.parent_path());
-        }
-    });
+    auto output_prepare_res =
+        profiler.measure("output_prepare", [&]() { return prepare_output_path(req.output_path); });
+    if (!output_prepare_res) {
+        auto failed_event = JobEvent{
+            JobEventType::Failed,
+            "prepare",
+            0.0F,
+            engine->current_device().backend,
+            "Output path preparation failed",
+            "",
+            output_prepare_res.error(),
+        };
+        failed_event.timings = finalize_timings(profiler, job_start, total_recorded);
+        auto emit_res = emit_event(on_event, failed_event);
+        if (!emit_res) return Unexpected(emit_res.error());
+        return Unexpected(output_prepare_res.error());
+    }
 
     auto report_progress = [&](float progress, const std::string& status) -> bool {
         if (!emitted_fallback && engine->backend_fallback().has_value()) {
