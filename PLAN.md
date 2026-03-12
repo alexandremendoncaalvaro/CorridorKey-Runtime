@@ -279,6 +279,47 @@
     - `frame_4k_backend = mlx`
     - `output_matches_input_resolution = true`
 
+### Plano tecnico para fechar o hot path de video MLX
+
+- O estado atual ja prova que o runtime:
+  - abre videos reais da pasta `assets/video_samples`
+  - seleciona `MLX`
+  - entra no pipeline de inferencia
+  - mas ainda nao entrega throughput aceitavel para chamar o video path de
+    "fechado"
+- A leitura embasada desta rodada e:
+  - o gargalo atual parece estar mais ligado ao **jeito como estamos
+    integrando o MLX no hot path de video** do que ao MLX em si
+  - a evidencia local mostra que os videos sample iniciam corretamente, mas
+    avancam devagar demais
+  - isso conversa com a documentacao oficial do MLX sobre `compile`,
+    lazy evaluation, sincronizacao em `eval()` e importancia de shape fixo
+  - isso tambem conversa com o `corridorkey-mlx`, que trata `compile=True`,
+    tile com `overlap=64` e engine persistente como caminho normal, nao
+    wrappers descartaveis por frame
+- Ataque aprovado para a proxima rodada:
+  1. substituir o bridge `.mlxfn` como hot path principal de video por uma
+     integracao mais direta e persistente com o engine do `corridorkey-mlx`
+  2. manter `.safetensors` como artefato publico do pack Apple
+  3. usar shapes fixos por tier para favorecer `compile=True`
+  4. manter tiled inference para high-resolution com `overlap=64`
+  5. medir `decode`, `prepare_inputs`, `mlx_run`, `extract_outputs`, `encode`
+     e `write` separadamente em workload de video real
+  6. usar profiling do MLX/Metal para confirmar se o custo dominante esta em
+     sincronizacao e extracao, antes de mexer em mais nada
+- Regras de implementacao desta etapa:
+  - nao reabrir `ONNX/CoreML` como trilho principal do Mac
+  - nao priorizar hardware decode sem prova de ganho
+  - nao sair ajustando knobs de FFmpeg/threads por intuicao
+  - nao trocar o corpus; atacar o problema com os samples ja versionados
+- Criterio de aceite desta etapa:
+  - pelo menos um sample `2048x2048` e um sample `4K` da pasta
+    `assets/video_samples` completam end-to-end
+  - `process --json` emite evento terminal `completed`
+  - o output final tem o mesmo tamanho do input
+  - o ganho ou o gargalo ficam explicados com benchmark e telemetria por
+    etapa, nao por percepcao
+
 ### Criterios de escolha entre MLX e Core ML direto
 
 - roda o corpus de release sem crash e sem seams
