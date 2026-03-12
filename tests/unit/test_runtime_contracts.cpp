@@ -103,6 +103,40 @@ TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {
     REQUIRE(max_quality_it->params.auto_despeckle);
 }
 
+TEST_CASE("preset lookup accepts product-facing aliases", "[unit][runtime]") {
+    auto preview = find_preset_by_selector("preview");
+    REQUIRE(preview.has_value());
+    REQUIRE(preview->id == "mac-preview");
+
+    auto balanced = find_preset_by_selector("balanced");
+    REQUIRE(balanced.has_value());
+    REQUIRE(balanced->id == "mac-balanced");
+
+    auto max_quality = find_preset_by_selector("max");
+    REQUIRE(max_quality.has_value());
+    REQUIRE(max_quality->id == "mac-max-quality");
+
+    REQUIRE_FALSE(find_preset_by_selector("unknown").has_value());
+}
+
+TEST_CASE("default model selection stays aligned with device intent", "[unit][runtime]") {
+    RuntimeCapabilities mac_capabilities;
+    mac_capabilities.platform = "macos";
+    mac_capabilities.apple_silicon = true;
+
+    auto default_preset = default_preset_for_capabilities(mac_capabilities);
+    REQUIRE(default_preset.has_value());
+    REQUIRE(default_preset->id == "mac-balanced");
+
+    auto mlx_model = default_model_for_request(mac_capabilities, Backend::Auto, default_preset);
+    REQUIRE(mlx_model.has_value());
+    REQUIRE(mlx_model->filename == "corridorkey_mlx.safetensors");
+
+    auto cpu_model = default_model_for_request(mac_capabilities, Backend::CPU, default_preset);
+    REQUIRE(cpu_model.has_value());
+    REQUIRE(cpu_model->filename == "corridorkey_int8_512.onnx");
+}
+
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {
     auto json = summarize_latency_samples({4.0, 6.0, 8.0, 10.0});
 

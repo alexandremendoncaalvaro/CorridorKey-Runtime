@@ -1,5 +1,6 @@
 #include <cpr/cpr.h>
 
+#include <cctype>
 #include <corridorkey/engine.hpp>
 #include <corridorkey/version.hpp>
 #include <cstdio>
@@ -8,9 +9,13 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
+#include <string_view>
+#include <vector>
 
 #include "../app/hardware_profile.hpp"
 #include "../app/job_orchestrator.hpp"
+#include "../app/runtime_contracts.hpp"
 #include "device_selection.hpp"
 
 using namespace corridorkey;
@@ -109,14 +114,162 @@ nlohmann::json event_to_json(const JobEvent& event) {
     return json;
 }
 
-InferenceParams build_inference_params(const cxxopts::ParseResult& result) {
-    InferenceParams params;
-    params.target_resolution = result["resolution"].as<int>();
-    params.despill_strength = result["despill"].as<float>();
-    params.auto_despeckle = result.count("despeckle");
-    params.batch_size = result["batch-size"].as<int>();
-    params.enable_tiling = result.count("tiled");
+bool option_present(int argc, char* argv[], std::initializer_list<std::string_view> option_names) {
+    for (int index = 1; index < argc; ++index) {
+        std::string_view token(argv[index]);
+        for (std::string_view name : option_names) {
+            if (token == name) {
+                return true;
+            }
+            if (token.size() > name.size() && token.substr(0, name.size()) == name &&
+                token[name.size()] == '=') {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+std::vector<std::string> positional_args(const cxxopts::ParseResult& result) {
+    if (!result.count("args")) {
+        return {};
+    }
+    return result["args"].as<std::vector<std::string>>();
+}
+
+std::optional<std::string> selected_preset_selector(const cxxopts::ParseResult& result) {
+    if (result.count("quality")) {
+        return result["quality"].as<std::string>();
+    }
+    if (result.count("preset")) {
+        return result["preset"].as<std::string>();
+    }
+    return std::nullopt;
+}
+
+InferenceParams build_inference_params(const cxxopts::ParseResult& result,
+                                       const std::optional<InferenceParams>& base_params, int argc,
+                                       char* argv[]) {
+    InferenceParams params = base_params.value_or(InferenceParams{});
+
+    if (!base_params.has_value() || option_present(argc, argv, {"--resolution", "-r"})) {
+        params.target_resolution = result["resolution"].as<int>();
+    }
+    if (!base_params.has_value() || option_present(argc, argv, {"--despill"})) {
+        params.despill_strength = result["despill"].as<float>();
+    }
+    if (!base_params.has_value() || option_present(argc, argv, {"--batch-size"})) {
+        params.batch_size = result["batch-size"].as<int>();
+    }
+    if (option_present(argc, argv, {"--despeckle"})) {
+        params.auto_despeckle = true;
+    }
+    if (option_present(argc, argv, {"--tiled"})) {
+        params.enable_tiling = true;
+    }
+
     return params;
+}
+
+std::filesystem::path default_models_dir() {
+    return "models";
+}
+
+bool is_video_path(const std::filesystem::path& path) {
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+    return extension == ".mp4" || extension == ".mov" || extension == ".avi" || extension == ".mkv";
+}
+
+std::filesystem::path default_output_path_for_input(const std::filesystem::path& input_path) {
+    std::filesystem::path outputs_root = "outputs";
+
+    if (std::filesystem::is_directory(input_path)) {
+        auto name = input_path.filename().string();
+        if (name.empty()) {
+            name = "sequence";
+        }
+        return outputs_root / (name + "_out");
+    }
+
+    if (is_video_path(input_path)) {
+        return outputs_root /
+               (input_path.stem().string() + "_out" + input_path.extension().string());
+    }
+
+    return outputs_root / input_path.stem();
+}
+
+struct ResolvedExecution {
+    std::filesystem::path models_dir = {};
+    std::filesystem::path model_path = {};
+    std::optional<PresetDefinition> preset = std::nullopt;
+    InferenceParams params = {};
+    bool default_model_selected = false;
+    bool default_output_selected = false;
+};
+
+Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult& result, int argc,
+                                                     char* argv[], const DeviceInfo& device,
+                                                     bool requires_output) {
+    ResolvedExecution resolved;
+    resolved.models_dir = default_models_dir();
+    if (result.count("model")) {
+        resolved.model_path = result["model"].as<std::string>();
+        auto parent = resolved.model_path.parent_path();
+        if (!parent.empty()) {
+            resolved.models_dir = parent;
+        }
+    }
+
+    auto capabilities = runtime_capabilities();
+    if (auto preset_selector = selected_preset_selector(result); preset_selector.has_value()) {
+        resolved.preset = find_preset_by_selector(*preset_selector);
+        if (!resolved.preset.has_value()) {
+            return Unexpected<Error>{
+                Error{ErrorCode::InvalidParameters, "Unknown preset: " + *preset_selector}};
+        }
+    } else if (!result.count("model")) {
+        resolved.preset = default_preset_for_capabilities(capabilities);
+    }
+
+    if (result.count("model")) {
+        resolved.params = build_inference_params(result, std::nullopt, argc, argv);
+    } else {
+        resolved.params = build_inference_params(
+            result,
+            resolved.preset.has_value() ? std::optional<InferenceParams>{resolved.preset->params}
+                                        : std::nullopt,
+            argc, argv);
+
+        auto selected_model =
+            default_model_for_request(capabilities, device.backend, resolved.preset);
+        if (!selected_model.has_value()) {
+            return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
+                                           "Could not resolve a default model for this device."}};
+        }
+
+        resolved.model_path = resolved.models_dir / selected_model->filename;
+        if (!std::filesystem::exists(resolved.model_path)) {
+            auto cpu_fallback = resolved.models_dir / "corridorkey_int8_512.onnx";
+            if (resolved.model_path.filename() != "corridorkey_int8_512.onnx" &&
+                std::filesystem::exists(cpu_fallback)) {
+                resolved.model_path = cpu_fallback;
+            } else {
+                return Unexpected<Error>{
+                    Error{ErrorCode::ModelLoadFailed,
+                          "Default model pack not found: " + resolved.model_path.string()}};
+            }
+        }
+        resolved.default_model_selected = true;
+    }
+
+    if (requires_output && !result.count("output")) {
+        resolved.default_output_selected = true;
+    }
+
+    return resolved;
 }
 
 void print_stage_timings(const nlohmann::json& timings) {
@@ -178,11 +331,16 @@ int main(int argc, char* argv[]) {
     options.add_options()(
         "command",
         "Sub-command to run (info, process, download, doctor, benchmark, models, presets)",
-        cxxopts::value<std::string>())("i,input", "Input video or directory of frames",
-                                       cxxopts::value<std::string>())(
+        cxxopts::value<std::string>())("args", "Positional arguments",
+                                       cxxopts::value<std::vector<std::string>>())(
+        "i,input", "Input video or directory of frames", cxxopts::value<std::string>())(
         "a,alpha-hint", "Alpha hint video or directory (optional)", cxxopts::value<std::string>())(
-        "o,output", "Output directory or file", cxxopts::value<std::string>())(
-        "m,model", "Path to model pack or exported artifact", cxxopts::value<std::string>())(
+        "o,output", "Output directory or file (optional for process/benchmark)",
+        cxxopts::value<std::string>())("m,model",
+                                       "Path to model pack or exported artifact (advanced)",
+                                       cxxopts::value<std::string>())(
+        "preset", "Preset (preview, balanced, max)", cxxopts::value<std::string>())(
+        "quality", "Alias for --preset", cxxopts::value<std::string>())(
         "r,resolution", "Resolution (0=auto, 512, 768, 1024)",
         cxxopts::value<int>()->default_value("0"))(
         "d,device", "Device (auto, cpu, mlx, coreml, cuda, dml)",
@@ -195,22 +353,21 @@ int main(int argc, char* argv[]) {
         "json", "Output results in JSON format")("v,version", "Print version")(
         "h,help", "Print detailed help");
 
-    options.parse_positional({"command"});
+    options.parse_positional({"command", "args"});
+    options.positional_help("command [input] [output]");
 
     if (argc <= 1) {
         std::cout << "==========================================\n"
                   << "      CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n"
                   << "==========================================\n\n"
-                  << "Welcome! To use this tool, follow these steps:\n\n"
-                  << "1. Prepare the Apple Silicon pack or download an ONNX baseline:\n"
-                  << "   python scripts/prepare_mlx_model_pack.py --output-dir models\n"
-                  << "   corridorkey download --variant int8\n\n"
-                  << "2. Process a video on Apple Silicon (Auto-selecting MLX for MLX packs):\n"
-                  << "   corridorkey process -i input.mp4 -o output.mp4 -m "
-                     "models/corridorkey_mlx.safetensors --tiled\n\n"
-                  << "3. Process a video with the CPU baseline:\n"
-                  << "   corridorkey process -i input.mp4 -o output.mp4 -m "
-                     "models/corridorkey_int8_512.onnx\n\n"
+                  << "Quick start:\n\n"
+                  << "1. Check the runtime:\n"
+                  << "   corridorkey doctor\n\n"
+                  << "2. Process a video with the default Apple Silicon path:\n"
+                  << "   corridorkey process input.mp4 output.mp4\n\n"
+                  << "3. Use a simpler or stronger preset when needed:\n"
+                  << "   corridorkey process input.mp4 output.mp4 --preset preview\n"
+                  << "   corridorkey process input.mp4 output.mp4 --preset max\n\n"
                   << "4. Inspect validated models and presets:\n"
                   << "   corridorkey models\n"
                   << "   corridorkey presets\n\n"
@@ -255,6 +412,7 @@ int main(int argc, char* argv[]) {
         }
 
         std::string cmd = result["command"].as<std::string>();
+        auto args = positional_args(result);
 
         if (cmd == "info") {
             if (use_json) {
@@ -266,7 +424,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (cmd == "doctor") {
-            std::filesystem::path models_dir = "models";
+            std::filesystem::path models_dir = default_models_dir();
             if (result.count("model")) {
                 models_dir = std::filesystem::path(result["model"].as<std::string>()).parent_path();
             }
@@ -325,20 +483,32 @@ int main(int argc, char* argv[]) {
         }
 
         if (cmd == "benchmark") {
-            if (!result.count("model")) {
-                std::cout << "Error: 'benchmark' requires a --model path." << std::endl;
+            if (args.size() > 1) {
+                std::cout << "Error: 'benchmark' accepts at most one positional input path."
+                          << std::endl;
                 return 1;
             }
 
             auto devices = list_devices();
             std::string device_str = result["device"].as<std::string>();
+            DeviceInfo device = cli::select_device(devices, device_str);
+
+            std::filesystem::path input_path =
+                result.count("input") ? std::filesystem::path(result["input"].as<std::string>())
+                                      : (args.empty() ? std::filesystem::path{}
+                                                      : std::filesystem::path(args.front()));
+            auto resolved = resolve_execution_defaults(result, argc, argv, device, false);
+            if (!resolved) {
+                std::cerr << "Error: " << resolved.error().message << std::endl;
+                return 1;
+            }
 
             JobRequest benchmark_request;
-            benchmark_request.model_path = result["model"].as<std::string>();
-            benchmark_request.device = cli::select_device(devices, device_str);
-            benchmark_request.params = build_inference_params(result);
-            if (result.count("input")) {
-                benchmark_request.input_path = result["input"].as<std::string>();
+            benchmark_request.model_path = resolved->model_path;
+            benchmark_request.device = device;
+            benchmark_request.params = resolved->params;
+            if (!input_path.empty()) {
+                benchmark_request.input_path = input_path;
             }
             if (result.count("alpha-hint")) {
                 benchmark_request.hint_path = result["alpha-hint"].as<std::string>();
@@ -361,14 +531,18 @@ int main(int argc, char* argv[]) {
                 std::cout << report.dump(4) << std::endl;
             } else {
                 std::cout << "--- Benchmark Results ---\n"
-                          << "Mode: " << report["mode"].get<std::string>() << "\n"
+                          << "Model: " << benchmark_request.model_path.filename().string() << "\n";
+                if (resolved->preset.has_value()) {
+                    std::cout << "Preset: " << resolved->preset->name << "\n";
+                }
+                std::cout << "Requested device: " << report["requested_device"].get<std::string>()
+                          << "\n"
+                          << "Backend: " << report["backend"].get<std::string>() << "\n";
+                std::cout << "Mode: " << report["mode"].get<std::string>() << "\n"
                           << "Device: "
                           << (report.contains("device")
                                   ? report["device"].get<std::string>()
                                   : report["requested_device"].get<std::string>())
-                          << "\n"
-                          << "Backend: " << report["backend"].get<std::string>() << "\n"
-                          << "Requested device: " << report["requested_device"].get<std::string>()
                           << "\n";
                 if (report["mode"] == "synthetic") {
                     std::cout << "Resolution: " << report["resolution"].get<int>() << "x"
@@ -463,26 +637,65 @@ int main(int argc, char* argv[]) {
         }
 
         if (cmd == "process") {
-            if (!result.count("input") || !result.count("output") || !result.count("model")) {
-                std::cout << "Error: 'process' command requires --input, --output, and --model."
+            if (args.size() > 2) {
+                std::cout << "Error: 'process' accepts at most two positional paths: input and "
+                             "output."
                           << std::endl;
                 return 1;
             }
 
-            JobRequest req;
-            req.input_path = result["input"].as<std::string>();
-            req.hint_path =
-                result.count("alpha-hint") ? result["alpha-hint"].as<std::string>() : "";
-            req.output_path = result["output"].as<std::string>();
-            req.model_path = result["model"].as<std::string>();
-            req.params = build_inference_params(result);
+            std::filesystem::path input_path =
+                result.count("input") ? std::filesystem::path(result["input"].as<std::string>())
+                                      : (args.empty() ? std::filesystem::path{}
+                                                      : std::filesystem::path(args.front()));
+            std::filesystem::path output_path =
+                result.count("output")
+                    ? std::filesystem::path(result["output"].as<std::string>())
+                    : (args.size() >= 2 ? std::filesystem::path(args[1]) : std::filesystem::path{});
+
+            if (input_path.empty()) {
+                std::cout << "Error: 'process' requires an input path." << std::endl;
+                return 1;
+            }
 
             auto devices = list_devices();
             std::string device_str = result["device"].as<std::string>();
-            req.device = cli::select_device(devices, device_str);
+            DeviceInfo device = cli::select_device(devices, device_str);
+            auto resolved = resolve_execution_defaults(result, argc, argv, device, true);
+            if (!resolved) {
+                std::cerr << "Error: " << resolved.error().message << std::endl;
+                return 1;
+            }
+            if (output_path.empty()) {
+                output_path = default_output_path_for_input(input_path);
+                resolved->default_output_selected = true;
+            }
+
+            JobRequest req;
+            req.input_path = input_path;
+            req.hint_path =
+                result.count("alpha-hint") ? result["alpha-hint"].as<std::string>() : "";
+            req.output_path = output_path;
+            req.model_path = resolved->model_path;
+            req.params = resolved->params;
+            req.device = device;
 
             if (!use_json) {
-                std::cout << "Processing Engine Setup:\n"
+                std::cout << "Processing setup:\n"
+                          << " - Input: " << req.input_path.string() << "\n"
+                          << " - Output: " << req.output_path.string();
+                if (resolved->default_output_selected) {
+                    std::cout << " [auto]";
+                }
+                std::cout << "\n";
+                if (resolved->preset.has_value()) {
+                    std::cout << " - Preset: " << resolved->preset->name << "\n";
+                }
+                std::cout << " - Model: " << req.model_path.filename().string();
+                if (resolved->default_model_selected) {
+                    std::cout << " [auto]";
+                }
+                std::cout << "\n"
                           << " - Requested device: " << req.device.name << " [" << device_str
                           << "]\n";
             }

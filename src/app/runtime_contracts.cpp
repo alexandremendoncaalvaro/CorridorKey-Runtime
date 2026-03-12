@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <filesystem>
 #include <utility>
 
@@ -11,6 +12,30 @@
 namespace corridorkey {
 
 namespace {
+
+std::string normalized_lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+std::optional<std::string> normalize_preset_selector(const std::string& selector) {
+    if (selector.empty()) {
+        return std::nullopt;
+    }
+
+    auto normalized = normalized_lower(selector);
+    if (normalized == "preview") {
+        return std::string("mac-preview");
+    }
+    if (normalized == "balanced" || normalized == "default") {
+        return std::string("mac-balanced");
+    }
+    if (normalized == "max" || normalized == "max-quality") {
+        return std::string("mac-max-quality");
+    }
+    return normalized;
+}
 
 ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
                                    const std::string& filename, const std::string& artifact_family,
@@ -71,6 +96,65 @@ RuntimeCapabilities runtime_capabilities() {
     capabilities.default_video_encoder = default_video_encoder_for_path("output.mp4");
 
     return capabilities;
+}
+
+std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filename) {
+    for (const auto& entry : model_catalog()) {
+        if (entry.filename == filename) {
+            return entry;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector) {
+    auto normalized = normalize_preset_selector(selector);
+    if (!normalized.has_value()) {
+        return std::nullopt;
+    }
+
+    for (const auto& preset : preset_catalog()) {
+        if (normalized_lower(preset.id) == *normalized) {
+            return preset;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<PresetDefinition> default_preset_for_capabilities(
+    const RuntimeCapabilities& capabilities) {
+    if (capabilities.platform == "macos" && capabilities.apple_silicon) {
+        for (const auto& preset : preset_catalog()) {
+            if (preset.default_for_macos) {
+                return preset;
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ModelCatalogEntry> default_model_for_request(
+    const RuntimeCapabilities& capabilities, Backend requested_backend,
+    const std::optional<PresetDefinition>& preset) {
+    if (requested_backend == Backend::CPU || !capabilities.apple_silicon) {
+        return find_model_by_filename("corridorkey_int8_512.onnx");
+    }
+
+    if ((requested_backend == Backend::Auto || requested_backend == Backend::MLX) &&
+        capabilities.platform == "macos" && capabilities.apple_silicon) {
+        if (preset.has_value()) {
+            auto preset_model = find_model_by_filename(preset->recommended_model);
+            if (preset_model.has_value()) {
+                return preset_model;
+            }
+        }
+        return find_model_by_filename("corridorkey_mlx.safetensors");
+    }
+
+    return find_model_by_filename("corridorkey_int8_512.onnx");
 }
 
 std::vector<ModelCatalogEntry> model_catalog() {
@@ -157,6 +241,25 @@ std::vector<PresetDefinition> preset_catalog() {
 }  // namespace corridorkey
 
 namespace corridorkey::app {
+
+std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filename) {
+    return corridorkey::find_model_by_filename(filename);
+}
+
+std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector) {
+    return corridorkey::find_preset_by_selector(selector);
+}
+
+std::optional<PresetDefinition> default_preset_for_capabilities(
+    const RuntimeCapabilities& capabilities) {
+    return corridorkey::default_preset_for_capabilities(capabilities);
+}
+
+std::optional<ModelCatalogEntry> default_model_for_request(
+    const RuntimeCapabilities& capabilities, Backend requested_backend,
+    const std::optional<PresetDefinition>& preset) {
+    return corridorkey::default_model_for_request(capabilities, requested_backend, preset);
+}
 
 std::string backend_to_string(Backend backend) {
     switch (backend) {
