@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION="${CORRIDORKEY_VERSION:-0.1.3}"
+VERSION="${CORRIDORKEY_VERSION:-0.1.4}"
 DIST_DIR="dist/CorridorKey_Mac_v${VERSION}"
 BIN_NAME="corridorkey"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"

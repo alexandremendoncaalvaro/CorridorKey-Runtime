@@ -8,7 +8,7 @@ if(APPLE)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.1.3
+    VERSION 0.1.4
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )

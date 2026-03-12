@@ -5,8 +5,7 @@
 namespace corridorkey::app {
 
 inline std::filesystem::path normalize_runtime_output_path(
-    const std::filesystem::path& output_path,
-    const std::filesystem::path& working_directory = {}) {
+    const std::filesystem::path& output_path, const std::filesystem::path& working_directory = {}) {
     if (output_path.empty() || output_path.has_root_path() || output_path.extension().empty()) {
         return output_path;
     }

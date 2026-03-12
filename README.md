@@ -251,8 +251,8 @@ Current preview scope:
 First-run flow from the release zip:
 
 ```bash
-cd CorridorKey_Mac_v0.1.3
-xattr -dr com.apple.quarantine CorridorKey_Mac_v0.1.3
+cd CorridorKey_Mac_v0.1.4
+xattr -dr com.apple.quarantine CorridorKey_Mac_v0.1.4
 ./corridorkey doctor
 ./corridorkey process input.mp4 output.mp4
 ./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
