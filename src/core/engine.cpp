@@ -128,6 +128,10 @@ std::optional<DeviceInfo> build_cpu_fallback_device(const DeviceInfo& device) {
     if (device.backend == Backend::CoreML || device.backend == Backend::Auto) {
         return DeviceInfo{"Generic CPU", device.available_memory_mb, Backend::CPU};
     }
+#elif defined(_WIN32)
+    if (device.backend == Backend::TensorRT || device.backend == Backend::Auto) {
+        return DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    }
 #endif
     return std::nullopt;
 }

@@ -28,3 +28,16 @@ TEST_CASE("cli explicit device selection still resolves named backends", "[unit]
     REQUIRE(selected.backend == Backend::CPU);
     REQUIRE(selected.name == "Generic CPU");
 }
+
+TEST_CASE("cli RTX aliases resolve to the TensorRT backend", "[unit][cli]") {
+    std::vector<DeviceInfo> devices = {
+        {"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
+        {"Generic CPU", 0, Backend::CPU},
+    };
+
+    auto by_rtx = cli::select_device(devices, "rtx");
+    REQUIRE(by_rtx.backend == Backend::TensorRT);
+
+    auto by_trt = cli::select_device(devices, "trt");
+    REQUIRE(by_trt.backend == Backend::TensorRT);
+}

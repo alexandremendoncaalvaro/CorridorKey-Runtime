@@ -359,6 +359,7 @@ struct ModelCatalogEntry {
     std::string intended_use = "";
     bool validated_for_macos = false;
     bool packaged_for_macos = false;
+    bool packaged_for_windows = false;
     std::vector<std::string> validated_platforms = {};
     std::vector<std::string> intended_platforms = {};
     std::vector<std::string> validated_hardware_tiers = {};
@@ -375,6 +376,7 @@ struct PresetDefinition {
     std::string recommended_model = "";
     std::string intended_use = "";
     bool default_for_macos = false;
+    bool default_for_windows = false;
     std::vector<std::string> validated_platforms = {};
     std::vector<std::string> intended_platforms = {};
     std::vector<std::string> validated_hardware_tiers = {};

@@ -47,6 +47,9 @@ inline DeviceInfo select_device(const std::vector<DeviceInfo>& devices, std::str
 
     std::transform(device_str.begin(), device_str.end(), device_str.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (device_str == "rtx" || device_str == "trt") {
+        device_str = "tensorrt";
+    }
     for (const auto& device : devices) {
         if (backend_name(device.backend) == device_str) {
             return device;

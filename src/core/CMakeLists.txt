@@ -6,4 +6,5 @@ target_sources(corridorkey_core PRIVATE
     inference_session.cpp
     mlx_session.cpp
     mlx_probe.cpp
+    windows_rtx_probe.cpp
 )

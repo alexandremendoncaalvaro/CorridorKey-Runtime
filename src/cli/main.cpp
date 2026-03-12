@@ -1,5 +1,6 @@
 #include <cpr/cpr.h>
 
+#include <algorithm>
 #include <cctype>
 #include <corridorkey/engine.hpp>
 #include <corridorkey/version.hpp>
@@ -15,7 +16,9 @@
 
 #include "../app/hardware_profile.hpp"
 #include "../app/job_orchestrator.hpp"
+#include "../app/model_compiler.hpp"
 #include "../app/runtime_contracts.hpp"
+#include "../common/runtime_paths.hpp"
 #include "device_selection.hpp"
 
 using namespace corridorkey;
@@ -173,7 +176,7 @@ InferenceParams build_inference_params(const cxxopts::ParseResult& result,
 }
 
 std::filesystem::path default_models_dir() {
-    return "models";
+    return common::default_models_root();
 }
 
 bool is_video_path(const std::filesystem::path& path) {
@@ -244,7 +247,7 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
             argc, argv);
 
         auto selected_model =
-            default_model_for_request(capabilities, device.backend, resolved.preset);
+            default_model_for_request(capabilities, device, resolved.preset);
         if (!selected_model.has_value()) {
             return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                            "Could not resolve a default model for this device."}};
@@ -316,6 +319,13 @@ void print_info() {
               << (info["capabilities"]["coreml_available"].get<bool>() ? "yes" : "no") << "\n"
               << " - MLX probe: "
               << (info["capabilities"]["mlx_probe_available"].get<bool>() ? "yes" : "no") << "\n"
+              << " - TensorRT RTX track: "
+              << (std::any_of(info["devices"].begin(), info["devices"].end(), [](const auto& d) {
+                      return d["backend"] == "tensorrt";
+                  })
+                      ? "yes"
+                      : "no")
+              << "\n"
               << " - CPU fallback: "
               << (info["capabilities"]["cpu_fallback_available"].get<bool>() ? "yes" : "no") << "\n"
               << " - VideoToolbox: "
@@ -330,7 +340,8 @@ int main(int argc, char* argv[]) {
 
     options.add_options()(
         "command",
-        "Sub-command to run (info, process, download, doctor, benchmark, models, presets)",
+        "Sub-command to run (info, process, download, doctor, benchmark, models, presets, "
+        "compile-context)",
         cxxopts::value<std::string>())("args", "Positional arguments",
                                        cxxopts::value<std::vector<std::string>>())(
         "i,input", "Input video or directory of frames", cxxopts::value<std::string>())(
@@ -343,7 +354,7 @@ int main(int argc, char* argv[]) {
         "quality", "Alias for --preset", cxxopts::value<std::string>())(
         "r,resolution", "Resolution (0=auto, 512, 768, 1024)",
         cxxopts::value<int>()->default_value("0"))(
-        "d,device", "Device (auto, cpu, mlx, coreml, cuda, dml)",
+        "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "variant", "ONNX model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",
@@ -363,12 +374,15 @@ int main(int argc, char* argv[]) {
                   << "Quick start:\n\n"
                   << "1. Check the runtime:\n"
                   << "   corridorkey doctor\n\n"
-                  << "2. Process a video with the default Apple Silicon path:\n"
+                  << "2. Process a video with the default accelerated path:\n"
                   << "   corridorkey process input.mp4 output.mp4\n\n"
                   << "3. Use a simpler or stronger preset when needed:\n"
                   << "   corridorkey process input.mp4 output.mp4 --preset preview\n"
                   << "   corridorkey process input.mp4 output.mp4 --preset max\n\n"
-                  << "4. Inspect validated models and presets:\n"
+                  << "4. Prepare TensorRT RTX context models for a Windows bundle (maintainers):\n"
+                  << "   corridorkey compile-context --model models/corridorkey_fp16_1024.onnx "
+                     "--device tensorrt\n\n"
+                  << "5. Inspect validated models and presets:\n"
                   << "   corridorkey models\n"
                   << "   corridorkey presets\n\n"
                   << "Run 'corridorkey --help' for all options.\n"
@@ -382,7 +396,8 @@ int main(int argc, char* argv[]) {
 
         if (use_json) {
 #if defined(_WIN32)
-            std::freopen("NUL", "a", stderr);
+            FILE* suppressed_stderr = nullptr;
+            freopen_s(&suppressed_stderr, "NUL", "a", stderr);
 #else
             std::freopen("/dev/null", "a", stderr);
 #endif
@@ -406,7 +421,7 @@ int main(int argc, char* argv[]) {
         if (!result.count("command")) {
             std::cout
                 << "Error: No command specified. Use 'info', 'download', 'process', 'doctor', "
-                   "'benchmark', 'models', or 'presets'."
+                   "'benchmark', 'models', 'presets', or 'compile-context'."
                 << std::endl;
             return 1;
         }
@@ -459,6 +474,9 @@ int main(int argc, char* argv[]) {
                     if (model["packaged_for_macos"].get<bool>()) {
                         std::cout << " [packaged]";
                     }
+                    if (model["packaged_for_windows"].get<bool>()) {
+                        std::cout << " [packaged-windows]";
+                    }
                     std::cout << "\n   " << model["description"].get<std::string>() << "\n";
                 }
             }
@@ -476,8 +494,60 @@ int main(int argc, char* argv[]) {
                     if (preset["default_for_macos"].get<bool>()) {
                         std::cout << " [default-macos]";
                     }
+                    if (preset["default_for_windows"].get<bool>()) {
+                        std::cout << " [default-windows]";
+                    }
                     std::cout << "\n   " << preset["description"].get<std::string>() << "\n";
                 }
+            }
+            return 0;
+        }
+
+        if (cmd == "compile-context") {
+            std::filesystem::path model_path =
+                result.count("model") ? std::filesystem::path(result["model"].as<std::string>())
+                                      : std::filesystem::path{};
+            if (model_path.empty()) {
+                std::cerr << "Error: 'compile-context' requires --model." << std::endl;
+                return 1;
+            }
+
+            auto devices = list_devices();
+            DeviceInfo device = cli::select_device(devices, result["device"].as<std::string>());
+            if (device.backend == Backend::Auto) {
+                device = auto_detect();
+            }
+
+            std::filesystem::path output_path =
+                result.count("output")
+                    ? std::filesystem::path(result["output"].as<std::string>())
+                    : common::tensorrt_rtx_compiled_context_model_path(model_path);
+
+            auto compile_res = compile_tensorrt_rtx_context_model(model_path, output_path, device);
+            if (!compile_res) {
+                if (use_json) {
+                    nlohmann::json failure;
+                    failure["command"] = "compile-context";
+                    failure["success"] = false;
+                    failure["error"] = compile_res.error().message;
+                    std::cout << failure.dump(4) << std::endl;
+                } else {
+                    std::cerr << "Error: " << compile_res.error().message << std::endl;
+                }
+                return 1;
+            }
+
+            if (use_json) {
+                nlohmann::json success;
+                success["command"] = "compile-context";
+                success["success"] = true;
+                success["input_model"] = model_path.string();
+                success["output_model"] = compile_res->string();
+                success["backend"] = backend_to_string_local(device.backend);
+                std::cout << success.dump(4) << std::endl;
+            } else {
+                std::cout << "Compiled TensorRT RTX context model: " << compile_res->string()
+                          << std::endl;
             }
             return 0;
         }
@@ -608,8 +678,11 @@ int main(int argc, char* argv[]) {
                             if (downloadTotal > 0) {
                                 float p = static_cast<float>(downloadNow) / downloadTotal;
                                 int bar_width = 50;
-                                std::cout << "\r[" << std::string(bar_width * p, '=')
-                                          << std::string(bar_width * (1 - p), ' ') << "] "
+                                auto filled =
+                                    static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
+                                auto empty = static_cast<size_t>(bar_width) - filled;
+                                std::cout << "\r[" << std::string(filled, '=')
+                                          << std::string(empty, ' ') << "] "
                                           << int(p * 100.0) << "% " << std::flush;
                             }
                             return true;
@@ -703,8 +776,11 @@ int main(int argc, char* argv[]) {
             auto progress = [](float p, const std::string& status) -> bool {
                 {
                     int bar_width = 50;
-                    std::cout << "\r[" << std::string(bar_width * p, '=')
-                              << std::string(bar_width * (1 - p), ' ') << "] " << int(p * 100.0)
+                    auto filled =
+                        static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
+                    auto empty = static_cast<size_t>(bar_width) - filled;
+                    std::cout << "\r[" << std::string(filled, '=')
+                              << std::string(empty, ' ') << "] " << int(p * 100.0)
                               << "% " << status << std::flush;
                 }
                 return true;

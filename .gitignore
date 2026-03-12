@@ -25,6 +25,15 @@ models/*.pth
 models/*.safetensors
 models/*.mlxfn
 
+# Local vendor payloads for release preparation
+vendor/onnxruntime-src/
+vendor/onnxruntime-source/
+vendor/onnxruntime-windows-rtx/
+vendor/TensorRT-RTX*/
+vendor/tensorrt-rtx*/
+vendor/cuda-*/
+vendor/CUDA-*/
+
 # Compiled objects
 *.o
 *.obj

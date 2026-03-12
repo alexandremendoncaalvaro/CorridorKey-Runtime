@@ -18,3 +18,21 @@ if(MSVC)
 else()
     target_compile_options(corridorkey_cli PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
+
+if(WIN32)
+    set(_corridorkey_cli_runtime_dlls "")
+    if(CORRIDORKEY_ORT_RUNTIME_DIR)
+        file(GLOB _corridorkey_cli_ort_runtime_dlls
+            "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
+        list(APPEND _corridorkey_cli_runtime_dlls ${_corridorkey_cli_ort_runtime_dlls})
+    endif()
+
+    add_custom_command(TARGET corridorkey_cli POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:corridorkey_core>
+            $<TARGET_RUNTIME_DLLS:corridorkey_cli>
+            ${_corridorkey_cli_runtime_dlls}
+            $<TARGET_FILE_DIR:corridorkey_cli>
+        COMMAND_EXPAND_LISTS
+    )
+endif()

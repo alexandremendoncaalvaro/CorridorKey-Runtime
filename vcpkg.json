@@ -6,10 +6,7 @@
         {
             "name": "onnxruntime",
             "platform": "!osx",
-            "features": [
-                "directml"
-            ],
-            "$comment": "Primary ML inference engine (Vendored on macOS for CoreML, DML on Windows)"
+            "$comment": "Primary ML inference engine for CPU fallback and lab builds. Windows RTX shipping uses a curated ONNX Runtime with TensorRT RTX support."
         },
         {
             "name": "openexr",

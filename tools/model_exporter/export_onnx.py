@@ -3,8 +3,26 @@ import sys
 import argparse
 import warnings
 
+def disable_torch_compile_for_export(torch_module):
+    # Export needs the plain eager model. Some upstream checkpoints decorate the
+    # module class with torch.compile, which breaks import-time model loading.
+    if not hasattr(torch_module, "compile"):
+        return
+
+    def passthrough_compile(*args, **kwargs):
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+
+        def decorator(obj):
+            return obj
+
+        return decorator
+
+    torch_module.compile = passthrough_compile
+
 def export_resolution(args, resolution, repo_path):
     import torch
+    disable_torch_compile_for_export(torch)
     from CorridorKeyModule.inference_engine import CorridorKeyEngine
 
     out_path = args.out.replace('.onnx', f'_{resolution}.onnx')

@@ -1,6 +1,7 @@
 # Application layer implementation
 set(APP_SOURCES
     job_orchestrator.cpp
+    model_compiler.cpp
     runtime_diagnostics.cpp
     runtime_contracts.cpp
 )

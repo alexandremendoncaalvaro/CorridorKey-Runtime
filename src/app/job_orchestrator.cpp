@@ -379,7 +379,8 @@ nlohmann::json JobOrchestrator::get_system_info() {
     auto strategy = HardwareProfile::get_best_strategy(devices[0]);
     info["recommendation"]["resolution"] = strategy.target_resolution;
     info["recommendation"]["variant"] = strategy.recommended_variant;
-    info["commands"] = {"info", "doctor", "benchmark", "download", "models", "presets", "process"};
+    info["commands"] = {"info",       "doctor",       "benchmark", "download",
+                        "models",     "presets",      "process",   "compile-context"};
 
     return info;
 }
@@ -396,9 +397,12 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["cache"] = health["cache"];
     report["coreml"] = health["coreml"];
     report["mlx"] = health["mlx"];
+    report["windows_rtx"] = health["windows_rtx"];
 
     nlohmann::json models = nlohmann::json::array();
     bool validated_models_present = true;
+    bool packaged_windows_models_present = true;
+    bool any_packaged_windows_model = false;
     for (const auto& model : model_catalog()) {
         std::filesystem::path path = models_dir / model.filename;
         nlohmann::json entry = to_json(model);
@@ -410,10 +414,19 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
         if (!model.validated_platforms.empty() && model.packaged_for_macos) {
             validated_models_present = validated_models_present && entry["found"].get<bool>();
         }
+        if (model.packaged_for_windows) {
+            any_packaged_windows_model = true;
+            packaged_windows_models_present =
+                packaged_windows_models_present && entry["found"].get<bool>();
+        }
         models.push_back(entry);
     }
     report["models"] = models;
     report["presets"] = list_presets();
+    bool platform_validated_models_present =
+        report["system"]["capabilities"]["platform"] == "windows"
+            ? (!any_packaged_windows_model || packaged_windows_models_present)
+            : validated_models_present;
     report["summary"]["bundle_healthy"] = report["bundle"]["healthy"];
     report["summary"]["video_healthy"] = report["video"]["healthy"];
     report["summary"]["cache_healthy"] = report["cache"]["healthy"];
@@ -429,12 +442,21 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
         !report["mlx"]["applicable"].get<bool>() || report["mlx"]["backend_integrated"].get<bool>();
     report["summary"]["apple_acceleration_healthy"] =
         !report["mlx"]["applicable"].get<bool>() || report["mlx"]["healthy"].get<bool>();
-    report["summary"]["validated_models_present"] = validated_models_present;
+    report["summary"]["validated_models_present"] = platform_validated_models_present;
+    report["summary"]["windows_rtx_provider_ready"] =
+        !report["windows_rtx"]["applicable"].get<bool>() ||
+        report["windows_rtx"]["provider_available"].get<bool>();
+    report["summary"]["windows_rtx_packaged_models_present"] =
+        !report["windows_rtx"]["applicable"].get<bool>() ||
+        !any_packaged_windows_model || packaged_windows_models_present;
+    report["summary"]["windows_rtx_healthy"] =
+        !report["windows_rtx"]["applicable"].get<bool>() || report["windows_rtx"]["healthy"].get<bool>();
     report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
                                    report["summary"]["video_healthy"].get<bool>() &&
                                    report["summary"]["cache_healthy"].get<bool>() &&
                                    report["summary"]["apple_acceleration_healthy"].get<bool>() &&
-                                   validated_models_present;
+                                   report["summary"]["windows_rtx_healthy"].get<bool>() &&
+                                   platform_validated_models_present;
 
     return report;
 }

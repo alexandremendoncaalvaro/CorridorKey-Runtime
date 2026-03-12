@@ -75,7 +75,8 @@ class InferenceSession {
     explicit InferenceSession(DeviceInfo device);
 
     void configure_session_options(bool use_optimized_model_cache,
-                                   const SessionCreateOptions& options);
+                                   const SessionCreateOptions& options,
+                                   const std::filesystem::path& model_path);
     void extract_metadata();
 
     /**

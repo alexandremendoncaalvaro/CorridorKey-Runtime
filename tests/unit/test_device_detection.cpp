@@ -67,3 +67,23 @@ TEST_CASE("apple device listing prioritizes operational backends over diagnostic
     SUCCEED("Apple ordering is not applicable on this build.");
 #endif
 }
+
+TEST_CASE("windows device listing prefers TensorRT RTX when available", "[unit][device]") {
+#if defined(_WIN32)
+    auto devices = list_devices();
+    REQUIRE_FALSE(devices.empty());
+
+    if (devices.front().backend == Backend::TensorRT) {
+        REQUIRE(devices.size() >= 2);
+        bool has_cpu = false;
+        for (const auto& device : devices) {
+            has_cpu = has_cpu || device.backend == Backend::CPU;
+        }
+        REQUIRE(has_cpu);
+    } else {
+        REQUIRE(devices.front().backend == Backend::CPU);
+    }
+#else
+    SUCCEED("Windows TensorRT ordering is not applicable on this build.");
+#endif
+}

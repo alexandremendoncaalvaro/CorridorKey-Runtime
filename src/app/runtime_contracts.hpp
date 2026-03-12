@@ -17,7 +17,7 @@ CORRIDORKEY_API std::optional<PresetDefinition> find_preset_by_selector(
 CORRIDORKEY_API std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities);
 CORRIDORKEY_API std::optional<ModelCatalogEntry> default_model_for_request(
-    const RuntimeCapabilities& capabilities, Backend requested_backend,
+    const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
     const std::optional<PresetDefinition>& preset);
 
 nlohmann::json to_json(const Error& error);

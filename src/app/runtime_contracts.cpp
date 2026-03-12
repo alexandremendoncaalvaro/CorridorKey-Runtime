@@ -13,6 +13,11 @@ namespace corridorkey {
 
 namespace {
 
+bool has_backend(const RuntimeCapabilities& capabilities, Backend backend) {
+    return std::find(capabilities.supported_backends.begin(), capabilities.supported_backends.end(),
+                     backend) != capabilities.supported_backends.end();
+}
+
 std::string normalized_lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
@@ -24,17 +29,30 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
         return std::nullopt;
     }
 
-    auto normalized = normalized_lower(selector);
-    if (normalized == "preview") {
-        return std::string("mac-preview");
+    return normalized_lower(selector);
+}
+
+std::string resolve_platform_preset_alias(const std::string& selector,
+                                          const RuntimeCapabilities& capabilities) {
+    if (selector == "preview") {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+            return "win-cpu-safe";
+        }
+        return "mac-preview";
     }
-    if (normalized == "balanced" || normalized == "default") {
-        return std::string("mac-balanced");
+    if (selector == "balanced" || selector == "default") {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+            return "win-rtx-balanced";
+        }
+        return "mac-balanced";
     }
-    if (normalized == "max" || normalized == "max-quality") {
-        return std::string("mac-max-quality");
+    if (selector == "max" || selector == "max-quality") {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+            return "win-rtx-max-quality";
+        }
+        return "mac-max-quality";
     }
-    return normalized;
+    return selector;
 }
 
 ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
@@ -42,6 +60,7 @@ ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
                                    const std::string& recommended_backend,
                                    const std::string& description, const std::string& intended_use,
                                    bool validated_for_macos, bool packaged_for_macos,
+                                   bool packaged_for_windows,
                                    std::vector<std::string> validated_platforms,
                                    std::vector<std::string> intended_platforms,
                                    std::vector<std::string> validated_hardware_tiers) {
@@ -56,6 +75,7 @@ ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
     entry.intended_use = intended_use;
     entry.validated_for_macos = validated_for_macos;
     entry.packaged_for_macos = packaged_for_macos;
+    entry.packaged_for_windows = packaged_for_windows;
     entry.validated_platforms = std::move(validated_platforms);
     entry.intended_platforms = std::move(intended_platforms);
     entry.validated_hardware_tiers = std::move(validated_hardware_tiers);
@@ -114,8 +134,11 @@ std::optional<PresetDefinition> find_preset_by_selector(const std::string& selec
         return std::nullopt;
     }
 
+    auto capabilities = runtime_capabilities();
+    auto resolved_id = resolve_platform_preset_alias(*normalized, capabilities);
+
     for (const auto& preset : preset_catalog()) {
-        if (normalized_lower(preset.id) == *normalized) {
+        if (normalized_lower(preset.id) == resolved_id) {
             return preset;
         }
     }
@@ -125,6 +148,14 @@ std::optional<PresetDefinition> find_preset_by_selector(const std::string& selec
 
 std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities) {
+    if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+        for (const auto& preset : preset_catalog()) {
+            if (preset.default_for_windows) {
+                return preset;
+            }
+        }
+    }
+
     if (capabilities.platform == "macos" && capabilities.apple_silicon) {
         for (const auto& preset : preset_catalog()) {
             if (preset.default_for_macos) {
@@ -137,13 +168,13 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 }
 
 std::optional<ModelCatalogEntry> default_model_for_request(
-    const RuntimeCapabilities& capabilities, Backend requested_backend,
+    const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
     const std::optional<PresetDefinition>& preset) {
-    if (requested_backend == Backend::CPU || !capabilities.apple_silicon) {
+    if (requested_device.backend == Backend::CPU) {
         return find_model_by_filename("corridorkey_int8_512.onnx");
     }
 
-    if ((requested_backend == Backend::Auto || requested_backend == Backend::MLX) &&
+    if ((requested_device.backend == Backend::Auto || requested_device.backend == Backend::MLX) &&
         capabilities.platform == "macos" && capabilities.apple_silicon) {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
@@ -154,6 +185,23 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         return find_model_by_filename("corridorkey_mlx.safetensors");
     }
 
+    if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT) &&
+        (requested_device.backend == Backend::Auto || requested_device.backend == Backend::TensorRT)) {
+        if (preset.has_value()) {
+            auto preset_model = find_model_by_filename(preset->recommended_model);
+            if (preset_model.has_value()) {
+                return preset_model;
+            }
+        }
+
+        if (requested_device.available_memory_mb >= 10000) {
+            return find_model_by_filename("corridorkey_fp16_1024.onnx");
+        }
+        if (requested_device.available_memory_mb >= 8000) {
+            return find_model_by_filename("corridorkey_fp16_768.onnx");
+        }
+    }
+
     return find_model_by_filename("corridorkey_int8_512.onnx");
 }
 
@@ -161,38 +209,43 @@ std::vector<ModelCatalogEntry> model_catalog() {
     return {
         make_model_entry("int8", 512, "corridorkey_int8_512.onnx", "onnx", "cpu",
                          "Validated macOS default for preview and 8 GB machines.",
-                         "portable_preview", true, true, {"macos_apple_silicon"},
+                         "portable_preview", true, true, true, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_8gb"}),
         make_model_entry("int8", 768, "corridorkey_int8_768.onnx", "onnx", "cpu",
                          "Validated CPU compatibility baseline for 16 GB Apple Silicon systems.",
-                         "portable_default", true, false, {"macos_apple_silicon"},
+                         "portable_default", true, false, false, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
         make_model_entry("int8", 1024, "corridorkey_int8_1024.onnx", "onnx", "cpu",
                          "Available for manual testing on high-memory systems.",
-                         "manual_high_resolution_validation", false, false, {},
+                         "manual_high_resolution_validation", false, false, false, {},
                          {"macos_apple_silicon"}, {}),
         make_model_entry("mlx", 2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
                          "Official Apple Silicon model pack for the first native MLX backend.",
-                         "apple_acceleration_primary", true, true, {"macos_apple_silicon"},
+                         "apple_acceleration_primary", true, true, false,
+                         {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
         make_model_entry("fp16", 512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
-                         "GPU-focused reference variant for non-macOS expansion.",
-                         "windows_rtx_reference", false, false, {}, {"windows_rtx"}, {}),
+                         "Lower-memory Windows RTX reference variant for lab bring-up.",
+                         "windows_rtx_reference", false, false, false, {}, {"windows_rtx_30_plus"},
+                         {"rtx_8gb"}),
         make_model_entry("fp16", 768, "corridorkey_fp16_768.onnx", "onnx", "tensorrt",
-                         "Higher quality GPU-focused reference variant.", "windows_rtx_reference",
-                         false, false, {}, {"windows_rtx"}, {}),
+                         "Portable Windows RTX balanced pack for Ampere-class GPUs.",
+                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_8gb", "rtx_10gb"}),
         make_model_entry("fp16", 1024, "corridorkey_fp16_1024.onnx", "onnx", "tensorrt",
-                         "Maximum GPU-focused reference variant.", "windows_rtx_reference", false,
-                         false, {}, {"windows_rtx"}, {}),
+                         "Maximum quality Windows RTX pack for 10 GB and higher tiers.",
+                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_10gb_plus"}),
         make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
-                         "Reference validation variant.", "reference_validation", false, false, {},
+                         "Reference validation variant.", "reference_validation", false, false,
+                         false, {},
                          {"macos_apple_silicon", "windows_rtx"}, {}),
         make_model_entry("fp32", 768, "corridorkey_fp32_768.onnx", "onnx", "cpu",
                          "Higher resolution reference validation variant.", "reference_validation",
-                         false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
+                         false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
         make_model_entry("fp32", 1024, "corridorkey_fp32_1024.onnx", "onnx", "cpu",
                          "Maximum resolution reference validation variant.", "reference_validation",
-                         false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
+                         false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
     };
 }
 
@@ -205,6 +258,7 @@ std::vector<PresetDefinition> preset_catalog() {
             InferenceParams{512, 1.0F, false, 400, 1.0F, false, 1, false, 32},
             "corridorkey_int8_512.onnx",
             "smoke_preview",
+            false,
             false,
             {"macos_apple_silicon"},
             {"macos_apple_silicon"},
@@ -219,6 +273,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "corridorkey_mlx.safetensors",
             "apple_acceleration_primary",
             true,
+            false,
             {"macos_apple_silicon"},
             {"macos_apple_silicon"},
             {"apple_silicon_16gb"},
@@ -231,9 +286,50 @@ std::vector<PresetDefinition> preset_catalog() {
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",
             false,
+            false,
             {"macos_apple_silicon"},
             {"macos_apple_silicon"},
             {"apple_silicon_16gb_plus"},
+        },
+        PresetDefinition{
+            "win-cpu-safe",
+            "Windows CPU Safe",
+            "Compatibility preset that keeps the Windows RTX bundle on the CPU fallback path.",
+            InferenceParams{512, 1.0F, false, 400, 1.0F, false, 1, false, 32},
+            "corridorkey_int8_512.onnx",
+            "windows_cpu_fallback",
+            false,
+            false,
+            {"windows_rtx_30_plus"},
+            {"windows_rtx_30_plus"},
+            {"cpu_fallback"},
+        },
+        PresetDefinition{
+            "win-rtx-balanced",
+            "Windows RTX Balanced",
+            "Default Windows RTX preset with FP16 inference, runtime cache enabled, and tiling "
+            "ready for portable bundles.",
+            InferenceParams{768, 1.0F, false, 400, 1.0F, false, 1, true, 32},
+            "corridorkey_fp16_768.onnx",
+            "windows_rtx_primary",
+            false,
+            true,
+            {"windows_rtx_30_plus"},
+            {"windows_rtx_30_plus"},
+            {"rtx_10gb_plus"},
+        },
+        PresetDefinition{
+            "win-rtx-max-quality",
+            "Windows RTX Max Quality",
+            "Higher-quality Windows RTX preset with cleanup enabled for the 10 GB and up tier.",
+            InferenceParams{1024, 1.0F, true, 400, 1.0F, false, 1, true, 64},
+            "corridorkey_fp16_1024.onnx",
+            "windows_rtx_primary",
+            false,
+            false,
+            {"windows_rtx_30_plus"},
+            {"windows_rtx_30_plus"},
+            {"rtx_10gb_plus"},
         },
     };
 }
@@ -256,9 +352,9 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 }
 
 std::optional<ModelCatalogEntry> default_model_for_request(
-    const RuntimeCapabilities& capabilities, Backend requested_backend,
+    const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
     const std::optional<PresetDefinition>& preset) {
-    return corridorkey::default_model_for_request(capabilities, requested_backend, preset);
+    return corridorkey::default_model_for_request(capabilities, requested_device, preset);
 }
 
 std::string backend_to_string(Backend backend) {
@@ -394,6 +490,7 @@ nlohmann::json to_json(const ModelCatalogEntry& model) {
     json["intended_use"] = model.intended_use;
     json["validated_for_macos"] = model.validated_for_macos;
     json["packaged_for_macos"] = model.packaged_for_macos;
+    json["packaged_for_windows"] = model.packaged_for_windows;
     json["validated_platforms"] = model.validated_platforms;
     json["intended_platforms"] = model.intended_platforms;
     json["validated_hardware_tiers"] = model.validated_hardware_tiers;
@@ -419,6 +516,7 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     json["recommended_model"] = preset.recommended_model;
     json["intended_use"] = preset.intended_use;
     json["default_for_macos"] = preset.default_for_macos;
+    json["default_for_windows"] = preset.default_for_windows;
     json["validated_platforms"] = preset.validated_platforms;
     json["intended_platforms"] = preset.intended_platforms;
     json["validated_hardware_tiers"] = preset.validated_hardware_tiers;

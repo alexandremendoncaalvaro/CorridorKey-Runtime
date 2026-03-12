@@ -32,6 +32,7 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     REQUIRE(int8_512 != models.end());
     REQUIRE(int8_512->validated_for_macos);
     REQUIRE(int8_512->packaged_for_macos);
+    REQUIRE(int8_512->packaged_for_windows);
     REQUIRE(int8_512->intended_use == "portable_preview");
     REQUIRE(int8_512->artifact_family == "onnx");
     REQUIRE(int8_512->recommended_backend == "cpu");
@@ -56,6 +57,12 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     REQUIRE(mlx_pack->recommended_backend == "mlx");
     REQUIRE(mlx_pack->intended_use == "apple_acceleration_primary");
     REQUIRE(mlx_pack->intended_platforms == std::vector<std::string>{"macos_apple_silicon"});
+
+    auto fp16_1024 = find_model("corridorkey_fp16_1024.onnx");
+    REQUIRE(fp16_1024 != models.end());
+    REQUIRE(fp16_1024->packaged_for_windows);
+    REQUIRE(fp16_1024->recommended_backend == "tensorrt");
+    REQUIRE(fp16_1024->intended_use == "windows_rtx_primary");
 }
 
 TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
@@ -101,20 +108,44 @@ TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {
                      [](const PresetDefinition& preset) { return preset.id == "mac-max-quality"; });
     REQUIRE(max_quality_it != presets.end());
     REQUIRE(max_quality_it->params.auto_despeckle);
+
+    auto windows_default_it =
+        std::find_if(presets.begin(), presets.end(),
+                     [](const PresetDefinition& preset) { return preset.default_for_windows; });
+    REQUIRE(windows_default_it != presets.end());
+    REQUIRE(windows_default_it->id == "win-rtx-balanced");
 }
 
 TEST_CASE("preset lookup accepts product-facing aliases", "[unit][runtime]") {
+    auto capabilities = runtime_capabilities();
+    bool windows_rtx_defaults =
+        capabilities.platform == "windows" &&
+        std::find(capabilities.supported_backends.begin(), capabilities.supported_backends.end(),
+                  Backend::TensorRT) != capabilities.supported_backends.end();
+
     auto preview = find_preset_by_selector("preview");
     REQUIRE(preview.has_value());
-    REQUIRE(preview->id == "mac-preview");
+    if (windows_rtx_defaults) {
+        REQUIRE(preview->id == "win-cpu-safe");
+    } else {
+        REQUIRE(preview->id == "mac-preview");
+    }
 
     auto balanced = find_preset_by_selector("balanced");
     REQUIRE(balanced.has_value());
-    REQUIRE(balanced->id == "mac-balanced");
+    if (windows_rtx_defaults) {
+        REQUIRE(balanced->id == "win-rtx-balanced");
+    } else {
+        REQUIRE(balanced->id == "mac-balanced");
+    }
 
     auto max_quality = find_preset_by_selector("max");
     REQUIRE(max_quality.has_value());
-    REQUIRE(max_quality->id == "mac-max-quality");
+    if (windows_rtx_defaults) {
+        REQUIRE(max_quality->id == "win-rtx-max-quality");
+    } else {
+        REQUIRE(max_quality->id == "mac-max-quality");
+    }
 
     REQUIRE_FALSE(find_preset_by_selector("unknown").has_value());
 }
@@ -123,18 +154,40 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     RuntimeCapabilities mac_capabilities;
     mac_capabilities.platform = "macos";
     mac_capabilities.apple_silicon = true;
+    mac_capabilities.supported_backends = {Backend::MLX, Backend::CPU};
 
     auto default_preset = default_preset_for_capabilities(mac_capabilities);
     REQUIRE(default_preset.has_value());
     REQUIRE(default_preset->id == "mac-balanced");
 
-    auto mlx_model = default_model_for_request(mac_capabilities, Backend::Auto, default_preset);
+    auto mlx_model = default_model_for_request(
+        mac_capabilities, DeviceInfo{"Apple Silicon MLX", 16000, Backend::Auto}, default_preset);
     REQUIRE(mlx_model.has_value());
     REQUIRE(mlx_model->filename == "corridorkey_mlx.safetensors");
 
-    auto cpu_model = default_model_for_request(mac_capabilities, Backend::CPU, default_preset);
+    auto cpu_model = default_model_for_request(
+        mac_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, default_preset);
     REQUIRE(cpu_model.has_value());
     REQUIRE(cpu_model->filename == "corridorkey_int8_512.onnx");
+
+    RuntimeCapabilities windows_capabilities;
+    windows_capabilities.platform = "windows";
+    windows_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
+
+    auto windows_default = default_preset_for_capabilities(windows_capabilities);
+    REQUIRE(windows_default.has_value());
+    REQUIRE(windows_default->id == "win-rtx-balanced");
+
+    auto windows_rtx_model = default_model_for_request(
+        windows_capabilities, DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
+        windows_default);
+    REQUIRE(windows_rtx_model.has_value());
+    REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_768.onnx");
+
+    auto windows_cpu_model = default_model_for_request(
+        windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default);
+    REQUIRE(windows_cpu_model.has_value());
+    REQUIRE(windows_cpu_model->filename == "corridorkey_int8_512.onnx");
 }
 
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {

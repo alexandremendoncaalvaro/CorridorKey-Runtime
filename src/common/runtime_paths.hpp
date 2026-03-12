@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <corridorkey/types.hpp>
 #include <cstdlib>
 #include <filesystem>
@@ -8,6 +9,19 @@
 #include <optional>
 #include <string_view>
 #include <vector>
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <limits.h>
+#include <unistd.h>
+#endif
 
 namespace corridorkey::common {
 
@@ -61,6 +75,22 @@ inline std::string cache_key_for_model(const std::filesystem::path& model_path, 
     return std::to_string(fnv1a_64(key));
 }
 
+inline std::string portable_model_fingerprint(const std::filesystem::path& model_path,
+                                              Backend backend) {
+    std::error_code error;
+    std::uint64_t file_size = 0;
+    if (std::filesystem::exists(model_path, error)) {
+        file_size = std::filesystem::file_size(model_path, error);
+    }
+
+    auto timestamp = std::filesystem::last_write_time(model_path, error);
+    long long ticks = error ? 0LL : static_cast<long long>(timestamp.time_since_epoch().count());
+
+    auto key = model_path.filename().string() + "|" + std::to_string(file_size) + "|" +
+               std::to_string(ticks) + "|" + backend_token(backend);
+    return std::to_string(fnv1a_64(key));
+}
+
 inline void append_unique_path(std::vector<std::filesystem::path>& paths,
                                const std::filesystem::path& candidate) {
     if (candidate.empty()) {
@@ -75,13 +105,84 @@ inline void append_unique_path(std::vector<std::filesystem::path>& paths,
 
 }  // namespace detail
 
-inline std::optional<std::filesystem::path> cache_root_override() {
-    const char* override_path = std::getenv("CORRIDORKEY_CACHE_DIR");
-    if (override_path == nullptr || *override_path == '\0') {
+inline std::optional<std::string> environment_variable_copy(const char* name) {
+#if defined(_WIN32)
+    char* value = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&value, &length, name) != 0 || value == nullptr) {
         return std::nullopt;
     }
 
-    return std::filesystem::path(override_path);
+    std::string copy(value, length > 0 ? length - 1 : 0);
+    std::free(value);
+    return copy;
+#else
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return std::nullopt;
+    }
+
+    return std::string(value);
+#endif
+}
+
+inline std::optional<std::filesystem::path> current_executable_path() {
+#if defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+        return std::filesystem::weakly_canonical(std::filesystem::path(buffer.c_str()));
+    }
+#elif defined(_WIN32)
+    std::wstring buffer(MAX_PATH, L'\0');
+    DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length > 0) {
+        buffer.resize(length);
+        return std::filesystem::path(buffer);
+    }
+#else
+    std::array<char, PATH_MAX> buffer{};
+    ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (length > 0) {
+        return std::filesystem::weakly_canonical(
+            std::filesystem::path(std::string(buffer.data(), static_cast<size_t>(length))));
+    }
+#endif
+    return std::nullopt;
+}
+
+inline std::filesystem::path default_models_root() {
+    if (auto override_path = environment_variable_copy("CORRIDORKEY_MODELS_DIR");
+        override_path.has_value()) {
+        return std::filesystem::path(*override_path);
+    }
+
+    if (auto executable_path = current_executable_path(); executable_path.has_value()) {
+        auto executable_dir = executable_path->parent_path();
+        std::error_code error;
+
+        auto packaged_candidate = executable_dir.parent_path() / "models";
+        if (std::filesystem::exists(packaged_candidate, error) && !error) {
+            return packaged_candidate;
+        }
+
+        auto sibling_candidate = executable_dir / "models";
+        if (std::filesystem::exists(sibling_candidate, error) && !error) {
+            return sibling_candidate;
+        }
+    }
+
+    return "models";
+}
+
+inline std::optional<std::filesystem::path> cache_root_override() {
+    auto override_path = environment_variable_copy("CORRIDORKEY_CACHE_DIR");
+    if (!override_path.has_value()) {
+        return std::nullopt;
+    }
+
+    return std::filesystem::path(*override_path);
 }
 
 inline std::filesystem::path configured_cache_root() {
@@ -90,9 +191,13 @@ inline std::filesystem::path configured_cache_root() {
     }
 
 #if defined(__APPLE__)
-    const char* home = std::getenv("HOME");
-    if (home != nullptr) {
-        return std::filesystem::path(home) / "Library" / "Caches" / "CorridorKey";
+    if (auto home = environment_variable_copy("HOME"); home.has_value()) {
+        return std::filesystem::path(*home) / "Library" / "Caches" / "CorridorKey";
+    }
+#elif defined(_WIN32)
+    if (auto local_app_data = environment_variable_copy("LOCALAPPDATA");
+        local_app_data.has_value()) {
+        return std::filesystem::path(*local_app_data) / "CorridorKey" / "Cache";
     }
 #endif
     return std::filesystem::temp_directory_path() / "corridorkey-cache";
@@ -109,10 +214,15 @@ inline std::vector<std::filesystem::path> cache_root_candidates() {
     }
 
 #if defined(__APPLE__)
-    const char* home = std::getenv("HOME");
-    if (home != nullptr) {
+    if (auto home = environment_variable_copy("HOME"); home.has_value()) {
         detail::append_unique_path(
-            candidates, std::filesystem::path(home) / "Library" / "Caches" / "CorridorKey");
+            candidates, std::filesystem::path(*home) / "Library" / "Caches" / "CorridorKey");
+    }
+#elif defined(_WIN32)
+    if (auto local_app_data = environment_variable_copy("LOCALAPPDATA");
+        local_app_data.has_value()) {
+        detail::append_unique_path(
+            candidates, std::filesystem::path(*local_app_data) / "CorridorKey" / "Cache");
     }
 #endif
     detail::append_unique_path(candidates, fallback_cache_root());
@@ -187,6 +297,44 @@ inline std::optional<std::filesystem::path> coreml_model_cache_root() {
     }
 
     return *cache_root / "coreml_ep";
+}
+
+inline std::optional<std::filesystem::path> tensorrt_rtx_runtime_cache_root() {
+    auto cache_root = selected_cache_root();
+    if (!cache_root.has_value()) {
+        return std::nullopt;
+    }
+
+    return *cache_root / "tensorrt_rtx";
+}
+
+inline std::optional<std::filesystem::path> tensorrt_rtx_runtime_cache_path(
+    const std::filesystem::path& model_path) {
+    auto cache_root = tensorrt_rtx_runtime_cache_root();
+    if (!cache_root.has_value()) {
+        return std::nullopt;
+    }
+
+    auto stem = model_path.stem().string();
+    auto cache_name =
+        stem + "_" + detail::portable_model_fingerprint(model_path, Backend::TensorRT);
+    return *cache_root / cache_name;
+}
+
+inline std::filesystem::path tensorrt_rtx_compiled_context_model_path(
+    const std::filesystem::path& model_path) {
+    return model_path.parent_path() / (model_path.stem().string() + "_ctx.onnx");
+}
+
+inline std::optional<std::filesystem::path> existing_tensorrt_rtx_compiled_context_model_path(
+    const std::filesystem::path& model_path) {
+    auto compiled_path = tensorrt_rtx_compiled_context_model_path(model_path);
+    std::error_code error;
+    if (std::filesystem::exists(compiled_path, error) && !error) {
+        return compiled_path;
+    }
+
+    return std::nullopt;
 }
 
 }  // namespace corridorkey::common

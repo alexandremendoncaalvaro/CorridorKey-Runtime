@@ -1,6 +1,7 @@
 #include <corridorkey/engine.hpp>
 
 #include "mlx_probe.hpp"
+#include "windows_rtx_probe.hpp"
 
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
@@ -67,11 +68,21 @@ DeviceInfo auto_detect() {
         device.available_memory_mb = static_cast<int64_t>(mem / (1024 * 1024));
     }
 #elif defined(_WIN32)
-    device.name = "Windows CPU Baseline";
-    device.backend = Backend::CPU;
     MEMORYSTATUSEX status;
     status.dwLength = sizeof(status);
     GlobalMemoryStatusEx(&status);
+
+    auto windows_rtx_gpu = core::probe_windows_rtx_gpu();
+    if (windows_rtx_gpu.has_value() && windows_rtx_gpu->ampere_or_newer &&
+        windows_rtx_gpu->provider_available) {
+        device.name = windows_rtx_gpu->adapter_name;
+        device.backend = Backend::TensorRT;
+        device.available_memory_mb = windows_rtx_gpu->dedicated_memory_mb;
+        return device;
+    }
+
+    device.name = "Windows CPU Baseline";
+    device.backend = Backend::CPU;
     device.available_memory_mb = static_cast<int64_t>(status.ullTotalPhys / (1024 * 1024));
 #else
     device.name = "Linux/Generic Device";
@@ -98,6 +109,15 @@ std::vector<DeviceInfo> list_devices() {
     if (detected.backend == Backend::CoreML) {
         devices.push_back(detected);
     }
+#elif defined(_WIN32)
+    auto windows_rtx_gpu = core::probe_windows_rtx_gpu();
+    if (windows_rtx_gpu.has_value() && windows_rtx_gpu->ampere_or_newer &&
+        windows_rtx_gpu->provider_available) {
+        devices.push_back({windows_rtx_gpu->adapter_name, windows_rtx_gpu->dedicated_memory_mb,
+                           Backend::TensorRT});
+    }
+
+    devices.push_back({"Generic CPU", 0, Backend::CPU});
 #else
     devices.push_back(detected);
     if (detected.backend != Backend::CPU) {

@@ -49,6 +49,10 @@ using JobEventCallback = std::function<bool(const JobEvent& event)>;
  * @brief The main inference engine for CorridorKey.
  * Implements the PIMPL pattern to hide ONNX Runtime details.
  */
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
 class CORRIDORKEY_API Engine {
    public:
     /**
@@ -150,5 +154,8 @@ class CORRIDORKEY_API Engine {
     class Impl;
     std::unique_ptr<Impl> m_impl;
 };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 }  // namespace corridorkey

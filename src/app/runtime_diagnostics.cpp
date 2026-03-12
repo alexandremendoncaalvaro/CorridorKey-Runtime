@@ -14,6 +14,7 @@
 
 #include "../core/inference_session.hpp"
 #include "../core/mlx_probe.hpp"
+#include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 #include "common/runtime_paths.hpp"
 
@@ -161,6 +162,46 @@ std::optional<std::filesystem::path> find_exact_library(const std::filesystem::p
     return std::nullopt;
 }
 
+std::vector<std::filesystem::path> find_libraries_with_prefix(const std::filesystem::path& directory,
+                                                              std::string_view prefix) {
+    std::vector<std::filesystem::path> matches;
+    std::error_code error;
+    if (!std::filesystem::exists(directory, error)) {
+        return matches;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
+        if (error || !entry.is_regular_file()) {
+            continue;
+        }
+
+        auto filename = entry.path().filename().string();
+        if (std::string_view(filename).starts_with(prefix)) {
+            matches.push_back(entry.path());
+        }
+    }
+
+    return matches;
+}
+
+void append_unique_paths(std::vector<std::filesystem::path>& destination,
+                         const std::vector<std::filesystem::path>& source) {
+    for (const auto& path : source) {
+        if (std::find(destination.begin(), destination.end(), path) == destination.end()) {
+            destination.push_back(path);
+        }
+    }
+}
+
+std::vector<std::filesystem::path> find_libraries_with_prefixes(
+    const std::filesystem::path& directory, std::initializer_list<std::string_view> prefixes) {
+    std::vector<std::filesystem::path> matches;
+    for (auto prefix : prefixes) {
+        append_unique_paths(matches, find_libraries_with_prefix(directory, prefix));
+    }
+    return matches;
+}
+
 std::vector<std::string> dependency_references(const std::filesystem::path& executable_path) {
     std::vector<std::string> references;
 #if defined(__APPLE__)
@@ -249,15 +290,33 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         executable_dir.filename() == "bin" ? executable_dir.parent_path() : executable_dir;
     std::filesystem::path expected_models_dir = bundle_root / "models";
     std::filesystem::path readme_path = bundle_root / "README.txt";
-    std::filesystem::path smoke_test_path = bundle_root / "smoke_test.sh";
+    std::filesystem::path smoke_test_path =
+#if defined(_WIN32)
+        bundle_root / "smoke_test.bat";
+#else
+        bundle_root / "smoke_test.sh";
+#endif
 
     auto runtime_library = find_runtime_library(executable_dir);
-    auto core_library = find_exact_library(executable_dir, "libcorridorkey_core.dylib");
+    auto core_library = find_exact_library(
+        executable_dir,
+#if defined(_WIN32)
+        "corridorkey_core.dll"
+#else
+        "libcorridorkey_core.dylib"
+#endif
+    );
     auto mlx_library = find_exact_library(executable_dir, "libmlx.dylib");
     auto references = dependency_references(executable_path);
     bool core_reference_found =
         std::any_of(references.begin(), references.end(), [](const std::string& reference) {
-            return reference.find("libcorridorkey_core.dylib") != std::string::npos;
+            return reference.find(
+#if defined(_WIN32)
+                       "corridorkey_core.dll"
+#else
+                       "libcorridorkey_core.dylib"
+#endif
+                       ) != std::string::npos;
         });
     auto core_references = core_library.has_value() ? dependency_references(*core_library)
                                                     : std::vector<std::string>{};
@@ -271,11 +330,40 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
             return reference.find("libmlx.dylib") != std::string::npos;
         });
     auto mlx_metallib = find_exact_library(executable_dir, "mlx.metallib");
+    std::vector<std::filesystem::path> tensorrt_provider_libraries;
+    if (auto exact_rtx_provider =
+            find_exact_library(executable_dir, "onnxruntime_providers_nv_tensorrt_rtx.dll");
+        exact_rtx_provider.has_value()) {
+        tensorrt_provider_libraries.push_back(*exact_rtx_provider);
+    }
+    if (auto legacy_rtx_provider =
+            find_exact_library(executable_dir, "onnxruntime_providers_nvtensorrtrtx.dll");
+        legacy_rtx_provider.has_value()) {
+        append_unique_paths(tensorrt_provider_libraries, {*legacy_rtx_provider});
+    }
+    append_unique_paths(
+        tensorrt_provider_libraries,
+        find_libraries_with_prefixes(executable_dir, {"onnxruntime_providers_nv_tensorrt_rtx",
+                                                      "onnxruntime_providers_nvtensorrtrtx"}));
+    auto vendor_provider_libraries = find_libraries_with_prefix(executable_dir, "onnxruntime_providers_");
+    auto tensorrt_rtx_core_libraries =
+        find_libraries_with_prefixes(executable_dir, {"tensorrt_rtx", "nvinfer"});
+    auto tensorrt_rtx_parser_libraries =
+        find_libraries_with_prefixes(executable_dir, {"tensorrt_onnxparser_rtx", "nvonnxparser"});
+    auto cuda_runtime_libraries =
+        find_libraries_with_prefixes(executable_dir, {"cudart64_", "cudart"});
+    auto compiled_context_models = nlohmann::json::array();
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_present = true;
     for (const auto& model : model_catalog()) {
-        if (!model.packaged_for_macos) {
+        bool packaged_for_current_platform =
+#if defined(_WIN32)
+            model.packaged_for_windows;
+#else
+            model.packaged_for_macos;
+#endif
+        if (!packaged_for_current_platform) {
             continue;
         }
 
@@ -298,6 +386,13 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         for (const auto& entry : std::filesystem::directory_iterator(models_dir, directory_error)) {
             if (directory_error || !entry.is_regular_file() ||
                 entry.path().extension() != ".mlxfn") {
+                if (directory_error || !entry.is_regular_file() ||
+                    entry.path().extension() != ".onnx" ||
+                    entry.path().stem().string().find("_ctx") == std::string::npos) {
+                    continue;
+                }
+
+                compiled_context_models.push_back(entry.path().filename().string());
                 continue;
             }
             mlx_bridge_artifacts.push_back(entry.path().filename().string());
@@ -328,14 +423,45 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["mlx_metallib_path"] = mlx_metallib.has_value() ? mlx_metallib->string() : "";
     json["mlx_bridge_present"] = mlx_bridge_present;
     json["mlx_bridge_artifacts"] = mlx_bridge_artifacts;
+    json["compiled_context_models"] = compiled_context_models;
+    json["tensorrt_rtx_provider_libraries"] = nlohmann::json::array();
+    for (const auto& path : tensorrt_provider_libraries) {
+        json["tensorrt_rtx_provider_libraries"].push_back(path.filename().string());
+    }
+    json["tensorrt_rtx_provider_found"] = !tensorrt_provider_libraries.empty();
+    json["provider_library_count"] = vendor_provider_libraries.size();
+    json["windows_rtx_runtime_libraries"] = nlohmann::json::array();
+    for (const auto& path : tensorrt_rtx_core_libraries) {
+        json["windows_rtx_runtime_libraries"].push_back(path.filename().string());
+    }
+    json["tensorrt_rtx_parser_libraries"] = nlohmann::json::array();
+    for (const auto& path : tensorrt_rtx_parser_libraries) {
+        json["tensorrt_rtx_parser_libraries"].push_back(path.filename().string());
+    }
+    json["cuda_runtime_libraries"] = nlohmann::json::array();
+    for (const auto& path : cuda_runtime_libraries) {
+        json["cuda_runtime_libraries"].push_back(path.filename().string());
+    }
+    json["tensorrt_rtx_runtime_found"] = !tensorrt_rtx_core_libraries.empty();
+    json["tensorrt_rtx_parser_found"] = !tensorrt_rtx_parser_libraries.empty();
+    json["cuda_runtime_found"] = !cuda_runtime_libraries.empty();
     json["dependency_references"] = references;
     json["core_dependency_references"] = core_references;
     json["packaged_models"] = packaged_models;
     json["signature"] = inspect_signature(executable_path);
+#if defined(_WIN32)
+    json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
+                      core_library.has_value() && packaged_models_present &&
+                      !tensorrt_provider_libraries.empty() &&
+                      !tensorrt_rtx_core_libraries.empty() &&
+                      !tensorrt_rtx_parser_libraries.empty() &&
+                      !cuda_runtime_libraries.empty();
+#else
     json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
                       runtime_reference_found && core_library.has_value() && core_reference_found &&
                       mlx_library.has_value() && mlx_reference_found && mlx_metallib.has_value() &&
                       mlx_bridge_present && packaged_models_present;
+#endif
     return json;
 }
 
@@ -361,6 +487,7 @@ nlohmann::json inspect_cache() {
     auto effective_cache_dir = selected_cache_dir.value_or(configured_cache_dir);
     auto optimized_models_dir = effective_cache_dir / "optimized_models";
     auto coreml_ep_dir = common::coreml_model_cache_root();
+    auto tensorrt_rtx_dir = common::tensorrt_rtx_runtime_cache_root();
 
     nlohmann::json optimized_models = nlohmann::json::array();
     nlohmann::json candidates = nlohmann::json::array();
@@ -392,11 +519,16 @@ nlohmann::json inspect_cache() {
     json["optimized_models"] = optimized_models;
     json["coreml_ep_cache_dir"] =
         coreml_ep_dir.has_value() ? coreml_ep_dir->string() : std::string();
+    json["tensorrt_rtx_cache_dir"] =
+        tensorrt_rtx_dir.has_value() ? tensorrt_rtx_dir->string() : std::string();
     json["healthy"] = selected_cache_dir.has_value();
     return json;
 }
 
 nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& models_dir) {
+#if !defined(__APPLE__)
+    (void)models_dir;
+#endif
     nlohmann::json json;
     json["applicable"] = false;
     json["available"] = false;
@@ -467,6 +599,9 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
 }
 
 nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
+#if !defined(__APPLE__)
+    (void)models_dir;
+#endif
     nlohmann::json json;
     json["applicable"] = false;
     json["probe_available"] = core::mlx_probe_available();
@@ -571,6 +706,93 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
     return json;
 }
 
+nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir) {
+    nlohmann::json json;
+    json["applicable"] = false;
+    json["gpu_detected"] = false;
+    json["provider_available"] = false;
+    json["ampere_or_newer"] = false;
+    json["runtime_cache_ready"] = false;
+    json["backend_integrated"] = false;
+    json["healthy"] = false;
+    json["driver_query_available"] = false;
+    json["driver_version"] = "";
+    json["gpu_name"] = "";
+    json["gpu_memory_mb"] = 0;
+    json["packaged_models"] = nlohmann::json::array();
+    json["compiled_context_models"] = nlohmann::json::array();
+
+#if defined(_WIN32)
+    json["applicable"] = true;
+
+    auto gpu = core::probe_windows_rtx_gpu();
+    json["gpu_detected"] = gpu.has_value();
+    if (gpu.has_value()) {
+        json["gpu_name"] = gpu->adapter_name;
+        json["gpu_memory_mb"] = gpu->dedicated_memory_mb;
+        json["driver_query_available"] = gpu->driver_query_available;
+        json["driver_version"] = gpu->driver_version;
+        json["provider_available"] = gpu->provider_available;
+        json["ampere_or_newer"] = gpu->ampere_or_newer;
+    }
+
+    auto runtime_cache_dir = common::tensorrt_rtx_runtime_cache_root();
+    json["runtime_cache_dir"] =
+        runtime_cache_dir.has_value() ? runtime_cache_dir->string() : std::string();
+    json["runtime_cache_ready"] = runtime_cache_dir.has_value();
+    json["backend_integrated"] =
+        gpu.has_value() && gpu->provider_available && gpu->ampere_or_newer;
+
+    bool packaged_models_ready = true;
+    bool any_packaged_model_found = false;
+    std::error_code error;
+    if (std::filesystem::exists(models_dir, error)) {
+        for (const auto& item : std::filesystem::directory_iterator(models_dir, error)) {
+            if (error || !item.is_regular_file()) {
+                continue;
+            }
+            if (item.path().extension() == ".onnx" &&
+                item.path().stem().string().find("_ctx") != std::string::npos) {
+                json["compiled_context_models"].push_back(item.path().filename().string());
+            }
+        }
+    }
+
+    for (const auto& model : model_catalog()) {
+        if (!model.packaged_for_windows) {
+            continue;
+        }
+
+        std::filesystem::path model_path = models_dir / model.filename;
+        bool found = std::filesystem::exists(model_path);
+        any_packaged_model_found = any_packaged_model_found || found;
+        packaged_models_ready = packaged_models_ready && found;
+
+        nlohmann::json entry;
+        entry["filename"] = model.filename;
+        entry["found"] = found;
+        entry["recommended_backend"] = model.recommended_backend;
+        entry["validated_platforms"] = model.validated_platforms;
+        entry["intended_platforms"] = model.intended_platforms;
+        if (model.recommended_backend == "tensorrt") {
+            auto compiled_context_path =
+                common::existing_tensorrt_rtx_compiled_context_model_path(model_path);
+            entry["compiled_context_path"] =
+                compiled_context_path.has_value() ? compiled_context_path->string() : std::string();
+            entry["compiled_context_found"] = compiled_context_path.has_value();
+        }
+        json["packaged_models"].push_back(entry);
+    }
+
+    json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
+    json["healthy"] = json["backend_integrated"].get<bool>() &&
+                      json["runtime_cache_ready"].get<bool>() &&
+                      json["packaged_models_ready"].get<bool>();
+#endif
+
+    return json;
+}
+
 nlohmann::json latency_summary(const std::vector<double>& samples) {
     nlohmann::json json;
     json["count"] = samples.size();
@@ -617,6 +839,7 @@ nlohmann::json inspect_operational_health(const std::filesystem::path& models_di
     json["cache"] = inspect_cache();
     json["coreml"] = inspect_coreml_execution_provider(models_dir);
     json["mlx"] = inspect_mlx_model_pack(models_dir);
+    json["windows_rtx"] = inspect_windows_rtx_track(models_dir);
     return json;
 }
 

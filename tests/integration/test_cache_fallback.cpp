@@ -12,12 +12,33 @@ using namespace corridorkey::app;
 
 namespace {
 
+std::optional<std::string> environment_variable_copy(const char* name) {
+#ifdef _WIN32
+    char* value = nullptr;
+    size_t length = 0;
+    if (_dupenv_s(&value, &length, name) != 0 || value == nullptr) {
+        return std::nullopt;
+    }
+
+    std::string copy(value, length > 0 ? length - 1 : 0);
+    std::free(value);
+    return copy;
+#else
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return std::nullopt;
+    }
+
+    return std::string(value);
+#endif
+}
+
 class ScopedEnvVar {
    public:
     ScopedEnvVar(const char* name, std::string value) : m_name(name) {
-        const char* current = std::getenv(name);
-        if (current != nullptr) {
-            m_previous = current;
+        auto current = environment_variable_copy(name);
+        if (current.has_value()) {
+            m_previous = *current;
         }
 
 #ifdef _WIN32

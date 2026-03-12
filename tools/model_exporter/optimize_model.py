@@ -1,12 +1,7 @@
 import os
-import sys
 import argparse
-import numpy as np
 
-def simplify_and_optimize(input_model_path: str, output_model_path: str, fp16: bool = False):
-    print(f"\n[Info] Optimizing {input_model_path} -> {output_model_path}")
-
-    # 1. Run ONNX Simplifier
+def simplify_model(input_model_path: str):
     import onnx
     from onnxsim import simplify
 
@@ -16,8 +11,20 @@ def simplify_and_optimize(input_model_path: str, output_model_path: str, fp16: b
     print("  -> Running ONNX Simplifier...")
     model_simp, check = simplify(model)
     if not check:
-        print("  [Warning] Simplified model check failed. Skipping simplification.")
-        model_simp = model
+        print("  [Warning] Simplified model check failed. Reusing the original graph.")
+        return model
+
+    return model_simp
+
+def simplify_and_optimize_portable_ort(input_model_path: str, output_model_path: str,
+                                       fp16: bool = False):
+    print(f"\n[Info] Optimizing {input_model_path} -> {output_model_path}")
+
+    # The ORT transformer optimizer is useful for the generic runtime path, but it
+    # introduces contrib ops that TensorRT RTX cannot compile.
+    import onnx
+
+    model_simp = simplify_model(input_model_path)
 
     # 2. Run ONNX Runtime Optimizer (Transformer specific)
     # We must save the simplified model first
@@ -53,10 +60,38 @@ def simplify_and_optimize(input_model_path: str, output_model_path: str, fp16: b
         if os.path.exists(temp_simp_path):
             os.remove(temp_simp_path)
 
+def simplify_and_convert_windows_rtx(input_model_path: str, fp32_output_path: str,
+                                     fp16_output_path: str):
+    print(f"\n[Info] Preparing TensorRT RTX-compatible models from {input_model_path}")
+
+    import onnx
+    from onnxruntime.transformers.float16 import convert_float_to_float16
+
+    model_simp = simplify_model(input_model_path)
+
+    print(f"  -> Saving simplified FP32 model to {fp32_output_path}")
+    onnx.save(model_simp, fp32_output_path)
+
+    print("  -> Converting graph weights and internal tensors to FP16 while preserving FP32 I/O...")
+    fp16_model = convert_float_to_float16(
+        model_simp,
+        keep_io_types=True,
+        disable_shape_infer=False,
+        force_fp16_initializers=True
+    )
+    onnx.save(fp16_model, fp16_output_path)
+    print(f"  [Success] Saved TensorRT RTX-compatible FP16 model to {fp16_output_path}")
 
 def main():
     parser = argparse.ArgumentParser(description="Optimize and Quantize CorridorKey ONNX models.")
     parser.add_argument("--dir", type=str, default="../../models", help="Directory containing raw exported ONNX models")
+    parser.add_argument(
+        "--target",
+        type=str,
+        choices=("portable-ort", "windows-rtx"),
+        default="portable-ort",
+        help="Select the optimization profile for the generated artifacts."
+    )
     args = parser.parse_args()
 
     models_dir = os.path.abspath(args.dir)
@@ -73,11 +108,15 @@ def main():
         fp32_opt_path = os.path.join(models_dir, f"corridorkey_fp32_{res}_opt.onnx")
         fp16_opt_path = os.path.join(models_dir, f"corridorkey_fp16_{res}.onnx")
 
+        if args.target == "windows-rtx":
+            simplify_and_convert_windows_rtx(raw_path, raw_path, fp16_opt_path)
+            continue
+
         # Create optimized FP32
-        simplify_and_optimize(raw_path, fp32_opt_path, fp16=False)
+        simplify_and_optimize_portable_ort(raw_path, fp32_opt_path, fp16=False)
 
         # Create optimized FP16
-        simplify_and_optimize(raw_path, fp16_opt_path, fp16=True)
+        simplify_and_optimize_portable_ort(raw_path, fp16_opt_path, fp16=True)
 
         # Overwrite raw FP32 with optimized FP32 for distribution
         os.replace(fp32_opt_path, raw_path)

@@ -16,7 +16,7 @@ else()
     target_include_directories(corridorkey_core PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${FFMPEG_INCLUDE_DIRS}
-        ${onnxruntime_INCLUDE_DIRS}
+        ${CORRIDORKEY_ORT_INCLUDE_DIRS}
     )
 endif()
 
@@ -47,6 +47,10 @@ if(APPLE)
     target_link_libraries(corridorkey_core PRIVATE "-framework CoreML" "-framework Foundation")
 endif()
 
+if(WIN32)
+    target_link_libraries(corridorkey_core PRIVATE dxgi)
+endif()
+
 if(APPLE AND MLX_FOUND)
     target_link_libraries(corridorkey_core PRIVATE mlx)
     target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_WITH_MLX=1)
@@ -58,7 +62,11 @@ endif()
 target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_EXPORTS)
 
 # Relax warnings for png_io.cpp because of stb library legacy code
-if(NOT MSVC)
+if(MSVC)
+    set_source_files_properties(frame_io/png_io.cpp PROPERTIES
+        COMPILE_DEFINITIONS "_CRT_SECURE_NO_WARNINGS"
+    )
+else()
     set_source_files_properties(frame_io/png_io.cpp PROPERTIES COMPILE_FLAGS "-Wno-error")
 endif()
 
@@ -86,6 +94,7 @@ if(BUILD_TESTING)
         target_include_directories(corridorkey_core_static PUBLIC
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${FFMPEG_INCLUDE_DIRS}
+            ${CORRIDORKEY_ORT_INCLUDE_DIRS}
         )
     endif()
 
@@ -104,6 +113,10 @@ if(BUILD_TESTING)
         target_link_libraries(corridorkey_core_static PRIVATE "-framework CoreML" "-framework Foundation")
     endif()
 
+    if(WIN32)
+        target_link_libraries(corridorkey_core_static PRIVATE dxgi)
+    endif()
+
     if(APPLE AND MLX_FOUND)
         target_link_libraries(corridorkey_core_static PRIVATE mlx)
         target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_WITH_MLX=1)
@@ -111,7 +124,7 @@ if(BUILD_TESTING)
         target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_WITH_MLX=0)
     endif()
 
-    target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_EXPORTS)
+    target_compile_definitions(corridorkey_core_static PUBLIC CORRIDORKEY_STATIC_DEFINE)
 
     if(NOT MSVC)
         set_source_files_properties(frame_io/png_io.cpp PROPERTIES COMPILE_FLAGS "-Wno-error")

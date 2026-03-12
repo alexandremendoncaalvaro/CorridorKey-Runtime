@@ -1,6 +1,15 @@
 #include "inference_session.hpp"
 
+#include <cstdlib>
+#include <string_view>
 #include <unordered_map>
+
+#if defined(_WIN32)
+#if __has_include(<onnxruntime/core/providers/nv_tensorrt_rtx/nv_provider_options.h>)
+#include <onnxruntime/core/providers/nv_tensorrt_rtx/nv_provider_options.h>
+#define CORRIDORKEY_HAS_NV_TENSORRT_RTX_OPTIONS 1
+#endif
+#endif
 
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
@@ -18,6 +27,23 @@ namespace corridorkey {
 namespace {
 
 constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
+constexpr const char* kTensorRtRtxExecutionProvider = "NvTensorRTRTXExecutionProvider";
+
+namespace tensorrt_rtx_option_names {
+#if defined(CORRIDORKEY_HAS_NV_TENSORRT_RTX_OPTIONS)
+constexpr const char* kDeviceId = onnxruntime::nv::provider_option_names::kDeviceId;
+constexpr const char* kDumpSubgraphs = onnxruntime::nv::provider_option_names::kDumpSubgraphs;
+constexpr const char* kDetailedBuildLog =
+    onnxruntime::nv::provider_option_names::kDetailedBuildLog;
+constexpr const char* kRuntimeCacheFile =
+    onnxruntime::nv::provider_option_names::kRuntimeCacheFile;
+#else
+constexpr const char* kDeviceId = "device_id";
+constexpr const char* kDumpSubgraphs = "nv_dump_subgraphs";
+constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
+constexpr const char* kRuntimeCacheFile = "nv_runtime_cache_path";
+#endif
+}  // namespace tensorrt_rtx_option_names
 
 #ifdef __APPLE__
 void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
@@ -42,6 +68,39 @@ void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
     Ort::ThrowOnError(
         OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, coreml_flags));
 #endif
+}
+#endif
+
+#ifdef _WIN32
+void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options,
+                                            const std::filesystem::path& model_path) {
+    std::unordered_map<std::string, std::string> provider_options = {
+        {tensorrt_rtx_option_names::kDeviceId, "0"},
+    };
+
+    if (auto runtime_cache_dir = common::tensorrt_rtx_runtime_cache_path(model_path);
+        runtime_cache_dir.has_value()) {
+        std::error_code error;
+        std::filesystem::create_directories(*runtime_cache_dir, error);
+        if (!error) {
+            provider_options.emplace(tensorrt_rtx_option_names::kRuntimeCacheFile,
+                                     runtime_cache_dir->string());
+        }
+    }
+
+    if (auto dump_subgraphs =
+            common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DUMP_SUBGRAPHS");
+        dump_subgraphs.has_value() && std::string_view(*dump_subgraphs) == "1") {
+        provider_options.emplace(tensorrt_rtx_option_names::kDumpSubgraphs, "1");
+    }
+
+    if (auto build_log =
+            common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DETAILED_LOG");
+        build_log.has_value() && std::string_view(*build_log) == "1") {
+        provider_options.emplace(tensorrt_rtx_option_names::kDetailedBuildLog, "1");
+    }
+
+    session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
 }
 #endif
 
@@ -121,7 +180,8 @@ InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(devic
 InferenceSession::~InferenceSession() = default;
 
 void InferenceSession::configure_session_options(bool use_optimized_model_cache,
-                                                 const SessionCreateOptions& options) {
+                                                 const SessionCreateOptions& options,
+                                                 const std::filesystem::path& model_path) {
     m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
     m_session_options.SetGraphOptimizationLevel(use_optimized_model_cache
                                                     ? GraphOptimizationLevel::ORT_DISABLE_ALL
@@ -146,9 +206,13 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             break;
         }
         case Backend::TensorRT: {
+#ifdef _WIN32
+            append_tensorrt_rtx_execution_provider(m_session_options, model_path);
+#else
             OrtTensorRTProviderOptions trt_options;
             trt_options.device_id = 0;
             m_session_options.AppendExecutionProvider_TensorRT(trt_options);
+#endif
             break;
         }
 #ifdef _WIN32
@@ -219,6 +283,16 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         std::optional<std::filesystem::path> optimized_model_path;
         bool using_optimized_model_cache = false;
 
+#ifdef _WIN32
+        if (session_ptr->m_device.backend == Backend::TensorRT) {
+            if (auto compiled_context_path =
+                    common::existing_tensorrt_rtx_compiled_context_model_path(model_path);
+                compiled_context_path.has_value()) {
+                session_model_path = *compiled_context_path;
+            }
+        }
+#endif
+
         if (core::use_optimized_model_cache_for_backend(session_ptr->m_device.backend)) {
             optimized_model_path =
                 common::optimized_model_cache_path(model_path, session_ptr->m_device.backend);
@@ -232,7 +306,8 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             }
         }
 
-        session_ptr->configure_session_options(using_optimized_model_cache, options);
+        session_ptr->configure_session_options(using_optimized_model_cache, options,
+                                              session_model_path);
         if (!using_optimized_model_cache && optimized_model_path.has_value()) {
 #ifdef _WIN32
             session_ptr->m_session_options.SetOptimizedModelFilePath(
@@ -264,7 +339,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
                     session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-                    session_ptr->configure_session_options(false, options);
+                    session_ptr->configure_session_options(false, options, model_path);
 #ifdef _WIN32
                     session_ptr->m_session_options.SetOptimizedModelFilePath(
                         optimized_model_path->wstring().c_str());
