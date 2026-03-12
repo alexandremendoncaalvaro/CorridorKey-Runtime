@@ -274,6 +274,12 @@ corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --m
 corridorkey process --json --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_mlx.safetensors --tiled
 ```
 
+**Enable cleanup for slower, higher-quality runs**:
+
+```bash
+corridorkey process --input input.mp4 --output output.mp4 --model models/corridorkey_mlx.safetensors --tiled --despeckle
+```
+
 **Process a directory of frames with the CPU baseline**:
 
 ```bash
@@ -308,6 +314,9 @@ Alpha hints are part of the product contract, not an afterthought.
   controlled results.
 - Rough matte fallback exists for smoke tests, low-friction usage, and simpler
   cases, not as a replacement for dedicated hint workflows.
+- The default Apple path does not enable morphological cleanup implicitly.
+  Turn on `--despeckle` for slower, higher-quality runs when the artifact
+  budget justifies it.
 
 ## Machine-Readable Interfaces
 

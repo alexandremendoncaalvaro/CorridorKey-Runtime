@@ -285,40 +285,40 @@
   - abre videos reais da pasta `assets/video_samples`
   - seleciona `MLX`
   - entra no pipeline de inferencia
-  - mas ainda nao entrega throughput aceitavel para chamar o video path de
-    "fechado"
-- A leitura embasada desta rodada e:
-  - o gargalo atual parece estar mais ligado ao **jeito como estamos
-    integrando o MLX no hot path de video** do que ao MLX em si
-  - a evidencia local mostra que os videos sample iniciam corretamente, mas
-    avancam devagar demais
-  - isso conversa com a documentacao oficial do MLX sobre `compile`,
-    lazy evaluation, sincronizacao em `eval()` e importancia de shape fixo
-  - isso tambem conversa com o `corridorkey-mlx`, que trata `compile=True`,
-    tile com `overlap=64` e engine persistente como caminho normal, nao
-    wrappers descartaveis por frame
-- Ataque aprovado para a proxima rodada:
-  1. substituir o bridge `.mlxfn` como hot path principal de video por uma
-     integracao mais direta e persistente com o engine do `corridorkey-mlx`
-  2. manter `.safetensors` como artefato publico do pack Apple
-  3. usar shapes fixos por tier para favorecer `compile=True`
-  4. manter tiled inference para high-resolution com `overlap=64`
-  5. medir `decode`, `prepare_inputs`, `mlx_run`, `extract_outputs`, `encode`
-     e `write` separadamente em workload de video real
-  6. usar profiling do MLX/Metal para confirmar se o custo dominante esta em
-     sincronizacao e extracao, antes de mexer em mais nada
-- Regras de implementacao desta etapa:
-  - nao reabrir `ONNX/CoreML` como trilho principal do Mac
-  - nao priorizar hardware decode sem prova de ganho
-  - nao sair ajustando knobs de FFmpeg/threads por intuicao
-  - nao trocar o corpus; atacar o problema com os samples ja versionados
-- Criterio de aceite desta etapa:
-  - pelo menos um sample `2048x2048` e um sample `4K` da pasta
-    `assets/video_samples` completam end-to-end
-  - `process --json` emite evento terminal `completed`
-  - o output final tem o mesmo tamanho do input
-  - o ganho ou o gargalo ficam explicados com benchmark e telemetria por
-    etapa, nao por percepcao
+  - e agora ja completa um sample `2048x2048` end-to-end com o backend `MLX`
+- A leitura embasada desta rodada ficou assim:
+  - o gargalo inicial do path MLX estava mesmo no jeito como o bridge era
+    exportado e executado, nao no MLX em si
+  - corrigir o `prepare_mlx_model_pack.py` para usar `compile_model(...)` de
+    fato, somado a `mlx::core::compile(...)` no runtime, derrubou o custo
+    dominante do bridge
+  - no frame `4K tiled`, o path com `corridorkey_mlx.safetensors` caiu de
+    `38972.608 ms` para `26111.325 ms` (`-33.0%`)
+  - a telemetria agora separa `mlx_materialize_outputs` de
+    `mlx_copy_outputs`, e mostrou que a copia host ficou pequena
+  - o bridge `512` venceu `1024` no corpus atual com folga:
+    - `4K tiled`: `17035.608 ms` vs `29708.233 ms`
+    - `assets/corridor.png`: `871.149 ms` vs `4130.743 ms`
+  - portanto o pack Apple passa a preferir `512` por padrao
+- Resultado validado no sample de video:
+  - `assets/video_samples/greenscreen_1769569137.mp4`
+  - `corridorkey_mlx_bridge_512.mlxfn`
+  - `40` frames processados
+  - `job_total = 55623.560 ms`
+  - resolucao de saida preservada em `2048x2048`
+- O gargalo dominante mudou de lugar:
+  - `post_despeckle = 40190.533 ms`
+  - `video_infer_batch = 54767.260 ms`
+  - `mlx_materialize_outputs = 12826.733 ms`
+- Isso conversa com o `corridorkey-mlx`, que hoje nao aplica
+  `despeckle/despill` no backend MLX. O caminho padrao do Mac deixa de ativar
+  cleanup implicitamente; `--despeckle` fica reservado para runs mais lentos e
+  orientados a qualidade.
+- Proxima rodada do Mac:
+  1. rerodar bundle + corpus baseline com o default `512`
+  2. validar `process --json` end-to-end no sample `4K`
+  3. decidir se `despeckle` precisa de otimizacao propria ou se fica apenas no
+     preset/caminho de max quality
 
 ### Criterios de escolha entre MLX e Core ML direto
 

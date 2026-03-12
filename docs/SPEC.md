@@ -144,7 +144,7 @@ struct DeviceInfo {
 struct InferenceParams {
     int target_resolution = 0;
     float despill_strength = 1.0f;
-    bool auto_despeckle = true;
+    bool auto_despeckle = false;
     int despeckle_size = 400;
     float refiner_scale = 1.0f;
     bool input_is_linear = false;
@@ -629,7 +629,7 @@ corridorkey process --json --input input.mp4 --output output.mp4 --model models/
 --resolution <0|512|768|1024>               Override processing resolution
 --model <path>                              Custom model path
 --despill <0.0-1.0>                         Green spill removal (default: 1.0)
---no-despeckle                              Disable morphological cleanup
+--despeckle                                 Enable morphological cleanup
 --batch-size <int>                          Number of frames per inference call
 --tiled                                     Enable tiled inference for large frames
 --json                                      Emit structured JSON output
