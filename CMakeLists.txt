@@ -1,7 +1,14 @@
 cmake_minimum_required(VERSION 3.28)
 
+if(APPLE)
+    set(CORRIDORKEY_MACOS_DEPLOYMENT_TARGET "14.0" CACHE STRING
+        "Minimum macOS deployment target for portable Apple Silicon releases")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "${CORRIDORKEY_MACOS_DEPLOYMENT_TARGET}" CACHE STRING
+        "Minimum macOS deployment target for portable Apple Silicon releases" FORCE)
+endif()
+
 project(CorridorKey-Runtime
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
@@ -63,6 +70,18 @@ if(APPLE)
     if(CORRIDORKEY_ENABLE_MLX)
         set(_corridorkey_mlx_package_dir "${CORRIDORKEY_MLX_CMAKE_DIR}")
         if(_corridorkey_mlx_package_dir STREQUAL "")
+            foreach(_corridorkey_mlx_bottle_name IN ITEMS sonoma sequoia tahoe)
+                file(GLOB _corridorkey_mlx_bottle_candidates
+                     "${CMAKE_SOURCE_DIR}/build/mlx-${_corridorkey_mlx_bottle_name}-bottle/mlx/*/share/cmake/MLX")
+                if(_corridorkey_mlx_bottle_candidates)
+                    list(GET _corridorkey_mlx_bottle_candidates 0 _corridorkey_mlx_package_dir)
+                    message(STATUS "Resolved portable MLX package at ${_corridorkey_mlx_package_dir}")
+                    break()
+                endif()
+            endforeach()
+        endif()
+
+        if(_corridorkey_mlx_package_dir STREQUAL "")
             set(_corridorkey_mlx_python_candidates "")
             if(NOT CORRIDORKEY_MLX_PYTHON STREQUAL "")
                 list(APPEND _corridorkey_mlx_python_candidates "${CORRIDORKEY_MLX_PYTHON}")
@@ -109,6 +128,32 @@ if(APPLE)
 
         find_package(MLX CONFIG QUIET)
         if(MLX_FOUND)
+            if(_corridorkey_mlx_package_dir MATCHES "${CMAKE_SOURCE_DIR}/build/mlx-.*-bottle/.*/share/cmake/MLX$")
+                get_filename_component(_corridorkey_mlx_prefix "${_corridorkey_mlx_package_dir}" DIRECTORY)
+                get_filename_component(_corridorkey_mlx_prefix "${_corridorkey_mlx_prefix}" DIRECTORY)
+                get_filename_component(_corridorkey_mlx_prefix "${_corridorkey_mlx_prefix}" DIRECTORY)
+                set(_corridorkey_mlx_dylib "${_corridorkey_mlx_prefix}/lib/libmlx.dylib")
+                if(EXISTS "${_corridorkey_mlx_dylib}")
+                    execute_process(
+                        COMMAND install_name_tool -id @rpath/libmlx.dylib "${_corridorkey_mlx_dylib}"
+                        RESULT_VARIABLE _corridorkey_mlx_install_name_result
+                        ERROR_VARIABLE _corridorkey_mlx_install_name_error
+                    )
+                    if(NOT _corridorkey_mlx_install_name_result EQUAL 0)
+                        message(FATAL_ERROR
+                            "Failed to normalize portable MLX install_name: ${_corridorkey_mlx_install_name_error}")
+                    endif()
+                    execute_process(
+                        COMMAND codesign --force --sign - "${_corridorkey_mlx_dylib}"
+                        RESULT_VARIABLE _corridorkey_mlx_codesign_result
+                        ERROR_VARIABLE _corridorkey_mlx_codesign_error
+                    )
+                    if(NOT _corridorkey_mlx_codesign_result EQUAL 0)
+                        message(FATAL_ERROR
+                            "Failed to ad-hoc sign portable MLX dylib: ${_corridorkey_mlx_codesign_error}")
+                    endif()
+                endif()
+            endif()
             if(TARGET mlx)
                 # The packaged MLX target hardcodes framework paths under
                 # /Applications/Xcode-latest.app, which is not present on

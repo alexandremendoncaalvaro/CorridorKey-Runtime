@@ -14,9 +14,31 @@
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "environment": {
+                "MACOSX_DEPLOYMENT_TARGET": "14.0"
+            },
             "cacheVariables": {
                 "VCPKG_MANIFEST_MODE": "ON",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "macos-portable",
+            "displayName": "macOS Portable Base",
+            "description": "Base configuration for portable macOS release builds",
+            "hidden": true,
+            "inherits": "default",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "environment": {
+                "MACOSX_DEPLOYMENT_TARGET": "14.0",
+                "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/scripts/vcpkg-triplets"
+            },
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "corridorkey-arm64-osx"
             }
         },
         {
@@ -30,6 +52,15 @@
             }
         },
         {
+            "name": "debug-macos-portable",
+            "displayName": "Debug macOS Portable",
+            "description": "Debug build with portable macOS deployment target",
+            "inherits": [
+                "debug",
+                "macos-portable"
+            ]
+        },
+        {
             "name": "release",
             "displayName": "Release (Optimized)",
             "description": "Release build with maximum optimizations",
@@ -37,6 +68,15 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "release-macos-portable",
+            "displayName": "Release macOS Portable",
+            "description": "Release build with portable macOS deployment target",
+            "inherits": [
+                "release",
+                "macos-portable"
+            ]
         },
         {
             "name": "release-lto",
@@ -54,8 +94,16 @@
             "configurePreset": "debug"
         },
         {
+            "name": "debug-macos-portable",
+            "configurePreset": "debug-macos-portable"
+        },
+        {
             "name": "release",
             "configurePreset": "release"
+        },
+        {
+            "name": "release-macos-portable",
+            "configurePreset": "release-macos-portable"
         },
         {
             "name": "release-lto",
