@@ -77,18 +77,19 @@ def copy_file(source: Path, target: Path, force: bool) -> Path:
 
 def export_bridge(weights_path: Path, export_path: Path, export_size: int) -> None:
     import mlx.core as mx
-    from corridorkey_mlx.inference.pipeline import load_model
+    from corridorkey_mlx.inference.pipeline import compile_model, load_model
 
     ensure_parent(export_path)
 
     model = load_model(weights_path, img_size=export_size, compile=False, slim=True, stage_gc=False)
-    model._compiled = True
+    model = compile_model(model, shapeless=False)
 
     def bridge_forward(x):
         outputs = model(x)
         return outputs["alpha_final"], outputs["fg_final"]
 
     example = mx.zeros((1, export_size, export_size, 4), dtype=mx.float32)
+    mx.eval(bridge_forward(example))
     mx.export_function(str(export_path), bridge_forward, example)
 
 

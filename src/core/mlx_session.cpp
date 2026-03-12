@@ -1,6 +1,8 @@
 #include "mlx_session.hpp"
 
 #include <algorithm>
+#include <cstring>
+#include <functional>
 #include <optional>
 #include <regex>
 
@@ -26,14 +28,8 @@ std::optional<int> bridge_resolution_from_filename(const std::filesystem::path& 
     return std::stoi(match[1].str());
 }
 
-std::vector<int> bridge_resolution_order_for_device(const DeviceInfo& device) {
-    if (device.available_memory_mb >= 16000) {
-        return {1024, 768, 512};
-    }
-    if (device.available_memory_mb >= 12000) {
-        return {768, 512, 1024};
-    }
-    return {512, 768, 1024};
+std::vector<int> bridge_resolution_order() {
+    return {512, 1024};
 }
 
 std::vector<std::filesystem::path> bridge_candidates(const std::filesystem::path& model_path,
@@ -41,8 +37,8 @@ std::vector<std::filesystem::path> bridge_candidates(const std::filesystem::path
     std::vector<std::filesystem::path> candidates;
     auto stem = model_path.stem().string();
     auto parent = model_path.parent_path();
-    // Prefer larger bridge exports on higher-memory Apple Silicon systems.
-    for (int resolution : bridge_resolution_order_for_device(device)) {
+    (void)device;
+    for (int resolution : bridge_resolution_order()) {
         candidates.push_back(parent / (stem + "_bridge_" + std::to_string(resolution) + ".mlxfn"));
     }
     return candidates;
@@ -86,15 +82,28 @@ int resolved_model_resolution(const std::filesystem::path& executable_artifact_p
     return 512;
 }
 
+void ensure_buffer_shape(ImageBuffer& buffer, int width, int height, int channels) {
+    Image view = buffer.view();
+    if (view.width == width && view.height == height && view.channels == channels) {
+        return;
+    }
+
+    buffer = ImageBuffer(width, height, channels);
+}
+
 }  // namespace
 
 class MlxSession::Impl {
    public:
     int model_resolution = 512;
     ImageBuffer input_buffer = {};
+    ImageBuffer alpha_buffer = {};
+    ImageBuffer foreground_buffer = {};
 
 #if CORRIDORKEY_WITH_MLX
-    std::optional<mlx::core::ImportedFunction> function = std::nullopt;
+    std::optional<mlx::core::ImportedFunction> imported_function = std::nullopt;
+    std::optional<std::function<std::vector<mlx::core::array>(const mlx::core::Args&)>>
+        compiled_function = std::nullopt;
 #endif
 };
 
@@ -123,8 +132,18 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
         session->m_impl->model_resolution = resolved_model_resolution(*executable_artifact_res);
         session->m_impl->input_buffer =
             ImageBuffer(session->m_impl->model_resolution, session->m_impl->model_resolution, 4);
-        session->m_impl->function.emplace(
+        session->m_impl->alpha_buffer =
+            ImageBuffer(session->m_impl->model_resolution, session->m_impl->model_resolution, 1);
+        session->m_impl->foreground_buffer =
+            ImageBuffer(session->m_impl->model_resolution, session->m_impl->model_resolution, 3);
+        session->m_impl->imported_function.emplace(
             mlx::core::import_function(executable_artifact_res->string()));
+        std::function<std::vector<mlx::core::array>(const mlx::core::Args&)> imported_callable =
+            [imported = *session->m_impl->imported_function](const mlx::core::Args& args) {
+                return imported(args);
+            };
+        session->m_impl->compiled_function.emplace(
+            mlx::core::compile(std::move(imported_callable), false));
         return session;
     } catch (const std::exception& error) {
         return Unexpected<Error>{
@@ -144,7 +163,7 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         Error{ErrorCode::HardwareNotSupported,
               "MLX backend is not linked in this build. Reconfigure CMake with MLX available."}};
 #else
-    if (!m_impl->function.has_value()) {
+    if (!m_impl->imported_function.has_value()) {
         return Unexpected<Error>{
             Error{ErrorCode::InferenceFailed, "MLX bridge function is not initialized."}};
     }
@@ -182,7 +201,18 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
             mlx::core::float32, no_op);
 
         auto outputs = common::measure_stage(
-            on_stage, "mlx_run", [&]() { return (*m_impl->function)(args); }, 1);
+            on_stage, "mlx_run",
+            [&]() {
+                if (m_impl->compiled_function.has_value()) {
+                    try {
+                        return (*m_impl->compiled_function)(args);
+                    } catch (const std::exception&) {
+                        m_impl->compiled_function.reset();
+                    }
+                }
+                return (*m_impl->imported_function)(args);
+            },
+            1);
         if (outputs.size() < 2) {
             return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
                                            "MLX bridge returned fewer than two output tensors."}};
@@ -194,9 +224,14 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         common::measure_stage(
             on_stage, "mlx_extract_outputs",
             [&]() {
-                mlx::core::eval(alpha, foreground);
-                alpha.wait();
-                foreground.wait();
+                common::measure_stage(
+                    on_stage, "mlx_materialize_outputs",
+                    [&]() {
+                        mlx::core::eval(alpha, foreground);
+                        alpha.wait();
+                        foreground.wait();
+                    },
+                    1);
             },
             1);
 
@@ -211,18 +246,26 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         int output_height = static_cast<int>(alpha_shape[1]);
         int output_width = static_cast<int>(alpha_shape[2]);
 
-        FrameResult result;
-        ImageBuffer full_alpha(output_width, output_height, 1);
-        ImageBuffer full_fg(output_width, output_height, 3);
-        std::copy(alpha.data<float>(), alpha.data<float>() + full_alpha.view().data.size(),
-                  full_alpha.view().data.begin());
-        std::copy(foreground.data<float>(), foreground.data<float>() + full_fg.view().data.size(),
-                  full_fg.view().data.begin());
+        ensure_buffer_shape(m_impl->alpha_buffer, output_width, output_height, 1);
+        ensure_buffer_shape(m_impl->foreground_buffer, output_width, output_height, 3);
 
-        ImageBuffer cropped_alpha = ColorUtils::crop(full_alpha.view(), rgb_roi.x_pos,
-                                                     rgb_roi.y_pos, rgb_roi.width, rgb_roi.height);
-        ImageBuffer cropped_fg = ColorUtils::crop(full_fg.view(), rgb_roi.x_pos, rgb_roi.y_pos,
-                                                  rgb_roi.width, rgb_roi.height);
+        Image full_alpha = m_impl->alpha_buffer.view();
+        Image full_fg = m_impl->foreground_buffer.view();
+        common::measure_stage(
+            on_stage, "mlx_copy_outputs",
+            [&]() {
+                std::memcpy(full_alpha.data.data(), alpha.data<float>(),
+                            full_alpha.data.size_bytes());
+                std::memcpy(full_fg.data.data(), foreground.data<float>(),
+                            full_fg.data.size_bytes());
+            },
+            1);
+
+        FrameResult result;
+        ImageBuffer cropped_alpha = ColorUtils::crop(full_alpha, rgb_roi.x_pos, rgb_roi.y_pos,
+                                                     rgb_roi.width, rgb_roi.height);
+        ImageBuffer cropped_fg =
+            ColorUtils::crop(full_fg, rgb_roi.x_pos, rgb_roi.y_pos, rgb_roi.width, rgb_roi.height);
         result.alpha = ColorUtils::resize(cropped_alpha.view(), rgb.width, rgb.height);
         result.foreground = ColorUtils::resize(cropped_fg.view(), rgb.width, rgb.height);
         return result;
