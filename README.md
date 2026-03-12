@@ -236,6 +236,53 @@ sudo ln -s "$(pwd)/build/release/src/cli/corridorkey" /usr/local/bin/corridorkey
 If `corridorkey` is not on your `PATH`, replace it with
 `./build/release/src/cli/corridorkey`.
 
+## macOS Preview Testing
+
+This section is the best starting point for Apple Silicon testers using the
+portable GitHub release.
+
+Current preview scope:
+
+- Supported hardware: **Mac with Apple Silicon**
+- Preferred OS target: **macOS 14+**
+- Runtime path: **MLX-first Apple pack bundled inside the release**
+- User expectation: **no Python required to install or run the release**
+
+First-run flow from the release zip:
+
+```bash
+cd CorridorKey_Mac_v0.1.0
+./corridorkey doctor
+./corridorkey process input.mp4 output.mp4
+./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
+```
+
+If Gatekeeper blocks the preview build, approve it manually or remove the
+quarantine flag from the extracted folder:
+
+```bash
+xattr -dr com.apple.quarantine CorridorKey_Mac_v0.1.0
+```
+
+Useful commands for testers:
+
+```bash
+./corridorkey doctor
+./corridorkey benchmark
+./corridorkey process input.mp4 output.mp4
+./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
+./corridorkey process --json input.mp4 output.mp4
+```
+
+What we want reported back from testers:
+
+- Mac model and RAM
+- macOS version
+- whether `doctor` passed cleanly
+- whether the app opened and processed a real file
+- rough runtime for a short clip or 4K sample
+- crashes, stalls, incorrect output, or strange visual artifacts
+
 For the official macOS bundle, the user-facing flow is now:
 
 ```bash
