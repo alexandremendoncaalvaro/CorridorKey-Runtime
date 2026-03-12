@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.0",
+    [string]$Version = "",
     [string]$BuildDir = "",
     [string]$OrtRoot = "",
     [switch]$CompileContexts,
@@ -8,6 +8,24 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function Get-ProjectVersion {
+    param([string]$RepoRoot)
+
+    $cmakePath = Join-Path $RepoRoot "CMakeLists.txt"
+    if (-not (Test-Path $cmakePath)) {
+        throw "Could not determine project version because CMakeLists.txt was not found at $cmakePath"
+    }
+
+    $projectLine = Select-String -Path $cmakePath -Pattern 'project\s*\(\s*CorridorKey-Runtime\s*$' -SimpleMatch
+    $versionLine = Select-String -Path $cmakePath -Pattern '^\s*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\s*$'
+
+    if ($null -ne $versionLine) {
+        return $versionLine.Matches[0].Groups[1].Value
+    }
+
+    throw "Could not determine project version from $cmakePath"
+}
 
 function Get-MatchingFiles {
     param(
@@ -185,6 +203,9 @@ function Assert-NoHardcodedPaths {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Get-ProjectVersion -RepoRoot $repoRoot
+}
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }

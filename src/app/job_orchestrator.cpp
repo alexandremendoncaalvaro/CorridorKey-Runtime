@@ -7,6 +7,7 @@
 
 #include "common/stage_profiler.hpp"
 #include "hardware_profile.hpp"
+#include "output_path_utils.hpp"
 #include "runtime_contracts.hpp"
 #include "runtime_diagnostics.hpp"
 
@@ -118,6 +119,7 @@ Result<void> prepare_output_path(const std::filesystem::path& output_path) {
 Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on_progress,
                                   JobEventCallback on_event) {
     JobRequest req = request;
+    req.output_path = normalize_runtime_output_path(req.output_path);
     bool emitted_fallback = false;
     common::StageProfiler profiler;
     auto stage_callback = [&](const StageTiming& timing) { profiler.record(timing); };
