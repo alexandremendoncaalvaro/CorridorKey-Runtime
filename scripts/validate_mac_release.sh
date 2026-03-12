@@ -10,6 +10,8 @@ UNPACK_DIR="${OUTPUT_ROOT}/bundle"
 INPUT_4K_VIDEO="${CORRIDORKEY_VALIDATION_INPUT_4K_VIDEO:-${ROOT_DIR}/assets/video_samples/100745-video-2160.mp4}"
 INPUT_4K_FRAME="${CORRIDORKEY_VALIDATION_INPUT_4K_FRAME:-${ROOT_DIR}/build/runtime_inputs/100745-video-2160-frame0.png}"
 INPUT_SMOKE="${CORRIDORKEY_VALIDATION_INPUT_SMOKE:-${ROOT_DIR}/assets/corridor.png}"
+INPUT_SAMPLE_VIDEO="${CORRIDORKEY_VALIDATION_INPUT_SAMPLE_VIDEO:-${ROOT_DIR}/assets/video_samples/greenscreen_1769569137.mp4}"
+SAMPLE_VIDEO_CLIP="${OUTPUT_ROOT}/sample_video_clip.mp4"
 
 require_file() {
     local path="$1"
@@ -21,6 +23,7 @@ require_file() {
 
 require_file "${ROOT_DIR}/scripts/package_mac.sh"
 require_file "$INPUT_SMOKE"
+require_file "$INPUT_SAMPLE_VIDEO"
 
 if [ ! -f "$INPUT_4K_FRAME" ]; then
     require_file "$INPUT_4K_VIDEO"
@@ -34,6 +37,9 @@ rm -rf "$OUTPUT_ROOT"
 mkdir -p "$OUTPUT_ROOT"
 rm -rf "$UNPACK_DIR"
 
+ffmpeg -y -i "$INPUT_SAMPLE_VIDEO" -frames:v 8 "$SAMPLE_VIDEO_CLIP" >/tmp/corridorkey_validate_sample_clip.log 2>&1
+require_file "$SAMPLE_VIDEO_CLIP"
+
 CORRIDORKEY_BUILD_DIR="$BUILD_DIR" "${ROOT_DIR}/scripts/package_mac.sh"
 
 require_file "$DIST_ZIP"
@@ -41,34 +47,42 @@ python3 -m zipfile -e "$DIST_ZIP" "$UNPACK_DIR"
 
 BUNDLE_ROOT="${UNPACK_DIR}/CorridorKey_Mac_v${VERSION}"
 CLI="${BUNDLE_ROOT}/bin/corridorkey"
+LAUNCHER="${BUNDLE_ROOT}/corridorkey"
 MODELS_DIR="${BUNDLE_ROOT}/models"
 
 require_file "$CLI"
+require_file "$LAUNCHER"
 require_file "${MODELS_DIR}/corridorkey_mlx.safetensors"
 require_file "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn"
 require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn"
 require_file "${MODELS_DIR}/corridorkey_int8_512.onnx"
 
 chmod +x "$CLI"
+chmod +x "$LAUNCHER"
 chmod +x "${BUNDLE_ROOT}/smoke_test.sh"
 bash "${BUNDLE_ROOT}/smoke_test.sh"
 
-(cd "$BUNDLE_ROOT" && ./bin/corridorkey info --json) > "${OUTPUT_ROOT}/info.json"
-(cd "$BUNDLE_ROOT" && ./bin/corridorkey doctor --json) > "${OUTPUT_ROOT}/doctor.json"
-(cd "$BUNDLE_ROOT" && ./bin/corridorkey models --json) > "${OUTPUT_ROOT}/models.json"
-(cd "$BUNDLE_ROOT" && ./bin/corridorkey presets --json) > "${OUTPUT_ROOT}/presets.json"
+(cd "$BUNDLE_ROOT" && ./corridorkey info --json) > "${OUTPUT_ROOT}/info.json"
+(cd "$BUNDLE_ROOT" && ./corridorkey doctor --json) > "${OUTPUT_ROOT}/doctor.json"
+(cd "$BUNDLE_ROOT" && ./corridorkey models --json) > "${OUTPUT_ROOT}/models.json"
+(cd "$BUNDLE_ROOT" && ./corridorkey presets --json) > "${OUTPUT_ROOT}/presets.json"
 
-"$CLI" benchmark --json -m "${MODELS_DIR}/corridorkey_mlx.safetensors" -d auto \
-    -i "$INPUT_SMOKE" -o "${OUTPUT_ROOT}/corridor_output" > "${OUTPUT_ROOT}/corridor_benchmark.json"
+(cd "$BUNDLE_ROOT" && ./corridorkey benchmark --json -i "$INPUT_SMOKE" \
+    -o "${OUTPUT_ROOT}/corridor_output") > "${OUTPUT_ROOT}/corridor_benchmark.json"
 
-"$CLI" benchmark --json -m "${MODELS_DIR}/corridorkey_mlx.safetensors" -d auto --tiled \
-    -i "$INPUT_4K_FRAME" -o "${OUTPUT_ROOT}/frame_4k_benchmark_output" > "${OUTPUT_ROOT}/frame_4k_benchmark.json"
+(cd "$BUNDLE_ROOT" && ./corridorkey benchmark --json --preset max -i "$INPUT_4K_FRAME" \
+    -o "${OUTPUT_ROOT}/frame_4k_benchmark_output") > "${OUTPUT_ROOT}/frame_4k_benchmark.json"
 
-"$CLI" process --json -m "${MODELS_DIR}/corridorkey_mlx.safetensors" -d auto --tiled \
-    -i "$INPUT_4K_FRAME" -o "${OUTPUT_ROOT}/frame_4k_output" > "${OUTPUT_ROOT}/frame_4k_process.ndjson"
+(cd "$BUNDLE_ROOT" && ./corridorkey process --json --preset max -i "$INPUT_4K_FRAME" \
+    -o "${OUTPUT_ROOT}/frame_4k_output") > "${OUTPUT_ROOT}/frame_4k_process.ndjson"
+
+(cd "$BUNDLE_ROOT" && ./corridorkey process --json -i "$SAMPLE_VIDEO_CLIP" \
+    -o "${OUTPUT_ROOT}/sample_video_output.mp4") > "${OUTPUT_ROOT}/sample_video_process.ndjson"
 
 ffprobe -v error -print_format json -show_streams "$INPUT_4K_FRAME" > "${OUTPUT_ROOT}/input_4k_ffprobe.json"
 ffprobe -v error -print_format json -show_streams "${OUTPUT_ROOT}/frame_4k_output/Comp/$(basename "$INPUT_4K_FRAME")" > "${OUTPUT_ROOT}/output_4k_ffprobe.json"
+ffprobe -v error -print_format json -show_streams "$SAMPLE_VIDEO_CLIP" > "${OUTPUT_ROOT}/input_sample_video_ffprobe.json"
+ffprobe -v error -print_format json -show_streams "${OUTPUT_ROOT}/sample_video_output.mp4" > "${OUTPUT_ROOT}/output_sample_video_ffprobe.json"
 
 CORRIDORKEY_VALIDATION_ROOT="$OUTPUT_ROOT" python3 - <<'PY'
 import json
@@ -78,6 +92,8 @@ from pathlib import Path
 output_root = Path(os.environ["CORRIDORKEY_VALIDATION_ROOT"])
 input_probe = json.loads((output_root / "input_4k_ffprobe.json").read_text())
 output_probe = json.loads((output_root / "output_4k_ffprobe.json").read_text())
+input_sample_video_probe = json.loads((output_root / "input_sample_video_ffprobe.json").read_text())
+output_sample_video_probe = json.loads((output_root / "output_sample_video_ffprobe.json").read_text())
 doctor = json.loads((output_root / "doctor.json").read_text())
 corridor_bench = json.loads((output_root / "corridor_benchmark.json").read_text())
 frame_bench = json.loads((output_root / "frame_4k_benchmark.json").read_text())
@@ -90,12 +106,17 @@ def first_video_stream(doc):
 
 input_video = first_video_stream(input_probe)
 output_video = first_video_stream(output_probe)
+input_sample_video = first_video_stream(input_sample_video_probe)
+output_sample_video = first_video_stream(output_sample_video_probe)
 
 summary = {
     "bundle_root": str((output_root / "bundle").resolve()),
     "bundle_healthy": doctor["summary"]["bundle_healthy"],
     "apple_acceleration_healthy": doctor["summary"]["apple_acceleration_healthy"],
     "doctor_healthy": doctor["summary"]["healthy"],
+    "signed": doctor["bundle"]["signature"]["signed"],
+    "notarized": doctor["bundle"]["signature"]["notarized"],
+    "gatekeeper_accepted": doctor["bundle"]["signature"]["gatekeeper_accepted"],
     "input_width": int(input_video["width"]),
     "input_height": int(input_video["height"]),
     "output_width": int(output_video["width"]),
@@ -106,6 +127,11 @@ summary = {
     "corridor_total_duration_ms": corridor_bench["total_duration_ms"],
     "frame_4k_backend": frame_bench["backend"],
     "frame_4k_total_duration_ms": frame_bench["total_duration_ms"],
+    "sample_video_width": int(output_sample_video["width"]),
+    "sample_video_height": int(output_sample_video["height"]),
+    "sample_video_matches_input_resolution": int(input_sample_video["width"])
+    == int(output_sample_video["width"])
+    and int(input_sample_video["height"]) == int(output_sample_video["height"]),
 }
 
 (output_root / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

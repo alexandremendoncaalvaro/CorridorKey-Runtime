@@ -104,7 +104,17 @@ install_name_tool -change "@rpath/libmlx.dylib" "@loader_path/$MLX_LIB_NAME" \
     "$DIST_DIR/bin/$CORE_LIB_NAME"
 
 echo "[4/5] Adding documentation..."
-cat << 'README_EOF' > "$DIST_DIR/README.txt"
+cat << 'LAUNCHER_EOF' > "$DIST_DIR/corridorkey"
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+exec "./bin/corridorkey" "$@"
+LAUNCHER_EOF
+chmod +x "$DIST_DIR/corridorkey"
+
+cat <<README_EOF > "$DIST_DIR/README.txt"
 CorridorKey Runtime v${VERSION} - Mac Portable Release
 ==================================================
 
@@ -112,21 +122,17 @@ This is a standalone, zero-python version of CorridorKey.
 
 QUICK START:
 1. Open Terminal.
-2. Navigate to this folder: cd "$(dirname "$0")"
-3. Run the smoke test:
+2. Navigate to this folder: cd "\$(dirname "\$0")"
+3. Check the bundle:
+   ./corridorkey doctor
+4. Run the smoke test:
    ./smoke_test.sh
-4. Benchmark the bundle:
-   ./bin/corridorkey benchmark --json -m models/corridorkey_int8_512.onnx
-5. If the Apple pack is present, process with MLX:
-   ./bin/corridorkey process -i input.mp4 -o outputs/result.mp4 -m models/corridorkey_mlx.safetensors --tiled
-6. Otherwise use the CPU baseline:
-   ./bin/corridorkey process -i input.mp4 -o outputs/result.mp4 -m models/corridorkey_int8_512.onnx
-
-If the Apple pack is not bundled, place these prepared files in ./models before
-running MLX jobs:
-- corridorkey_mlx.safetensors
-- corridorkey_mlx_bridge_512.mlxfn
-- corridorkey_mlx_bridge_1024.mlxfn
+5. Process a regular video:
+   ./corridorkey process input.mp4 output.mp4
+6. Process a 4K input with the stronger preset:
+   ./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
+7. Run a synthetic benchmark:
+   ./corridorkey benchmark
 
 When the bundle is signed and notarized, Gatekeeper should accept it without
 the manual "Open" workaround.
@@ -134,21 +140,16 @@ README_EOF
 
 cat << 'SMOKE_EOF' > "$DIST_DIR/smoke_test.sh"
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-./bin/corridorkey info
-./bin/corridorkey doctor --json > /dev/null
-./bin/corridorkey models --json > /dev/null
-./bin/corridorkey presets --json > /dev/null
-if [ -f "./models/corridorkey_int8_512.onnx" ]; then
-    ./bin/corridorkey benchmark --json -m ./models/corridorkey_int8_512.onnx > /dev/null
-fi
-if [ -f "./models/corridorkey_mlx.safetensors" ] && [ -f "./models/corridorkey_mlx_bridge_512.mlxfn" ]; then
-    ./bin/corridorkey benchmark --json -m ./models/corridorkey_mlx.safetensors -d mlx > /dev/null
-fi
+./corridorkey info
+./corridorkey doctor --json > /dev/null
+./corridorkey models --json > /dev/null
+./corridorkey presets --json > /dev/null
+./corridorkey benchmark --json > /dev/null
 SMOKE_EOF
 chmod +x "$DIST_DIR/smoke_test.sh"
 
