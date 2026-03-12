@@ -96,6 +96,44 @@
   - fechar assinatura/notarizacao do artefato oficial
   - iniciar baseline de Windows e, em seguida, trilho Windows RTX
 
+## Windows handoff
+
+- O que ja esta fechado e nao deve ser reaberto no inicio da trilha Windows:
+  - o primeiro track de release do Mac esta funcionalmente fechado
+  - o bundle portatil macOS ja existe e foi publicado como `v0.1.0`
+  - o caminho principal do Mac e **MLX-first**
+  - `ONNX/CoreML` fica como baseline de diagnostico e comparacao, nao como
+    trilho principal de aceleracao
+  - Python continua permitido apenas em tooling interno de conversao/preparo de
+    release; o artefato distribuido para usuario final continua zero-Python
+- O que ainda sobra no Mac, mas nao bloqueia abrir Windows:
+  - assinatura/notarizacao do bundle oficial
+  - polimento adicional de UX do CLI e feedback de testers
+  - tuning incremental de throughput em workloads longos
+- Objetivo da proxima fase:
+  - abrir o baseline Windows com contratos equivalentes aos do Mac
+  - depois entrar no trilho Windows RTX com `TensorRT RTX` como caminho
+    principal de produto
+- Ordem de execucao no Windows:
+  1. build Windows 11 com `CPU` fallback funcionando
+  2. paridade de `info`, `doctor`, `benchmark`, `models`, `presets` e
+     `process --json`
+  3. empacotamento inicial de bundle/zip de Windows
+  4. diagnostico de prerequisitos e tiers de hardware
+  5. integracao do provider principal `TensorRT RTX`
+  6. validacao do corpus relevante no Windows
+- Criterios minimos para considerar o baseline Windows pronto:
+  - `doctor` e `benchmark` funcionam com `CPU`
+  - `process` roda imagem e video sem crash
+  - output preserva resolucao
+  - JSON/NDJSON seguem os contratos ja usados no Mac
+  - bundle roda fora da arvore de build
+- Perguntas que ja estao respondidas e nao precisam de nova descoberta:
+  - o runtime continua `library-first`
+  - artefatos de modelo podem divergir por plataforma
+  - o proximo foco de produto apos macOS e **Windows RTX**
+  - GUI continua depois de runtime Mac + Windows RTX
+
 - Fechar a decisao do trilho acelerado para macOS:
   - tratar `ONNX int8 -> ORT CoreML` atual apenas como baseline investigativo
   - avaliar `MLX` contra conversao direta `PyTorch -> Core ML`
