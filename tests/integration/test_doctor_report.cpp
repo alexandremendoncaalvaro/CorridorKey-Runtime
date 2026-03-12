@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+#include <fstream>
 
 #include "app/job_orchestrator.hpp"
 
@@ -79,4 +80,39 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["summary"].contains("apple_acceleration_backend_integrated"));
     REQUIRE(report["summary"].contains("apple_acceleration_healthy"));
     REQUIRE(report["summary"].contains("validated_models_present"));
+}
+
+TEST_CASE("doctor report ignores macOS metadata sidecars in packaged models",
+          "[integration][doctor]") {
+    auto source_models_dir = std::filesystem::path(PROJECT_ROOT) / "models";
+    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-sidecars";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+
+    for (const auto& filename :
+         {"corridorkey_int8_512.onnx", "corridorkey_mlx.safetensors",
+          "corridorkey_mlx_bridge_512.mlxfn", "corridorkey_mlx_bridge_1024.mlxfn"}) {
+        std::filesystem::create_symlink(source_models_dir / filename, temp_dir / filename);
+    }
+
+    {
+        std::ofstream sidecar(temp_dir / "._corridorkey_mlx_bridge_512.mlxfn",
+                              std::ios::binary | std::ios::trunc);
+        REQUIRE(sidecar.is_open());
+        sidecar << "metadata";
+    }
+
+    auto report = JobOrchestrator::run_doctor(temp_dir);
+
+    for (const auto& entry : report["mlx"]["bridge_artifacts"]) {
+        REQUIRE(entry["filename"].get<std::string>().rfind("._", 0) != 0);
+    }
+    for (const auto& entry : report["mlx"]["models"]) {
+        REQUIRE(entry["filename"].get<std::string>().rfind("._", 0) != 0);
+    }
+    for (const auto& entry : report["coreml"]["models"]) {
+        REQUIRE(std::filesystem::path(entry["filename"].get<std::string>()).extension() == ".onnx");
+    }
+
+    std::filesystem::remove_all(temp_dir);
 }
