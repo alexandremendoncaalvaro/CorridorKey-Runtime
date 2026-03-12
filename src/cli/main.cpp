@@ -247,8 +247,7 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
                                         : std::nullopt,
             argc, argv);
 
-        auto selected_model =
-            default_model_for_request(capabilities, device, resolved.preset);
+        auto selected_model = default_model_for_request(capabilities, device, resolved.preset);
         if (!selected_model.has_value()) {
             return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                            "Could not resolve a default model for this device."}};
@@ -321,9 +320,8 @@ void print_info() {
               << " - MLX probe: "
               << (info["capabilities"]["mlx_probe_available"].get<bool>() ? "yes" : "no") << "\n"
               << " - TensorRT RTX track: "
-              << (std::any_of(info["devices"].begin(), info["devices"].end(), [](const auto& d) {
-                      return d["backend"] == "tensorrt";
-                  })
+              << (std::any_of(info["devices"].begin(), info["devices"].end(),
+                              [](const auto& d) { return d["backend"] == "tensorrt"; })
                       ? "yes"
                       : "no")
               << "\n"
@@ -683,8 +681,8 @@ int main(int argc, char* argv[]) {
                                     static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
                                 auto empty = static_cast<size_t>(bar_width) - filled;
                                 std::cout << "\r[" << std::string(filled, '=')
-                                          << std::string(empty, ' ') << "] "
-                                          << int(p * 100.0) << "% " << std::flush;
+                                          << std::string(empty, ' ') << "] " << int(p * 100.0)
+                                          << "% " << std::flush;
                             }
                             return true;
                         }));
@@ -777,12 +775,10 @@ int main(int argc, char* argv[]) {
             auto progress = [](float p, const std::string& status) -> bool {
                 {
                     int bar_width = 50;
-                    auto filled =
-                        static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
+                    auto filled = static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
                     auto empty = static_cast<size_t>(bar_width) - filled;
-                    std::cout << "\r[" << std::string(filled, '=')
-                              << std::string(empty, ' ') << "] " << int(p * 100.0)
-                              << "% " << status << std::flush;
+                    std::cout << "\r[" << std::string(filled, '=') << std::string(empty, ' ')
+                              << "] " << int(p * 100.0) << "% " << status << std::flush;
                 }
                 return true;
             };

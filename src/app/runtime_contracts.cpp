@@ -186,7 +186,8 @@ std::optional<ModelCatalogEntry> default_model_for_request(
     }
 
     if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT) &&
-        (requested_device.backend == Backend::Auto || requested_device.backend == Backend::TensorRT)) {
+        (requested_device.backend == Backend::Auto ||
+         requested_device.backend == Backend::TensorRT)) {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
             if (preset_model.has_value()) {
@@ -221,8 +222,7 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          {"macos_apple_silicon"}, {}),
         make_model_entry("mlx", 2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
                          "Official Apple Silicon model pack for the first native MLX backend.",
-                         "apple_acceleration_primary", true, true, false,
-                         {"macos_apple_silicon"},
+                         "apple_acceleration_primary", true, true, false, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
         make_model_entry("fp16", 512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
                          "Lower-memory Windows RTX reference variant for lab bring-up.",
@@ -238,8 +238,7 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          {"rtx_10gb_plus"}),
         make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
-                         false, {},
-                         {"macos_apple_silicon", "windows_rtx"}, {}),
+                         false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
         make_model_entry("fp32", 768, "corridorkey_fp32_768.onnx", "onnx", "cpu",
                          "Higher resolution reference validation variant.", "reference_validation",
                          false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),

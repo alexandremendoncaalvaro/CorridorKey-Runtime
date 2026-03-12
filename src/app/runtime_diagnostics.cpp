@@ -167,8 +167,8 @@ std::optional<std::filesystem::path> find_exact_library(const std::filesystem::p
     return std::nullopt;
 }
 
-std::vector<std::filesystem::path> find_libraries_with_prefix(const std::filesystem::path& directory,
-                                                              std::string_view prefix) {
+std::vector<std::filesystem::path> find_libraries_with_prefix(
+    const std::filesystem::path& directory, std::string_view prefix) {
     std::vector<std::filesystem::path> matches;
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) {
@@ -303,12 +303,11 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
 #endif
 
     auto runtime_library = find_runtime_library(executable_dir);
-    auto core_library = find_exact_library(
-        executable_dir,
+    auto core_library = find_exact_library(executable_dir,
 #if defined(_WIN32)
-        "corridorkey_core.dll"
+                                           "corridorkey_core.dll"
 #else
-        "libcorridorkey_core.dylib"
+                                           "libcorridorkey_core.dylib"
 #endif
     );
     auto mlx_library = find_exact_library(executable_dir, "libmlx.dylib");
@@ -350,7 +349,8 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         tensorrt_provider_libraries,
         find_libraries_with_prefixes(executable_dir, {"onnxruntime_providers_nv_tensorrt_rtx",
                                                       "onnxruntime_providers_nvtensorrtrtx"}));
-    auto vendor_provider_libraries = find_libraries_with_prefix(executable_dir, "onnxruntime_providers_");
+    auto vendor_provider_libraries =
+        find_libraries_with_prefix(executable_dir, "onnxruntime_providers_");
     auto tensorrt_rtx_core_libraries =
         find_libraries_with_prefixes(executable_dir, {"tensorrt_rtx", "nvinfer"});
     auto tensorrt_rtx_parser_libraries =
@@ -462,8 +462,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                       core_library.has_value() && packaged_models_present &&
                       !tensorrt_provider_libraries.empty() &&
                       !tensorrt_rtx_core_libraries.empty() &&
-                      !tensorrt_rtx_parser_libraries.empty() &&
-                      !cuda_runtime_libraries.empty();
+                      !tensorrt_rtx_parser_libraries.empty() && !cuda_runtime_libraries.empty();
 #else
     json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
                       runtime_reference_found && core_library.has_value() && core_reference_found &&
@@ -733,6 +732,10 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["packaged_models"] = nlohmann::json::array();
     json["compiled_context_models"] = nlohmann::json::array();
 
+#if !defined(_WIN32)
+    (void)models_dir;
+#endif
+
 #if defined(_WIN32)
     json["applicable"] = true;
 
@@ -751,8 +754,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["runtime_cache_dir"] =
         runtime_cache_dir.has_value() ? runtime_cache_dir->string() : std::string();
     json["runtime_cache_ready"] = runtime_cache_dir.has_value();
-    json["backend_integrated"] =
-        gpu.has_value() && gpu->provider_available && gpu->ampere_or_newer;
+    json["backend_integrated"] = gpu.has_value() && gpu->provider_available && gpu->ampere_or_newer;
 
     bool packaged_models_ready = true;
     bool any_packaged_model_found = false;

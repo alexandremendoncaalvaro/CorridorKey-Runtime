@@ -20,15 +20,16 @@ namespace corridorkey::app {
 
 namespace {
 
+#if defined(_WIN32) && defined(ORT_API_VERSION) && ORT_API_VERSION >= 22
 constexpr const char* kTensorRtRtxExecutionProvider = "NvTensorRTRTXExecutionProvider";
 
 constexpr const char* kDeviceId = "device_id";
 constexpr const char* kEnableValue = "1";
 
 #if defined(CORRIDORKEY_HAS_ORT_SESSION_CONFIG_KEYS)
-constexpr const char* kEpContextEnable = kOrtSessionOptionEpContextEnable;
-constexpr const char* kEpContextFilePath = kOrtSessionOptionEpContextFilePath;
-constexpr const char* kEpContextEmbedMode = kOrtSessionOptionEpContextEmbedMode;
+const char* const kEpContextEnable = kOrtSessionOptionEpContextEnable;
+const char* const kEpContextFilePath = kOrtSessionOptionEpContextFilePath;
+const char* const kEpContextEmbedMode = kOrtSessionOptionEpContextEmbedMode;
 #else
 constexpr const char* kEpContextEnable = "ep.context_enable";
 constexpr const char* kEpContextFilePath = "ep.context_file_path";
@@ -43,8 +44,8 @@ void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options) {
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
 }
 
-Result<std::filesystem::path> compile_with_compile_api(const std::filesystem::path& input_model_path,
-                                                       const std::filesystem::path& output_model_path) {
+Result<std::filesystem::path> compile_with_compile_api(
+    const std::filesystem::path& input_model_path, const std::filesystem::path& output_model_path) {
     try {
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "CorridorKeyModelCompiler");
         Ort::SessionOptions session_options;
@@ -65,9 +66,9 @@ Result<std::filesystem::path> compile_with_compile_api(const std::filesystem::pa
 
         auto status = Ort::CompileModel(env, compile_options);
         if (!status.IsOK()) {
-            return Unexpected(Error{ErrorCode::InferenceFailed,
-                                    "TensorRT RTX compile API failed: " +
-                                        std::string(status.GetErrorMessage())});
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed,
+                      "TensorRT RTX compile API failed: " + std::string(status.GetErrorMessage())});
         }
 
         return output_model_path;
@@ -107,15 +108,16 @@ Result<std::filesystem::path> compile_with_ep_context_dump(
 
         return output_model_path;
     } catch (const Ort::Exception& error) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                "TensorRT RTX EP context generation failed: " +
-                                    std::string(error.what())});
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed,
+                  "TensorRT RTX EP context generation failed: " + std::string(error.what())});
     } catch (const std::exception& error) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                "TensorRT RTX EP context generation failed: " +
-                                    std::string(error.what())});
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed,
+                  "TensorRT RTX EP context generation failed: " + std::string(error.what())});
     }
 }
+#endif
 
 }  // namespace
 
@@ -136,25 +138,24 @@ Result<std::filesystem::path> compile_tensorrt_rtx_context_model(
                             "TensorRT RTX context compilation is only supported on Windows."});
 #else
     if (device.backend != Backend::TensorRT) {
-        return Unexpected(
-            Error{ErrorCode::InvalidParameters, "TensorRT RTX compilation requires --device tensorrt."});
+        return Unexpected(Error{ErrorCode::InvalidParameters,
+                                "TensorRT RTX compilation requires --device tensorrt."});
     }
     if (!std::filesystem::exists(input_model_path)) {
-        return Unexpected(
-            Error{ErrorCode::ModelLoadFailed, "Model file not found: " + input_model_path.string()});
+        return Unexpected(Error{ErrorCode::ModelLoadFailed,
+                                "Model file not found: " + input_model_path.string()});
     }
     if (!core::tensorrt_rtx_provider_available()) {
-        return Unexpected(
-            Error{ErrorCode::HardwareNotSupported, "TensorRT RTX provider is not available in this build."});
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "TensorRT RTX provider is not available in this build."});
     }
 
     std::error_code error;
     if (!output_model_path.parent_path().empty()) {
         std::filesystem::create_directories(output_model_path.parent_path(), error);
         if (error) {
-            return Unexpected(
-                Error{ErrorCode::IoError,
-                      "Failed to prepare output directory: " + output_model_path.string()});
+            return Unexpected(Error{ErrorCode::IoError, "Failed to prepare output directory: " +
+                                                            output_model_path.string()});
         }
     }
 
@@ -170,10 +171,10 @@ Result<std::filesystem::path> compile_tensorrt_rtx_context_model(
         return ep_context_result;
     }
 
-    return Unexpected(Error{
-        ErrorCode::InferenceFailed,
-        compile_result.error().message + " Falling back to EP context generation also failed: " +
-            ep_context_result.error().message});
+    return Unexpected(Error{ErrorCode::InferenceFailed,
+                            compile_result.error().message +
+                                " Falling back to EP context generation also failed: " +
+                                ep_context_result.error().message});
 #endif
 }
 

@@ -419,8 +419,8 @@ nlohmann::json JobOrchestrator::get_system_info() {
     auto strategy = HardwareProfile::get_best_strategy(devices[0]);
     info["recommendation"]["resolution"] = strategy.target_resolution;
     info["recommendation"]["variant"] = strategy.recommended_variant;
-    info["commands"] = {"info",       "doctor",       "benchmark", "download",
-                        "models",     "presets",      "process",   "compile-context"};
+    info["commands"] = {"info",   "doctor",  "benchmark", "download",
+                        "models", "presets", "process",   "compile-context"};
 
     return info;
 }
@@ -487,10 +487,10 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
         !report["windows_rtx"]["applicable"].get<bool>() ||
         report["windows_rtx"]["provider_available"].get<bool>();
     report["summary"]["windows_rtx_packaged_models_present"] =
-        !report["windows_rtx"]["applicable"].get<bool>() ||
-        !any_packaged_windows_model || packaged_windows_models_present;
-    report["summary"]["windows_rtx_healthy"] =
-        !report["windows_rtx"]["applicable"].get<bool>() || report["windows_rtx"]["healthy"].get<bool>();
+        !report["windows_rtx"]["applicable"].get<bool>() || !any_packaged_windows_model ||
+        packaged_windows_models_present;
+    report["summary"]["windows_rtx_healthy"] = !report["windows_rtx"]["applicable"].get<bool>() ||
+                                               report["windows_rtx"]["healthy"].get<bool>();
     report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
                                    report["summary"]["video_healthy"].get<bool>() &&
                                    report["summary"]["cache_healthy"].get<bool>() &&

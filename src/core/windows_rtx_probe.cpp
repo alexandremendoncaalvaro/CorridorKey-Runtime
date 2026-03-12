@@ -92,8 +92,7 @@ bool is_ampere_or_newer_name(const std::string& adapter_name) {
 }
 
 std::optional<std::string> query_driver_version_for_gpu(const std::string& adapter_name) {
-    std::string command =
-        "nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>NUL";
+    std::string command = "nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>NUL";
     FILE* pipe = _popen(command.c_str(), "r");
     if (pipe == nullptr) {
         return std::nullopt;
