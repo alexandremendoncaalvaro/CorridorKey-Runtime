@@ -16,7 +16,7 @@ Performance optimization for CorridorKey focuses on **real-world gains on constr
 - **Measurable:** Demonstrate 5%+ improvement via profiling (not speculation)
 - **Portable:** Work across macOS, Windows, Linux, and ARM
 - **Maintainable:** Not sacrifice code clarity for marginal gains
-- **Targetable:** Work toward specific hardware tiers (M1/x86/ARM)
+- **Targetable:** Work toward specific hardware tiers (M-series/x86/ARM)
 
 ---
 
@@ -31,7 +31,7 @@ Enable maximum optimization for Release builds:
 - `-finline-limit=10000 -funroll-loops`: Aggressive inlining and loop unrolling
 - `-fvectorize -fpredictive-commoning`: Vector code generation hints
 - CPU-specific tuning:
-  - Apple Silicon: `-mcpu=apple-m1` (or M2/M3)
+  - Apple Silicon: `-mcpu` matched to the target M-series machine for private benchmarking builds
   - Intel/AMD x86: `-march=haswell` (or newer like `zen3`)
   - ARM: `-march=armv8.2-a+fp16+dotprod`
 
@@ -146,7 +146,7 @@ Separate of Arrays (SOA) layout is **critical for SIMD efficiency:**
 
 ### 3.3 Platform-Specific Strategies
 
-**Apple Silicon (M1/M2/M3):**
+**Apple Silicon (M-series):**
 - NEON SIMD + custom CPU extensions
 - Ultra-fast unified memory (no GPU-CPU copies needed for inference)
 - Large L3 cache (24MB): Fits entire 512-pixel frames + working buffers

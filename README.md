@@ -243,7 +243,7 @@ portable GitHub release.
 
 Current preview scope:
 
-- Supported hardware: **Mac with Apple Silicon**
+- Supported hardware: **Mac with Apple Silicon (M-series, including M5)**
 - Preferred OS target: **macOS 14+**
 - Runtime path: **MLX-first Apple pack bundled inside the release**
 - User expectation: **no Python required to install or run the release**
