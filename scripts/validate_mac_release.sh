@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
-VERSION="${CORRIDORKEY_VERSION:-0.1.1}"
+VERSION="${CORRIDORKEY_VERSION:-0.1.2}"
 DIST_ZIP="${ROOT_DIR}/dist/CorridorKey_Mac_v${VERSION}.zip"
 DIST_DMG="${ROOT_DIR}/dist/CorridorKey_Mac_v${VERSION}.dmg"
 OUTPUT_ROOT="${CORRIDORKEY_VALIDATION_ROOT:-${ROOT_DIR}/build/macos_release_validation}"

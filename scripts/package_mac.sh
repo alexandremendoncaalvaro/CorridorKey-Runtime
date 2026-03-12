@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION="${CORRIDORKEY_VERSION:-0.1.1}"
+VERSION="${CORRIDORKEY_VERSION:-0.1.2}"
 DIST_DIR="dist/CorridorKey_Mac_v${VERSION}"
 BIN_NAME="corridorkey"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
@@ -19,6 +19,8 @@ MLX_HIGH_RES_BRIDGE="models/corridorkey_mlx_bridge_1024.mlxfn"
 CPU_BASELINE_MODEL="models/corridorkey_int8_512.onnx"
 ZIP_PATH="dist/CorridorKey_Mac_v${VERSION}.zip"
 DMG_PATH="dist/CorridorKey_Mac_v${VERSION}.dmg"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+IDENTITY_HELPER="${REPO_ROOT}/scripts/codesign-identity.sh"
 
 resolve_real_path() {
     python3 - "$1" <<'PY'
@@ -111,7 +113,7 @@ require_public_release_prereqs() {
 
 create_zip_archive() {
     rm -f "$ZIP_PATH"
-    ditto -c -k --keepParent "$DIST_DIR" "$ZIP_PATH"
+    COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent "$DIST_DIR" "$ZIP_PATH"
 }
 
 create_dmg_archive() {
@@ -222,6 +224,17 @@ CORE_LIB_NAME="$(basename "$CORE_LIB")"
 MLX_LIB_NAME="$(basename "$MLX_LIB")"
 MLX_METALLIB_NAME="$(basename "$MLX_METALLIB")"
 
+if [ -z "$SIGN_IDENTITY" ] && [ -x "$IDENTITY_HELPER" ]; then
+    if [ "$PUBLIC_RELEASE" = "1" ]; then
+        SIGN_IDENTITY="$(bash "$IDENTITY_HELPER" public)"
+    else
+        SIGN_IDENTITY="$(bash "$IDENTITY_HELPER" release)"
+    fi
+    if [ "$SIGN_IDENTITY" = "-" ]; then
+        SIGN_IDENTITY=""
+    fi
+fi
+
 require_public_release_prereqs
 
 echo "[1/5] Cleaning and creating dist directory..."
@@ -323,7 +336,7 @@ sign_binary "$DIST_DIR/bin/$BIN_NAME"
 echo "[4.75/5] Validating bundle outside the build tree..."
 (cd "$DIST_DIR" && ./smoke_test.sh)
 
-find "$DIST_DIR" -name '.DS_Store' -delete
+find "$DIST_DIR" \( -name '.DS_Store' -o -name '._*' \) -delete
 
 case "$ARCHIVE_FORMAT" in
     zip)
