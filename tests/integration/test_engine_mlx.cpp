@@ -52,7 +52,7 @@ TEST_CASE("mlx bridge executes a single frame through the runtime", "[integratio
 #endif
 }
 
-TEST_CASE("mlx safetensors pack prefers a larger bridge on 16 GB Apple Silicon",
+TEST_CASE("mlx safetensors pack prefers the 512 bridge on 16 GB Apple Silicon",
           "[integration][mlx]") {
 #if !defined(__APPLE__)
     SUCCEED("MLX runtime execution is only applicable on macOS.");
@@ -78,7 +78,7 @@ TEST_CASE("mlx safetensors pack prefers a larger bridge on 16 GB Apple Silicon",
         Engine::create(safetensors_path, DeviceInfo{"Apple Silicon MLX", 16000, Backend::MLX});
     REQUIRE(engine.has_value());
     REQUIRE(engine.value()->current_device().backend == Backend::MLX);
-    REQUIRE(engine.value()->recommended_resolution() == 1024);
+    REQUIRE(engine.value()->recommended_resolution() == 512);
 #endif
 }
 

@@ -90,10 +90,17 @@ TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {
 
     REQUIRE(default_it != presets.end());
     REQUIRE(default_it->params.enable_tiling);
+    REQUIRE_FALSE(default_it->params.auto_despeckle);
     REQUIRE(default_it->recommended_model == "corridorkey_mlx.safetensors");
     REQUIRE(default_it->intended_use == "apple_acceleration_primary");
     std::vector<std::string> preset_platforms = {"macos_apple_silicon"};
     REQUIRE(default_it->validated_platforms == preset_platforms);
+
+    auto max_quality_it =
+        std::find_if(presets.begin(), presets.end(),
+                     [](const PresetDefinition& preset) { return preset.id == "mac-max-quality"; });
+    REQUIRE(max_quality_it != presets.end());
+    REQUIRE(max_quality_it->params.auto_despeckle);
 }
 
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {

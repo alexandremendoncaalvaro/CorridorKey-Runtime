@@ -118,7 +118,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-preview",
             "Mac Preview",
             "Fast validation preset for smoke tests and low-memory systems.",
-            InferenceParams{512, 1.0F, true, 400, 1.0F, false, 1, false, 32},
+            InferenceParams{512, 1.0F, false, 400, 1.0F, false, 1, false, 32},
             "corridorkey_int8_512.onnx",
             "smoke_preview",
             false,
@@ -129,8 +129,9 @@ std::vector<PresetDefinition> preset_catalog() {
         PresetDefinition{
             "mac-balanced",
             "Mac Balanced",
-            "Default Apple Silicon preset using the native MLX model pack with automatic tiling.",
-            InferenceParams{0, 1.0F, true, 400, 1.0F, false, 1, true, 32},
+            "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
+            "and no implicit cleanup.",
+            InferenceParams{0, 1.0F, false, 400, 1.0F, false, 1, true, 32},
             "corridorkey_mlx.safetensors",
             "apple_acceleration_primary",
             true,
@@ -141,7 +142,7 @@ std::vector<PresetDefinition> preset_catalog() {
         PresetDefinition{
             "mac-max-quality",
             "Mac Max Quality",
-            "Apple Silicon preset for higher-quality tiled runs with the MLX model pack.",
+            "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
             InferenceParams{0, 1.0F, true, 400, 1.0F, false, 1, true, 64},
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",

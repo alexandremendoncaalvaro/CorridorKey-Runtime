@@ -332,7 +332,7 @@ class ImageBuffer {
 struct InferenceParams {
     int target_resolution = 0;  // 0 = Auto-detect based on hardware
     float despill_strength = 1.0F;
-    bool auto_despeckle = true;
+    bool auto_despeckle = false;
     int despeckle_size = 400;
     float refiner_scale = 1.0F;
     bool input_is_linear = false;

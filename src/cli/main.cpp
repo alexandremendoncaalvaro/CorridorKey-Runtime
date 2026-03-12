@@ -113,7 +113,7 @@ InferenceParams build_inference_params(const cxxopts::ParseResult& result) {
     InferenceParams params;
     params.target_resolution = result["resolution"].as<int>();
     params.despill_strength = result["despill"].as<float>();
-    params.auto_despeckle = !result.count("no-despeckle");
+    params.auto_despeckle = result.count("despeckle");
     params.batch_size = result["batch-size"].as<int>();
     params.enable_tiling = result.count("tiled");
     return params;
@@ -191,7 +191,7 @@ int main(int argc, char* argv[]) {
         "batch-size", "Number of frames to process in a single GPU call",
         cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
                                                    cxxopts::value<float>()->default_value("1.0"))(
-        "no-despeckle", "Disable cleanup")("tiled", "Enable tiling for high-res (4K+)")(
+        "despeckle", "Enable morphological cleanup")("tiled", "Enable tiling for high-res (4K+)")(
         "json", "Output results in JSON format")("v,version", "Print version")(
         "h,help", "Print detailed help");
 
