@@ -12,7 +12,14 @@ IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
 
 pick_identity() {
     local prefix="$1"
-    printf "%s\n" "$IDENTITIES" | awk -F'"' -v prefix="$prefix" '$2 ~ ("^" prefix) { print $2; exit }'
+    printf "%s\n" "$IDENTITIES" | awk -F'"' -v prefix="$prefix" '
+        $2 ~ ("^" prefix) {
+            gsub(/^[[:space:]]+/, "", $1)
+            split($1, parts, /[[:space:]]+/)
+            print parts[2]
+            exit
+        }
+    '
 }
 
 case "$MODE" in

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION="${CORRIDORKEY_VERSION:-0.1.2}"
+VERSION="${CORRIDORKEY_VERSION:-0.1.3}"
 DIST_DIR="dist/CorridorKey_Mac_v${VERSION}"
 BIN_NAME="corridorkey"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
@@ -297,19 +297,22 @@ This is a standalone, zero-python version of CorridorKey.
 QUICK START:
 1. Open Terminal.
 2. Navigate to this folder: cd "\$(dirname "\$0")"
-3. Check the bundle:
+3. If macOS blocks the preview build after extraction, remove the quarantine
+   attribute from this folder once:
+   xattr -dr com.apple.quarantine CorridorKey_Mac_v${VERSION}
+4. Check the bundle:
    ./corridorkey doctor
-4. Run the smoke test:
+5. Run the smoke test:
    ./smoke_test.sh
-5. Process a regular video:
+6. Process a regular video:
    ./corridorkey process input.mp4 output.mp4
-6. Process a 4K input with the stronger preset:
+7. Process a 4K input with the stronger preset:
    ./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
-7. Run a synthetic benchmark:
+8. Run a synthetic benchmark:
    ./corridorkey benchmark
 
-When the bundle is signed and notarized, Gatekeeper should accept it without
-the manual "Open" workaround.
+This preview is not notarized yet, so the quarantine-removal step above may be
+required on first run.
 README_EOF
 
 cat << 'SMOKE_EOF' > "$DIST_DIR/smoke_test.sh"
