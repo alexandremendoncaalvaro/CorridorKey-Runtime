@@ -236,6 +236,19 @@ sudo ln -s "$(pwd)/build/release/src/cli/corridorkey" /usr/local/bin/corridorkey
 If `corridorkey` is not on your `PATH`, replace it with
 `./build/release/src/cli/corridorkey`.
 
+For the official macOS bundle, the user-facing flow is now:
+
+```bash
+./corridorkey doctor
+./corridorkey process input.mp4 output.mp4
+./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
+```
+
+The bundle already includes the packaged Apple model pack. End users do not
+need to pick `--model`, `--device`, or `--tiled` for the common path.
+
+From source builds, maintainers can still use the lower-level commands below.
+
 **Download ONNX baseline packs**:
 
 ```bash
@@ -251,8 +264,9 @@ python scripts/prepare_mlx_model_pack.py --output-dir models
 **Inspect runtime capabilities and hardware recommendation**:
 
 ```bash
-corridorkey info --json
-corridorkey doctor --json --model models/corridorkey_mlx.safetensors
+corridorkey info
+corridorkey doctor
+corridorkey doctor --json
 ```
 
 **Inspect validated models and presets**:
@@ -265,25 +279,34 @@ corridorkey presets --json
 **Run a synthetic benchmark with timings**:
 
 ```bash
-corridorkey benchmark --json --model models/corridorkey_int8_512.onnx --device cpu
+corridorkey benchmark
+corridorkey benchmark --json
 ```
 
 **Run a real-workload benchmark on the Apple path**:
 
 ```bash
-corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --model models/corridorkey_mlx.safetensors --device mlx
+corridorkey benchmark --input input.mp4 --output benchmark_output.mp4
+corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --preset max
 ```
 
-**Process a single video with NDJSON events on Apple Silicon**:
+**Process a single video with the default Apple Silicon path**:
 
 ```bash
-corridorkey process --json --input input.mp4 --alpha-hint hint.mp4 --output output.mp4 --model models/corridorkey_mlx.safetensors --tiled
+corridorkey process input.mp4 output.mp4
+```
+
+**Process a single video with NDJSON events**:
+
+```bash
+corridorkey process --json --input input.mp4 --alpha-hint hint.mp4 --output output.mp4
 ```
 
 **Enable cleanup for slower, higher-quality runs**:
 
 ```bash
-corridorkey process --input input.mp4 --output output.mp4 --model models/corridorkey_mlx.safetensors --tiled --despeckle
+corridorkey process input.mp4 output.mp4 --preset max
+corridorkey process input.mp4 output.mp4 --despeckle
 ```
 
 **Process a directory of frames with the CPU baseline**:
@@ -295,6 +318,7 @@ corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output
 **Use tiled inference for larger inputs on the Apple path**:
 
 ```bash
+corridorkey process input_4k.mp4 output_4k.mp4 --preset max
 corridorkey process --input input_4k.mp4 --output output_4k.mp4 --model models/corridorkey_mlx.safetensors --tiled
 ```
 

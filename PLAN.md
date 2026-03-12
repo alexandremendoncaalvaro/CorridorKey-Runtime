@@ -83,6 +83,19 @@
 
 ## Backlog imediato
 
+- Estado atual do macOS:
+  - bundle portatil validado fora da arvore de build
+  - fluxo padrao do usuario no bundle reduzido a `doctor`, `process input output`
+    e `process input output --preset max`
+  - pack Apple empacotado no release, sem dependencia de Python para o usuario
+  - validacao final ainda separa dois niveis:
+    - funcional: concluido para o bundle local
+    - Gatekeeper publico: depende de assinatura/notarizacao com credenciais da
+      conta Apple de release
+- Proxima transicao de produto depois do bundle Mac:
+  - fechar assinatura/notarizacao do artefato oficial
+  - iniciar baseline de Windows e, em seguida, trilho Windows RTX
+
 - Fechar a decisao do trilho acelerado para macOS:
   - tratar `ONNX int8 -> ORT CoreML` atual apenas como baseline investigativo
   - avaliar `MLX` contra conversao direta `PyTorch -> Core ML`
