@@ -179,10 +179,14 @@ bash "${BUNDLE_ROOT}/smoke_test.sh"
 (cd "$BUNDLE_ROOT" && ./corridorkey process --json -i "$SAMPLE_VIDEO_CLIP" \
     -o "${OUTPUT_ROOT}/sample_video_output.mp4") > "${OUTPUT_ROOT}/sample_video_process.ndjson"
 
+(cd "$BUNDLE_ROOT" && ./corridorkey process --json "$SAMPLE_VIDEO_CLIP" \
+    sample_video_output_flat.mp4) > "${OUTPUT_ROOT}/sample_video_process_flat.ndjson"
+
 ffprobe -v error -print_format json -show_streams "$INPUT_4K_FRAME" > "${OUTPUT_ROOT}/input_4k_ffprobe.json"
 ffprobe -v error -print_format json -show_streams "${OUTPUT_ROOT}/frame_4k_output/Comp/$(basename "$INPUT_4K_FRAME")" > "${OUTPUT_ROOT}/output_4k_ffprobe.json"
 ffprobe -v error -print_format json -show_streams "$SAMPLE_VIDEO_CLIP" > "${OUTPUT_ROOT}/input_sample_video_ffprobe.json"
 ffprobe -v error -print_format json -show_streams "${OUTPUT_ROOT}/sample_video_output.mp4" > "${OUTPUT_ROOT}/output_sample_video_ffprobe.json"
+ffprobe -v error -print_format json -show_streams "${BUNDLE_ROOT}/sample_video_output_flat.mp4" > "${OUTPUT_ROOT}/output_sample_video_flat_ffprobe.json"
 
 CORRIDORKEY_VALIDATION_ROOT="$OUTPUT_ROOT" \
 CORRIDORKEY_ARCHIVE_FORMAT="$ARCHIVE_FORMAT" \
@@ -196,6 +200,7 @@ input_probe = json.loads((output_root / "input_4k_ffprobe.json").read_text())
 output_probe = json.loads((output_root / "output_4k_ffprobe.json").read_text())
 input_sample_video_probe = json.loads((output_root / "input_sample_video_ffprobe.json").read_text())
 output_sample_video_probe = json.loads((output_root / "output_sample_video_ffprobe.json").read_text())
+output_sample_video_flat_probe = json.loads((output_root / "output_sample_video_flat_ffprobe.json").read_text())
 doctor = json.loads((output_root / "doctor.json").read_text())
 corridor_bench = json.loads((output_root / "corridor_benchmark.json").read_text())
 frame_bench = json.loads((output_root / "frame_4k_benchmark.json").read_text())
@@ -210,6 +215,7 @@ input_video = first_video_stream(input_probe)
 output_video = first_video_stream(output_probe)
 input_sample_video = first_video_stream(input_sample_video_probe)
 output_sample_video = first_video_stream(output_sample_video_probe)
+output_sample_video_flat = first_video_stream(output_sample_video_flat_probe)
 
 summary = {
     "archive_format": os.environ.get("CORRIDORKEY_ARCHIVE_FORMAT", "zip"),
@@ -235,6 +241,9 @@ summary = {
     "sample_video_matches_input_resolution": int(input_sample_video["width"])
     == int(output_sample_video["width"])
     and int(input_sample_video["height"]) == int(output_sample_video["height"]),
+    "sample_video_flat_matches_input_resolution": int(input_sample_video["width"])
+    == int(output_sample_video_flat["width"])
+    and int(input_sample_video["height"]) == int(output_sample_video_flat["height"]),
 }
 
 (output_root / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

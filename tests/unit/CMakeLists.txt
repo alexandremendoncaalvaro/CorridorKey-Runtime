@@ -7,6 +7,7 @@ add_executable(test_unit
     test_device_selection.cpp
     test_device_detection.cpp
     test_inference_session.cpp
+    test_process_paths.cpp
     test_runtime_contracts.cpp
     test_session_cache_policy.cpp
     test_session_policy.cpp
