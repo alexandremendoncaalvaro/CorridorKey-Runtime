@@ -251,7 +251,7 @@ Current preview scope:
 First-run flow from the release zip:
 
 ```bash
-cd CorridorKey_Mac_v0.1.0
+cd CorridorKey_Mac_v0.1.1
 ./corridorkey doctor
 ./corridorkey process input.mp4 output.mp4
 ./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
@@ -261,7 +261,7 @@ If Gatekeeper blocks the preview build, approve it manually or remove the
 quarantine flag from the extracted folder:
 
 ```bash
-xattr -dr com.apple.quarantine CorridorKey_Mac_v0.1.0
+xattr -dr com.apple.quarantine CorridorKey_Mac_v0.1.1
 ```
 
 Useful commands for testers:
