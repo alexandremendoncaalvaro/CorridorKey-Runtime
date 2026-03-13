@@ -3,7 +3,13 @@
 # Collect source files for the core library
 # This is where we handle the PIMPL implementation and internal details
 
-add_library(corridorkey_core SHARED)
+if(WIN32)
+    # Force static for all internal targets on Windows
+    add_library(corridorkey_core STATIC)
+    target_compile_definitions(corridorkey_core PUBLIC CORRIDORKEY_STATIC_DEFINE)
+else()
+    add_library(corridorkey_core SHARED)
+endif()
 
 # Private includes for internal implementation headers
 if(APPLE)

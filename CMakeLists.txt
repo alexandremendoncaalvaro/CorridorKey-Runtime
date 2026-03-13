@@ -7,6 +7,11 @@ if(APPLE)
         "Minimum macOS deployment target for portable Apple Silicon releases" FORCE)
 endif()
 
+if(WIN32)
+    set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "" FORCE)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+endif()
+
 project(CorridorKey-Runtime
     VERSION 0.1.4
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"

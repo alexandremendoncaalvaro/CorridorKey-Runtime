@@ -44,12 +44,12 @@ $vcpkgRoot = "C:\tools\vcpkg"
 $ortRoot = [System.IO.Path]::GetFullPath($ortTarget).TrimEnd("\")
 $cudaHome = [System.IO.Path]::GetFullPath((Join-Path $vendorDir "cuda-12.9.1-local")).TrimEnd("\")
 
-# 4. Run CMake Configuration and Build
-Write-Host "Running CMake configuration and build (Release preset)..."
+# 4. Run CMake Configuration and Build (ULTRA STATIC MODE)
+Write-Host "Running Deep Static Configuration and Build (Release preset)..."
 $vsDevCmd = Join-Path $vsPath "Common7\Tools\VsDevCmd.bat"
 
-# Use explicit set commands in CMD to avoid any PowerShell variable pollution
-$fullCmd = "call `"$vsDevCmd`" -arch=x64 && set `"VCPKG_ROOT=$vcpkgRoot`" && set `"CUDA_PATH=$cudaHome`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$ortRoot`" && cmake --preset release && cmake --build --preset release"
+# Force static triplet and static CRT at configuration time
+$fullCmd = "call `"$vsDevCmd`" -arch=x64 && set `"VCPKG_ROOT=$vcpkgRoot`" && set `"CUDA_PATH=$cudaHome`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$ortRoot`" && cmake --preset release -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded && cmake --build --preset release"
 & cmd.exe /c $fullCmd
 
 if ($LASTEXITCODE -eq 0) {
