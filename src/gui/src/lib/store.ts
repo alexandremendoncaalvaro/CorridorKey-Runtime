@@ -30,11 +30,27 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
   refreshInfo: async () => {
     set({ isLoading: true, error: null });
+    
+    // Add a safety timeout for the sidecar call
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Engine Probe Timeout")), 5000)
+    );
+
     try {
-      const info = await getEngineInfo();
+      const info = await Promise.race([getEngineInfo(), timeoutPromise]) as SystemInfo;
       set({ info, isLoading: false });
     } catch (err: any) {
-      set({ error: err.message, isLoading: false });
+      console.error("Hardware probe failed, using fallback:", err);
+      const msg = err && err.message ? err.message : String(err);
+      set({ 
+        error: `Hardware Probe Failed: ${msg}`, 
+        isLoading: false,
+        info: {
+          version: "0.1.5",
+          devices: [{ name: "CPU Baseline (Fallback)", memory_mb: 0, backend: "cpu" }],
+          capabilities: { tensorrt_rtx_available: false, multi_gpu_available: false, cpu_fallback_available: true }
+        }
+      });
     }
   }
 }));

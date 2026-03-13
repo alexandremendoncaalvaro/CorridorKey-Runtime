@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { Command } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export interface JobProgress {
   type: "job_started" | "backend_selected" | "progress" | "warning" | "artifact_written" | "completed" | "failed" | "cancelled";
@@ -13,6 +14,7 @@ export interface JobProgress {
 interface JobState {
   inputPath: string | null;
   outputPath: string | null;
+  hintPath: string | null;
   isProcessing: boolean;
   currentProgress: number;
   statusMessage: string;
@@ -23,6 +25,7 @@ interface JobState {
   // Actions
   setInput: (path: string | null) => void;
   setOutput: (path: string | null) => void;
+  setHint: (path: string | null) => void;
   startJob: () => Promise<void>;
   reset: () => void;
 }
@@ -30,6 +33,7 @@ interface JobState {
 export const useJobStore = create<JobState>((set, get) => ({
   inputPath: null,
   outputPath: null,
+  hintPath: null,
   isProcessing: false,
   currentProgress: 0,
   statusMessage: "Ready",
@@ -39,6 +43,7 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   setInput: (path) => set({ inputPath: path, error: null }),
   setOutput: (path) => set({ outputPath: path, error: null }),
+  setHint: (path) => set({ hintPath: path }),
 
   reset: () => set({
     isProcessing: false,
@@ -50,68 +55,58 @@ export const useJobStore = create<JobState>((set, get) => ({
   }),
 
   startJob: async () => {
-    const { inputPath, outputPath } = get();
+    const { inputPath, outputPath, hintPath } = get();
     if (!inputPath || !outputPath) return;
 
     set({ 
       isProcessing: true, 
       currentProgress: 0, 
-      statusMessage: "Initializing engine...", 
+      statusMessage: "Starting engine...", 
       error: null,
       logs: [] 
     });
 
     try {
-      // Build sidecar command
-      const args = [
-        "process",
-        "--input", inputPath,
-        "--output", outputPath,
-        "--json" // Crucial for NDJSON parsing
-      ];
-
-      const command = Command.sidecar("bin/corridorkey", args);
-
-      // Listen to stdout for NDJSON events
-      command.stdout.on("data", (line) => {
+      // Listen for events from the Rust backend
+      const unlisten = await listen<string>("engine-event", (event) => {
+        const line = event.payload;
         try {
-          const event = JSON.parse(line) as JobProgress;
+          const payload = JSON.parse(line) as JobProgress;
           
           set((state) => ({ 
             logs: [...state.logs, line]
           }));
 
-          switch (event.type) {
+          switch (payload.type) {
             case "backend_selected":
-              set({ activeBackend: event.backend || null });
+              set({ activeBackend: payload.backend || null });
               break;
             case "progress":
               set({ 
-                currentProgress: (event.progress || 0) * 100,
-                statusMessage: event.message || `Processing ${event.phase || ""}...`
+                currentProgress: (payload.progress || 0) * 100,
+                statusMessage: payload.message || `Processing...`
               });
               break;
             case "completed":
-              set({ isProcessing: false, currentProgress: 100, statusMessage: "Finished successfully" });
+              set({ isProcessing: false, currentProgress: 100, statusMessage: "Finished" });
+              unlisten();
               break;
             case "failed":
-              set({ isProcessing: false, error: event.message || "Unknown engine failure" });
+              set({ isProcessing: false, error: payload.message || "Failed" });
+              unlisten();
               break;
           }
         } catch (e) {
-          // If it's not valid JSON, treat as raw log
           set((state) => ({ logs: [...state.logs, line] }));
         }
       });
 
-      command.stderr.on("data", (line) => {
-        set((state) => ({ logs: [...state.logs, `[ERROR] ${line}`] }));
+      await invoke("start_processing", { 
+        input: inputPath, 
+        output: outputPath, 
+        hint: hintPath 
       });
-
-      const _child = await command.spawn();
       
-      // We don't await the full execution here so the UI stays responsive
-      // The events will update the store.
     } catch (err: any) {
       set({ isProcessing: false, error: err.toString() });
     }

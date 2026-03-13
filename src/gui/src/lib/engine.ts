@@ -1,4 +1,4 @@
-import { Command } from "@tauri-apps/plugin-shell";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface DeviceInfo {
   name: string;
@@ -17,34 +17,14 @@ export interface SystemInfo {
 }
 
 /**
- * Invokes the CorridorKey native engine sidecar.
- * @param args Arguments to pass to the CLI
- * @returns Parsed JSON output or raw string
- */
-export async function invokeEngine<T = any>(args: string[]): Promise<T> {
-  try {
-    const command = Command.sidecar("bin/corridorkey", args);
-    const output = await command.execute();
-    
-    if (output.code !== 0) {
-      throw new Error(`Engine exited with code ${output.code}: ${output.stderr}`);
-    }
-
-    try {
-      return JSON.parse(output.stdout) as T;
-    } catch {
-      return output.stdout as unknown as T;
-    }
-  } catch (error) {
-    console.error("Failed to invoke engine:", error);
-    throw error;
-  }
-}
-
-/**
- * Fetches system information from the native engine.
+ * Fetches system information from the native engine via Rust bridge.
  */
 export async function getEngineInfo(): Promise<SystemInfo> {
-  // Using 'info --json' command we implemented earlier
-  return await invokeEngine<SystemInfo>(["info", "--json"]);
+  try {
+    const jsonStr = await invoke<string>("get_engine_status");
+    return JSON.parse(jsonStr) as SystemInfo;
+  } catch (error) {
+    console.error("Failed to fetch engine info:", error);
+    throw error;
+  }
 }
