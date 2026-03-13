@@ -18,17 +18,8 @@ export function TopBar() {
       </div>
       
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/50 text-[10px] font-bold border border-border/50">
-          <ShieldCheck className="w-3 h-3 text-brand" />
-          <span>PRODUCTION READY {info?.version ? `v${info.version}` : ""}</span>
-        </div>
-        
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/50 text-[10px] font-bold border border-border/50">
-          {isLoading ? (
-            <Loader2 className="w-3 h-3 animate-spin" />
-          ) : (
-            <Monitor className="w-3 h-3" />
-          )}
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 text-[10px] font-bold border border-zinc-800">
+          <Monitor className="w-3 h-3" />
           <span>{gpu?.name || "CPU Baseline"}</span>
         </div>
       </div>

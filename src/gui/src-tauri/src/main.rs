@@ -2,5 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    srcgui_lib::run()
+    corridorkey_gui_lib::run()
 }
+
+// Force rebuild for icon update: 03/13/2026 01:59:33
