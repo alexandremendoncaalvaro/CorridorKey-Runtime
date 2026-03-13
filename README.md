@@ -8,7 +8,7 @@ hardware.
 The runtime contract is shared across platform tracks. The model artifact is
 not. This product is designed to use the backend and converted model pack that
 best fit each hardware target instead of forcing one artifact shape across
-Apple Silicon, RTX consumer GPUs, and CPU fallback.
+Apple Silicon, Universal Windows GPUs, and CPU fallback.
 
 This repository is not trying to reproduce a generic Python workflow in another
 language. It exists to make CorridorKey usable as a native, predictable, and
@@ -45,13 +45,11 @@ The current delivery shape is explicit:
 - **macOS Apple Silicon track:** MLX is now the default operational path for
   Apple model packs, while ONNX remains the CPU-compatible compatibility and
   diagnostics baseline.
-- **Windows RTX track:** TensorRT RTX is now the primary Windows product path,
-  with curated FP16 ONNX model packs, packaged runtime DLLs, and structured CPU
-  fallback.
+- **Windows Universal GPU track:** TensorRT RTX is the primary high-performance Windows product path, with integrated support for **CUDA** (GTX) and **DirectML** (AMD/Intel).
 - **Operational tooling:** `doctor`, `benchmark`, `models`, `presets`, and
   `process --json` expose stable machine-readable diagnostics.
 - **Validated model catalog:** the packaged macOS set centers on
-  `corridorkey_mlx.safetensors`, while the packaged Windows RTX set centers on
+  `corridorkey_mlx.safetensors`, while the Windows Universal GPU set centers on
   `corridorkey_fp16_768.onnx`, `corridorkey_fp16_1024.onnx`, and
   `corridorkey_int8_512.onnx` for fallback.
 - **Measured runtime behavior:** stage-level timings cover engine creation,
@@ -84,7 +82,7 @@ per platform track.
   pack, not as a requirement to reuse the same ONNX artifact shipped for other
   targets. The approved Mac evaluation paths are `MLX` and direct `Core ML`
   conversion from the source checkpoint.
-- **Windows RTX pack:** remains an ONNX-derived path aimed at `TensorRT RTX`
+- **Windows Universal GPU pack:** remains an ONNX-derived path aimed at `TensorRT RTX`
   with a separate packaging and cache strategy.
 
 This means the runtime stays unified while acceleration can diverge where the
@@ -202,11 +200,11 @@ export VCPKG_ROOT="$HOME/vcpkg"
 </details>
 
 <details>
-<summary>Windows</summary>
+<summary>Windows (Universal GPU)</summary>
 
 ```powershell
-git clone https://github.com/microsoft/vcpkg.git %USERPROFILE%\vcpkg
-%USERPROFILE%\vcpkg\bootstrap-vcpkg.bat
+# Run the automated setup script
+.\scripts\setup_windows.ps1
 ```
 
 </details>
@@ -292,67 +290,62 @@ For the official macOS bundle, the user-facing flow is now:
 The bundle already includes the packaged Apple model pack. End users do not
 need to pick `--model`, `--device`, or `--tiled` for the common path.
 
-## Windows RTX Preview Testing
+## Windows Universal GPU Preview Testing
 
 This section is the best starting point for Windows testers using the portable
 GitHub release.
 
 Current preview scope:
 
-- Supported hardware: **NVIDIA RTX 30xx or newer**
+- Supported hardware: **NVIDIA (RTX/GTX), AMD RX, or Intel Arc**
 - Preferred OS target: **Windows 11 x64**
-- Runtime path: **TensorRT RTX first, CPU fallback available**
-- User expectation: **no separate CorridorKey, ONNX Runtime, TensorRT RTX, or
-  CUDA Toolkit installation**
-- External dependency that still exists: **compatible NVIDIA driver on the
-  target machine**
+- Runtime path: **Multi-backend (TensorRT RTX, CUDA, DirectML)**
+- User expectation: **no separate CorridorKey, ONNX Runtime, or CUDA installation**
+- External dependency that still exists: **compatible GPU driver on the target machine**
 
 First-run flow from the release zip:
 
 ```powershell
-cd CorridorKey_Windows_RTX_v0.1.4
-.\corridorkey.cmd doctor
-.\smoke_test.bat
-.\corridorkey.cmd process input.mp4 output.mp4
-.\corridorkey.cmd process input_4k.mp4 output_4k.mp4 --preset max
+cd CorridorKey_Windows_v0.1.4
+.\corridorkey.ps1 doctor
+.\corridorkey.ps1 process input.mp4 output.mp4
+.\corridorkey.ps1 process input_4k.mp4 output_4k.mp4 --preset max
 ```
 
 Useful commands for testers:
 
 ```powershell
-.\corridorkey.cmd doctor
-.\corridorkey.cmd benchmark
-.\corridorkey.cmd process input.mp4 output.mp4
-.\corridorkey.cmd process input_4k.mp4 output_4k.mp4 --preset max
-.\corridorkey.cmd process --json --input input.mp4 --output output.mp4
+.\corridorkey.ps1 info
+.\corridorkey.ps1 doctor
+.\corridorkey.ps1 benchmark
+.\corridorkey.ps1 process input.mp4 output.mp4
+.\corridorkey.ps1 process --json --input input.mp4 --output output.mp4
 ```
 
 What we want reported back from testers:
 
 - GPU model and VRAM
-- NVIDIA driver version
-- whether `doctor` passed with `bundle_healthy=true`
-- whether the app opened and processed a real file
+- Windows version
+- whether `doctor` passed with `healthy=true`
+- which backend was automatically selected (TensorRT, CUDA, or DirectML)
 - rough runtime for a short clip or 4K sample
-- crashes, stalls, fallback to CPU, incorrect output, or visual artifacts
+- crashes, stalls, or visual artifacts
 
 Current known Windows limitation:
 
 - the portable video path still reports `mpeg4` as the default encoder in the
   current release bundle
-- `doctor` can still report `video_healthy=false` even when the TensorRT RTX
-  inference path and bundle health are correct
+- TensorRT compilation on first run may take up to 30 seconds (cached thereafter)
 
 For the official Windows bundle, the user-facing flow is now:
 
 ```powershell
-.\corridorkey.cmd doctor
-.\smoke_test.bat
-.\corridorkey.cmd process input.mp4 output.mp4
-.\corridorkey.cmd process input_4k.mp4 output_4k.mp4 --preset max
+.\corridorkey.ps1 doctor
+.\corridorkey.ps1 process input.mp4 output.mp4
+.\corridorkey.ps1 process input_4k.mp4 output_4k.mp4 --preset max
 ```
 
-The bundle already includes the packaged Windows RTX runtime DLLs and validated
+The bundle already includes the packaged Windows universal runtime DLLs and validated
 model set. End users do not need to point the runtime at a local SDK install.
 
 From source builds, maintainers can still use the lower-level commands below.
@@ -496,9 +489,8 @@ Alpha hints are part of the product contract, not an afterthought.
 
 1. **macOS portable runtime:** Apple Silicon track with MLX-first execution,
    curated Apple model packs, diagnostics, and CPU fallback.
-2. **Windows RTX portable runtime:** TensorRT RTX-focused Windows track with
-   curated FP16 ONNX packs, packaged runtime DLLs, diagnostics, and CPU
-   fallback.
+2. **Windows Universal GPU portable runtime:** multi-backend Windows track with
+   curated FP16 ONNX packs, packaged universal runtimes (TensorRT, CUDA, DirectML), diagnostics, and CPU fallback.
 3. **Integration surfaces:** sidecar, GUI, plugin, and pipeline consumers over
    the same library-first contracts.
 4. **Broader platform expansion:** Linux and secondary providers after the
@@ -509,8 +501,7 @@ Alpha hints are part of the product contract, not an afterthought.
 | Platform | Primary path | Status | Notes |
 |----------|--------------|--------|-------|
 | macOS 14+ Apple Silicon | MLX-first Apple model packs; CPU ONNX fallback and diagnostics | Current release track | Runtime contracts are fixed; accelerated Mac artifacts are not assumed to match Windows |
-| Windows 11 + NVIDIA RTX | TensorRT RTX + CPU fallback | Current release track | Portable bundle ships curated runtime DLLs and RTX-oriented ONNX model packs |
-| Windows 11 general | CPU; DirectML/WinML secondary | Exploratory | Not treated as the primary Windows product path |
+| Windows 11 (Universal GPU) | TensorRT RTX, CUDA, or DirectML + CPU fallback | Current release track | Portable bundle ships curated universal runtimes and optimized model packs |
 | Linux | Architecture-ready later | Deferred | Not a current productized track |
 
 ## Documentation
