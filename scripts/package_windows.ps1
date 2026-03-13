@@ -1,60 +1,50 @@
-# CorridorKey Runtime — Ultimate Windows Packaging Script (GUI + Engine)
-# This script creates a 100% portable "Zero-Install" folder for distribution.
+# CorridorKey Runtime — Ultimate Portable Packaging Script (FIXED)
+# This script ensures a 100% reliable bundle with the sidecar named 'ck-engine.exe'.
 
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot | Split-Path -Parent
 $distDir = Join-Path $projectRoot "dist\CorridorKey-Windows-Portable"
-$engineBin = Join-Path $projectRoot "build\release\src\cli\corridorkey.exe"
-$guiBin = Join-Path $projectRoot "src\gui\src-tauri\target\release\CorridorKey.exe"
+$engineBuildDir = Join-Path $projectRoot "build\release\src\cli"
+$guiBin = Join-Path $projectRoot "src\gui\src-tauri\target\release\corridorkey-gui.exe"
 $vendorDir = Join-Path $projectRoot "vendor"
 $modelsDir = Join-Path $projectRoot "models"
 
-Write-Host "--- Packaging CorridorKey Ultimate Portable Bundle ---" -ForegroundColor Cyan
+Write-Host "--- Packaging CorridorKey Ultimate (Anti-Loop Version) ---" -ForegroundColor Cyan
 
 # 1. Clean and Setup
 if (Test-Path $distDir) { Remove-Item $distDir -Recurse -Force }
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
-$sidecarDir = New-Item -ItemType Directory -Path (Join-Path $distDir "bin") -Force
-$modelsDistDir = New-Item -ItemType Directory -Path (Join-Path $distDir "models") -Force
+New-Item -ItemType Directory -Path (Join-Path $distDir "models") -Force | Out-Null
 
-# 2. Copy Engine & Runtimes (Sidecar Folder)
-Write-Host "[1/4] Copying Native Engine and AI Runtimes..."
-Copy-Item $engineBin $sidecarDir -Force
+# 2. Copy Sidecar Engine as 'ck-engine.exe' (No suffix, as proven to work)
+Write-Host "[1/4] Copying Sidecar Engine as 'ck-engine.exe'..."
+Copy-Item (Join-Path $engineBuildDir "corridorkey.exe") (Join-Path $distDir "ck-engine.exe") -Force
 
-# AI DLLs (DirectML, ONNX, CUDA)
+# 3. Copy ALL DLLs to Root
+Write-Host "[2/4] Copying all Runtimes and Core DLLs to root..."
+Copy-Item (Join-Path $engineBuildDir "*.dll") $distDir -Force
+
+# AI Runtimes from vendor
 $universalOrt = Join-Path $vendorDir "onnxruntime-universal"
 $cudaBin = Join-Path $vendorDir "cuda-12.9.1-local\bin"
+if (Test-Path $universalOrt) { Copy-Item (Join-Path $universalOrt "*.dll") $distDir -Force }
+if (Test-Path $cudaBin) { Copy-Item (Join-Path $cudaBin "*.dll") $distDir -Force }
 
-if (Test-Path $universalOrt) { Copy-Item (Join-Path $universalOrt "*.dll") $sidecarDir -Force }
-if (Test-Path $cudaBin) { Copy-Item (Join-Path $cudaBin "*.dll") $sidecarDir -Force }
-
-# 3. Copy GUI (Main Executable)
-Write-Host "[2/4] Copying GUI Frontend..."
+# 4. Copy GUI (Main Application)
+Write-Host "[3/4] Copying GUI Frontend as 'CorridorKey.exe'..."
 if (Test-Path $guiBin) {
-    Copy-Item $guiBin $distDir -Force
+    Copy-Item $guiBin (Join-Path $distDir "CorridorKey.exe") -Force
 } else {
-    Write-Host "Warning: GUI Binary not found. Run 'pnpm tauri build' in src/gui first." -ForegroundColor Yellow
+    Write-Error "GUI Binary not found. Run 'pnpm tauri build' in src/gui first."
 }
 
-# 4. Copy Models
-Write-Host "[3/4] Copying Models..."
+# 5. Copy Models
+Write-Host "[4/4] Copying Models..."
 $targetModels = @("corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx", "corridorkey_int8_512.onnx")
 foreach ($m in $targetModels) {
     $src = Join-Path $modelsDir $m
-    if (Test-Path $src) { Copy-Item $src $modelsDistDir -Force }
+    if (Test-Path $src) { Copy-Item $src (Join-Path $distDir "models") -Force }
 }
 
-# 5. Create Metadata / Smoke Test
-Write-Host "[4/4] Finalizing Bundle..."
-$readme = @"
-# CorridorKey Portable v0.1.4
-To run: Double-click CorridorKey.exe
-
-Requirements:
-- Windows 11
-- NVIDIA (RTX/GTX) or AMD/Intel GPU with latest drivers.
-"@
-$readme | Out-File (Join-Path $distDir "README.txt") -Encoding ascii
-
 Write-Host "`n--- Bundle Ready at: $distDir ---" -ForegroundColor Green
-Write-Host "You can now ZIP this folder and share it with testers."
+Write-Host "Collision-free version. Double-click CorridorKey.exe to start."
