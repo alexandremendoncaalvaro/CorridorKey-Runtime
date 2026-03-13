@@ -1,0 +1,9 @@
+[tools]
+node = "22"
+rust = "latest"
+pnpm = "latest"
+cmake = "latest"
+ninja = "latest"
+
+[settings]
+experimental = true
