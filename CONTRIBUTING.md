@@ -49,16 +49,17 @@ cmake --build build/debug --parallel
 </details>
 
 <details>
-<summary>Windows (RTX)</summary>
+<summary>Windows (Universal GPU)</summary>
 
 ```powershell
 # Set VCPKG_ROOT — required by CMakePresets.json
 $env:VCPKG_ROOT = "C:\tools\vcpkg" # Adjust to your path
 
 # Run the automated setup script
+# This script handles multi-backend dependencies (TensorRT, CUDA, DirectML)
 .\scripts\setup_windows.ps1
 
-# Build (release mode for RTX performance)
+# Build (release mode for GPU performance)
 cmake --build --preset release
 ```
 
