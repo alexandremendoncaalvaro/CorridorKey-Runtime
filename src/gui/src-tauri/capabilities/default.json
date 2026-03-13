@@ -7,19 +7,8 @@
     "core:default",
     "opener:default",
     "dialog:default",
-    "shell:allow-execute",
     "fs:allow-read",
     "fs:allow-write",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "args": true,
-          "sidecar": true,
-          "name": "binaries/ck-engine"
-        }
-      ]
-    },
     {
       "identifier": "fs:allow-read",
       "allow": [{ "path": "**" }]

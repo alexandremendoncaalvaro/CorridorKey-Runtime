@@ -1,15 +1,24 @@
 use tauri::{Manager, Emitter, AppHandle};
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
+use std::process::{Command, Stdio};
+use std::env;
+use std::io::{BufRead, BufReader};
+use std::thread;
+
+fn get_engine_path() -> Result<std::path::PathBuf, String> {
+    let mut exe_path = env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
+    exe_path.pop(); // Remove the executable name, leaving the directory
+    Ok(exe_path.join("ck-engine.exe"))
+}
 
 #[tauri::command]
-async fn get_engine_status(app: AppHandle) -> Result<String, String> {
-    let sidecar_command = app.shell().sidecar("ck-engine")
-        .map_err(|e| format!("Sidecar Resolution Error: {}", e))?
-        .args(["info", "--json"]);
+async fn get_engine_status() -> Result<String, String> {
+    let engine_path = get_engine_path()?;
 
-    let output = sidecar_command.output().await
-        .map_err(|e| format!("Sidecar Execution Error: {}", e))?;
+    let output = Command::new(&engine_path)
+        .args(["info", "--json"])
+        .current_dir(engine_path.parent().unwrap())
+        .output()
+        .map_err(|e| format!("Process Spawn Error: Could not start {}. Details: {}", engine_path.display(), e))?;
     
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -20,6 +29,9 @@ async fn get_engine_status(app: AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn start_processing(app: AppHandle, input: String, output: String, hint: Option<String>) -> Result<(), String> {
+    let engine_path = get_engine_path()?;
+    let current_dir = engine_path.parent().unwrap().to_path_buf();
+
     let mut args = vec!["process".to_string(), "--input".to_string(), input, "--output".to_string(), output, "--json".to_string()];
     
     if let Some(h) = hint {
@@ -29,17 +41,25 @@ async fn start_processing(app: AppHandle, input: String, output: String, hint: O
         }
     }
 
-    let (mut rx, _child) = app.shell().sidecar("ck-engine")
-        .map_err(|e| format!("Sidecar Resolution Error: {}", e))?
+    let mut child = Command::new(&engine_path)
         .args(args)
-        .spawn().map_err(|e| format!("Sidecar Spawn Error: {}", e))?;
+        .current_dir(current_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Process Spawn Error: {}", e))?;
 
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            if let CommandEvent::Stdout(line) = event {
-                let _ = app.emit("engine-event", String::from_utf8_lossy(&line).to_string());
+    let stdout = child.stdout.take().unwrap();
+    
+    // Spawn a standard thread to read stdout and emit to Tauri frontend
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                let _ = app.emit("engine-event", l);
             }
         }
+        let _ = child.wait();
     });
 
     Ok(())
@@ -50,7 +70,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
