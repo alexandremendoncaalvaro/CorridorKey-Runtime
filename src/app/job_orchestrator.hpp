@@ -27,6 +27,7 @@ struct JobRequest {
     std::filesystem::path model_path;
 
     InferenceParams params;
+    VideoOutputOptions video_output;
     DeviceInfo device;
 };
 

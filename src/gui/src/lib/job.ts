@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { downloadDir } from "@tauri-apps/api/path";
 
 export interface JobProgress {
   type: "job_started" | "backend_selected" | "progress" | "warning" | "artifact_written" | "completed" | "failed" | "cancelled";
@@ -25,6 +26,8 @@ interface JobState {
   inputPath: string | null;
   outputPath: string | null;
   hintPath: string | null;
+  videoEncodeMode: "lossless" | "balanced";
+  defaultOutputDir: string | null;
   isProcessing: boolean;
   currentProgress: number;
   statusMessage: string;
@@ -37,6 +40,8 @@ interface JobState {
   setInput: (path: string | null) => void;
   setOutput: (path: string | null) => void;
   setHint: (path: string | null) => void;
+  setVideoEncodeMode: (mode: "lossless" | "balanced") => void;
+  initDefaults: () => Promise<void>;
   startJob: () => Promise<void>;
   reset: () => void;
   loadHistory: () => void;
@@ -47,6 +52,8 @@ export const useJobStore = create<JobState>((set, get) => ({
   inputPath: null,
   outputPath: null,
   hintPath: null,
+  videoEncodeMode: "lossless",
+  defaultOutputDir: null,
   isProcessing: false,
   currentProgress: 0,
   statusMessage: "Ready",
@@ -58,6 +65,18 @@ export const useJobStore = create<JobState>((set, get) => ({
   setInput: (path) => set({ inputPath: path, error: null }),
   setOutput: (path) => set({ outputPath: path, error: null }),
   setHint: (path) => set({ hintPath: path }),
+  setVideoEncodeMode: (mode) => set({ videoEncodeMode: mode }),
+  initDefaults: async () => {
+    try {
+      const dir = await downloadDir();
+      if (!dir) return;
+      set((state) =>
+        state.outputPath
+          ? { defaultOutputDir: dir }
+          : { outputPath: dir, defaultOutputDir: dir }
+      );
+    } catch (e) {}
+  },
 
   loadHistory: () => {
     const saved = localStorage.getItem("corridorkey_history");
@@ -79,7 +98,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   }),
 
   startJob: async () => {
-    const { inputPath, outputPath, hintPath, history } = get();
+    const { inputPath, outputPath, hintPath, history, videoEncodeMode } = get();
     if (!inputPath || !outputPath) return;
 
     const startTime = Date.now();
@@ -111,13 +130,29 @@ export const useJobStore = create<JobState>((set, get) => ({
                 statusMessage: payload.message || `Processing...`
               });
               break;
+            case "warning":
+              if (payload.message) {
+                set({ statusMessage: payload.message });
+              }
+              break;
+            case "artifact_written":
+              if (payload.artifact_path) {
+                set({ outputPath: payload.artifact_path });
+              }
+              break;
             case "completed":
               const duration = Date.now() - startTime;
+              const finalOutputPath = get().outputPath || outputPath;
+              if (finalOutputPath) {
+                try {
+                  void invoke("reveal_in_folder", { path: finalOutputPath });
+                } catch (e) {}
+              }
               const newRecord: JobRecord = {
                 id: Math.random().toString(36).substr(2, 9),
                 timestamp: new Date().toISOString(),
                 input: inputPath,
-                output: outputPath,
+                output: finalOutputPath || "",
                 status: "success",
                 backend: get().activeBackend,
                 duration_ms: duration
@@ -145,7 +180,8 @@ export const useJobStore = create<JobState>((set, get) => ({
       await invoke("start_processing", { 
         input: inputPath, 
         output: outputPath, 
-        hint: hintPath 
+        hint: hintPath,
+        video_encode: videoEncodeMode
       });
       
     } catch (err: any) {

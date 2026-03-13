@@ -16,7 +16,7 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report.contains("cache"));
     REQUIRE(report.contains("coreml"));
     REQUIRE(report.contains("mlx"));
-    REQUIRE(report.contains("windows_rtx"));
+    REQUIRE(report.contains("windows_universal"));
     REQUIRE(report.contains("summary"));
     REQUIRE(report["models"].is_array());
     REQUIRE(report["presets"].is_array());
@@ -30,6 +30,11 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["bundle"].contains("mlx_metallib_found"));
     REQUIRE(report["bundle"].contains("mlx_bridge_present"));
     REQUIRE(report["bundle"]["mlx_bridge_artifacts"].is_array());
+    REQUIRE(report["video"].contains("default_mode"));
+    REQUIRE(report["video"].contains("default_container"));
+    REQUIRE(report["video"].contains("default_encoder"));
+    REQUIRE(report["video"].contains("lossless_available"));
+    REQUIRE(report["video"].contains("lossless_unavailable_reason"));
     REQUIRE(report["video"]["supported_encoders"].is_array());
     REQUIRE(report["video"].contains("portable_h264_available"));
     REQUIRE(report["cache"].contains("writable"));
@@ -76,20 +81,20 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     if (report["mlx"]["bridge_ready"].get<bool>()) {
         REQUIRE(report["mlx"]["backend_integrated"].get<bool>());
     }
-    REQUIRE(report["windows_rtx"].contains("applicable"));
-    REQUIRE(report["windows_rtx"].contains("gpu_detected"));
-    REQUIRE(report["windows_rtx"].contains("provider_available"));
-    REQUIRE(report["windows_rtx"].contains("runtime_cache_ready"));
-    REQUIRE(report["windows_rtx"].contains("packaged_models"));
-    REQUIRE(report["windows_rtx"].contains("compiled_context_models"));
+    REQUIRE(report["windows_universal"].contains("applicable"));
+    REQUIRE(report["windows_universal"].contains("gpu_detected"));
+    REQUIRE(report["windows_universal"].contains("provider_available"));
+    REQUIRE(report["windows_universal"].contains("runtime_cache_ready"));
+    REQUIRE(report["windows_universal"].contains("packaged_models"));
+    REQUIRE(report["windows_universal"].contains("compiled_context_models"));
     REQUIRE(report["summary"].contains("coreml_healthy"));
     REQUIRE(report["summary"].contains("apple_acceleration_probe_ready"));
     REQUIRE(report["summary"].contains("apple_acceleration_bridge_ready"));
     REQUIRE(report["summary"].contains("apple_acceleration_backend_integrated"));
     REQUIRE(report["summary"].contains("apple_acceleration_healthy"));
-    REQUIRE(report["summary"].contains("windows_rtx_provider_ready"));
-    REQUIRE(report["summary"].contains("windows_rtx_packaged_models_present"));
-    REQUIRE(report["summary"].contains("windows_rtx_healthy"));
+    REQUIRE(report["summary"].contains("windows_universal_provider_ready"));
+    REQUIRE(report["summary"].contains("windows_universal_packaged_models_present"));
+    REQUIRE(report["summary"].contains("windows_universal_healthy"));
     REQUIRE(report["summary"].contains("validated_models_present"));
 }
 

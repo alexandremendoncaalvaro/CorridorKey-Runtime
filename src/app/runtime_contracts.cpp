@@ -113,7 +113,13 @@ RuntimeCapabilities runtime_capabilities() {
 
     capabilities.mlx_probe_available = core::mlx_probe_available();
     capabilities.videotoolbox_available = is_videotoolbox_available();
-    capabilities.default_video_encoder = default_video_encoder_for_path("output.mp4");
+    VideoFrameFormat input_format;
+    auto video_support = inspect_video_output_support(input_format);
+    capabilities.default_video_mode = video_support.default_mode;
+    capabilities.default_video_container = video_support.default_container;
+    capabilities.default_video_encoder = video_support.default_encoder;
+    capabilities.lossless_video_available = video_support.lossless_available;
+    capabilities.lossless_video_unavailable_reason = video_support.lossless_unavailable_reason;
 
     return capabilities;
 }
@@ -375,6 +381,16 @@ std::string backend_to_string(Backend backend) {
     }
 }
 
+std::string video_output_mode_to_string(VideoOutputMode mode) {
+    switch (mode) {
+        case VideoOutputMode::Lossless:
+            return "lossless";
+        case VideoOutputMode::Balanced:
+            return "balanced";
+    }
+    return "lossless";
+}
+
 std::string job_event_type_to_string(JobEventType type) {
     switch (type) {
         case JobEventType::JobStarted:
@@ -423,7 +439,11 @@ nlohmann::json to_json(const RuntimeCapabilities& capabilities) {
     json["videotoolbox_available"] = capabilities.videotoolbox_available;
     json["tiling_supported"] = capabilities.tiling_supported;
     json["batching_supported"] = capabilities.batching_supported;
+    json["default_video_mode"] = video_output_mode_to_string(capabilities.default_video_mode);
+    json["default_video_container"] = capabilities.default_video_container;
     json["default_video_encoder"] = capabilities.default_video_encoder;
+    json["lossless_video_available"] = capabilities.lossless_video_available;
+    json["lossless_video_unavailable_reason"] = capabilities.lossless_video_unavailable_reason;
 
     nlohmann::json backends = nlohmann::json::array();
     for (Backend backend : capabilities.supported_backends) {

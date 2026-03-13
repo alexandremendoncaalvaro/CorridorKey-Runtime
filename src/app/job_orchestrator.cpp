@@ -4,7 +4,9 @@
 #include <array>
 #include <chrono>
 #include <corridorkey/version.hpp>
+#include <optional>
 
+#include "../frame_io/video_io.hpp"
 #include "common/hardware_telemetry.hpp"
 #include "common/stage_profiler.hpp"
 #include "hardware_profile.hpp"
@@ -43,7 +45,8 @@ std::vector<StageTiming> finalize_timings(common::StageProfiler& profiler,
     return profiler.snapshot();
 }
 
-std::filesystem::path make_benchmark_output_path(const JobRequest& request, bool video_input) {
+Result<std::filesystem::path> make_benchmark_output_path(const JobRequest& request,
+                                                         bool video_input) {
     auto temp_root = std::filesystem::temp_directory_path() / "corridorkey-benchmark";
     std::filesystem::create_directories(temp_root);
 
@@ -54,7 +57,9 @@ std::filesystem::path make_benchmark_output_path(const JobRequest& request, bool
     }
 
     if (video_input) {
-        return temp_root / (stem + "_" + token + ".mp4");
+        VideoFrameFormat input_format;
+        return resolve_video_output_path(temp_root / (stem + "_" + token), request.video_output,
+                                         input_format);
     }
 
     return temp_root / (stem + "_" + token);
@@ -120,6 +125,75 @@ Result<void> prepare_output_path(const std::filesystem::path& output_path) {
     }
 
     return {};
+}
+
+struct ResolvedVideoOutput {
+    std::filesystem::path output_path;
+    std::optional<std::string> warning;
+};
+
+Result<ResolvedVideoOutput> resolve_video_output_for_request(const JobRequest& request) {
+    if (request.output_path.empty()) {
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Output path must not be empty for video jobs."});
+    }
+
+    std::filesystem::path output_path = request.output_path;
+    std::error_code error;
+    bool output_is_directory = std::filesystem::exists(output_path, error) &&
+                               std::filesystem::is_directory(output_path, error);
+
+    if (output_is_directory) {
+        auto stem = request.input_path.stem().string();
+        if (stem.empty()) {
+            stem = "output";
+        }
+        output_path = output_path / (stem + "_out");
+    }
+
+    bool has_extension = !output_path.extension().empty();
+    if (has_extension && request.video_output.mode != VideoOutputMode::Lossless) {
+        return ResolvedVideoOutput{output_path, std::nullopt};
+    }
+    if (has_extension && request.video_output.allow_lossy_fallback) {
+        return ResolvedVideoOutput{output_path, std::nullopt};
+    }
+
+    auto reader_res = VideoReader::open(request.input_path);
+    if (!reader_res) {
+        return Unexpected(reader_res.error());
+    }
+    VideoFrameFormat input_format = (*reader_res)->format();
+
+    if (has_extension) {
+        auto plan = resolve_video_output_plan(output_path, request.video_output, input_format);
+        if (plan) {
+            return ResolvedVideoOutput{output_path, std::nullopt};
+        }
+
+        std::filesystem::path base_path = output_path;
+        base_path.replace_extension();
+        auto fallback_path =
+            resolve_video_output_path(base_path, request.video_output, input_format);
+        if (fallback_path) {
+            std::string extension = output_path.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            std::string warning = "Lossless output is not available for " + extension +
+                                  ". Writing lossless output to " + fallback_path->string() +
+                                  " instead. Use --video-encode balanced to keep " + extension +
+                                  " with compression.";
+            return ResolvedVideoOutput{*fallback_path, warning};
+        }
+
+        return Unexpected(plan.error());
+    }
+
+    auto resolved_path = resolve_video_output_path(output_path, request.video_output, input_format);
+    if (!resolved_path) {
+        return Unexpected(resolved_path.error());
+    }
+    return ResolvedVideoOutput{*resolved_path, std::nullopt};
 }
 
 }  // namespace
@@ -266,7 +340,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         JobEvent progress_event{
             JobEventType::Progress, "inference", progress, engine->current_device().backend, status,
         };
-        
+
         // Capture system metrics without performance cost
         auto metrics = common::get_current_metrics();
         progress_event.metrics = metrics_to_json(metrics);
@@ -293,11 +367,29 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         return Unexpected(error);
     };
 
+    bool input_is_video =
+        std::filesystem::is_regular_file(req.input_path) && is_video_file(req.input_path);
+    if (input_is_video) {
+        auto resolved_output = resolve_video_output_for_request(req);
+        if (!resolved_output) {
+            return finalize_failure(resolved_output.error());
+        }
+        req.output_path = resolved_output->output_path;
+        if (resolved_output->warning.has_value()) {
+            auto warning_event = JobEvent{
+                JobEventType::Warning,     "prepare", 0.0F, engine->current_device().backend,
+                *resolved_output->warning,
+            };
+            auto emit_warning_res = emit_event(on_event, warning_event);
+            if (!emit_warning_res) return Unexpected(emit_warning_res.error());
+        }
+    }
+
     // 3. Dispatch to Video or Sequence
-    if (std::filesystem::is_regular_file(req.input_path) && is_video_file(req.input_path)) {
+    if (input_is_video) {
         auto result = profiler.measure("video_pipeline", [&]() {
             return engine->process_video(req.input_path, req.hint_path, req.output_path, req.params,
-                                         report_progress, stage_callback);
+                                         req.video_output, report_progress, stage_callback);
         });
         if (!result) {
             return finalize_failure(result.error());
@@ -504,8 +596,9 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["summary"]["windows_universal_packaged_models_present"] =
         !report["windows_universal"]["applicable"].get<bool>() || !any_packaged_windows_model ||
         packaged_windows_models_present;
-    report["summary"]["windows_universal_healthy"] = !report["windows_universal"]["applicable"].get<bool>() ||
-                                               report["windows_universal"]["healthy"].get<bool>();
+    report["summary"]["windows_universal_healthy"] =
+        !report["windows_universal"]["applicable"].get<bool>() ||
+        report["windows_universal"]["healthy"].get<bool>();
     report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
                                    report["summary"]["video_healthy"].get<bool>() &&
                                    report["summary"]["cache_healthy"].get<bool>() &&
@@ -632,7 +725,12 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
                        is_video_file(benchmark_request.input_path);
     bool cleanup_output = benchmark_request.output_path.empty();
     if (cleanup_output) {
-        benchmark_request.output_path = make_benchmark_output_path(benchmark_request, video_input);
+        auto output_res = make_benchmark_output_path(benchmark_request, video_input);
+        if (!output_res) {
+            results["error"] = output_res.error().message;
+            return results;
+        }
+        benchmark_request.output_path = *output_res;
     }
 
     std::vector<StageTiming> timings;

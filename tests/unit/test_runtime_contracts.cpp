@@ -14,9 +14,17 @@ TEST_CASE("runtime capabilities expose stable diagnostics", "[unit][runtime]") {
     REQUIRE_FALSE(capabilities.platform.empty());
     REQUIRE(capabilities.cpu_fallback_available);
     REQUIRE(capabilities.supported_backends.size() == devices.size());
-    REQUIRE_FALSE(capabilities.default_video_encoder.empty());
+    if (capabilities.lossless_video_available) {
+        REQUIRE(capabilities.default_video_mode == VideoOutputMode::Lossless);
+    }
+    if (capabilities.lossless_video_available) {
+        REQUIRE_FALSE(capabilities.default_video_container.empty());
+        REQUIRE_FALSE(capabilities.default_video_encoder.empty());
+    }
     auto json = to_json(capabilities);
     REQUIRE(json.contains("mlx_probe_available"));
+    REQUIRE(json.contains("default_video_mode"));
+    REQUIRE(json.contains("lossless_video_available"));
 }
 
 TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {

@@ -19,13 +19,14 @@ import { Button } from "./components/ui/button";
 
 function App() {
   const { refreshInfo, error: engineError, info } = useEngineStore();
-  const { history, loadHistory, clearHistory } = useJobStore();
+  const { history, loadHistory, clearHistory, videoEncodeMode, setVideoEncodeMode, initDefaults } = useJobStore();
   const [activeTab, setActiveTab] = useState("Workflow");
 
   useEffect(() => {
     refreshInfo();
     loadHistory();
-  }, [refreshInfo, loadHistory]);
+    void initDefaults();
+  }, [refreshInfo, loadHistory, initDefaults]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -133,8 +134,26 @@ function App() {
                   </div>
                 </div>
                 <div className="flex bg-zinc-900 p-1 rounded-lg border border-zinc-800">
-                  <button className="px-4 py-1.5 rounded-md text-xs font-bold bg-brand text-white shadow-lg">LOSSLESS</button>
-                  <button className="px-4 py-1.5 rounded-md text-xs font-bold text-muted-foreground hover:text-zinc-100">BALANCED</button>
+                  <button
+                    onClick={() => setVideoEncodeMode("lossless")}
+                    className={`px-4 py-1.5 rounded-md text-xs font-bold ${
+                      videoEncodeMode === "lossless"
+                        ? "bg-brand text-white shadow-lg"
+                        : "text-muted-foreground hover:text-zinc-100"
+                    }`}
+                  >
+                    LOSSLESS
+                  </button>
+                  <button
+                    onClick={() => setVideoEncodeMode("balanced")}
+                    className={`px-4 py-1.5 rounded-md text-xs font-bold ${
+                      videoEncodeMode === "balanced"
+                        ? "bg-brand text-white shadow-lg"
+                        : "text-muted-foreground hover:text-zinc-100"
+                    }`}
+                  >
+                    BALANCED
+                  </button>
                 </div>
               </div>
 
@@ -154,17 +173,49 @@ function App() {
         );
       case "Support":
         return (
-          <div className="max-w-4xl mx-auto space-y-6 text-center py-20">
-            <div className="mx-auto w-16 h-16 rounded-full bg-zinc-900 flex items-center justify-center mb-6">
+          <div className="max-w-4xl mx-auto space-y-8 text-center py-12">
+            <div className="mx-auto w-16 h-16 rounded-full bg-zinc-900 flex items-center justify-center mb-2">
               <HelpCircle className="w-8 h-8 text-brand" />
             </div>
-            <h2 className="text-3xl font-bold">Need assistance?</h2>
-            <p className="text-muted-foreground max-w-md mx-auto text-lg">
-              CorridorKey Runtime is a production engine. For bug reports or feature requests, visit the official repository.
-            </p>
-            <Button variant="secondary" className="mt-8">
-              Open Documentation
-            </Button>
+            <div className="space-y-2">
+              <h2 className="text-3xl font-bold">Community & Support</h2>
+              <p className="text-muted-foreground max-w-md mx-auto">
+                CorridorKey Runtime is an open-source production engine. 
+                Join our community to report bugs, suggest features, or get help.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
+              <div className="p-6 rounded-2xl border bg-card/50 space-y-4 flex flex-col items-center">
+                <div className="font-bold text-sm uppercase tracking-widest text-brand">This Runtime</div>
+                <p className="text-xs text-muted-foreground flex-1">Technical documentation and native engine source code.</p>
+                <Button variant="secondary" size="sm" className="w-full" onClick={() => {
+                  import("@tauri-apps/plugin-opener").then(m => m.openUrl("https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime"));
+                }}>
+                  GitHub Repo
+                </Button>
+              </div>
+
+              <div className="p-6 rounded-2xl border bg-card/50 space-y-4 flex flex-col items-center">
+                <div className="font-bold text-sm uppercase tracking-widest text-brand">Original Project</div>
+                <p className="text-xs text-muted-foreground flex-1">The original CorridorKey project by Corridor Digital.</p>
+                <Button variant="secondary" size="sm" className="w-full" onClick={() => {
+                  import("@tauri-apps/plugin-opener").then(m => m.openUrl("https://github.com/nikopueringer/CorridorKey"));
+                }}>
+                  Source Repo
+                </Button>
+              </div>
+
+              <div className="p-6 rounded-2xl border bg-card/50 space-y-4 flex flex-col items-center">
+                <div className="font-bold text-sm uppercase tracking-widest text-brand">Community</div>
+                <p className="text-xs text-muted-foreground flex-1">Join the discussion and share your results.</p>
+                <Button variant="primary" size="sm" className="w-full" onClick={() => {
+                  import("@tauri-apps/plugin-opener").then(m => m.openUrl("https://discord.com/invite/bHPZvbhS4"));
+                }}>
+                  Join Discord
+                </Button>
+              </div>
+            </div>
           </div>
         );
       default:

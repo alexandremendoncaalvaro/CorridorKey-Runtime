@@ -1,10 +1,10 @@
 #pragma once
 
 #include <corridorkey/api_export.hpp>
-#include <nlohmann/json.hpp>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -128,6 +128,10 @@ class Result<void> {
  * @brief Hardware backends supported by the runtime.
  */
 enum class Backend : std::uint8_t { Auto, CPU, CUDA, TensorRT, CoreML, DirectML, MLX };
+/**
+ * @brief Output encoding policy for video exports.
+ */
+enum class VideoOutputMode : std::uint8_t { Lossless, Balanced };
 
 /**
  * @brief Information about a detected hardware device.
@@ -160,7 +164,11 @@ struct RuntimeCapabilities {
     bool tiling_supported = true;
     bool batching_supported = true;
     std::vector<Backend> supported_backends = {};
+    VideoOutputMode default_video_mode = VideoOutputMode::Lossless;
+    std::string default_video_container = "";
     std::string default_video_encoder = "";
+    bool lossless_video_available = false;
+    std::string lossless_video_unavailable_reason = "";
 };
 
 /**
@@ -345,6 +353,15 @@ struct InferenceParams {
     // Tiling Inference (High-Res support)
     bool enable_tiling = false;
     int tile_padding = 32;  // Overlap in pixels to blend seams
+};
+
+/**
+ * @brief Parameters to control video output encoding policy.
+ */
+struct VideoOutputOptions {
+    VideoOutputMode mode = VideoOutputMode::Lossless;
+    bool allow_lossy_fallback = false;
+    std::string requested_container = "";
 };
 
 /**

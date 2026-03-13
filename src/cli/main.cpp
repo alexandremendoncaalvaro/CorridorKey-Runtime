@@ -20,6 +20,7 @@
 #include "../app/runtime_contracts.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/windows_rtx_probe.hpp"
+#include "../frame_io/video_io.hpp"
 #include "device_selection.hpp"
 #include "process_paths.hpp"
 
@@ -153,6 +154,32 @@ std::optional<std::string> selected_preset_selector(const cxxopts::ParseResult& 
     return std::nullopt;
 }
 
+std::string normalized_lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+Result<VideoOutputOptions> resolve_video_output_options(const cxxopts::ParseResult& result) {
+    VideoOutputOptions options;
+    if (!result.count("video-encode")) {
+        return options;
+    }
+
+    std::string mode = normalized_lower(result["video-encode"].as<std::string>());
+    if (mode == "lossless") {
+        options.mode = VideoOutputMode::Lossless;
+        return options;
+    }
+    if (mode == "balanced") {
+        options.mode = VideoOutputMode::Balanced;
+        return options;
+    }
+
+    return Unexpected<Error>{Error{ErrorCode::InvalidParameters,
+                                   "Invalid --video-encode value. Use 'lossless' or 'balanced'."}};
+}
+
 InferenceParams build_inference_params(const cxxopts::ParseResult& result,
                                        const std::optional<InferenceParams>& base_params, int argc,
                                        char* argv[]) {
@@ -187,7 +214,8 @@ bool is_video_path(const std::filesystem::path& path) {
     return extension == ".mp4" || extension == ".mov" || extension == ".avi" || extension == ".mkv";
 }
 
-std::filesystem::path default_output_path_for_input(const std::filesystem::path& input_path) {
+Result<std::filesystem::path> default_output_path_for_input(
+    const std::filesystem::path& input_path, const VideoOutputOptions& output_options) {
     std::filesystem::path outputs_root = "outputs";
 
     if (std::filesystem::is_directory(input_path)) {
@@ -199,8 +227,13 @@ std::filesystem::path default_output_path_for_input(const std::filesystem::path&
     }
 
     if (is_video_path(input_path)) {
-        return outputs_root /
-               (input_path.stem().string() + "_out" + input_path.extension().string());
+        auto reader_res = VideoReader::open(input_path);
+        if (!reader_res) {
+            return Unexpected(reader_res.error());
+        }
+        VideoFrameFormat input_format = (*reader_res)->format();
+        auto base_path = outputs_root / (input_path.stem().string() + "_out");
+        return resolve_video_output_path(base_path, output_options, input_format);
     }
 
     return outputs_root / input_path.stem();
@@ -306,7 +339,7 @@ void print_info() {
     std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n";
     std::cout << "------------------------------------------\n";
     std::cout << "Detected Hardware Devices:\n";
-    
+
 #if defined(_WIN32)
     auto gpus = corridorkey::core::list_windows_gpus();
     if (gpus.empty()) {
@@ -336,6 +369,10 @@ void print_info() {
               << " - Multi-GPU (Universal): yes\n"
               << " - TensorRT RTX track: yes\n"
               << " - CPU fallback: yes\n"
+              << " - Default video mode: "
+              << info["capabilities"]["default_video_mode"].get<std::string>() << "\n"
+              << " - Default video container: "
+              << info["capabilities"]["default_video_container"].get<std::string>() << "\n"
               << " - Default video encoder: "
               << info["capabilities"]["default_video_encoder"].get<std::string>() << "\n";
 }
@@ -362,6 +399,8 @@ int main(int argc, char* argv[]) {
         cxxopts::value<int>()->default_value("0"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
+        "video-encode", "Video output encoding (lossless, balanced)",
+        cxxopts::value<std::string>()->default_value("lossless"))(
         "variant", "ONNX model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",
         cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
@@ -568,6 +607,11 @@ int main(int argc, char* argv[]) {
             auto devices = list_devices();
             std::string device_str = result["device"].as<std::string>();
             DeviceInfo device = cli::select_device(devices, device_str);
+            auto video_output_options_res = resolve_video_output_options(result);
+            if (!video_output_options_res) {
+                std::cerr << "Error: " << video_output_options_res.error().message << std::endl;
+                return 1;
+            }
 
             std::filesystem::path input_path =
                 result.count("input") ? std::filesystem::path(result["input"].as<std::string>())
@@ -583,6 +627,7 @@ int main(int argc, char* argv[]) {
             benchmark_request.model_path = resolved->model_path;
             benchmark_request.device = device;
             benchmark_request.params = resolved->params;
+            benchmark_request.video_output = *video_output_options_res;
             if (!input_path.empty()) {
                 benchmark_request.input_path = input_path;
             }
@@ -740,13 +785,24 @@ int main(int argc, char* argv[]) {
             auto devices = list_devices();
             std::string device_str = result["device"].as<std::string>();
             DeviceInfo device = cli::select_device(devices, device_str);
+            auto video_output_options_res = resolve_video_output_options(result);
+            if (!video_output_options_res) {
+                std::cerr << "Error: " << video_output_options_res.error().message << std::endl;
+                return 1;
+            }
             auto resolved = resolve_execution_defaults(result, argc, argv, device, true);
             if (!resolved) {
                 std::cerr << "Error: " << resolved.error().message << std::endl;
                 return 1;
             }
             if (output_path.empty()) {
-                output_path = default_output_path_for_input(input_path);
+                auto default_output =
+                    default_output_path_for_input(input_path, *video_output_options_res);
+                if (!default_output) {
+                    std::cerr << "Error: " << default_output.error().message << std::endl;
+                    return 1;
+                }
+                output_path = *default_output;
                 resolved->default_output_selected = true;
             }
 
@@ -757,6 +813,7 @@ int main(int argc, char* argv[]) {
             req.output_path = output_path;
             req.model_path = resolved->model_path;
             req.params = resolved->params;
+            req.video_output = *video_output_options_res;
             req.device = device;
 
             if (!use_json) {
@@ -767,6 +824,12 @@ int main(int argc, char* argv[]) {
                     std::cout << " [auto]";
                 }
                 std::cout << "\n";
+                if (is_video_path(req.input_path)) {
+                    std::cout << " - Video encode: "
+                              << (req.video_output.mode == VideoOutputMode::Lossless ? "lossless"
+                                                                                     : "balanced")
+                              << "\n";
+                }
                 if (resolved->preset.has_value()) {
                     std::cout << " - Preset: " << resolved->preset->name << "\n";
                 }

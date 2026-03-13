@@ -70,9 +70,10 @@ export function ProcessFlow() {
 
   const handleSelectOutput = async () => {
     const selected = await save({
+      defaultPath: outputPath || undefined,
       filters: [{
         name: 'Video',
-        extensions: ['mp4']
+        extensions: ['mov', 'mkv', 'avi', 'mp4']
       }]
     });
     if (selected) {

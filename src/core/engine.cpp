@@ -295,6 +295,18 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
                                    const std::filesystem::path& output_video,
                                    const InferenceParams& params, ProgressCallback on_progress,
                                    StageTimingCallback on_stage) {
+    VideoOutputOptions output_options;
+    output_options.mode = VideoOutputMode::Lossless;
+    return process_video(input_video, hint_video, output_video, params, output_options, on_progress,
+                         on_stage);
+}
+
+Result<void> Engine::process_video(const std::filesystem::path& input_video,
+                                   const std::filesystem::path& hint_video,
+                                   const std::filesystem::path& output_video,
+                                   const InferenceParams& params,
+                                   const VideoOutputOptions& output_options,
+                                   ProgressCallback on_progress, StageTimingCallback on_stage) {
     if (!m_impl->session) {
         return Unexpected(Error{ErrorCode::InferenceFailed, "Engine not initialized"});
     }
@@ -322,7 +334,8 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
     int out_h = reader_rgb->height();
 
     auto writer_res = common::measure_stage(on_stage, "video_open_writer", [&]() {
-        return VideoWriter::open(output_video, out_w, out_h, reader_rgb->fps());
+        return VideoWriter::open(output_video, out_w, out_h, reader_rgb->fps(),
+                                 reader_rgb->format(), output_options);
     });
     if (!writer_res) return Unexpected(writer_res.error());
     auto writer = std::move(*writer_res);
@@ -336,6 +349,7 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         std::vector<ImageBuffer> hint_bufs;
         std::vector<Image> rgb_views;
         std::vector<Image> hint_views;
+        std::vector<std::optional<int64_t>> pts_us;
     };
 
     auto fetch_batch = [&](int size) -> Result<Batch> {
@@ -343,27 +357,32 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         for (int i = 0; i < size; ++i) {
             auto rgb_res = common::measure_stage(
                 on_stage, "video_decode_frame", [&]() { return reader_rgb->read_next_frame(); }, 1);
-            if (!rgb_res || rgb_res->view().empty()) break;
+            if (!rgb_res || rgb_res->buffer.view().empty()) break;
 
+            VideoFrame rgb_frame = std::move(*rgb_res);
             ImageBuffer hint_buf;
             if (has_hint_video) {
                 auto hint_res = common::measure_stage(
                     on_stage, "video_decode_hint", [&]() { return reader_hint->read_next_frame(); },
                     1);
-                if (!hint_res || hint_res->view().empty()) break;
-                hint_buf = std::move(*hint_res);
+                if (!hint_res || hint_res->buffer.view().empty()) break;
+                hint_buf = std::move(hint_res->buffer);
             } else {
-                hint_buf = ImageBuffer(rgb_res->view().width, rgb_res->view().height, 1);
-                common::measure_stage(
-                    on_stage, "video_generate_hint",
-                    [&]() { ColorUtils::generate_rough_matte(rgb_res->view(), hint_buf.view()); },
-                    1);
+                hint_buf = ImageBuffer(rgb_frame.buffer.view().width,
+                                       rgb_frame.buffer.view().height, 1);
+                common::measure_stage(on_stage, "video_generate_hint",
+                                      [&]() {
+                                          ColorUtils::generate_rough_matte(
+                                              rgb_frame.buffer.view(), hint_buf.view());
+                                      },
+                                      1);
             }
 
-            b.rgb_views.push_back(rgb_res->view());
+            b.rgb_views.push_back(rgb_frame.buffer.view());
             b.hint_views.push_back(hint_buf.view());
-            b.rgb_bufs.push_back(std::move(*rgb_res));
+            b.rgb_bufs.push_back(std::move(rgb_frame.buffer));
             b.hint_bufs.push_back(std::move(hint_buf));
+            b.pts_us.push_back(rgb_frame.pts_us);
         }
         return b;
     };
@@ -422,14 +441,20 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         }
 
         auto frames_to_encode = std::move(*results);
+        auto pts_to_encode = std::move(current_batch.pts_us);
         has_pending_encode = true;
         pending_encode = std::async(
             std::launch::async,
-            [frames = std::move(frames_to_encode), &writer, on_stage]() mutable -> Result<void> {
-                for (auto& res : frames) {
+            [frames = std::move(frames_to_encode), pts = std::move(pts_to_encode), &writer,
+             on_stage]() mutable -> Result<void> {
+                for (size_t index = 0; index < frames.size(); ++index) {
+                    auto pts_value = index < pts.size() ? pts[index] : std::nullopt;
                     auto write_res = common::measure_stage(
                         on_stage, "video_encode_frame",
-                        [&]() { return writer->write_frame(res.composite.view()); }, 1);
+                        [&]() {
+                            return writer->write_frame(frames[index].composite.view(), pts_value);
+                        },
+                        1);
                     if (!write_res) {
                         return Unexpected(write_res.error());
                     }
@@ -445,7 +470,12 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         return Unexpected(final_encode_res.error());
     }
 
-    common::measure_stage(on_stage, "video_flush_writer", [&]() { writer.reset(); });
+    auto flush_res =
+        common::measure_stage(on_stage, "video_flush_writer", [&]() { return writer->finalize(); });
+    if (!flush_res) {
+        return Unexpected(flush_res.error());
+    }
+    writer.reset();
 
     if (on_progress) {
         on_progress(1.0f, "Done");

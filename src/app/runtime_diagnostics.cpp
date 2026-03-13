@@ -46,6 +46,16 @@ std::string trim_copy(std::string value) {
     return value;
 }
 
+std::string video_output_mode_to_string(VideoOutputMode mode) {
+    switch (mode) {
+        case VideoOutputMode::Lossless:
+            return "lossless";
+        case VideoOutputMode::Balanced:
+            return "balanced";
+    }
+    return "lossless";
+}
+
 bool is_metadata_sidecar(const std::filesystem::path& path) {
     auto filename = path.filename().string();
     return filename == ".DS_Store" || filename.rfind("._", 0) == 0;
@@ -473,18 +483,27 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
 }
 
 nlohmann::json inspect_video_stack() {
-    auto encoders = available_video_encoders_for_path("doctor_output.mp4");
+    VideoFrameFormat input_format;
+    auto support = inspect_video_output_support(input_format);
+    std::string default_container =
+        support.default_container.empty() ? ".mov" : support.default_container;
+    auto encoders = available_video_encoders_for_path("doctor_output" + default_container);
+    auto mp4_encoders = available_video_encoders_for_path("doctor_output.mp4");
     bool portable_h264_available =
-        std::any_of(encoders.begin(), encoders.end(), [](const std::string& encoder) {
+        std::any_of(mp4_encoders.begin(), mp4_encoders.end(), [](const std::string& encoder) {
             return encoder == "h264_videotoolbox" || encoder == "libx264" || encoder == "h264";
         });
 
     nlohmann::json json;
-    json["default_encoder"] = default_video_encoder_for_path("doctor_output.mp4");
+    json["default_mode"] = video_output_mode_to_string(support.default_mode);
+    json["default_container"] = support.default_container;
+    json["default_encoder"] = support.default_encoder;
     json["supported_encoders"] = encoders;
     json["videotoolbox_available"] = is_videotoolbox_available();
     json["portable_h264_available"] = portable_h264_available;
-    json["healthy"] = portable_h264_available;
+    json["lossless_available"] = support.lossless_available;
+    json["lossless_unavailable_reason"] = support.lossless_unavailable_reason;
+    json["healthy"] = support.lossless_available;
     return json;
 }
 
@@ -742,7 +761,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     auto gpus = core::list_windows_gpus();
     json["gpu_detected"] = !gpus.empty();
     json["gpus"] = nlohmann::json::array();
-    
+
     bool any_gpu_healthy = false;
     for (const auto& gpu : gpus) {
         nlohmann::json gpu_json;
@@ -817,7 +836,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     }
 
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
-    
+
     bool backend_ok = json.value("backend_integrated", false);
     bool cache_ok = json.value("runtime_cache_ready", false);
     bool models_ok = json.value("packaged_models_ready", false);
