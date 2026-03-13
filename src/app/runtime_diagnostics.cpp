@@ -739,22 +739,41 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 #if defined(_WIN32)
     json["applicable"] = true;
 
-    auto gpu = core::probe_windows_rtx_gpu();
-    json["gpu_detected"] = gpu.has_value();
-    if (gpu.has_value()) {
-        json["gpu_name"] = gpu->adapter_name;
-        json["gpu_memory_mb"] = gpu->dedicated_memory_mb;
-        json["driver_query_available"] = gpu->driver_query_available;
-        json["driver_version"] = gpu->driver_version;
-        json["provider_available"] = gpu->provider_available;
-        json["ampere_or_newer"] = gpu->ampere_or_newer;
+    auto gpus = core::list_windows_gpus();
+    json["gpu_detected"] = !gpus.empty();
+    json["gpus"] = nlohmann::json::array();
+    
+    bool any_gpu_healthy = false;
+    for (const auto& gpu : gpus) {
+        nlohmann::json gpu_json;
+        gpu_json["name"] = gpu.adapter_name;
+        gpu_json["memory_mb"] = gpu.dedicated_memory_mb;
+        gpu_json["is_rtx"] = gpu.is_rtx;
+        gpu_json["tensorrt_available"] = gpu.tensorrt_rtx_available;
+        gpu_json["cuda_available"] = gpu.cuda_available;
+        gpu_json["directml_available"] = gpu.directml_available;
+        gpu_json["driver_version"] = gpu.driver_version;
+        json["gpus"].push_back(gpu_json);
+
+        if (gpu.tensorrt_rtx_available || gpu.cuda_available || gpu.directml_available) {
+            any_gpu_healthy = true;
+        }
+
+        // Legacy fields for backward compatibility with existing UI/CLI expectations
+        if (gpu.tensorrt_rtx_available && json["gpu_name"] == "") {
+            json["gpu_name"] = gpu.adapter_name;
+            json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
+            json["provider_available"] = true;
+            json["ampere_or_newer"] = gpu.is_rtx;
+            json["driver_version"] = gpu.driver_version;
+        }
     }
 
     auto runtime_cache_dir = common::tensorrt_rtx_runtime_cache_root();
     json["runtime_cache_dir"] =
         runtime_cache_dir.has_value() ? runtime_cache_dir->string() : std::string();
     json["runtime_cache_ready"] = runtime_cache_dir.has_value();
-    json["backend_integrated"] = gpu.has_value() && gpu->provider_available && gpu->ampere_or_newer;
+    json["backend_integrated"] = any_gpu_healthy;
 
     bool packaged_models_ready = true;
     bool any_packaged_model_found = false;
@@ -798,9 +817,12 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     }
 
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
-    json["healthy"] = json["backend_integrated"].get<bool>() &&
-                      json["runtime_cache_ready"].get<bool>() &&
-                      json["packaged_models_ready"].get<bool>();
+    
+    bool backend_ok = json.value("backend_integrated", false);
+    bool cache_ok = json.value("runtime_cache_ready", false);
+    bool models_ok = json.value("packaged_models_ready", false);
+
+    json["healthy"] = backend_ok && cache_ok && models_ok;
 #endif
 
     return json;
@@ -852,7 +874,7 @@ nlohmann::json inspect_operational_health(const std::filesystem::path& models_di
     json["cache"] = inspect_cache();
     json["coreml"] = inspect_coreml_execution_provider(models_dir);
     json["mlx"] = inspect_mlx_model_pack(models_dir);
-    json["windows_rtx"] = inspect_windows_rtx_track(models_dir);
+    json["windows_universal"] = inspect_windows_rtx_track(models_dir);
     return json;
 }
 

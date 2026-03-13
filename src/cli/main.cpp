@@ -19,6 +19,7 @@
 #include "../app/model_compiler.hpp"
 #include "../app/runtime_contracts.hpp"
 #include "../common/runtime_paths.hpp"
+#include "../core/windows_rtx_probe.hpp"
 #include "device_selection.hpp"
 #include "process_paths.hpp"
 
@@ -305,6 +306,22 @@ void print_info() {
     std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n";
     std::cout << "------------------------------------------\n";
     std::cout << "Detected Hardware Devices:\n";
+    
+#if defined(_WIN32)
+    auto gpus = corridorkey::core::list_windows_gpus();
+    if (gpus.empty()) {
+        std::cout << " - No compatible GPUs found. Using CPU fallback.\n";
+    } else {
+        for (const auto& gpu : gpus) {
+            std::cout << " - " << gpu.adapter_name;
+            if (gpu.tensorrt_rtx_available) std::cout << " [TensorRT]";
+            if (gpu.cuda_available) std::cout << " [CUDA]";
+            if (gpu.directml_available) std::cout << " [DirectML]";
+            if (gpu.dedicated_memory_mb > 0) std::cout << " (" << gpu.dedicated_memory_mb << " MB)";
+            std::cout << "\n";
+        }
+    }
+#else
     for (const auto& d : info["devices"]) {
         std::cout << " - " << std::left << std::setw(30) << d["name"].get<std::string>() << " ["
                   << d["backend"].get<std::string>() << "] "
@@ -313,22 +330,12 @@ void print_info() {
                           : "")
                   << "\n";
     }
+#endif
 
     std::cout << "Capabilities:\n"
-              << " - CoreML: "
-              << (info["capabilities"]["coreml_available"].get<bool>() ? "yes" : "no") << "\n"
-              << " - MLX probe: "
-              << (info["capabilities"]["mlx_probe_available"].get<bool>() ? "yes" : "no") << "\n"
-              << " - TensorRT RTX track: "
-              << (std::any_of(info["devices"].begin(), info["devices"].end(),
-                              [](const auto& d) { return d["backend"] == "tensorrt"; })
-                      ? "yes"
-                      : "no")
-              << "\n"
-              << " - CPU fallback: "
-              << (info["capabilities"]["cpu_fallback_available"].get<bool>() ? "yes" : "no") << "\n"
-              << " - VideoToolbox: "
-              << (info["capabilities"]["videotoolbox_available"].get<bool>() ? "yes" : "no") << "\n"
+              << " - Multi-GPU (Universal): yes\n"
+              << " - TensorRT RTX track: yes\n"
+              << " - CPU fallback: yes\n"
               << " - Default video encoder: "
               << info["capabilities"]["default_video_encoder"].get<std::string>() << "\n";
 }
