@@ -1,12 +1,11 @@
 import { useEffect } from "react";
 import { Sidebar } from "./components/layout/sidebar";
 import { TopBar } from "./components/layout/topbar";
-import { Button } from "./components/ui/button";
+import { ProcessFlow } from "./components/workflow/ProcessFlow";
 import { useEngineStore } from "./lib/store";
-import { UploadCloud, Zap, ShieldCheck, Play } from "lucide-react";
 
 function App() {
-  const { refreshInfo, error } = useEngineStore();
+  const { refreshInfo, error: engineError } = useEngineStore();
 
   useEffect(() => {
     refreshInfo();
@@ -20,9 +19,9 @@ function App() {
         <TopBar />
         
         <div className="flex-1 overflow-y-auto p-8 lg:p-12">
-          {error && (
-            <div className="mb-8 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-              <strong>Engine Error:</strong> {error}
+          {engineError && (
+            <div className="mb-8 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm animate-in shake-1 duration-500">
+              <strong>Engine Error:</strong> {engineError}
             </div>
           )}
           
@@ -32,45 +31,15 @@ function App() {
             <div className="space-y-4">
               <h1 className="text-4xl font-bold tracking-tight lg:text-5xl">
                 Neural Keying <br />
-                <span className="text-muted-foreground">Redefined.</span>
+                <span className="text-muted-foreground font-medium">Native Runtime.</span>
               </h1>
               <p className="text-lg text-muted-foreground max-w-xl">
-                Studio-grade green screen removal powered by high-performance native inference.
+                The fastest way to run CorridorKey locally on Windows and Mac.
               </p>
             </div>
 
-            {/* Drop Zone Card */}
-            <div className="group relative rounded-2xl border-2 border-dashed border-muted-foreground/20 bg-accent/5 px-12 py-20 transition-all hover:border-brand/50 hover:bg-brand/5 flex flex-col items-center justify-center text-center space-y-4">
-              <div className="p-4 rounded-full bg-background shadow-apple transition-transform group-hover:scale-110">
-                <UploadCloud className="w-8 h-8 text-brand" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-xl font-semibold">Drop your footage</h3>
-                <p className="text-sm text-muted-foreground">
-                  Support for MP4, MOV, and high-bitrate EXR sequences.
-                </p>
-              </div>
-              <Button variant="secondary" className="mt-4">
-                Select Files
-              </Button>
-            </div>
-
-            {/* Quick Actions / Presets */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {[
-                { title: "Balanced", desc: "Optimal speed and quality for 1080p", icon: Zap },
-                { title: "High Quality", desc: "Maximum precision at 4K resolution", icon: ShieldCheck },
-                { title: "Preview", desc: "Fast draft for timing and layout", icon: Play }
-              ].map((item, i) => (
-                <div key={i} className="p-6 rounded-xl border bg-card/50 hover:bg-card transition-colors cursor-pointer space-y-3">
-                  <item.icon className="w-5 h-5 text-brand" />
-                  <div className="space-y-1">
-                    <h4 className="font-semibold">{item.title}</h4>
-                    <p className="text-xs text-muted-foreground">{item.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {/* Main Workflow */}
+            <ProcessFlow />
 
           </div>
         </div>
@@ -78,8 +47,5 @@ function App() {
     </div>
   );
 }
-
-// Re-using icon from topbar for consistency
-import { ShieldCheck, Play } from "lucide-react";
 
 export default App;
