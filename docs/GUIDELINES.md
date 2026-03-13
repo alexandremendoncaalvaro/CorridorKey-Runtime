@@ -57,7 +57,21 @@ rule makes the code worse, document why it is being broken.
 | Limit instance variables | Prefer small structs. When a class has > 5 members, consider splitting. | Code review |
 | No getters/setters | Prefer immutable value types or methods that express behavior. Trivial POD structs with public members are fine. | Code review |
 
-### 1.4 Code Standards
+### 1.4 Integration as a Structural Goal
+
+The runtime is designed as a reusable foundation for multiple surfaces (CLI,
+GUI, sidecar). Logic must reside in the library core, never in the frontend
+wrapper. All features must be accessible via the library API.
+
+### 1.5 Commitment to Reliability (Central Tradeoff)
+
+This project explicitly privileges **operational predictability, portable
+packaging, and stable integration** over the raw speed of research
+experimentation. Engineering decisions prioritize a robust, diagnostic-heavy
+runtime that "just works" for the end user, even when this requires more
+disciplined development cycles and higher engineering overhead.
+
+### 1.6 Code Standards
 
 - **Const correctness:** Everything that can be const, is const.
 - **RAII everywhere:** No raw `new`/`delete`. Use `std::unique_ptr`,
