@@ -185,7 +185,10 @@ throughput of the CPU baseline at the same synthetic resolution.
 
 ### Prerequisites
 
-- C++20 compiler (GCC 12+, Clang 16+, MSVC 17.4+)
+- **C++20 compiler**:
+  - Windows: [Visual Studio 2022](https://visualstudio.microsoft.com/vs/community/) (v17.4+) with "Desktop development with C++"
+  - macOS: Apple Clang 15+ (Xcode 15+)
+  - Linux: GCC 12+ or Clang 16+
 - [CMake 3.28+](https://cmake.org/download/)
 - [Ninja](https://ninja-build.org/) build system
 - [vcpkg](https://github.com/microsoft/vcpkg) package manager

@@ -19,30 +19,56 @@ changes.
 
 ### First-Time Setup
 
+#### 1. Clone
 ```bash
-# Clone
 git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
+```
 
+#### 2. Configure Environment
+
+<details>
+<summary>Linux / macOS</summary>
+
+```bash
 # Install vcpkg (if you don't have it already)
 git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
-~/vcpkg/bootstrap-vcpkg.sh   # Linux/macOS
-# ~/vcpkg/bootstrap-vcpkg.bat  # Windows
+~/vcpkg/bootstrap-vcpkg.sh
 
 # Set VCPKG_ROOT — required by CMakePresets.json
-# Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.) for persistence
 export VCPKG_ROOT="$HOME/vcpkg"
-# On Windows: set VCPKG_ROOT=%USERPROFILE%\vcpkg (System Environment Variables)
 
-# Install git hooks (mandatory)
+# Install git hooks
 ./scripts/setup_gates.sh
 
-# Build (debug mode for development)
+# Build (debug mode)
 cmake --preset debug
 cmake --build build/debug --parallel
+```
 
-# Run tests
-ctest --test-dir build/debug --label-regex unit --output-on-failure
+</details>
+
+<details>
+<summary>Windows (RTX)</summary>
+
+```powershell
+# Set VCPKG_ROOT — required by CMakePresets.json
+$env:VCPKG_ROOT = "C:\tools\vcpkg" # Adjust to your path
+
+# Run the automated setup script
+.\scripts\setup_windows.ps1
+
+# Build (release mode for RTX performance)
+cmake --build --preset release
+```
+
+</details>
+
+#### 3. Run Tests
+
+```bash
+# Run unit tests
+ctest --preset unit
 ```
 
 ### Build Presets
