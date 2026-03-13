@@ -31,9 +31,9 @@ if (Test-Path $universalOrt) { Copy-Item (Join-Path $universalOrt "*.dll") $dist
 if (Test-Path $cudaBin) { Copy-Item (Join-Path $cudaBin "*.dll") $distDir -Force }
 
 # 4. Copy GUI (Main Application)
-Write-Host "[3/4] Copying GUI Frontend as 'CorridorKey.exe'..."
+Write-Host "[3/4] Copying GUI Frontend as 'CorridorKey_v0.1.5.exe'..."
 if (Test-Path $guiBin) {
-    Copy-Item $guiBin (Join-Path $distDir "CorridorKey.exe") -Force
+    Copy-Item $guiBin (Join-Path $distDir "CorridorKey_v0.1.5.exe") -Force
 } else {
     Write-Error "GUI Binary not found. Run 'pnpm tauri build' in src/gui first."
 }
@@ -47,4 +47,4 @@ foreach ($m in $targetModels) {
 }
 
 Write-Host "`n--- Bundle Ready at: $distDir ---" -ForegroundColor Green
-Write-Host "Collision-free version. Double-click CorridorKey.exe to start."
+Write-Host "Collision-free version. Double-click CorridorKey_v0.1.5.exe to start."
