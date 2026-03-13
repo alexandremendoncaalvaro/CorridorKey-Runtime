@@ -68,25 +68,47 @@ DeviceInfo auto_detect() {
         device.available_memory_mb = static_cast<int64_t>(mem / (1024 * 1024));
     }
 #elif defined(_WIN32)
+    auto gpus = core::list_windows_gpus();
+    
+    // Tier 1: NVIDIA RTX (Best Performance)
+    for (const auto& gpu : gpus) {
+        if (gpu.tensorrt_rtx_available) {
+            device.name = gpu.adapter_name;
+            device.backend = Backend::TensorRT;
+            device.available_memory_mb = gpu.dedicated_memory_mb;
+            return device;
+        }
+    }
+
+    // Tier 2: NVIDIA GTX (CUDA Fallback)
+    for (const auto& gpu : gpus) {
+        if (gpu.cuda_available) {
+            device.name = gpu.adapter_name + " (CUDA)";
+            device.backend = Backend::CUDA;
+            device.available_memory_mb = gpu.dedicated_memory_mb;
+            return device;
+        }
+    }
+
+    // Tier 3: AMD / Universal (DirectML Fallback)
+    for (const auto& gpu : gpus) {
+        if (gpu.directml_available) {
+            device.name = gpu.adapter_name + " (DirectML)";
+            device.backend = Backend::DirectML;
+            device.available_memory_mb = gpu.dedicated_memory_mb;
+            return device;
+        }
+    }
+
+    // Last Resort: CPU
     MEMORYSTATUSEX status;
     status.dwLength = sizeof(status);
     GlobalMemoryStatusEx(&status);
-
-    auto windows_rtx_gpu = core::probe_windows_rtx_gpu();
-    if (windows_rtx_gpu.has_value() && windows_rtx_gpu->ampere_or_newer &&
-        windows_rtx_gpu->provider_available) {
-        device.name = windows_rtx_gpu->adapter_name;
-        device.backend = Backend::TensorRT;
-        device.available_memory_mb = windows_rtx_gpu->dedicated_memory_mb;
-        return device;
-    }
-
     device.name = "Windows CPU Baseline";
     device.backend = Backend::CPU;
     device.available_memory_mb = static_cast<int64_t>(status.ullTotalPhys / (1024 * 1024));
 #else
     device.name = "Linux/Generic Device";
-    // Check for NVIDIA via a lightweight check (simplified for now)
     device.backend = Backend::CPU;
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);
@@ -98,33 +120,32 @@ DeviceInfo auto_detect() {
 
 std::vector<DeviceInfo> list_devices() {
     std::vector<DeviceInfo> devices;
-    DeviceInfo detected = auto_detect();
 #if defined(__APPLE__)
+    DeviceInfo detected = auto_detect();
     if (detect_apple_silicon() && core::mlx_probe_available()) {
         devices.push_back({"Apple Silicon MLX", detected.available_memory_mb, Backend::MLX});
     }
-
     devices.push_back({"Generic CPU", detected.available_memory_mb, Backend::CPU});
-
     if (detected.backend == Backend::CoreML) {
         devices.push_back(detected);
     }
 #elif defined(_WIN32)
-    auto windows_rtx_gpu = core::probe_windows_rtx_gpu();
-    if (windows_rtx_gpu.has_value() && windows_rtx_gpu->ampere_or_newer &&
-        windows_rtx_gpu->provider_available) {
-        devices.push_back({windows_rtx_gpu->adapter_name, windows_rtx_gpu->dedicated_memory_mb,
-                           Backend::TensorRT});
+    auto gpus = core::list_windows_gpus();
+    for (const auto& gpu : gpus) {
+        if (gpu.tensorrt_rtx_available) {
+            devices.push_back({gpu.adapter_name + " (TensorRT)", gpu.dedicated_memory_mb, Backend::TensorRT});
+        }
+        if (gpu.cuda_available) {
+            devices.push_back({gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb, Backend::CUDA});
+        }
+        if (gpu.directml_available) {
+            devices.push_back({gpu.adapter_name + " (DirectML)", gpu.dedicated_memory_mb, Backend::DirectML});
+        }
     }
-
     devices.push_back({"Generic CPU", 0, Backend::CPU});
 #else
-    devices.push_back(detected);
-    if (detected.backend != Backend::CPU) {
-        devices.push_back({"Generic CPU", detected.available_memory_mb, Backend::CPU});
-    }
+    devices.push_back(auto_detect());
 #endif
-
     return devices;
 }
 

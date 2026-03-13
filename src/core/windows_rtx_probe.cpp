@@ -28,6 +28,8 @@ namespace {
 #if defined(_WIN32)
 
 constexpr unsigned int kNvidiaVendorId = 0x10DE;
+constexpr unsigned int kAmdVendorId = 0x1002;
+constexpr unsigned int kIntelVendorId = 0x8086;
 
 std::string trim_copy(std::string value) {
     auto is_space = [](unsigned char ch) { return std::isspace(ch) != 0; };
@@ -63,32 +65,8 @@ std::string utf8_from_wide(const std::wstring& wide) {
     return utf8;
 }
 
-bool is_ampere_or_newer_name(const std::string& adapter_name) {
-    auto upper = upper_copy(adapter_name);
-    auto rtx_pos = upper.find("RTX");
-    if (rtx_pos == std::string::npos) {
-        return false;
-    }
-
-    auto after_rtx = upper.substr(rtx_pos + 3);
-    if (after_rtx.find('A') != std::string::npos) {
-        return true;
-    }
-
-    int number = 0;
-    bool parsing = false;
-    for (char ch : after_rtx) {
-        if (std::isdigit(static_cast<unsigned char>(ch)) != 0) {
-            parsing = true;
-            number = number * 10 + (ch - '0');
-            continue;
-        }
-        if (parsing) {
-            break;
-        }
-    }
-
-    return parsing && number >= 3000;
+bool has_rtx_branding(const std::string& adapter_name) {
+    return upper_copy(adapter_name).find("RTX") != std::string::npos;
 }
 
 std::optional<std::string> query_driver_version_for_gpu(const std::string& adapter_name) {
@@ -119,30 +97,55 @@ std::optional<std::string> query_driver_version_for_gpu(const std::string& adapt
     return version;
 }
 
-#endif
-
-}  // namespace
-
-bool tensorrt_rtx_provider_available() {
+bool provider_available(const std::string& provider_name) {
     try {
         auto providers = Ort::GetAvailableProviders();
-        return std::find(providers.begin(), providers.end(), "NvTensorRTRTXExecutionProvider") !=
-               providers.end();
+        return std::find(providers.begin(), providers.end(), provider_name) != providers.end();
     } catch (...) {
         return false;
     }
 }
 
-std::optional<WindowsRtxGpuInfo> probe_windows_rtx_gpu() {
-#if !defined(_WIN32)
-    return std::nullopt;
+#endif
+
+}  // namespace
+
+bool tensorrt_rtx_provider_available() {
+#if defined(_WIN32)
+    return provider_available("NvTensorRTRTXExecutionProvider");
 #else
+    return false;
+#endif
+}
+
+bool cuda_provider_available() {
+#if defined(_WIN32)
+    return provider_available("CUDAExecutionProvider");
+#else
+    return false;
+#endif
+}
+
+bool directml_provider_available() {
+#if defined(_WIN32)
+    return provider_available("DML") || provider_available("DirectML");
+#else
+    return false;
+#endif
+}
+
+std::vector<WindowsGpuInfo> list_windows_gpus() {
+    std::vector<WindowsGpuInfo> gpus;
+#if defined(_WIN32)
     Microsoft::WRL::ComPtr<IDXGIFactory6> factory;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
-        return std::nullopt;
+        return gpus;
     }
 
-    std::optional<WindowsRtxGpuInfo> best_gpu = std::nullopt;
+    bool trt_available = tensorrt_rtx_provider_available();
+    bool cuda_available = cuda_provider_available();
+    bool dml_available = directml_provider_available();
+
     for (UINT adapter_index = 0;; ++adapter_index) {
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
         if (factory->EnumAdapters1(adapter_index, &adapter) == DXGI_ERROR_NOT_FOUND) {
@@ -156,39 +159,31 @@ std::optional<WindowsRtxGpuInfo> probe_windows_rtx_gpu() {
         if ((description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0) {
             continue;
         }
-        if (description.VendorId != kNvidiaVendorId) {
-            continue;
-        }
 
-        auto adapter_name = trim_copy(utf8_from_wide(description.Description));
-        if (upper_copy(adapter_name).find("RTX") == std::string::npos) {
-            continue;
-        }
-
-        WindowsRtxGpuInfo candidate;
-        candidate.adapter_name = adapter_name;
-        candidate.dedicated_memory_mb =
+        WindowsGpuInfo info;
+        info.adapter_name = trim_copy(utf8_from_wide(description.Description));
+        info.dedicated_memory_mb =
             static_cast<int64_t>(description.DedicatedVideoMemory / (1024ULL * 1024ULL));
-        candidate.ampere_or_newer = is_ampere_or_newer_name(adapter_name);
+        info.vendor_id = description.VendorId;
+        info.is_rtx = has_rtx_branding(info.adapter_name);
 
-        auto driver_version = query_driver_version_for_gpu(adapter_name);
-        if (driver_version.has_value()) {
-            candidate.driver_query_available = true;
-            candidate.driver_version = *driver_version;
+        // Capability Matrix
+        info.directml_available = dml_available;
+        if (info.vendor_id == kNvidiaVendorId) {
+            info.cuda_available = cuda_available;
+            info.tensorrt_rtx_available = info.is_rtx && trt_available;
+
+            auto driver = query_driver_version_for_gpu(info.adapter_name);
+            if (driver.has_value()) {
+                info.driver_query_available = true;
+                info.driver_version = *driver;
+            }
         }
 
-        if (!best_gpu.has_value() ||
-            candidate.dedicated_memory_mb > best_gpu->dedicated_memory_mb) {
-            best_gpu = candidate;
-        }
+        gpus.push_back(std::move(info));
     }
-
-    if (best_gpu.has_value()) {
-        best_gpu->provider_available = tensorrt_rtx_provider_available();
-    }
-
-    return best_gpu;
 #endif
+    return gpus;
 }
 
 }  // namespace corridorkey::core

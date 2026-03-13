@@ -1,21 +1,28 @@
 #pragma once
 
+#include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace corridorkey::core {
 
-struct WindowsRtxGpuInfo {
+struct WindowsGpuInfo {
     std::string adapter_name = "";
     std::string driver_version = "";
     int64_t dedicated_memory_mb = 0;
+    unsigned int vendor_id = 0;
     bool driver_query_available = false;
-    bool provider_available = false;
-    bool ampere_or_newer = false;
+    bool tensorrt_rtx_available = false;
+    bool cuda_available = false;
+    bool directml_available = false;
+    bool is_rtx = false;
 };
 
-std::optional<WindowsRtxGpuInfo> probe_windows_rtx_gpu();
-bool tensorrt_rtx_provider_available();
+CORRIDORKEY_API std::vector<WindowsGpuInfo> list_windows_gpus();
+CORRIDORKEY_API bool tensorrt_rtx_provider_available();
+CORRIDORKEY_API bool cuda_provider_available();
+CORRIDORKEY_API bool directml_provider_available();
 
 }  // namespace corridorkey::core
