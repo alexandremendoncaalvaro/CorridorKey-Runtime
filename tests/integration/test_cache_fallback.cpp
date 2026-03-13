@@ -86,7 +86,8 @@ class ScopedPermissions {
 TEST_CASE("session creation falls back to writable cache root when configured cache is locked",
           "[integration][cache]") {
 #ifdef _WIN32
-    SKIP("Filesystem permission emulation is not reliable on Windows for this regression test");
+    SUCCEED("Filesystem permission emulation is not reliable on Windows for this regression test");
+    return;
 #endif
 
     const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";

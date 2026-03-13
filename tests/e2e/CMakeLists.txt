@@ -10,6 +10,8 @@ target_link_libraries(test_e2e
         Catch2::Catch2WithMain
 )
 
+corridorkey_stage_ort_runtime(test_e2e)
+
 if(NOT MSVC)
     target_compile_options(test_e2e PRIVATE -Wall -Wextra -Wpedantic -Werror)
 else()

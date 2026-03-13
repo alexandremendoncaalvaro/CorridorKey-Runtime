@@ -37,7 +37,7 @@ if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
     $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
 }
 
-$distDir = Join-Path $repoRoot ("dist\CorridorKey_Windows_RTX_v" + $Version)
+$distDir = Join-Path $repoRoot ("dist\CorridorKey_Windows_v" + $Version)
 $engineSource = Join-Path $BuildDir "src\cli\corridorkey.exe"
 $guiSource = Join-Path $repoRoot "src\gui\src-tauri\target\release\corridorkey-gui.exe"
 $modelsSource = Join-Path $repoRoot "models"
@@ -135,8 +135,8 @@ $readmePath = Join-Path $distDir "README.txt"
 $smokePath = Join-Path $distDir "smoke_test.bat"
 
 @"
-CorridorKey Runtime v$Version - Windows RTX Portable Release
-============================================================
+CorridorKey Runtime v$Version - Windows Preview Portable Release
+===============================================================
 
 Quick start:
 1. Open PowerShell or Command Prompt in this folder.

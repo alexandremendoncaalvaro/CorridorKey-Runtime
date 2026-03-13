@@ -21,6 +21,8 @@ target_link_libraries(test_unit
         Catch2::Catch2WithMain
 )
 
+corridorkey_stage_ort_runtime(test_unit)
+
 # Target-based compiler warnings for tests
 if(NOT MSVC)
     target_compile_options(test_unit PRIVATE -Wall -Wextra -Wpedantic -Werror)

@@ -19,6 +19,8 @@ target_link_libraries(test_integration
         Catch2::Catch2WithMain
 )
 
+corridorkey_stage_ort_runtime(test_integration)
+
 target_compile_definitions(test_integration PRIVATE PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 
 if(NOT MSVC)

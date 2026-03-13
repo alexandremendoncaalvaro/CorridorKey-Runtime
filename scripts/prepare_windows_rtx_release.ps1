@@ -361,7 +361,7 @@ if (-not $SkipPackage.IsPresent) {
         -Arguments $packageArguments
 
     if (-not $SkipBundleValidation.IsPresent) {
-        $bundleRoot = Join-Path $repoRoot "dist\CorridorKey_Windows_RTX_v$Version"
+        $bundleRoot = Join-Path $repoRoot "dist\CorridorKey_Windows_v$Version"
         Write-Host "[validate] Running the packaged smoke test..."
         Invoke-ExternalCommand -FilePath (Join-Path $bundleRoot "smoke_test.bat") -WorkingDirectory $bundleRoot `
             -Arguments @()
@@ -373,8 +373,8 @@ $summary = [ordered]@{
     models_dir = [System.IO.Path]::GetFullPath($modelsDir)
     build_dir = [System.IO.Path]::GetFullPath($buildDir)
     ort_install_dir = [System.IO.Path]::GetFullPath($ortInstallDir)
-    packaged_bundle_dir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\CorridorKey_Windows_RTX_v$Version"))
-    packaged_bundle_zip = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\CorridorKey_Windows_RTX_v$Version.zip"))
+    packaged_bundle_dir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\CorridorKey_Windows_v$Version"))
+    packaged_bundle_zip = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\CorridorKey_Windows_v$Version.zip"))
 }
 if (-not [string]::IsNullOrWhiteSpace($sourceRepo)) {
     $summary["corridorkey_repo"] = $sourceRepo

@@ -10,6 +10,8 @@ target_link_libraries(test_regression
         Catch2::Catch2WithMain
 )
 
+corridorkey_stage_ort_runtime(test_regression)
+
 if(NOT MSVC)
     target_compile_options(test_regression PRIVATE -Wall -Wextra -Wpedantic -Werror)
 else()

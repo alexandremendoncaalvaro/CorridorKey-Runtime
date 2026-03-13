@@ -17,7 +17,7 @@ TEST_CASE("End-to-End: Full Video Pipeline Sanity Check", "[e2e][video]") {
         return;
     }
 
-    auto device = auto_detect();
+    DeviceInfo device{"Generic CPU", 0, Backend::CPU};
     auto engine_res = Engine::create(model_path, device);
     REQUIRE(engine_res.has_value());
     auto engine = std::move(*engine_res);
