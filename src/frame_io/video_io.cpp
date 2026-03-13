@@ -292,12 +292,17 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
                                                        int height, double fps,
                                                        const VideoFrameFormat& input_format,
                                                        const VideoOutputOptions& options,
-                                                       const std::string& codec_name) {
+                                                       const std::string& codec_name,
+                                                       std::optional<VideoTimeBase> time_base) {
     auto writer = std::unique_ptr<VideoWriter>(new VideoWriter());
     auto* impl = writer->m_impl.get();
 
-    if (width <= 0 || height <= 0 || fps <= 0.0) {
-        return Unexpected(Error{ErrorCode::InvalidParameters, "Invalid video dimensions or fps"});
+    if (width <= 0 || height <= 0) {
+        return Unexpected(Error{ErrorCode::InvalidParameters, "Invalid video dimensions"});
+    }
+    if (fps <= 0.0 && (!time_base.has_value() || !time_base->is_valid())) {
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Invalid fps without a usable time base"});
     }
 
     VideoOutputPlan plan;
@@ -337,8 +342,14 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
 
     impl->codec_context->width = width;
     impl->codec_context->height = height;
-    impl->codec_context->time_base = av_inv_q(av_d2q(fps, 60000));
-    impl->codec_context->framerate = av_d2q(fps, 60000);
+    AVRational resolved_time_base = av_inv_q(av_d2q(std::max(1.0, fps), 60000));
+    if (time_base.has_value() && time_base->is_valid()) {
+        resolved_time_base = AVRational{time_base->numerator, time_base->denominator};
+    }
+    impl->codec_context->time_base = resolved_time_base;
+    if (fps > 0.0) {
+        impl->codec_context->framerate = av_d2q(fps, 60000);
+    }
     impl->codec_context->pix_fmt = static_cast<AVPixelFormat>(plan.pixel_format);
 
     impl->stream = avformat_new_stream(impl->format_context.get(), nullptr);
@@ -368,8 +379,10 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
     }
 
     impl->stream->time_base = impl->codec_context->time_base;
-    impl->stream->avg_frame_rate = av_d2q(fps, 60000);
-    impl->stream->r_frame_rate = impl->stream->avg_frame_rate;
+    if (fps > 0.0) {
+        impl->stream->avg_frame_rate = av_d2q(fps, 60000);
+        impl->stream->r_frame_rate = impl->stream->avg_frame_rate;
+    }
 
     int param_result =
         avcodec_parameters_from_context(impl->stream->codecpar, impl->codec_context.get());
@@ -411,10 +424,12 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
 
 Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::path& path, int width,
                                                        int height, double fps,
-                                                       const std::string& codec_name) {
+                                                       const std::string& codec_name,
+                                                       std::optional<VideoTimeBase> time_base) {
     VideoFrameFormat input_format;
     VideoOutputOptions options;
-    return VideoWriter::open(path, width, height, fps, input_format, options, codec_name);
+    return VideoWriter::open(path, width, height, fps, input_format, options, codec_name,
+                             time_base);
 }
 
 Result<void> VideoWriter::write_frame(const Image& image) {
@@ -1242,6 +1257,17 @@ double VideoReader::fps() const {
     }
 
     return 0.0;
+}
+
+std::optional<VideoTimeBase> VideoReader::time_base() const {
+    auto* stream = m_impl->format_context->streams[m_impl->stream_index];
+    if (stream == nullptr) {
+        return std::nullopt;
+    }
+    if (stream->time_base.num <= 0 || stream->time_base.den <= 0) {
+        return std::nullopt;
+    }
+    return VideoTimeBase{stream->time_base.num, stream->time_base.den};
 }
 
 int64_t VideoReader::total_frames() const {

@@ -333,9 +333,79 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
     int out_w = reader_rgb->width();
     int out_h = reader_rgb->height();
 
+    struct PrefetchedFrame {
+        VideoFrame rgb_frame;
+        ImageBuffer hint_buffer;
+    };
+
+    std::deque<PrefetchedFrame> prefetched_frames;
+
+    auto read_frame_pair = [&]() -> Result<std::optional<PrefetchedFrame>> {
+        auto rgb_res = common::measure_stage(
+            on_stage, "video_decode_frame", [&]() { return reader_rgb->read_next_frame(); }, 1);
+        if (!rgb_res || rgb_res->buffer.view().empty()) {
+            return std::optional<PrefetchedFrame>{};
+        }
+
+        VideoFrame rgb_frame = std::move(*rgb_res);
+        ImageBuffer hint_buf;
+        if (has_hint_video) {
+            auto hint_res = common::measure_stage(
+                on_stage, "video_decode_hint", [&]() { return reader_hint->read_next_frame(); }, 1);
+            if (!hint_res || hint_res->buffer.view().empty()) {
+                return std::optional<PrefetchedFrame>{};
+            }
+            hint_buf = std::move(hint_res->buffer);
+        } else {
+            hint_buf =
+                ImageBuffer(rgb_frame.buffer.view().width, rgb_frame.buffer.view().height, 1);
+            common::measure_stage(on_stage, "video_generate_hint",
+                                  [&]() {
+                                      ColorUtils::generate_rough_matte(
+                                          rgb_frame.buffer.view(), hint_buf.view());
+                                  },
+                                  1);
+        }
+
+        return std::optional<PrefetchedFrame>{
+            PrefetchedFrame{std::move(rgb_frame), std::move(hint_buf)}};
+    };
+
+    auto first_pair_res = read_frame_pair();
+    if (!first_pair_res) {
+        return Unexpected(first_pair_res.error());
+    }
+    if (!first_pair_res->has_value()) {
+        return Unexpected(Error{ErrorCode::IoError, "FFmpeg: Input video contains no frames"});
+    }
+    prefetched_frames.push_back(std::move(**first_pair_res));
+
+    auto second_pair_res = read_frame_pair();
+    if (!second_pair_res) {
+        return Unexpected(second_pair_res.error());
+    }
+    if (second_pair_res->has_value()) {
+        prefetched_frames.push_back(std::move(**second_pair_res));
+    }
+
+    std::optional<double> derived_fps;
+    if (prefetched_frames.size() >= 2) {
+        const auto& first_pts = prefetched_frames[0].rgb_frame.pts_us;
+        const auto& second_pts = prefetched_frames[1].rgb_frame.pts_us;
+        if (first_pts.has_value() && second_pts.has_value()) {
+            int64_t delta = *second_pts - *first_pts;
+            if (delta > 0) {
+                derived_fps = 1000000.0 / static_cast<double>(delta);
+            }
+        }
+    }
+
+    double output_fps = derived_fps.value_or(reader_rgb->fps());
+    auto input_time_base = reader_rgb->time_base();
+
     auto writer_res = common::measure_stage(on_stage, "video_open_writer", [&]() {
-        return VideoWriter::open(output_video, out_w, out_h, reader_rgb->fps(),
-                                 reader_rgb->format(), output_options);
+        return VideoWriter::open(output_video, out_w, out_h, output_fps, reader_rgb->format(),
+                                 output_options, "", input_time_base);
     });
     if (!writer_res) return Unexpected(writer_res.error());
     auto writer = std::move(*writer_res);
@@ -355,34 +425,26 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
     auto fetch_batch = [&](int size) -> Result<Batch> {
         Batch b;
         for (int i = 0; i < size; ++i) {
-            auto rgb_res = common::measure_stage(
-                on_stage, "video_decode_frame", [&]() { return reader_rgb->read_next_frame(); }, 1);
-            if (!rgb_res || rgb_res->buffer.view().empty()) break;
-
-            VideoFrame rgb_frame = std::move(*rgb_res);
-            ImageBuffer hint_buf;
-            if (has_hint_video) {
-                auto hint_res = common::measure_stage(
-                    on_stage, "video_decode_hint", [&]() { return reader_hint->read_next_frame(); },
-                    1);
-                if (!hint_res || hint_res->buffer.view().empty()) break;
-                hint_buf = std::move(hint_res->buffer);
+            std::optional<PrefetchedFrame> pair;
+            if (!prefetched_frames.empty()) {
+                pair = std::move(prefetched_frames.front());
+                prefetched_frames.pop_front();
             } else {
-                hint_buf = ImageBuffer(rgb_frame.buffer.view().width,
-                                       rgb_frame.buffer.view().height, 1);
-                common::measure_stage(on_stage, "video_generate_hint",
-                                      [&]() {
-                                          ColorUtils::generate_rough_matte(
-                                              rgb_frame.buffer.view(), hint_buf.view());
-                                      },
-                                      1);
+                auto pair_res = read_frame_pair();
+                if (!pair_res) {
+                    return Unexpected(pair_res.error());
+                }
+                if (!pair_res->has_value()) {
+                    break;
+                }
+                pair = std::move(**pair_res);
             }
 
-            b.rgb_views.push_back(rgb_frame.buffer.view());
-            b.hint_views.push_back(hint_buf.view());
-            b.rgb_bufs.push_back(std::move(rgb_frame.buffer));
-            b.hint_bufs.push_back(std::move(hint_buf));
-            b.pts_us.push_back(rgb_frame.pts_us);
+            b.rgb_views.push_back(pair->rgb_frame.buffer.view());
+            b.hint_views.push_back(pair->hint_buffer.view());
+            b.rgb_bufs.push_back(std::move(pair->rgb_frame.buffer));
+            b.hint_bufs.push_back(std::move(pair->hint_buffer));
+            b.pts_us.push_back(pair->rgb_frame.pts_us);
         }
         return b;
     };

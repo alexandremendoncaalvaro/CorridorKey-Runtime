@@ -25,6 +25,18 @@ struct VideoFrame {
 };
 
 /**
+ * @brief Time base for timestamp conversion.
+ */
+struct VideoTimeBase {
+    int numerator = 0;
+    int denominator = 0;
+
+    [[nodiscard]] bool is_valid() const {
+        return numerator > 0 && denominator > 0;
+    }
+};
+
+/**
  * @brief Resolved video output plan for a specific container and encoder.
  */
 struct VideoOutputPlan {
@@ -65,6 +77,7 @@ class VideoReader {
     int width() const;
     int height() const;
     double fps() const;
+    std::optional<VideoTimeBase> time_base() const;
     int64_t total_frames() const;
     VideoFrameFormat format() const;
 
@@ -83,10 +96,14 @@ class VideoWriter {
                                                      int height, double fps,
                                                      const VideoFrameFormat& input_format,
                                                      const VideoOutputOptions& options = {},
-                                                     const std::string& codec_name = "");
+                                                     const std::string& codec_name = "",
+                                                     std::optional<VideoTimeBase> time_base =
+                                                         std::nullopt);
     static Result<std::unique_ptr<VideoWriter>> open(const std::filesystem::path& path, int width,
                                                      int height, double fps,
-                                                     const std::string& codec_name = "");
+                                                     const std::string& codec_name = "",
+                                                     std::optional<VideoTimeBase> time_base =
+                                                         std::nullopt);
     ~VideoWriter();
 
     Result<void> write_frame(const Image& image);
