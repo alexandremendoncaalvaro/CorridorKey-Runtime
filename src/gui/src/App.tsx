@@ -1,9 +1,17 @@
+import { useEffect } from "react";
 import { Sidebar } from "./components/layout/sidebar";
 import { TopBar } from "./components/layout/topbar";
 import { Button } from "./components/ui/button";
-import { UploadCloud, Zap } from "lucide-react";
+import { useEngineStore } from "./lib/store";
+import { UploadCloud, Zap, ShieldCheck, Play } from "lucide-react";
 
 function App() {
+  const { refreshInfo, error } = useEngineStore();
+
+  useEffect(() => {
+    refreshInfo();
+  }, [refreshInfo]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent text-foreground selection:bg-brand/20">
       <Sidebar />
@@ -12,6 +20,12 @@ function App() {
         <TopBar />
         
         <div className="flex-1 overflow-y-auto p-8 lg:p-12">
+          {error && (
+            <div className="mb-8 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+              <strong>Engine Error:</strong> {error}
+            </div>
+          )}
+          
           <div className="max-w-4xl mx-auto space-y-12">
             
             {/* Hero Section */}
