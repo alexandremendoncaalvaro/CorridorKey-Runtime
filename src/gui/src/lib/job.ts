@@ -11,6 +11,16 @@ export interface JobProgress {
   artifact_path?: string;
 }
 
+export interface JobRecord {
+  id: string;
+  timestamp: string;
+  input: string;
+  output: string;
+  status: "success" | "failed";
+  backend: string | null;
+  duration_ms?: number;
+}
+
 interface JobState {
   inputPath: string | null;
   outputPath: string | null;
@@ -21,6 +31,7 @@ interface JobState {
   activeBackend: string | null;
   error: string | null;
   logs: string[];
+  history: JobRecord[];
 
   // Actions
   setInput: (path: string | null) => void;
@@ -28,6 +39,8 @@ interface JobState {
   setHint: (path: string | null) => void;
   startJob: () => Promise<void>;
   reset: () => void;
+  loadHistory: () => void;
+  clearHistory: () => void;
 }
 
 export const useJobStore = create<JobState>((set, get) => ({
@@ -40,10 +53,21 @@ export const useJobStore = create<JobState>((set, get) => ({
   activeBackend: null,
   error: null,
   logs: [],
+  history: [],
 
   setInput: (path) => set({ inputPath: path, error: null }),
   setOutput: (path) => set({ outputPath: path, error: null }),
   setHint: (path) => set({ hintPath: path }),
+
+  loadHistory: () => {
+    const saved = localStorage.getItem("corridorkey_history");
+    if (saved) set({ history: JSON.parse(saved) });
+  },
+
+  clearHistory: () => {
+    localStorage.removeItem("corridorkey_history");
+    set({ history: [] });
+  },
 
   reset: () => set({
     isProcessing: false,
@@ -55,9 +79,10 @@ export const useJobStore = create<JobState>((set, get) => ({
   }),
 
   startJob: async () => {
-    const { inputPath, outputPath, hintPath } = get();
+    const { inputPath, outputPath, hintPath, history } = get();
     if (!inputPath || !outputPath) return;
 
+    const startTime = Date.now();
     set({ 
       isProcessing: true, 
       currentProgress: 0, 
@@ -67,7 +92,6 @@ export const useJobStore = create<JobState>((set, get) => ({
     });
 
     try {
-      // Listen for events from the Rust backend
       const unlisten = await listen<string>("engine-event", (event) => {
         const line = event.payload;
         try {
@@ -88,7 +112,24 @@ export const useJobStore = create<JobState>((set, get) => ({
               });
               break;
             case "completed":
-              set({ isProcessing: false, currentProgress: 100, statusMessage: "Finished" });
+              const duration = Date.now() - startTime;
+              const newRecord: JobRecord = {
+                id: Math.random().toString(36).substr(2, 9),
+                timestamp: new Date().toISOString(),
+                input: inputPath,
+                output: outputPath,
+                status: "success",
+                backend: get().activeBackend,
+                duration_ms: duration
+              };
+              const updatedHistory = [newRecord, ...history].slice(0, 50);
+              localStorage.setItem("corridorkey_history", JSON.stringify(updatedHistory));
+              set({ 
+                isProcessing: false, 
+                currentProgress: 100, 
+                statusMessage: "Finished",
+                history: updatedHistory
+              });
               unlisten();
               break;
             case "failed":
