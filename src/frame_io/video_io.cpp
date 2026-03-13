@@ -10,6 +10,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 }
 
@@ -337,6 +338,13 @@ Result<std::unique_ptr<VideoWriter>> VideoWriter::open(const std::filesystem::pa
         }
 
         if (avcodec_open2(impl->codec_ctx.get(), codec, nullptr) >= 0) {
+            // Set ultra-high quality defaults for x264 (VFX Grade)
+            if (std::string(codec->name).find("libx264") != std::string::npos ||
+                std::string(codec->name).find("h264") != std::string::npos) {
+                av_opt_set(impl->codec_ctx->priv_data, "preset", "veryslow", 0);
+                av_opt_set(impl->codec_ctx->priv_data, "crf", "10", 0); // High-quality VFX target
+                av_opt_set(impl->codec_ctx->priv_data, "profile", "high444", 0);
+            }
             avcodec_parameters_from_context(st->codecpar, impl->codec_ctx.get());
             break;
         }

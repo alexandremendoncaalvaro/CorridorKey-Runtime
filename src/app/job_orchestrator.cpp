@@ -5,6 +5,7 @@
 #include <chrono>
 #include <corridorkey/version.hpp>
 
+#include "common/hardware_telemetry.hpp"
 #include "common/stage_profiler.hpp"
 #include "hardware_profile.hpp"
 #include "output_path_utils.hpp"
@@ -14,6 +15,13 @@
 namespace corridorkey::app {
 
 namespace {
+
+nlohmann::json metrics_to_json(const common::SystemMetrics& m) {
+    nlohmann::json j;
+    j["ram_usage_mb"] = m.ram_usage_mb;
+    j["cpu_usage_percent"] = m.cpu_usage_percent;
+    return j;
+}
 
 Result<void> emit_event(const JobEventCallback& callback, const JobEvent& event) {
     if (callback && !callback(event)) {
@@ -258,6 +266,11 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         JobEvent progress_event{
             JobEventType::Progress, "inference", progress, engine->current_device().backend, status,
         };
+        
+        // Capture system metrics without performance cost
+        auto metrics = common::get_current_metrics();
+        progress_event.metrics = metrics_to_json(metrics);
+
         auto progress_res = emit_event(on_event, progress_event);
         return progress_res.has_value();
     };
@@ -439,7 +452,7 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["cache"] = health["cache"];
     report["coreml"] = health["coreml"];
     report["mlx"] = health["mlx"];
-    report["windows_rtx"] = health["windows_rtx"];
+    report["windows_universal"] = health["windows_universal"];
 
     nlohmann::json models = nlohmann::json::array();
     bool validated_models_present = true;
@@ -485,19 +498,19 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["summary"]["apple_acceleration_healthy"] =
         !report["mlx"]["applicable"].get<bool>() || report["mlx"]["healthy"].get<bool>();
     report["summary"]["validated_models_present"] = platform_validated_models_present;
-    report["summary"]["windows_rtx_provider_ready"] =
-        !report["windows_rtx"]["applicable"].get<bool>() ||
-        report["windows_rtx"]["provider_available"].get<bool>();
-    report["summary"]["windows_rtx_packaged_models_present"] =
-        !report["windows_rtx"]["applicable"].get<bool>() || !any_packaged_windows_model ||
+    report["summary"]["windows_universal_provider_ready"] =
+        !report["windows_universal"]["applicable"].get<bool>() ||
+        report["windows_universal"]["provider_available"].get<bool>();
+    report["summary"]["windows_universal_packaged_models_present"] =
+        !report["windows_universal"]["applicable"].get<bool>() || !any_packaged_windows_model ||
         packaged_windows_models_present;
-    report["summary"]["windows_rtx_healthy"] = !report["windows_rtx"]["applicable"].get<bool>() ||
-                                               report["windows_rtx"]["healthy"].get<bool>();
+    report["summary"]["windows_universal_healthy"] = !report["windows_universal"]["applicable"].get<bool>() ||
+                                               report["windows_universal"]["healthy"].get<bool>();
     report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
                                    report["summary"]["video_healthy"].get<bool>() &&
                                    report["summary"]["cache_healthy"].get<bool>() &&
                                    report["summary"]["apple_acceleration_healthy"].get<bool>() &&
-                                   report["summary"]["windows_rtx_healthy"].get<bool>() &&
+                                   report["summary"]["windows_universal_healthy"].get<bool>() &&
                                    platform_validated_models_present;
 
     return report;

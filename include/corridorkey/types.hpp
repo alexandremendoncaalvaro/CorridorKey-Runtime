@@ -1,6 +1,7 @@
 #pragma once
 
 #include <corridorkey/api_export.hpp>
+#include <nlohmann/json.hpp>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -204,6 +205,7 @@ struct JobEvent {
     std::optional<Error> error = std::nullopt;
     std::optional<BackendFallbackInfo> fallback = std::nullopt;
     std::vector<StageTiming> timings = {};
+    nlohmann::json metrics = nlohmann::json::object();
 };
 
 /**
