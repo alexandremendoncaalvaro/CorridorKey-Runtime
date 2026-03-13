@@ -8,15 +8,22 @@ import {
   AlertCircle, 
   CheckCircle2,
   ChevronRight,
-  Terminal
+  Terminal,
+  Layers
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
+interface JobMetrics {
+  ram_usage_mb?: number;
+  cpu_usage_percent?: number;
+}
+
 export function ProcessFlow() {
   const { 
     inputPath, setInput, 
-    outputPath, setOutput, 
+    outputPath, setOutput,
+    hintPath, setHint,
     startJob, isProcessing, 
     currentProgress, statusMessage, 
     error, activeBackend,
@@ -24,6 +31,16 @@ export function ProcessFlow() {
   } = useJobStore();
 
   const [showLogs, setShowLogs] = useState(false);
+  
+  // Extract metrics from the last log entry if possible
+  const lastLog = logs[logs.length - 1];
+  let metrics: JobMetrics = {};
+  if (lastLog) {
+    try {
+      const parsed = JSON.parse(lastLog);
+      if (parsed.metrics) metrics = parsed.metrics;
+    } catch (e) {}
+  }
 
   const handleSelectInput = async () => {
     const selected = await open({
@@ -35,6 +52,19 @@ export function ProcessFlow() {
     });
     if (selected && !Array.isArray(selected)) {
       setInput(selected);
+    }
+  };
+
+  const handleSelectHint = async () => {
+    const selected = await open({
+      multiple: false,
+      filters: [{
+        name: 'Video/Images',
+        extensions: ['mp4', 'mov', 'exr', 'png', 'jpg']
+      }]
+    });
+    if (selected && !Array.isArray(selected)) {
+      setHint(selected);
     }
   };
 
@@ -54,7 +84,7 @@ export function ProcessFlow() {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       
       {/* Steps Container */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Step 1: Input */}
         <div 
@@ -62,7 +92,7 @@ export function ProcessFlow() {
           className={cn(
             "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
             inputPath 
-              ? "border-brand/40 bg-brand/5 bg-opacity-10" 
+              ? "border-brand/40 bg-brand/5" 
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
             isProcessing && "opacity-50 cursor-not-allowed"
           )}
@@ -71,20 +101,43 @@ export function ProcessFlow() {
             <FileVideo className={cn("w-6 h-6", inputPath ? "text-brand" : "text-muted-foreground")} />
           </div>
           <div className="space-y-1">
-            <h4 className="font-semibold text-sm">1. Source Footage</h4>
-            <p className="text-xs text-muted-foreground truncate max-w-[200px]">
-              {inputPath ? (inputPath.split(/[\\/]/).pop()) : "Select video or image"}
+            <h4 className="font-semibold text-sm text-foreground">1. Source</h4>
+            <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">
+              {inputPath ? (inputPath.split(/[\\/]/).pop()) : "Select footage"}
             </p>
           </div>
         </div>
 
-        {/* Step 2: Output */}
+        {/* Step 2: Alpha Hint (Optional) */}
+        <div 
+          onClick={!isProcessing ? handleSelectHint : undefined}
+          className={cn(
+            "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4 relative",
+            hintPath 
+              ? "border-brand/40 bg-brand/5" 
+              : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
+            isProcessing && "opacity-50 cursor-not-allowed"
+          )}
+        >
+          <div className="absolute top-2 right-3 text-[8px] font-bold text-muted-foreground/50 uppercase tracking-tighter">Optional</div>
+          <div className="p-3 rounded-full bg-background shadow-sm">
+            <Layers className={cn("w-6 h-6", hintPath ? "text-brand" : "text-muted-foreground")} />
+          </div>
+          <div className="space-y-1">
+            <h4 className="font-semibold text-sm text-foreground">2. Alpha Hint</h4>
+            <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">
+              {hintPath ? (hintPath.split(/[\\/]/).pop()) : "Select rough mask"}
+            </p>
+          </div>
+        </div>
+
+        {/* Step 3: Output */}
         <div 
           onClick={!isProcessing ? handleSelectOutput : undefined}
           className={cn(
             "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
             outputPath 
-              ? "border-brand/40 bg-brand/5 bg-opacity-10" 
+              ? "border-brand/40 bg-brand/5" 
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
             isProcessing && "opacity-50 cursor-not-allowed"
           )}
@@ -93,8 +146,8 @@ export function ProcessFlow() {
             <FolderDown className={cn("w-6 h-6", outputPath ? "text-brand" : "text-muted-foreground")} />
           </div>
           <div className="space-y-1">
-            <h4 className="font-semibold text-sm">2. Export Destination</h4>
-            <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+            <h4 className="font-semibold text-sm text-foreground">3. Destination</h4>
+            <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">
               {outputPath ? (outputPath.split(/[\\/]/).pop()) : "Choose where to save"}
             </p>
           </div>
@@ -104,7 +157,7 @@ export function ProcessFlow() {
 
       {/* Progress Section */}
       {(isProcessing || currentProgress > 0 || error) && (
-        <div className="p-8 rounded-2xl bg-card border shadow-apple space-y-6">
+        <div className="p-8 rounded-2xl bg-card border border-zinc-800 shadow-apple space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {error ? (
@@ -115,7 +168,7 @@ export function ProcessFlow() {
                 <Zap className="w-5 h-5 text-brand animate-pulse" />
               )}
               <div>
-                <h4 className="font-bold text-sm leading-none">
+                <h4 className="font-bold text-sm leading-none text-foreground">
                   {error ? "Processing Failed" : currentProgress === 100 ? "Complete" : "In Progress"}
                 </h4>
                 <p className={cn(
@@ -126,18 +179,26 @@ export function ProcessFlow() {
                 </p>
               </div>
             </div>
-            {activeBackend && (
-              <div className="px-2 py-1 rounded bg-accent text-[10px] font-mono font-bold uppercase tracking-wider">
-                {activeBackend}
-              </div>
-            )}
+            
+            <div className="flex gap-2">
+              {activeBackend && (
+                <div className="px-2 py-1 rounded bg-zinc-800 text-zinc-400 text-[10px] font-mono font-bold uppercase tracking-wider">
+                  {activeBackend}
+                </div>
+              )}
+              {metrics.ram_usage_mb && (
+                <div className="px-2 py-1 rounded bg-brand/10 text-brand text-[10px] font-mono font-bold">
+                  {metrics.ram_usage_mb}MB RAM
+                </div>
+              )}
+            </div>
           </div>
 
           {!error && (
             <div className="space-y-2">
-              <div className="h-2 w-full bg-accent rounded-full overflow-hidden">
+              <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden">
                 <div 
-                  className="h-full bg-brand transition-all duration-500 ease-out shadow-[0_0_8px_rgba(var(--color-brand),0.5)]" 
+                  className="h-full bg-brand transition-all duration-500 ease-out shadow-[0_0_10px_rgba(14,165,233,0.5)]" 
                   style={{ width: `${currentProgress}%` }}
                 />
               </div>
