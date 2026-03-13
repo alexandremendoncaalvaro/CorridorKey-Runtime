@@ -17,20 +17,15 @@ without rebuilding the surrounding stack each time.
 
 The current delivery shape is explicit:
 
-- **macOS Apple Silicon** ships as a portable MLX-first runtime track
-- **Windows RTX** ships as a portable TensorRT RTX runtime track with CPU
-  fallback
-- **GUI, sidecar, and embedded integrations come after that**, all consuming
-  the same library-first runtime contracts
+- **macOS Apple Silicon** ships as a portable MLX-first runtime track.
+- **Windows (Universal GPU)** ships as a portable multi-backend runtime track. It prioritizes **TensorRT RTX** for performance, with integrated support for **CUDA** (GTX/Pascal+) and **DirectML** (AMD/Intel/Universal).
+- **GUI, sidecar, and embedded integrations come after that**, all consuming the same library-first runtime contracts.
 
 ## Who This Is For
 
-- **Technical local operators** who want to run CorridorKey without Python,
-  virtual environments, or ad hoc setup.
-- **Windows RTX users** who care about predictable installation, provider
-  behavior, and reproducible performance on consumer GPUs.
-- **Integrators** who want a native engine they can embed into an application,
-  plugin, sidecar, or pipeline without re-implementing business logic.
+- **Technical operators** who want to run CorridorKey without Python, virtual environments, or fragile setup.
+- **Windows users** (NVIDIA, AMD, Intel) who care about predictable installation and reproducible performance on consumer GPUs.
+- **Integrators** who want a native engine they can embed into an application, plugin, or sidecar without re-implementing business logic.
 
 ## Why This Exists vs. Original Workflow
 
@@ -71,9 +66,7 @@ Validated runtime paths today:
 - **macOS 14+ on Apple Silicon:** MLX-first execution for Apple model packs,
   CPU fallback for ONNX baselines, structured diagnostics, and a curated model
   catalog.
-- **Windows 11 x64 on NVIDIA RTX 30xx+:** TensorRT RTX execution with packaged
-  runtime DLLs, curated FP16 ONNX packs, `doctor` diagnostics, and CPU
-  fallback.
+- **Windows 11 x64 (Universal GPU):** Primary path via TensorRT RTX for maximum performance, with CUDA (Pascal+) and DirectML (AMD/Intel) support. Portable bundle includes AI runtimes and curated model packs.
 
 Linux remains architecture-ready and deferred until the current macOS and
 Windows release tracks are both stable enough to stop consuming the majority of

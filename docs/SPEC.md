@@ -32,23 +32,28 @@ that is required to extract predictable performance from the target hardware.
 
 ### 1.1 What This Is
 
-- A **native runtime engine** around the existing CorridorKey model
+- A **native runtime engine** around the existing CorridorKey model.
 - A **single-binary operational surface** with diagnostics, benchmark, and
-  stable JSON/NDJSON contracts
+  stable JSON/NDJSON contracts.
 - A **library-first product boundary** that supports CLI, future GUI, sidecar,
-  plugin, and pipeline integrations
-- A hardware-aware runtime with **curated provider tracks**, not a flat promise
-  of parity across every backend
-- A **platform-specific model-pack strategy** where Apple Silicon, RTX, and CPU
-  fallback are allowed to use different converted artifacts under the same
-  runtime contract
+  plugin, and pipeline integrations.
+- A hardware-aware runtime with **curated provider tracks**, delivering
+  predictable performance across diverse GPU tiers.
+- A **platform-specific model-pack strategy** where Apple Silicon, Universal
+  GPU (RTX/GTX/AMD), and CPU fallback use optimized converted artifacts under
+  the same runtime contract.
 
 ### 1.2 What This Is NOT
 
-- Not a retraining or new model architecture
-- Not a generic multi-backend framework with equal support for every provider
-- Not a reimplementation of a full Python workflow inside this repository
-- Not a first-party alpha-hint authoring suite in this phase
+- Not a retraining or new model architecture.
+- Not a generic multi-backend framework; we prioritize a few high-quality,
+  validated paths (TensorRT, CUDA, DirectML, MLX).
+- Not a race for the "fastest benchmark" in isolation; performance is measured
+  on end-to-end production reliability and stability.
+- Not a promise of broad support without evidence; every hardware tier must
+  pass explicit validation in the `doctor` tool.
+- Not a replacement for the original project, but a focused contribution
+  targeting native deployment and integration.
 
 ### 1.3 Intended Users
 
@@ -62,7 +67,7 @@ that is required to extract predictable performance from the target hardware.
 |------|--------|
 | Native local execution | No Python, no pip, no venv |
 | macOS production runtime | Corpus passes on 8 GB and 16 GB Apple Silicon tiers with an Apple-specific accelerated artifact path |
-| Windows RTX next | Product track is defined around TensorRT RTX and CPU fallback |
+| Windows Universal GPU next | Product track covers TensorRT RTX, CUDA, and DirectML with CPU fallback |
 | Operational predictability | `doctor`, `benchmark`, and `process --json` stay stable |
 | Platform-specific optimization | Separate model packs per product track without changing the runtime contract |
 | Quality parity with original model behavior | < 2% deviation on reference test set |
@@ -91,10 +96,10 @@ that is required to extract predictable performance from the target hardware.
 ├──────────────────────────────────────────────────────────┤
 │              Execution backends and model packs              │
 │   ┌────────────┬───────────────┬──────────┬──────────────┐ │
-│   │ Apple      │ Windows RTX   │ CPU      │ Secondary    │ │
+│   │ Apple      │ Windows Univ. │ CPU      │ Secondary    │ │
 │   │ model pack │ model pack    │ baseline │ exploratory  │ │
-│   │ (MLX or    │ (ONNX / TRT   │ (ONNX)   │ paths        │ │
-│   │ Core ML)   │ RTX)          │          │              │ │
+│   │ (MLX or    │ (ONNX / TRT / │ (ONNX)   │ paths        │ │
+│   │ Core ML)   │ CUDA / DML)   │          │              │ │
 │   └────────────┴───────────────┴──────────┴──────────────┘ │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -303,14 +308,15 @@ Mitigation:
 
 ### 4.1 Tier Definitions
 
-```
-Tier   │ VRAM/RAM Available │ Model     │ Resolution │ Expected FPS
-───────┼────────────────────┼───────────┼────────────┼─────────────
-HIGH   │ 10+ GB dedicated   │ FP16      │ 1024²      │ 2-5 fps
-MEDIUM │ 12-16 GB unified   │ INT8      │ 512-768²   │ 1-3 fps
-LOW    │ 6-8 GB             │ INT8      │ 512²       │ 0.5-2 fps
-CPU    │ 16+ GB RAM         │ INT8      │ 512²       │ 0.1-0.5 fps
-```
+The runtime categorizes hardware into four operational tiers to deliver
+predictable performance across diverse systems.
+
+| Tier | Target Hardware | Backend | Resolution | Expected FPS |
+|:---|:---|:---|:---|:---|
+| **Tier 1 (Pro)** | NVIDIA RTX 20xx/30xx/40xx | TensorRT | 1024² | 2-5 fps |
+| **Tier 2 (Plus)** | NVIDIA GTX 10xx/16xx | CUDA | 768² | 1-3 fps |
+| **Tier 3 (Base)** | AMD RX, Intel Arc, iGPU | DirectML | 512² | 0.5-2 fps |
+| **Fallback** | Any CPU (AVX2+) | ONNX CPU | 512² | 0.1-0.5 fps |
 
 ### 4.2 Hardware Map (Development & Test)
 
@@ -360,13 +366,13 @@ curated delivery tracks.
      `PyTorch -> Core ML` conversion from the source checkpoint.
    - Inputs larger than the selected model resolution must use tiling before
      GUI work begins.
-2. **Next product track:** Windows 11 on NVIDIA RTX hardware.
-   - TensorRT RTX is the intended primary Windows path.
-   - The Windows accelerated artifact is allowed to remain ONNX-derived even if
-     the Mac artifact family diverges.
+2. **Next product track: Windows 11 (Universal GPU).**
+   - Primary path: **TensorRT RTX** for maximum NVIDIA performance.
+   - Integrated support: **CUDA** for GTX hardware and **DirectML** for AMD/Intel.
+   - Distribution includes curated AI runtimes and optimized model packs.
    - CPU remains the mandatory compatibility fallback.
-   - Windows delivery is judged by installation predictability, diagnostics,
-     cache behavior, and validated hardware tiers, not by broad backend count.
+   - Windows delivery is judged by installation predictability, multi-GPU diagnostics, and stable performance across tiers.
+
 3. **Later integration surfaces:** GUI, sidecar, plugin, and pipeline embedding
    consume the same library-first runtime once the current and next tracks are
    stable.
@@ -493,9 +499,9 @@ The runtime binary stays native C++, but model preparation is track-specific.
 | Platform | Compiler | Primary provider path | Product status |
 |----------|----------|-----------------------|----------------|
 | macOS 14+ (ARM64) | Apple Clang 15+ | Apple-specific accelerated pack, CPU fallback | Current release gate |
-| Windows 11 + NVIDIA RTX (x86_64) | MSVC 17.4+ | TensorRT RTX, CPU fallback | Next product track |
-| Windows 11 generic (x86_64) | MSVC 17.4+ | CPU; DirectML/WinML secondary | Exploratory, not the primary Windows product path |
-| Linux (x86_64) | GCC 12+ / Clang 16+ | CPU/CUDA architecture-ready | Deferred until macOS + Windows RTX are stable |
+| Windows 11 (Universal GPU) | MSVC 17.4+ | TensorRT RTX, CUDA, DirectML | Next product track |
+| Windows 1 legacy | MSVC 17.4+ | CPU baseline | Baseline fallback |
+| Linux (x86_64) | GCC 12+ / Clang 16+ | CPU/CUDA architecture-ready | Deferred |
 | Linux (ARM64) | GCC 12+ | CPU | Deferred |
 
 Provider support is curated by phase. The product does not promise equivalent
@@ -796,9 +802,7 @@ Summary of what's covered there:
    Apple-specific accelerated artifact path, keep CPU fallback mandatory, close
    tiling behavior, structured diagnostics, benchmark telemetry, and portable
    bundle acceptance on Apple Silicon.
-2. **Phase 2 — Windows RTX track:** define and implement the TensorRT RTX-based
-   Windows product path with CPU fallback, installation guidance, validated
-   tiers, and equivalent diagnostics.
+2. **Phase 2 — Windows Universal GPU track:** define and implement the universal Windows product path (TensorRT, CUDA, DirectML) with CPU fallback, installation guidance, validated tiers, and equivalent diagnostics.
 3. **Phase 3 — integration surfaces:** keep the sidecar contract stable and
    build GUI, plugin, and pipeline-facing surfaces as thin consumers of the
    same runtime.
