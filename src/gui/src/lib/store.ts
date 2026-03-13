@@ -22,9 +22,9 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     const { info } = get();
     if (!info || info.devices.length === 0) return null;
     // Prefer TensorRT, then CUDA, then DirectML
-    return info.devices.find(d => d.backend === "tensorrt") || 
-           info.devices.find(d => d.backend === "cuda") ||
-           info.devices.find(d => d.backend === "dml") ||
+    return info.devices.find((d: DeviceInfo) => d.backend === "tensorrt") || 
+           info.devices.find((d: DeviceInfo) => d.backend === "cuda") ||
+           info.devices.find((d: DeviceInfo) => d.backend === "dml") ||
            info.devices[0];
   },
 

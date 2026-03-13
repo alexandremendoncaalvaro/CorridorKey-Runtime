@@ -108,7 +108,7 @@ export const useJobStore = create<JobState>((set, get) => ({
         set((state) => ({ logs: [...state.logs, `[ERROR] ${line}`] }));
       });
 
-      const child = await command.spawn();
+      const _child = await command.spawn();
       
       // We don't await the full execution here so the UI stays responsive
       // The events will update the store.

@@ -5,7 +5,6 @@ import {
   Cpu, 
   Settings, 
   FolderOpen, 
-  Play,
   HelpCircle
 } from "lucide-react";
 
