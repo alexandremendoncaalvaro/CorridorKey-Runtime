@@ -33,6 +33,7 @@ vendor/TensorRT-RTX*/
 vendor/tensorrt-rtx*/
 vendor/cuda-*/
 vendor/CUDA-*/
+vendor/openfx/
 
 # Compiled objects
 *.o
@@ -56,6 +57,7 @@ compile_commands.json
 # Outputs
 outputs/
 dist/
+*.zip
 
 # OS
 .DS_Store
