@@ -348,6 +348,23 @@ For the official Windows bundle, the user-facing flow is now:
 The bundle already includes the packaged Windows universal runtime DLLs and validated
 model set. End users do not need to point the runtime at a local SDK install.
 
+### DaVinci Resolve Plugin (New!)
+
+The Windows Universal GPU track now ships with a fully integrated **OpenFX Plugin** for Blackmagic DaVinci Resolve.
+
+**How to Install the OFX Plugin:**
+1. Download the `CorridorKey_Resolve_vX.Y.Z_Win_RTX.zip` package from the Releases page.
+2. Extract the folder to a safe location (e.g., Documents).
+3. Right-click the `install.bat` file and select **Run as Administrator**.
+4. The script will safely copy the `CorridorKey.ofx.bundle` to your system's OFX plugin directory and clear DaVinci's cache.
+
+**How to Use the OFX Plugin:**
+1. Open DaVinci Resolve and navigate to the **Color** or **Fusion** page.
+2. Search for "CorridorKey" in the OpenFX panel.
+3. Drag and drop the node onto your clip.
+4. The TensorRT Engine will compile the model into VRAM on the very first frame. DaVinci Resolve will briefly freeze for about 10–30 seconds.
+5. Once compiled, you can adjust the Inspector settings (Despill, Despeckle, Linear Input) and scrub the timeline seamlessly.
+
 From source builds, maintainers can still use the lower-level commands below.
 
 **Download ONNX baseline packs**:
