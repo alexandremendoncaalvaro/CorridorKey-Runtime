@@ -99,6 +99,7 @@ std::optional<std::string> query_driver_version_for_gpu(const std::string& adapt
 
 bool provider_available(const std::string& provider_name) {
     try {
+        Ort::Env dummy_env{ORT_LOGGING_LEVEL_WARNING, "probe"};
         auto providers = Ort::GetAvailableProviders();
         return std::find(providers.begin(), providers.end(), provider_name) != providers.end();
     } catch (...) {
