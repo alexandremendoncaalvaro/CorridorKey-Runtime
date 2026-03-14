@@ -348,7 +348,7 @@ For the official Windows bundle, the user-facing flow is now:
 The bundle already includes the packaged Windows universal runtime DLLs and validated
 model set. End users do not need to point the runtime at a local SDK install.
 
-### DaVinci Resolve Plugin (New!)
+### DaVinci Resolve Plugin
 
 The Windows Universal GPU track now ships with a fully integrated **OpenFX Plugin** for Blackmagic DaVinci Resolve.
 
