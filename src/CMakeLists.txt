@@ -81,6 +81,7 @@ add_subdirectory(core)
 add_subdirectory(app)
 add_subdirectory(frame_io)
 add_subdirectory(post_process)
+add_subdirectory(plugins/ofx)
 
 # Static library for testing (exposes all symbols without CORRIDORKEY_API)
 if(BUILD_TESTING)
