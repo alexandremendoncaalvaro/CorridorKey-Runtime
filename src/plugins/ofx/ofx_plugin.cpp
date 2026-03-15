@@ -1,6 +1,7 @@
-#include "ofx_shared.hpp"
-
 #include <cstring>
+
+#include "ofx_logging.hpp"
+#include "ofx_shared.hpp"
 
 namespace corridorkey::ofx {
 
@@ -13,6 +14,7 @@ static void set_host(OfxHost* host) {
 
 bool fetch_suites() {
     if (g_host == nullptr || g_host->fetchSuite == nullptr) {
+        log_message("fetch_suites", "Host or fetchSuite unavailable.");
         return false;
     }
 
@@ -23,14 +25,17 @@ bool fetch_suites() {
     g_suites.parameter = static_cast<const OfxParameterSuiteV1*>(
         g_host->fetchSuite(g_host->host, kOfxParameterSuite, 1));
 
-    const void* message_suite =
-        g_host->fetchSuite(g_host->host, kOfxMessageSuite, 2);
+    const void* message_suite = g_host->fetchSuite(g_host->host, kOfxMessageSuite, 2);
     if (message_suite == nullptr) {
         message_suite = g_host->fetchSuite(g_host->host, kOfxMessageSuite, 1);
     }
     g_suites.message = static_cast<const OfxMessageSuiteV2*>(message_suite);
 
-    return g_suites.property && g_suites.image_effect && g_suites.parameter;
+    if (!g_suites.property || !g_suites.image_effect || !g_suites.parameter) {
+        log_message("fetch_suites", "Missing required OpenFX suites.");
+        return false;
+    }
+    return true;
 }
 
 void post_message(const char* message_type, const char* message, OfxImageEffectHandle effect) {
@@ -42,15 +47,20 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 }
 
 OfxStatus on_load() {
+    log_message("on_load", "Load requested.");
     if (!fetch_suites()) {
+        log_message("on_load", "Missing required suites.");
         return kOfxStatErrMissingHostFeature;
     }
+    log_message("on_load", "Load successful.");
     return kOfxStatOK;
 }
 
 static OfxStatus plugin_main_entry(const char* action, const void* handle,
-                                   OfxPropertySetHandle in_args,
-                                   OfxPropertySetHandle out_args) {
+                                   OfxPropertySetHandle in_args, OfxPropertySetHandle out_args) {
+    if (action != nullptr && std::strcmp(action, kOfxImageEffectActionRender) != 0) {
+        log_message("plugin_main_entry", action);
+    }
     if (std::strcmp(action, kOfxActionLoad) == 0) {
         return on_load();
     }
@@ -67,8 +77,8 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
                 context_value = context;
             }
         }
-        return describe_in_context(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
-                                   context_value);
+        return describe_in_context(
+            reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), context_value);
     }
     if (std::strcmp(action, kOfxActionCreateInstance) == 0) {
         return create_instance(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
@@ -77,8 +87,8 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
         return destroy_instance(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
     }
     if (std::strcmp(action, kOfxImageEffectActionGetClipPreferences) == 0) {
-        return get_clip_preferences(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
-                                    out_args);
+        return get_clip_preferences(
+            reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), out_args);
     }
     if (std::strcmp(action, kOfxImageEffectActionRender) == 0) {
         return render(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args,
@@ -93,12 +103,8 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
 }
 
 static OfxPlugin g_plugin = {
-    kOfxImageEffectPluginApi,
-    kOfxImageEffectPluginApiVersion,
-    kPluginIdentifier,
-    CORRIDORKEY_VERSION_MAJOR,
-    CORRIDORKEY_VERSION_MINOR,
-    &set_host,
+    kOfxImageEffectPluginApi,  kOfxImageEffectPluginApiVersion, kPluginIdentifier,
+    CORRIDORKEY_VERSION_MAJOR, CORRIDORKEY_VERSION_MINOR,       &set_host,
     &plugin_main_entry,
 };
 
@@ -106,20 +112,25 @@ static OfxPlugin g_plugin = {
 
 extern "C" {
 
-OfxExport OfxStatus OfxSetHost(const OfxHost* host) {
+CORRIDORKEY_OFX_EXPORT OfxStatus OfxSetHost(const OfxHost* host) {
+    corridorkey::ofx::log_message("OfxSetHost",
+                                  host == nullptr ? "Host pointer is null." : "Host received.");
     corridorkey::ofx::set_host(const_cast<OfxHost*>(host));
     return kOfxStatOK;
 }
 
-OfxExport int OfxGetNumberOfPlugins(void) {
+CORRIDORKEY_OFX_EXPORT int OfxGetNumberOfPlugins(void) {
+    corridorkey::ofx::log_message("OfxGetNumberOfPlugins", "Returning 1.");
     return 1;
 }
 
-OfxExport OfxPlugin* OfxGetPlugin(int nth) {
+CORRIDORKEY_OFX_EXPORT OfxPlugin* OfxGetPlugin(int nth) {
+    corridorkey::ofx::log_message("OfxGetPlugin",
+                                  nth == 0 ? "Returning plugin 0." : "Requested invalid index.");
     if (nth == 0) {
         return &corridorkey::ofx::g_plugin;
     }
     return nullptr;
 }
 
-} // extern "C"
+}  // extern "C"

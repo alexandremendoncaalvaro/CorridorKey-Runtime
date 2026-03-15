@@ -12,7 +12,13 @@
 #include "ofxParam.h"
 #include "ofxProperty.h"
 
-
+#if defined(_WIN32)
+#define CORRIDORKEY_OFX_EXPORT OfxExport
+#elif defined(__GNUC__)
+#define CORRIDORKEY_OFX_EXPORT __attribute__((visibility("default")))
+#else
+#define CORRIDORKEY_OFX_EXPORT
+#endif
 
 namespace corridorkey {
 class Engine;

@@ -56,9 +56,8 @@ void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
 
     for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
-        auto row =
-            reinterpret_cast<const unsigned char*>(src_data) +
-            static_cast<ptrdiff_t>(y_pos) * static_cast<ptrdiff_t>(row_bytes);
+        auto row = reinterpret_cast<const unsigned char*>(src_data) +
+                   static_cast<ptrdiff_t>(y_pos) * static_cast<ptrdiff_t>(row_bytes);
         for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
             if (is_float) {
                 const float* pixel =
@@ -76,8 +75,7 @@ void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
     }
 }
 
-void write_output_image(const Image& src, void* dst_data, int row_bytes,
-                        const std::string& depth) {
+void write_output_image(const Image& src, void* dst_data, int row_bytes, const std::string& depth) {
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
     const SrgbLut& lut = SrgbLut::instance();
@@ -105,14 +103,10 @@ void write_output_image(const Image& src, void* dst_data, int row_bytes,
                 pixel[3] = a;
             } else if (is_byte) {
                 unsigned char* pixel = row + static_cast<size_t>(x_pos) * 4;
-                pixel[0] =
-                    static_cast<unsigned char>(std::clamp(r * 255.0f + 0.5f, 0.0f, 255.0f));
-                pixel[1] =
-                    static_cast<unsigned char>(std::clamp(g * 255.0f + 0.5f, 0.0f, 255.0f));
-                pixel[2] =
-                    static_cast<unsigned char>(std::clamp(b * 255.0f + 0.5f, 0.0f, 255.0f));
-                pixel[3] =
-                    static_cast<unsigned char>(std::clamp(a * 255.0f + 0.5f, 0.0f, 255.0f));
+                pixel[0] = static_cast<unsigned char>(std::clamp(r * 255.0f + 0.5f, 0.0f, 255.0f));
+                pixel[1] = static_cast<unsigned char>(std::clamp(g * 255.0f + 0.5f, 0.0f, 255.0f));
+                pixel[2] = static_cast<unsigned char>(std::clamp(b * 255.0f + 0.5f, 0.0f, 255.0f));
+                pixel[3] = static_cast<unsigned char>(std::clamp(a * 255.0f + 0.5f, 0.0f, 255.0f));
             }
         }
     }

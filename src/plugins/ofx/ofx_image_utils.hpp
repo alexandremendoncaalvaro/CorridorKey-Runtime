@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ofx_shared.hpp"
-
 #include <string>
+
+#include "ofx_shared.hpp"
 
 namespace corridorkey::ofx {
 
@@ -21,7 +21,6 @@ bool is_depth(const std::string& depth, const char* expected);
 
 void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
                            const std::string& depth);
-void write_output_image(const Image& src, void* dst_data, int row_bytes,
-                        const std::string& depth);
+void write_output_image(const Image& src, void* dst_data, int row_bytes, const std::string& depth);
 
 }  // namespace corridorkey::ofx

@@ -1,8 +1,8 @@
-#include "ofx_shared.hpp"
-
 #include <corridorkey/engine.hpp>
 
 #include "ofx_image_utils.hpp"
+#include "ofx_logging.hpp"
+#include "ofx_shared.hpp"
 #include "post_process/color_utils.hpp"
 
 namespace corridorkey::ofx {
@@ -11,11 +11,13 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle /*out_args*/) {
     if (g_suites.image_effect == nullptr || g_suites.property == nullptr ||
         g_suites.parameter == nullptr) {
+        log_message("render", "Missing required suites.");
         return kOfxStatErrMissingHostFeature;
     }
 
     InstanceData* data = get_instance_data(instance);
     if (data == nullptr || data->engine == nullptr) {
+        log_message("render", "Engine is not ready.");
         post_message(kOfxMessageError, "CorridorKey engine is not ready.", instance);
         return kOfxStatFailed;
     }
@@ -27,6 +29,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     OfxPropertySetHandle source_props = nullptr;
     if (!fetch_image(data->source_clip, time, source_props)) {
+        log_message("render", "Failed to fetch source image.");
         post_message(kOfxMessageError, "Failed to fetch source image.", instance);
         return kOfxStatFailed;
     }
@@ -34,6 +37,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     OfxPropertySetHandle output_props = nullptr;
     if (!fetch_image(data->output_clip, time, output_props)) {
+        log_message("render", "Failed to fetch output image.");
         post_message(kOfxMessageError, "Failed to fetch output image.", instance);
         return kOfxStatFailed;
     }
@@ -43,6 +47,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (g_suites.property->propGetPointer(source_props, kOfxImagePropData, 0, &source_data) !=
             kOfxStatOK ||
         source_data == nullptr) {
+        log_message("render", "Source image data unavailable.");
         post_message(kOfxMessageError, "Source image data is unavailable.", instance);
         return kOfxStatFailed;
     }
@@ -51,24 +56,28 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (g_suites.property->propGetPointer(output_props, kOfxImagePropData, 0, &output_data) !=
             kOfxStatOK ||
         output_data == nullptr) {
+        log_message("render", "Output image data unavailable.");
         post_message(kOfxMessageError, "Output image data is unavailable.", instance);
         return kOfxStatFailed;
     }
 
     OfxRectI source_bounds{};
     if (!get_rect_i(source_props, kOfxImagePropBounds, source_bounds)) {
+        log_message("render", "Source bounds unavailable.");
         post_message(kOfxMessageError, "Source bounds are unavailable.", instance);
         return kOfxStatFailed;
     }
 
     int source_row_bytes = 0;
     if (!get_int(source_props, kOfxImagePropRowBytes, source_row_bytes)) {
+        log_message("render", "Source row bytes unavailable.");
         post_message(kOfxMessageError, "Source row bytes are unavailable.", instance);
         return kOfxStatFailed;
     }
 
     int output_row_bytes = 0;
     if (!get_int(output_props, kOfxImagePropRowBytes, output_row_bytes)) {
+        log_message("render", "Output row bytes unavailable.");
         post_message(kOfxMessageError, "Output row bytes are unavailable.", instance);
         return kOfxStatFailed;
     }
@@ -77,14 +86,17 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     std::string source_components;
     if (!get_string(source_props, kOfxImageEffectPropPixelDepth, source_depth) ||
         !get_string(source_props, kOfxImageEffectPropComponents, source_components)) {
+        log_message("render", "Source format unavailable.");
         post_message(kOfxMessageError, "Source format is unavailable.", instance);
         return kOfxStatFailed;
     }
     if (!is_depth(source_depth, kOfxBitDepthFloat) && !is_depth(source_depth, kOfxBitDepthByte)) {
+        log_message("render", "Unsupported source bit depth.");
         post_message(kOfxMessageError, "Unsupported source bit depth.", instance);
         return kOfxStatFailed;
     }
     if (source_components != kOfxImageComponentRGBA) {
+        log_message("render", "Unsupported source components.");
         post_message(kOfxMessageError, "Only RGBA source images are supported.", instance);
         return kOfxStatFailed;
     }
@@ -94,6 +106,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         output_depth = source_depth;
     }
     if (!is_depth(output_depth, kOfxBitDepthFloat) && !is_depth(output_depth, kOfxBitDepthByte)) {
+        log_message("render", "Unsupported output bit depth.");
         post_message(kOfxMessageError, "Unsupported output bit depth.", instance);
         return kOfxStatFailed;
     }
@@ -101,6 +114,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int width = source_bounds.x2 - source_bounds.x1;
     int height = source_bounds.y2 - source_bounds.y1;
     if (width <= 0 || height <= 0) {
+        log_message("render", "Invalid source bounds.");
         post_message(kOfxMessageError, "Invalid source bounds.", instance);
         return kOfxStatFailed;
     }
@@ -145,12 +159,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     auto result = data->engine->process_frame(rgb_view, hint_view, params);
     if (!result) {
+        log_message("render", std::string("Engine processing failed: ") + result.error().message);
         post_message(kOfxMessageError, result.error().message.c_str(), instance);
         return kOfxStatFailed;
     }
 
     Image output_view = result->processed.view();
     if (output_view.width != width || output_view.height != height) {
+        log_message("render", "Unexpected output size from engine.");
         post_message(kOfxMessageError, "Unexpected output size from engine.", instance);
         return kOfxStatFailed;
     }

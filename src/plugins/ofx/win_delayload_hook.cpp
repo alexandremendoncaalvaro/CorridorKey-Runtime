@@ -1,16 +1,17 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <delayimp.h>
+#include <windows.h>
+
 #include <string>
 
 static FARPROC WINAPI corridorkey_delay_load_hook(unsigned dliNotify, PDelayLoadInfo pdli) {
     if (dliNotify == dliNotePreLoadLibrary) {
         if (_stricmp(pdli->szDll, "onnxruntime.dll") == 0) {
             HMODULE hPlugin = nullptr;
-            GetModuleHandleExW(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCWSTR>(&corridorkey_delay_load_hook), &hPlugin);
+            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               reinterpret_cast<LPCWSTR>(&corridorkey_delay_load_hook), &hPlugin);
 
             if (hPlugin) {
                 wchar_t path[MAX_PATH];

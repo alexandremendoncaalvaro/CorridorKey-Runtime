@@ -1,7 +1,8 @@
-#include "ofx_shared.hpp"
-
 #include <array>
 #include <cstring>
+
+#include "ofx_logging.hpp"
+#include "ofx_shared.hpp"
 
 namespace corridorkey::ofx {
 
@@ -46,11 +47,13 @@ void define_bool_param(OfxParamSetHandle param_set, const char* name, const char
 
 OfxStatus describe(OfxImageEffectHandle descriptor) {
     if (g_suites.property == nullptr || g_suites.image_effect == nullptr) {
+        log_message("describe", "Missing property or image_effect suite.");
         return kOfxStatErrMissingHostFeature;
     }
 
     OfxPropertySetHandle props = nullptr;
     if (g_suites.image_effect->getPropertySet(descriptor, &props) != kOfxStatOK) {
+        log_message("describe", "Failed to get property set.");
         return kOfxStatFailed;
     }
 
@@ -63,8 +66,7 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
 
     std::array<int, 3> version_parts = {CORRIDORKEY_VERSION_MAJOR, CORRIDORKEY_VERSION_MINOR,
                                         CORRIDORKEY_VERSION_PATCH};
-    g_suites.property->propSetIntN(props, kOfxPropVersion,
-                                   static_cast<int>(version_parts.size()),
+    g_suites.property->propSetIntN(props, kOfxPropVersion, static_cast<int>(version_parts.size()),
                                    version_parts.data());
     g_suites.property->propSetString(props, kOfxPropVersionLabel, 0, CORRIDORKEY_VERSION_STRING);
 
@@ -79,29 +81,34 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsMultiResolution, 0, 1);
     g_suites.property->propSetInt(props, kOfxImageEffectPropTemporalClipAccess, 0, 0);
 
+    log_message("describe", "Describe completed.");
     return kOfxStatOK;
 }
 
 OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context) {
     if (g_suites.property == nullptr || g_suites.image_effect == nullptr ||
         g_suites.parameter == nullptr) {
+        log_message("describe_in_context", "Missing required suites.");
         return kOfxStatErrMissingHostFeature;
     }
     if (context == nullptr || std::strcmp(context, kOfxImageEffectContextFilter) != 0) {
+        log_message("describe_in_context", "Unsupported context.");
         return kOfxStatErrUnsupported;
     }
 
     OfxPropertySetHandle clip_props = nullptr;
     if (g_suites.image_effect->clipDefine(descriptor, kOfxImageEffectSimpleSourceClipName,
                                           &clip_props) != kOfxStatOK) {
+        log_message("describe_in_context", "Failed to define source clip.");
         return kOfxStatFailed;
     }
     g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
                                      kOfxImageComponentRGBA);
     g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 0);
 
-    if (g_suites.image_effect->clipDefine(descriptor, kOfxImageEffectOutputClipName,
-                                          &clip_props) != kOfxStatOK) {
+    if (g_suites.image_effect->clipDefine(descriptor, kOfxImageEffectOutputClipName, &clip_props) !=
+        kOfxStatOK) {
+        log_message("describe_in_context", "Failed to define output clip.");
         return kOfxStatFailed;
     }
     g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
@@ -109,6 +116,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     OfxParamSetHandle param_set = nullptr;
     if (g_suites.image_effect->getParamSet(descriptor, &param_set) != kOfxStatOK) {
+        log_message("describe_in_context", "Failed to get param set.");
         return kOfxStatFailed;
     }
 
@@ -121,11 +129,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
                       "Disable sRGB to linear conversion for linear footage.");
 
+    log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;
 }
 
 OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHandle out_args) {
     if (out_args == nullptr || g_suites.property == nullptr || g_suites.image_effect == nullptr) {
+        log_message("get_clip_preferences", "Missing required suites or out_args.");
         return kOfxStatFailed;
     }
 
@@ -146,12 +156,12 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
 
     std::string components_key =
         std::string("OfxImageClipPropComponents_") + kOfxImageEffectOutputClipName;
-    std::string depth_key =
-        std::string("OfxImageClipPropDepth_") + kOfxImageEffectOutputClipName;
+    std::string depth_key = std::string("OfxImageClipPropDepth_") + kOfxImageEffectOutputClipName;
 
     g_suites.property->propSetString(out_args, components_key.c_str(), 0, kOfxImageComponentRGBA);
     g_suites.property->propSetString(out_args, depth_key.c_str(), 0, depth_value);
 
+    log_message("get_clip_preferences", "Clip preferences set.");
     return kOfxStatOK;
 }
 
