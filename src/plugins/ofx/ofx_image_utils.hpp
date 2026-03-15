@@ -21,6 +21,7 @@ bool is_depth(const std::string& depth, const char* expected);
 
 void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
                            const std::string& depth);
-void write_output_image(const Image& src, void* dst_data, int row_bytes, const std::string& depth);
+void write_output_image(const Image& src, void* dst_data, int row_bytes, const std::string& depth,
+                        bool apply_srgb = false);
 
 }  // namespace corridorkey::ofx

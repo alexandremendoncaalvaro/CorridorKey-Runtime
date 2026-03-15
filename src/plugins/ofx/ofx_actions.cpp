@@ -160,6 +160,8 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
 
     g_suites.property->propSetString(out_args, components_key.c_str(), 0, kOfxImageComponentRGBA);
     g_suites.property->propSetString(out_args, depth_key.c_str(), 0, depth_value);
+    g_suites.property->propSetString(out_args, kOfxImageEffectPropPreMultiplication, 0,
+                                     kOfxImagePreMultiplied);
 
     log_message("get_clip_preferences", "Clip preferences set.");
     return kOfxStatOK;

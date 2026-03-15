@@ -145,10 +145,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         g_suites.parameter->paramGetValueAtTime(data->refiner_param, time, &refiner_scale);
     }
 
-    if (input_is_linear == 0) {
-        ColorUtils::srgb_to_linear(rgb_view);
-    }
-
     ColorUtils::generate_rough_matte(rgb_view, hint_view);
 
     InferenceParams params;
@@ -171,7 +167,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         return kOfxStatFailed;
     }
 
-    write_output_image(output_view, output_data, output_row_bytes, output_depth);
+    write_output_image(output_view, output_data, output_row_bytes, output_depth,
+                       input_is_linear == 0);
     return kOfxStatOK;
 }
 

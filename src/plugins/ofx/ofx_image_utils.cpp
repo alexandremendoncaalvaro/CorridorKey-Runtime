@@ -81,7 +81,8 @@ void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
     }
 }
 
-void write_output_image(const Image& src, void* dst_data, int row_bytes, const std::string& depth) {
+void write_output_image(const Image& src, void* dst_data, int row_bytes, const std::string& depth,
+                        bool apply_srgb) {
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
     const SrgbLut& lut = SrgbLut::instance();
@@ -92,27 +93,53 @@ void write_output_image(const Image& src, void* dst_data, int row_bytes, const s
         const float* src_row = &src(y_pos, 0, 0);
         if (is_float) {
             float* dst_pixel = reinterpret_cast<float*>(row);
-            for (int x_pos = 0; x_pos < src.width; ++x_pos) {
-                dst_pixel[0] = src_row[0];
-                dst_pixel[1] = src_row[1];
-                dst_pixel[2] = src_row[2];
-                dst_pixel[3] = src_row[3];
-                src_row += 4;
-                dst_pixel += 4;
+            if (apply_srgb) {
+                for (int x_pos = 0; x_pos < src.width; ++x_pos) {
+                    float a = src_row[3];
+                    if (a > 0.0f) {
+                        float inv_a = 1.0f / a;
+                        dst_pixel[0] = lut.to_srgb(src_row[0] * inv_a) * a;
+                        dst_pixel[1] = lut.to_srgb(src_row[1] * inv_a) * a;
+                        dst_pixel[2] = lut.to_srgb(src_row[2] * inv_a) * a;
+                    } else {
+                        dst_pixel[0] = 0.0f;
+                        dst_pixel[1] = 0.0f;
+                        dst_pixel[2] = 0.0f;
+                    }
+                    dst_pixel[3] = a;
+                    src_row += 4;
+                    dst_pixel += 4;
+                }
+            } else {
+                for (int x_pos = 0; x_pos < src.width; ++x_pos) {
+                    dst_pixel[0] = src_row[0];
+                    dst_pixel[1] = src_row[1];
+                    dst_pixel[2] = src_row[2];
+                    dst_pixel[3] = src_row[3];
+                    src_row += 4;
+                    dst_pixel += 4;
+                }
             }
         } else if (is_byte) {
             unsigned char* dst_pixel = row;
             for (int x_pos = 0; x_pos < src.width; ++x_pos) {
-                float r = lut.to_srgb(src_row[0]);
-                float g = lut.to_srgb(src_row[1]);
-                float b = lut.to_srgb(src_row[2]);
                 float a = src_row[3];
-                dst_pixel[0] =
-                    static_cast<unsigned char>(std::clamp(r * 255.0f + 0.5f, 0.0f, 255.0f));
-                dst_pixel[1] =
-                    static_cast<unsigned char>(std::clamp(g * 255.0f + 0.5f, 0.0f, 255.0f));
-                dst_pixel[2] =
-                    static_cast<unsigned char>(std::clamp(b * 255.0f + 0.5f, 0.0f, 255.0f));
+                if (a > 0.0f) {
+                    float inv_a = 1.0f / a;
+                    float r = lut.to_srgb(src_row[0] * inv_a) * a;
+                    float g = lut.to_srgb(src_row[1] * inv_a) * a;
+                    float b = lut.to_srgb(src_row[2] * inv_a) * a;
+                    dst_pixel[0] =
+                        static_cast<unsigned char>(std::clamp(r * 255.0f + 0.5f, 0.0f, 255.0f));
+                    dst_pixel[1] =
+                        static_cast<unsigned char>(std::clamp(g * 255.0f + 0.5f, 0.0f, 255.0f));
+                    dst_pixel[2] =
+                        static_cast<unsigned char>(std::clamp(b * 255.0f + 0.5f, 0.0f, 255.0f));
+                } else {
+                    dst_pixel[0] = 0;
+                    dst_pixel[1] = 0;
+                    dst_pixel[2] = 0;
+                }
                 dst_pixel[3] =
                     static_cast<unsigned char>(std::clamp(a * 255.0f + 0.5f, 0.0f, 255.0f));
                 src_row += 4;
