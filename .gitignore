@@ -68,3 +68,4 @@ dist/
 __pycache__/
 *.pyc
 uv.lock
+.env
