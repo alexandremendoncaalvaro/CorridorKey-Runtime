@@ -29,7 +29,6 @@ CORE_LIB="${BUILD_DIR}/src/libcorridorkey_core.dylib"
 CPU_BASELINE_MODEL="${REPO_ROOT}/models/corridorkey_int8_512.onnx"
 MLX_REQUIRED_PACK="${REPO_ROOT}/models/corridorkey_mlx.safetensors"
 MLX_REQUIRED_BRIDGE="${REPO_ROOT}/models/corridorkey_mlx_bridge_512.mlxfn"
-MLX_HIGH_RES_BRIDGE="${REPO_ROOT}/models/corridorkey_mlx_bridge_1024.mlxfn"
 
 resolve_real_path() {
     python3 - "$1" <<'PY'
@@ -186,8 +185,8 @@ require_file "$CORE_LIB"
 require_file "$CPU_BASELINE_MODEL"
 require_file "$MLX_REQUIRED_PACK"
 require_file "$MLX_REQUIRED_BRIDGE"
-require_file "$MLX_HIGH_RES_BRIDGE"
 require_file "${PLUGINS_SCRIPTS_DIR}/Distribution.xml"
+require_file "${PLUGINS_SCRIPTS_DIR}/system/preinstall"
 require_file "${PLUGINS_SCRIPTS_DIR}/user/postinstall"
 require_file "${PLUGINS_SCRIPTS_DIR}/clear_cache/postinstall"
 
@@ -208,25 +207,25 @@ fi
 
 resolve_installer_identity
 
-echo "[1/6] Cleaning packaging workspace..."
+echo "[1/7] Cleaning packaging workspace..."
 rm -rf "$WORK_DIR"
 rm -rf "$DIST_DIR"
 mkdir -p "$MACOS_DIR" "$MODELS_DIR" "$PKG_DIR" "$DIST_DIR"
 
-echo "[2/6] Copying bundle payload..."
+echo "[2/7] Copying bundle payload..."
 cp "$PLUGIN_BINARY" "$MACOS_DIR/$PLUGIN_NAME"
 cp "$CORE_LIB" "$MACOS_DIR/$CORE_LIB_NAME"
 cp "$MLX_LIB" "$MACOS_DIR/$MLX_LIB_NAME"
 cp "$MLX_METALLIB" "$MACOS_DIR/$MLX_METALLIB_NAME"
 cp "$RUNTIME_LIB_REAL" "$MACOS_DIR/$RUNTIME_LINK_NAME"
 
-chmod u+w "$MACOS_DIR/$MLX_METALLIB_NAME"
+chmod u+w "$MACOS_DIR/$PLUGIN_NAME" "$MACOS_DIR/$CORE_LIB_NAME" \
+    "$MACOS_DIR/$RUNTIME_LINK_NAME" "$MACOS_DIR/$MLX_LIB_NAME" \
+    "$MACOS_DIR/$MLX_METALLIB_NAME"
 
 cp "$CPU_BASELINE_MODEL" "$MODELS_DIR/"
 cp "$MLX_REQUIRED_PACK" "$MODELS_DIR/"
 cp "$MLX_REQUIRED_BRIDGE" "$MODELS_DIR/"
-cp "$MLX_HIGH_RES_BRIDGE" "$MODELS_DIR/"
-
 cat <<PLIST_EOF > "${BUNDLE_DIR}/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -250,7 +249,13 @@ cat <<PLIST_EOF > "${BUNDLE_DIR}/Contents/Info.plist"
 </plist>
 PLIST_EOF
 
-echo "[3/6] Fixing library paths for portability..."
+echo "[3/7] Stripping debug symbols..."
+strip -x "$MACOS_DIR/$PLUGIN_NAME"
+strip -x "$MACOS_DIR/$CORE_LIB_NAME"
+strip -x "$MACOS_DIR/$RUNTIME_LINK_NAME"
+strip -x "$MACOS_DIR/$MLX_LIB_NAME"
+
+echo "[4/7] Fixing library paths for portability..."
 install_name_tool -id "@rpath/${RUNTIME_LINK_NAME}" "$MACOS_DIR/$RUNTIME_LINK_NAME"
 
 rewrite_dependency "$MACOS_DIR/$PLUGIN_NAME" "@rpath/libcorridorkey_core.dylib" \
@@ -276,30 +281,28 @@ delete_absolute_rpaths "$MACOS_DIR/$CORE_LIB_NAME"
 delete_absolute_rpaths "$MACOS_DIR/$RUNTIME_LINK_NAME"
 delete_absolute_rpaths "$MACOS_DIR/$MLX_LIB_NAME"
 
-echo "[4/6] Signing bundle binaries..."
+echo "[5/7] Signing bundle binaries..."
 sign_binary "$MACOS_DIR/$RUNTIME_LINK_NAME"
 sign_binary "$MACOS_DIR/$MLX_LIB_NAME"
 sign_resource "$MACOS_DIR/$MLX_METALLIB_NAME"
 sign_binary "$MACOS_DIR/$CORE_LIB_NAME"
 sign_binary "$MACOS_DIR/$PLUGIN_NAME"
 
-echo "[5/6] Building installer package..."
+echo "[6/7] Building installer package..."
 SYSTEM_ROOT="${WORK_DIR}/system_root"
-USER_ROOT="${WORK_DIR}/user_root"
-mkdir -p "$SYSTEM_ROOT" "$USER_ROOT"
+mkdir -p "$SYSTEM_ROOT"
 ditto "$BUNDLE_DIR" "$SYSTEM_ROOT/$BUNDLE_NAME"
-ditto "$BUNDLE_DIR" "$USER_ROOT/$BUNDLE_NAME"
 
 pkgbuild --root "$SYSTEM_ROOT" \
     --identifier "com.corridorkey.ofx.system" \
     --version "$VERSION" \
     --install-location "/Library/OFX/Plugins" \
+    --scripts "${PLUGINS_SCRIPTS_DIR}/system" \
     "$PKG_DIR/corridorkey_ofx_system.pkg"
 
-pkgbuild --root "$USER_ROOT" \
+pkgbuild --nopayload \
     --identifier "com.corridorkey.ofx.user" \
     --version "$VERSION" \
-    --install-location "/Users/Shared/CorridorKey" \
     --scripts "${PLUGINS_SCRIPTS_DIR}/user" \
     "$PKG_DIR/corridorkey_ofx_user.pkg"
 
@@ -319,7 +322,7 @@ else
     productbuild --distribution "$DIST_XML" --package-path "$PKG_DIR" "$PKG_PATH"
 fi
 
-echo "[6/6] Creating archive..."
+echo "[7/7] Creating archive..."
 case "$ARCHIVE_FORMAT" in
     dmg)
         DMG_ROOT="${WORK_DIR}/dmg_root"
@@ -327,7 +330,7 @@ case "$ARCHIVE_FORMAT" in
         mkdir -p "$DMG_ROOT"
         cp "$PKG_PATH" "$DMG_ROOT/"
         hdiutil create -volname "CorridorKey Resolve OFX" -srcfolder "$DMG_ROOT" \
-            -ov -format UDZO "$DMG_PATH"
+            -ov -format ULFO "$DMG_PATH"
         if [ -n "$SIGN_IDENTITY" ]; then
             codesign --force --sign "$SIGN_IDENTITY" "$DMG_PATH"
         fi

@@ -96,6 +96,7 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
     }
 
     if (std::strcmp(action, kOfxActionUnload) == 0) {
+        close_log();
         return kOfxStatOK;
     }
 

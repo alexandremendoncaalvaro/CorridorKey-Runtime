@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+
+system_bundle="/Library/OFX/Plugins/CorridorKey.ofx.bundle"
+if [ -d "$system_bundle" ]; then
+    rm -rf "$system_bundle"
+fi
+
+console_user="$(stat -f%Su /dev/console)"
+if [ -z "$console_user" ] || [ "$console_user" = "root" ]; then
+    exit 0
+fi
+
+user_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"
+if [ -z "$user_home" ]; then
+    exit 0
+fi
+
+user_bundle="${user_home}/Library/OFX/Plugins/CorridorKey.ofx.bundle"
+if [ -d "$user_bundle" ]; then
+    rm -rf "$user_bundle"
+fi
+
+exit 0

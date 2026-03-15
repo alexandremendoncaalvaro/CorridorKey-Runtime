@@ -13,6 +13,17 @@ require_file() {
     fi
 }
 
+require_min_size() {
+    local path="$1"
+    local min_bytes="$2"
+    local actual_bytes
+    actual_bytes="$(stat -f%z "$path")"
+    if [ "$actual_bytes" -lt "$min_bytes" ]; then
+        echo "File too small: $path ($actual_bytes bytes, expected >= $min_bytes)" >&2
+        exit 1
+    fi
+}
+
 require_no_absolute_rpaths() {
     local binary="$1"
     local leaked_rpaths
@@ -63,8 +74,16 @@ require_file "$MLX_LIB"
 require_file "$MLX_METALLIB"
 require_file "${MODELS_DIR}/corridorkey_mlx.safetensors"
 require_file "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn"
-require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn"
 require_file "${MODELS_DIR}/corridorkey_int8_512.onnx"
+
+require_min_size "$PLUGIN_BINARY" 100000
+require_min_size "$CORE_LIB" 5000000
+require_min_size "$RUNTIME_LIB" 5000000
+require_min_size "$MLX_LIB" 5000000
+require_min_size "$MLX_METALLIB" 50000000
+require_min_size "${MODELS_DIR}/corridorkey_mlx.safetensors" 300000000
+require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn" 200000000
+require_min_size "${MODELS_DIR}/corridorkey_int8_512.onnx" 50000000
 
 require_no_absolute_rpaths "$PLUGIN_BINARY"
 require_no_absolute_rpaths "$CORE_LIB"

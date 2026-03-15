@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
+#include <mutex>
 #include <string>
 
 #include "common/runtime_paths.hpp"
@@ -20,6 +21,10 @@
 namespace corridorkey::ofx {
 
 namespace {
+
+std::mutex g_log_mutex;
+std::FILE* g_log_file = nullptr;
+bool g_log_init_attempted = false;
 
 std::filesystem::path resolve_log_path() {
     if (auto override_path = common::environment_variable_copy("CORRIDORKEY_OFX_LOG");
@@ -89,11 +94,16 @@ int current_process_id() {
 }  // namespace
 
 void log_message(std::string_view scope, std::string_view message) {
-    auto path = resolve_log_path();
-    ensure_parent_directory(path);
+    std::lock_guard<std::mutex> lock(g_log_mutex);
 
-    std::FILE* file = std::fopen(path.string().c_str(), "a");
-    if (file == nullptr) {
+    if (!g_log_init_attempted) {
+        g_log_init_attempted = true;
+        auto path = resolve_log_path();
+        ensure_parent_directory(path);
+        g_log_file = std::fopen(path.string().c_str(), "a");
+    }
+
+    if (g_log_file == nullptr) {
         return;
     }
 
@@ -101,12 +111,20 @@ void log_message(std::string_view scope, std::string_view message) {
     std::uint64_t thread_id = current_thread_id();
     int process_id = current_process_id();
 
-    std::fprintf(file, "%s [%.*s] [pid=%d tid=%llu] %.*s\n", timestamp.c_str(),
+    std::fprintf(g_log_file, "%s [%.*s] [pid=%d tid=%llu] %.*s\n", timestamp.c_str(),
                  static_cast<int>(scope.size()), scope.data(), process_id,
                  static_cast<unsigned long long>(thread_id), static_cast<int>(message.size()),
                  message.data());
-    std::fflush(file);
-    std::fclose(file);
+    std::fflush(g_log_file);
+}
+
+void close_log() {
+    std::lock_guard<std::mutex> lock(g_log_mutex);
+    if (g_log_file != nullptr) {
+        std::fclose(g_log_file);
+        g_log_file = nullptr;
+    }
+    g_log_init_attempted = false;
 }
 
 }  // namespace corridorkey::ofx

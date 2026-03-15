@@ -159,9 +159,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
 
     data->device = auto_detect();
-#if defined(__APPLE__)
-    data->device.backend = Backend::Auto;
-#endif
     log_message("create_instance", std::string("Detected device: ") + data->device.name);
     log_message("create_instance",
                 std::string("Requested backend: ") + backend_label(data->device.backend));

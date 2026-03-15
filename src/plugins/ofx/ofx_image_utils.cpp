@@ -58,18 +58,24 @@ void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
     for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
         auto row = reinterpret_cast<const unsigned char*>(src_data) +
                    static_cast<ptrdiff_t>(y_pos) * static_cast<ptrdiff_t>(row_bytes);
-        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-            if (is_float) {
-                const float* pixel =
-                    reinterpret_cast<const float*>(row) + static_cast<size_t>(x_pos) * 4;
-                dst(y_pos, x_pos, 0) = pixel[0];
-                dst(y_pos, x_pos, 1) = pixel[1];
-                dst(y_pos, x_pos, 2) = pixel[2];
-            } else if (is_byte) {
-                const unsigned char* pixel = row + static_cast<size_t>(x_pos) * 4;
-                dst(y_pos, x_pos, 0) = static_cast<float>(pixel[0]) / 255.0f;
-                dst(y_pos, x_pos, 1) = static_cast<float>(pixel[1]) / 255.0f;
-                dst(y_pos, x_pos, 2) = static_cast<float>(pixel[2]) / 255.0f;
+        float* dst_row = &dst(y_pos, 0, 0);
+        if (is_float) {
+            const float* src_pixel = reinterpret_cast<const float*>(row);
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                dst_row[0] = src_pixel[0];
+                dst_row[1] = src_pixel[1];
+                dst_row[2] = src_pixel[2];
+                src_pixel += 4;
+                dst_row += 3;
+            }
+        } else if (is_byte) {
+            const unsigned char* src_pixel = row;
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                dst_row[0] = static_cast<float>(src_pixel[0]) / 255.0f;
+                dst_row[1] = static_cast<float>(src_pixel[1]) / 255.0f;
+                dst_row[2] = static_cast<float>(src_pixel[2]) / 255.0f;
+                src_pixel += 4;
+                dst_row += 3;
             }
         }
     }
@@ -83,30 +89,34 @@ void write_output_image(const Image& src, void* dst_data, int row_bytes, const s
     for (int y_pos = 0; y_pos < src.height; ++y_pos) {
         auto row = reinterpret_cast<unsigned char*>(dst_data) +
                    static_cast<ptrdiff_t>(y_pos) * static_cast<ptrdiff_t>(row_bytes);
-        for (int x_pos = 0; x_pos < src.width; ++x_pos) {
-            float r = src(y_pos, x_pos, 0);
-            float g = src(y_pos, x_pos, 1);
-            float b = src(y_pos, x_pos, 2);
-            float a = src(y_pos, x_pos, 3);
-
-            if (is_byte) {
-                r = lut.to_srgb(r);
-                g = lut.to_srgb(g);
-                b = lut.to_srgb(b);
+        const float* src_row = &src(y_pos, 0, 0);
+        if (is_float) {
+            float* dst_pixel = reinterpret_cast<float*>(row);
+            for (int x_pos = 0; x_pos < src.width; ++x_pos) {
+                dst_pixel[0] = src_row[0];
+                dst_pixel[1] = src_row[1];
+                dst_pixel[2] = src_row[2];
+                dst_pixel[3] = src_row[3];
+                src_row += 4;
+                dst_pixel += 4;
             }
-
-            if (is_float) {
-                float* pixel = reinterpret_cast<float*>(row) + static_cast<size_t>(x_pos) * 4;
-                pixel[0] = r;
-                pixel[1] = g;
-                pixel[2] = b;
-                pixel[3] = a;
-            } else if (is_byte) {
-                unsigned char* pixel = row + static_cast<size_t>(x_pos) * 4;
-                pixel[0] = static_cast<unsigned char>(std::clamp(r * 255.0f + 0.5f, 0.0f, 255.0f));
-                pixel[1] = static_cast<unsigned char>(std::clamp(g * 255.0f + 0.5f, 0.0f, 255.0f));
-                pixel[2] = static_cast<unsigned char>(std::clamp(b * 255.0f + 0.5f, 0.0f, 255.0f));
-                pixel[3] = static_cast<unsigned char>(std::clamp(a * 255.0f + 0.5f, 0.0f, 255.0f));
+        } else if (is_byte) {
+            unsigned char* dst_pixel = row;
+            for (int x_pos = 0; x_pos < src.width; ++x_pos) {
+                float r = lut.to_srgb(src_row[0]);
+                float g = lut.to_srgb(src_row[1]);
+                float b = lut.to_srgb(src_row[2]);
+                float a = src_row[3];
+                dst_pixel[0] =
+                    static_cast<unsigned char>(std::clamp(r * 255.0f + 0.5f, 0.0f, 255.0f));
+                dst_pixel[1] =
+                    static_cast<unsigned char>(std::clamp(g * 255.0f + 0.5f, 0.0f, 255.0f));
+                dst_pixel[2] =
+                    static_cast<unsigned char>(std::clamp(b * 255.0f + 0.5f, 0.0f, 255.0f));
+                dst_pixel[3] =
+                    static_cast<unsigned char>(std::clamp(a * 255.0f + 0.5f, 0.0f, 255.0f));
+                src_row += 4;
+                dst_pixel += 4;
             }
         }
     }

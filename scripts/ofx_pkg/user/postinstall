@@ -11,17 +11,15 @@ if [ -z "$user_home" ]; then
     exit 0
 fi
 
-staging_root="/Users/Shared/CorridorKey"
-staging_bundle="${staging_root}/CorridorKey.ofx.bundle"
+system_bundle="/Library/OFX/Plugins/CorridorKey.ofx.bundle"
 target_dir="${user_home}/Library/OFX/Plugins"
 target_bundle="${target_dir}/CorridorKey.ofx.bundle"
 
-if [ ! -d "$staging_bundle" ]; then
+if [ ! -d "$system_bundle" ]; then
     exit 0
 fi
 
 mkdir -p "$target_dir"
-ditto "$staging_bundle" "$target_bundle"
+ditto "$system_bundle" "$target_bundle"
 chown -R "$console_user" "$target_bundle"
-rm -rf "$staging_bundle"
-rm -rf "$staging_root"
+rm -rf "$system_bundle"

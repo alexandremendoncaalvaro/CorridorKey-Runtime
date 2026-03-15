@@ -18,6 +18,7 @@
         <pkg-ref id="com.corridorkey.ofx.system"/>
     </choice>
     <choice id="install_user" title="Current user" selected="false">
+        <pkg-ref id="com.corridorkey.ofx.system"/>
         <pkg-ref id="com.corridorkey.ofx.user"/>
     </choice>
     <choice id="clear_cache" title="Clear DaVinci Resolve plugin cache after install" selected="true">
