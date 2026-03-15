@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="1">
+    <title>CorridorKey OFX Plugin</title>
+    <organization>corridorkey</organization>
+    <domains enable_localSystem="true" enable_currentUserHome="true"/>
+    <options customize="always" require-scripts="false"/>
+
+    <choices-outline>
+        <line choice="destination_choice">
+            <line choice="install_system"/>
+            <line choice="install_user"/>
+        </line>
+        <line choice="clear_cache"/>
+    </choices-outline>
+
+    <choice id="destination_choice" title="Install Location" description="Choose where to install the OFX plugin." exclusive="true"/>
+    <choice id="install_system" title="System-wide (recommended)" selected="true">
+        <pkg-ref id="com.corridorkey.ofx.system"/>
+    </choice>
+    <choice id="install_user" title="Current user" selected="false">
+        <pkg-ref id="com.corridorkey.ofx.user"/>
+    </choice>
+    <choice id="clear_cache" title="Clear DaVinci Resolve plugin cache after install" selected="true">
+        <pkg-ref id="com.corridorkey.ofx.clear_cache"/>
+    </choice>
+
+    <pkg-ref id="com.corridorkey.ofx.system" version="@VERSION@" auth="Root">corridorkey_ofx_system.pkg</pkg-ref>
+    <pkg-ref id="com.corridorkey.ofx.user" version="@VERSION@" auth="Root">corridorkey_ofx_user.pkg</pkg-ref>
+    <pkg-ref id="com.corridorkey.ofx.clear_cache" version="@VERSION@" auth="Root">corridorkey_ofx_clear_cache.pkg</pkg-ref>
+</installer-gui-script>

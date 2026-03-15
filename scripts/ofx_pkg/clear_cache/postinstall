@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+
+console_user="$(stat -f%Su /dev/console)"
+if [ -z "$console_user" ] || [ "$console_user" = "root" ]; then
+    exit 0
+fi
+
+user_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"
+if [ -z "$user_home" ]; then
+    exit 0
+fi
+
+cache_path="${user_home}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Support/OFXPluginCacheV2.xml"
+rm -f "$cache_path"
