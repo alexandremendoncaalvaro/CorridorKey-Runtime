@@ -1,5 +1,6 @@
 #pragma once
 
+#include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
 #include <utility>
 
@@ -9,7 +10,7 @@ namespace corridorkey {
  * @brief High-performance pixel manipulation utilities.
  * All functions work on Linear Float data unless specified.
  */
-class ColorUtils {
+class CORRIDORKEY_API ColorUtils {
    public:
     /**
      * @brief Apply premultiplication: RGB * Alpha.
