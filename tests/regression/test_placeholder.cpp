@@ -14,8 +14,7 @@ TEST_CASE("Regression: MP4 lossless output does not silently downgrade", "[regre
     if (encoder.empty()) {
         auto plan = resolve_video_output_plan("regression_output.mp4", options, input_format);
         REQUIRE_FALSE(plan.has_value());
-        REQUIRE(plan.error().message.find("Lossless output is not available") !=
-                std::string::npos);
+        REQUIRE(plan.error().message.find("Lossless output is not available") != std::string::npos);
     } else {
         REQUIRE((encoder == "libx264rgb" || encoder == "libx264"));
     }

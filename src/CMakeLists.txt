@@ -51,6 +51,7 @@ target_link_libraries(corridorkey_core
 
 if(APPLE)
     target_link_libraries(corridorkey_core PRIVATE "-framework CoreML" "-framework Foundation")
+    target_link_options(corridorkey_core PRIVATE "-Wl,-no_warn_duplicate_libraries")
 endif()
 
 if(WIN32)
@@ -73,7 +74,9 @@ if(MSVC)
         COMPILE_DEFINITIONS "_CRT_SECURE_NO_WARNINGS"
     )
 else()
-    set_source_files_properties(frame_io/png_io.cpp PROPERTIES COMPILE_FLAGS "-Wno-error")
+    set_source_files_properties(frame_io/png_io.cpp PROPERTIES
+        COMPILE_FLAGS "-Wno-error -Wno-deprecated-declarations -Wno-missing-field-initializers"
+    )
 endif()
 
 # Organize subdirectories
@@ -134,7 +137,9 @@ if(BUILD_TESTING)
     target_compile_definitions(corridorkey_core_static PUBLIC CORRIDORKEY_STATIC_DEFINE)
 
     if(NOT MSVC)
-        set_source_files_properties(frame_io/png_io.cpp PROPERTIES COMPILE_FLAGS "-Wno-error")
+        set_source_files_properties(frame_io/png_io.cpp PROPERTIES
+            COMPILE_FLAGS "-Wno-error -Wno-deprecated-declarations -Wno-missing-field-initializers"
+        )
         target_compile_options(corridorkey_core_static PRIVATE -Wall -Wextra -Wpedantic -Werror)
     else()
         target_compile_options(corridorkey_core_static PRIVATE /W4 /WX /permissive-)

@@ -359,12 +359,12 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         } else {
             hint_buf =
                 ImageBuffer(rgb_frame.buffer.view().width, rgb_frame.buffer.view().height, 1);
-            common::measure_stage(on_stage, "video_generate_hint",
-                                  [&]() {
-                                      ColorUtils::generate_rough_matte(
-                                          rgb_frame.buffer.view(), hint_buf.view());
-                                  },
-                                  1);
+            common::measure_stage(
+                on_stage, "video_generate_hint",
+                [&]() {
+                    ColorUtils::generate_rough_matte(rgb_frame.buffer.view(), hint_buf.view());
+                },
+                1);
         }
 
         return std::optional<PrefetchedFrame>{

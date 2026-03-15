@@ -15,7 +15,8 @@
             "binaryDir": "${sourceDir}/build/${presetName}",
             "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
             "environment": {
-                "MACOSX_DEPLOYMENT_TARGET": "14.0"
+                "MACOSX_DEPLOYMENT_TARGET": "14.0",
+                "VCPKG_OSX_DEPLOYMENT_TARGET": "14.0"
             },
             "cacheVariables": {
                 "VCPKG_MANIFEST_MODE": "ON",

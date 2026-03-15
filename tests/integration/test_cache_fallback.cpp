@@ -130,9 +130,9 @@ class ScopedWindowsDenyWrite {
             return;
         }
 
-        DWORD result = GetNamedSecurityInfoW(
-            m_path_wide.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
-            &m_original_dacl, nullptr, &m_original_sd);
+        DWORD result =
+            GetNamedSecurityInfoW(m_path_wide.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                  nullptr, nullptr, &m_original_dacl, nullptr, &m_original_sd);
         if (result != ERROR_SUCCESS) {
             return;
         }
@@ -153,9 +153,9 @@ class ScopedWindowsDenyWrite {
             return;
         }
 
-        result = SetNamedSecurityInfoW(m_path_wide.data(), SE_FILE_OBJECT,
-                                       DACL_SECURITY_INFORMATION, nullptr, nullptr, new_dacl,
-                                       nullptr);
+        result =
+            SetNamedSecurityInfoW(m_path_wide.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                  nullptr, nullptr, new_dacl, nullptr);
         LocalFree(new_dacl);
         if (result != ERROR_SUCCESS) {
             return;
@@ -170,9 +170,8 @@ class ScopedWindowsDenyWrite {
         }
 
         if (m_active) {
-            SetNamedSecurityInfoW(m_path_wide.data(), SE_FILE_OBJECT,
-                                  DACL_SECURITY_INFORMATION, nullptr, nullptr, m_original_dacl,
-                                  nullptr);
+            SetNamedSecurityInfoW(m_path_wide.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
+                                  nullptr, nullptr, m_original_dacl, nullptr);
         }
 
         LocalFree(m_original_sd);

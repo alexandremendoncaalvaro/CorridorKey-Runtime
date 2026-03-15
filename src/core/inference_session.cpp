@@ -221,9 +221,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 #ifdef _WIN32
         case Backend::DirectML: {
             // DirectML is the universal GPU path for Windows (AMD, Intel, old NVIDIA)
-            std::unordered_map<std::string, std::string> dml_options = {
-                {"device_id", "0"}
-            };
+            std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
             m_session_options.AppendExecutionProvider("DML", dml_options);
             break;
         }

@@ -69,7 +69,7 @@ DeviceInfo auto_detect() {
     }
 #elif defined(_WIN32)
     auto gpus = core::list_windows_gpus();
-    
+
     // Tier 1: NVIDIA RTX (Best Performance)
     for (const auto& gpu : gpus) {
         if (gpu.tensorrt_rtx_available) {
@@ -133,13 +133,16 @@ std::vector<DeviceInfo> list_devices() {
     auto gpus = core::list_windows_gpus();
     for (const auto& gpu : gpus) {
         if (gpu.tensorrt_rtx_available) {
-            devices.push_back({gpu.adapter_name + " (TensorRT)", gpu.dedicated_memory_mb, Backend::TensorRT});
+            devices.push_back(
+                {gpu.adapter_name + " (TensorRT)", gpu.dedicated_memory_mb, Backend::TensorRT});
         }
         if (gpu.cuda_available) {
-            devices.push_back({gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb, Backend::CUDA});
+            devices.push_back(
+                {gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb, Backend::CUDA});
         }
         if (gpu.directml_available) {
-            devices.push_back({gpu.adapter_name + " (DirectML)", gpu.dedicated_memory_mb, Backend::DirectML});
+            devices.push_back(
+                {gpu.adapter_name + " (DirectML)", gpu.dedicated_memory_mb, Backend::DirectML});
         }
     }
     devices.push_back({"Generic CPU", 0, Backend::CPU});

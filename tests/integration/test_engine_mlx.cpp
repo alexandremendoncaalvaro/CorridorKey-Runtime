@@ -217,7 +217,11 @@ TEST_CASE("job orchestrator accepts a flat video output filename",
     const auto output_path = std::filesystem::path("output.mp4");
 
     {
-        auto writer_res = VideoWriter::open(input_path, 64, 64, 12.0);
+        VideoFrameFormat input_format;
+        VideoOutputOptions output_options;
+        output_options.mode = VideoOutputMode::Balanced;
+        output_options.allow_lossy_fallback = true;
+        auto writer_res = VideoWriter::open(input_path, 64, 64, 12.0, input_format, output_options);
         REQUIRE(writer_res.has_value());
         auto writer = std::move(*writer_res);
 
@@ -242,6 +246,8 @@ TEST_CASE("job orchestrator accepts a flat video output filename",
     request.model_path = model_path;
     request.device = DeviceInfo{"Apple Silicon MLX", 16000, Backend::MLX};
     request.params.target_resolution = 0;
+    request.video_output.mode = VideoOutputMode::Balanced;
+    request.video_output.allow_lossy_fallback = true;
 
     {
         CurrentPathGuard guard(temp_root);
