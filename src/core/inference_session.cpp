@@ -19,6 +19,7 @@
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
+#include "post_process/restore_source.hpp"
 #include "session_cache_policy.hpp"
 #include "session_policy.hpp"
 
@@ -544,12 +545,14 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
     result.foreground = std::move(acc_fg);
 
     common::measure_stage(
-        on_stage, "tile_post_process", [&]() { apply_post_process(result, params, on_stage); }, 1);
+        on_stage, "tile_post_process", [&]() { apply_post_process(result, rgb, params, on_stage); },
+        1);
 
     return result;
 }
 
-void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params,
+void InferenceSession::apply_post_process(FrameResult& result, const Image& source_rgb,
+                                          const InferenceParams& params,
                                           StageTimingCallback on_stage) {
     if (result.alpha.view().empty() || result.foreground.view().empty()) return;
 
@@ -566,6 +569,17 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     common::measure_stage(
         on_stage, "post_despill",
         [&]() { despill(result.foreground.view(), params.despill_strength); }, 1);
+
+    // 2b. Restore original source detail in opaque interior regions
+    if (!source_rgb.empty() && source_rgb.width == w && source_rgb.height == h) {
+        common::measure_stage(
+            on_stage, "post_restore_source",
+            [&]() {
+                restore_source_detail(result.foreground.view(), source_rgb,
+                                      result.alpha.const_view());
+            },
+            1);
+    }
 
     // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
     const auto& lut = SrgbLut::instance();
@@ -629,8 +643,8 @@ Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<I
     auto results_res = infer_batch_raw(rgbs, alpha_hints, params, on_stage);
     if (!results_res) return results_res;
 
-    for (auto& res : *results_res) {
-        apply_post_process(res, params, on_stage);
+    for (size_t i = 0; i < results_res->size(); ++i) {
+        apply_post_process((*results_res)[i], rgbs[i], params, on_stage);
     }
     return results_res;
 }
@@ -817,7 +831,7 @@ Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_h
     auto result_res = infer_raw(rgb, alpha_hint, params, on_stage);
     if (!result_res) return result_res;
 
-    apply_post_process(*result_res, params, on_stage);
+    apply_post_process(*result_res, rgb, params, on_stage);
     return result_res;
 }
 

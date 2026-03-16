@@ -127,12 +127,16 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     copy_source_to_linear(rgb_view, source_data, source_row_bytes, source_depth);
 
     int despeckle_enabled = 0;
+    int despeckle_size = 400;
     int input_is_linear = 0;
     double despill_strength = 1.0;
     double refiner_scale = 1.0;
 
     if (data->despeckle_param) {
         g_suites.parameter->paramGetValueAtTime(data->despeckle_param, time, &despeckle_enabled);
+    }
+    if (data->despeckle_size_param) {
+        g_suites.parameter->paramGetValueAtTime(data->despeckle_size_param, time, &despeckle_size);
     }
     if (data->input_is_linear_param) {
         g_suites.parameter->paramGetValueAtTime(data->input_is_linear_param, time,
@@ -150,6 +154,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     InferenceParams params;
     params.despill_strength = static_cast<float>(despill_strength);
     params.auto_despeckle = despeckle_enabled != 0;
+    params.despeckle_size = despeckle_size;
     params.refiner_scale = static_cast<float>(refiner_scale);
     params.input_is_linear = input_is_linear != 0;
 

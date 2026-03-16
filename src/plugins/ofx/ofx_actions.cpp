@@ -28,6 +28,25 @@ void define_double_param(OfxParamSetHandle param_set, const char* name, const ch
     }
 }
 
+void define_int_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                      int default_value, int min_value, int max_value, const char* hint) {
+    OfxPropertySetHandle param_props = nullptr;
+    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeInteger, name, &param_props) !=
+        kOfxStatOK) {
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    g_suites.property->propSetInt(param_props, kOfxParamPropDefault, 0, default_value);
+    g_suites.property->propSetInt(param_props, kOfxParamPropMin, 0, min_value);
+    g_suites.property->propSetInt(param_props, kOfxParamPropMax, 0, max_value);
+    g_suites.property->propSetInt(param_props, kOfxParamPropDisplayMin, 0, min_value);
+    g_suites.property->propSetInt(param_props, kOfxParamPropDisplayMax, 0, max_value);
+    if (hint != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+}
+
 void define_bool_param(OfxParamSetHandle param_set, const char* name, const char* label,
                        int default_value, const char* hint) {
     OfxPropertySetHandle param_props = nullptr;
@@ -124,8 +143,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Strength of green spill suppression.");
     define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
                       "Clean small alpha speckles automatically.");
-    define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.5, 2.0,
-                        "Refinement scale applied during inference.");
+    define_int_param(param_set, kParamDespeckleSize, "Despeckle Size", 400, 50, 2000,
+                     "Minimum connected component area in pixels to keep.");
+    define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
+                        "Edge refinement strength. 0 disables the refiner.");
     define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
                       "Disable sRGB to linear conversion for linear footage.");
 

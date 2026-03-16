@@ -32,6 +32,7 @@ constexpr const char* kPluginGroup = "Keying";
 
 constexpr const char* kParamDespillStrength = "despill_strength";
 constexpr const char* kParamAutoDespeckle = "auto_despeckle";
+constexpr const char* kParamDespeckleSize = "despeckle_size";
 constexpr const char* kParamRefinerScale = "refiner_scale";
 constexpr const char* kParamInputIsLinear = "input_is_linear";
 
@@ -48,6 +49,7 @@ struct InstanceData {
     OfxImageClipHandle output_clip = nullptr;
     OfxParamHandle despill_param = nullptr;
     OfxParamHandle despeckle_param = nullptr;
+    OfxParamHandle despeckle_size_param = nullptr;
     OfxParamHandle refiner_param = nullptr;
     OfxParamHandle input_is_linear_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;

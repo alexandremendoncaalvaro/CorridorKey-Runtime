@@ -153,6 +153,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAutoDespeckle, &data->despeckle_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamDespeckleSize, &data->despeckle_size_param,
+                                       nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRefinerScale, &data->refiner_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamInputIsLinear, &data->input_is_linear_param,

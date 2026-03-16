@@ -1,65 +1,160 @@
-# Product Direction: Native, Distributable, and Integratable Engine
+# CorridorKey OFX Plugin - Development Plan
 
-## Executive Summary
+## Business Context
 
-- The product is communicated as a **production-oriented native engine** for executing CorridorKey with operational predictability on real hardware.
-- The delivery sequence is explicit: **1. macOS first**, **2. Windows Universal GPU next**, **3. Integration surfaces**, **4. Broad platform expansion**.
-- The immediate focus remains closing the macOS production runtime, but documentation must reflect that **Windows Universal GPU** is the current active product track.
-- Core value is not "supporting many backends"; it is delivering **simple installation, reliable diagnostics, reproducible benchmarks, stable contracts, and consistent tier-based behavior**.
-- The runtime is unified, but **model artifacts are curated per platform**. The product does not assume a single packaged ONNX is the right path for both Apple Silicon and Windows.
-- Python remains allowed only in internal conversion and release preparation tools. The final distributed artifact must have **zero Python dependencies** for the end user.
+The OFX plugin is the primary delivery surface for CorridorKey. The first
+functional macOS Apple Silicon build is live (resolve-v0.1.4-mac), with basic
+keying, despill, despeckle, and refiner controls. The immediate goal is to
+close the quality gap with the community Python app (EZ-CorridorKey) and
+establish the plugin as a production-ready tool inside DaVinci Resolve.
 
-## Product Positioning
+## Current State
 
-- The project is not a "cross-platform port" of CorridorKey.
-- The primary message is: **CorridorKey as a native, distributable, and integratable engine, built for real hardware and reproducible production use.**
-- `library-first` remains a central pillar: CLI, future GUI, sidecars, plugins, and pipeline integrations all consume the same core logic.
-- `doctor`, `benchmark`, `models`, `presets`, `process --json`, and stage-level telemetry are core product features, not accessories.
+**Shipped (resolve-v0.1.4-mac):**
+- Functional OFX plugin for DaVinci Resolve on macOS Apple Silicon
+- MLX backend with CPU/CoreML fallback
+- Notarized DMG with PKG installer (system-wide / per-user)
+- Parameters: Despill Strength, Auto Despeckle, Refiner Scale, Input Is Linear
+- Correct color space pipeline (sRGB in, premultiplied sRGB out)
 
-## Platform Tracks
+**Known Issues:**
+- Output quality is visibly lower than source (details lost, darker than expected)
+- No way to restore original source detail in opaque regions
+- Despeckle is binary (on/off), no size threshold control
+- No separate matte/foreground output modes
+- Windows OFX plugin exists but has not been validated at the same level
 
-- **Current: macOS 14+ Apple Silicon**
-  - Unified runtime contracts.
-  - `int8_512` and `int8_768` as compatibility baselines.
-  - CPU as a mandatory fallback.
-  - Mac acceleration requires **platform-specific artifacts** (MLX-first).
-  - Portable CLI bundle as the first external artifact.
-- **Active: Windows 11 (Universal GPU)**
-  - **TensorRT RTX** as the primary high-performance path.
-  - Integrated support for **CUDA** (GTX) and **DirectML** (AMD/Intel/Universal).
-  - Focus on predictable installation, multi-backend diagnostics, and local caching.
-  - CPU as a mandatory fallback.
-- **Future**
-  - GUI and sidecars as thin runtime consumers.
-  - Linux and other paths only after macOS and Windows tracks are validated.
+## Phase 1 - Quality Parity with EZ-CorridorKey
 
-## Delivery Sequence
+Goal: match or exceed the visual quality of the Python standalone app.
 
-### Phase 1 — macOS production runtime (Release Gate)
-- Robust backend and fallback logic.
-- Performance guided by real-world benchmarks.
-- Reliable tiling for high-resolution processing.
-- Portable CLI bundle for third-party operators.
+### 1.1 Source Detail Restoration
 
-### Phase 2 — Windows Universal GPU track (Active)
-- Installation and provider contracts for consumer GPUs.
-- Caching, JIT compilation, and diagnostic strategy for TensorRT and CUDA.
-- Validated tiers and models for RTX, GTX, and AMD hardware.
-- `doctor` and `benchmark` parity with the macOS track.
+The single biggest quality improvement. The ML model output loses fine texture
+in fully opaque interior regions. EZ-CorridorKey solves this by blending
+original source pixels back where the matte is confidently opaque and far from
+edges.
 
-### Phase 3 — Integration surfaces
-- Stable Sidecar/Tauri contract built on existing JSON/NDJSON.
-- GUI as a thin client.
-- Explicit support for plugin and pipeline embedding.
+**Approach:**
+- Compute distance from alpha edge (alpha < threshold) for each pixel
+- Where alpha is near-opaque (> 0.92) AND distance from edge is significant
+  (> 8px) AND pixel has no green spill: blend original source RGB
+- Use smooth blend ramp to avoid visible transition artifacts
+- Implement in `src/post_process/` as a reusable utility
 
-### Phase 4 — Broader platform expansion
-- Linux and secondary paths.
-- Additional validation only where there is a clear value proposition.
+### 1.2 Despeckle Size Threshold
 
-## Strategic Commitments
+Replace the binary on/off toggle with a pixel-area threshold parameter.
 
-- **Predictability over Magic**: Runtime behavior must be understandable and reproducible.
-- **Practical Distribution over Fragile Setup**: Reduce accidental dependencies and installation friction.
-- **Integration as a Structural Goal**: The runtime is a foundation for other tools, not just a standalone command.
-- **Real Validation over Broad Claims**: Hardware support is communicated only after evidence-based testing.
-- **Disciplined Scope**: Prioritize few, high-quality paths over generic, unvalidated compatibility.
+**Approach:**
+- Add `kParamDespeckleSize` as integer parameter (range 50-2000, default 400)
+- Connected component analysis on the alpha channel
+- Remove components smaller than threshold
+- Apply morphological dilation + gaussian blur for smooth cleanup
+- Keep the existing bool as an enable/disable, add the size as a sub-parameter
+
+### 1.3 Refiner Scale Range
+
+Extend refiner scale to allow disabling the refiner entirely.
+
+**Approach:**
+- Change range from [0.5, 2.0] to [0.0, 3.0]
+- 0.0 = refiner disabled (use raw model output)
+- This matches EZ-CorridorKey behavior and gives users more control
+
+### 1.4 Despill Algorithm Improvement
+
+Current despill is functional but the green limit calculation could be more
+nuanced.
+
+**Approach:**
+- Verify current despill matches the luminance-preserving approach
+- Green limit = (R+B)/2, spillage = max(G - limit, 0)
+- Redistribute spill equally to R and B channels
+- Ensure strength parameter blends smoothly between original and despilled
+
+## Phase 2 - Output Control and Workflow
+
+Goal: give compositors the control they expect from a professional keyer.
+
+### 2.1 Output Mode Selector
+
+Allow users to choose what the plugin outputs.
+
+**Options:**
+- **Processed (default):** RGBA with matte applied (current behavior)
+- **Matte Only:** Alpha channel as grayscale (for manual compositing)
+- **Foreground Only:** RGB with green removed, no alpha applied
+- **Source + Matte:** Original RGB with generated alpha (no despill)
+
+**Approach:**
+- Add `kParamOutputMode` as choice parameter in `ofx_actions.cpp`
+- Branch in `ofx_render.cpp` after engine processing to write the selected
+  output variant
+
+### 2.2 Alpha Edge Controls
+
+Fine-tune matte edges without re-running inference.
+
+**Parameters:**
+- **Erode/Dilate** (range -10 to +10 px): shrink or grow the matte
+- **Edge Softness** (0.0 to 5.0 px): gaussian blur on matte edges only
+- **Black/White Point** (0.0 to 1.0 each): crush or lift matte levels
+
+**Approach:**
+- Implement as post-processing on the alpha channel after inference
+- Pure pixel math in `src/post_process/`, no external dependencies
+
+### 2.3 Color Correction Controls
+
+Compensate for the slight color shift that keying introduces.
+
+**Parameters:**
+- **Brightness** (0.5 to 2.0, default 1.0): simple gain on RGB
+- **Saturation** (0.0 to 2.0, default 1.0): saturation adjustment
+
+**Approach:**
+- Apply after despill, before final output write
+- Operate in linear space for correctness
+
+## Phase 3 - Platform Parity
+
+### 3.1 Windows OFX Validation
+
+- Validate the existing Windows build at the same quality level
+- Test with TensorRT, CUDA, and DirectML backends
+- Ensure installer and packaging match macOS quality
+
+### 3.2 Cross-Platform Feature Sync
+
+- Ensure all Phase 1-2 features work identically on Windows
+- Unified parameter set, same default values, same output behavior
+
+## Phase 4 - Advanced Features
+
+These are longer-term items informed by EZ-CorridorKey capabilities and
+community feedback.
+
+### 4.1 Multiple Alpha Hint Strategies
+
+EZ-CorridorKey supports GVM, BiRefNet, SAM2, and MatAnyone2. Evaluate which
+alternative hint generators could improve results for non-person subjects.
+
+### 4.2 Tiled Inference for Large Resolutions
+
+For 4K+ frames on constrained hardware, process in overlapping tiles with
+linear blend ramps at tile boundaries. EZ-CorridorKey uses 512x512 tiles with
+128px overlap.
+
+### 4.3 Temporal Consistency
+
+For video sequences, explore frame-to-frame matte consistency to reduce
+flickering. This could leverage SAM2-style temporal propagation or simpler
+alpha temporal filtering.
+
+## Reference
+
+- **EZ-CorridorKey:** github.com/edenaion/EZ-CorridorKey (Python standalone,
+  same AI model, community-driven)
+- **Archived plans:** docs/archive/PLAN_product_direction.md,
+  docs/archive/PLAN_OFX_MAC_v1.md
