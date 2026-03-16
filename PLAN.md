@@ -10,11 +10,17 @@ establish the plugin as a production-ready tool inside DaVinci Resolve.
 
 ## Current State
 
-**Shipped (resolve-v0.1.4-mac):**
+**Shipped (v0.2.0-mac):**
 - Functional OFX plugin for DaVinci Resolve on macOS Apple Silicon
 - MLX backend with CPU/CoreML fallback
 - Notarized DMG with PKG installer (system-wide / per-user)
-- Parameters: Despill Strength, Auto Despeckle, Refiner Scale, Input Is Linear
+- Smart resolution selection (512/768/1024 Auto based on input size)
+- Lanczos4 output upscaling for maximum edge detail
+- Source detail restoration with soft green falloff
+- Alpha Hint external matte input
+- Output Mode selector (Processed, Matte Only, Foreground Only, Source+Matte)
+- Alpha Edge Controls (Erode/Dilate, Softness, Black/White Point)
+- Color Correction (Brightness, Saturation)
 - Correct color space pipeline (sRGB in, premultiplied sRGB out)
 
 ## Phase 1 - Quality Parity with EZ-CorridorKey
@@ -50,6 +56,14 @@ Features requested by the community and critical for real-world compositing.
 
 Goal: proper 4K support and user control over quality/speed tradeoff.
 
+Research finding (2026-03-15): All reference implementations (original
+CorridorKey, EZ-CorridorKey, CorridorKey-Engine) process at 2048x2048 on
+CUDA and 1024x1024 on MPS/Apple Silicon. No repo does native-resolution
+inference. All downscale to model resolution, process, then Lanczos4
+upscale. Tiling is only applied to the CNN refiner (never the backbone),
+with 512px tiles and 128px overlap. Our 1024 bridge already matches what
+EZ-CorridorKey achieves on Apple Silicon.
+
 - [x] **2.1 Quality Mode Parameter** -- choice parameter exposing inference
   resolution: Auto (default), Preview (512), Standard (768), High (1024).
   Auto selects based on input resolution. Changing quality recreates the
@@ -59,10 +73,11 @@ Goal: proper 4K support and user control over quality/speed tradeoff.
   MLX bridge based on input size (<=1000px: 512, <=2000px: 768, >2000px:
   1024). Single-pass inference with no tiling overhead. Engine recreated
   only when target resolution changes.
-- [ ] **2.3 Preview Scale** -- optional downscale factor (1/2, 1/4, 1/8)
-  applied before inference for fast interactive scrubbing. Upscales result
-  to output resolution. Independent of Quality Mode. Enables fast timeline
-  navigation even at high quality settings.
+- [x] **2.3 Lanczos4 Output Upscaling** -- replaced bilinear upscaling of
+  inference results with separable Lanczos4 interpolation when resizing
+  back to source resolution. All reference repos use Lanczos4 for this
+  step. Bilinear retained for downscaling in `fit_pad` where it is
+  appropriate. (`src/post_process/color_utils.cpp`)
 
 ## Phase 3 - Output Control and Workflow
 
@@ -73,8 +88,9 @@ Goal: give compositors the control they expect from a professional keyer.
 - [x] **3.2 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
   Softness (0-5 px), Black/White Point (0-1 each). Post-inference alpha
   manipulation, no re-run needed.
-- [ ] **3.3 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
-  controls applied after despill in linear space.
+- [x] **3.3 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
+  controls applied to foreground in linear space after inference. Uses
+  Rec. 709 luminance weights for saturation. (`src/plugins/ofx/ofx_render.cpp`)
 
 ## Phase 4 - Platform Parity
 
@@ -95,14 +111,24 @@ feedback.
 - [ ] **5.2 Multiple Alpha Hint Strategies** -- evaluate BiRefNet, SAM2,
   MatAnyone2 as alternative hint generators for non-person subjects.
   Also enables arbitrary background colors without retraining.
-- [ ] **5.3 Tiled Inference Enhancements** -- advanced tiling with adaptive
-  tile sizes, resolution-aware overlap, and quality metrics.
+- [ ] **5.3 Refiner-Only Tiling** -- tile the CNN refiner (not the backbone
+  encoder) with 512px tiles and 128px overlap using linear ramp blending.
+  The refiner has ~65px receptive field (dilated convs 1,2,4,8), so 128px
+  overlap is mathematically lossless. This is the strategy all reference
+  repos use. Useful for memory savings, not quality improvement.
 - [ ] **5.4 Temporal Consistency** -- frame-to-frame matte consistency to
   reduce flickering in video sequences.
+- [ ] **5.5 2048px MLX Bridge** -- compile a 2048px bridge for Apple Silicon.
+  Would give our plugin a quality advantage over EZ-CorridorKey on MPS
+  (which caps at 1024). Requires memory profiling on 16GB/32GB machines.
 
 ## Reference
 
+- **Original CorridorKey:** github.com/nikopueringer/CorridorKey (creator's
+  repo, GreenFormer model)
 - **EZ-CorridorKey:** github.com/edenaion/EZ-CorridorKey (Python standalone,
   same AI model, community-driven)
+- **CorridorKey-Engine:** github.com/99oblivius/CorridorKey-Engine (Python
+  engine with optimizations, FlashAttention, deferred DMA)
 - **Archived plans:** docs/archive/PLAN_product_direction.md,
   docs/archive/PLAN_OFX_MAC_v1.md
