@@ -52,10 +52,15 @@ void distance_from_edge(const Image& alpha, float threshold, std::vector<float>&
     }
 }
 
-// Detect green spill: returns true if the pixel has significant green excess
-inline bool has_green_spill(float r, float g, float b) {
-    float limit = (r + b) * 0.5f;
-    return (g - limit) > 0.05f;
+// Detect green contamination using chromaticity (relative proportions).
+// Works correctly for both bright and dark pixels near the green screen.
+inline bool has_green_contamination(float r, float g, float b) {
+    float sum = r + g + b;
+    if (sum < 0.01f) return false;  // near-black pixels are safe
+    float green_ratio = g / sum;
+    // Pure green screen has green_ratio ~0.6-0.8. Neutral gray is ~0.333.
+    // Flag anything with green dominance above 0.38 (conservative threshold).
+    return green_ratio > 0.38f;
 }
 
 }  // namespace
@@ -88,7 +93,7 @@ void restore_source_detail(Image foreground, const Image& source, const Image& a
                 float src_r = source(y, x, 0);
                 float src_g = source(y, x, 1);
                 float src_b = source(y, x, 2);
-                if (has_green_spill(src_r, src_g, src_b)) continue;
+                if (has_green_contamination(src_r, src_g, src_b)) continue;
 
                 // Smooth blend weight: 0 at dist_min, 1 at dist_max
                 float blend = std::clamp((d - dist_min) / (dist_max - dist_min), 0.0f, 1.0f);
