@@ -3,6 +3,14 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Load environment variables from .env if present
+if [ -f "${REPO_ROOT}/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${REPO_ROOT}/.env"
+    set +a
+fi
+
 VERSION="${CORRIDORKEY_VERSION:-0.1.7}"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-${REPO_ROOT}/build/release-macos-portable}"
 DIST_DIR="${REPO_ROOT}/dist/CorridorKey_Resolve_Mac_v${VERSION}"

@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+REPO_ROOT_EARLY="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "${REPO_ROOT_EARLY}/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${REPO_ROOT_EARLY}/.env"
+    set +a
+fi
+
 VERSION="${CORRIDORKEY_VERSION:-0.1.4}"
 DIST_DIR="dist/CorridorKey_Mac_v${VERSION}"
 BIN_NAME="corridorkey"
