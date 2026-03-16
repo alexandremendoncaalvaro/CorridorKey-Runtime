@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <new>
@@ -217,46 +218,35 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     return kOfxStatOK;
 }
 
-bool ensure_engine_for_quality(InstanceData* data, int quality_mode) {
-    if (data == nullptr || quality_mode == data->active_quality_mode) {
-        return true;
-    }
+int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
+    if (quality_mode == kQualityPreview) return 512;
+    if (quality_mode == kQualityStandard) return 768;
+    if (quality_mode == kQualityHigh) return 1024;
 
-    // Map quality mode to MLX bridge resolution
-    int resolution = 512;
-    if (quality_mode == kQualityStandard) {
-        resolution = 768;
-    } else if (quality_mode == kQualityHigh) {
-        resolution = 1024;
-    }
+    // Auto: select based on input resolution
+    int max_dim = std::max(input_width, input_height);
+    if (max_dim > 2000) return 1024;
+    if (max_dim > 1000) return 768;
+    return 512;
+}
 
-    // For Auto mode, keep the default model
-    if (quality_mode == kQualityAuto) {
-        if (data->active_quality_mode == kQualityAuto) return true;
-        // Reload original model
-        auto engine_result = Engine::create(data->model_path, data->device);
-        if (!engine_result) {
-            log_message(
-                "ensure_engine_for_quality",
-                std::string("Failed to reload default engine: ") + engine_result.error().message);
-            return false;
-        }
-        data->engine = std::move(*engine_result);
-        data->active_quality_mode = kQualityAuto;
-        log_message("ensure_engine_for_quality", "Switched to Auto quality mode.");
-        return true;
-    }
+bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
+                               int input_height) {
+    if (data == nullptr) return true;
 
-    // Try to find the bridge for the requested resolution
-    auto bridge_path =
-        data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
-    if (!std::filesystem::exists(bridge_path)) {
+    int target = resolve_target_resolution(quality_mode, input_width, input_height);
+    if (target == data->active_resolution) return true;
+
+    auto desired_bridge =
+        data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(target) + ".mlxfn");
+
+    if (!std::filesystem::exists(desired_bridge)) {
         log_message("ensure_engine_for_quality",
-                    std::string("Bridge not found: ") + bridge_path.string());
+                    std::string("Bridge not found: ") + desired_bridge.string());
         return false;
     }
 
-    auto engine_result = Engine::create(bridge_path, data->device);
+    auto engine_result = Engine::create(desired_bridge, data->device);
     if (!engine_result) {
         log_message(
             "ensure_engine_for_quality",
@@ -265,10 +255,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode) {
     }
 
     data->engine = std::move(*engine_result);
+    data->model_path = desired_bridge;
     data->active_quality_mode = quality_mode;
+    data->active_resolution = target;
     log_message("ensure_engine_for_quality",
-                std::string("Switched to quality mode with resolution ") +
-                    std::to_string(resolution) + ".");
+                std::string("Switched to bridge ") + desired_bridge.filename().string());
     return true;
 }
 

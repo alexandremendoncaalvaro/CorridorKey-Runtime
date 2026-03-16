@@ -84,6 +84,7 @@ struct InstanceData {
     std::filesystem::path model_path = {};
     DeviceInfo device = {};
     int active_quality_mode = kQualityAuto;
+    int active_resolution = 0;
 };
 
 extern OfxHost* g_host;
@@ -95,7 +96,8 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
-bool ensure_engine_for_quality(InstanceData* data, int quality_mode);
+bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
+                               int input_height = 0);
 
 OfxStatus on_load();
 OfxStatus describe(OfxImageEffectHandle descriptor);

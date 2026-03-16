@@ -142,7 +142,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
     }
-    if (!ensure_engine_for_quality(data, quality_mode)) {
+    if (!ensure_engine_for_quality(data, quality_mode, width, height)) {
         log_message("render", "Failed to switch quality mode. Using current engine.");
     }
     if (data->output_mode_param) {
@@ -215,8 +215,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.despeckle_size = despeckle_size;
     params.refiner_scale = static_cast<float>(refiner_scale);
     params.input_is_linear = input_is_linear != 0;
-    params.enable_tiling = true;
-    params.tile_padding = 32;
 
     auto result = data->engine->process_frame(rgb_view, hint_view, params);
     if (!result) {
