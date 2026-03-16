@@ -36,7 +36,7 @@ Goal: match or exceed the visual quality of the Python standalone app.
 
 Features requested by the community and critical for real-world compositing.
 
-- [ ] **1.5.1 Alpha Hint Input Clip** -- add a second optional OFX input clip
+- [x] **1.5.1 Alpha Hint Input Clip** -- add a second optional OFX input clip
   ("Alpha Hint") so users can feed an external matte from another Fusion node
   (keyer, roto, painted mask) instead of the auto-generated rough matte.
   If not connected, falls back to `generate_rough_matte` as today.
