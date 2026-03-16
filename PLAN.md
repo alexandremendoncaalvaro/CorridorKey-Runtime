@@ -21,7 +21,7 @@ establish the plugin as a production-ready tool inside DaVinci Resolve.
 - Output Mode selector (Processed, Matte Only, Foreground Only, Source+Matte)
 - Alpha Edge Controls (Erode/Dilate, Softness, Black/White Point)
 - Color Correction (Brightness, Saturation)
-- Correct color space pipeline (sRGB in, premultiplied sRGB out)
+- Correct color space pipeline (sRGB in, linear premultiplied out, sRGB conversion in write)
 
 ## Phase 1 - Quality Parity with EZ-CorridorKey
 
@@ -91,6 +91,12 @@ Goal: give compositors the control they expect from a professional keyer.
 - [x] **3.3 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
   controls applied to foreground in linear space after inference. Uses
   Rec. 709 luminance weights for saturation. (`src/plugins/ofx/ofx_render.cpp`)
+- [x] **3.4 Color Pipeline Audit** -- fixed double-gamma bug in all output
+  modes when alpha edge controls or color correction were active. The
+  foreground (sRGB from model) was being premultiplied without linearization,
+  then `write_output_image` applied `to_srgb()` again, causing gray banding
+  at transparency edges. Now all output paths convert FG to linear before
+  premultiplication, matching the reference repos exactly.
 
 ## Phase 4 - Platform Parity
 

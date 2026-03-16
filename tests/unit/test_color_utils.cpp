@@ -113,6 +113,150 @@ TEST_CASE("ColorUtils::resize_lanczos upscale", "[unit][color]") {
     }
 }
 
+TEST_CASE("ColorUtils::resize_lanczos edge boundary reflect_101", "[unit][color][regression]") {
+    // Regression: Lanczos4 used to truncate the kernel at image edges,
+    // producing asymmetric weights and visible halos/stepping artifacts.
+    // The fix uses BORDER_REFLECT_101 to maintain kernel symmetry.
+
+    SECTION("Single-pixel image upscale preserves value") {
+        ImageBuffer buf(1, 1, 1);
+        buf.view().data[0] = 0.8f;
+        ImageBuffer result = ColorUtils::resize_lanczos(buf.view(), 4, 4);
+        Image out = result.view();
+        for (size_t i = 0; i < out.data.size(); ++i) {
+            REQUIRE(out.data[i] == Catch::Approx(0.8f).margin(0.01f));
+        }
+    }
+
+    SECTION("Horizontal edge: left/right columns match on symmetric input") {
+        ImageBuffer buf(8, 1, 1);
+        Image img = buf.view();
+        for (int x = 0; x < 8; ++x) {
+            img(0, x) = static_cast<float>(x) / 7.0f;
+        }
+
+        ImageBuffer result = ColorUtils::resize_lanczos(img, 16, 1);
+        Image out = result.view();
+
+        // With reflect_101, an ascending ramp from 0..1 should produce a
+        // monotonically non-decreasing output (no negative overshoots at left edge)
+        for (int x = 1; x < 16; ++x) {
+            REQUIRE(out(0, x) >= out(0, x - 1) - 0.05f);
+        }
+    }
+
+    SECTION("Hard alpha edge: output stays in [0,1] range") {
+        ImageBuffer buf(8, 8, 1);
+        Image img = buf.view();
+        for (int y = 0; y < 8; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                img(y, x) = x < 4 ? 0.0f : 1.0f;
+            }
+        }
+
+        ImageBuffer result = ColorUtils::resize_lanczos(img, 16, 16);
+        Image out = result.view();
+        for (size_t i = 0; i < out.data.size(); ++i) {
+            // Lanczos ringing may produce slight overshoot, but reflect_101
+            // should keep it much smaller than the old truncation artifacts
+            REQUIRE(out.data[i] >= -0.15f);
+            REQUIRE(out.data[i] <= 1.15f);
+        }
+    }
+}
+
+TEST_CASE("ColorUtils::clamp_image", "[unit][color]") {
+    ImageBuffer buf(3, 1, 1);
+    Image img = buf.view();
+    img.data[0] = -0.1f;
+    img.data[1] = 0.5f;
+    img.data[2] = 1.2f;
+
+    ColorUtils::clamp_image(img, 0.0f, 1.0f);
+
+    REQUIRE(img.data[0] == Catch::Approx(0.0f));
+    REQUIRE(img.data[1] == Catch::Approx(0.5f));
+    REQUIRE(img.data[2] == Catch::Approx(1.0f));
+}
+
+TEST_CASE("ColorUtils::gaussian_blur smooths alpha", "[unit][color]") {
+    SECTION("Uniform image is unchanged") {
+        ImageBuffer buf(8, 8, 1);
+        Image img = buf.view();
+        std::fill(img.data.begin(), img.data.end(), 0.7f);
+
+        ColorUtils::gaussian_blur(img, 1.0f);
+        for (size_t i = 0; i < img.data.size(); ++i) {
+            REQUIRE(img.data[i] == Catch::Approx(0.7f).margin(0.001f));
+        }
+    }
+
+    SECTION("Hard edge is softened") {
+        ImageBuffer buf(16, 1, 1);
+        Image img = buf.view();
+        for (int x = 0; x < 16; ++x) {
+            img(0, x) = x < 8 ? 0.0f : 1.0f;
+        }
+
+        ColorUtils::gaussian_blur(img, 1.5f);
+
+        // Pixels far from edge should stay near original
+        REQUIRE(img(0, 0) < 0.05f);
+        REQUIRE(img(0, 15) > 0.95f);
+        // Transition region should now be gradual
+        REQUIRE(img(0, 7) > 0.1f);
+        REQUIRE(img(0, 7) < 0.5f);
+        REQUIRE(img(0, 8) > 0.5f);
+        REQUIRE(img(0, 8) < 0.9f);
+    }
+
+    SECTION("Zero sigma is no-op") {
+        ImageBuffer buf(4, 4, 1);
+        Image img = buf.view();
+        img(0, 0) = 1.0f;
+        img(0, 1) = 0.0f;
+
+        ColorUtils::gaussian_blur(img, 0.0f);
+        REQUIRE(img(0, 0) == 1.0f);
+        REQUIRE(img(0, 1) == 0.0f);
+    }
+}
+
+TEST_CASE("ColorUtils::resize_area anti-aliased downscale", "[unit][color]") {
+    SECTION("Small downscale matches bilinear") {
+        ImageBuffer buf(4, 4, 1);
+        Image img = buf.view();
+        std::fill(img.data.begin(), img.data.end(), 0.5f);
+
+        ImageBuffer result = ColorUtils::resize_area(img, 3, 3);
+        ImageBuffer ref = ColorUtils::resize(img, 3, 3);
+
+        for (size_t i = 0; i < result.view().data.size(); ++i) {
+            REQUIRE(result.view().data[i] == Catch::Approx(ref.view().data[i]).margin(0.001f));
+        }
+    }
+
+    SECTION("Large downscale pre-filters high frequencies") {
+        // Create a fine stripe pattern at 32x1 (alternating 0/1 every pixel)
+        // Bilinear at 5x downscale will alias; area should smooth
+        ImageBuffer buf(32, 1, 1);
+        Image img = buf.view();
+        for (int x = 0; x < 32; ++x) {
+            img(0, x) = (x % 2 == 0) ? 0.0f : 1.0f;
+        }
+
+        // Downscale 32 -> 6 = 5.3x factor (well above 1.5x threshold)
+        ImageBuffer area_result = ColorUtils::resize_area(img, 6, 1);
+        Image area = area_result.view();
+
+        // After pre-filtering, all output values should be near 0.5
+        for (int x = 0; x < 6; ++x) {
+            REQUIRE(area(0, x) > 0.3f);
+            REQUIRE(area(0, x) < 0.7f);
+        }
+    }
+}
+
 TEST_CASE("ColorUtils::generate_rough_matte", "[unit][color]") {
     ImageBuffer rgb_buf(2, 1, 3);
     Image rgb = rgb_buf.view();

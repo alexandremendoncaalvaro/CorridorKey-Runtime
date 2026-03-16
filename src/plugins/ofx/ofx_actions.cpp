@@ -82,6 +82,18 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
     }
 }
 
+void define_group_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                        bool open) {
+    OfxPropertySetHandle param_props = nullptr;
+    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeGroup, name, &param_props) !=
+        kOfxStatOK) {
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    g_suites.property->propSetInt(param_props, kOfxParamPropGroupOpen, 0, open ? 1 : 0);
+}
+
 }  // namespace
 
 OfxStatus describe(OfxImageEffectHandle descriptor) {
@@ -96,9 +108,10 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
         return kOfxStatFailed;
     }
 
+    std::string long_label = std::string(kPluginLabel) + " v" + CORRIDORKEY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropShortLabel, 0, kPluginLabel);
-    g_suites.property->propSetString(props, kOfxPropLongLabel, 0, kPluginLabel);
+    g_suites.property->propSetString(props, kOfxPropLongLabel, 0, long_label.c_str());
     std::string description =
         std::string("CorridorKey AI green screen keyer v") + CORRIDORKEY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropPluginDescription, 0, description.c_str());
@@ -170,6 +183,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         return kOfxStatFailed;
     }
 
+    std::string version_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
+    define_group_param(param_set, "version_group", version_group_label.c_str(), false);
+
     define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityAuto,
                         {"Auto", "Preview (512)", "Standard (768)", "High (1024)"},
                         "Inference resolution. Auto selects based on input size. "
@@ -204,6 +220,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
                       "Disable sRGB to linear conversion for linear footage.");
+
+    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleLanczos4,
+                        {"Lanczos4", "Bilinear"},
+                        "Method used to upscale model output to source resolution. "
+                        "Lanczos4 is sharper; Bilinear is smoother.");
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;

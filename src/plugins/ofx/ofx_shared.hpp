@@ -45,12 +45,17 @@ constexpr const char* kParamAlphaErode = "alpha_erode";
 constexpr const char* kParamAlphaSoftness = "alpha_softness";
 constexpr const char* kParamBrightness = "brightness";
 constexpr const char* kParamSaturation = "saturation";
+constexpr const char* kParamUpscaleMethod = "upscale_method";
 
 // Quality mode choice indices
 constexpr int kQualityAuto = 0;
 constexpr int kQualityPreview = 1;
 constexpr int kQualityStandard = 2;
 constexpr int kQualityHigh = 3;
+
+// Upscale method choice indices
+constexpr int kUpscaleLanczos4 = 0;
+constexpr int kUpscaleBilinear = 1;
 
 // Output mode choice indices
 constexpr int kOutputProcessed = 0;
@@ -83,6 +88,7 @@ struct InstanceData {
     OfxParamHandle alpha_softness_param = nullptr;
     OfxParamHandle brightness_param = nullptr;
     OfxParamHandle saturation_param = nullptr;
+    OfxParamHandle upscale_method_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};

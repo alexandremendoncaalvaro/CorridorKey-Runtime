@@ -19,6 +19,7 @@ class MlxSession {
     MlxSession& operator=(MlxSession&&) noexcept;
 
     [[nodiscard]] Result<FrameResult> infer(const Image& rgb, const Image& alpha_hint,
+                                            UpscaleMethod upscale_method = UpscaleMethod::Lanczos4,
                                             StageTimingCallback on_stage = nullptr);
 
     [[nodiscard]] int model_resolution() const;

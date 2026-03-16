@@ -1,7 +1,6 @@
 #include "despill.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <numeric>
 #include <vector>
 
@@ -32,19 +31,10 @@ void despill(Image rgb, float strength) {
             float spill = std::max(0.0f, g - limit);
 
             if (spill > 0.0f) {
-                float r_new = r + spill * 0.5f;
-                float g_new = g - spill;
-                float b_new = b + spill * 0.5f;
-
-                if (strength < 1.0f) {
-                    rgb(y, x, 0) = r + (r_new - r) * strength;
-                    rgb(y, x, 1) = g + (g_new - g) * strength;
-                    rgb(y, x, 2) = b + (b_new - b) * strength;
-                } else {
-                    rgb(y, x, 0) = r_new;
-                    rgb(y, x, 1) = g_new;
-                    rgb(y, x, 2) = b_new;
-                }
+                float effective_spill = spill * strength;
+                rgb(y, x, 0) = std::min(1.0f, r + effective_spill * 0.5f);
+                rgb(y, x, 1) = g - effective_spill;
+                rgb(y, x, 2) = std::min(1.0f, b + effective_spill * 0.5f);
             }
         }
     });

@@ -36,15 +36,36 @@ class CORRIDORKEY_API ColorUtils {
 
     /**
      * @brief Resize an image using bilinear interpolation.
-     * Suitable for downscaling. Returns an owned ImageBuffer.
+     * Returns an owned ImageBuffer.
      */
     static ImageBuffer resize(Image image, int new_width, int new_height);
 
     /**
+     * @brief Resize with Gaussian pre-filter for anti-aliased downscaling.
+     * When downscaling by more than 1.5x, applies a Gaussian blur before
+     * bilinear interpolation to prevent aliasing. For upscaling or small
+     * downscale ratios, behaves identically to resize().
+     */
+    static ImageBuffer resize_area(Image image, int new_width, int new_height);
+
+    /**
      * @brief Resize an image using Lanczos4 interpolation.
+     * Uses BORDER_REFLECT_101 boundary handling matching OpenCV.
      * Higher quality than bilinear for upscaling. Returns an owned ImageBuffer.
      */
     static ImageBuffer resize_lanczos(Image image, int new_width, int new_height);
+
+    /**
+     * @brief Apply separable Gaussian blur in-place.
+     * @param image Single-channel or multi-channel image to blur.
+     * @param sigma Standard deviation of the Gaussian kernel.
+     */
+    static void gaussian_blur(Image image, float sigma);
+
+    /**
+     * @brief Clamp all pixel values to [min_val, max_val].
+     */
+    static void clamp_image(Image image, float min_val, float max_val);
 
     /**
      * @brief Resize image maintaining aspect ratio and padding to reach target size (Letterbox).

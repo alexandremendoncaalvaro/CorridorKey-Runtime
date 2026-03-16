@@ -337,6 +337,11 @@ class ImageBuffer {
 };
 
 /**
+ * @brief Upscale method for resizing model output to source resolution.
+ */
+enum class UpscaleMethod : std::uint8_t { Lanczos4, Bilinear };
+
+/**
  * @brief Parameters to control the inference and post-processing.
  */
 struct InferenceParams {
@@ -353,6 +358,8 @@ struct InferenceParams {
     // Tiling Inference (High-Res support)
     bool enable_tiling = false;
     int tile_padding = 32;  // Overlap in pixels to blend seams
+
+    UpscaleMethod upscale_method = UpscaleMethod::Lanczos4;
 };
 
 /**

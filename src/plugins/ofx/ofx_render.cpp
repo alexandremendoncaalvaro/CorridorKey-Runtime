@@ -1,5 +1,6 @@
 #include <corridorkey/engine.hpp>
 
+#include "common/srgb_lut.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
@@ -140,6 +141,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     double alpha_softness = 0.0;
     double brightness = 1.0;
     double saturation = 1.0;
+    int upscale_method = kUpscaleLanczos4;
 
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
@@ -186,6 +188,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->saturation_param) {
         g_suites.parameter->paramGetValueAtTime(data->saturation_param, time, &saturation);
     }
+    if (data->upscale_method_param) {
+        g_suites.parameter->paramGetValueAtTime(data->upscale_method_param, time, &upscale_method);
+    }
 
     // Use external alpha hint if connected, otherwise generate from green channel
     bool hint_from_clip = false;
@@ -217,12 +222,28 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         ColorUtils::generate_rough_matte(rgb_view, hint_view);
     }
 
+    // When input is linear, convert to sRGB for model inference.
+    // The model was trained on sRGB ImageNet-normalized input.
+    // Reference: OG CorridorKey inference_engine.py:170-174
+    if (input_is_linear != 0) {
+        const SrgbLut& lut = SrgbLut::instance();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                rgb_view(y, x, 0) = lut.to_srgb(rgb_view(y, x, 0));
+                rgb_view(y, x, 1) = lut.to_srgb(rgb_view(y, x, 1));
+                rgb_view(y, x, 2) = lut.to_srgb(rgb_view(y, x, 2));
+            }
+        }
+    }
+
     InferenceParams params;
     params.despill_strength = static_cast<float>(despill_strength);
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
     params.refiner_scale = static_cast<float>(refiner_scale);
     params.input_is_linear = input_is_linear != 0;
+    params.upscale_method =
+        upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
 
     auto result = data->engine->process_frame(rgb_view, hint_view, params);
     if (!result) {
@@ -239,50 +260,58 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         return kOfxStatFailed;
     }
 
-    bool alpha_modified = false;
     if (alpha_erode != 0.0) {
         alpha_erode_dilate(alpha_view, static_cast<float>(alpha_erode));
-        alpha_modified = true;
     }
     if (alpha_softness > 0.0) {
         alpha_blur(alpha_view, static_cast<float>(alpha_softness));
-        alpha_modified = true;
     }
     if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
         alpha_levels(alpha_view, static_cast<float>(alpha_black_point),
                      static_cast<float>(alpha_white_point));
-        alpha_modified = true;
     }
 
-    // Apply color correction to foreground in linear space
-    Image fg_color_view = result->foreground.view();
+    // Convert foreground from sRGB to linear for all output assembly.
+    // The model outputs sRGB foreground; all premultiplication and color
+    // correction must happen in linear space to avoid double-gamma artifacts.
+    const SrgbLut& lut = SrgbLut::instance();
+    Image fg_srgb_view = result->foreground.view();
+    ImageBuffer fg_linear_buf(width, height, 3);
+    Image fg_linear = fg_linear_buf.view();
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            fg_linear(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
+            fg_linear(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
+            fg_linear(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
+        }
+    }
+
+    // Apply color correction in linear space
     if (brightness != 1.0 || saturation != 1.0) {
         const float bright_f = static_cast<float>(brightness);
         const float sat_f = static_cast<float>(saturation);
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
-                float r = fg_color_view(y, x, 0) * bright_f;
-                float g = fg_color_view(y, x, 1) * bright_f;
-                float b = fg_color_view(y, x, 2) * bright_f;
+                float r = fg_linear(y, x, 0) * bright_f;
+                float g = fg_linear(y, x, 1) * bright_f;
+                float b = fg_linear(y, x, 2) * bright_f;
                 if (sat_f != 1.0F) {
                     float luma = 0.2126F * r + 0.7152F * g + 0.0722F * b;
                     r = luma + sat_f * (r - luma);
                     g = luma + sat_f * (g - luma);
                     b = luma + sat_f * (b - luma);
                 }
-                fg_color_view(y, x, 0) = r;
-                fg_color_view(y, x, 1) = g;
-                fg_color_view(y, x, 2) = b;
+                fg_linear(y, x, 0) = r;
+                fg_linear(y, x, 1) = g;
+                fg_linear(y, x, 2) = b;
             }
         }
-        alpha_modified = true;
     }
 
     // Build output based on selected mode
     bool apply_srgb = input_is_linear == 0;
 
     if (output_mode == kOutputMatteOnly) {
-        // Output alpha as grayscale RGBA (A, A, A, 1)
         ImageBuffer matte_rgba(width, height, 4);
         Image matte_view = matte_rgba.view();
         for (int y = 0; y < height; ++y) {
@@ -296,55 +325,46 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
         write_output_image(matte_view, output_data, output_row_bytes, output_depth, false);
     } else if (output_mode == kOutputForegroundOnly) {
-        // Output foreground RGB with alpha = 1 (no transparency)
-        Image fg_view = result->foreground.view();
+        // Foreground with alpha = 1, premultiplied linear
         ImageBuffer fg_rgba(width, height, 4);
         Image out_view = fg_rgba.view();
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
-                out_view(y, x, 0) = fg_view(y, x, 0);
-                out_view(y, x, 1) = fg_view(y, x, 1);
-                out_view(y, x, 2) = fg_view(y, x, 2);
+                out_view(y, x, 0) = fg_linear(y, x, 0);
+                out_view(y, x, 1) = fg_linear(y, x, 1);
+                out_view(y, x, 2) = fg_linear(y, x, 2);
                 out_view(y, x, 3) = 1.0f;
             }
         }
         write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
     } else if (output_mode == kOutputSourceMatte) {
-        // Output original source RGB with generated alpha
+        // Source RGB (sRGB) converted to linear, premultiplied with alpha
         ImageBuffer src_rgba(width, height, 4);
         Image out_view = src_rgba.view();
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 float a = alpha_view(y, x);
-                out_view(y, x, 0) = rgb_view(y, x, 0) * a;
-                out_view(y, x, 1) = rgb_view(y, x, 1) * a;
-                out_view(y, x, 2) = rgb_view(y, x, 2) * a;
+                out_view(y, x, 0) = lut.to_linear(rgb_view(y, x, 0)) * a;
+                out_view(y, x, 1) = lut.to_linear(rgb_view(y, x, 1)) * a;
+                out_view(y, x, 2) = lut.to_linear(rgb_view(y, x, 2)) * a;
                 out_view(y, x, 3) = a;
             }
         }
         write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
     } else {
-        // Default: Processed output (premultiplied RGBA)
-        if (alpha_modified) {
-            // Re-premultiply foreground with modified alpha
-            Image fg_view = result->foreground.view();
-            ImageBuffer reprocessed(width, height, 4);
-            Image out_view = reprocessed.view();
-            for (int y = 0; y < height; ++y) {
-                for (int x = 0; x < width; ++x) {
-                    float a = alpha_view(y, x);
-                    out_view(y, x, 0) = fg_view(y, x, 0) * a;
-                    out_view(y, x, 1) = fg_view(y, x, 1) * a;
-                    out_view(y, x, 2) = fg_view(y, x, 2) * a;
-                    out_view(y, x, 3) = a;
-                }
+        // Default: Processed output (premultiplied linear RGBA)
+        ImageBuffer reprocessed(width, height, 4);
+        Image out_view = reprocessed.view();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                float a = alpha_view(y, x);
+                out_view(y, x, 0) = fg_linear(y, x, 0) * a;
+                out_view(y, x, 1) = fg_linear(y, x, 1) * a;
+                out_view(y, x, 2) = fg_linear(y, x, 2) * a;
+                out_view(y, x, 3) = a;
             }
-            write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
-        } else {
-            Image output_view = result->processed.view();
-            write_output_image(output_view, output_data, output_row_bytes, output_depth,
-                               apply_srgb);
         }
+        write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
     }
     return kOfxStatOK;
 }

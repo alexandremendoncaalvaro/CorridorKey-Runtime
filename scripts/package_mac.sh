@@ -9,7 +9,9 @@ if [ -f "${REPO_ROOT_EARLY}/.env" ]; then
     set +a
 fi
 
-VERSION="${CORRIDORKEY_VERSION:-0.2.0}"
+# Extract version from version.hpp (single source of truth)
+_default_version=$(grep 'CORRIDORKEY_VERSION_STRING' "${REPO_ROOT_EARLY}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')
+VERSION="${CORRIDORKEY_VERSION:-${_default_version}}"
 DIST_DIR="dist/CorridorKey_Mac_v${VERSION}"
 BIN_NAME="corridorkey"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"

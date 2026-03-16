@@ -154,7 +154,7 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
 }
 
 Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
-                                      StageTimingCallback on_stage) {
+                                      UpscaleMethod upscale_method, StageTimingCallback on_stage) {
 #if !CORRIDORKEY_WITH_MLX
     (void)rgb;
     (void)alpha_hint;
@@ -169,15 +169,14 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
     }
 
     try {
-        auto [padded_rgb, rgb_roi] =
-            ColorUtils::fit_pad(rgb, m_impl->model_resolution, m_impl->model_resolution);
-        auto [padded_hint, hint_roi] =
-            ColorUtils::fit_pad(alpha_hint, m_impl->model_resolution, m_impl->model_resolution);
-        (void)hint_roi;
+        ImageBuffer squashed_rgb =
+            ColorUtils::resize_area(rgb, m_impl->model_resolution, m_impl->model_resolution);
+        ImageBuffer squashed_hint =
+            ColorUtils::resize_area(alpha_hint, m_impl->model_resolution, m_impl->model_resolution);
 
         Image input = m_impl->input_buffer.view();
-        Image rgb_view = padded_rgb.view();
-        Image hint_view = padded_hint.view();
+        Image rgb_view = squashed_rgb.view();
+        Image hint_view = squashed_hint.view();
 
         common::measure_stage(
             on_stage, "mlx_prepare_inputs",
@@ -262,12 +261,13 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
             1);
 
         FrameResult result;
-        ImageBuffer cropped_alpha = ColorUtils::crop(full_alpha, rgb_roi.x_pos, rgb_roi.y_pos,
-                                                     rgb_roi.width, rgb_roi.height);
-        ImageBuffer cropped_fg =
-            ColorUtils::crop(full_fg, rgb_roi.x_pos, rgb_roi.y_pos, rgb_roi.width, rgb_roi.height);
-        result.alpha = ColorUtils::resize_lanczos(cropped_alpha.view(), rgb.width, rgb.height);
-        result.foreground = ColorUtils::resize_lanczos(cropped_fg.view(), rgb.width, rgb.height);
+        bool use_lanczos = upscale_method == UpscaleMethod::Lanczos4;
+
+        result.alpha = use_lanczos ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height)
+                                   : ColorUtils::resize(full_alpha, rgb.width, rgb.height);
+        ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+        result.foreground = use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height)
+                                        : ColorUtils::resize(full_fg, rgb.width, rgb.height);
         return result;
     } catch (const std::exception& error) {
         return Unexpected<Error>{Error{ErrorCode::InferenceFailed, "MLX bridge execution failed: " +

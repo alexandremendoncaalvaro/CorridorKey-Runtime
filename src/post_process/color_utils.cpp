@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include "common/srgb_lut.hpp"
 
@@ -107,6 +108,80 @@ ImageBuffer ColorUtils::resize(Image image, int new_width, int new_height) {
     return result;
 }
 
+void ColorUtils::gaussian_blur(Image image, float sigma) {
+    if (image.empty() || sigma <= 0.0F) return;
+
+    int w = image.width;
+    int h = image.height;
+    int channels = image.channels;
+    int kernel = static_cast<int>(std::ceil(sigma * 3.0F));
+    if (kernel < 1) kernel = 1;
+
+    std::vector<float> weights(static_cast<size_t>(kernel) + 1);
+    float sum = 0.0F;
+    for (int i = 0; i <= kernel; ++i) {
+        float fi = static_cast<float>(i);
+        weights[i] = std::exp(-(fi * fi) / (2.0F * sigma * sigma));
+        sum += (i == 0) ? weights[i] : 2.0F * weights[i];
+    }
+    for (int i = 0; i <= kernel; ++i) {
+        weights[i] /= sum;
+    }
+
+    size_t buf_size = static_cast<size_t>(w) * h * channels;
+    std::vector<float> temp(buf_size);
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            for (int c = 0; c < channels; ++c) {
+                float acc = image(y, x, c) * weights[0];
+                for (int dx = 1; dx <= kernel; ++dx) {
+                    int xl = std::max(x - dx, 0);
+                    int xr = std::min(x + dx, w - 1);
+                    acc += (image(y, xl, c) + image(y, xr, c)) * weights[dx];
+                }
+                temp[(static_cast<size_t>(y) * w + x) * channels + c] = acc;
+            }
+        }
+    }
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            for (int c = 0; c < channels; ++c) {
+                size_t idx = (static_cast<size_t>(y) * w + x) * channels + c;
+                float acc = temp[idx] * weights[0];
+                for (int dy = 1; dy <= kernel; ++dy) {
+                    int yt = std::max(y - dy, 0);
+                    int yb = std::min(y + dy, h - 1);
+                    acc += (temp[(static_cast<size_t>(yt) * w + x) * channels + c] +
+                            temp[(static_cast<size_t>(yb) * w + x) * channels + c]) *
+                           weights[dy];
+                }
+                image(y, x, c) = acc;
+            }
+        }
+    }
+}
+
+ImageBuffer ColorUtils::resize_area(Image image, int new_width, int new_height) {
+    float scale_x = static_cast<float>(image.width) / static_cast<float>(new_width);
+    float scale_y = static_cast<float>(image.height) / static_cast<float>(new_height);
+    float max_scale = std::max(scale_x, scale_y);
+
+    if (max_scale <= 1.5F) {
+        return resize(image, new_width, new_height);
+    }
+
+    float sigma = (max_scale - 1.0F) * 0.5F;
+
+    ImageBuffer blurred(image.width, image.height, image.channels);
+    Image blurred_view = blurred.view();
+    std::copy(image.data.begin(), image.data.end(), blurred_view.data.begin());
+    gaussian_blur(blurred_view, sigma);
+
+    return resize(blurred_view, new_width, new_height);
+}
+
 namespace {
 
 constexpr int kLanczosA = 4;
@@ -120,10 +195,16 @@ float lanczos_kernel(float x) {
     return (std::sin(pi_x) / pi_x) * (std::sin(pi_x_a) / pi_x_a);
 }
 
+// BORDER_REFLECT_101: gfedcb|abcdefgh|gfedcba (matches OpenCV default)
+inline int reflect_101(int idx, int len) {
+    if (idx < 0) idx = -idx;
+    if (idx >= len) idx = 2 * (len - 1) - idx;
+    return std::clamp(idx, 0, len - 1);
+}
+
 }  // namespace
 
 ImageBuffer ColorUtils::resize_lanczos(Image image, int new_width, int new_height) {
-    // Separable Lanczos4: horizontal pass then vertical pass
     const float scale_x = static_cast<float>(image.width) / static_cast<float>(new_width);
     const float scale_y = static_cast<float>(image.height) / static_cast<float>(new_height);
 
@@ -134,27 +215,27 @@ ImageBuffer ColorUtils::resize_lanczos(Image image, int new_width, int new_heigh
     for (int y_pos = 0; y_pos < image.height; ++y_pos) {
         for (int x_pos = 0; x_pos < new_width; ++x_pos) {
             const float center = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
-            const int i_start = std::max(0, static_cast<int>(std::ceil(center - kLanczosA)));
-            const int i_end =
-                std::min(image.width - 1, static_cast<int>(std::floor(center + kLanczosA)));
+            const int i_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+            const int i_end = static_cast<int>(std::floor(center + kLanczosA));
 
             float weight_sum = 0.0F;
-            for (int channel = 0; channel < image.channels; ++channel) {
-                h_view(y_pos, x_pos, channel) = 0.0F;
+            for (int c = 0; c < image.channels; ++c) {
+                h_view(y_pos, x_pos, c) = 0.0F;
             }
 
             for (int i = i_start; i <= i_end; ++i) {
+                const int src_i = reflect_101(i, image.width);
                 const float w = lanczos_kernel(static_cast<float>(i) - center);
                 weight_sum += w;
-                for (int channel = 0; channel < image.channels; ++channel) {
-                    h_view(y_pos, x_pos, channel) += image(y_pos, i, channel) * w;
+                for (int c = 0; c < image.channels; ++c) {
+                    h_view(y_pos, x_pos, c) += image(y_pos, src_i, c) * w;
                 }
             }
 
             if (weight_sum > 0.0F) {
                 const float inv_w = 1.0F / weight_sum;
-                for (int channel = 0; channel < image.channels; ++channel) {
-                    h_view(y_pos, x_pos, channel) *= inv_w;
+                for (int c = 0; c < image.channels; ++c) {
+                    h_view(y_pos, x_pos, c) *= inv_w;
                 }
             }
         }
@@ -166,34 +247,40 @@ ImageBuffer ColorUtils::resize_lanczos(Image image, int new_width, int new_heigh
 
     for (int y_pos = 0; y_pos < new_height; ++y_pos) {
         const float center = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
-        const int j_start = std::max(0, static_cast<int>(std::ceil(center - kLanczosA)));
-        const int j_end =
-            std::min(image.height - 1, static_cast<int>(std::floor(center + kLanczosA)));
+        const int j_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+        const int j_end = static_cast<int>(std::floor(center + kLanczosA));
 
         for (int x_pos = 0; x_pos < new_width; ++x_pos) {
             float weight_sum = 0.0F;
-            for (int channel = 0; channel < image.channels; ++channel) {
-                res_view(y_pos, x_pos, channel) = 0.0F;
+            for (int c = 0; c < image.channels; ++c) {
+                res_view(y_pos, x_pos, c) = 0.0F;
             }
 
             for (int j = j_start; j <= j_end; ++j) {
+                const int src_j = reflect_101(j, h_view.height);
                 const float w = lanczos_kernel(static_cast<float>(j) - center);
                 weight_sum += w;
-                for (int channel = 0; channel < image.channels; ++channel) {
-                    res_view(y_pos, x_pos, channel) += h_view(j, x_pos, channel) * w;
+                for (int c = 0; c < image.channels; ++c) {
+                    res_view(y_pos, x_pos, c) += h_view(src_j, x_pos, c) * w;
                 }
             }
 
             if (weight_sum > 0.0F) {
                 const float inv_w = 1.0F / weight_sum;
-                for (int channel = 0; channel < image.channels; ++channel) {
-                    res_view(y_pos, x_pos, channel) *= inv_w;
+                for (int c = 0; c < image.channels; ++c) {
+                    res_view(y_pos, x_pos, c) *= inv_w;
                 }
             }
         }
     }
 
     return result;
+}
+
+void ColorUtils::clamp_image(Image image, float min_val, float max_val) {
+    for (auto& v : image.data) {
+        v = std::clamp(v, min_val, max_val);
+    }
 }
 
 std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(Image image, int target_width, int target_height) {

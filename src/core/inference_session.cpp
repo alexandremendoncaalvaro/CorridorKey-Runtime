@@ -19,7 +19,6 @@
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
-#include "post_process/restore_source.hpp"
 #include "session_cache_policy.hpp"
 #include "session_policy.hpp"
 
@@ -554,6 +553,7 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
 void InferenceSession::apply_post_process(FrameResult& result, const Image& source_rgb,
                                           const InferenceParams& params,
                                           StageTimingCallback on_stage) {
+    (void)source_rgb;
     if (result.alpha.view().empty() || result.foreground.view().empty()) return;
 
     int w = result.foreground.view().width;
@@ -566,20 +566,10 @@ void InferenceSession::apply_post_process(FrameResult& result, const Image& sour
             [&]() { despeckle(result.alpha.view(), params.despeckle_size); }, 1);
     }
 
+    // 2. Despill: must be last color correction before linear conversion
     common::measure_stage(
         on_stage, "post_despill",
         [&]() { despill(result.foreground.view(), params.despill_strength); }, 1);
-
-    // 2b. Restore original source detail in opaque interior regions
-    if (!source_rgb.empty() && source_rgb.width == w && source_rgb.height == h) {
-        common::measure_stage(
-            on_stage, "post_restore_source",
-            [&]() {
-                restore_source_detail(result.foreground.view(), source_rgb,
-                                      result.alpha.const_view());
-            },
-            1);
-    }
 
     // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
     const auto& lut = SrgbLut::instance();
@@ -664,7 +654,8 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         std::vector<FrameResult> results;
         results.reserve(rgbs.size());
         for (size_t index = 0; index < rgbs.size(); ++index) {
-            auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index], on_stage);
+            auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index],
+                                               params.upscale_method, on_stage);
             if (!result) {
                 return Unexpected(result.error());
             }
@@ -682,9 +673,6 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
         bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
         std::vector<Ort::Value> input_tensors;
-
-        // Tracking valid areas for each image in batch
-        std::vector<Rect> rois(batch_size);
 
         if (is_concatenated) {
             auto shape = m_input_node_dims[0];
@@ -705,15 +693,13 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 on_stage, "batch_prepare_inputs",
                 [&]() {
                     for (size_t b = 0; b < batch_size; ++b) {
-                        auto [padded_rgb, rgb_roi] =
-                            ColorUtils::fit_pad(rgbs[b], (int)model_w, (int)model_h);
-                        auto [padded_hint, hint_roi] =
-                            ColorUtils::fit_pad(alpha_hints[b], (int)model_w, (int)model_h);
-                        (void)hint_roi;
-                        rois[b] = rgb_roi;
+                        ImageBuffer squashed_rgb =
+                            ColorUtils::resize_area(rgbs[b], (int)model_w, (int)model_h);
+                        ImageBuffer squashed_hint =
+                            ColorUtils::resize_area(alpha_hints[b], (int)model_w, (int)model_h);
 
-                        Image cur_rgb = padded_rgb.view();
-                        Image cur_hint = padded_hint.view();
+                        Image cur_rgb = squashed_rgb.view();
+                        Image cur_hint = squashed_hint.view();
                         float* dst = dst_base + (b * image_stride);
 
                         for (int y = 0; y < model_h; ++y) {
@@ -777,24 +763,28 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             [&]() {
                 for (size_t b = 0; b < batch_size; ++b) {
                     FrameResult& result = batch_results[b];
-                    Rect& roi = rois[b];
+                    bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
 
-                    ImageBuffer full_alpha((int)alpha_shape[3], (int)alpha_shape[2],
-                                           (int)alpha_shape[1]);
+                    ImageBuffer model_alpha((int)alpha_shape[3], (int)alpha_shape[2],
+                                            (int)alpha_shape[1]);
                     ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride),
-                                            full_alpha.view());
-                    ImageBuffer cropped_alpha = ColorUtils::crop(full_alpha.view(), roi.x_pos,
-                                                                 roi.y_pos, roi.width, roi.height);
-                    result.alpha = ColorUtils::resize_lanczos(cropped_alpha.view(), rgbs[b].width,
-                                                              rgbs[b].height);
+                                            model_alpha.view());
+
+                    result.alpha =
+                        use_lanczos
+                            ? ColorUtils::resize_lanczos(model_alpha.view(), rgbs[b].width,
+                                                         rgbs[b].height)
+                            : ColorUtils::resize(model_alpha.view(), rgbs[b].width, rgbs[b].height);
+                    ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
 
                     if (fg_ptr != nullptr) {
-                        ImageBuffer full_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
-                        ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), full_fg.view());
-                        ImageBuffer cropped_fg = ColorUtils::crop(full_fg.view(), roi.x_pos,
-                                                                  roi.y_pos, roi.width, roi.height);
-                        result.foreground = ColorUtils::resize_lanczos(
-                            cropped_fg.view(), rgbs[b].width, rgbs[b].height);
+                        ImageBuffer model_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
+                        ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), model_fg.view());
+                        result.foreground =
+                            use_lanczos ? ColorUtils::resize_lanczos(model_fg.view(), rgbs[b].width,
+                                                                     rgbs[b].height)
+                                        : ColorUtils::resize(model_fg.view(), rgbs[b].width,
+                                                             rgbs[b].height);
                     }
                 }
             },
