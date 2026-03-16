@@ -9,7 +9,7 @@ if [ -f "${REPO_ROOT_EARLY}/.env" ]; then
     set +a
 fi
 
-VERSION="${CORRIDORKEY_VERSION:-0.1.4}"
+VERSION="${CORRIDORKEY_VERSION:-0.2.0}"
 DIST_DIR="dist/CorridorKey_Mac_v${VERSION}"
 BIN_NAME="corridorkey"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
