@@ -40,10 +40,11 @@ Features requested by the community and critical for real-world compositing.
   ("Alpha Hint") so users can feed an external matte from another Fusion node
   (keyer, roto, painted mask) instead of the auto-generated rough matte.
   If not connected, falls back to `generate_rough_matte` as today.
-- [ ] **1.5.2 Color Space Auto-Detection** -- query Resolve clip properties
-  to detect whether input is linear or sRGB instead of relying on a manual
-  checkbox. Addresses the reported "EXR ingested as linear even if sRGB
-  selected" issue.
+- [ ] **1.5.2 Color Space Auto-Detection** -- OFX 1.5 colour management
+  extensions exist but DaVinci Resolve does not implement them. Possible
+  heuristic: detect linear footage by checking if float pixel values
+  exceed 1.0. For now, the "Input Is Linear" checkbox remains the
+  reliable manual fallback.
 
 ## Phase 2 - Resolution and Quality Control
 
@@ -67,9 +68,9 @@ Goal: proper 4K support and user control over quality/speed tradeoff.
 
 Goal: give compositors the control they expect from a professional keyer.
 
-- [ ] **3.1 Output Mode Selector** -- choice parameter: Processed (default),
+- [x] **3.1 Output Mode Selector** -- choice parameter: Processed (default),
   Matte Only, Foreground Only, Source + Matte.
-- [ ] **3.2 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
+- [x] **3.2 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
   Softness (0-5 px), Black/White Point (0-1 each). Post-inference alpha
   manipulation, no re-run needed.
 - [ ] **3.3 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
