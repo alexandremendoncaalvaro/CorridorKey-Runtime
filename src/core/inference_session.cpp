@@ -785,16 +785,16 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                                             full_alpha.view());
                     ImageBuffer cropped_alpha = ColorUtils::crop(full_alpha.view(), roi.x_pos,
                                                                  roi.y_pos, roi.width, roi.height);
-                    result.alpha =
-                        ColorUtils::resize(cropped_alpha.view(), rgbs[b].width, rgbs[b].height);
+                    result.alpha = ColorUtils::resize_lanczos(cropped_alpha.view(), rgbs[b].width,
+                                                              rgbs[b].height);
 
                     if (fg_ptr != nullptr) {
                         ImageBuffer full_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
                         ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), full_fg.view());
                         ImageBuffer cropped_fg = ColorUtils::crop(full_fg.view(), roi.x_pos,
                                                                   roi.y_pos, roi.width, roi.height);
-                        result.foreground =
-                            ColorUtils::resize(cropped_fg.view(), rgbs[b].width, rgbs[b].height);
+                        result.foreground = ColorUtils::resize_lanczos(
+                            cropped_fg.view(), rgbs[b].width, rgbs[b].height);
                     }
                 }
             },

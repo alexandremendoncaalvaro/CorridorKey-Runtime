@@ -266,8 +266,8 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
                                                      rgb_roi.width, rgb_roi.height);
         ImageBuffer cropped_fg =
             ColorUtils::crop(full_fg, rgb_roi.x_pos, rgb_roi.y_pos, rgb_roi.width, rgb_roi.height);
-        result.alpha = ColorUtils::resize(cropped_alpha.view(), rgb.width, rgb.height);
-        result.foreground = ColorUtils::resize(cropped_fg.view(), rgb.width, rgb.height);
+        result.alpha = ColorUtils::resize_lanczos(cropped_alpha.view(), rgb.width, rgb.height);
+        result.foreground = ColorUtils::resize_lanczos(cropped_fg.view(), rgb.width, rgb.height);
         return result;
     } catch (const std::exception& error) {
         return Unexpected<Error>{Error{ErrorCode::InferenceFailed, "MLX bridge execution failed: " +

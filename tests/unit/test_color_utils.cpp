@@ -85,6 +85,34 @@ TEST_CASE("ColorUtils::resize bilinear", "[unit][color]") {
     }
 }
 
+TEST_CASE("ColorUtils::resize_lanczos upscale", "[unit][color]") {
+    ImageBuffer buf(2, 2, 1);
+    Image img = buf.view();
+    // Uniform value -- Lanczos should preserve it exactly
+    img.data[0] = 0.5f;
+    img.data[1] = 0.5f;
+    img.data[2] = 0.5f;
+    img.data[3] = 0.5f;
+
+    SECTION("Upscale uniform 2x2 to 4x4") {
+        ImageBuffer resized_buf = ColorUtils::resize_lanczos(img, 4, 4);
+        Image resized = resized_buf.view();
+        REQUIRE(resized.width == 4);
+        REQUIRE(resized.height == 4);
+        for (size_t i = 0; i < resized.data.size(); ++i) {
+            REQUIRE(resized.data[i] == Catch::Approx(0.5f).margin(0.01f));
+        }
+    }
+
+    SECTION("Upscale to same size is identity") {
+        ImageBuffer resized_buf = ColorUtils::resize_lanczos(img, 2, 2);
+        Image resized = resized_buf.view();
+        for (size_t i = 0; i < resized.data.size(); ++i) {
+            REQUIRE(resized.data[i] == Catch::Approx(img.data[i]).margin(0.001f));
+        }
+    }
+}
+
 TEST_CASE("ColorUtils::generate_rough_matte", "[unit][color]") {
     ImageBuffer rgb_buf(2, 1, 3);
     Image rgb = rgb_buf.view();

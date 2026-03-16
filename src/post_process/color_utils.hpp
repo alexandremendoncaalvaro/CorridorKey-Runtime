@@ -36,9 +36,15 @@ class CORRIDORKEY_API ColorUtils {
 
     /**
      * @brief Resize an image using bilinear interpolation.
-     * Returns an owned ImageBuffer.
+     * Suitable for downscaling. Returns an owned ImageBuffer.
      */
     static ImageBuffer resize(Image image, int new_width, int new_height);
+
+    /**
+     * @brief Resize an image using Lanczos4 interpolation.
+     * Higher quality than bilinear for upscaling. Returns an owned ImageBuffer.
+     */
+    static ImageBuffer resize_lanczos(Image image, int new_width, int new_height);
 
     /**
      * @brief Resize image maintaining aspect ratio and padding to reach target size (Letterbox).
