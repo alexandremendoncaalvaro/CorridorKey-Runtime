@@ -52,15 +52,15 @@ void distance_from_edge(const Image& alpha, float threshold, std::vector<float>&
     }
 }
 
-// Detect green contamination using chromaticity (relative proportions).
-// Works correctly for both bright and dark pixels near the green screen.
-inline bool has_green_contamination(float r, float g, float b) {
+// Soft green contamination weight using chromaticity.
+// Returns 1.0 for clean pixels, 0.0 for fully contaminated, smooth ramp between.
+// Eliminates hard edges at the green/non-green boundary.
+inline float green_safety_weight(float r, float g, float b) {
     float sum = r + g + b;
-    if (sum < 0.01f) return false;  // near-black pixels are safe
+    if (sum < 0.01f) return 1.0f;  // near-black pixels are safe
     float green_ratio = g / sum;
-    // Pure green screen has green_ratio ~0.6-0.8. Neutral gray is ~0.333.
-    // Flag anything with green dominance above 0.38 (conservative threshold).
-    return green_ratio > 0.38f;
+    // Neutral gray is ~0.333. Ramp: fully safe at 0.34, fully contaminated at 0.44.
+    return 1.0f - std::clamp((green_ratio - 0.34f) / (0.44f - 0.34f), 0.0f, 1.0f);
 }
 
 }  // namespace
@@ -89,14 +89,17 @@ void restore_source_detail(Image foreground, const Image& source, const Image& a
                 float d = dist[y * w + x];
                 if (d < dist_min) continue;
 
-                // Check source pixel for green spill - skip contaminated pixels
                 float src_r = source(y, x, 0);
                 float src_g = source(y, x, 1);
                 float src_b = source(y, x, 2);
-                if (has_green_contamination(src_r, src_g, src_b)) continue;
+
+                // Soft green safety: 1.0 = clean, 0.0 = fully contaminated
+                float safety = green_safety_weight(src_r, src_g, src_b);
+                if (safety < 0.01f) continue;
 
                 // Smooth blend weight: 0 at dist_min, 1 at dist_max
                 float blend = std::clamp((d - dist_min) / (dist_max - dist_min), 0.0f, 1.0f);
+                blend *= safety;
 
                 foreground(y, x, 0) += (src_r - foreground(y, x, 0)) * blend;
                 foreground(y, x, 1) += (src_g - foreground(y, x, 1)) * blend;

@@ -49,12 +49,16 @@ Features requested by the community and critical for real-world compositing.
 
 Goal: give compositors the control they expect from a professional keyer.
 
-- [ ] **2.1 Output Mode Selector** -- choice parameter: Processed (default),
+- [ ] **2.1 Preview Mode** -- choice parameter for processing resolution:
+  Full (default), 1/2, 1/4, 1/8, 1/16. Downscale input before inference,
+  upscale result to output resolution. Enables fast interactive previewing
+  on heavy timelines. Full quality for final render.
+- [ ] **2.2 Output Mode Selector** -- choice parameter: Processed (default),
   Matte Only, Foreground Only, Source + Matte.
-- [ ] **2.2 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
+- [ ] **2.3 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
   Softness (0-5 px), Black/White Point (0-1 each). Post-inference alpha
   manipulation, no re-run needed.
-- [ ] **2.3 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
+- [ ] **2.4 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
   controls applied after despill in linear space.
 
 ## Phase 3 - Platform Parity
@@ -69,11 +73,16 @@ Goal: give compositors the control they expect from a professional keyer.
 Longer-term items informed by EZ-CorridorKey capabilities and community
 feedback.
 
-- [ ] **4.1 Multiple Alpha Hint Strategies** -- evaluate BiRefNet, SAM2,
+- [ ] **4.1 Blue Screen Support** -- channel-swap approach (swap B and G
+  channels before inference, swap back after). Requires adapting despill
+  and rough matte generation to work on the blue channel. No model
+  retraining needed.
+- [ ] **4.2 Multiple Alpha Hint Strategies** -- evaluate BiRefNet, SAM2,
   MatAnyone2 as alternative hint generators for non-person subjects.
-- [ ] **4.2 Tiled Inference for Large Resolutions** -- 4K+ support with
+  Also enables arbitrary background colors without retraining.
+- [ ] **4.3 Tiled Inference for Large Resolutions** -- 4K+ support with
   overlapping tiles and linear blend ramps at boundaries.
-- [ ] **4.3 Temporal Consistency** -- frame-to-frame matte consistency to
+- [ ] **4.4 Temporal Consistency** -- frame-to-frame matte consistency to
   reduce flickering in video sequences.
 
 ## Reference
