@@ -55,10 +55,10 @@ Goal: proper 4K support and user control over quality/speed tradeoff.
   Auto selects based on input resolution. Changing quality recreates the
   engine with the appropriate MLX bridge or ONNX model. The MLX safetensors
   pack supports dynamic bridge compilation up to 2048px.
-- [x] **2.2 Enable Tiling in OFX** -- pass `enable_tiling = true` and
-  appropriate `tile_padding` to InferenceParams. Critical for 4K+ inputs
-  where the model resolution is smaller than the frame. Tiling engine
-  already exists (`run_tiled`), just needs to be wired into the plugin.
+- [x] **2.2 Smart Resolution Selection** -- Auto mode selects the optimal
+  MLX bridge based on input size (<=1000px: 512, <=2000px: 768, >2000px:
+  1024). Single-pass inference with no tiling overhead. Engine recreated
+  only when target resolution changes.
 - [ ] **2.3 Preview Scale** -- optional downscale factor (1/2, 1/4, 1/8)
   applied before inference for fast interactive scrubbing. Upscales result
   to output resolution. Independent of Quality Mode. Enables fast timeline
