@@ -43,6 +43,8 @@ constexpr const char* kParamAlphaBlackPoint = "alpha_black_point";
 constexpr const char* kParamAlphaWhitePoint = "alpha_white_point";
 constexpr const char* kParamAlphaErode = "alpha_erode";
 constexpr const char* kParamAlphaSoftness = "alpha_softness";
+constexpr const char* kParamBrightness = "brightness";
+constexpr const char* kParamSaturation = "saturation";
 
 // Quality mode choice indices
 constexpr int kQualityAuto = 0;
@@ -79,6 +81,8 @@ struct InstanceData {
     OfxParamHandle alpha_white_point_param = nullptr;
     OfxParamHandle alpha_erode_param = nullptr;
     OfxParamHandle alpha_softness_param = nullptr;
+    OfxParamHandle brightness_param = nullptr;
+    OfxParamHandle saturation_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};

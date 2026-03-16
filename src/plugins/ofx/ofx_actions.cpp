@@ -99,8 +99,9 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
     g_suites.property->propSetString(props, kOfxPropLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropShortLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropLongLabel, 0, kPluginLabel);
-    g_suites.property->propSetString(props, kOfxPropPluginDescription, 0,
-                                     "CorridorKey keyer for DaVinci Resolve.");
+    std::string description =
+        std::string("CorridorKey AI green screen keyer v") + CORRIDORKEY_VERSION_STRING;
+    g_suites.property->propSetString(props, kOfxPropPluginDescription, 0, description.c_str());
     g_suites.property->propSetString(props, kOfxImageEffectPluginPropGrouping, 0, kPluginGroup);
 
     std::array<int, 3> version_parts = {CORRIDORKEY_VERSION_MAJOR, CORRIDORKEY_VERSION_MINOR,
@@ -195,6 +196,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Shrink (negative) or expand (positive) the alpha edge in pixels.");
     define_double_param(param_set, kParamAlphaSoftness, "Alpha Edge Softness", 0.0, 0.0, 5.0,
                         "Blur the alpha edge to soften transitions.");
+
+    define_double_param(param_set, kParamBrightness, "Brightness", 1.0, 0.5, 2.0,
+                        "Foreground brightness adjustment applied in linear space.");
+    define_double_param(param_set, kParamSaturation, "Saturation", 1.0, 0.0, 2.0,
+                        "Foreground saturation adjustment. 0 = grayscale, 1 = original.");
 
     define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
                       "Disable sRGB to linear conversion for linear footage.");

@@ -138,6 +138,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     double alpha_white_point = 1.0;
     double alpha_erode = 0.0;
     double alpha_softness = 0.0;
+    double brightness = 1.0;
+    double saturation = 1.0;
 
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
@@ -177,6 +179,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->alpha_softness_param) {
         g_suites.parameter->paramGetValueAtTime(data->alpha_softness_param, time, &alpha_softness);
+    }
+    if (data->brightness_param) {
+        g_suites.parameter->paramGetValueAtTime(data->brightness_param, time, &brightness);
+    }
+    if (data->saturation_param) {
+        g_suites.parameter->paramGetValueAtTime(data->saturation_param, time, &saturation);
     }
 
     // Use external alpha hint if connected, otherwise generate from green channel
@@ -243,6 +251,30 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
         alpha_levels(alpha_view, static_cast<float>(alpha_black_point),
                      static_cast<float>(alpha_white_point));
+        alpha_modified = true;
+    }
+
+    // Apply color correction to foreground in linear space
+    Image fg_color_view = result->foreground.view();
+    if (brightness != 1.0 || saturation != 1.0) {
+        const float bright_f = static_cast<float>(brightness);
+        const float sat_f = static_cast<float>(saturation);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                float r = fg_color_view(y, x, 0) * bright_f;
+                float g = fg_color_view(y, x, 1) * bright_f;
+                float b = fg_color_view(y, x, 2) * bright_f;
+                if (sat_f != 1.0F) {
+                    float luma = 0.2126F * r + 0.7152F * g + 0.0722F * b;
+                    r = luma + sat_f * (r - luma);
+                    g = luma + sat_f * (g - luma);
+                    b = luma + sat_f * (b - luma);
+                }
+                fg_color_view(y, x, 0) = r;
+                fg_color_view(y, x, 1) = g;
+                fg_color_view(y, x, 2) = b;
+            }
+        }
         alpha_modified = true;
     }
 

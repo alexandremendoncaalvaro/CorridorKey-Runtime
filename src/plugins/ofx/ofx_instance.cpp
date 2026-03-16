@@ -175,6 +175,10 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAlphaSoftness, &data->alpha_softness_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamBrightness, &data->brightness_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamSaturation, &data->saturation_param,
+                                       nullptr);
 
     data->device = auto_detect();
     log_message("create_instance", std::string("Detected device: ") + data->device.name);
