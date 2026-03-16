@@ -154,6 +154,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
     g_suites.parameter->paramGetHandle(param_set, kParamQualityMode, &data->quality_mode_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamOutputMode, &data->output_mode_param,
+                                       nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamDespillStrength, &data->despill_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAutoDespeckle, &data->despeckle_param,
@@ -163,6 +165,14 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     g_suites.parameter->paramGetHandle(param_set, kParamRefinerScale, &data->refiner_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamInputIsLinear, &data->input_is_linear_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamAlphaBlackPoint,
+                                       &data->alpha_black_point_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamAlphaWhitePoint,
+                                       &data->alpha_white_point_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamAlphaErode, &data->alpha_erode_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamAlphaSoftness, &data->alpha_softness_param,
                                        nullptr);
 
     data->device = auto_detect();

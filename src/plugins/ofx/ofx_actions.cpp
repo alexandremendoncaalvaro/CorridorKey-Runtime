@@ -174,6 +174,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Inference resolution. Auto selects based on input size. "
                         "Higher values produce better detail at the cost of speed.");
 
+    define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
+                        {"Processed", "Matte Only", "Foreground Only", "Source + Matte"},
+                        "What to output. Matte Only shows the alpha channel as grayscale.");
+
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 1.0, 0.0, 1.0,
                         "Strength of green spill suppression.");
     define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
@@ -182,6 +186,16 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Minimum connected component area in pixels to keep.");
     define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
                         "Edge refinement strength. 0 disables the refiner.");
+
+    define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
+                        "Remap alpha: values at or below this become fully transparent.");
+    define_double_param(param_set, kParamAlphaWhitePoint, "Alpha White Point", 1.0, 0.0, 1.0,
+                        "Remap alpha: values at or above this become fully opaque.");
+    define_double_param(param_set, kParamAlphaErode, "Alpha Erode/Dilate", 0.0, -10.0, 10.0,
+                        "Shrink (negative) or expand (positive) the alpha edge in pixels.");
+    define_double_param(param_set, kParamAlphaSoftness, "Alpha Edge Softness", 0.0, 0.0, 5.0,
+                        "Blur the alpha edge to soften transitions.");
+
     define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
                       "Disable sRGB to linear conversion for linear footage.");
 

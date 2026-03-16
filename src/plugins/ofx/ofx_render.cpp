@@ -3,6 +3,7 @@
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
+#include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 
 namespace corridorkey::ofx {
@@ -127,17 +128,25 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     copy_source_to_linear(rgb_view, source_data, source_row_bytes, source_depth);
 
     int quality_mode = kQualityAuto;
+    int output_mode = kOutputProcessed;
     int despeckle_enabled = 0;
     int despeckle_size = 400;
     int input_is_linear = 0;
     double despill_strength = 1.0;
     double refiner_scale = 1.0;
+    double alpha_black_point = 0.0;
+    double alpha_white_point = 1.0;
+    double alpha_erode = 0.0;
+    double alpha_softness = 0.0;
 
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
     }
     if (!ensure_engine_for_quality(data, quality_mode)) {
         log_message("render", "Failed to switch quality mode. Using current engine.");
+    }
+    if (data->output_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->output_mode_param, time, &output_mode);
     }
     if (data->despeckle_param) {
         g_suites.parameter->paramGetValueAtTime(data->despeckle_param, time, &despeckle_enabled);
@@ -154,6 +163,20 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->refiner_param) {
         g_suites.parameter->paramGetValueAtTime(data->refiner_param, time, &refiner_scale);
+    }
+    if (data->alpha_black_point_param) {
+        g_suites.parameter->paramGetValueAtTime(data->alpha_black_point_param, time,
+                                                &alpha_black_point);
+    }
+    if (data->alpha_white_point_param) {
+        g_suites.parameter->paramGetValueAtTime(data->alpha_white_point_param, time,
+                                                &alpha_white_point);
+    }
+    if (data->alpha_erode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->alpha_erode_param, time, &alpha_erode);
+    }
+    if (data->alpha_softness_param) {
+        g_suites.parameter->paramGetValueAtTime(data->alpha_softness_param, time, &alpha_softness);
     }
 
     // Use external alpha hint if connected, otherwise generate from green channel
@@ -202,15 +225,97 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         return kOfxStatFailed;
     }
 
-    Image output_view = result->processed.view();
-    if (output_view.width != width || output_view.height != height) {
+    // Apply alpha edge controls before final output assembly
+    Image alpha_view = result->alpha.view();
+    if (alpha_view.width != width || alpha_view.height != height) {
         log_message("render", "Unexpected output size from engine.");
         post_message(kOfxMessageError, "Unexpected output size from engine.", instance);
         return kOfxStatFailed;
     }
 
-    write_output_image(output_view, output_data, output_row_bytes, output_depth,
-                       input_is_linear == 0);
+    bool alpha_modified = false;
+    if (alpha_erode != 0.0) {
+        alpha_erode_dilate(alpha_view, static_cast<float>(alpha_erode));
+        alpha_modified = true;
+    }
+    if (alpha_softness > 0.0) {
+        alpha_blur(alpha_view, static_cast<float>(alpha_softness));
+        alpha_modified = true;
+    }
+    if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
+        alpha_levels(alpha_view, static_cast<float>(alpha_black_point),
+                     static_cast<float>(alpha_white_point));
+        alpha_modified = true;
+    }
+
+    // Build output based on selected mode
+    bool apply_srgb = input_is_linear == 0;
+
+    if (output_mode == kOutputMatteOnly) {
+        // Output alpha as grayscale RGBA (A, A, A, 1)
+        ImageBuffer matte_rgba(width, height, 4);
+        Image matte_view = matte_rgba.view();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                float a = alpha_view(y, x);
+                matte_view(y, x, 0) = a;
+                matte_view(y, x, 1) = a;
+                matte_view(y, x, 2) = a;
+                matte_view(y, x, 3) = 1.0f;
+            }
+        }
+        write_output_image(matte_view, output_data, output_row_bytes, output_depth, false);
+    } else if (output_mode == kOutputForegroundOnly) {
+        // Output foreground RGB with alpha = 1 (no transparency)
+        Image fg_view = result->foreground.view();
+        ImageBuffer fg_rgba(width, height, 4);
+        Image out_view = fg_rgba.view();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                out_view(y, x, 0) = fg_view(y, x, 0);
+                out_view(y, x, 1) = fg_view(y, x, 1);
+                out_view(y, x, 2) = fg_view(y, x, 2);
+                out_view(y, x, 3) = 1.0f;
+            }
+        }
+        write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
+    } else if (output_mode == kOutputSourceMatte) {
+        // Output original source RGB with generated alpha
+        ImageBuffer src_rgba(width, height, 4);
+        Image out_view = src_rgba.view();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                float a = alpha_view(y, x);
+                out_view(y, x, 0) = rgb_view(y, x, 0) * a;
+                out_view(y, x, 1) = rgb_view(y, x, 1) * a;
+                out_view(y, x, 2) = rgb_view(y, x, 2) * a;
+                out_view(y, x, 3) = a;
+            }
+        }
+        write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
+    } else {
+        // Default: Processed output (premultiplied RGBA)
+        if (alpha_modified) {
+            // Re-premultiply foreground with modified alpha
+            Image fg_view = result->foreground.view();
+            ImageBuffer reprocessed(width, height, 4);
+            Image out_view = reprocessed.view();
+            for (int y = 0; y < height; ++y) {
+                for (int x = 0; x < width; ++x) {
+                    float a = alpha_view(y, x);
+                    out_view(y, x, 0) = fg_view(y, x, 0) * a;
+                    out_view(y, x, 1) = fg_view(y, x, 1) * a;
+                    out_view(y, x, 2) = fg_view(y, x, 2) * a;
+                    out_view(y, x, 3) = a;
+                }
+            }
+            write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
+        } else {
+            Image output_view = result->processed.view();
+            write_output_image(output_view, output_data, output_row_bytes, output_depth,
+                               apply_srgb);
+        }
+    }
     return kOfxStatOK;
 }
 
