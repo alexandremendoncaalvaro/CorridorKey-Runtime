@@ -32,11 +32,18 @@ constexpr const char* kPluginGroup = "Keying";
 
 constexpr const char* kClipAlphaHint = "Alpha Hint";
 
+constexpr const char* kParamQualityMode = "quality_mode";
 constexpr const char* kParamDespillStrength = "despill_strength";
 constexpr const char* kParamAutoDespeckle = "auto_despeckle";
 constexpr const char* kParamDespeckleSize = "despeckle_size";
 constexpr const char* kParamRefinerScale = "refiner_scale";
 constexpr const char* kParamInputIsLinear = "input_is_linear";
+
+// Quality mode choice indices
+constexpr int kQualityAuto = 0;
+constexpr int kQualityPreview = 1;
+constexpr int kQualityStandard = 2;
+constexpr int kQualityHigh = 3;
 
 struct OfxSuites {
     const OfxPropertySuiteV1* property = nullptr;
@@ -50,14 +57,17 @@ struct InstanceData {
     OfxImageClipHandle source_clip = nullptr;
     OfxImageClipHandle alpha_hint_clip = nullptr;
     OfxImageClipHandle output_clip = nullptr;
+    OfxParamHandle quality_mode_param = nullptr;
     OfxParamHandle despill_param = nullptr;
     OfxParamHandle despeckle_param = nullptr;
     OfxParamHandle despeckle_size_param = nullptr;
     OfxParamHandle refiner_param = nullptr;
     OfxParamHandle input_is_linear_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
+    std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     DeviceInfo device = {};
+    int active_quality_mode = kQualityAuto;
 };
 
 extern OfxHost* g_host;
@@ -68,6 +78,8 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
+
+bool ensure_engine_for_quality(InstanceData* data, int quality_mode);
 
 OfxStatus on_load();
 OfxStatus describe(OfxImageEffectHandle descriptor);

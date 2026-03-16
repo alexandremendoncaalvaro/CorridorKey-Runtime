@@ -29,7 +29,7 @@ std::optional<int> bridge_resolution_from_filename(const std::filesystem::path& 
 }
 
 std::vector<int> bridge_resolution_order() {
-    return {512, 1024};
+    return {512, 768, 1024};
 }
 
 std::vector<std::filesystem::path> bridge_candidates(const std::filesystem::path& model_path,

@@ -28,7 +28,9 @@ PLUGIN_BINARY="${BUILD_DIR}/src/plugins/ofx/CorridorKey.ofx"
 CORE_LIB="${BUILD_DIR}/src/libcorridorkey_core.dylib"
 CPU_BASELINE_MODEL="${REPO_ROOT}/models/corridorkey_int8_512.onnx"
 MLX_REQUIRED_PACK="${REPO_ROOT}/models/corridorkey_mlx.safetensors"
-MLX_REQUIRED_BRIDGE="${REPO_ROOT}/models/corridorkey_mlx_bridge_512.mlxfn"
+MLX_BRIDGE_512="${REPO_ROOT}/models/corridorkey_mlx_bridge_512.mlxfn"
+MLX_BRIDGE_768="${REPO_ROOT}/models/corridorkey_mlx_bridge_768.mlxfn"
+MLX_BRIDGE_1024="${REPO_ROOT}/models/corridorkey_mlx_bridge_1024.mlxfn"
 
 resolve_real_path() {
     python3 - "$1" <<'PY'
@@ -184,7 +186,9 @@ require_file "$PLUGIN_BINARY"
 require_file "$CORE_LIB"
 require_file "$CPU_BASELINE_MODEL"
 require_file "$MLX_REQUIRED_PACK"
-require_file "$MLX_REQUIRED_BRIDGE"
+require_file "$MLX_BRIDGE_512"
+require_file "$MLX_BRIDGE_768"
+require_file "$MLX_BRIDGE_1024"
 require_file "${PLUGINS_SCRIPTS_DIR}/Distribution.xml"
 require_file "${PLUGINS_SCRIPTS_DIR}/system/preinstall"
 require_file "${PLUGINS_SCRIPTS_DIR}/user/postinstall"
@@ -225,7 +229,9 @@ chmod u+w "$MACOS_DIR/$PLUGIN_NAME" "$MACOS_DIR/$CORE_LIB_NAME" \
 
 cp "$CPU_BASELINE_MODEL" "$MODELS_DIR/"
 cp "$MLX_REQUIRED_PACK" "$MODELS_DIR/"
-cp "$MLX_REQUIRED_BRIDGE" "$MODELS_DIR/"
+cp "$MLX_BRIDGE_512" "$MODELS_DIR/"
+cp "$MLX_BRIDGE_768" "$MODELS_DIR/"
+cp "$MLX_BRIDGE_1024" "$MODELS_DIR/"
 cat <<PLIST_EOF > "${BUNDLE_DIR}/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

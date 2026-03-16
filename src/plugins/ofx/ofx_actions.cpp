@@ -1,5 +1,6 @@
 #include <array>
 #include <cstring>
+#include <vector>
 
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
@@ -57,6 +58,25 @@ void define_bool_param(OfxParamSetHandle param_set, const char* name, const char
 
     g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
     g_suites.property->propSetInt(param_props, kOfxParamPropDefault, 0, default_value);
+    if (hint != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+}
+
+void define_choice_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                         int default_value, const std::vector<const char*>& options,
+                         const char* hint) {
+    OfxPropertySetHandle param_props = nullptr;
+    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeChoice, name, &param_props) !=
+        kOfxStatOK) {
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    g_suites.property->propSetInt(param_props, kOfxParamPropDefault, 0, default_value);
+    for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+        g_suites.property->propSetString(param_props, kOfxParamPropChoiceOption, i, options[i]);
+    }
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -148,6 +168,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         log_message("describe_in_context", "Failed to get param set.");
         return kOfxStatFailed;
     }
+
+    define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityAuto,
+                        {"Auto", "Preview (512)", "Standard (768)", "High (1024)"},
+                        "Inference resolution. Auto selects based on input size. "
+                        "Higher values produce better detail at the cost of speed.");
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 1.0, 0.0, 1.0,
                         "Strength of green spill suppression.");

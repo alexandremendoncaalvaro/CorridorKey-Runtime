@@ -45,44 +45,58 @@ Features requested by the community and critical for real-world compositing.
   checkbox. Addresses the reported "EXR ingested as linear even if sRGB
   selected" issue.
 
-## Phase 2 - Output Control and Workflow
+## Phase 2 - Resolution and Quality Control
+
+Goal: proper 4K support and user control over quality/speed tradeoff.
+
+- [x] **2.1 Quality Mode Parameter** -- choice parameter exposing inference
+  resolution: Auto (default), Preview (512), Standard (768), High (1024).
+  Auto selects based on input resolution. Changing quality recreates the
+  engine with the appropriate MLX bridge or ONNX model. The MLX safetensors
+  pack supports dynamic bridge compilation up to 2048px.
+- [x] **2.2 Enable Tiling in OFX** -- pass `enable_tiling = true` and
+  appropriate `tile_padding` to InferenceParams. Critical for 4K+ inputs
+  where the model resolution is smaller than the frame. Tiling engine
+  already exists (`run_tiled`), just needs to be wired into the plugin.
+- [ ] **2.3 Preview Scale** -- optional downscale factor (1/2, 1/4, 1/8)
+  applied before inference for fast interactive scrubbing. Upscales result
+  to output resolution. Independent of Quality Mode. Enables fast timeline
+  navigation even at high quality settings.
+
+## Phase 3 - Output Control and Workflow
 
 Goal: give compositors the control they expect from a professional keyer.
 
-- [ ] **2.1 Preview Mode** -- choice parameter for processing resolution:
-  Full (default), 1/2, 1/4, 1/8, 1/16. Downscale input before inference,
-  upscale result to output resolution. Enables fast interactive previewing
-  on heavy timelines. Full quality for final render.
-- [ ] **2.2 Output Mode Selector** -- choice parameter: Processed (default),
+- [ ] **3.1 Output Mode Selector** -- choice parameter: Processed (default),
   Matte Only, Foreground Only, Source + Matte.
-- [ ] **2.3 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
+- [ ] **3.2 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
   Softness (0-5 px), Black/White Point (0-1 each). Post-inference alpha
   manipulation, no re-run needed.
-- [ ] **2.4 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
+- [ ] **3.3 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
   controls applied after despill in linear space.
 
-## Phase 3 - Platform Parity
+## Phase 4 - Platform Parity
 
-- [ ] **3.1 Windows OFX Validation** -- validate at the same quality level
+- [ ] **4.1 Windows OFX Validation** -- validate at the same quality level
   with TensorRT, CUDA, and DirectML backends.
-- [ ] **3.2 Cross-Platform Feature Sync** -- ensure all features work
+- [ ] **4.2 Cross-Platform Feature Sync** -- ensure all features work
   identically on Windows with unified parameter set.
 
-## Phase 4 - Advanced Features
+## Phase 5 - Advanced Features
 
 Longer-term items informed by EZ-CorridorKey capabilities and community
 feedback.
 
-- [ ] **4.1 Blue Screen Support** -- channel-swap approach (swap B and G
+- [ ] **5.1 Blue Screen Support** -- channel-swap approach (swap B and G
   channels before inference, swap back after). Requires adapting despill
   and rough matte generation to work on the blue channel. No model
   retraining needed.
-- [ ] **4.2 Multiple Alpha Hint Strategies** -- evaluate BiRefNet, SAM2,
+- [ ] **5.2 Multiple Alpha Hint Strategies** -- evaluate BiRefNet, SAM2,
   MatAnyone2 as alternative hint generators for non-person subjects.
   Also enables arbitrary background colors without retraining.
-- [ ] **4.3 Tiled Inference for Large Resolutions** -- 4K+ support with
-  overlapping tiles and linear blend ramps at boundaries.
-- [ ] **4.4 Temporal Consistency** -- frame-to-frame matte consistency to
+- [ ] **5.3 Tiled Inference Enhancements** -- advanced tiling with adaptive
+  tile sizes, resolution-aware overlap, and quality metrics.
+- [ ] **5.4 Temporal Consistency** -- frame-to-frame matte consistency to
   reduce flickering in video sequences.
 
 ## Reference

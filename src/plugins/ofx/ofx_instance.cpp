@@ -152,6 +152,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatFailed;
     }
 
+    g_suites.parameter->paramGetHandle(param_set, kParamQualityMode, &data->quality_mode_param,
+                                       nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamDespillStrength, &data->despill_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAutoDespeckle, &data->despeckle_param,
@@ -179,8 +181,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     }
     log_message("create_instance", std::string("Selected model: ") + model_entry->filename);
 
-    auto models_root = resolve_models_root();
-    data->model_path = models_root / model_entry->filename;
+    data->models_root = resolve_models_root();
+    data->model_path = data->models_root / model_entry->filename;
     if (!std::filesystem::exists(data->model_path)) {
         log_message("create_instance",
                     std::string("Model file missing: ") + data->model_path.string());
@@ -203,6 +205,61 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
     set_instance_data(instance, data.release());
     return kOfxStatOK;
+}
+
+bool ensure_engine_for_quality(InstanceData* data, int quality_mode) {
+    if (data == nullptr || quality_mode == data->active_quality_mode) {
+        return true;
+    }
+
+    // Map quality mode to MLX bridge resolution
+    int resolution = 512;
+    if (quality_mode == kQualityStandard) {
+        resolution = 768;
+    } else if (quality_mode == kQualityHigh) {
+        resolution = 1024;
+    }
+
+    // For Auto mode, keep the default model
+    if (quality_mode == kQualityAuto) {
+        if (data->active_quality_mode == kQualityAuto) return true;
+        // Reload original model
+        auto engine_result = Engine::create(data->model_path, data->device);
+        if (!engine_result) {
+            log_message(
+                "ensure_engine_for_quality",
+                std::string("Failed to reload default engine: ") + engine_result.error().message);
+            return false;
+        }
+        data->engine = std::move(*engine_result);
+        data->active_quality_mode = kQualityAuto;
+        log_message("ensure_engine_for_quality", "Switched to Auto quality mode.");
+        return true;
+    }
+
+    // Try to find the bridge for the requested resolution
+    auto bridge_path =
+        data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
+    if (!std::filesystem::exists(bridge_path)) {
+        log_message("ensure_engine_for_quality",
+                    std::string("Bridge not found: ") + bridge_path.string());
+        return false;
+    }
+
+    auto engine_result = Engine::create(bridge_path, data->device);
+    if (!engine_result) {
+        log_message(
+            "ensure_engine_for_quality",
+            std::string("Failed to create engine for bridge: ") + engine_result.error().message);
+        return false;
+    }
+
+    data->engine = std::move(*engine_result);
+    data->active_quality_mode = quality_mode;
+    log_message("ensure_engine_for_quality",
+                std::string("Switched to quality mode with resolution ") +
+                    std::to_string(resolution) + ".");
+    return true;
 }
 
 OfxStatus destroy_instance(OfxImageEffectHandle instance) {
