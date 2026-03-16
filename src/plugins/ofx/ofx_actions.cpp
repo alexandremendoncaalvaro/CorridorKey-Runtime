@@ -125,6 +125,16 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                      kOfxImageComponentRGBA);
     g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 0);
 
+    if (g_suites.image_effect->clipDefine(descriptor, kClipAlphaHint, &clip_props) != kOfxStatOK) {
+        log_message("describe_in_context", "Failed to define alpha hint clip.");
+        return kOfxStatFailed;
+    }
+    g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
+                                     kOfxImageComponentRGBA);
+    g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 1,
+                                     kOfxImageComponentAlpha);
+    g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
+
     if (g_suites.image_effect->clipDefine(descriptor, kOfxImageEffectOutputClipName, &clip_props) !=
         kOfxStatOK) {
         log_message("describe_in_context", "Failed to define output clip.");

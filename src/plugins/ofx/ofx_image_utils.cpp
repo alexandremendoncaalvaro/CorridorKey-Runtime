@@ -46,6 +46,19 @@ bool fetch_image(OfxImageClipHandle clip, OfxTime time, OfxPropertySetHandle& im
     return g_suites.image_effect->clipGetImage(clip, time, nullptr, &image_props) == kOfxStatOK;
 }
 
+bool is_clip_connected(OfxImageClipHandle clip) {
+    if (clip == nullptr || g_suites.image_effect == nullptr || g_suites.property == nullptr) {
+        return false;
+    }
+    OfxPropertySetHandle clip_props = nullptr;
+    if (g_suites.image_effect->clipGetPropertySet(clip, &clip_props) != kOfxStatOK) {
+        return false;
+    }
+    int connected = 0;
+    g_suites.property->propGetInt(clip_props, kOfxImageClipPropConnected, 0, &connected);
+    return connected != 0;
+}
+
 bool is_depth(const std::string& depth, const char* expected) {
     return std::strcmp(depth.c_str(), expected) == 0;
 }
@@ -76,6 +89,47 @@ void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
                 dst_row[2] = static_cast<float>(src_pixel[2]) / 255.0f;
                 src_pixel += 4;
                 dst_row += 3;
+            }
+        }
+    }
+}
+
+void copy_alpha_hint(Image dst, const void* src_data, int row_bytes, const std::string& depth,
+                     const std::string& components) {
+    const bool is_float = is_depth(depth, kOfxBitDepthFloat);
+    const bool is_byte = is_depth(depth, kOfxBitDepthByte);
+    const bool is_rgba = (components == kOfxImageComponentRGBA);
+
+    for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
+        const auto* row = reinterpret_cast<const unsigned char*>(src_data) +
+                          static_cast<size_t>(y_pos) * row_bytes;
+        float* dst_row = &dst(y_pos, 0);
+
+        if (is_float) {
+            const float* src_pixel = reinterpret_cast<const float*>(row);
+            if (is_rgba) {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = src_pixel[3];
+                    src_pixel += 4;
+                }
+            } else {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = src_pixel[0];
+                    ++src_pixel;
+                }
+            }
+        } else if (is_byte) {
+            const unsigned char* src_pixel = row;
+            if (is_rgba) {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = static_cast<float>(src_pixel[3]) / 255.0f;
+                    src_pixel += 4;
+                }
+            } else {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
+                    ++src_pixel;
+                }
             }
         }
     }

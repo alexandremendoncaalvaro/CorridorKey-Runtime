@@ -30,6 +30,8 @@ constexpr const char* kPluginIdentifier = "com.corridorkey.resolve";
 constexpr const char* kPluginLabel = "CorridorKey";
 constexpr const char* kPluginGroup = "Keying";
 
+constexpr const char* kClipAlphaHint = "Alpha Hint";
+
 constexpr const char* kParamDespillStrength = "despill_strength";
 constexpr const char* kParamAutoDespeckle = "auto_despeckle";
 constexpr const char* kParamDespeckleSize = "despeckle_size";
@@ -46,6 +48,7 @@ struct OfxSuites {
 struct InstanceData {
     OfxImageEffectHandle effect = nullptr;
     OfxImageClipHandle source_clip = nullptr;
+    OfxImageClipHandle alpha_hint_clip = nullptr;
     OfxImageClipHandle output_clip = nullptr;
     OfxParamHandle despill_param = nullptr;
     OfxParamHandle despeckle_param = nullptr;

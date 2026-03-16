@@ -17,140 +17,64 @@ establish the plugin as a production-ready tool inside DaVinci Resolve.
 - Parameters: Despill Strength, Auto Despeckle, Refiner Scale, Input Is Linear
 - Correct color space pipeline (sRGB in, premultiplied sRGB out)
 
-**Known Issues:**
-- Output quality is visibly lower than source (details lost, darker than expected)
-- No way to restore original source detail in opaque regions
-- Despeckle is binary (on/off), no size threshold control
-- No separate matte/foreground output modes
-- Windows OFX plugin exists but has not been validated at the same level
-
 ## Phase 1 - Quality Parity with EZ-CorridorKey
 
 Goal: match or exceed the visual quality of the Python standalone app.
 
-### 1.1 Source Detail Restoration
+- [x] **1.1 Source Detail Restoration** -- blend original source pixels back
+  into opaque interior regions using chamfer distance transform. Avoids green
+  spill contamination with per-pixel check. Smooth blend ramp at edges.
+  (`src/post_process/restore_source.cpp`)
+- [x] **1.2 Despeckle Size Threshold** -- expose existing engine parameter as
+  integer slider (50-2000px, default 400) in OFX panel. Replaces binary toggle.
+- [x] **1.3 Refiner Scale Range** -- extended from [0.5, 2.0] to [0.0, 3.0].
+  Setting 0.0 disables the CNN edge refiner entirely.
+- [x] **1.4 Despill Algorithm** -- verified: already matches EZ-CorridorKey
+  (green limit = (R+B)/2, redistribute spill to R and B).
 
-The single biggest quality improvement. The ML model output loses fine texture
-in fully opaque interior regions. EZ-CorridorKey solves this by blending
-original source pixels back where the matte is confidently opaque and far from
-edges.
+## Phase 1.5 - Core Workflow (community-driven, high priority)
 
-**Approach:**
-- Compute distance from alpha edge (alpha < threshold) for each pixel
-- Where alpha is near-opaque (> 0.92) AND distance from edge is significant
-  (> 8px) AND pixel has no green spill: blend original source RGB
-- Use smooth blend ramp to avoid visible transition artifacts
-- Implement in `src/post_process/` as a reusable utility
+Features requested by the community and critical for real-world compositing.
 
-### 1.2 Despeckle Size Threshold
-
-Replace the binary on/off toggle with a pixel-area threshold parameter.
-
-**Approach:**
-- Add `kParamDespeckleSize` as integer parameter (range 50-2000, default 400)
-- Connected component analysis on the alpha channel
-- Remove components smaller than threshold
-- Apply morphological dilation + gaussian blur for smooth cleanup
-- Keep the existing bool as an enable/disable, add the size as a sub-parameter
-
-### 1.3 Refiner Scale Range
-
-Extend refiner scale to allow disabling the refiner entirely.
-
-**Approach:**
-- Change range from [0.5, 2.0] to [0.0, 3.0]
-- 0.0 = refiner disabled (use raw model output)
-- This matches EZ-CorridorKey behavior and gives users more control
-
-### 1.4 Despill Algorithm Improvement
-
-Current despill is functional but the green limit calculation could be more
-nuanced.
-
-**Approach:**
-- Verify current despill matches the luminance-preserving approach
-- Green limit = (R+B)/2, spillage = max(G - limit, 0)
-- Redistribute spill equally to R and B channels
-- Ensure strength parameter blends smoothly between original and despilled
+- [ ] **1.5.1 Alpha Hint Input Clip** -- add a second optional OFX input clip
+  ("Alpha Hint") so users can feed an external matte from another Fusion node
+  (keyer, roto, painted mask) instead of the auto-generated rough matte.
+  If not connected, falls back to `generate_rough_matte` as today.
+- [ ] **1.5.2 Color Space Auto-Detection** -- query Resolve clip properties
+  to detect whether input is linear or sRGB instead of relying on a manual
+  checkbox. Addresses the reported "EXR ingested as linear even if sRGB
+  selected" issue.
 
 ## Phase 2 - Output Control and Workflow
 
 Goal: give compositors the control they expect from a professional keyer.
 
-### 2.1 Output Mode Selector
-
-Allow users to choose what the plugin outputs.
-
-**Options:**
-- **Processed (default):** RGBA with matte applied (current behavior)
-- **Matte Only:** Alpha channel as grayscale (for manual compositing)
-- **Foreground Only:** RGB with green removed, no alpha applied
-- **Source + Matte:** Original RGB with generated alpha (no despill)
-
-**Approach:**
-- Add `kParamOutputMode` as choice parameter in `ofx_actions.cpp`
-- Branch in `ofx_render.cpp` after engine processing to write the selected
-  output variant
-
-### 2.2 Alpha Edge Controls
-
-Fine-tune matte edges without re-running inference.
-
-**Parameters:**
-- **Erode/Dilate** (range -10 to +10 px): shrink or grow the matte
-- **Edge Softness** (0.0 to 5.0 px): gaussian blur on matte edges only
-- **Black/White Point** (0.0 to 1.0 each): crush or lift matte levels
-
-**Approach:**
-- Implement as post-processing on the alpha channel after inference
-- Pure pixel math in `src/post_process/`, no external dependencies
-
-### 2.3 Color Correction Controls
-
-Compensate for the slight color shift that keying introduces.
-
-**Parameters:**
-- **Brightness** (0.5 to 2.0, default 1.0): simple gain on RGB
-- **Saturation** (0.0 to 2.0, default 1.0): saturation adjustment
-
-**Approach:**
-- Apply after despill, before final output write
-- Operate in linear space for correctness
+- [ ] **2.1 Output Mode Selector** -- choice parameter: Processed (default),
+  Matte Only, Foreground Only, Source + Matte.
+- [ ] **2.2 Alpha Edge Controls** -- Erode/Dilate (-10 to +10 px), Edge
+  Softness (0-5 px), Black/White Point (0-1 each). Post-inference alpha
+  manipulation, no re-run needed.
+- [ ] **2.3 Color Correction** -- Brightness (0.5-2.0) and Saturation (0-2.0)
+  controls applied after despill in linear space.
 
 ## Phase 3 - Platform Parity
 
-### 3.1 Windows OFX Validation
-
-- Validate the existing Windows build at the same quality level
-- Test with TensorRT, CUDA, and DirectML backends
-- Ensure installer and packaging match macOS quality
-
-### 3.2 Cross-Platform Feature Sync
-
-- Ensure all Phase 1-2 features work identically on Windows
-- Unified parameter set, same default values, same output behavior
+- [ ] **3.1 Windows OFX Validation** -- validate at the same quality level
+  with TensorRT, CUDA, and DirectML backends.
+- [ ] **3.2 Cross-Platform Feature Sync** -- ensure all features work
+  identically on Windows with unified parameter set.
 
 ## Phase 4 - Advanced Features
 
-These are longer-term items informed by EZ-CorridorKey capabilities and
-community feedback.
+Longer-term items informed by EZ-CorridorKey capabilities and community
+feedback.
 
-### 4.1 Multiple Alpha Hint Strategies
-
-EZ-CorridorKey supports GVM, BiRefNet, SAM2, and MatAnyone2. Evaluate which
-alternative hint generators could improve results for non-person subjects.
-
-### 4.2 Tiled Inference for Large Resolutions
-
-For 4K+ frames on constrained hardware, process in overlapping tiles with
-linear blend ramps at tile boundaries. EZ-CorridorKey uses 512x512 tiles with
-128px overlap.
-
-### 4.3 Temporal Consistency
-
-For video sequences, explore frame-to-frame matte consistency to reduce
-flickering. This could leverage SAM2-style temporal propagation or simpler
-alpha temporal filtering.
+- [ ] **4.1 Multiple Alpha Hint Strategies** -- evaluate BiRefNet, SAM2,
+  MatAnyone2 as alternative hint generators for non-person subjects.
+- [ ] **4.2 Tiled Inference for Large Resolutions** -- 4K+ support with
+  overlapping tiles and linear blend ramps at boundaries.
+- [ ] **4.3 Temporal Consistency** -- frame-to-frame matte consistency to
+  reduce flickering in video sequences.
 
 ## Reference
 

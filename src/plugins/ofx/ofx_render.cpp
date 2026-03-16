@@ -149,7 +149,35 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         g_suites.parameter->paramGetValueAtTime(data->refiner_param, time, &refiner_scale);
     }
 
-    ColorUtils::generate_rough_matte(rgb_view, hint_view);
+    // Use external alpha hint if connected, otherwise generate from green channel
+    bool hint_from_clip = false;
+    OfxPropertySetHandle hint_props = nullptr;
+    ImageHandleGuard hint_guard{};
+
+    if (is_clip_connected(data->alpha_hint_clip)) {
+        if (fetch_image(data->alpha_hint_clip, time, hint_props)) {
+            hint_guard.handle = hint_props;
+            void* hint_data = nullptr;
+            int hint_row_bytes = 0;
+            std::string hint_depth;
+            std::string hint_components;
+
+            if (g_suites.property->propGetPointer(hint_props, kOfxImagePropData, 0, &hint_data) ==
+                    kOfxStatOK &&
+                hint_data != nullptr &&
+                get_int(hint_props, kOfxImagePropRowBytes, hint_row_bytes) &&
+                get_string(hint_props, kOfxImageEffectPropPixelDepth, hint_depth) &&
+                get_string(hint_props, kOfxImageEffectPropComponents, hint_components)) {
+                copy_alpha_hint(hint_view, hint_data, hint_row_bytes, hint_depth, hint_components);
+                hint_from_clip = true;
+                log_message("render", "Using external alpha hint from connected clip.");
+            }
+        }
+    }
+
+    if (!hint_from_clip) {
+        ColorUtils::generate_rough_matte(rgb_view, hint_view);
+    }
 
     InferenceParams params;
     params.despill_strength = static_cast<float>(despill_strength);
