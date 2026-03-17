@@ -32,9 +32,9 @@ void despill(Image rgb, float strength) {
 
             if (spill > 0.0f) {
                 float effective_spill = spill * strength;
-                rgb(y, x, 0) = std::min(1.0f, r + effective_spill * 0.5f);
+                rgb(y, x, 0) = r + effective_spill * 0.5f;
                 rgb(y, x, 1) = g - effective_spill;
-                rgb(y, x, 2) = std::min(1.0f, b + effective_spill * 0.5f);
+                rgb(y, x, 2) = b + effective_spill * 0.5f;
             }
         }
     });

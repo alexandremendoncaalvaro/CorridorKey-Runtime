@@ -24,18 +24,30 @@ TEST_CASE("despill removes green spill with redistribution", "[unit][despill]") 
         REQUIRE(rgb.data[2] == Catch::Approx(0.55f));
     }
 
-    SECTION("Redistribution is clamped to 1.0") {
+    SECTION("Redistribution preserves full energy") {
         rgb.data[0] = 0.9f;
         rgb.data[1] = 1.0f;
         rgb.data[2] = 0.1f;
         despill(rgb, 1.0f);
         // limit = (0.9 + 0.1) / 2 = 0.5
         // spill = 1.0 - 0.5 = 0.5
-        // R_new = min(1.0, 0.9 + 0.25) = 1.0
-        // B_new = min(1.0, 0.1 + 0.25) = 0.35
-        REQUIRE(rgb.data[0] == Catch::Approx(1.0f));
+        // R_new = 0.9 + 0.25 = 1.15 (no clamping, matches Python reference)
+        // B_new = 0.1 + 0.25 = 0.35
+        REQUIRE(rgb.data[0] == Catch::Approx(1.15f));
         REQUIRE(rgb.data[1] == Catch::Approx(0.5f));
         REQUIRE(rgb.data[2] == Catch::Approx(0.35f));
+    }
+
+    SECTION("Values above 1.0 are preserved after redistribution") {
+        rgb.data[0] = 0.95f;
+        rgb.data[1] = 1.0f;
+        rgb.data[2] = 0.05f;
+        despill(rgb, 1.0f);
+        // limit = (0.95 + 0.05) / 2 = 0.5
+        // spill = 1.0 - 0.5 = 0.5
+        // R_new = 0.95 + 0.25 = 1.20
+        REQUIRE(rgb.data[0] == Catch::Approx(1.20f));
+        REQUIRE(rgb.data[0] > 1.0f);
     }
 
     SECTION("No color shift toward purple on dark pixels") {
