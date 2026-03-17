@@ -96,8 +96,8 @@ class InferenceSession {
     /**
      * @brief Apply despeckle, despill and composition to raw results.
      */
-    void apply_post_process(FrameResult& result, const Image& source_rgb,
-                            const InferenceParams& params, StageTimingCallback on_stage = nullptr);
+    void apply_post_process(FrameResult& result, const InferenceParams& params,
+                            StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Helper for running tiling inference on large images.
