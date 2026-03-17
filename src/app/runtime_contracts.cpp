@@ -249,8 +249,16 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Higher resolution reference validation variant.", "reference_validation",
                          false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
         make_model_entry("fp32", 1024, "corridorkey_fp32_1024.onnx", "onnx", "cpu",
-                         "Maximum resolution reference validation variant.", "reference_validation",
+                         "High resolution reference validation variant.", "reference_validation",
                          false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
+        make_model_entry("fp32", 1536, "corridorkey_fp32_1536.onnx", "onnx", "cpu",
+                         "Ultra resolution variant for near-native 1080p inference.",
+                         "reference_validation", false, false, false, {},
+                         {"macos_apple_silicon", "windows_rtx"}, {}),
+        make_model_entry("fp32", 2048, "corridorkey_fp32_2048.onnx", "onnx", "cpu",
+                         "Maximum resolution variant matching Python reference pipeline.",
+                         "reference_validation", false, false, false, {},
+                         {"macos_apple_silicon", "windows_rtx"}, {}),
     };
 }
 

@@ -228,12 +228,15 @@ int resolve_target_resolution(int quality_mode, int input_width, int input_heigh
     if (quality_mode == kQualityPreview) return 512;
     if (quality_mode == kQualityStandard) return 768;
     if (quality_mode == kQualityHigh) return 1024;
+    if (quality_mode == kQualityUltra) return 1536;
+    if (quality_mode == kQualityMaximum) return 2048;
 
     // Auto: select based on input resolution
     int max_dim = std::max(input_width, input_height);
-    if (max_dim > 2000) return 1024;
-    if (max_dim > 1000) return 768;
-    return 512;
+    if (max_dim > 3000) return 2048;
+    if (max_dim > 2000) return 1536;
+    if (max_dim > 1000) return 1024;
+    return 768;
 }
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
@@ -243,14 +246,32 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     int target = resolve_target_resolution(quality_mode, input_width, input_height);
     if (target == data->active_resolution) return true;
 
-    auto desired_bridge =
-        data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(target) + ".mlxfn");
+    // Try the desired resolution, then fall back to lower resolutions
+    constexpr int fallback_resolutions[] = {2048, 1536, 1024, 768, 512};
+    std::filesystem::path desired_bridge;
+    bool found = false;
+    for (int res : fallback_resolutions) {
+        if (res > target) continue;
+        desired_bridge =
+            data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(res) + ".mlxfn");
+        if (std::filesystem::exists(desired_bridge)) {
+            if (res < target) {
+                log_message("ensure_engine_for_quality", "Bridge for " + std::to_string(target) +
+                                                             " not found, falling back to " +
+                                                             std::to_string(res));
+            }
+            target = res;
+            found = true;
+            break;
+        }
+    }
 
-    if (!std::filesystem::exists(desired_bridge)) {
-        log_message("ensure_engine_for_quality",
-                    std::string("Bridge not found: ") + desired_bridge.string());
+    if (!found) {
+        log_message("ensure_engine_for_quality", "No bridge file found.");
         return false;
     }
+
+    if (target == data->active_resolution) return true;
 
     auto engine_result = Engine::create(desired_bridge, data->device);
     if (!engine_result) {

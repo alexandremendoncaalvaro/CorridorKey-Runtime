@@ -52,6 +52,8 @@ constexpr int kQualityAuto = 0;
 constexpr int kQualityPreview = 1;
 constexpr int kQualityStandard = 2;
 constexpr int kQualityHigh = 3;
+constexpr int kQualityUltra = 4;
+constexpr int kQualityMaximum = 5;
 
 // Upscale method choice indices
 constexpr int kUpscaleLanczos4 = 0;

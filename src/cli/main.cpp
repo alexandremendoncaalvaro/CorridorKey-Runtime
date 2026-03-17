@@ -709,7 +709,7 @@ int main(int argc, char* argv[]) {
 
             std::filesystem::create_directory("models");
 
-            const std::vector<int> available_resolutions = {512, 768, 1024};
+            const std::vector<int> available_resolutions = {512, 768, 1024, 1536, 2048};
 
             for (const auto& v : variants_to_download) {
                 for (const int resolution : available_resolutions) {

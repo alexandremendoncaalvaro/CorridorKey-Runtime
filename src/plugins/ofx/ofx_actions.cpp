@@ -187,7 +187,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "version_group", version_group_label.c_str(), false);
 
     define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityAuto,
-                        {"Auto", "Preview (512)", "Standard (768)", "High (1024)"},
+                        {"Auto", "Preview (512)", "Standard (768)", "High (1024)", "Ultra (1536)",
+                         "Maximum (2048)"},
                         "Inference resolution. Auto selects based on input size. "
                         "Higher values produce better detail at the cost of speed.");
 
