@@ -4,15 +4,24 @@ version = "0.1.0"
 description = "Isolated Python tool to export the CorridorKey PyTorch model to ONNX for the C++ runtime."
 requires-python = "==3.10.*"
 dependencies = [
-    "torch==2.3.1",
-    "torchvision==0.18.1",
+    "torch==2.3.1+cu121",
+    "torchvision==0.18.1+cu121",
     "onnx<1.15.0",
-    "onnxruntime==1.16.3",
+    "onnxruntime-gpu==1.18.0",
     "onnxsim>=0.4.36",
     "timm>=0.9.12",
     "opencv-python-headless>=4.8.1",
     "numpy<2.0.0"
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
 
 [tool.uv]
 managed = true

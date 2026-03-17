@@ -56,7 +56,11 @@ def load_model_with_pos_embed_interpolation(checkpoint_path, img_size):
     model = model.to("cpu")
     model.eval()
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    device = "cpu"
+    print(f"[Info] Using device: {device}")
+    model = model.to(device)
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     state_dict = checkpoint.get("state_dict", checkpoint)
 
     new_state_dict = {}
@@ -108,8 +112,14 @@ def export_resolution(args, resolution):
             out = self.model(x)
             return out["alpha"], out.get("fg", x[:, :3, :, :])
 
+    device = next(base_model.parameters()).device
     model = ONNXWrapper(base_model)
-    dummy_x = torch.randn(1, 4, resolution, resolution, device="cpu")
+    dummy_x = torch.randn(1, 4, resolution, resolution, device=device)
+
+    if resolution >= 1536:
+        print(f"[Info] Forcing FP16 mode for {resolution}px to save memory...")
+        model = model.half()
+        dummy_x = dummy_x.half()
 
     print(f"[Info] Exporting ONNX model to {out_path}...")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)

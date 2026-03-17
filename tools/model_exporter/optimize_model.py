@@ -96,7 +96,7 @@ def main():
 
     models_dir = os.path.abspath(args.dir)
 
-    resolutions = [512, 768, 1024]
+    resolutions = [512, 768, 1024, 1536, 2048]
 
     for res in resolutions:
         raw_path = os.path.join(models_dir, f"corridorkey_fp32_{res}.onnx")
