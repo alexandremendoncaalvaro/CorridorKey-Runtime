@@ -252,15 +252,23 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 
     // Try the desired resolution, then fall back to lower resolutions
     constexpr int fallback_resolutions[] = {2048, 1536, 1024, 768, 512};
-    std::filesystem::path desired_bridge;
+    std::filesystem::path desired_path;
     bool found = false;
     for (int res : fallback_resolutions) {
         if (res > target) continue;
-        desired_bridge =
-            data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(res) + ".mlxfn");
-        if (std::filesystem::exists(desired_bridge)) {
+
+        if (data->device.backend == Backend::MLX) {
+            desired_path =
+                data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(res) + ".mlxfn");
+        } else if (data->device.backend == Backend::TensorRT || data->device.backend == Backend::CUDA) {
+            desired_path = data->models_root / ("corridorkey_fp16_" + std::to_string(res) + ".onnx");
+        } else {
+            desired_path = data->models_root / ("corridorkey_int8_" + std::to_string(res) + ".onnx");
+        }
+
+        if (std::filesystem::exists(desired_path)) {
             if (res < target) {
-                log_message("ensure_engine_for_quality", "Bridge for " + std::to_string(target) +
+                log_message("ensure_engine_for_quality", "Model for " + std::to_string(target) +
                                                              " not found, falling back to " +
                                                              std::to_string(res));
             }
@@ -271,26 +279,26 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     }
 
     if (!found) {
-        log_message("ensure_engine_for_quality", "No bridge file found.");
+        log_message("ensure_engine_for_quality", "No compatible model file found.");
         return false;
     }
 
     if (target == data->active_resolution) return true;
 
-    auto engine_result = Engine::create(desired_bridge, data->device);
+    auto engine_result = Engine::create(desired_path, data->device);
     if (!engine_result) {
         log_message(
             "ensure_engine_for_quality",
-            std::string("Failed to create engine for bridge: ") + engine_result.error().message);
+            std::string("Failed to create engine for model: ") + engine_result.error().message);
         return false;
     }
 
     data->engine = std::move(*engine_result);
-    data->model_path = desired_bridge;
+    data->model_path = desired_path;
     data->active_quality_mode = quality_mode;
     data->active_resolution = target;
     log_message("ensure_engine_for_quality",
-                std::string("Switched to bridge ") + desired_bridge.filename().string());
+                std::string("Switched to model ") + desired_path.filename().string());
     return true;
 }
 

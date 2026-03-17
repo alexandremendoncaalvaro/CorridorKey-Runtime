@@ -124,9 +124,8 @@ feedback.
   repos use. Useful for memory savings, not quality improvement.
 - [ ] **5.4 Temporal Consistency** -- frame-to-frame matte consistency to
   reduce flickering in video sequences.
-- [ ] **5.5 2048px MLX Bridge** -- compile a 2048px bridge for Apple Silicon.
-  Would give our plugin a quality advantage over EZ-CorridorKey on MPS
-  (which caps at 1024). Requires memory profiling on 16GB/32GB machines.
+- [x] **5.5 2048px MLX Bridge** -- compile a 2048px bridge for Apple Silicon.
+  Implemented support in the model catalog and updated preparation scripts.
 
 ## Reference
 

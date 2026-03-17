@@ -52,6 +52,12 @@ std::string resolve_platform_preset_alias(const std::string& selector,
         }
         return "mac-max-quality";
     }
+    if (selector == "ultra" || selector == "maximum") {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+            return "win-rtx-ultra-quality";
+        }
+        return "mac-ultra-quality";
+    }
     return selector;
 }
 
@@ -201,6 +207,12 @@ std::optional<ModelCatalogEntry> default_model_for_request(
             }
         }
 
+        if (requested_device.available_memory_mb >= 24000) {
+            return find_model_by_filename("corridorkey_fp16_2048.onnx");
+        }
+        if (requested_device.available_memory_mb >= 16000) {
+            return find_model_by_filename("corridorkey_fp16_1536.onnx");
+        }
         if (requested_device.available_memory_mb >= 10000) {
             return find_model_by_filename("corridorkey_fp16_1024.onnx");
         }
@@ -242,6 +254,14 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Maximum quality Windows RTX pack for 10 GB and higher tiers.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_10gb_plus"}),
+        make_model_entry("fp16", 1536, "corridorkey_fp16_1536.onnx", "onnx", "tensorrt",
+                         "High-fidelity Windows RTX pack for 16 GB VRAM systems.",
+                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_16gb_plus"}),
+        make_model_entry("fp16", 2048, "corridorkey_fp16_2048.onnx", "onnx", "tensorrt",
+                         "Extreme quality Windows RTX pack for 24 GB VRAM systems.",
+                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_24gb"}),
         make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
                          false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
@@ -343,6 +363,32 @@ std::vector<PresetDefinition> preset_catalog() {
             {"windows_rtx_30_plus"},
             {"windows_rtx_30_plus"},
             {"rtx_10gb_plus"},
+        },
+        PresetDefinition{
+            "win-rtx-ultra-quality",
+            "Windows RTX Ultra Quality",
+            "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
+            InferenceParams{2048, 1.0F, true, 400, 1.0F, false, 1, true, 64},
+            "corridorkey_fp16_2048.onnx",
+            "windows_rtx_primary",
+            false,
+            false,
+            {"windows_rtx_30_plus"},
+            {"windows_rtx_30_plus"},
+            {"rtx_24gb"},
+        },
+        PresetDefinition{
+            "mac-ultra-quality",
+            "Mac Ultra Quality",
+            "Extreme quality Apple Silicon preset using 2048px MLX bridge with cleanup enabled.",
+            InferenceParams{2048, 1.0F, true, 400, 1.0F, false, 1, true, 64},
+            "corridorkey_mlx.safetensors",
+            "native_resolution_examples",
+            false,
+            false,
+            {"macos_apple_silicon"},
+            {"macos_apple_silicon"},
+            {"apple_silicon_16gb_plus"},
         },
     };
 }

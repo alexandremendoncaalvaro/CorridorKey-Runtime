@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--bridge-resolutions",
-        default="512,1024",
+        default="512,1024,2048",
         help="Comma-separated bridge export resolutions bundled with the Apple model pack.",
     )
     parser.add_argument(
