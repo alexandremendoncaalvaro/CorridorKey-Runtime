@@ -283,50 +283,6 @@ void ColorUtils::clamp_image(Image image, float min_val, float max_val) {
     }
 }
 
-std::pair<ImageBuffer, Rect> ColorUtils::fit_pad(Image image, int target_width, int target_height) {
-    const float scale =
-        std::min(static_cast<float>(target_width) / static_cast<float>(image.width),
-                 static_cast<float>(target_height) / static_cast<float>(image.height));
-    const int new_w = static_cast<int>(static_cast<float>(image.width) * scale);
-    const int new_h = static_cast<int>(static_cast<float>(image.height) * scale);
-
-    ImageBuffer resized = resize(image, new_w, new_h);
-
-    ImageBuffer result(target_width, target_height, image.channels);
-    std::fill(result.view().data.begin(), result.view().data.end(), 0.0F);
-
-    const int pad_x = (target_width - new_w) / 2;
-    const int pad_y = (target_height - new_h) / 2;
-
-    Image dst = result.view();
-    Image src = resized.view();
-
-    for (int y_pos = 0; y_pos < new_h; ++y_pos) {
-        for (int x_pos = 0; x_pos < new_w; ++x_pos) {
-            for (int channel = 0; channel < image.channels; ++channel) {
-                dst(y_pos + pad_y, x_pos + pad_x, channel) = src(y_pos, x_pos, channel);
-            }
-        }
-    }
-
-    return std::make_pair(std::move(result), Rect{pad_x, pad_y, new_w, new_h});
-}
-
-ImageBuffer ColorUtils::crop(Image image, int x_start, int y_start, int width, int height) {
-    ImageBuffer result(width, height, image.channels);
-    Image dst = result.view();
-
-    for (int y_pos = 0; y_pos < height; ++y_pos) {
-        for (int x_pos = 0; x_pos < width; ++x_pos) {
-            for (int channel = 0; channel < image.channels; ++channel) {
-                dst(y_pos, x_pos, channel) = image(y_pos + y_start, x_pos + x_start, channel);
-            }
-        }
-    }
-
-    return result;
-}
-
 void ColorUtils::to_planar(Image src, float* dst) {
     const int height = src.height;
     const int width = src.width;

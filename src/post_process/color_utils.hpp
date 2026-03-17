@@ -2,7 +2,6 @@
 
 #include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
-#include <utility>
 
 namespace corridorkey {
 
@@ -66,17 +65,6 @@ class CORRIDORKEY_API ColorUtils {
      * @brief Clamp all pixel values to [min_val, max_val].
      */
     static void clamp_image(Image image, float min_val, float max_val);
-
-    /**
-     * @brief Resize image maintaining aspect ratio and padding to reach target size (Letterbox).
-     * Returns the padded image and the original valid area (ROI).
-     */
-    static std::pair<ImageBuffer, Rect> fit_pad(Image image, int target_width, int target_height);
-
-    /**
-     * @brief Crop an image using a defined rectangle.
-     */
-    static ImageBuffer crop(Image image, int x_start, int y_start, int width, int height);
 
     /**
      * @brief Convert interleaved HWC data to planar NCHW data.
