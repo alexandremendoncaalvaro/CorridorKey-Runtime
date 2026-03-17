@@ -46,6 +46,8 @@ constexpr const char* kParamAlphaSoftness = "alpha_softness";
 constexpr const char* kParamBrightness = "brightness";
 constexpr const char* kParamSaturation = "saturation";
 constexpr const char* kParamUpscaleMethod = "upscale_method";
+constexpr const char* kParamEnableTiling = "enable_tiling";
+constexpr const char* kParamTileOverlap = "tile_overlap";
 
 // Quality mode choice indices
 constexpr int kQualityAuto = 0;
@@ -91,6 +93,8 @@ struct InstanceData {
     OfxParamHandle brightness_param = nullptr;
     OfxParamHandle saturation_param = nullptr;
     OfxParamHandle upscale_method_param = nullptr;
+    OfxParamHandle enable_tiling_param = nullptr;
+    OfxParamHandle tile_overlap_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};

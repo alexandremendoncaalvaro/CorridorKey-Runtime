@@ -142,6 +142,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     double brightness = 1.0;
     double saturation = 1.0;
     int upscale_method = kUpscaleLanczos4;
+    int enable_tiling = 0;
+    int tile_overlap = 32;
 
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
@@ -190,6 +192,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->upscale_method_param) {
         g_suites.parameter->paramGetValueAtTime(data->upscale_method_param, time, &upscale_method);
+    }
+    if (data->enable_tiling_param) {
+        g_suites.parameter->paramGetValueAtTime(data->enable_tiling_param, time, &enable_tiling);
+    }
+    if (data->tile_overlap_param) {
+        g_suites.parameter->paramGetValueAtTime(data->tile_overlap_param, time, &tile_overlap);
     }
 
     // Use external alpha hint if connected, otherwise generate from green channel
@@ -244,6 +252,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.input_is_linear = input_is_linear != 0;
     params.upscale_method =
         upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
+    params.enable_tiling = enable_tiling != 0;
+    params.tile_padding = tile_overlap;
 
     auto result = data->engine->process_frame(rgb_view, hint_view, params);
     if (!result) {

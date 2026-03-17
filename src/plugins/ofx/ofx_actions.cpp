@@ -9,9 +9,15 @@ namespace corridorkey::ofx {
 
 namespace {
 
+void set_parent(OfxPropertySetHandle param_props, const char* parent) {
+    if (parent != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropParent, 0, parent);
+    }
+}
+
 void define_double_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                         double default_value, double min_value, double max_value,
-                         const char* hint) {
+                         double default_value, double min_value, double max_value, const char* hint,
+                         const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeDouble, name, &param_props) !=
         kOfxStatOK) {
@@ -27,10 +33,12 @@ void define_double_param(OfxParamSetHandle param_set, const char* name, const ch
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
+    set_parent(param_props, parent);
 }
 
 void define_int_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                      int default_value, int min_value, int max_value, const char* hint) {
+                      int default_value, int min_value, int max_value, const char* hint,
+                      const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeInteger, name, &param_props) !=
         kOfxStatOK) {
@@ -46,10 +54,11 @@ void define_int_param(OfxParamSetHandle param_set, const char* name, const char*
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
+    set_parent(param_props, parent);
 }
 
 void define_bool_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                       int default_value, const char* hint) {
+                       int default_value, const char* hint, const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeBoolean, name, &param_props) !=
         kOfxStatOK) {
@@ -61,11 +70,12 @@ void define_bool_param(OfxParamSetHandle param_set, const char* name, const char
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
+    set_parent(param_props, parent);
 }
 
 void define_choice_param(OfxParamSetHandle param_set, const char* name, const char* label,
                          int default_value, const std::vector<const char*>& options,
-                         const char* hint) {
+                         const char* hint, const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeChoice, name, &param_props) !=
         kOfxStatOK) {
@@ -80,10 +90,11 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
+    set_parent(param_props, parent);
 }
 
-void define_group_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                        bool open) {
+void define_group_param(OfxParamSetHandle param_set, const char* name, const char* label, bool open,
+                        const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeGroup, name, &param_props) !=
         kOfxStatOK) {
@@ -92,6 +103,9 @@ void define_group_param(OfxParamSetHandle param_set, const char* name, const cha
 
     g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
     g_suites.property->propSetInt(param_props, kOfxParamPropGroupOpen, 0, open ? 1 : 0);
+    if (parent != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropParent, 0, parent);
+    }
 }
 
 }  // namespace
@@ -186,46 +200,75 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     std::string version_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
     define_group_param(param_set, "version_group", version_group_label.c_str(), false);
 
+    // -- Quality group (open by default) --
+    define_group_param(param_set, "quality_group", "Quality", true);
+
     define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityAuto,
                         {"Auto", "Preview (512)", "Standard (768)", "High (1024)", "Ultra (1536)",
                          "Maximum (2048)"},
                         "Inference resolution. Auto selects based on input size. "
-                        "Higher values produce better detail at the cost of speed.");
+                        "Higher values produce better detail at the cost of speed.",
+                        "quality_group");
+    define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
+                      "Process at native resolution using overlapping tiles. "
+                      "Sharper details but slower.",
+                      "quality_group");
+    define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 32, 8, 128,
+                     "Pixel overlap between tiles for seamless blending.", "quality_group");
+
+    // -- Output group --
+    define_group_param(param_set, "output_group", "Output", true);
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
                         {"Processed", "Matte Only", "Foreground Only", "Source + Matte"},
-                        "What to output. Matte Only shows the alpha channel as grayscale.");
-
-    define_double_param(param_set, kParamDespillStrength, "Despill Strength", 1.0, 0.0, 1.0,
-                        "Strength of green spill suppression.");
-    define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
-                      "Clean small alpha speckles automatically.");
-    define_int_param(param_set, kParamDespeckleSize, "Despeckle Size", 400, 50, 2000,
-                     "Minimum connected component area in pixels to keep.");
-    define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
-                        "Edge refinement strength. 0 disables the refiner.");
-
-    define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
-                        "Remap alpha: values at or below this become fully transparent.");
-    define_double_param(param_set, kParamAlphaWhitePoint, "Alpha White Point", 1.0, 0.0, 1.0,
-                        "Remap alpha: values at or above this become fully opaque.");
-    define_double_param(param_set, kParamAlphaErode, "Alpha Erode/Dilate", 0.0, -10.0, 10.0,
-                        "Shrink (negative) or expand (positive) the alpha edge in pixels.");
-    define_double_param(param_set, kParamAlphaSoftness, "Alpha Edge Softness", 0.0, 0.0, 5.0,
-                        "Blur the alpha edge to soften transitions.");
-
-    define_double_param(param_set, kParamBrightness, "Brightness", 1.0, 0.5, 2.0,
-                        "Foreground brightness adjustment applied in linear space.");
-    define_double_param(param_set, kParamSaturation, "Saturation", 1.0, 0.0, 2.0,
-                        "Foreground saturation adjustment. 0 = grayscale, 1 = original.");
-
-    define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
-                      "Disable sRGB to linear conversion for linear footage.");
-
+                        "What to output. Matte Only shows the alpha channel as grayscale.",
+                        "output_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleLanczos4,
                         {"Lanczos4", "Bilinear"},
                         "Method used to upscale model output to source resolution. "
-                        "Lanczos4 is sharper; Bilinear is smoother.");
+                        "Lanczos4 is sharper; Bilinear is smoother.",
+                        "output_group");
+
+    // -- Keying group --
+    define_group_param(param_set, "keying_group", "Keying", true);
+
+    define_double_param(param_set, kParamDespillStrength, "Despill Strength", 1.0, 0.0, 1.0,
+                        "Strength of green spill suppression.", "keying_group");
+    define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
+                      "Clean small alpha speckles automatically.", "keying_group");
+    define_int_param(param_set, kParamDespeckleSize, "Despeckle Size", 400, 50, 2000,
+                     "Minimum connected component area in pixels to keep.", "keying_group");
+    define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
+                        "Edge refinement strength. 0 disables the refiner.", "keying_group");
+
+    // -- Alpha group --
+    define_group_param(param_set, "alpha_group", "Alpha", true);
+
+    define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
+                        "Remap alpha: values at or below this become fully transparent.",
+                        "alpha_group");
+    define_double_param(param_set, kParamAlphaWhitePoint, "Alpha White Point", 1.0, 0.0, 1.0,
+                        "Remap alpha: values at or above this become fully opaque.", "alpha_group");
+    define_double_param(param_set, kParamAlphaErode, "Alpha Erode/Dilate", 0.0, -10.0, 10.0,
+                        "Shrink (negative) or expand (positive) the alpha edge in pixels.",
+                        "alpha_group");
+    define_double_param(param_set, kParamAlphaSoftness, "Alpha Edge Softness", 0.0, 0.0, 5.0,
+                        "Blur the alpha edge to soften transitions.", "alpha_group");
+
+    // -- Color group --
+    define_group_param(param_set, "color_group", "Color", true);
+
+    define_double_param(param_set, kParamBrightness, "Brightness", 1.0, 0.5, 2.0,
+                        "Foreground brightness adjustment applied in linear space.", "color_group");
+    define_double_param(param_set, kParamSaturation, "Saturation", 1.0, 0.0, 2.0,
+                        "Foreground saturation adjustment. 0 = grayscale, 1 = original.",
+                        "color_group");
+
+    // -- Advanced group (collapsed by default) --
+    define_group_param(param_set, "advanced_group", "Advanced", false);
+
+    define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
+                      "Disable sRGB to linear conversion for linear footage.", "advanced_group");
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;

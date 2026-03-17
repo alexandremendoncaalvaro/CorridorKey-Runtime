@@ -181,6 +181,10 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamUpscaleMethod, &data->upscale_method_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamEnableTiling, &data->enable_tiling_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamTileOverlap, &data->tile_overlap_param,
+                                       nullptr);
 
     data->device = auto_detect();
     log_message("create_instance", std::string("Detected device: ") + data->device.name);
