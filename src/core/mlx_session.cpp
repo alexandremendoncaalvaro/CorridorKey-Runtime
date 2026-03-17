@@ -7,6 +7,7 @@
 #include <regex>
 
 #include "common/stage_profiler.hpp"
+#include "pipeline_strategy.hpp"
 #include "post_process/color_utils.hpp"
 
 #if CORRIDORKEY_WITH_MLX
@@ -29,7 +30,7 @@ std::optional<int> bridge_resolution_from_filename(const std::filesystem::path& 
 }
 
 std::vector<int> bridge_resolution_order() {
-    return {512, 768, 1024};
+    return {512, 768, 1024, 1536, 2048};
 }
 
 std::vector<std::filesystem::path> bridge_candidates(const std::filesystem::path& model_path,
@@ -169,14 +170,29 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
     }
 
     try {
-        ImageBuffer squashed_rgb =
-            ColorUtils::resize_area(rgb, m_impl->model_resolution, m_impl->model_resolution);
-        ImageBuffer squashed_hint =
-            ColorUtils::resize_area(alpha_hint, m_impl->model_resolution, m_impl->model_resolution);
+        int model_res = m_impl->model_resolution;
+        auto strategy = select_pipeline(rgb.width, rgb.height, model_res);
+
+        ImageBuffer prepared_rgb;
+        ImageBuffer prepared_hint;
+        Rect roi{};
+
+        if (strategy == PipelineStrategy::Padded) {
+            auto [padded_rgb, rgb_roi] = ColorUtils::fit_pad(rgb, model_res, model_res);
+            auto [padded_hint, hint_roi] = ColorUtils::fit_pad(alpha_hint, model_res, model_res);
+            (void)hint_roi;
+            roi = rgb_roi;
+            prepared_rgb = std::move(padded_rgb);
+            prepared_hint = std::move(padded_hint);
+        } else {
+            prepared_rgb = ColorUtils::resize_area(rgb, model_res, model_res);
+            prepared_hint = ColorUtils::resize_area(alpha_hint, model_res, model_res);
+            roi = Rect{0, 0, model_res, model_res};
+        }
 
         Image input = m_impl->input_buffer.view();
-        Image rgb_view = squashed_rgb.view();
-        Image hint_view = squashed_hint.view();
+        Image rgb_view = prepared_rgb.view();
+        Image hint_view = prepared_hint.view();
 
         common::measure_stage(
             on_stage, "mlx_prepare_inputs",
@@ -263,11 +279,26 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         FrameResult result;
         bool use_lanczos = upscale_method == UpscaleMethod::Lanczos4;
 
-        result.alpha = use_lanczos ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height)
-                                   : ColorUtils::resize(full_alpha, rgb.width, rgb.height);
+        Image alpha_to_upscale = full_alpha;
+        Image fg_to_upscale = full_fg;
+        ImageBuffer cropped_alpha;
+        ImageBuffer cropped_fg;
+
+        if (strategy == PipelineStrategy::Padded) {
+            cropped_alpha =
+                ColorUtils::crop(full_alpha, roi.x_pos, roi.y_pos, roi.width, roi.height);
+            cropped_fg = ColorUtils::crop(full_fg, roi.x_pos, roi.y_pos, roi.width, roi.height);
+            alpha_to_upscale = cropped_alpha.view();
+            fg_to_upscale = cropped_fg.view();
+        }
+
+        result.alpha = use_lanczos
+                           ? ColorUtils::resize_lanczos(alpha_to_upscale, rgb.width, rgb.height)
+                           : ColorUtils::resize(alpha_to_upscale, rgb.width, rgb.height);
         ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-        result.foreground = use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height)
-                                        : ColorUtils::resize(full_fg, rgb.width, rgb.height);
+        result.foreground = use_lanczos
+                                ? ColorUtils::resize_lanczos(fg_to_upscale, rgb.width, rgb.height)
+                                : ColorUtils::resize(fg_to_upscale, rgb.width, rgb.height);
         return result;
     } catch (const std::exception& error) {
         return Unexpected<Error>{Error{ErrorCode::InferenceFailed, "MLX bridge execution failed: " +
