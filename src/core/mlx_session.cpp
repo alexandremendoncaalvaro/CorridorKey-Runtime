@@ -307,6 +307,98 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
 #endif
 }
 
+Result<FrameResult> MlxSession::infer_tile(const Image& rgb_tile, const Image& hint_tile,
+                                           StageTimingCallback on_stage) {
+#if !CORRIDORKEY_WITH_MLX
+    (void)rgb_tile;
+    (void)hint_tile;
+    (void)on_stage;
+    return Unexpected<Error>{
+        Error{ErrorCode::HardwareNotSupported,
+              "MLX backend is not linked in this build. Reconfigure CMake with MLX available."}};
+#else
+    if (!m_impl->imported_function.has_value()) {
+        return Unexpected<Error>{
+            Error{ErrorCode::InferenceFailed, "MLX bridge function is not initialized."}};
+    }
+
+    try {
+        int model_res = m_impl->model_resolution;
+        ensure_buffer_shape(m_impl->input_buffer, model_res, model_res, 4);
+        Image input = m_impl->input_buffer.view();
+
+        common::measure_stage(
+            on_stage, "mlx_prepare_inputs",
+            [&]() {
+                for (int y_pos = 0; y_pos < model_res; ++y_pos) {
+                    for (int x_pos = 0; x_pos < model_res; ++x_pos) {
+                        input(y_pos, x_pos, 0) = (rgb_tile(y_pos, x_pos, 0) - 0.485F) / 0.229F;
+                        input(y_pos, x_pos, 1) = (rgb_tile(y_pos, x_pos, 1) - 0.456F) / 0.224F;
+                        input(y_pos, x_pos, 2) = (rgb_tile(y_pos, x_pos, 2) - 0.406F) / 0.225F;
+                        input(y_pos, x_pos, 3) = hint_tile(y_pos, x_pos, 0);
+                    }
+                }
+            },
+            1);
+
+        auto no_op = [](void*) {};
+        mlx::core::Args args;
+        args.emplace_back(input.data.data(), mlx::core::Shape{1, model_res, model_res, 4},
+                          mlx::core::float32, no_op);
+
+        auto outputs = common::measure_stage(
+            on_stage, "mlx_run",
+            [&]() {
+                if (m_impl->compiled_function.has_value()) {
+                    try {
+                        return (*m_impl->compiled_function)(args);
+                    } catch (const std::exception&) {
+                        m_impl->compiled_function.reset();
+                    }
+                }
+                return (*m_impl->imported_function)(args);
+            },
+            1);
+        if (outputs.size() < 2) {
+            return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
+                                           "MLX bridge returned fewer than two output tensors."}};
+        }
+
+        auto alpha = mlx::core::contiguous(outputs[0]);
+        auto foreground = mlx::core::contiguous(outputs[1]);
+
+        mlx::core::eval(alpha, foreground);
+        alpha.wait();
+        foreground.wait();
+
+        const auto& alpha_shape = alpha.shape();
+        const auto& fg_shape = foreground.shape();
+        if (alpha_shape.size() != 4 || fg_shape.size() != 4 || alpha_shape[0] != 1 ||
+            fg_shape[0] != 1 || alpha_shape[3] != 1 || fg_shape[3] != 3) {
+            return Unexpected<Error>{
+                Error{ErrorCode::InferenceFailed, "MLX bridge returned unexpected tensor shapes."}};
+        }
+
+        int out_h = static_cast<int>(alpha_shape[1]);
+        int out_w = static_cast<int>(alpha_shape[2]);
+
+        FrameResult result;
+        result.alpha = ImageBuffer(out_w, out_h, 1);
+        result.foreground = ImageBuffer(out_w, out_h, 3);
+
+        std::memcpy(result.alpha.view().data.data(), alpha.data<float>(),
+                    result.alpha.view().data.size_bytes());
+        std::memcpy(result.foreground.view().data.data(), foreground.data<float>(),
+                    result.foreground.view().data.size_bytes());
+
+        return result;
+    } catch (const std::exception& error) {
+        return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
+                                       "MLX tile inference failed: " + std::string(error.what())}};
+    }
+#endif
+}
+
 int MlxSession::model_resolution() const {
     return m_impl->model_resolution;
 }

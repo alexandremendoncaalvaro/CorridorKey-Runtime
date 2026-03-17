@@ -668,15 +668,21 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 "matching bridge artifact."}};
         }
 
+        int model_res = m_mlx_session->model_resolution();
         std::vector<FrameResult> results;
         results.reserve(rgbs.size());
         for (size_t index = 0; index < rgbs.size(); ++index) {
-            auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index],
-                                               params.upscale_method, on_stage);
-            if (!result) {
-                return Unexpected(result.error());
+            bool is_tile = rgbs[index].width == model_res && rgbs[index].height == model_res;
+            if (is_tile) {
+                auto result = m_mlx_session->infer_tile(rgbs[index], alpha_hints[index], on_stage);
+                if (!result) return Unexpected(result.error());
+                results.push_back(std::move(*result));
+            } else {
+                auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index],
+                                                   params.upscale_method, on_stage);
+                if (!result) return Unexpected(result.error());
+                results.push_back(std::move(*result));
             }
-            results.push_back(std::move(*result));
         }
         return results;
     }

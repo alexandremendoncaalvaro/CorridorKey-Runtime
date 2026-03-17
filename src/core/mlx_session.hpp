@@ -22,6 +22,9 @@ class MlxSession {
                                             UpscaleMethod upscale_method = UpscaleMethod::Lanczos4,
                                             StageTimingCallback on_stage = nullptr);
 
+    [[nodiscard]] Result<FrameResult> infer_tile(const Image& rgb_tile, const Image& hint_tile,
+                                                 StageTimingCallback on_stage = nullptr);
+
     [[nodiscard]] int model_resolution() const;
 
    private:
