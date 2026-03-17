@@ -41,6 +41,7 @@ MLX_REQUIRED_PACK="${REPO_ROOT}/models/corridorkey_mlx.safetensors"
 MLX_BRIDGE_512="${REPO_ROOT}/models/corridorkey_mlx_bridge_512.mlxfn"
 MLX_BRIDGE_768="${REPO_ROOT}/models/corridorkey_mlx_bridge_768.mlxfn"
 MLX_BRIDGE_1024="${REPO_ROOT}/models/corridorkey_mlx_bridge_1024.mlxfn"
+MLX_BRIDGE_1536="${REPO_ROOT}/models/corridorkey_mlx_bridge_1536.mlxfn"
 
 resolve_real_path() {
     python3 - "$1" <<'PY'
@@ -199,6 +200,7 @@ require_file "$MLX_REQUIRED_PACK"
 require_file "$MLX_BRIDGE_512"
 require_file "$MLX_BRIDGE_768"
 require_file "$MLX_BRIDGE_1024"
+require_file "$MLX_BRIDGE_1536"
 require_file "${PLUGINS_SCRIPTS_DIR}/Distribution.xml"
 require_file "${PLUGINS_SCRIPTS_DIR}/system/preinstall"
 require_file "${PLUGINS_SCRIPTS_DIR}/user/postinstall"
@@ -242,6 +244,7 @@ cp "$MLX_REQUIRED_PACK" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_512" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_768" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_1024" "$MODELS_DIR/"
+cp "$MLX_BRIDGE_1536" "$MODELS_DIR/"
 cat <<PLIST_EOF > "${BUNDLE_DIR}/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
