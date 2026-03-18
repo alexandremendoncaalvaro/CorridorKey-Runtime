@@ -404,7 +404,7 @@ int main(int argc, char* argv[]) {
         "variant", "ONNX model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",
         cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
-                                                   cxxopts::value<float>()->default_value("1.0"))(
+                                                   cxxopts::value<float>()->default_value("0.5"))(
         "despeckle", "Enable morphological cleanup")("tiled", "Enable tiling for high-res (4K+)")(
         "json", "Output results in JSON format")("v,version", "Print version")(
         "h,help", "Print detailed help");
