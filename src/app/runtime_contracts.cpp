@@ -302,7 +302,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Mac Balanced",
             "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
             "and no implicit cleanup.",
-            InferenceParams{0, 1.0F, false, 400, 1.0F, false, 1, true, 32},
+            InferenceParams{0, 1.0F, false, 400, 1.0F, false, 1, true, 64},
             "corridorkey_mlx.safetensors",
             "apple_acceleration_primary",
             true,
@@ -342,7 +342,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Windows RTX Balanced",
             "Default Windows RTX preset with FP16 inference, runtime cache enabled, and tiling "
             "ready for portable bundles.",
-            InferenceParams{768, 1.0F, false, 400, 1.0F, false, 1, true, 32},
+            InferenceParams{768, 1.0F, false, 400, 1.0F, false, 1, true, 64},
             "corridorkey_fp16_768.onnx",
             "windows_rtx_primary",
             false,
@@ -581,6 +581,9 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     params["batch_size"] = preset.params.batch_size;
     params["enable_tiling"] = preset.params.enable_tiling;
     params["tile_padding"] = preset.params.tile_padding;
+    params["source_passthrough"] = preset.params.source_passthrough;
+    params["sp_erode_px"] = preset.params.sp_erode_px;
+    params["sp_blur_px"] = preset.params.sp_blur_px;
 
     nlohmann::json json;
     json["id"] = preset.id;

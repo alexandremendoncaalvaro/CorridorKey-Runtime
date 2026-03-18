@@ -96,7 +96,7 @@ class InferenceSession {
     /**
      * @brief Apply despeckle, despill and composition to raw results.
      */
-    void apply_post_process(FrameResult& result, const InferenceParams& params,
+    void apply_post_process(FrameResult& result, const InferenceParams& params, Image source_rgb,
                             StageTimingCallback on_stage = nullptr);
 
     /**

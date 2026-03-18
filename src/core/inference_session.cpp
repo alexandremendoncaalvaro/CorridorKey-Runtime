@@ -19,6 +19,7 @@
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
+#include "post_process/source_passthrough.hpp"
 #include "session_cache_policy.hpp"
 #include "session_policy.hpp"
 
@@ -544,26 +545,40 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
     result.foreground = std::move(acc_fg);
 
     common::measure_stage(
-        on_stage, "tile_post_process", [&]() { apply_post_process(result, params, on_stage); }, 1);
+        on_stage, "tile_post_process", [&]() { apply_post_process(result, params, rgb, on_stage); },
+        1);
 
     return result;
 }
 
 void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params,
-                                          StageTimingCallback on_stage) {
+                                          Image source_rgb, StageTimingCallback on_stage) {
     if (result.alpha.view().empty() || result.foreground.view().empty()) return;
 
     int w = result.foreground.view().width;
     int h = result.foreground.view().height;
 
-    // 1. Despeckle alpha
+    // 1. Source passthrough: blend original source into opaque regions (before despill
+    //    so that despill can clean green spill from both model and source pixels)
+    if (params.source_passthrough && !source_rgb.empty()) {
+        common::measure_stage(
+            on_stage, "post_source_passthrough",
+            [&]() {
+                corridorkey::source_passthrough(source_rgb, result.foreground.view(),
+                                                result.alpha.view(), params.sp_erode_px,
+                                                params.sp_blur_px);
+            },
+            1);
+    }
+
+    // 2. Despeckle alpha
     if (params.auto_despeckle) {
         common::measure_stage(
             on_stage, "post_despeckle",
             [&]() { despeckle(result.alpha.view(), params.despeckle_size); }, 1);
     }
 
-    // 2. Despill: must be last color correction before linear conversion
+    // 3. Despill foreground (operates on combined fg after source passthrough)
     common::measure_stage(
         on_stage, "post_despill",
         [&]() { despill(result.foreground.view(), params.despill_strength); }, 1);
@@ -631,7 +646,7 @@ Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<I
     if (!results_res) return results_res;
 
     for (size_t i = 0; i < results_res->size(); ++i) {
-        apply_post_process((*results_res)[i], params, on_stage);
+        apply_post_process((*results_res)[i], params, rgbs[i], on_stage);
     }
     return results_res;
 }
@@ -825,7 +840,7 @@ Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_h
     auto result_res = infer_raw(rgb, alpha_hint, params, on_stage);
     if (!result_res) return result_res;
 
-    apply_post_process(*result_res, params, on_stage);
+    apply_post_process(*result_res, params, rgb, on_stage);
     return result_res;
 }
 

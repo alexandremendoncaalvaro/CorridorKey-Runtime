@@ -346,7 +346,7 @@ enum class UpscaleMethod : std::uint8_t { Lanczos4, Bilinear };
  */
 struct InferenceParams {
     int target_resolution = 0;  // 0 = Auto-detect based on hardware
-    float despill_strength = 1.0F;
+    float despill_strength = 0.5F;
     bool auto_despeckle = false;
     int despeckle_size = 400;
     float refiner_scale = 1.0F;
@@ -357,9 +357,14 @@ struct InferenceParams {
 
     // Tiling Inference (High-Res support)
     bool enable_tiling = false;
-    int tile_padding = 32;  // Overlap in pixels to blend seams
+    int tile_padding = 64;  // Overlap in pixels to blend seams
 
     UpscaleMethod upscale_method = UpscaleMethod::Lanczos4;
+
+    // Source passthrough: blend original source pixels in opaque regions
+    bool source_passthrough = true;
+    int sp_erode_px = 3;  // Erosion radius for interior mask
+    int sp_blur_px = 7;   // Blur radius for transition smoothing
 };
 
 /**
