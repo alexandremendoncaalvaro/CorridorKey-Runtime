@@ -185,6 +185,11 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamTileOverlap, &data->tile_overlap_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamSourcePassthrough,
+                                       &data->source_passthrough_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamEdgeErode, &data->edge_erode_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamEdgeBlur, &data->edge_blur_param, nullptr);
 
     data->device = auto_detect();
     log_message("create_instance", std::string("Detected device: ") + data->device.name);
@@ -260,10 +265,13 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         if (data->device.backend == Backend::MLX) {
             desired_path =
                 data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(res) + ".mlxfn");
-        } else if (data->device.backend == Backend::TensorRT || data->device.backend == Backend::CUDA) {
-            desired_path = data->models_root / ("corridorkey_fp16_" + std::to_string(res) + ".onnx");
+        } else if (data->device.backend == Backend::TensorRT ||
+                   data->device.backend == Backend::CUDA) {
+            desired_path =
+                data->models_root / ("corridorkey_fp16_" + std::to_string(res) + ".onnx");
         } else {
-            desired_path = data->models_root / ("corridorkey_int8_" + std::to_string(res) + ".onnx");
+            desired_path =
+                data->models_root / ("corridorkey_int8_" + std::to_string(res) + ".onnx");
         }
 
         if (std::filesystem::exists(desired_path)) {

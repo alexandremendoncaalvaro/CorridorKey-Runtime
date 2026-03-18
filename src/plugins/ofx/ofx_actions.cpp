@@ -213,7 +213,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                       "Process at native resolution using overlapping tiles. "
                       "Sharper details but slower.",
                       "quality_group");
-    define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 32, 8, 128,
+    define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
                      "Pixel overlap between tiles for seamless blending.", "quality_group");
 
     // -- Output group --
@@ -232,7 +232,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // -- Keying group --
     define_group_param(param_set, "keying_group", "Keying", true);
 
-    define_double_param(param_set, kParamDespillStrength, "Despill Strength", 1.0, 0.0, 1.0,
+    define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
                         "Strength of green spill suppression.", "keying_group");
     define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
                       "Clean small alpha speckles automatically.", "keying_group");
@@ -240,6 +240,18 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Minimum connected component area in pixels to keep.", "keying_group");
     define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
                         "Edge refinement strength. 0 disables the refiner.", "keying_group");
+    define_bool_param(param_set, kParamSourcePassthrough, "Source Passthrough", 1,
+                      "Blend original source pixels into high-confidence alpha regions "
+                      "for sharper interior detail.",
+                      "keying_group");
+    define_int_param(param_set, kParamEdgeErode, "Edge Erode", 3, 0, 10,
+                     "Erosion radius for the passthrough interior mask. "
+                     "Higher values widen the transition zone at edges.",
+                     "keying_group");
+    define_int_param(param_set, kParamEdgeBlur, "Edge Blur", 7, 0, 20,
+                     "Blur radius for smoothing the passthrough transition. "
+                     "Higher values create a softer blend between source and model.",
+                     "keying_group");
 
     // -- Alpha group --
     define_group_param(param_set, "alpha_group", "Alpha", true);

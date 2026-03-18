@@ -48,6 +48,9 @@ constexpr const char* kParamSaturation = "saturation";
 constexpr const char* kParamUpscaleMethod = "upscale_method";
 constexpr const char* kParamEnableTiling = "enable_tiling";
 constexpr const char* kParamTileOverlap = "tile_overlap";
+constexpr const char* kParamSourcePassthrough = "source_passthrough";
+constexpr const char* kParamEdgeErode = "edge_erode";
+constexpr const char* kParamEdgeBlur = "edge_blur";
 
 // Quality mode choice indices
 constexpr int kQualityAuto = 0;
@@ -95,6 +98,9 @@ struct InstanceData {
     OfxParamHandle upscale_method_param = nullptr;
     OfxParamHandle enable_tiling_param = nullptr;
     OfxParamHandle tile_overlap_param = nullptr;
+    OfxParamHandle source_passthrough_param = nullptr;
+    OfxParamHandle edge_erode_param = nullptr;
+    OfxParamHandle edge_blur_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};

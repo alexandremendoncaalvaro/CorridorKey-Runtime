@@ -133,7 +133,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int despeckle_enabled = 0;
     int despeckle_size = 400;
     int input_is_linear = 0;
-    double despill_strength = 1.0;
+    double despill_strength = 0.5;
     double refiner_scale = 1.0;
     double alpha_black_point = 0.0;
     double alpha_white_point = 1.0;
@@ -143,7 +143,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     double saturation = 1.0;
     int upscale_method = kUpscaleLanczos4;
     int enable_tiling = 0;
-    int tile_overlap = 32;
+    int tile_overlap = 64;
+    int source_passthrough_enabled = 1;
+    int edge_erode = 3;
+    int edge_blur = 7;
 
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
@@ -198,6 +201,16 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->tile_overlap_param) {
         g_suites.parameter->paramGetValueAtTime(data->tile_overlap_param, time, &tile_overlap);
+    }
+    if (data->source_passthrough_param) {
+        g_suites.parameter->paramGetValueAtTime(data->source_passthrough_param, time,
+                                                &source_passthrough_enabled);
+    }
+    if (data->edge_erode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->edge_erode_param, time, &edge_erode);
+    }
+    if (data->edge_blur_param) {
+        g_suites.parameter->paramGetValueAtTime(data->edge_blur_param, time, &edge_blur);
     }
 
     // Use external alpha hint if connected, otherwise generate from green channel
@@ -254,6 +267,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
     params.enable_tiling = enable_tiling != 0;
     params.tile_padding = tile_overlap;
+    params.source_passthrough = source_passthrough_enabled != 0;
+    params.sp_erode_px = edge_erode;
+    params.sp_blur_px = edge_blur;
 
     auto result = data->engine->process_frame(rgb_view, hint_view, params);
     if (!result) {
