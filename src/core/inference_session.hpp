@@ -120,11 +120,13 @@ class InferenceSession {
     std::vector<const char*> m_input_node_names_ptr = {};
     std::vector<const char*> m_output_node_names_ptr = {};
     std::vector<std::vector<int64_t>> m_input_node_dims = {};
+    ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
 
     // Pre-allocated buffer pools (reused across run() calls)
     std::vector<ImageBuffer> m_resize_pool = {};
     std::vector<ImageBuffer> m_planar_pool = {};
+    std::vector<Ort::Float16_t> m_fp16_pool = {};
     std::vector<ImageBuffer> m_tiled_rgb_pool = {};
     std::vector<ImageBuffer> m_tiled_hint_pool = {};
     ImageBuffer m_tiled_weight_mask = {};

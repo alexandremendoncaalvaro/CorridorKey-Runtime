@@ -23,6 +23,34 @@
 #include "session_cache_policy.hpp"
 #include "session_policy.hpp"
 
+#include <fstream>
+#include <mutex>
+
+namespace {
+void debug_log(const std::string& message) {
+#ifdef _WIN32
+    char* local_app_data = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&local_app_data, &len, "LOCALAPPDATA") == 0 && local_app_data != nullptr) {
+        std::filesystem::path log_path =
+            std::filesystem::path(local_app_data) / "CorridorKey" / "Logs" / "ofx.log";
+        static std::mutex log_mutex;
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::ofstream log_file(log_path, std::ios::app);
+        if (log_file.is_open()) {
+            std::time_t now = std::time(nullptr);
+            char buf[32];
+            ctime_s(buf, sizeof(buf), &now);
+            std::string ts(buf);
+            if (!ts.empty() && ts.back() == '\n') ts.pop_back();
+            log_file << ts << " [InferenceSession] " << message << std::endl;
+        }
+        free(local_app_data);
+    }
+#endif
+}
+}  // namespace
+
 namespace corridorkey {
 
 namespace {
@@ -76,17 +104,23 @@ void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
 #ifdef _WIN32
 void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options,
                                             const std::filesystem::path& model_path) {
+    debug_log("Configuring TensorRT RTX execution provider");
     std::unordered_map<std::string, std::string> provider_options = {
         {tensorrt_rtx_option_names::kDeviceId, "0"},
     };
 
+    debug_log("Setting up runtime cache");
     if (auto runtime_cache_dir = common::tensorrt_rtx_runtime_cache_path(model_path);
         runtime_cache_dir.has_value()) {
+        debug_log("Runtime cache dir: " + runtime_cache_dir->string());
         std::error_code error;
         std::filesystem::create_directories(*runtime_cache_dir, error);
         if (!error) {
             provider_options.emplace(tensorrt_rtx_option_names::kRuntimeCacheFile,
                                      runtime_cache_dir->string());
+            debug_log("Runtime cache configured successfully");
+        } else {
+            debug_log("Failed to create runtime cache dir: " + error.message());
         }
     }
 
@@ -94,14 +128,18 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
             common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DUMP_SUBGRAPHS");
         dump_subgraphs.has_value() && std::string_view(*dump_subgraphs) == "1") {
         provider_options.emplace(tensorrt_rtx_option_names::kDumpSubgraphs, "1");
+        debug_log("Subgraph dumping enabled");
     }
 
     if (auto build_log = common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DETAILED_LOG");
         build_log.has_value() && std::string_view(*build_log) == "1") {
         provider_options.emplace(tensorrt_rtx_option_names::kDetailedBuildLog, "1");
+        debug_log("Detailed build logging enabled");
     }
 
+    debug_log("Appending execution provider to session options");
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
+    debug_log("Execution provider appended successfully");
 }
 #endif
 
@@ -186,24 +224,34 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 #ifndef _WIN32
     (void)model_path;
 #endif
+    debug_log("Setting intra-op threads");
     m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
+
+    debug_log("Setting graph optimization level");
     m_session_options.SetGraphOptimizationLevel(use_optimized_model_cache
                                                     ? GraphOptimizationLevel::ORT_DISABLE_ALL
                                                     : GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+    debug_log("Setting log severity level");
     m_session_options.SetLogSeverityLevel(options.log_severity);
 
     if (options.disable_cpu_ep_fallback && m_device.backend != Backend::CPU) {
+        debug_log("Disabling CPU EP fallback");
         m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
     }
+
+    debug_log("Configuring execution provider for backend: " + std::to_string(static_cast<int>(m_device.backend)));
 
     switch (m_device.backend) {
         case Backend::CoreML: {
 #ifdef __APPLE__
+            fprintf(stderr, "[InferenceSession] Adding CoreML execution provider\n");
             append_coreml_execution_provider(m_session_options);
 #endif
             break;
         }
         case Backend::CUDA: {
+            fprintf(stderr, "[InferenceSession] Adding CUDA execution provider\n");
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = 0;
             m_session_options.AppendExecutionProvider_CUDA(cuda_options);
@@ -211,8 +259,11 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         }
         case Backend::TensorRT: {
 #ifdef _WIN32
+            fprintf(stderr, "[InferenceSession] Adding TensorRT RTX execution provider\n");
             append_tensorrt_rtx_execution_provider(m_session_options, model_path);
+            fprintf(stderr, "[InferenceSession] TensorRT RTX execution provider added\n");
 #else
+            fprintf(stderr, "[InferenceSession] Adding TensorRT execution provider\n");
             OrtTensorRTProviderOptions trt_options;
             trt_options.device_id = 0;
             m_session_options.AppendExecutionProvider_TensorRT(trt_options);
@@ -221,6 +272,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         }
 #ifdef _WIN32
         case Backend::DirectML: {
+            fprintf(stderr, "[InferenceSession] Adding DirectML execution provider\n");
             // DirectML is the universal GPU path for Windows (AMD, Intel, old NVIDIA)
             std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
             m_session_options.AppendExecutionProvider("DML", dml_options);
@@ -229,14 +281,46 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 #endif
         case Backend::MLX:
         default:
+            fprintf(stderr, "[InferenceSession] Using default CPU execution provider\n");
             break;
     }
 }
 
+#include <fstream>
+#include <mutex>
+
+namespace {
+void debug_log(const std::string& message) {
+#ifdef _WIN32
+    char* local_app_data = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&local_app_data, &len, "LOCALAPPDATA") == 0 && local_app_data != nullptr) {
+        std::filesystem::path log_path =
+            std::filesystem::path(local_app_data) / "CorridorKey" / "Logs" / "ofx.log";
+        static std::mutex log_mutex;
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::ofstream log_file(log_path, std::ios::app);
+        if (log_file.is_open()) {
+            std::time_t now = std::time(nullptr);
+            char buf[32];
+            ctime_s(buf, sizeof(buf), &now);
+            std::string ts(buf);
+            if (!ts.empty() && ts.back() == '\n') ts.pop_back();
+            log_file << ts << " [InferenceSession] " << message << std::endl;
+        }
+        free(local_app_data);
+    }
+#endif
+}
+}  // namespace
+
 void InferenceSession::extract_metadata() {
+    debug_log("Extracting model metadata [BUILD 2026-03-18-V1]");
     Ort::AllocatorWithDefaultOptions allocator;
 
     size_t num_input_nodes = m_session.GetInputCount();
+    debug_log("Model has " + std::to_string(num_input_nodes) + " inputs");
+
     for (size_t i = 0; i < num_input_nodes; i++) {
         auto input_name_ptr = m_session.GetInputNameAllocated(i, allocator);
         m_input_node_names.push_back(input_name_ptr.get());
@@ -244,23 +328,37 @@ void InferenceSession::extract_metadata() {
         auto type_info = m_session.GetInputTypeInfo(i);
         auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
         m_input_node_dims.push_back(tensor_info.GetShape());
+
+        // Capture input element type for FP16 model support
+        if (i == 0) {
+            m_input_element_type = tensor_info.GetElementType();
+            debug_log("Input 0 element type: " + std::to_string(m_input_element_type) + 
+                      " (FLOAT16 is 10, FLOAT is 1)");
+        }
     }
     for (const auto& name : m_input_node_names) {
         m_input_node_names_ptr.push_back(name.c_str());
     }
 
+    fprintf(stderr, "[InferenceSession] Getting output count\n");
     size_t num_output_nodes = m_session.GetOutputCount();
+    fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
+
     for (size_t i = 0; i < num_output_nodes; i++) {
+        fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
         auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
         m_output_node_names.push_back(output_name_ptr.get());
     }
     for (const auto& name : m_output_node_names) {
         m_output_node_names_ptr.push_back(name.c_str());
     }
+    fprintf(stderr, "[InferenceSession] Metadata extraction complete\n");
 }
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options) {
+    fprintf(stderr, "[InferenceSession] Creating session for model: %s\n", model_path.string().c_str());
+
     if (!std::filesystem::exists(model_path)) {
         return Unexpected(
             Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
@@ -269,6 +367,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     DeviceInfo requested_device = device;
 
     try {
+        fprintf(stderr, "[InferenceSession] Allocating InferenceSession object\n");
         auto session_ptr =
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
         if (requested_device.backend == Backend::MLX) {
@@ -281,7 +380,9 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             return session_ptr;
         }
 
+        fprintf(stderr, "[InferenceSession] Creating ORT environment\n");
         session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
+        fprintf(stderr, "[InferenceSession] ORT environment created\n");
         std::filesystem::path session_model_path = model_path;
         std::optional<std::filesystem::path> optimized_model_path;
         bool using_optimized_model_cache = false;
@@ -309,9 +410,13 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             }
         }
 
+        fprintf(stderr, "[InferenceSession] Configuring session options\n");
         session_ptr->configure_session_options(using_optimized_model_cache, options,
                                                session_model_path);
+        fprintf(stderr, "[InferenceSession] Session options configured\n");
+
         if (!using_optimized_model_cache && optimized_model_path.has_value()) {
+            fprintf(stderr, "[InferenceSession] Setting optimized model path\n");
 #ifdef _WIN32
             session_ptr->m_session_options.SetOptimizedModelFilePath(
                 optimized_model_path->wstring().c_str());
@@ -320,6 +425,8 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 #endif
         }
 
+        fprintf(stderr, "[InferenceSession] Creating ONNX Runtime session from model: %s\n",
+                session_model_path.string().c_str());
 #ifdef _WIN32
         session_ptr->m_session =
             Ort::Session(session_ptr->m_env, session_model_path.wstring().c_str(),
@@ -328,8 +435,10 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         session_ptr->m_session = Ort::Session(session_ptr->m_env, session_model_path.c_str(),
                                               session_ptr->m_session_options);
 #endif
+        fprintf(stderr, "[InferenceSession] ONNX Runtime session created successfully\n");
 
         session_ptr->extract_metadata();
+        fprintf(stderr, "[InferenceSession] Session created successfully\n");
         return session_ptr;
     } catch (const Ort::Exception& e) {
         if (core::use_optimized_model_cache_for_backend(requested_device.backend)) {
@@ -737,9 +846,24 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 batch_size);
 
             std::vector<int64_t> effective_shape = {(int64_t)batch_size, 4, model_h, model_w};
-            input_tensors.push_back(
-                Ort::Value::CreateTensor<float>(memory_info, dst_base, total_planar_size,
-                                                effective_shape.data(), effective_shape.size()));
+
+            // Check if model expects FP16 input (required for TensorRT on Windows)
+            if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+                debug_log("Creating FP16 input tensor [BATCH SIZE=" + std::to_string(batch_size) + "]");
+                m_fp16_pool.resize(total_planar_size);
+                for (size_t i = 0; i < total_planar_size; ++i) {
+                    m_fp16_pool[i] = Ort::Float16_t(dst_base[i]);
+                }
+                input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
+                    memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
+                    effective_shape.size()));
+            } else {
+                debug_log("Creating FP32 input tensor (type: " + std::to_string(m_input_element_type) + 
+                          ") [BATCH SIZE=" + std::to_string(batch_size) + "]");
+                input_tensors.push_back(Ort::Value::CreateTensor<float>(
+                    memory_info, dst_base, total_planar_size, effective_shape.data(),
+                    effective_shape.size()));
+            }
         } else {
             return Unexpected(Error{ErrorCode::HardwareNotSupported,
                                     "Non-concatenated models not yet supported with batching"});
@@ -756,26 +880,64 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             batch_size);
 
         if (output_tensors.empty()) {
+            debug_log("Model produced no output tensors");
             return Unexpected(
                 Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
         }
 
         std::vector<FrameResult> batch_results(batch_size);
 
-        float* alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
-        float* fg_ptr =
-            output_tensors.size() > 1 ? output_tensors[1].GetTensorMutableData<float>() : nullptr;
+        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
+        auto alpha_type = alpha_info.GetElementType();
+        auto alpha_shape = alpha_info.GetShape();
+        debug_log("Alpha output element type: " + std::to_string(alpha_type) + 
+                  " (FLOAT16 is 10, FLOAT is 1)");
 
-        auto alpha_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
         size_t alpha_image_stride = alpha_shape[1] * alpha_shape[2] * alpha_shape[3];
 
-        std::vector<int64_t> fg_shape;
-        size_t fg_image_stride = 0;
-        if (fg_ptr) {
-            fg_shape = output_tensors[1].GetTensorTypeAndShapeInfo().GetShape();
-            fg_image_stride = fg_shape[1] * fg_shape[2] * fg_shape[3];
+        float* alpha_ptr = nullptr;
+        std::vector<float> alpha_fp32_conv;
+
+        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            debug_log("Converting alpha output from FP16 to FP32");
+            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
+            size_t total_alpha_elements = batch_size * alpha_image_stride;
+            alpha_fp32_conv.resize(total_alpha_elements);
+            for (size_t i = 0; i < total_alpha_elements; ++i) {
+                alpha_fp32_conv[i] = alpha_fp16[i].ToFloat();
+            }
+            alpha_ptr = alpha_fp32_conv.data();
+        } else {
+            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
         }
 
+        float* fg_ptr = nullptr;
+        std::vector<float> fg_fp32_conv;
+        std::vector<int64_t> fg_shape;
+        size_t fg_image_stride = 0;
+
+        if (output_tensors.size() > 1) {
+            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
+            auto fg_type = fg_info.GetElementType();
+            fg_shape = fg_info.GetShape();
+            fg_image_stride = fg_shape[1] * fg_shape[2] * fg_shape[3];
+            debug_log("FG output element type: " + std::to_string(fg_type));
+
+            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+                debug_log("Converting FG output from FP16 to FP32");
+                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
+                size_t total_fg_elements = batch_size * fg_image_stride;
+                fg_fp32_conv.resize(total_fg_elements);
+                for (size_t i = 0; i < total_fg_elements; ++i) {
+                    fg_fp32_conv[i] = fg_fp16[i].ToFloat();
+                }
+                fg_ptr = fg_fp32_conv.data();
+            } else {
+                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
+            }
+        }
+
+        debug_log("Extracting batch outputs...");
         common::measure_stage(
             on_stage, "batch_extract_outputs",
             [&]() {
