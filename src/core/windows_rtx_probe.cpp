@@ -135,6 +135,22 @@ bool directml_provider_available() {
 #endif
 }
 
+bool winml_provider_available() {
+#if defined(_WIN32)
+    return provider_available("WinML");
+#else
+    return false;
+#endif
+}
+
+bool openvino_provider_available() {
+#if defined(_WIN32)
+    return provider_available("OpenVINO");
+#else
+    return false;
+#endif
+}
+
 std::vector<WindowsGpuInfo> list_windows_gpus() {
     std::vector<WindowsGpuInfo> gpus;
 #if defined(_WIN32)
@@ -146,6 +162,8 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
     bool trt_available = tensorrt_rtx_provider_available();
     bool cuda_available = cuda_provider_available();
     bool dml_available = directml_provider_available();
+    bool winml_available = winml_provider_available();
+    bool openvino_available = openvino_provider_available();
 
     for (UINT adapter_index = 0;; ++adapter_index) {
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
@@ -170,6 +188,9 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
 
         // Capability Matrix
         info.directml_available = dml_available;
+        info.winml_available = winml_available;
+        info.openvino_available = openvino_available;
+
         if (info.vendor_id == kNvidiaVendorId) {
             info.cuda_available = cuda_available;
             info.tensorrt_rtx_available = info.is_rtx && trt_available;
@@ -179,6 +200,9 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
                 info.driver_query_available = true;
                 info.driver_version = *driver;
             }
+        } else if (info.vendor_id == kIntelVendorId) {
+            // Intel specific optimizations (OpenVINO)
+            info.openvino_available = openvino_available;
         }
 
         gpus.push_back(std::move(info));

@@ -127,7 +127,17 @@ class Result<void> {
 /**
  * @brief Hardware backends supported by the runtime.
  */
-enum class Backend : std::uint8_t { Auto, CPU, CUDA, TensorRT, CoreML, DirectML, MLX };
+enum class Backend : std::uint8_t {
+    Auto,
+    CPU,
+    CUDA,
+    TensorRT,
+    CoreML,
+    DirectML,
+    MLX,
+    WindowsML,
+    OpenVINO
+};
 /**
  * @brief Output encoding policy for video exports.
  */

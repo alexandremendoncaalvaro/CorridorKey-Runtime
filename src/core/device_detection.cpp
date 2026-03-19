@@ -80,7 +80,27 @@ DeviceInfo auto_detect() {
         }
     }
 
-    // Tier 2: NVIDIA GTX (CUDA Fallback)
+    // Tier 2: Windows ML (Modern Universal / NPU)
+    for (const auto& gpu : gpus) {
+        if (gpu.winml_available) {
+            device.name = gpu.adapter_name + " (Windows AI)";
+            device.backend = Backend::WindowsML;
+            device.available_memory_mb = gpu.dedicated_memory_mb;
+            return device;
+        }
+    }
+
+    // Tier 3: Intel OpenVINO (NPU/iGPU)
+    for (const auto& gpu : gpus) {
+        if (gpu.openvino_available) {
+            device.name = gpu.adapter_name + " (OpenVINO)";
+            device.backend = Backend::OpenVINO;
+            device.available_memory_mb = gpu.dedicated_memory_mb;
+            return device;
+        }
+    }
+
+    // Tier 4: NVIDIA GTX (CUDA Fallback)
     for (const auto& gpu : gpus) {
         if (gpu.cuda_available) {
             device.name = gpu.adapter_name + " (CUDA)";
@@ -90,7 +110,7 @@ DeviceInfo auto_detect() {
         }
     }
 
-    // Tier 3: AMD / Universal (DirectML Fallback)
+    // Tier 5: AMD / Universal (DirectML Fallback)
     for (const auto& gpu : gpus) {
         if (gpu.directml_available) {
             device.name = gpu.adapter_name + " (DirectML)";
@@ -143,6 +163,14 @@ std::vector<DeviceInfo> list_devices() {
         if (gpu.directml_available) {
             devices.push_back(
                 {gpu.adapter_name + " (DirectML)", gpu.dedicated_memory_mb, Backend::DirectML});
+        }
+        if (gpu.winml_available) {
+            devices.push_back(
+                {gpu.adapter_name + " (Windows AI)", gpu.dedicated_memory_mb, Backend::WindowsML});
+        }
+        if (gpu.openvino_available) {
+            devices.push_back(
+                {gpu.adapter_name + " (OpenVINO)", gpu.dedicated_memory_mb, Backend::OpenVINO});
         }
     }
     devices.push_back({"Generic CPU", 0, Backend::CPU});

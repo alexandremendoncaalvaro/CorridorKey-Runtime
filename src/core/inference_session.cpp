@@ -9,6 +9,14 @@
 #include <onnxruntime/core/providers/nv_tensorrt_rtx/nv_provider_options.h>
 #define CORRIDORKEY_HAS_NV_TENSORRT_RTX_OPTIONS 1
 #endif
+#if __has_include(<onnxruntime/core/providers/winml/winml_provider_factory.h>)
+#include <onnxruntime/core/providers/winml/winml_provider_factory.h>
+#define CORRIDORKEY_HAS_WINML_OPTIONS 1
+#endif
+#if __has_include(<onnxruntime/core/providers/openvino/openvino_provider_factory.h>)
+#include <onnxruntime/core/providers/openvino/openvino_provider_factory.h>
+#define CORRIDORKEY_HAS_OPENVINO_OPTIONS 1
+#endif
 #endif
 
 #include "common/parallel_for.hpp"
@@ -276,6 +284,24 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             // DirectML is the universal GPU path for Windows (AMD, Intel, old NVIDIA)
             std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
             m_session_options.AppendExecutionProvider("DML", dml_options);
+            break;
+        }
+        case Backend::WindowsML: {
+            fprintf(stderr, "[InferenceSession] Adding WindowsML execution provider\n");
+            // In March 2026, WindowsML EP or adapter handles NPU/GPU auto-selection
+            std::unordered_map<std::string, std::string> winml_options = {};
+            m_session_options.AppendExecutionProvider("WinML", winml_options);
+            break;
+        }
+        case Backend::OpenVINO: {
+            fprintf(stderr, "[InferenceSession] Adding OpenVINO execution provider\n");
+            // Intel specific acceleration
+#if defined(CORRIDORKEY_HAS_OPENVINO_OPTIONS)
+            Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_OpenVINO(m_session_options, "AUTO"));
+#else
+            std::unordered_map<std::string, std::string> ov_options = {{"device_type", "AUTO"}};
+            m_session_options.AppendExecutionProvider("OpenVINO", ov_options);
+#endif
             break;
         }
 #endif

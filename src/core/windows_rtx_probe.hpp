@@ -17,6 +17,8 @@ struct WindowsGpuInfo {
     bool tensorrt_rtx_available = false;
     bool cuda_available = false;
     bool directml_available = false;
+    bool winml_available = false;
+    bool openvino_available = false;
     bool is_rtx = false;
 };
 
@@ -24,5 +26,7 @@ CORRIDORKEY_API std::vector<WindowsGpuInfo> list_windows_gpus();
 CORRIDORKEY_API bool tensorrt_rtx_provider_available();
 CORRIDORKEY_API bool cuda_provider_available();
 CORRIDORKEY_API bool directml_provider_available();
+CORRIDORKEY_API bool winml_provider_available();
+CORRIDORKEY_API bool openvino_provider_available();
 
 }  // namespace corridorkey::core
