@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cstdio>
 
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
@@ -114,23 +115,30 @@ static OfxPlugin g_plugin = {
 extern "C" {
 
 CORRIDORKEY_OFX_EXPORT OfxStatus OfxSetHost(const OfxHost* host) {
+    std::fprintf(stderr, "[OFX] OfxSetHost called\n");
     corridorkey::ofx::log_message("OfxSetHost",
                                   host == nullptr ? "Host pointer is null." : "Host received.");
     corridorkey::ofx::set_host(const_cast<OfxHost*>(host));
+    std::fprintf(stderr, "[OFX] OfxSetHost returning kOfxStatOK\n");
     return kOfxStatOK;
 }
 
 CORRIDORKEY_OFX_EXPORT int OfxGetNumberOfPlugins(void) {
+    std::fprintf(stderr, "[OFX] OfxGetNumberOfPlugins called\n");
     corridorkey::ofx::log_message("OfxGetNumberOfPlugins", "Returning 1.");
+    std::fprintf(stderr, "[OFX] OfxGetNumberOfPlugins returning 1\n");
     return 1;
 }
 
 CORRIDORKEY_OFX_EXPORT OfxPlugin* OfxGetPlugin(int nth) {
+    std::fprintf(stderr, "[OFX] OfxGetPlugin called with index %d\n", nth);
     corridorkey::ofx::log_message("OfxGetPlugin",
                                   nth == 0 ? "Returning plugin 0." : "Requested invalid index.");
     if (nth == 0) {
+        std::fprintf(stderr, "[OFX] OfxGetPlugin returning plugin 0\n");
         return &corridorkey::ofx::g_plugin;
     }
+    std::fprintf(stderr, "[OFX] OfxGetPlugin returning nullptr\n");
     return nullptr;
 }
 
