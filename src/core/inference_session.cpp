@@ -19,6 +19,9 @@
 #endif
 #endif
 
+#include <fstream>
+#include <mutex>
+
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
@@ -30,9 +33,6 @@
 #include "post_process/source_passthrough.hpp"
 #include "session_cache_policy.hpp"
 #include "session_policy.hpp"
-
-#include <fstream>
-#include <mutex>
 
 namespace {
 void debug_log(const std::string& message) {
@@ -55,6 +55,8 @@ void debug_log(const std::string& message) {
         }
         free(local_app_data);
     }
+#else
+    (void)message;
 #endif
 }
 }  // namespace
@@ -248,7 +250,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
     }
 
-    debug_log("Configuring execution provider for backend: " + std::to_string(static_cast<int>(m_device.backend)));
+    debug_log("Configuring execution provider for backend: " +
+              std::to_string(static_cast<int>(m_device.backend)));
 
     switch (m_device.backend) {
         case Backend::CoreML: {
@@ -297,7 +300,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             fprintf(stderr, "[InferenceSession] Adding OpenVINO execution provider\n");
             // Intel specific acceleration
 #if defined(CORRIDORKEY_HAS_OPENVINO_OPTIONS)
-            Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_OpenVINO(m_session_options, "AUTO"));
+            Ort::ThrowOnError(
+                OrtSessionOptionsAppendExecutionProvider_OpenVINO(m_session_options, "AUTO"));
 #else
             std::unordered_map<std::string, std::string> ov_options = {{"device_type", "AUTO"}};
             m_session_options.AppendExecutionProvider("OpenVINO", ov_options);
@@ -311,34 +315,6 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             break;
     }
 }
-
-#include <fstream>
-#include <mutex>
-
-namespace {
-void debug_log(const std::string& message) {
-#ifdef _WIN32
-    char* local_app_data = nullptr;
-    size_t len = 0;
-    if (_dupenv_s(&local_app_data, &len, "LOCALAPPDATA") == 0 && local_app_data != nullptr) {
-        std::filesystem::path log_path =
-            std::filesystem::path(local_app_data) / "CorridorKey" / "Logs" / "ofx.log";
-        static std::mutex log_mutex;
-        std::lock_guard<std::mutex> lock(log_mutex);
-        std::ofstream log_file(log_path, std::ios::app);
-        if (log_file.is_open()) {
-            std::time_t now = std::time(nullptr);
-            char buf[32];
-            ctime_s(buf, sizeof(buf), &now);
-            std::string ts(buf);
-            if (!ts.empty() && ts.back() == '\n') ts.pop_back();
-            log_file << ts << " [InferenceSession] " << message << std::endl;
-        }
-        free(local_app_data);
-    }
-#endif
-}
-}  // namespace
 
 void InferenceSession::extract_metadata() {
     debug_log("Extracting model metadata [BUILD 2026-03-18-V1]");
@@ -358,7 +334,7 @@ void InferenceSession::extract_metadata() {
         // Capture input element type for FP16 model support
         if (i == 0) {
             m_input_element_type = tensor_info.GetElementType();
-            debug_log("Input 0 element type: " + std::to_string(m_input_element_type) + 
+            debug_log("Input 0 element type: " + std::to_string(m_input_element_type) +
                       " (FLOAT16 is 10, FLOAT is 1)");
         }
     }
@@ -383,7 +359,8 @@ void InferenceSession::extract_metadata() {
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options) {
-    fprintf(stderr, "[InferenceSession] Creating session for model: %s\n", model_path.string().c_str());
+    fprintf(stderr, "[InferenceSession] Creating session for model: %s\n",
+            model_path.string().c_str());
 
     if (!std::filesystem::exists(model_path)) {
         return Unexpected(
@@ -875,7 +852,8 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
             // Check if model expects FP16 input (required for TensorRT on Windows)
             if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                debug_log("Creating FP16 input tensor [BATCH SIZE=" + std::to_string(batch_size) + "]");
+                debug_log("Creating FP16 input tensor [BATCH SIZE=" + std::to_string(batch_size) +
+                          "]");
                 m_fp16_pool.resize(total_planar_size);
                 for (size_t i = 0; i < total_planar_size; ++i) {
                     m_fp16_pool[i] = Ort::Float16_t(dst_base[i]);
@@ -884,8 +862,9 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                     memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
                     effective_shape.size()));
             } else {
-                debug_log("Creating FP32 input tensor (type: " + std::to_string(m_input_element_type) + 
-                          ") [BATCH SIZE=" + std::to_string(batch_size) + "]");
+                debug_log(
+                    "Creating FP32 input tensor (type: " + std::to_string(m_input_element_type) +
+                    ") [BATCH SIZE=" + std::to_string(batch_size) + "]");
                 input_tensors.push_back(Ort::Value::CreateTensor<float>(
                     memory_info, dst_base, total_planar_size, effective_shape.data(),
                     effective_shape.size()));
@@ -916,7 +895,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
         auto alpha_type = alpha_info.GetElementType();
         auto alpha_shape = alpha_info.GetShape();
-        debug_log("Alpha output element type: " + std::to_string(alpha_type) + 
+        debug_log("Alpha output element type: " + std::to_string(alpha_type) +
                   " (FLOAT16 is 10, FLOAT is 1)");
 
         size_t alpha_image_stride = alpha_shape[1] * alpha_shape[2] * alpha_shape[3];
