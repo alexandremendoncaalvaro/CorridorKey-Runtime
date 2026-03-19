@@ -25,7 +25,7 @@ if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-    $OutputDir = Join-Path $repoRoot "dist\CorridorKey.ofx"
+    $OutputDir = Join-Path $repoRoot "dist\CorridorKey.ofx.bundle"
 }
 
 $pluginBinary = Join-Path $BuildDir "src\plugins\ofx\CorridorKey.ofx"

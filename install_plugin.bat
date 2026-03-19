@@ -1,16 +1,24 @@
 @echo off
-set "SrcPath=C:\Dev\CorridorKey-Runtime\dist\CorridorKey.ofx"
+set "SrcPath=%~dp0CorridorKey.ofx.bundle"
 set "DstPath=C:\Program Files\Common Files\OFX\Plugins\CorridorKey.ofx.bundle"
 set "CacheFile=%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
 
-echo Validating bundle before installation...
+echo Installing CorridorKey OFX Plugin...
+echo Source: "%SrcPath%"
+echo Destination: "%DstPath%"
+echo.
+
+if not exist "%SrcPath%" (
+    echo ERROR: Plugin bundle not found at "%SrcPath%"
+    echo Please ensure you extracted the entire ZIP file.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Validating bundle...
 if not exist "%SrcPath%\Contents\Win64\onnxruntime.dll" (
-    echo.
     echo ERROR: onnxruntime.dll not found in bundle!
-    echo The bundle may not have been packaged correctly.
-    echo.
-    echo Please run the packaging script first:
-    echo   powershell -ExecutionPolicy Bypass -File scripts\package_ofx.ps1
     echo.
     pause
     exit /b 1
