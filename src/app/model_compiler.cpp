@@ -1,9 +1,11 @@
 #include "model_compiler.hpp"
 
-#if __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
+#if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
+#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#elif __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
 #include <onnxruntime/onnxruntime_cxx_api.h>
 #else
-#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#error "ONNX Runtime C++ headers not found"
 #endif
 
 #if __has_include(<onnxruntime/core/session/onnxruntime_session_options_config_keys.h>)

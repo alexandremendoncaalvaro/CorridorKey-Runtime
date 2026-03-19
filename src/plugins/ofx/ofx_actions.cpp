@@ -232,7 +232,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                 "quality mode.",
                                 "runtime_group");
 
-    // -- Quality group (open by default) --
     define_group_param(param_set, "quality_group", "Quality", true);
 
     define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityAuto,
@@ -248,7 +247,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
                      "Pixel overlap between tiles for seamless blending.", "quality_group");
 
-    // -- Output group --
     define_group_param(param_set, "output_group", "Output", true);
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
@@ -261,7 +259,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Lanczos4 is sharper; Bilinear is smoother.",
                         "output_group");
 
-    // -- Keying group --
     define_group_param(param_set, "keying_group", "Keying", true);
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
@@ -286,7 +283,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Higher values create a softer blend between source and model.",
                      "keying_group");
 
-    // -- Alpha group --
     define_group_param(param_set, "alpha_group", "Alpha", true);
 
     define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
@@ -300,7 +296,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_double_param(param_set, kParamAlphaSoftness, "Alpha Edge Softness", 0.0, 0.0, 5.0,
                         "Blur the alpha edge to soften transitions.", "alpha_group");
 
-    // -- Color group --
     define_group_param(param_set, "color_group", "Color", true);
 
     define_double_param(param_set, kParamBrightness, "Brightness", 1.0, 0.5, 2.0,
@@ -309,7 +304,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Foreground saturation adjustment. 0 = grayscale, 1 = original.",
                         "color_group");
 
-    // -- Advanced group (collapsed by default) --
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
     define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,

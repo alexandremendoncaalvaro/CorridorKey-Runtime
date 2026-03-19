@@ -208,7 +208,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatFailed;
     }
 
-    // Alpha Hint clip is optional -- silently ignore if not available
     g_suites.image_effect->clipGetHandle(instance, kClipAlphaHint, &data->alpha_hint_clip, nullptr);
 
     if (g_suites.image_effect->clipGetHandle(instance, "Output", &data->output_clip, nullptr) !=

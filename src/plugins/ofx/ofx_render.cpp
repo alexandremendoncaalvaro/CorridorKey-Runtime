@@ -221,7 +221,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         g_suites.parameter->paramGetValueAtTime(data->edge_blur_param, time, &edge_blur);
     }
 
-    // Use external alpha hint if connected, otherwise generate from green channel
     bool hint_from_clip = false;
     OfxPropertySetHandle hint_props = nullptr;
     ImageHandleGuard hint_guard{};
@@ -251,9 +250,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         ColorUtils::generate_rough_matte(rgb_view, hint_view);
     }
 
-    // When input is linear, convert to sRGB for model inference.
-    // The model was trained on sRGB ImageNet-normalized input.
-    // Reference: OG CorridorKey inference_engine.py:170-174
     if (input_is_linear != 0) {
         const SrgbLut& lut = SrgbLut::instance();
         for (int y = 0; y < height; ++y) {
@@ -286,7 +282,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         return kOfxStatFailed;
     }
 
-    // Apply alpha edge controls before final output assembly
     Image alpha_view = result->alpha.view();
     if (alpha_view.width != width || alpha_view.height != height) {
         log_message("render", "Unexpected output size from engine.");
@@ -305,9 +300,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                      static_cast<float>(alpha_white_point));
     }
 
-    // Convert foreground from sRGB to linear for all output assembly.
-    // The model outputs sRGB foreground; all premultiplication and color
-    // correction must happen in linear space to avoid double-gamma artifacts.
     const SrgbLut& lut = SrgbLut::instance();
     Image fg_srgb_view = result->foreground.view();
     ImageBuffer fg_linear_buf(width, height, 3);
@@ -320,7 +312,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
     }
 
-    // Apply color correction in linear space
     if (brightness != 1.0 || saturation != 1.0) {
         const float bright_f = static_cast<float>(brightness);
         const float sat_f = static_cast<float>(saturation);
@@ -342,7 +333,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
     }
 
-    // Build output based on selected mode
     bool apply_srgb = input_is_linear == 0;
 
     if (output_mode == kOutputMatteOnly) {
@@ -359,7 +349,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
         write_output_image(matte_view, output_data, output_row_bytes, output_depth, false);
     } else if (output_mode == kOutputForegroundOnly) {
-        // Foreground with alpha = 1, premultiplied linear
         ImageBuffer fg_rgba(width, height, 4);
         Image out_view = fg_rgba.view();
         for (int y = 0; y < height; ++y) {
@@ -372,7 +361,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
         write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
     } else if (output_mode == kOutputSourceMatte) {
-        // Source RGB (sRGB) converted to linear, premultiplied with alpha
         ImageBuffer src_rgba(width, height, 4);
         Image out_view = src_rgba.view();
         for (int y = 0; y < height; ++y) {
@@ -386,7 +374,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
         write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
     } else {
-        // Default: Processed output (premultiplied linear RGBA)
         ImageBuffer reprocessed(width, height, 4);
         Image out_view = reprocessed.view();
         for (int y = 0; y < height; ++y) {

@@ -2,7 +2,8 @@ param(
     [string]$BuildDir = "",
     [string]$OrtRoot = "",
     [string]$ModelsDir = "",
-    [string]$OutputDir = ""
+    [string]$OutputDir = "",
+    [switch]$Skip2048
 )
 
 Set-StrictMode -Version Latest
@@ -105,9 +106,11 @@ $targetModels = @(
     "corridorkey_fp16_768.onnx",
     "corridorkey_fp16_1024.onnx",
     "corridorkey_fp16_1536.onnx",
-    "corridorkey_fp16_2048.onnx",
     "corridorkey_int8_512.onnx"
 )
+if (-not $Skip2048.IsPresent) {
+    $targetModels += "corridorkey_fp16_2048.onnx"
+}
 foreach ($model in $targetModels) {
     $sourcePath = Join-Path $ModelsDir $model
     Assert-FileExists -Path $sourcePath -Message "Missing model: $sourcePath"

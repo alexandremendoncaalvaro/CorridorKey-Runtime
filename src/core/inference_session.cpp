@@ -267,13 +267,13 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     switch (m_device.backend) {
         case Backend::CoreML: {
 #ifdef __APPLE__
-            fprintf(stderr, "[InferenceSession] Adding CoreML execution provider\n");
+            debug_log("Adding CoreML execution provider");
             append_coreml_execution_provider(m_session_options);
 #endif
             break;
         }
         case Backend::CUDA: {
-            fprintf(stderr, "[InferenceSession] Adding CUDA execution provider\n");
+            debug_log("Adding CUDA execution provider");
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = 0;
             m_session_options.AppendExecutionProvider_CUDA(cuda_options);
@@ -281,11 +281,11 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         }
         case Backend::TensorRT: {
 #ifdef _WIN32
-            fprintf(stderr, "[InferenceSession] Adding TensorRT RTX execution provider\n");
+            debug_log("Adding TensorRT RTX execution provider");
             append_tensorrt_rtx_execution_provider(m_session_options, model_path);
-            fprintf(stderr, "[InferenceSession] TensorRT RTX execution provider added\n");
+            debug_log("TensorRT RTX execution provider added");
 #else
-            fprintf(stderr, "[InferenceSession] Adding TensorRT execution provider\n");
+            debug_log("Adding TensorRT execution provider");
             OrtTensorRTProviderOptions trt_options;
             trt_options.device_id = 0;
             m_session_options.AppendExecutionProvider_TensorRT(trt_options);
@@ -294,35 +294,30 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         }
 #ifdef _WIN32
         case Backend::DirectML: {
-            fprintf(stderr, "[InferenceSession] Adding DirectML execution provider\n");
+            debug_log("Adding DirectML execution provider");
             // DirectML is the universal GPU path for Windows (AMD, Intel, old NVIDIA)
             std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
             m_session_options.AppendExecutionProvider("DML", dml_options);
             break;
         }
         case Backend::WindowsML: {
-            fprintf(stderr, "[InferenceSession] Adding WindowsML execution provider\n");
+            debug_log("Adding WindowsML execution provider");
             // In March 2026, WindowsML EP or adapter handles NPU/GPU auto-selection
             std::unordered_map<std::string, std::string> winml_options = {};
             m_session_options.AppendExecutionProvider("WinML", winml_options);
             break;
         }
         case Backend::OpenVINO: {
-            fprintf(stderr, "[InferenceSession] Adding OpenVINO execution provider\n");
+            debug_log("Adding OpenVINO execution provider");
             // Intel specific acceleration
-#if defined(CORRIDORKEY_HAS_OPENVINO_OPTIONS)
-            Ort::ThrowOnError(
-                OrtSessionOptionsAppendExecutionProvider_OpenVINO(m_session_options, "AUTO"));
-#else
             std::unordered_map<std::string, std::string> ov_options = {{"device_type", "AUTO"}};
             m_session_options.AppendExecutionProvider("OpenVINO", ov_options);
-#endif
             break;
         }
 #endif
         case Backend::MLX:
         default:
-            fprintf(stderr, "[InferenceSession] Using default CPU execution provider\n");
+            debug_log("Using default CPU execution provider");
             break;
     }
 }

@@ -46,6 +46,13 @@ RuntimeCapabilities mac_capabilities() {
     return capabilities;
 }
 
+RuntimeCapabilities windows_capabilities() {
+    RuntimeCapabilities capabilities;
+    capabilities.platform = "windows";
+    capabilities.supported_backends = {Backend::TensorRT, Backend::CUDA, Backend::CPU};
+    return capabilities;
+}
+
 }  // namespace
 
 TEST_CASE("ofx bootstrap prefers mlx on apple silicon when bootstrap artifacts are present",
@@ -128,6 +135,44 @@ TEST_CASE("auto mlx quality may fall back to the highest available lower bridge"
     REQUIRE(selection->effective_resolution == 1536);
     REQUIRE(selection->used_fallback);
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_mlx_bridge_1536.mlxfn");
+}
+
+TEST_CASE("fixed windows tensorRT quality fails when the exact model is unavailable",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-missing");
+    touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160);
+
+    REQUIRE_FALSE(selection.has_value());
+}
+
+TEST_CASE("auto windows tensorRT quality falls back to the highest packaged model",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto");
+    touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
+
+    auto candidates = build_bootstrap_candidates(
+        windows_capabilities(), DeviceInfo{"RTX", 24576, Backend::TensorRT}, temp_dir.path());
+    REQUIRE_FALSE(candidates.empty());
+    REQUIRE(candidates.front().device.backend == Backend::TensorRT);
+    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_768.onnx");
+    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_768.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 2048);
+    REQUIRE(selection->effective_resolution == 1536);
+    REQUIRE(selection->used_fallback);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
 }
 
 TEST_CASE("ofx defaults open new instances with source passthrough disabled",
