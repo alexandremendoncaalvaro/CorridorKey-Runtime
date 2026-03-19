@@ -4,9 +4,11 @@
 #include <cstdint>
 
 #if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#include <psapi.h>
+#endif
 #include <windows.h>
+#include <psapi.h>
 #elif defined(__APPLE__)
 #include <mach/mach.h>
 #include <sys/sysctl.h>

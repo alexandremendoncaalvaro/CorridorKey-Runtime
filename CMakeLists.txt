@@ -18,6 +18,10 @@ project(CorridorKey-Runtime
     LANGUAGES CXX
 )
 
+if(WIN32)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
+endif()
+
 if(DEFINED CMAKE_TOOLCHAIN_FILE)
     message(STATUS "Using toolchain file: ${CMAKE_TOOLCHAIN_FILE}")
 endif()
@@ -203,7 +207,9 @@ else()
                 set_target_properties(onnxruntime::onnxruntime PROPERTIES
                     IMPORTED_LOCATION "${_corridorkey_windows_ort_dll}"
                     IMPORTED_IMPLIB "${_corridorkey_windows_ort_implib}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${_corridorkey_windows_ort_include}"
+                    # NOTE: We don't set INTERFACE_INCLUDE_DIRECTORIES here to avoid
+                    # conflicts with vcpkg's ONNX Runtime. Include paths are set directly
+                    # in target_include_directories with BEFORE to take precedence.
                 )
                 set(CORRIDORKEY_ORT_INCLUDE_DIRS "${_corridorkey_windows_ort_include}")
                 get_filename_component(CORRIDORKEY_ORT_RUNTIME_DIR

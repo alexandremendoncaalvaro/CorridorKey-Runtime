@@ -155,6 +155,7 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
 
 Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
                                       UpscaleMethod upscale_method, StageTimingCallback on_stage) {
+    (void)upscale_method;
 #if !CORRIDORKEY_WITH_MLX
     (void)rgb;
     (void)alpha_hint;
