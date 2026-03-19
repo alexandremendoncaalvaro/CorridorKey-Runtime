@@ -22,8 +22,15 @@ else()
     target_include_directories(corridorkey_core PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${FFMPEG_INCLUDE_DIRS}
-        ${CORRIDORKEY_ORT_INCLUDE_DIRS}
     )
+    # CRITICAL: Override vcpkg's ONNX Runtime with vendor version
+    # For GCC: use -I flag which takes precedence over -isystem
+    # For MSVC: use /I flag (added via CMAKE_CXX_FLAGS)
+    if(NOT MSVC)
+        target_compile_options(corridorkey_core PRIVATE
+            "-I${CORRIDORKEY_ORT_INCLUDE_DIRS}"
+        )
+    endif()
 endif()
 
 # Strict compiler warnings (target-based, not global)
