@@ -33,6 +33,7 @@
 #include "post_process/source_passthrough.hpp"
 #include "session_cache_policy.hpp"
 #include "session_policy.hpp"
+#include "tile_blend.hpp"
 
 namespace {
 void debug_log(const std::string& message) {
@@ -172,9 +173,15 @@ void extract_tile_rows(const Image& source_rgb, const Image& source_hint, Image 
 
 void accumulate_tile_rows(const Image& mask, const FrameResult& tile_result, Image acc_alpha,
                           Image acc_fg, Image acc_weight, int y_start, int x_start,
-                          int image_height, int image_width, int y_begin, int y_end) {
+                          int image_height, int image_width, int overlap, int y_begin, int y_end) {
     Image tile_alpha = tile_result.alpha.const_view();
     Image tile_foreground = tile_result.foreground.const_view();
+    const bool touches_left = x_start == 0;
+    const bool touches_top = y_start == 0;
+    const bool touches_right = x_start + mask.width >= image_width;
+    const bool touches_bottom = y_start + mask.height >= image_height;
+    const bool needs_edge_aware_weights =
+        touches_left || touches_top || touches_right || touches_bottom;
 
     for (int y = y_begin; y < y_end; ++y) {
         int global_y = y_start + y;
@@ -189,6 +196,10 @@ void accumulate_tile_rows(const Image& mask, const FrameResult& tile_result, Ima
             }
 
             float weight = mask(y, x);
+            if (needs_edge_aware_weights) {
+                weight = core::edge_aware_tile_weight(x, y, mask.width, overlap, touches_left,
+                                                      touches_right, touches_top, touches_bottom);
+            }
             acc_weight(global_y, global_x) += weight;
             acc_alpha(global_y, global_x) += tile_alpha(y, x) * weight;
             for (int channel = 0; channel < 3; ++channel) {
@@ -498,8 +509,8 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
     int w = rgb.width;
     int h = rgb.height;
     int tile_size = model_res;
-    int padding = params.tile_padding;
-    int stride = tile_size - 2 * padding;
+    int overlap = std::clamp(params.tile_padding, 0, tile_size - 1);
+    int stride = core::tile_stride(tile_size, overlap);
     int tile_batch_size = m_device.backend == Backend::CPU ? std::max(1, params.batch_size) : 1;
 
     // Allocate accumulators
@@ -511,7 +522,7 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
     std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0f);
     std::fill(acc_weight.view().data.begin(), acc_weight.view().data.end(), 0.0f);
 
-    if (m_tiled_weight_mask.view().width != tile_size || m_tiled_weight_padding != padding) {
+    if (m_tiled_weight_mask.view().width != tile_size || m_tiled_weight_padding != overlap) {
         m_tiled_weight_mask = ImageBuffer(tile_size, tile_size, 1);
         Image mask_view = m_tiled_weight_mask.view();
         common::measure_stage(
@@ -520,20 +531,20 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
                 common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
                     for (int y = y_begin; y < y_end; ++y) {
                         float wy = 1.0f;
-                        if (padding > 0 && y < padding) {
-                            wy = static_cast<float>(y) / static_cast<float>(padding);
-                        } else if (padding > 0 && y >= tile_size - padding) {
+                        if (overlap > 0 && y < overlap) {
+                            wy = static_cast<float>(y) / static_cast<float>(overlap);
+                        } else if (overlap > 0 && y >= tile_size - overlap) {
                             wy =
-                                static_cast<float>(tile_size - 1 - y) / static_cast<float>(padding);
+                                static_cast<float>(tile_size - 1 - y) / static_cast<float>(overlap);
                         }
 
                         for (int x = 0; x < tile_size; ++x) {
                             float wx = 1.0f;
-                            if (padding > 0 && x < padding) {
-                                wx = static_cast<float>(x) / static_cast<float>(padding);
-                            } else if (padding > 0 && x >= tile_size - padding) {
+                            if (overlap > 0 && x < overlap) {
+                                wx = static_cast<float>(x) / static_cast<float>(overlap);
+                            } else if (overlap > 0 && x >= tile_size - overlap) {
                                 wx = static_cast<float>(tile_size - 1 - x) /
-                                     static_cast<float>(padding);
+                                     static_cast<float>(overlap);
                             }
                             mask_view(y, x) = std::min(wx, wy);
                         }
@@ -541,7 +552,7 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
                 });
             },
             1);
-        m_tiled_weight_padding = padding;
+        m_tiled_weight_padding = overlap;
     }
 
     if (m_tiled_buffer_size != tile_size || m_tiled_pool_capacity != tile_batch_size) {
@@ -594,7 +605,7 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
                     common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
                         accumulate_tile_rows(mask, (*batch_results)[tile_index], acc_alpha.view(),
                                              acc_fg.view(), acc_weight.view(), tile.y_start,
-                                             tile.x_start, h, w, y_begin, y_end);
+                                             tile.x_start, h, w, overlap, y_begin, y_end);
                     });
                 },
                 1);

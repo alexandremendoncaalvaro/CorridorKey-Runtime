@@ -15,6 +15,7 @@ add_executable(test_unit
     test_session_policy.cpp
     test_source_passthrough.cpp
     test_stage_profiler.cpp
+    test_tile_blend.cpp
 )
 
 target_link_libraries(test_unit

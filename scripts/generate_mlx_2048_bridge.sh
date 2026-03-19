@@ -5,17 +5,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${CORRIDORKEY_SUPPORT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 EMBEDDED_VENV_DIR="${REPO_ROOT}/.venv-macos-mlx"
 EMBEDDED_PYTHON_HOME="${CORRIDORKEY_EMBEDDED_PYTHON_HOME:-${EMBEDDED_VENV_DIR}/python-home}"
-MODELS_DIR="${REPO_ROOT}/models"
+PAYLOAD_MODELS_DIR="${REPO_ROOT}/models"
 OUTPUTS_DIR="${CORRIDORKEY_SUPPORT_OUTPUT_ROOT:-${REPO_ROOT}/outputs}"
+WORK_ROOT="${CORRIDORKEY_SUPPORT_WORK_ROOT:-${OUTPUTS_DIR}/workspace}"
+WORK_MODELS_DIR="${WORK_ROOT}/models"
 TIMESTAMP="$(date +"%Y%m%d_%H%M%S")"
 SUPPORT_DIR="${OUTPUTS_DIR}/mlx_2048_support_${TIMESTAMP}"
 LOG_PATH="${SUPPORT_DIR}/generation.log"
 REPORT_PATH="${SUPPORT_DIR}/send_this_to_support.txt"
 SYSTEM_REPORT_PATH="${SUPPORT_DIR}/system_report.txt"
 SUPPORT_ZIP_PATH="${SUPPORT_DIR}.zip"
-BRIDGE_PATH="${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn"
-WEIGHTS_PATH="${MODELS_DIR}/corridorkey_mlx.safetensors"
-CHECKPOINT_PATH="${MODELS_DIR}/CorridorKey.pth"
+BRIDGE_PATH="${WORK_MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn"
+WEIGHTS_PATH="${PAYLOAD_MODELS_DIR}/corridorkey_mlx.safetensors"
+CHECKPOINT_PATH="${PAYLOAD_MODELS_DIR}/CorridorKey.pth"
 DRY_RUN=0
 FORCE_REGENERATE=0
 RECOMMENDED_MEMORY_GB=24
@@ -74,6 +76,7 @@ write_support_files() {
     {
         printf 'date=%s\n' "$(date)"
         printf 'repo_root=%s\n' "$REPO_ROOT"
+        printf 'work_root=%s\n' "$WORK_ROOT"
         printf 'bridge_path=%s\n' "$BRIDGE_PATH"
         printf 'bridge_size_bytes=%s\n' "$bridge_size"
         printf 'bridge_sha256=%s\n' "$sha256"
@@ -93,6 +96,7 @@ write_support_files() {
         printf '1. %s\n' "$BRIDGE_PATH"
         printf '2. %s\n' "$LOG_PATH"
         printf '3. %s\n' "$SYSTEM_REPORT_PATH"
+        printf '\nWritable workspace:\n%s\n' "$WORK_ROOT"
         printf '\nBridge SHA-256:\n%s\n' "$sha256"
     } > "$REPORT_PATH"
 
@@ -186,8 +190,9 @@ exec > >(tee -a "$LOG_PATH") 2>&1
 print_step "CorridorKey MLX 2048 Bridge Generator"
 printf 'Repository: %s\n' "$REPO_ROOT"
 printf 'Log file: %s\n' "$LOG_PATH"
+printf 'Writable workspace: %s\n' "$WORK_ROOT"
 
-[ -d "$MODELS_DIR" ] || fail "Could not find the models folder at ${MODELS_DIR}."
+[ -d "$PAYLOAD_MODELS_DIR" ] || fail "Could not find the models folder at ${PAYLOAD_MODELS_DIR}."
 [ "$(uname -s)" = "Darwin" ] || fail "This script must be run on macOS."
 [ "$(uname -m)" = "arm64" ] || fail "This script must be run on an Apple Silicon Mac."
 
@@ -209,6 +214,8 @@ printf 'Using Python: %s\n' "$PYTHON_BIN"
 
 SOURCE_ARGS=()
 SOURCE_DESCRIPTION=""
+mkdir -p "$WORK_MODELS_DIR"
+
 if [ -f "$WEIGHTS_PATH" ]; then
     SOURCE_ARGS=(--weights-path "$WEIGHTS_PATH")
     SOURCE_DESCRIPTION="existing MLX weights"
@@ -234,7 +241,7 @@ fi
 
 COMMAND_ARGS=(
     "${REPO_ROOT}/scripts/prepare_mlx_model_pack.py"
-    --output-dir "$MODELS_DIR"
+    --output-dir "$WORK_MODELS_DIR"
     --bridge-resolutions 2048
     "${SOURCE_ARGS[@]}"
 )
