@@ -3,6 +3,7 @@
 #include "common/srgb_lut.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
+#include "ofx_model_selection.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
@@ -144,15 +145,22 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int upscale_method = kUpscaleLanczos4;
     int enable_tiling = 0;
     int tile_overlap = 64;
-    int source_passthrough_enabled = 1;
-    int edge_erode = 3;
-    int edge_blur = 7;
+    int source_passthrough_enabled = kDefaultSourcePassthroughEnabled;
+    int edge_erode = kDefaultEdgeErode;
+    int edge_blur = kDefaultEdgeBlur;
 
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
     }
     if (!ensure_engine_for_quality(data, quality_mode, width, height)) {
-        log_message("render", "Failed to switch quality mode. Using current engine.");
+        const std::string quality_error =
+            data->last_error.empty() ? "Failed to switch quality mode." : data->last_error;
+        if (is_fixed_quality_mode(quality_mode)) {
+            log_message("render", quality_error);
+            post_message(kOfxMessageError, quality_error.c_str(), instance);
+            return kOfxStatFailed;
+        }
+        log_message("render", quality_error + " Using current engine.");
     }
     if (data->output_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->output_mode_param, time, &output_mode);

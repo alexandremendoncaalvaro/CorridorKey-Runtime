@@ -7,6 +7,10 @@ import os
 import shutil
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CANONICAL_CHECKPOINT = REPO_ROOT / "models" / "CorridorKey.pth"
+DEFAULT_BRIDGE_RESOLUTIONS = "512,768,1024,1536,2048"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -31,7 +35,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        help="Optional PyTorch checkpoint (.pth) to convert to MLX safetensors.",
+        help=(
+            "Optional PyTorch checkpoint (.pth) to convert to MLX safetensors. "
+            "When omitted, the script uses models/CorridorKey.pth if present."
+        ),
     )
     parser.add_argument(
         "--weights-path",
@@ -40,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--bridge-resolutions",
-        default="512,1024,2048",
+        default=DEFAULT_BRIDGE_RESOLUTIONS,
         help="Comma-separated bridge export resolutions bundled with the Apple model pack.",
     )
     parser.add_argument(
@@ -73,6 +80,12 @@ def copy_file(source: Path, target: Path, force: bool) -> Path:
     ensure_parent(target)
     shutil.copy2(source, target)
     return target
+
+
+def default_checkpoint_path() -> Path | None:
+    if CANONICAL_CHECKPOINT.exists():
+        return CANONICAL_CHECKPOINT
+    return None
 
 
 def export_bridge(weights_path: Path, export_path: Path, export_size: int) -> None:
@@ -118,17 +131,18 @@ def main() -> int:
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     weights_target = output_dir / args.asset_name
+    checkpoint_path = args.checkpoint or default_checkpoint_path()
 
     if args.weights_path is not None:
         weights_path = copy_file(args.weights_path, weights_target, args.force)
         source = "existing_weights"
-    elif args.checkpoint is not None:
+    elif checkpoint_path is not None:
         if weights_target.exists() and not args.force:
             weights_path = weights_target
         else:
-            convert_checkpoint(args.checkpoint, weights_target)
+            convert_checkpoint(checkpoint_path, weights_target)
             weights_path = weights_target
-        source = "converted_checkpoint"
+        source = "canonical_checkpoint" if checkpoint_path == CANONICAL_CHECKPOINT else "converted_checkpoint"
     else:
         weights_path = download_weights(
             tag=args.tag,
@@ -143,6 +157,8 @@ def main() -> int:
         "weights_path": str(weights_path.resolve()),
         "source": source,
     }
+    if checkpoint_path is not None:
+        result["checkpoint_path"] = str(checkpoint_path.resolve())
 
     if not args.skip_bridge_export:
         bridge_exports = []
@@ -150,6 +166,10 @@ def main() -> int:
             export_path = output_dir / f"{weights_path.stem}_bridge_{resolution}.mlxfn"
             if not export_path.exists() or args.force:
                 export_bridge(weights_path, export_path, resolution)
+            if not export_path.exists():
+                raise FileNotFoundError(
+                    f"Expected MLX bridge export was not created: {export_path}"
+                )
             bridge_exports.append(
                 {
                     "path": str(export_path.resolve()),

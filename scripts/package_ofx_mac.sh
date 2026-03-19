@@ -15,7 +15,13 @@ fi
 _default_version=$(grep 'CORRIDORKEY_VERSION_STRING' "${REPO_ROOT}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')
 VERSION="${CORRIDORKEY_VERSION:-${_default_version}}"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-${REPO_ROOT}/build/release-macos-portable}"
-DIST_DIR="${REPO_ROOT}/dist/CorridorKey_Resolve_Mac_v${VERSION}"
+REQUIRE_MLX_2048="${CORRIDORKEY_REQUIRE_MLX_2048:-1}"
+DIST_SUFFIX="${CORRIDORKEY_OFX_DIST_SUFFIX:-}"
+if [ -z "$DIST_SUFFIX" ] && [ "$REQUIRE_MLX_2048" != "1" ]; then
+    DIST_SUFFIX="_test-no2048"
+fi
+DIST_BASENAME="CorridorKey_Resolve_Mac_v${VERSION}${DIST_SUFFIX}"
+DIST_DIR="${REPO_ROOT}/dist/${DIST_BASENAME}"
 WORK_DIR="${REPO_ROOT}/build/ofx_mac_pkg"
 BUNDLE_NAME="CorridorKey.ofx.bundle"
 BUNDLE_DIR="${WORK_DIR}/${BUNDLE_NAME}"
@@ -23,8 +29,8 @@ MACOS_DIR="${BUNDLE_DIR}/Contents/MacOS"
 RESOURCES_DIR="${BUNDLE_DIR}/Contents/Resources"
 MODELS_DIR="${RESOURCES_DIR}/models"
 PKG_DIR="${WORK_DIR}/pkgs"
-PKG_PATH="${DIST_DIR}/CorridorKey_Resolve_Mac_v${VERSION}.pkg"
-DMG_PATH="${REPO_ROOT}/dist/CorridorKey_Resolve_Mac_v${VERSION}.dmg"
+PKG_PATH="${DIST_DIR}/${DIST_BASENAME}.pkg"
+DMG_PATH="${REPO_ROOT}/dist/${DIST_BASENAME}.dmg"
 SIGN_IDENTITY="${CORRIDORKEY_SIGN_IDENTITY:-}"
 INSTALLER_IDENTITY="${CORRIDORKEY_INSTALLER_IDENTITY:-}"
 NOTARY_PROFILE="${CORRIDORKEY_NOTARY_PROFILE:-}"
@@ -42,6 +48,7 @@ MLX_BRIDGE_512="${REPO_ROOT}/models/corridorkey_mlx_bridge_512.mlxfn"
 MLX_BRIDGE_768="${REPO_ROOT}/models/corridorkey_mlx_bridge_768.mlxfn"
 MLX_BRIDGE_1024="${REPO_ROOT}/models/corridorkey_mlx_bridge_1024.mlxfn"
 MLX_BRIDGE_1536="${REPO_ROOT}/models/corridorkey_mlx_bridge_1536.mlxfn"
+MLX_BRIDGE_2048="${REPO_ROOT}/models/corridorkey_mlx_bridge_2048.mlxfn"
 
 resolve_real_path() {
     python3 - "$1" <<'PY'
@@ -113,6 +120,16 @@ sign_resource() {
     else
         codesign --force --sign - "$resource"
     fi
+}
+
+clear_provenance_xattrs() {
+    local target="$1"
+
+    if ! command -v xattr >/dev/null 2>&1; then
+        return
+    fi
+
+    xattr -dr com.apple.provenance "$target" 2>/dev/null || true
 }
 
 resolve_installer_identity() {
@@ -201,6 +218,9 @@ require_file "$MLX_BRIDGE_512"
 require_file "$MLX_BRIDGE_768"
 require_file "$MLX_BRIDGE_1024"
 require_file "$MLX_BRIDGE_1536"
+if [ "$REQUIRE_MLX_2048" = "1" ]; then
+    require_file "$MLX_BRIDGE_2048"
+fi
 require_file "${PLUGINS_SCRIPTS_DIR}/Distribution.xml"
 require_file "${PLUGINS_SCRIPTS_DIR}/system/preinstall"
 require_file "${PLUGINS_SCRIPTS_DIR}/user/postinstall"
@@ -245,6 +265,9 @@ cp "$MLX_BRIDGE_512" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_768" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_1024" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_1536" "$MODELS_DIR/"
+if [ "$REQUIRE_MLX_2048" = "1" ]; then
+    cp "$MLX_BRIDGE_2048" "$MODELS_DIR/"
+fi
 cat <<PLIST_EOF > "${BUNDLE_DIR}/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -306,6 +329,7 @@ sign_binary "$MACOS_DIR/$MLX_LIB_NAME"
 sign_resource "$MACOS_DIR/$MLX_METALLIB_NAME"
 sign_binary "$MACOS_DIR/$CORE_LIB_NAME"
 sign_binary "$MACOS_DIR/$PLUGIN_NAME"
+clear_provenance_xattrs "$BUNDLE_DIR"
 
 echo "[6/7] Building installer package..."
 SYSTEM_ROOT="${WORK_DIR}/system_root"

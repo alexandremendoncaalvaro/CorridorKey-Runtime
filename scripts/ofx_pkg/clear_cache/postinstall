@@ -11,5 +11,13 @@ if [ -z "$user_home" ]; then
     exit 0
 fi
 
-cache_path="${user_home}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Support/OFXPluginCacheV2.xml"
-rm -f "$cache_path"
+cache_paths=(
+    "${user_home}/Library/Application Support/Blackmagic Design/DaVinci Resolve/Support/OFXPluginCacheV2.xml"
+    "${user_home}/Library/Containers/com.blackmagic-design.DaVinciResolve/Data/Library/Application Support/OFXPluginCacheV2.xml"
+    "${user_home}/Library/Containers/com.blackmagic-design.DaVinciResolveLite/Data/Library/Application Support/OFXPluginCacheV2.xml"
+    "${user_home}/Library/Containers/com.blackmagic-design.DaVinciResolveStudio/Data/Library/Application Support/OFXPluginCacheV2.xml"
+)
+
+for cache_path in "${cache_paths[@]}"; do
+    rm -f "$cache_path"
+done

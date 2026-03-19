@@ -1,0 +1,180 @@
+#pragma once
+
+#include <algorithm>
+#include <corridorkey/engine.hpp>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
+
+#include "app/runtime_contracts.hpp"
+#include "ofx_constants.hpp"
+
+namespace corridorkey::ofx {
+
+struct BootstrapEngineCandidate {
+    DeviceInfo device = {};
+    std::filesystem::path requested_model_path = {};
+    std::filesystem::path executable_model_path = {};
+};
+
+struct QualityArtifactSelection {
+    std::filesystem::path executable_model_path = {};
+    int requested_resolution = 0;
+    int effective_resolution = 0;
+    bool used_fallback = false;
+};
+
+inline const char* quality_mode_label(int quality_mode) {
+    switch (quality_mode) {
+        case kQualityPreview:
+            return "Preview (512)";
+        case kQualityStandard:
+            return "Standard (768)";
+        case kQualityHigh:
+            return "High (1024)";
+        case kQualityUltra:
+            return "Ultra (1536)";
+        case kQualityMaximum:
+            return "Maximum (2048)";
+        default:
+            return "Auto";
+    }
+}
+
+inline bool is_fixed_quality_mode(int quality_mode) {
+    return quality_mode != kQualityAuto;
+}
+
+inline int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
+    if (quality_mode == kQualityPreview) return 512;
+    if (quality_mode == kQualityStandard) return 768;
+    if (quality_mode == kQualityHigh) return 1024;
+    if (quality_mode == kQualityUltra) return 1536;
+    if (quality_mode == kQualityMaximum) return 2048;
+
+    int max_dim = std::max(input_width, input_height);
+    if (max_dim > 3000) return 2048;
+    if (max_dim > 2000) return 1536;
+    if (max_dim > 1000) return 1024;
+    return 768;
+}
+
+inline std::filesystem::path mlx_pack_path(const std::filesystem::path& models_root) {
+    return models_root / "corridorkey_mlx.safetensors";
+}
+
+inline std::filesystem::path artifact_path_for_backend(const std::filesystem::path& models_root,
+                                                       Backend backend, int resolution) {
+    if (backend == Backend::MLX) {
+        return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
+    }
+    if (backend == Backend::TensorRT || backend == Backend::CUDA) {
+        return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
+    }
+    return models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
+}
+
+inline bool path_exists(const std::filesystem::path& path) {
+    std::error_code error;
+    return std::filesystem::exists(path, error) && !error;
+}
+
+inline bool has_mlx_bootstrap_artifacts(const std::filesystem::path& models_root) {
+    return path_exists(mlx_pack_path(models_root)) &&
+           path_exists(artifact_path_for_backend(models_root, Backend::MLX, 512));
+}
+
+inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
+    const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
+    const std::filesystem::path& models_root) {
+    std::vector<BootstrapEngineCandidate> candidates;
+
+    auto append_unique = [&](BootstrapEngineCandidate candidate) {
+        if (candidate.executable_model_path.empty()) {
+            return;
+        }
+        auto duplicate = std::find_if(
+            candidates.begin(), candidates.end(), [&](const BootstrapEngineCandidate& existing) {
+                return existing.device.backend == candidate.device.backend &&
+                       existing.executable_model_path == candidate.executable_model_path;
+            });
+        if (duplicate == candidates.end()) {
+            candidates.push_back(std::move(candidate));
+        }
+    };
+
+#if defined(__APPLE__)
+    if (capabilities.platform == "macos" && capabilities.apple_silicon &&
+        capabilities.mlx_probe_available && has_mlx_bootstrap_artifacts(models_root)) {
+        append_unique(
+            {DeviceInfo{"Apple Silicon MLX", detected_device.available_memory_mb, Backend::MLX},
+             mlx_pack_path(models_root),
+             artifact_path_for_backend(models_root, Backend::MLX, 512)});
+    }
+#else
+    (void)capabilities;
+#endif
+
+    auto preset = app::default_preset_for_capabilities(capabilities);
+    auto append_default_candidate = [&](const DeviceInfo& device) {
+        auto model_entry = app::default_model_for_request(capabilities, device, preset);
+        if (!model_entry.has_value()) {
+            return;
+        }
+
+        auto requested_model_path = models_root / model_entry->filename;
+        if (!path_exists(requested_model_path)) {
+            return;
+        }
+
+        auto executable_model_path = requested_model_path;
+        if (device.backend == Backend::MLX) {
+            executable_model_path = artifact_path_for_backend(models_root, Backend::MLX, 512);
+            if (!path_exists(executable_model_path)) {
+                return;
+            }
+        }
+
+        append_unique({device, requested_model_path, executable_model_path});
+    };
+
+    append_default_candidate(detected_device);
+    if (detected_device.backend != Backend::CPU) {
+        append_default_candidate(
+            DeviceInfo{"Generic CPU", detected_device.available_memory_mb, Backend::CPU});
+    }
+
+    return candidates;
+}
+
+inline std::optional<QualityArtifactSelection> select_quality_artifact(
+    const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
+    int input_height) {
+    const int requested_resolution =
+        resolve_target_resolution(quality_mode, input_width, input_height);
+
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    for (int resolution : kFallbackResolutions) {
+        if (resolution > requested_resolution) {
+            continue;
+        }
+        if (is_fixed_quality_mode(quality_mode) && resolution != requested_resolution) {
+            continue;
+        }
+
+        auto artifact_path = artifact_path_for_backend(models_root, backend, resolution);
+        if (!path_exists(artifact_path)) {
+            continue;
+        }
+
+        return QualityArtifactSelection{artifact_path, requested_resolution, resolution,
+                                        resolution != requested_resolution};
+    }
+
+    return std::nullopt;
+}
+
+}  // namespace corridorkey::ofx

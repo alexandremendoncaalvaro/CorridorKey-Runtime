@@ -7,6 +7,7 @@ add_executable(test_unit
     test_device_selection.cpp
     test_device_detection.cpp
     test_inference_session.cpp
+    test_ofx_model_selection.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
     test_runtime_contracts.cpp
@@ -20,6 +21,11 @@ target_link_libraries(test_unit
     PRIVATE
         corridorkey_core_static
         Catch2::Catch2WithMain
+)
+
+target_include_directories(test_unit
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/vendor/openfx/include
 )
 
 corridorkey_stage_ort_runtime(test_unit)

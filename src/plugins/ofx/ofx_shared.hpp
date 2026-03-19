@@ -11,6 +11,7 @@
 #include "ofxMessage.h"
 #include "ofxParam.h"
 #include "ofxProperty.h"
+#include "ofx_constants.hpp"
 
 #if defined(_WIN32)
 #define CORRIDORKEY_OFX_EXPORT OfxExport
@@ -51,24 +52,11 @@ constexpr const char* kParamTileOverlap = "tile_overlap";
 constexpr const char* kParamSourcePassthrough = "source_passthrough";
 constexpr const char* kParamEdgeErode = "edge_erode";
 constexpr const char* kParamEdgeBlur = "edge_blur";
-
-// Quality mode choice indices
-constexpr int kQualityAuto = 0;
-constexpr int kQualityPreview = 1;
-constexpr int kQualityStandard = 2;
-constexpr int kQualityHigh = 3;
-constexpr int kQualityUltra = 4;
-constexpr int kQualityMaximum = 5;
-
-// Upscale method choice indices
-constexpr int kUpscaleLanczos4 = 0;
-constexpr int kUpscaleBilinear = 1;
-
-// Output mode choice indices
-constexpr int kOutputProcessed = 0;
-constexpr int kOutputMatteOnly = 1;
-constexpr int kOutputForegroundOnly = 2;
-constexpr int kOutputSourceMatte = 3;
+constexpr const char* kParamRuntimeProcessing = "runtime_processing";
+constexpr const char* kParamRuntimeDevice = "runtime_device";
+constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
+constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
+constexpr int kRuntimeStatusEnabled = 0;
 
 struct OfxSuites {
     const OfxPropertySuiteV1* property = nullptr;
@@ -101,12 +89,16 @@ struct InstanceData {
     OfxParamHandle source_passthrough_param = nullptr;
     OfxParamHandle edge_erode_param = nullptr;
     OfxParamHandle edge_blur_param = nullptr;
+    OfxParamHandle runtime_processing_param = nullptr;
+    OfxParamHandle runtime_device_param = nullptr;
+    OfxParamHandle runtime_artifact_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     DeviceInfo device = {};
     int active_quality_mode = kQualityAuto;
     int active_resolution = 0;
+    std::string last_error = {};
 };
 
 extern OfxHost* g_host;

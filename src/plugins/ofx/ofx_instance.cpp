@@ -2,10 +2,12 @@
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <new>
+#include <string>
 
 #include "app/runtime_contracts.hpp"
 #include "common/runtime_paths.hpp"
 #include "ofx_logging.hpp"
+#include "ofx_model_selection.hpp"
 #include "ofx_shared.hpp"
 
 #if defined(__APPLE__)
@@ -35,6 +37,74 @@ std::string backend_label(Backend backend) {
         default:
             return "auto";
     }
+}
+
+std::string processing_backend_label(Backend backend) {
+    switch (backend) {
+        case Backend::CPU:
+            return "CPU";
+        case Backend::CoreML:
+            return "CoreML";
+        case Backend::CUDA:
+            return "CUDA GPU";
+        case Backend::TensorRT:
+            return "TensorRT GPU";
+        case Backend::DirectML:
+            return "DirectML GPU";
+        case Backend::MLX:
+            return "MLX GPU";
+        default:
+            return "Auto";
+    }
+}
+
+std::string processing_device_label(const DeviceInfo& device) {
+    if (!device.name.empty()) {
+        return device.name;
+    }
+    return processing_backend_label(device.backend);
+}
+
+std::string runtime_artifact_label(const std::filesystem::path& model_path, int resolution) {
+    if (model_path.empty()) {
+        return "Not loaded";
+    }
+
+    std::string label = model_path.filename().string();
+    if (resolution > 0) {
+        label += " (" + std::to_string(resolution) + "px)";
+    }
+    return label;
+}
+
+void set_string_param_value(OfxParamHandle param, const std::string& value) {
+    if (g_suites.parameter == nullptr || param == nullptr) {
+        return;
+    }
+    g_suites.parameter->paramSetValue(param, value.c_str());
+}
+
+void update_runtime_panel(InstanceData* data) {
+    if (data == nullptr) {
+        return;
+    }
+
+    set_string_param_value(data->runtime_processing_param,
+                           processing_backend_label(data->device.backend));
+    set_string_param_value(data->runtime_device_param, processing_device_label(data->device));
+    set_string_param_value(data->runtime_artifact_param,
+                           runtime_artifact_label(data->model_path, data->active_resolution));
+}
+
+void set_runtime_panel_status(InstanceData* data, const std::string& processing,
+                              const std::string& device, const std::string& artifact) {
+    if (data == nullptr) {
+        return;
+    }
+
+    set_string_param_value(data->runtime_processing_param, processing);
+    set_string_param_value(data->runtime_device_param, device);
+    set_string_param_value(data->runtime_artifact_param, artifact);
 }
 
 std::optional<std::filesystem::path> plugin_module_path() {
@@ -190,123 +260,141 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     g_suites.parameter->paramGetHandle(param_set, kParamEdgeErode, &data->edge_erode_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamEdgeBlur, &data->edge_blur_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeProcessing,
+                                       &data->runtime_processing_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeDevice, &data->runtime_device_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeArtifact,
+                                       &data->runtime_artifact_param, nullptr);
 
-    data->device = auto_detect();
-    log_message("create_instance", std::string("Detected device: ") + data->device.name);
-    log_message("create_instance",
-                std::string("Requested backend: ") + backend_label(data->device.backend));
-
-    auto capabilities = runtime_capabilities();
-    log_message("create_instance", std::string("Platform: ") + capabilities.platform);
-    auto preset = app::default_preset_for_capabilities(capabilities);
-    auto model_entry = app::default_model_for_request(capabilities, data->device, preset);
-    if (!model_entry.has_value()) {
-        log_message("create_instance", "No compatible model found.");
-        post_message(kOfxMessageError, "No compatible model found for this device.", instance);
-        return kOfxStatFailed;
-    }
-    log_message("create_instance", std::string("Selected model: ") + model_entry->filename);
+    set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Not loaded");
 
     data->models_root = resolve_models_root();
-    data->model_path = data->models_root / model_entry->filename;
-    if (!std::filesystem::exists(data->model_path)) {
-        log_message("create_instance",
-                    std::string("Model file missing: ") + data->model_path.string());
-        post_message(kOfxMessageError, "Model file not found.", instance);
-        return kOfxStatFailed;
-    }
+    DeviceInfo detected_device = auto_detect();
+    log_message("create_instance", std::string("Detected device: ") + detected_device.name);
+    log_message("create_instance",
+                std::string("Detected backend: ") + backend_label(detected_device.backend));
+    auto capabilities = runtime_capabilities();
+    log_message("create_instance", std::string("Platform: ") + capabilities.platform);
 
-    auto engine_result = Engine::create(data->model_path, data->device);
-    if (!engine_result) {
-        log_message("create_instance",
-                    std::string("Engine create failed: ") + engine_result.error().message);
-        post_message(kOfxMessageError,
-                     ("Failed to load AI engine: " + engine_result.error().message).c_str(),
+    auto bootstrap_candidates =
+        build_bootstrap_candidates(capabilities, detected_device, data->models_root);
+    if (bootstrap_candidates.empty()) {
+        log_message("create_instance", "No compatible model artifacts found for OFX bootstrap.");
+        post_message(kOfxMessageError, "No compatible model artifacts found for this device.",
                      instance);
         return kOfxStatFailed;
     }
 
-    data->engine = std::move(*engine_result);
-    log_message("create_instance", "Engine created successfully.");
+    std::string failure_summary;
+    for (const auto& candidate : bootstrap_candidates) {
+        log_message("create_instance",
+                    std::string("Attempting backend: ") + backend_label(candidate.device.backend));
+        log_message("create_instance", std::string("Requested model: ") +
+                                           candidate.requested_model_path.filename().string());
+        if (candidate.executable_model_path != candidate.requested_model_path) {
+            log_message("create_instance", std::string("Requested executable artifact: ") +
+                                               candidate.executable_model_path.filename().string());
+        }
 
-    set_instance_data(instance, data.release());
-    return kOfxStatOK;
-}
+        auto engine_result = Engine::create(candidate.executable_model_path, candidate.device);
+        if (!engine_result) {
+            std::string failure =
+                backend_label(candidate.device.backend) + ": " + engine_result.error().message;
+            log_message("create_instance", std::string("Engine create failed: ") + failure);
+            if (!failure_summary.empty()) {
+                failure_summary += " | ";
+            }
+            failure_summary += failure;
+            continue;
+        }
 
-int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
-    if (quality_mode == kQualityPreview) return 512;
-    if (quality_mode == kQualityStandard) return 768;
-    if (quality_mode == kQualityHigh) return 1024;
-    if (quality_mode == kQualityUltra) return 1536;
-    if (quality_mode == kQualityMaximum) return 2048;
+        data->engine = std::move(*engine_result);
+        data->device = data->engine->current_device();
+        data->model_path = candidate.executable_model_path;
+        data->active_quality_mode = kQualityAuto;
+        data->active_resolution = data->engine->recommended_resolution();
+        data->last_error.clear();
 
-    // Auto: select based on input resolution
-    int max_dim = std::max(input_width, input_height);
-    if (max_dim > 3000) return 2048;
-    if (max_dim > 2000) return 1536;
-    if (max_dim > 1000) return 1024;
-    return 768;
+        if (candidate.device.backend != detected_device.backend) {
+            log_message("create_instance", std::string("Backend fallback: ") +
+                                               backend_label(detected_device.backend) + " -> " +
+                                               backend_label(candidate.device.backend));
+        }
+        log_message("create_instance", std::string("Selected model: ") +
+                                           candidate.requested_model_path.filename().string());
+        if (candidate.executable_model_path != candidate.requested_model_path) {
+            log_message("create_instance", std::string("Effective bridge: ") +
+                                               candidate.executable_model_path.filename().string());
+        }
+        log_message("create_instance",
+                    std::string("Effective backend: ") + backend_label(data->device.backend));
+        log_message("create_instance",
+                    "Effective resolution: " + std::to_string(data->active_resolution));
+        log_message("create_instance", "Engine created successfully.");
+        update_runtime_panel(data.get());
+
+        set_instance_data(instance, data.release());
+        return kOfxStatOK;
+    }
+
+    data->last_error = failure_summary;
+    std::string failure_message = "Failed to load AI engine: " + failure_summary;
+    post_message(kOfxMessageError, failure_message.c_str(), instance);
+    return kOfxStatFailed;
 }
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height) {
     if (data == nullptr) return true;
 
-    int target = resolve_target_resolution(quality_mode, input_width, input_height);
-    if (target == data->active_resolution) return true;
-
-    // Try the desired resolution, then fall back to lower resolutions
-    constexpr int fallback_resolutions[] = {2048, 1536, 1024, 768, 512};
-    std::filesystem::path desired_path;
-    bool found = false;
-    for (int res : fallback_resolutions) {
-        if (res > target) continue;
-
-        if (data->device.backend == Backend::MLX) {
-            desired_path =
-                data->models_root / ("corridorkey_mlx_bridge_" + std::to_string(res) + ".mlxfn");
-        } else if (data->device.backend == Backend::TensorRT ||
-                   data->device.backend == Backend::CUDA) {
-            desired_path =
-                data->models_root / ("corridorkey_fp16_" + std::to_string(res) + ".onnx");
-        } else {
-            desired_path =
-                data->models_root / ("corridorkey_int8_" + std::to_string(res) + ".onnx");
-        }
-
-        if (std::filesystem::exists(desired_path)) {
-            if (res < target) {
-                log_message("ensure_engine_for_quality", "Model for " + std::to_string(target) +
-                                                             " not found, falling back to " +
-                                                             std::to_string(res));
-            }
-            target = res;
-            found = true;
-            break;
-        }
-    }
-
-    if (!found) {
-        log_message("ensure_engine_for_quality", "No compatible model file found.");
+    auto selection = select_quality_artifact(data->models_root, data->device.backend, quality_mode,
+                                             input_width, input_height);
+    if (!selection.has_value()) {
+        int requested_resolution =
+            resolve_target_resolution(quality_mode, input_width, input_height);
+        data->last_error = "Requested quality " + std::string(quality_mode_label(quality_mode)) +
+                           " requires a " + std::to_string(requested_resolution) +
+                           "px artifact for backend " + backend_label(data->device.backend) +
+                           ", but that artifact is missing.";
+        log_message("ensure_engine_for_quality", data->last_error);
         return false;
     }
 
-    if (target == data->active_resolution) return true;
+    if (selection->effective_resolution == data->active_resolution &&
+        selection->executable_model_path == data->model_path) {
+        return true;
+    }
 
-    auto engine_result = Engine::create(desired_path, data->device);
+    auto engine_result = Engine::create(selection->executable_model_path, data->device);
     if (!engine_result) {
-        log_message(
-            "ensure_engine_for_quality",
-            std::string("Failed to create engine for model: ") + engine_result.error().message);
+        data->last_error = "Failed to create engine for " +
+                           std::string(quality_mode_label(quality_mode)) + " using " +
+                           selection->executable_model_path.filename().string() + ": " +
+                           engine_result.error().message;
+        log_message("ensure_engine_for_quality", data->last_error);
         return false;
     }
 
     data->engine = std::move(*engine_result);
-    data->model_path = desired_path;
+    data->device = data->engine->current_device();
+    data->model_path = selection->executable_model_path;
     data->active_quality_mode = quality_mode;
-    data->active_resolution = target;
+    data->active_resolution = selection->effective_resolution;
+    data->last_error.clear();
+    if (selection->used_fallback) {
+        log_message("ensure_engine_for_quality",
+                    "Auto quality requested " + std::to_string(selection->requested_resolution) +
+                        " and fell back to " + std::to_string(selection->effective_resolution));
+    }
     log_message("ensure_engine_for_quality",
-                std::string("Switched to model ") + desired_path.filename().string());
+                std::string("Switched to artifact ") +
+                    selection->executable_model_path.filename().string());
+    log_message("ensure_engine_for_quality",
+                std::string("Effective backend: ") + backend_label(data->device.backend));
+    log_message("ensure_engine_for_quality",
+                "Effective resolution: " + std::to_string(data->active_resolution));
+    update_runtime_panel(data);
     return true;
 }
 

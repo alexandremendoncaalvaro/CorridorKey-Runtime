@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${CORRIDORKEY_VERSION:-0.1.7}"
+DEFAULT_VERSION="$(grep 'CORRIDORKEY_VERSION_STRING' "${ROOT_DIR}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')"
+VERSION="${CORRIDORKEY_VERSION:-${DEFAULT_VERSION}}"
+REQUIRE_MLX_2048="${CORRIDORKEY_REQUIRE_MLX_2048:-1}"
 BUNDLE_PATH="${CORRIDORKEY_OFX_BUNDLE:-${ROOT_DIR}/build/ofx_mac_pkg/CorridorKey.ofx.bundle}"
 
 require_file() {
@@ -51,6 +53,17 @@ require_dependency() {
     fi
 }
 
+require_no_appledouble_entries() {
+    local root="$1"
+    local leaked_entry
+
+    leaked_entry="$(find "$root" \( -name '._*' -o -name '.__*' \) -print -quit)"
+    if [ -n "$leaked_entry" ]; then
+        echo "Unexpected AppleDouble entry found in bundle: $leaked_entry" >&2
+        exit 1
+    fi
+}
+
 if [ ! -d "$BUNDLE_PATH" ]; then
     echo "Bundle not found at $BUNDLE_PATH" >&2
     exit 1
@@ -74,6 +87,12 @@ require_file "$MLX_LIB"
 require_file "$MLX_METALLIB"
 require_file "${MODELS_DIR}/corridorkey_mlx.safetensors"
 require_file "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn"
+require_file "${MODELS_DIR}/corridorkey_mlx_bridge_768.mlxfn"
+require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn"
+require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn"
+if [ "$REQUIRE_MLX_2048" = "1" ]; then
+    require_file "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn"
+fi
 require_file "${MODELS_DIR}/corridorkey_int8_512.onnx"
 
 require_min_size "$PLUGIN_BINARY" 100000
@@ -83,7 +102,15 @@ require_min_size "$MLX_LIB" 5000000
 require_min_size "$MLX_METALLIB" 50000000
 require_min_size "${MODELS_DIR}/corridorkey_mlx.safetensors" 300000000
 require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn" 200000000
+require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_768.mlxfn" 200000000
+require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn" 200000000
+require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn" 200000000
+if [ "$REQUIRE_MLX_2048" = "1" ]; then
+    require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn" 200000000
+fi
 require_min_size "${MODELS_DIR}/corridorkey_int8_512.onnx" 50000000
+
+require_no_appledouble_entries "$BUNDLE_PATH"
 
 require_no_absolute_rpaths "$PLUGIN_BINARY"
 require_no_absolute_rpaths "$CORE_LIB"

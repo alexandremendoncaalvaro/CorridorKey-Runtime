@@ -93,6 +93,26 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
     set_parent(param_props, parent);
 }
 
+void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                                 const char* default_value, const char* hint,
+                                 const char* parent = nullptr) {
+    OfxPropertySetHandle param_props = nullptr;
+    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props) !=
+        kOfxStatOK) {
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    g_suites.property->propSetString(param_props, kOfxParamPropDefault, 0, default_value);
+    g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0,
+                                     kRuntimeStatusStringMode);
+    g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, kRuntimeStatusEnabled);
+    if (hint != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+    set_parent(param_props, parent);
+}
+
 void define_group_param(OfxParamSetHandle param_set, const char* name, const char* label, bool open,
                         const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
@@ -197,8 +217,20 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         return kOfxStatFailed;
     }
 
-    std::string version_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
-    define_group_param(param_set, "version_group", version_group_label.c_str(), false);
+    std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
+    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
+
+    define_runtime_status_param(
+        param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
+        "Shows the backend currently used by this OFX instance.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
+        "Shows the device selected for this OFX instance.", "runtime_group");
+    define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
+                                "Initializing...",
+                                "Shows the actual model or bridge file loaded for the current "
+                                "quality mode.",
+                                "runtime_group");
 
     // -- Quality group (open by default) --
     define_group_param(param_set, "quality_group", "Quality", true);
@@ -240,15 +272,16 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Minimum connected component area in pixels to keep.", "keying_group");
     define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
                         "Edge refinement strength. 0 disables the refiner.", "keying_group");
-    define_bool_param(param_set, kParamSourcePassthrough, "Source Passthrough", 1,
+    define_bool_param(param_set, kParamSourcePassthrough, "Source Passthrough",
+                      kDefaultSourcePassthroughEnabled,
                       "Blend original source pixels into high-confidence alpha regions "
                       "for sharper interior detail.",
                       "keying_group");
-    define_int_param(param_set, kParamEdgeErode, "Edge Erode", 3, 0, 10,
+    define_int_param(param_set, kParamEdgeErode, "Edge Erode", kDefaultEdgeErode, 0, 10,
                      "Erosion radius for the passthrough interior mask. "
                      "Higher values widen the transition zone at edges.",
                      "keying_group");
-    define_int_param(param_set, kParamEdgeBlur, "Edge Blur", 7, 0, 20,
+    define_int_param(param_set, kParamEdgeBlur, "Edge Blur", kDefaultEdgeBlur, 0, 20,
                      "Blur radius for smoothing the passthrough transition. "
                      "Higher values create a softer blend between source and model.",
                      "keying_group");
