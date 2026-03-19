@@ -98,34 +98,45 @@ Goal: give compositors the control they expect from a professional keyer.
   at transparency edges. Now all output paths convert FG to linear before
   premultiplication, matching the reference repos exactly.
 
-## Phase 4 - Platform Parity
+## Phase 4 - Platform Parity (NVIDIA RTX)
 
-- [ ] **4.1 Windows OFX Validation** -- validate at the same quality level
-  with TensorRT, CUDA, and DirectML backends.
-- [ ] **4.2 Cross-Platform Feature Sync** -- ensure all features work
-  identically on Windows with unified parameter set.
+Goal: ensure the Windows version matches macOS quality and performance.
 
-## Phase 5 - Advanced Features
+- [x] **4.1 TensorRT-RTX Integration** -- fully implemented with FP16 support.
+- [x] **4.2 FP16 Input/Output Conversion** -- hardware-accelerated half-precision
+  handling for TensorRT engines.
+- [x] **4.3 MSVC Compilation & Vendor ORT** -- stabilized build pipeline with
+  Visual Studio 2022 and managed ONNX Runtime dependencies.
+- [x] **4.4 Portable Installer** -- relative path installation script for
+  professional distribution.
 
-Longer-term items informed by EZ-CorridorKey capabilities and community
-feedback.
+## Phase 5 - Universal Windows AI (AMD, Intel, Qualcomm)
 
-- [ ] **5.1 Blue Screen Support** -- channel-swap approach (swap B and G
+Goal: target the March 2026 Windows AI stack for maximum compatibility.
+
+- [ ] **5.1 Windows AI Platform (WinML) Backend** -- migrate from manual
+  backend selection to the Windows ML orchestrator. This allows the OS to
+  automatically route to the NPU on Copilot+ PCs or the GPU on AMD/Intel.
+- [ ] **5.2 NPU-First Strategy (QNN & OpenVINO 2026.0)** -- optimize models for
+  the Snapdragon X2 Elite (Qualcomm QNN) and Intel Core Ultra (OpenVINO)
+  NPUs to offload the GPU during video rendering.
+- [ ] **5.3 DirectML Fallback (Legacy Compatibility)** -- maintain DirectML for
+  pre-2024 AMD/NVIDIA hardware where NPUs are unavailable.
+- [ ] **5.4 Blue Screen Support** -- channel-swap approach (swap B and G
   channels before inference, swap back after). Requires adapting despill
   and rough matte generation to work on the blue channel. No model
   retraining needed.
-- [ ] **5.2 Multiple Alpha Hint Strategies** -- evaluate BiRefNet, SAM2,
-  MatAnyone2 as alternative hint generators for non-person subjects.
-  Also enables arbitrary background colors without retraining.
-- [ ] **5.3 Refiner-Only Tiling** -- tile the CNN refiner (not the backbone
-  encoder) with 512px tiles and 128px overlap using linear ramp blending.
-  The refiner has ~65px receptive field (dilated convs 1,2,4,8), so 128px
-  overlap is mathematically lossless. This is the strategy all reference
-  repos use. Useful for memory savings, not quality improvement.
-- [ ] **5.4 Temporal Consistency** -- frame-to-frame matte consistency to
-  reduce flickering in video sequences.
-- [x] **5.5 2048px MLX Bridge** -- compile a 2048px bridge for Apple Silicon.
-  Implemented support in the model catalog and updated preparation scripts.
+
+## Phase 6 - Performance & Workflow Refinement
+
+- [ ] **6.1 GPU/NPU Zero-Copy Pipeline** -- implement direct memory link between
+  the AI backend and DaVinci Resolve's GPU buffers to eliminate CPU staging.
+- [ ] **6.2 INT8 Quantization** -- utilize 2026-era quantization tools (Olive)
+  to achieve 2x speedup on NPUs with minimal quality loss.
+- [ ] **6.3 Temporal Consistency (Video-Native)** -- frame-to-frame matte
+  consistency to reduce flickering.
+- [ ] **6.4 2048px Windows Engine** -- expand Windows support to match the
+  2048px macOS bridge.
 
 ## Reference
 
