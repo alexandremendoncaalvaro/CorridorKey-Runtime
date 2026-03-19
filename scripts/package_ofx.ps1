@@ -41,11 +41,10 @@ function Assert-FileExists {
 
 function Resolve-OrtDllPath {
     param([string]$Root, [string]$Name)
-    foreach ($candidate in @(
-        (Join-Path $Root $Name),
-        (Join-Path $Root "bin" $Name),
-        (Join-Path $Root "lib" $Name)
-    )) {
+    $path1 = Join-Path $Root $Name
+    $path2 = Join-Path (Join-Path $Root "bin") $Name
+    $path3 = Join-Path (Join-Path $Root "lib") $Name
+    foreach ($candidate in @($path1, $path2, $path3)) {
         if (Test-Path $candidate) {
             return $candidate
         }
@@ -74,21 +73,23 @@ Copy-Item $pluginBinary $win64Dir -Force
 
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
-Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_dml.dll" -DestinationDir $win64Dir
-Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_cuda.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir
 
 $tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nv_tensorrt_rtx.dll"
 if (-not $tensorrtProvider) {
     $tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nvtensorrtrtx.dll"
 }
-if (-not $tensorrtProvider) {
-    throw "Required TensorRT provider DLL not found in $OrtRoot"
+if ($tensorrtProvider) {
+    Copy-Item $tensorrtProvider $win64Dir -Force
+    # Copy essential TensorRT-RTX support libs
+    Copy-OrtDll -Root $OrtRoot -Name "tensorrt_onnxparser_rtx_1_3.dll" -DestinationDir $win64Dir
+    Copy-OrtDll -Root $OrtRoot -Name "tensorrt_rtx_1_3.dll" -DestinationDir $win64Dir
 }
-Copy-Item $tensorrtProvider $win64Dir -Force
 
 $cudartCandidates = @()
-foreach ($candidateDir in @($OrtRoot, (Join-Path $OrtRoot "bin"), (Join-Path $OrtRoot "lib"))) {
+$rootBin = Join-Path $OrtRoot "bin"
+$rootLib = Join-Path $OrtRoot "lib"
+foreach ($candidateDir in @($OrtRoot, $rootBin, $rootLib)) {
     if (Test-Path $candidateDir) {
         $cudartCandidates += Get-ChildItem -Path $candidateDir -Filter "cudart64_*.dll" -File -ErrorAction SilentlyContinue
     }
@@ -103,6 +104,8 @@ foreach ($candidate in $cudartCandidates) {
 $targetModels = @(
     "corridorkey_fp16_768.onnx",
     "corridorkey_fp16_1024.onnx",
+    "corridorkey_fp16_1536.onnx",
+    "corridorkey_fp16_2048.onnx",
     "corridorkey_int8_512.onnx"
 )
 foreach ($model in $targetModels) {

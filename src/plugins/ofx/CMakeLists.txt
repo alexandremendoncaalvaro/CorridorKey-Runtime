@@ -77,9 +77,6 @@ if(WIN32)
         # Copy all auxiliary ONNX Runtime and TensorRT DLLs
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
 
-        # Rename onnxruntime.dll to corridorkey_onnxruntime.dll to avoid conflict with Resolve's bundled ORT
-        COMMAND ${CMAKE_COMMAND} -E rename "${_ofx_bundle_dir}/Contents/Win64/onnxruntime.dll" "${_ofx_bundle_dir}/Contents/Win64/corridorkey_onnxruntime.dll"
-
         # Copy models
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
 
