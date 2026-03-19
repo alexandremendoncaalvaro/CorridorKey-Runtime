@@ -40,6 +40,7 @@ CHECKPOINT_PATH="${REPO_ROOT}/models/CorridorKey.pth"
 WEIGHTS_PATH="${REPO_ROOT}/models/corridorkey_mlx.safetensors"
 EMBEDDED_VENV="${REPO_ROOT}/.venv-macos-mlx"
 PYTHON_RUNTIME_LIB="${CORRIDORKEY_EMBEDDED_PYTHON_LIB:-}"
+PYTHON_RUNTIME_HOME="${CORRIDORKEY_EMBEDDED_PYTHON_HOME:-}"
 
 require_file() {
     local path="$1"
@@ -154,6 +155,60 @@ resolve_embedded_python_runtime() {
     return 1
 }
 
+resolve_embedded_python_home() {
+    local python_bin="$1"
+    local venv_root
+    local pyvenv_cfg
+    local python_home_bin
+    local python_home_root
+
+    if [ -n "$PYTHON_RUNTIME_HOME" ] && [ -d "$PYTHON_RUNTIME_HOME" ]; then
+        printf '%s\n' "$PYTHON_RUNTIME_HOME"
+        return 0
+    fi
+
+    venv_root="$(cd "$(dirname "$python_bin")/.." && pwd)"
+    pyvenv_cfg="${venv_root}/pyvenv.cfg"
+    if [ ! -f "$pyvenv_cfg" ]; then
+        return 1
+    fi
+
+    python_home_bin="$(awk -F' = ' '$1=="home" { print $2; exit }' "$pyvenv_cfg")"
+    if [ -z "$python_home_bin" ]; then
+        return 1
+    fi
+
+    python_home_root="$(cd "$(dirname "$python_home_bin")" && pwd)"
+    if [ ! -d "${python_home_root}/lib" ]; then
+        return 1
+    fi
+
+    printf '%s\n' "$python_home_root"
+}
+
+copy_portable_python_home() {
+    local source_root="$1"
+    local destination_root="$2"
+    local stdlib_dir
+    local stdlib_name
+    local stdlib_zip
+
+    stdlib_dir="$(find "${source_root}/lib" -maxdepth 1 -type d -name 'python3.*' | head -n 1)"
+    if [ -z "$stdlib_dir" ]; then
+        echo "ERROR: Could not locate the embedded Python standard library under ${source_root}/lib." >&2
+        exit 1
+    fi
+
+    stdlib_name="$(basename "$stdlib_dir")"
+    stdlib_zip="$(find "${source_root}/lib" -maxdepth 1 -type f -name 'python*.zip' | head -n 1)"
+
+    mkdir -p "${destination_root}/bin" "${destination_root}/lib"
+    ditto "$stdlib_dir" "${destination_root}/lib/${stdlib_name}"
+    if [ -n "$stdlib_zip" ]; then
+        cp "$stdlib_zip" "${destination_root}/lib/"
+    fi
+}
+
 sign_nested_code() {
     local root="$1"
     local path
@@ -231,6 +286,14 @@ if [ -z "$PYTHON_RUNTIME_LIB" ]; then
 fi
 require_file "$PYTHON_RUNTIME_LIB"
 
+if [ -z "$PYTHON_RUNTIME_HOME" ]; then
+    PYTHON_RUNTIME_HOME="$(resolve_embedded_python_home "${EMBEDDED_VENV}/bin/python")" || {
+        echo "ERROR: Could not locate the embedded Python home." >&2
+        exit 1
+    }
+fi
+require_file "${PYTHON_RUNTIME_HOME}/lib"
+
 echo "[1/6] Cleaning packaging directories..."
 rm -rf "$PAYLOAD_ROOT" "$WORK_DIR" "$DIST_DIR"
 rm -f "$DMG_PATH" "$ZIP_PATH"
@@ -243,6 +306,10 @@ cp "$CHECKPOINT_PATH" "$PAYLOAD_ROOT/models/"
 cp "$WEIGHTS_PATH" "$PAYLOAD_ROOT/models/"
 ditto "$EMBEDDED_VENV" "${PAYLOAD_ROOT}/.venv-macos-mlx"
 materialize_embedded_python "${PAYLOAD_ROOT}/.venv-macos-mlx"
+copy_portable_python_home "$PYTHON_RUNTIME_HOME" "${PAYLOAD_ROOT}/.venv-macos-mlx/python-home"
+cp "${PAYLOAD_ROOT}/.venv-macos-mlx/bin/python3" "${PAYLOAD_ROOT}/.venv-macos-mlx/python-home/bin/python3"
+cp "${PAYLOAD_ROOT}/.venv-macos-mlx/bin/python" "${PAYLOAD_ROOT}/.venv-macos-mlx/python-home/bin/python"
+cp "${PAYLOAD_ROOT}/.venv-macos-mlx/bin/python3.13" "${PAYLOAD_ROOT}/.venv-macos-mlx/python-home/bin/python3.13"
 mkdir -p "${PAYLOAD_ROOT}/.venv-macos-mlx/lib"
 cp "$PYTHON_RUNTIME_LIB" "${PAYLOAD_ROOT}/.venv-macos-mlx/lib/"
 ditto "$PAYLOAD_ROOT" "$PAYLOAD_DIR"
@@ -272,8 +339,9 @@ mkdir -p "$OUTPUT_ROOT"
 export CORRIDORKEY_SUPPORT_ROOT="$PAYLOAD_ROOT"
 export CORRIDORKEY_SUPPORT_OUTPUT_ROOT="$OUTPUT_ROOT"
 export CORRIDORKEY_MLX_PYTHON="${PAYLOAD_ROOT}/.venv-macos-mlx/bin/python"
+export CORRIDORKEY_EMBEDDED_PYTHON_HOME="${PAYLOAD_ROOT}/.venv-macos-mlx/python-home"
 
-exec "${PAYLOAD_ROOT}/scripts/generate_mlx_2048_bridge.sh"
+exec "${PAYLOAD_ROOT}/scripts/generate_mlx_2048_bridge.sh" "$@"
 COMMAND_EOF
 chmod +x "$RUN_COMMAND"
 

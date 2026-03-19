@@ -3,6 +3,8 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${CORRIDORKEY_SUPPORT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+EMBEDDED_VENV_DIR="${REPO_ROOT}/.venv-macos-mlx"
+EMBEDDED_PYTHON_HOME="${CORRIDORKEY_EMBEDDED_PYTHON_HOME:-${EMBEDDED_VENV_DIR}/python-home}"
 MODELS_DIR="${REPO_ROOT}/models"
 OUTPUTS_DIR="${CORRIDORKEY_SUPPORT_OUTPUT_ROOT:-${REPO_ROOT}/outputs}"
 TIMESTAMP="$(date +"%Y%m%d_%H%M%S")"
@@ -107,8 +109,8 @@ find_python() {
     if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
         candidates+=("${VIRTUAL_ENV}/bin/python")
     fi
-    if [ -x "${REPO_ROOT}/.venv-macos-mlx/bin/python" ]; then
-        candidates+=("${REPO_ROOT}/.venv-macos-mlx/bin/python")
+    if [ -x "${EMBEDDED_VENV_DIR}/bin/python" ]; then
+        candidates+=("${EMBEDDED_VENV_DIR}/bin/python")
     fi
     if command -v python3 >/dev/null 2>&1; then
         candidates+=("$(command -v python3)")
@@ -116,7 +118,7 @@ find_python() {
 
     for candidate in "${candidates[@]}"; do
         [ -x "$candidate" ] || continue
-        if "$candidate" - <<'PY' >/dev/null 2>&1
+        if run_python_candidate "$candidate" - <<'PY' >/dev/null 2>&1
 import mlx.core  # noqa: F401
 import corridorkey_mlx  # noqa: F401
 PY
@@ -127,6 +129,29 @@ PY
     done
 
     return 1
+}
+
+python_uses_embedded_home() {
+    case "$1" in
+        "${EMBEDDED_VENV_DIR}/bin/"*)
+            [ -d "${EMBEDDED_PYTHON_HOME}/lib" ]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+run_python_candidate() {
+    local candidate="$1"
+    shift
+
+    if python_uses_embedded_home "$candidate"; then
+        PYTHONHOME="${EMBEDDED_PYTHON_HOME}" PYTHONNOUSERSITE=1 "$candidate" "$@"
+        return
+    fi
+
+    "$candidate" "$@"
 }
 
 existing_bridge_is_valid() {
@@ -207,8 +232,7 @@ if [ "$FORCE_REGENERATE" -eq 0 ] && existing_bridge_is_valid; then
     exit 0
 fi
 
-COMMAND=(
-    "$PYTHON_BIN"
+COMMAND_ARGS=(
     "${REPO_ROOT}/scripts/prepare_mlx_model_pack.py"
     --output-dir "$MODELS_DIR"
     --bridge-resolutions 2048
@@ -216,7 +240,10 @@ COMMAND=(
 )
 
 print_step "Generation command"
-printf '%q ' "${COMMAND[@]}"
+if python_uses_embedded_home "$PYTHON_BIN"; then
+    printf 'PYTHONHOME=%q PYTHONNOUSERSITE=1 ' "$EMBEDDED_PYTHON_HOME"
+fi
+printf '%q ' "$PYTHON_BIN" "${COMMAND_ARGS[@]}"
 printf '\n'
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -227,7 +254,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 print_step "Generating corridorkey_mlx_bridge_2048.mlxfn"
-"${COMMAND[@]}" || fail "Bridge generation failed."
+run_python_candidate "$PYTHON_BIN" "${COMMAND_ARGS[@]}" || fail "Bridge generation failed."
 
 [ -f "$BRIDGE_PATH" ] || fail "The generation step finished, but ${BRIDGE_PATH} was not created."
 
