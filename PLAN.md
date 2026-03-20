@@ -57,6 +57,9 @@ The current test builds already provide:
   - `RGB -> R`
 - Windows packaging that includes the currently required `TensorRT` and `int8`
   artifacts.
+- A repeatable vendor and packaging path for an official Windows `DirectML`
+  runtime based on `Microsoft.ML.OnnxRuntime.DirectML` and
+  `Microsoft.AI.DirectML`.
 - Windows validation that refuses to treat a bundle as truly universal when the
   required non-TensorRT provider DLLs are missing.
 - Strict OFX GPU residency policy on Windows GPU paths, with explicit failure
@@ -67,8 +70,18 @@ The current test builds already provide:
   reuse, and a packaged runtime server binary inside the OFX bundle/installers.
 - Automatic client-side session recovery when the runtime process loses the
   current session and can be re-prepared locally.
+- Version-scoped OFX runtime cache roots, shared-frame roots, ports, and log
+  files so stale servers from older builds do not collide with the current
+  plugin.
+- Wider source-passthrough edge controls for real Resolve grading use:
+  - `Edge Erode`: `0..32`
+  - `Edge Blur`: `0..64`
+- A single-frame inference fast path that reuses resize/upscale buffers instead
+  of always routing one frame through the generic batch staging path.
 - Windows Resolve installers and ZIP packages built from the official
   packaging/validation flow.
+- Separate Windows test packages for the `TensorRT RTX` path and the official
+  `DirectML` path.
 
 ## Release Blockers
 
@@ -79,13 +92,15 @@ These issues still block the final Resolve goal:
 - Copy/paste and first-instance latency need another field-validation pass after
   deferred bootstrap; the eager `768` bootstrap path is gone, but we still need
   Resolve-side confirmation that duplication is now acceptably fast.
-- `Preview (512)` still shows too much steady-state CPU-side cost in the
-  current logs, especially around frame extraction/output staging.
-- The current Windows universal path is not honestly AMD/Intel GPU-ready until
-  the required provider DLLs and a validated non-NVIDIA execution path exist.
-- The out-of-process runtime still needs hardened recovery for server crashes,
-  hung renders, protocol mismatches, and restart scenarios before it can be
-  treated as release-hard.
+- `Preview (512)` now has a lower-allocation single-frame path, but still needs
+  Resolve-side validation that the steady-state staging cost is low enough.
+- The project now has an official Windows `DirectML` package path, but a single
+  Windows bundle should not be called universal until AMD/Intel test systems
+  validate the non-NVIDIA path in real Resolve sessions.
+- The out-of-process runtime already isolates stale-version collisions and
+  protocol mismatches, but still needs hardened recovery for server crashes,
+  hung renders under load, and startup edge cases before it can be treated as
+  release-hard.
 
 ## Workstream 1 - Resolve Test Baseline
 
@@ -128,8 +143,9 @@ policy together.
   same OFX installer and bundle layout, launch it on demand, reuse an active
   instance, and stop it after an idle timeout.
 - [ ] **2.7 Crash Containment and Recovery** -- detect server crashes, hung
-  renders, protocol mismatches, and startup failures, then surface deterministic
-  OFX errors without requiring a Resolve restart.
+  renders under load, and startup failures, then surface deterministic OFX
+  errors without requiring a Resolve restart. Protocol mismatches and stale
+  version collisions are now handled as part of the baseline runtime path.
 - [x] **2.8 Diagnostics Parity** -- preserve the current panel/log visibility
   for backend, artifact, quality, warmup state, fallback reason, and stage
   timings when execution is out-of-process.
@@ -158,9 +174,10 @@ the out-of-process architecture.
 - [ ] **3.5 Honest Universal Claim** -- only claim Windows universal GPU
   compatibility once AMD/Intel systems can load the required provider path and
   actually execute on GPU.
-- [ ] **3.6 Steady-State Preview Throughput** -- reduce the remaining CPU-side
-  cost in the `512` render path so preview mode stays responsive even after the
-  new out-of-process architecture is in place.
+- [ ] **3.6 Steady-State Preview Throughput** -- validate and, if needed,
+  further reduce the remaining CPU-side cost in the `512` render path. A
+  single-frame fast path is now in place, but Resolve-side responsiveness still
+  needs field validation.
 
 ## Workstream 4 - Compositing Workflow Surface
 
