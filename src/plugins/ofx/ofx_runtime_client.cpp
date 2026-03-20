@@ -1,5 +1,6 @@
 #include "ofx_runtime_client.hpp"
 
+#include <cerrno>
 #include <chrono>
 #include <thread>
 #include <vector>
@@ -9,11 +10,14 @@
 #include "ofx_logging.hpp"
 
 #if defined(__APPLE__)
+#include <signal.h>
 #include <spawn.h>
 extern char** environ;
 #elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <signal.h>
 #endif
 
 namespace corridorkey::ofx {
@@ -38,6 +42,45 @@ bool is_session_missing_error(const Error& error) {
 
 bool is_transport_error(const Error& error) {
     return error.code == ErrorCode::IoError;
+}
+
+bool is_protocol_mismatch_error(const Error& error) {
+    return error.code == ErrorCode::InvalidParameters &&
+           error.message.find("Unsupported OFX runtime protocol version") != std::string::npos;
+}
+
+bool is_restartable_server_error(const Error& error) {
+    return is_transport_error(error) || is_protocol_mismatch_error(error);
+}
+
+Result<void> terminate_server_process(int server_pid) {
+    if (server_pid <= 0) {
+        return {};
+    }
+
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE,
+                                 static_cast<DWORD>(server_pid));
+    if (process == nullptr) {
+        return {};
+    }
+
+    if (!TerminateProcess(process, 0)) {
+        CloseHandle(process);
+        return Unexpected<Error>(
+            Error{ErrorCode::IoError, "Failed to terminate the stale OFX runtime server."});
+    }
+
+    WaitForSingleObject(process, 5000);
+    CloseHandle(process);
+    return {};
+#else
+    if (kill(server_pid, SIGTERM) != 0 && errno != ESRCH) {
+        return Unexpected<Error>(
+            Error{ErrorCode::IoError, "Failed to terminate the stale OFX runtime server."});
+    }
+    return {};
+#endif
 }
 
 void replay_stage_timings(const std::vector<StageTiming>& timings, StageTimingCallback on_stage) {
@@ -87,7 +130,12 @@ Result<app::OfxRuntimeHealthResponse> OfxRuntimeClient::health() {
     if (!response) {
         return Unexpected<Error>(response.error());
     }
-    return app::health_response_from_json(*response);
+    auto parsed = app::health_response_from_json(*response);
+    if (!parsed) {
+        return Unexpected<Error>(parsed.error());
+    }
+    update_server_health(*parsed);
+    return parsed;
 }
 
 Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
@@ -239,38 +287,62 @@ bool OfxRuntimeClient::has_session() const {
 }
 
 Result<void> OfxRuntimeClient::ensure_server_running() {
+    const auto wait_for_server_ready = [&]() -> Result<void> {
+        const auto start_time = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start_time <
+               std::chrono::milliseconds(m_options.launch_timeout_ms)) {
+            auto poll =
+                send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
+            if (poll) {
+                auto health = app::health_response_from_json(*poll);
+                if (health) {
+                    update_server_health(*health);
+                    log_message("ofx_runtime_client",
+                                "event=server_ready pid=" + std::to_string(m_server_pid));
+                    return {};
+                }
+                return Unexpected<Error>(health.error());
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        }
+
+        return Unexpected<Error>(
+            Error{ErrorCode::IoError, "Timed out waiting for the OFX runtime server to start."});
+    };
+
     auto health_response =
         send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
     if (health_response) {
+        auto health = app::health_response_from_json(*health_response);
+        if (!health) {
+            return Unexpected<Error>(health.error());
+        }
+        update_server_health(*health);
         return {};
+    }
+
+    if (is_protocol_mismatch_error(health_response.error())) {
+        if (m_server_pid > 0) {
+            auto restart = restart_server(health_response.error().message);
+            if (restart) {
+                return restart;
+            }
+        }
+        return Unexpected<Error>(health_response.error());
+    }
+
+    if (m_server_pid > 0 && is_restartable_server_error(health_response.error())) {
+        auto restart = restart_server(health_response.error().message);
+        if (restart) {
+            return restart;
+        }
     }
 
     auto launch_result = launch_server();
     if (!launch_result) {
         return Unexpected<Error>(launch_result.error());
     }
-
-    const auto start_time = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start_time <
-           std::chrono::milliseconds(m_options.launch_timeout_ms)) {
-        auto poll = common::send_json_request(
-            m_options.endpoint,
-            app::to_json(app::OfxRuntimeRequestEnvelope{app::kOfxRuntimeProtocolVersion,
-                                                       app::OfxRuntimeCommand::Health,
-                                                       nlohmann::json::object()}),
-            1000);
-        if (poll) {
-            auto payload = unwrap_response(*poll);
-            if (payload) {
-                log_message("ofx_runtime_client", "event=server_ready");
-                return {};
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    }
-
-    return Unexpected<Error>(
-        Error{ErrorCode::IoError, "Timed out waiting for the OFX runtime server to start."});
+    return wait_for_server_ready();
 }
 
 Result<nlohmann::json> OfxRuntimeClient::send_command(app::OfxRuntimeCommand command,
@@ -327,6 +399,44 @@ Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_st
     return {};
 }
 
+Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
+    log_message("ofx_runtime_client",
+                "event=restart_server_begin pid=" + std::to_string(m_server_pid) +
+                    " reason=" + reason);
+    auto terminate_result = terminate_server_process(m_server_pid);
+    if (!terminate_result) {
+        return Unexpected<Error>(terminate_result.error());
+    }
+
+    m_server_pid = 0;
+
+    auto launch_result = launch_server();
+    if (!launch_result) {
+        return Unexpected<Error>(launch_result.error());
+    }
+
+    const auto start_time = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start_time <
+           std::chrono::milliseconds(m_options.launch_timeout_ms)) {
+        auto poll =
+            send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
+        if (poll) {
+            auto health = app::health_response_from_json(*poll);
+            if (health) {
+                update_server_health(*health);
+                log_message("ofx_runtime_client",
+                            "event=restart_server_result pid=" + std::to_string(m_server_pid));
+                return {};
+            }
+            return Unexpected<Error>(health.error());
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    }
+
+    return Unexpected<Error>(
+        Error{ErrorCode::IoError, "Timed out waiting for the restarted OFX runtime server."});
+}
+
 Result<void> OfxRuntimeClient::launch_server() {
     if (m_options.server_binary.empty() || !std::filesystem::exists(m_options.server_binary)) {
         return Unexpected<Error>(
@@ -378,6 +488,10 @@ Result<void> OfxRuntimeClient::launch_server() {
 
 void OfxRuntimeClient::update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot) {
     m_session = snapshot;
+}
+
+void OfxRuntimeClient::update_server_health(const app::OfxRuntimeHealthResponse& health) {
+    m_server_pid = health.server_pid;
 }
 
 }  // namespace corridorkey::ofx

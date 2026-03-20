@@ -280,3 +280,74 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
     server_thread.join();
     REQUIRE_FALSE(server_error.has_value());
 }
+
+TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime server",
+          "[integration][ofx][runtime][regression]") {
+    const auto port = reserve_local_port();
+    const LocalJsonEndpoint endpoint{"127.0.0.1", port};
+
+    std::optional<Error> server_error;
+    std::atomic<bool> stop_server = false;
+
+    std::thread server_thread([&]() {
+        auto server = LocalJsonServer::listen(endpoint);
+        if (!server) {
+            server_error = server.error();
+            return;
+        }
+
+        while (!stop_server.load()) {
+            auto client = server->accept_one(500);
+            if (!client) {
+                server_error = client.error();
+                return;
+            }
+            if (!client->has_value()) {
+                continue;
+            }
+
+            auto request_json = (*client)->read_json(2000);
+            if (!request_json) {
+                server_error = request_json.error();
+                return;
+            }
+
+            OfxRuntimeResponseEnvelope response;
+            response.protocol_version = kOfxRuntimeProtocolVersion + 1;
+            response.success = true;
+            response.payload = to_json(OfxRuntimeHealthResponse{4242, 0, 0});
+            (*client)->write_json(to_json(response));
+        }
+    });
+
+    bool ready = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        auto probe = send_json_request(
+            endpoint,
+            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+                                             .payload = nlohmann::json::object()}),
+            500);
+        if (probe) {
+            ready = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    REQUIRE(ready);
+
+    OfxRuntimeClientOptions options;
+    options.endpoint = endpoint;
+    options.request_timeout_ms = 1000;
+    auto client = OfxRuntimeClient::create(options);
+    REQUIRE(client.has_value());
+
+    auto health = (*client)->health();
+    REQUIRE_FALSE(health.has_value());
+    CHECK(health.error().message.find("Unsupported OFX runtime protocol version") !=
+          std::string::npos);
+
+    stop_server = true;
+    server_thread.join();
+    REQUIRE_FALSE(server_error.has_value());
+}

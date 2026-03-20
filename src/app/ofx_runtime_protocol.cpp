@@ -12,6 +12,15 @@ Error invalid_protocol_error(const std::string& message) {
     return Error{ErrorCode::InvalidParameters, message};
 }
 
+Result<void> validate_protocol_version(int protocol_version) {
+    if (protocol_version != kOfxRuntimeProtocolVersion) {
+        return Unexpected<Error>(invalid_protocol_error(
+            "Unsupported OFX runtime protocol version: " + std::to_string(protocol_version) +
+            ". Expected " + std::to_string(kOfxRuntimeProtocolVersion) + "."));
+    }
+    return {};
+}
+
 std::optional<Json> get_optional_object_field(const Json& json, const char* name) {
     if (!json.contains(name) || json.at(name).is_null()) {
         return std::nullopt;
@@ -301,6 +310,8 @@ nlohmann::json to_json(const OfxRuntimeRequestEnvelope& envelope) {
 Result<OfxRuntimeRequestEnvelope> ofx_runtime_request_from_json(const nlohmann::json& json) {
     auto protocol_version = required_int(json, "protocol_version");
     if (!protocol_version) return Unexpected<Error>(protocol_version.error());
+    auto protocol_valid = validate_protocol_version(*protocol_version);
+    if (!protocol_valid) return Unexpected<Error>(protocol_valid.error());
     auto command_string = required_string(json, "command");
     if (!command_string) return Unexpected<Error>(command_string.error());
     auto command = ofx_runtime_command_from_string(*command_string);
@@ -320,6 +331,8 @@ nlohmann::json to_json(const OfxRuntimeResponseEnvelope& envelope) {
 Result<OfxRuntimeResponseEnvelope> ofx_runtime_response_from_json(const nlohmann::json& json) {
     auto protocol_version = required_int(json, "protocol_version");
     if (!protocol_version) return Unexpected<Error>(protocol_version.error());
+    auto protocol_valid = validate_protocol_version(*protocol_version);
+    if (!protocol_valid) return Unexpected<Error>(protocol_valid.error());
     auto success = required_bool(json, "success");
     if (!success) return Unexpected<Error>(success.error());
     auto error = required_string(json, "error");

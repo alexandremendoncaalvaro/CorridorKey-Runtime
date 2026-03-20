@@ -46,11 +46,14 @@ class OfxRuntimeClient {
                                                        const nlohmann::json& payload) const;
     Result<void> launch_server();
     Result<void> recover_runtime_session(StageTimingCallback on_stage);
+    Result<void> restart_server(const std::string& reason);
     void update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot);
+    void update_server_health(const app::OfxRuntimeHealthResponse& health);
 
     OfxRuntimeClientOptions m_options = {};
     app::OfxRuntimeSessionSnapshot m_session = {};
     std::optional<app::OfxRuntimePrepareSessionRequest> m_last_prepare_request = std::nullopt;
+    int m_server_pid = 0;
 };
 
 std::filesystem::path resolve_ofx_runtime_server_binary(

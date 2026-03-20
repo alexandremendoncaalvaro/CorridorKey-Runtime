@@ -100,7 +100,8 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         }
 
         logger.log("event=request_received command=" +
-                   ofx_runtime_command_to_string(request->command));
+                   ofx_runtime_command_to_string(request->command) + " protocol_version=" +
+                   std::to_string(request->protocol_version));
 
         OfxRuntimeResponseEnvelope response = error_response(
             Error{ErrorCode::InvalidParameters, "Unsupported OFX runtime command."});

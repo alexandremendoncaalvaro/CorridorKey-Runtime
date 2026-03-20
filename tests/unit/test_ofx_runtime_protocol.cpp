@@ -126,3 +126,26 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     CHECK(parsed_ok->success);
     CHECK(parsed_ok->payload.at("accepted").get<bool>());
 }
+
+TEST_CASE("ofx runtime protocol rejects mismatched protocol versions",
+          "[unit][ofx][runtime][regression]") {
+    OfxRuntimeRequestEnvelope request;
+    request.protocol_version = kOfxRuntimeProtocolVersion + 1;
+    request.command = OfxRuntimeCommand::Health;
+    request.payload = nlohmann::json::object();
+
+    auto parsed_request = ofx_runtime_request_from_json(to_json(request));
+    REQUIRE_FALSE(parsed_request.has_value());
+    CHECK(parsed_request.error().message.find("Unsupported OFX runtime protocol version") !=
+          std::string::npos);
+
+    OfxRuntimeResponseEnvelope response;
+    response.protocol_version = kOfxRuntimeProtocolVersion + 1;
+    response.success = true;
+    response.payload = nlohmann::json::object();
+
+    auto parsed_response = ofx_runtime_response_from_json(to_json(response));
+    REQUIRE_FALSE(parsed_response.has_value());
+    CHECK(parsed_response.error().message.find("Unsupported OFX runtime protocol version") !=
+          std::string::npos);
+}
