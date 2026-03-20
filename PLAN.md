@@ -95,7 +95,7 @@ Features requested by the community and critical for real-world compositing.
   heuristic: detect linear footage by checking if float pixel values
   exceed 1.0. For now, the "Input Is Linear" checkbox remains the
   reliable manual fallback.
-- [ ] **1.5.3 Alpha Hint UX Clarification** -- make the OFX UI explicit about
+- [x] **1.5.3 Alpha Hint UX Clarification** -- make the OFX UI explicit about
   how hint inputs are interpreted: RGBA uses `A`, single-channel inputs use the
   provided channel directly, and RGB-only hint expectations must either be
   documented or handled with an explicit fallback policy.
@@ -103,9 +103,9 @@ Features requested by the community and critical for real-world compositing.
   should keep generating an internal rough matte when no hint is connected, or
   whether hint generation belongs strictly outside the node so CorridorKey stays
   focused on keying.
-- [ ] **1.5.5 Alpha Hint RGB Fallback Policy** -- evaluate the proposed UX
-  fallback of using channel `R` when an RGB hint is connected without a valid
-  alpha channel.
+- [x] **1.5.5 Alpha Hint RGB Fallback Policy** -- the Alpha Hint clip now
+  accepts RGB in addition to RGBA and Alpha, and RGB hints explicitly fall back
+  to channel `R` instead of being host-dependent or under-documented.
 
 ## Phase 2 - Resolution and Quality Control
 
@@ -158,7 +158,7 @@ Goal: give compositors the control they expect from a professional keyer.
   then `write_output_image` applied `to_srgb()` again, causing gray banding
   at transparency edges. Now all output paths convert FG to linear before
   premultiplication, matching the reference repos exactly.
-- [ ] **3.5 Processed Output Presentation** -- clarify the expected appearance
+- [x] **3.5 Processed Output Presentation** -- clarify the expected appearance
   of the `Processed` output in Resolve so users are not surprised by viewing
   linear premultiplied RGB directly without a display transform.
 - [ ] **3.6 Panel Simplification** -- review whether Brightness and Saturation
