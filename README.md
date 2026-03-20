@@ -21,6 +21,13 @@ The current delivery shape is explicit:
 - **Windows (Universal GPU)** ships as a portable multi-backend runtime track. It prioritizes **TensorRT RTX** for performance, with integrated support for **CUDA** (GTX/Pascal+) and **DirectML** (AMD/Intel/Universal).
 - **GUI, sidecar, and embedded integrations come after that**, all consuming the same library-first runtime contracts.
 
+Installer posture by release surface:
+
+- **Desktop Runtime / macOS Apple Silicon:** distributed as a DMG release.
+- **Resolve OFX / macOS Apple Silicon:** distributed as a signed `.pkg` inside a DMG.
+- **Desktop Runtime / Windows:** portable runtime remains the baseline packaged artifact, and the Tauri app now has an NSIS installer path layered on top of that runtime payload.
+- **Resolve OFX / Windows:** distributed as a dedicated Windows installer, with the packaged bundle plus `install_plugin.bat` kept as a manual fallback path.
+
 ## Who This Is For
 
 - **Technical operators** who want to run CorridorKey without Python, virtual environments, or fragile setup.
@@ -250,8 +257,8 @@ Current preview scope:
 First-run flow from the release zip:
 
 ```bash
-cd CorridorKey_Mac_v0.1.4
-xattr -dr com.apple.quarantine CorridorKey_Mac_v0.1.4
+cd CorridorKey_Runtime_vX.Y.Z_macOS_AppleSilicon
+xattr -dr com.apple.quarantine CorridorKey_Runtime_vX.Y.Z_macOS_AppleSilicon
 ./corridorkey doctor
 ./corridorkey process input.mp4 output.mp4
 ./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
@@ -306,20 +313,20 @@ Current preview scope:
 First-run flow from the release zip:
 
 ```powershell
-cd CorridorKey_Windows_v0.1.4
-.\corridorkey.ps1 doctor
-.\corridorkey.ps1 process input.mp4 output.mp4
-.\corridorkey.ps1 process input_4k.mp4 output_4k.mp4 --preset max
+cd CorridorKey_Runtime_vX.Y.Z_Windows
+.\ck-engine.exe doctor
+.\ck-engine.exe process input.mp4 output.mp4
+.\ck-engine.exe process input_4k.mp4 output_4k.mp4 --preset max
 ```
 
 Useful commands for testers:
 
 ```powershell
-.\corridorkey.ps1 info
-.\corridorkey.ps1 doctor
-.\corridorkey.ps1 benchmark
-.\corridorkey.ps1 process input.mp4 output.mp4
-.\corridorkey.ps1 process --json --input input.mp4 --output output.mp4
+.\ck-engine.exe info
+.\ck-engine.exe doctor
+.\ck-engine.exe benchmark
+.\ck-engine.exe process input.mp4 output.mp4
+.\ck-engine.exe process --json --input input.mp4 --output output.mp4
 ```
 
 What we want reported back from testers:
@@ -340,9 +347,9 @@ Current known Windows limitation:
 For the official Windows bundle, the user-facing flow is now:
 
 ```powershell
-.\corridorkey.ps1 doctor
-.\corridorkey.ps1 process input.mp4 output.mp4
-.\corridorkey.ps1 process input_4k.mp4 output_4k.mp4 --preset max
+.\ck-engine.exe doctor
+.\ck-engine.exe process input.mp4 output.mp4
+.\ck-engine.exe process input_4k.mp4 output_4k.mp4 --preset max
 ```
 
 The bundle already includes the packaged Windows universal runtime DLLs and validated
@@ -353,10 +360,10 @@ model set. End users do not need to point the runtime at a local SDK install.
 The Windows Universal GPU track now ships with a fully integrated **OpenFX Plugin** for Blackmagic DaVinci Resolve.
 
 **How to Install the OFX Plugin:**
-1. Download the `CorridorKey_Resolve_vX.Y.Z_Win_RTX.zip` package from the Releases page.
-2. Extract the folder to a safe location (e.g., Documents).
-3. Right-click the `install.bat` file and select **Run as Administrator**.
-4. The script will safely copy the `CorridorKey.ofx.bundle` to your system's OFX plugin directory and clear DaVinci's cache.
+1. Download the latest Windows `CorridorKey_Resolve` installer from the Releases page.
+2. Run the installer as Administrator.
+3. Start DaVinci Resolve after the installer finishes.
+4. If you need the manual path, use the release ZIP and run `install_plugin.bat` as Administrator.
 
 **How to Use the OFX Plugin:**
 1. Open DaVinci Resolve and navigate to the **Color** or **Fusion** page.
