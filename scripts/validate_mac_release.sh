@@ -3,9 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
-VERSION="${CORRIDORKEY_VERSION:-0.1.4}"
-DIST_ZIP="${ROOT_DIR}/dist/CorridorKey_Mac_v${VERSION}.zip"
-DIST_DMG="${ROOT_DIR}/dist/CorridorKey_Mac_v${VERSION}.dmg"
+DEFAULT_VERSION="$(grep 'CORRIDORKEY_VERSION_STRING' "${ROOT_DIR}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')"
+VERSION="${CORRIDORKEY_VERSION:-${DEFAULT_VERSION}}"
+DIST_BASENAME="CorridorKey_Runtime_v${VERSION}_macOS_AppleSilicon"
+DIST_ZIP="${ROOT_DIR}/dist/${DIST_BASENAME}.zip"
+DIST_DMG="${ROOT_DIR}/dist/${DIST_BASENAME}.dmg"
 OUTPUT_ROOT="${CORRIDORKEY_VALIDATION_ROOT:-${ROOT_DIR}/build/macos_release_validation}"
 UNPACK_DIR="${OUTPUT_ROOT}/bundle"
 DMG_MOUNT_DIR="${OUTPUT_ROOT}/dmg_mount"
@@ -114,7 +116,7 @@ case "$ARCHIVE_FORMAT" in
         mkdir -p "$DMG_MOUNT_DIR"
         hdiutil attach "$DIST_DMG" -mountpoint "$DMG_MOUNT_DIR" -nobrowse -readonly >/tmp/corridorkey_validate_attach.log
         MOUNTED_DMG=1
-        cp -R "$DMG_MOUNT_DIR/CorridorKey_Mac_v${VERSION}" "$UNPACK_DIR/"
+        cp -R "$DMG_MOUNT_DIR/${DIST_BASENAME}" "$UNPACK_DIR/"
         ;;
     *)
         echo "Unsupported CORRIDORKEY_ARCHIVE_FORMAT '$ARCHIVE_FORMAT'" >&2
@@ -122,7 +124,7 @@ case "$ARCHIVE_FORMAT" in
         ;;
 esac
 
-BUNDLE_ROOT="${UNPACK_DIR}/CorridorKey_Mac_v${VERSION}"
+BUNDLE_ROOT="${UNPACK_DIR}/${DIST_BASENAME}"
 CLI="${BUNDLE_ROOT}/bin/corridorkey"
 LAUNCHER="${BUNDLE_ROOT}/corridorkey"
 MODELS_DIR="${BUNDLE_ROOT}/models"

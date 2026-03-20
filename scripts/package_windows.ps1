@@ -37,7 +37,9 @@ if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
     $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
 }
 
-$distDir = Join-Path $repoRoot ("dist\CorridorKey_Windows_v" + $Version)
+$releaseBasename = "CorridorKey_Runtime_v${Version}_Windows"
+$distDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
+$zipPath = Join-Path $repoRoot ("dist\" + $releaseBasename + ".zip")
 $engineSource = Join-Path $BuildDir "src\cli\corridorkey.exe"
 $guiSource = Join-Path $repoRoot "src\gui\src-tauri\target\release\corridorkey-gui.exe"
 $modelsSource = Join-Path $repoRoot "models"
@@ -90,6 +92,9 @@ Write-Host "[1/6] Cleaning and creating bundle layout..."
 if (Test-Path $distDir) {
     Remove-Item $distDir -Recurse -Force
 }
+if (Test-Path $zipPath) {
+    Remove-Item $zipPath -Force
+}
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 New-Item -ItemType Directory -Path $bundleModelsDir -Force | Out-Null
 New-Item -ItemType Directory -Path $bundleOutputsDir -Force | Out-Null
@@ -105,7 +110,7 @@ Copy-DllsFromDir -SourceDir (Join-Path $OrtRoot "bin") -DestinationDir $distDir
 
 Write-Host "[4/6] Copying GUI..."
 Assert-FileExists -Path $guiSource -Message "GUI binary not found at $guiSource"
-Copy-Item $guiSource (Join-Path $distDir ("CorridorKey_v" + $Version + ".exe")) -Force
+Copy-Item $guiSource (Join-Path $distDir "CorridorKey_Runtime.exe") -Force
 
 Write-Host "[5/6] Copying models..."
 $targetModels = @(
@@ -135,8 +140,8 @@ $readmePath = Join-Path $distDir "README.txt"
 $smokePath = Join-Path $distDir "smoke_test.bat"
 
 @"
-CorridorKey Runtime v$Version - Windows Preview Portable Release
-===============================================================
+CorridorKey Runtime v$Version - Windows Portable Release
+=======================================================
 
 Quick start:
 1. Open PowerShell or Command Prompt in this folder.
@@ -169,4 +174,8 @@ exit /b 0
 
 Assert-NoForbiddenPathPrefix -Prefixes $ForbiddenPathPrefix -BundleRoot $distDir
 
+Write-Host "[6.5/6] Creating ZIP archive..."
+Compress-Archive -Path $distDir -DestinationPath $zipPath -CompressionLevel Optimal
+
 Write-Host "Bundle ready at: $distDir"
+Write-Host "Archive ready at: $zipPath"

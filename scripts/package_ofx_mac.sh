@@ -20,7 +20,7 @@ DIST_SUFFIX="${CORRIDORKEY_OFX_DIST_SUFFIX:-}"
 if [ -z "$DIST_SUFFIX" ] && [ "$REQUIRE_MLX_2048" != "1" ]; then
     DIST_SUFFIX="_test-no2048"
 fi
-DIST_BASENAME="CorridorKey_Resolve_Mac_v${VERSION}${DIST_SUFFIX}"
+DIST_BASENAME="CorridorKey_Resolve_v${VERSION}_macOS_AppleSilicon${DIST_SUFFIX}"
 DIST_DIR="${REPO_ROOT}/dist/${DIST_BASENAME}"
 WORK_DIR="${REPO_ROOT}/build/ofx_mac_pkg"
 BUNDLE_NAME="CorridorKey.ofx.bundle"
@@ -385,7 +385,7 @@ case "$ARCHIVE_FORMAT" in
         echo "SUCCESS: DMG created at $DMG_PATH"
         ;;
     zip)
-        ZIP_PATH="${REPO_ROOT}/dist/CorridorKey_Resolve_Mac_v${VERSION}.zip"
+        ZIP_PATH="${REPO_ROOT}/dist/${DIST_BASENAME}.zip"
         rm -f "$ZIP_PATH"
         ditto -c -k --norsrc --keepParent "$DIST_DIR" "$ZIP_PATH"
         echo "SUCCESS: ZIP created at $ZIP_PATH"
