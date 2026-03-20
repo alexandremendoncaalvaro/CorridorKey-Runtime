@@ -51,6 +51,10 @@ OfxRuntimeResponseEnvelope error_response(const Error& error) {
                                       nlohmann::json::object()};
 }
 
+std::string response_detail(const OfxRuntimeResponseEnvelope& response) {
+    return response.success ? "ok" : response.error;
+}
+
 }  // namespace
 
 Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
@@ -82,6 +86,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         auto request_json = (*client)->read_json(static_cast<int>(options.idle_timeout.count()));
         if (!request_json) {
             auto response = error_response(request_json.error());
+            logger.log("event=request_failed stage=read_json detail=" + request_json.error().message);
             (*client)->write_json(to_json(response));
             continue;
         }
@@ -89,9 +94,13 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         auto request = ofx_runtime_request_from_json(*request_json);
         if (!request) {
             auto response = error_response(request.error());
+            logger.log("event=request_failed stage=parse detail=" + request.error().message);
             (*client)->write_json(to_json(response));
             continue;
         }
+
+        logger.log("event=request_received command=" +
+                   ofx_runtime_command_to_string(request->command));
 
         OfxRuntimeResponseEnvelope response = error_response(
             Error{ErrorCode::InvalidParameters, "Unsupported OFX runtime command."});
@@ -152,6 +161,9 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         }
 
         (*client)->write_json(to_json(response));
+        logger.log("event=request_completed command=" +
+                   ofx_runtime_command_to_string(request->command) + " success=" +
+                   std::to_string(response.success) + " detail=" + response_detail(response));
         broker.cleanup_idle_sessions();
     }
 

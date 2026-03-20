@@ -28,6 +28,11 @@ Error transport_error(ErrorCode code, const std::string& message) {
     return Error{code, message};
 }
 
+#if defined(_WIN32)
+constexpr DWORD kSharedFrameShareMode =
+    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+#endif
+
 std::wstring wide_path(const std::filesystem::path& path) {
 #if defined(_WIN32)
     return path.wstring();
@@ -151,8 +156,9 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
     }
 
 #if defined(_WIN32)
-    auto file_handle = CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                                   CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    auto file_handle =
+        CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, kSharedFrameShareMode,
+                    nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
     if (file_handle == INVALID_HANDLE_VALUE) {
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to create shared frame file."));
@@ -222,8 +228,9 @@ Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path
     }
 
 #if defined(_WIN32)
-    auto file_handle = CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    auto file_handle =
+        CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, kSharedFrameShareMode,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file_handle == INVALID_HANDLE_VALUE) {
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to open shared frame file."));

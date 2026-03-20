@@ -121,51 +121,67 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
             Error{ErrorCode::InvalidParameters, "OFX runtime session is not prepared."});
     }
 
-    auto transport_path = common::next_ofx_shared_frame_path();
-    auto transport = common::SharedFrameTransport::create(transport_path, rgb.width, rgb.height);
-    if (!transport) {
-        return Unexpected<Error>(transport.error());
+    const auto transport_path = common::next_ofx_shared_frame_path();
+    auto render_result = [&]() -> Result<FrameResult> {
+        auto transport =
+            common::SharedFrameTransport::create(transport_path, rgb.width, rgb.height);
+        if (!transport) {
+            return Unexpected<Error>(transport.error());
+        }
+
+        std::copy(rgb.data.begin(), rgb.data.end(), transport->rgb_view().data.begin());
+        std::copy(alpha_hint.data.begin(), alpha_hint.data.end(),
+                  transport->hint_view().data.begin());
+
+        app::OfxRuntimeRenderFrameRequest request;
+        request.session_id = m_session.session_id;
+        request.shared_frame_path = transport_path;
+        request.width = rgb.width;
+        request.height = rgb.height;
+        request.params = params;
+        request.render_index = render_index;
+
+        auto response =
+            send_command(app::OfxRuntimeCommand::RenderFrame, app::to_json(request));
+        if (!response) {
+            return Unexpected<Error>(response.error());
+        }
+
+        auto parsed = app::render_frame_response_from_json(*response);
+        if (!parsed) {
+            return Unexpected<Error>(parsed.error());
+        }
+
+        update_session_snapshot(parsed->session);
+        replay_stage_timings(parsed->timings, on_stage);
+
+        FrameResult result;
+        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
+        result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+        std::copy(transport->alpha_view().data.begin(), transport->alpha_view().data.end(),
+                  result.alpha.view().data.begin());
+        std::copy(transport->foreground_view().data.begin(),
+                  transport->foreground_view().data.end(),
+                  result.foreground.view().data.begin());
+        return result;
+    }();
+
+    std::error_code cleanup_error;
+    std::filesystem::remove(transport_path, cleanup_error);
+    if (!render_result) {
+        if (cleanup_error) {
+            log_message("ofx_runtime_client",
+                        "event=shared_frame_cleanup_failed path=" + transport_path.string() +
+                            " detail=" + cleanup_error.message());
+        }
+        return Unexpected<Error>(render_result.error());
     }
-
-    std::copy(rgb.data.begin(), rgb.data.end(), transport->rgb_view().data.begin());
-    std::copy(alpha_hint.data.begin(), alpha_hint.data.end(), transport->hint_view().data.begin());
-
-    app::OfxRuntimeRenderFrameRequest request;
-    request.session_id = m_session.session_id;
-    request.shared_frame_path = transport_path;
-    request.width = rgb.width;
-    request.height = rgb.height;
-    request.params = params;
-    request.render_index = render_index;
-
-    auto response = send_command(app::OfxRuntimeCommand::RenderFrame, app::to_json(request));
-    if (!response) {
-        std::error_code error;
-        std::filesystem::remove(transport_path, error);
-        return Unexpected<Error>(response.error());
+    if (cleanup_error) {
+        log_message("ofx_runtime_client",
+                    "event=shared_frame_cleanup_failed path=" + transport_path.string() +
+                        " detail=" + cleanup_error.message());
     }
-
-    auto parsed = app::render_frame_response_from_json(*response);
-    if (!parsed) {
-        std::error_code error;
-        std::filesystem::remove(transport_path, error);
-        return Unexpected<Error>(parsed.error());
-    }
-
-    update_session_snapshot(parsed->session);
-    replay_stage_timings(parsed->timings, on_stage);
-
-    FrameResult result;
-    result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-    result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
-    std::copy(transport->alpha_view().data.begin(), transport->alpha_view().data.end(),
-              result.alpha.view().data.begin());
-    std::copy(transport->foreground_view().data.begin(), transport->foreground_view().data.end(),
-              result.foreground.view().data.begin());
-
-    std::error_code error;
-    std::filesystem::remove(transport_path, error);
-    return result;
+    return render_result;
 }
 
 Result<void> OfxRuntimeClient::release_session() {
