@@ -1,0 +1,54 @@
+#pragma once
+
+#include <corridorkey/engine.hpp>
+#include <filesystem>
+#include <memory>
+
+#include "app/ofx_runtime_protocol.hpp"
+#include "common/local_ipc.hpp"
+
+namespace corridorkey::ofx {
+
+struct OfxRuntimeClientOptions {
+    common::LocalJsonEndpoint endpoint = {};
+    std::filesystem::path server_binary = {};
+    int request_timeout_ms = 30000;
+    int launch_timeout_ms = 10000;
+    int idle_timeout_ms = 120000;
+};
+
+class OfxRuntimeClient {
+   public:
+    static Result<std::unique_ptr<OfxRuntimeClient>> create(OfxRuntimeClientOptions options);
+
+    ~OfxRuntimeClient();
+
+    Result<app::OfxRuntimeHealthResponse> health();
+    Result<app::OfxRuntimePrepareSessionResponse> prepare_session(
+        const app::OfxRuntimePrepareSessionRequest& request, StageTimingCallback on_stage = nullptr);
+    Result<FrameResult> process_frame(const Image& rgb, const Image& alpha_hint,
+                                      const InferenceParams& params, std::uint64_t render_index,
+                                      StageTimingCallback on_stage = nullptr);
+    Result<void> release_session();
+
+    [[nodiscard]] DeviceInfo current_device() const;
+    [[nodiscard]] std::optional<BackendFallbackInfo> backend_fallback() const;
+    [[nodiscard]] bool has_session() const;
+
+   private:
+    explicit OfxRuntimeClient(OfxRuntimeClientOptions options);
+
+    Result<void> ensure_server_running();
+    Result<nlohmann::json> send_command(app::OfxRuntimeCommand command,
+                                        const nlohmann::json& payload);
+    Result<void> launch_server();
+    void update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot);
+
+    OfxRuntimeClientOptions m_options = {};
+    app::OfxRuntimeSessionSnapshot m_session = {};
+};
+
+std::filesystem::path resolve_ofx_runtime_server_binary(
+    const std::filesystem::path& plugin_module_path);
+
+}  // namespace corridorkey::ofx

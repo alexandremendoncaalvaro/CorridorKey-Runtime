@@ -67,7 +67,8 @@ if(APPLE)
 endif()
 
 if(WIN32)
-    target_link_libraries(corridorkey_core PRIVATE dxgi)
+    target_link_libraries(corridorkey_core PRIVATE dxgi ws2_32)
+    corridorkey_apply_windows_x64_link_dirs(corridorkey_core)
 endif()
 
 if(APPLE AND MLX_FOUND)
@@ -79,6 +80,11 @@ endif()
 
 # Set the compile definition for the export macro
 target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_EXPORTS)
+
+target_sources(corridorkey_core PRIVATE
+    common/local_ipc.cpp
+    common/shared_memory_transport.cpp
+)
 
 # Relax warnings for png_io.cpp because of stb library legacy code
 if(MSVC)
@@ -137,7 +143,8 @@ if(BUILD_TESTING)
     endif()
 
     if(WIN32)
-        target_link_libraries(corridorkey_core_static PRIVATE dxgi)
+        target_link_libraries(corridorkey_core_static PRIVATE dxgi ws2_32)
+        corridorkey_apply_windows_x64_link_dirs(corridorkey_core_static)
     endif()
 
     if(APPLE AND MLX_FOUND)
@@ -148,6 +155,11 @@ if(BUILD_TESTING)
     endif()
 
     target_compile_definitions(corridorkey_core_static PUBLIC CORRIDORKEY_STATIC_DEFINE)
+
+    target_sources(corridorkey_core_static PRIVATE
+        common/local_ipc.cpp
+        common/shared_memory_transport.cpp
+    )
 
     if(NOT MSVC)
         set_source_files_properties(frame_io/png_io.cpp PROPERTIES

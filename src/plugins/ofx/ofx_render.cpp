@@ -5,6 +5,7 @@
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
+#include "ofx_runtime_client.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
@@ -96,7 +97,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     InstanceData* data = get_instance_data(instance);
-    if (data == nullptr || data->engine == nullptr) {
+    if (data == nullptr ||
+        (data->use_runtime_server && data->runtime_client == nullptr) ||
+        (!data->use_runtime_server && data->engine == nullptr)) {
         log_message("render", "Engine is not ready.");
         post_message(kOfxMessageError, "CorridorKey engine is not ready.", instance);
         return kOfxStatFailed;
@@ -370,33 +373,51 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.sp_blur_px = edge_blur;
 
     const DeviceInfo requested_device = requested_device_for_render(data);
-    const DeviceInfo effective_device_before = data->engine->current_device();
+    const DeviceInfo effective_device_before =
+        data->use_runtime_server ? data->runtime_client->current_device()
+                                 : data->engine->current_device();
     const std::string render_phase = render_phase_label(data->render_count);
     log_render_event("render_begin", render_phase, requested_device, effective_device_before,
                      data->model_path, data->requested_resolution, data->active_resolution,
-                     data->engine->backend_fallback());
+                     data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                              : data->engine->backend_fallback());
 
-    auto result = data->engine->process_frame(
-        rgb_view, hint_view, params,
-        [&](const StageTiming& timing) {
-            log_render_stage(render_phase, requested_device, data->model_path,
-                             data->requested_resolution, data->active_resolution, timing);
-        });
+    auto result = data->use_runtime_server
+                      ? data->runtime_client->process_frame(
+                            rgb_view, hint_view, params, data->render_count,
+                            [&](const StageTiming& timing) {
+                                log_render_stage(render_phase, requested_device, data->model_path,
+                                                 data->requested_resolution,
+                                                 data->active_resolution, timing);
+                            })
+                      : data->engine->process_frame(
+                            rgb_view, hint_view, params,
+                            [&](const StageTiming& timing) {
+                                log_render_stage(render_phase, requested_device, data->model_path,
+                                                 data->requested_resolution,
+                                                 data->active_resolution, timing);
+                            });
     ++data->render_count;
     if (!result) {
         log_render_event("render_result", render_phase, requested_device,
-                         data->engine->current_device(), data->model_path,
+                         data->use_runtime_server ? data->runtime_client->current_device()
+                                                  : data->engine->current_device(),
+                         data->model_path,
                          data->requested_resolution, data->active_resolution,
-                         data->engine->backend_fallback(), result.error().message);
+                         data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                  : data->engine->backend_fallback(),
+                         result.error().message);
         log_message("render", std::string("Engine processing failed: ") + result.error().message);
         post_message(kOfxMessageError, result.error().message.c_str(), instance);
         return kOfxStatFailed;
     }
 
-    DeviceInfo effective_device = data->engine->current_device();
+    DeviceInfo effective_device = data->use_runtime_server ? data->runtime_client->current_device()
+                                                           : data->engine->current_device();
     log_render_event("render_result", render_phase, requested_device, effective_device,
                      data->model_path, data->requested_resolution, data->active_resolution,
-                     data->engine->backend_fallback());
+                     data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                              : data->engine->backend_fallback());
     if (effective_device.backend != data->device.backend || effective_device.name != data->device.name) {
         data->device = effective_device;
         update_runtime_panel(data);
@@ -406,7 +427,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         std::string fallback_message =
             "Render switched away from the requested backend while using " +
             data->model_path.filename().string() + ".";
-        if (auto fallback = data->engine->backend_fallback();
+        if (auto fallback = data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                     : data->engine->backend_fallback();
             fallback.has_value() && !fallback->reason.empty()) {
             fallback_message += " Reason: " + fallback->reason;
         }

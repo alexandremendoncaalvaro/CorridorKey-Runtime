@@ -27,6 +27,8 @@ class Engine;
 
 namespace corridorkey::ofx {
 
+class OfxRuntimeClient;
+
 constexpr const char* kPluginIdentifier = "com.corridorkey.resolve";
 constexpr const char* kPluginLabel = "CorridorKey";
 constexpr const char* kPluginGroup = "Keying";
@@ -96,15 +98,18 @@ struct InstanceData {
     OfxParamHandle runtime_requested_quality_param = nullptr;
     OfxParamHandle runtime_effective_quality_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
+    std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
+    std::filesystem::path runtime_server_path = {};
     DeviceInfo device = {};
     DeviceInfo preferred_device = {};
     int active_quality_mode = kQualityAuto;
     int requested_resolution = 0;
     int active_resolution = 0;
     bool cpu_quality_guardrail_active = false;
+    bool use_runtime_server = false;
     std::uint64_t render_count = 0;
     std::string last_error = {};
 };

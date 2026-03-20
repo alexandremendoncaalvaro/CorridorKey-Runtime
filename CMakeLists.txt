@@ -18,6 +18,41 @@ project(CorridorKey-Runtime
     LANGUAGES CXX
 )
 
+if(WIN32 AND MSVC)
+    get_filename_component(_corridorkey_msvc_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(_corridorkey_msvc_host_dir "${_corridorkey_msvc_bin_dir}" DIRECTORY)
+    get_filename_component(_corridorkey_msvc_bin_root "${_corridorkey_msvc_host_dir}" DIRECTORY)
+    get_filename_component(_corridorkey_msvc_root "${_corridorkey_msvc_bin_root}" DIRECTORY)
+    set(CORRIDORKEY_MSVC_LIB_DIR "${_corridorkey_msvc_root}/lib/x64" CACHE INTERNAL
+        "Resolved MSVC x64 library directory")
+    set(CORRIDORKEY_MSVC_DELAYIMP_LIB "${CORRIDORKEY_MSVC_LIB_DIR}/delayimp.lib" CACHE INTERNAL
+        "Resolved MSVC x64 delay import library")
+
+    get_filename_component(_corridorkey_rc_arch_dir "${CMAKE_RC_COMPILER}" DIRECTORY)
+    get_filename_component(_corridorkey_windows_sdk_version_dir "${_corridorkey_rc_arch_dir}" DIRECTORY)
+    get_filename_component(_corridorkey_windows_sdk_bin_root "${_corridorkey_windows_sdk_version_dir}" DIRECTORY)
+    get_filename_component(_corridorkey_windows_sdk_root "${_corridorkey_windows_sdk_bin_root}" DIRECTORY)
+    get_filename_component(_corridorkey_windows_sdk_version
+        "${_corridorkey_windows_sdk_version_dir}" NAME)
+    set(CORRIDORKEY_WINDOWS_UCRT_LIB_DIR
+        "${_corridorkey_windows_sdk_root}/Lib/${_corridorkey_windows_sdk_version}/ucrt/x64"
+        CACHE INTERNAL "Resolved Windows SDK UCRT x64 library directory")
+    set(CORRIDORKEY_WINDOWS_UM_LIB_DIR
+        "${_corridorkey_windows_sdk_root}/Lib/${_corridorkey_windows_sdk_version}/um/x64"
+        CACHE INTERNAL "Resolved Windows SDK UM x64 library directory")
+
+    function(corridorkey_apply_windows_x64_link_dirs target_name)
+        if(NOT TARGET ${target_name})
+            message(FATAL_ERROR "corridorkey_apply_windows_x64_link_dirs expects an existing target")
+        endif()
+        target_link_directories(${target_name} PUBLIC
+            "${CORRIDORKEY_MSVC_LIB_DIR}"
+            "${CORRIDORKEY_WINDOWS_UCRT_LIB_DIR}"
+            "${CORRIDORKEY_WINDOWS_UM_LIB_DIR}"
+        )
+    endfunction()
+endif()
+
 if(WIN32)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()

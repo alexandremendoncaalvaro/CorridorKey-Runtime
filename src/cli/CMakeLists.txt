@@ -20,6 +20,7 @@ else()
 endif()
 
 if(WIN32)
+    corridorkey_apply_windows_x64_link_dirs(corridorkey_cli)
     set(_corridorkey_cli_runtime_dlls "")
     if(CORRIDORKEY_ORT_RUNTIME_DIR)
         file(GLOB _corridorkey_cli_ort_runtime_dlls

@@ -2,6 +2,9 @@
 set(APP_SOURCES
     job_orchestrator.cpp
     model_compiler.cpp
+    ofx_runtime_protocol.cpp
+    ofx_runtime_service.cpp
+    ofx_session_broker.cpp
     runtime_diagnostics.cpp
     runtime_contracts.cpp
 )

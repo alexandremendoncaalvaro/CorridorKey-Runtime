@@ -207,6 +207,20 @@ inline std::filesystem::path fallback_cache_root() {
     return std::filesystem::temp_directory_path() / "corridorkey-cache";
 }
 
+inline std::filesystem::path default_logs_root() {
+#if defined(__APPLE__)
+    if (auto home = environment_variable_copy("HOME"); home.has_value()) {
+        return std::filesystem::path(*home) / "Library" / "Logs" / "CorridorKey";
+    }
+#elif defined(_WIN32)
+    if (auto local_app_data = environment_variable_copy("LOCALAPPDATA");
+        local_app_data.has_value()) {
+        return std::filesystem::path(*local_app_data) / "CorridorKey" / "Logs";
+    }
+#endif
+    return std::filesystem::temp_directory_path() / "corridorkey-logs";
+}
+
 inline std::vector<std::filesystem::path> cache_root_candidates() {
     std::vector<std::filesystem::path> candidates;
     if (auto override_path = cache_root_override(); override_path.has_value()) {
@@ -269,6 +283,39 @@ inline std::filesystem::path default_cache_root() {
     }
 
     return configured_cache_root();
+}
+
+inline std::filesystem::path ofx_runtime_root() {
+    if (auto override_path = environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_ROOT");
+        override_path.has_value()) {
+        return std::filesystem::path(*override_path);
+    }
+    return default_cache_root() / "ofx_runtime";
+}
+
+inline std::filesystem::path ofx_runtime_shared_frames_root() {
+    return ofx_runtime_root() / "frames";
+}
+
+inline std::filesystem::path ofx_runtime_server_log_path() {
+    if (auto override_path = environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_LOG");
+        override_path.has_value()) {
+        return std::filesystem::path(*override_path);
+    }
+    return default_logs_root() / "ofx_runtime_server.log";
+}
+
+inline std::uint16_t default_ofx_runtime_port() {
+    if (auto override_port = environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_PORT");
+        override_port.has_value()) {
+        return static_cast<std::uint16_t>(std::stoi(*override_port));
+    }
+
+    auto cache_root = ofx_runtime_root().string();
+    constexpr std::uint16_t kBasePort = 43000;
+    constexpr std::uint16_t kPortSpan = 1000;
+    return static_cast<std::uint16_t>(kBasePort +
+                                      (detail::fnv1a_64(cache_root) % kPortSpan));
 }
 
 inline std::optional<std::filesystem::path> optimized_model_cache_path(
