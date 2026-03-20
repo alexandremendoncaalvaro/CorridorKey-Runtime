@@ -15,6 +15,8 @@ Write-Host ""
 
 $win64Dir = Join-Path $BundlePath "Contents\Win64"
 $resourcesDir = Join-Path $BundlePath "Contents\Resources\models"
+$bundleDescriptor = [System.IO.Path]::GetFullPath($BundlePath)
+$expectsUniversalGpuPath = $bundleDescriptor -match 'Universal'
 
 # Check bundle structure
 if (-not (Test-Path $BundlePath)) {
@@ -86,15 +88,41 @@ if ($tensorrtProvider.Count -eq 0) {
     }
 }
 
+# Check Windows universal GPU providers
+$universalProviderDlls = @(
+    "onnxruntime_providers_dml.dll",
+    "onnxruntime_providers_winml.dll",
+    "onnxruntime_providers_openvino.dll"
+)
+$foundUniversalProviders = @()
+foreach ($provider in $universalProviderDlls) {
+    $path = Join-Path $win64Dir $provider
+    if (Test-Path $path) {
+        $foundUniversalProviders += $provider
+        Write-Host "[PASS] Found $provider" -ForegroundColor Green
+    }
+}
+if ($foundUniversalProviders.Count -eq 0) {
+    $message = "No Windows universal GPU provider DLL found; AMD/Intel systems will fall back to CPU."
+    if ($expectsUniversalGpuPath) {
+        Write-Host "[FAIL] $message" -ForegroundColor Red
+        throw $message
+    }
+    Write-Host "[WARN] $message" -ForegroundColor Yellow
+}
+
 # Check models
 $requiredModels = @(
+    "corridorkey_fp16_512.onnx",
     "corridorkey_fp16_768.onnx",
     "corridorkey_fp16_1024.onnx",
-    "corridorkey_int8_512.onnx"
+    "corridorkey_fp16_1536.onnx",
+    "corridorkey_int8_512.onnx",
+    "corridorkey_int8_768.onnx",
+    "corridorkey_int8_1024.onnx"
 )
 
 $optionalModels = @(
-    "corridorkey_fp16_1536.onnx",
     "corridorkey_fp16_2048.onnx"
 )
 

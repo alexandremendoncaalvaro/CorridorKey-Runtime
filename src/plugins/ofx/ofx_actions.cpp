@@ -226,6 +226,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_runtime_status_param(
         param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
         "Shows the device selected for this OFX instance.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
+        "Shows the quality mode currently requested by the OFX controls.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
+        "Shows the actual resolution currently used for inference after artifact selection.",
+        "runtime_group");
     define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
                                 "Initializing...",
                                 "Shows the actual model or bridge file loaded for the current "

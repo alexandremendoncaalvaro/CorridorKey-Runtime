@@ -182,24 +182,7 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
     const std::optional<PresetDefinition>& preset) {
-    if (requested_device.backend == Backend::CPU) {
-        return find_model_by_filename("corridorkey_int8_512.onnx");
-    }
-
-    if ((requested_device.backend == Backend::Auto || requested_device.backend == Backend::MLX) &&
-        capabilities.platform == "macos" && capabilities.apple_silicon) {
-        if (preset.has_value()) {
-            auto preset_model = find_model_by_filename(preset->recommended_model);
-            if (preset_model.has_value()) {
-                return preset_model;
-            }
-        }
-        return find_model_by_filename("corridorkey_mlx.safetensors");
-    }
-
-    if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT) &&
-        (requested_device.backend == Backend::Auto ||
-         requested_device.backend == Backend::TensorRT)) {
+    auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
             if (preset_model.has_value()) {
@@ -219,6 +202,50 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         if (requested_device.available_memory_mb >= 8000) {
             return find_model_by_filename("corridorkey_fp16_768.onnx");
         }
+        return find_model_by_filename("corridorkey_fp16_512.onnx");
+    };
+
+    auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
+        if (requested_device.available_memory_mb >= 10000) {
+            return find_model_by_filename("corridorkey_int8_1024.onnx");
+        }
+        if (requested_device.available_memory_mb >= 8000) {
+            return find_model_by_filename("corridorkey_int8_768.onnx");
+        }
+        return find_model_by_filename("corridorkey_int8_512.onnx");
+    };
+
+    if (requested_device.backend == Backend::CPU) {
+        return find_model_by_filename("corridorkey_int8_512.onnx");
+    }
+
+    if ((requested_device.backend == Backend::Auto || requested_device.backend == Backend::MLX) &&
+        capabilities.platform == "macos" && capabilities.apple_silicon) {
+        if (preset.has_value()) {
+            auto preset_model = find_model_by_filename(preset->recommended_model);
+            if (preset_model.has_value()) {
+                return preset_model;
+            }
+        }
+        return find_model_by_filename("corridorkey_mlx.safetensors");
+    }
+
+    if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT) &&
+        (requested_device.backend == Backend::Auto ||
+         requested_device.backend == Backend::TensorRT)) {
+        return windows_rtx_model();
+    }
+
+    if (capabilities.platform == "windows" && requested_device.backend == Backend::CUDA &&
+        has_backend(capabilities, Backend::CUDA)) {
+        return windows_rtx_model();
+    }
+
+    if (capabilities.platform == "windows" &&
+        (requested_device.backend == Backend::DirectML ||
+         requested_device.backend == Backend::WindowsML ||
+         requested_device.backend == Backend::OpenVINO)) {
+        return windows_universal_model();
     }
 
     return find_model_by_filename("corridorkey_int8_512.onnx");
@@ -232,11 +259,11 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          {"macos_apple_silicon"}, {"apple_silicon_8gb"}),
         make_model_entry("int8", 768, "corridorkey_int8_768.onnx", "onnx", "cpu",
                          "Validated CPU compatibility baseline for 16 GB Apple Silicon systems.",
-                         "portable_default", true, false, false, {"macos_apple_silicon"},
+                         "portable_default", true, false, true, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
         make_model_entry("int8", 1024, "corridorkey_int8_1024.onnx", "onnx", "cpu",
                          "Available for manual testing on high-memory systems.",
-                         "manual_high_resolution_validation", false, false, false, {},
+                         "manual_high_resolution_validation", false, false, true, {},
                          {"macos_apple_silicon"}, {}),
         make_model_entry("mlx", 2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
                          "Official Apple Silicon model pack for the first native MLX backend.",
@@ -244,7 +271,7 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
         make_model_entry("fp16", 512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
                          "Lower-memory Windows RTX reference variant for lab bring-up.",
-                         "windows_rtx_reference", false, false, false, {}, {"windows_rtx_30_plus"},
+                         "windows_rtx_reference", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb"}),
         make_model_entry("fp16", 768, "corridorkey_fp16_768.onnx", "onnx", "tensorrt",
                          "Portable Windows RTX balanced pack for Ampere-class GPUs.",

@@ -62,6 +62,16 @@ function Copy-OrtDll {
     Copy-Item $resolved $DestinationDir -Force
 }
 
+function Copy-OrtDllIfPresent {
+    param([string]$Root, [string]$Name, [string]$DestinationDir)
+    $resolved = Resolve-OrtDllPath -Root $Root -Name $Name
+    if (-not $resolved) {
+        return $false
+    }
+    Copy-Item $resolved $DestinationDir -Force
+    return $true
+}
+
 if (Test-Path $OutputDir) {
     Remove-Item $OutputDir -Recurse -Force
 }
@@ -75,6 +85,21 @@ Copy-Item $pluginBinary $win64Dir -Force
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir
+
+$copiedUniversalProvider = $false
+foreach ($provider in @(
+        "onnxruntime_providers_dml.dll",
+        "onnxruntime_providers_winml.dll",
+        "onnxruntime_providers_openvino.dll"
+    )) {
+    if (Copy-OrtDllIfPresent -Root $OrtRoot -Name $provider -DestinationDir $win64Dir) {
+        Write-Host "Copied optional runtime DLL: $provider"
+        $copiedUniversalProvider = $true
+    }
+}
+if (-not $copiedUniversalProvider) {
+    Write-Warning "No DirectML/WinML/OpenVINO provider DLL was found under $OrtRoot. AMD/Intel systems will fall back to CPU."
+}
 
 $tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nv_tensorrt_rtx.dll"
 if (-not $tensorrtProvider) {
@@ -103,10 +128,13 @@ foreach ($candidate in $cudartCandidates) {
 }
 
 $targetModels = @(
+    "corridorkey_fp16_512.onnx",
     "corridorkey_fp16_768.onnx",
     "corridorkey_fp16_1024.onnx",
     "corridorkey_fp16_1536.onnx",
-    "corridorkey_int8_512.onnx"
+    "corridorkey_int8_512.onnx",
+    "corridorkey_int8_768.onnx",
+    "corridorkey_int8_1024.onnx"
 )
 if (-not $Skip2048.IsPresent) {
     $targetModels += "corridorkey_fp16_2048.onnx"

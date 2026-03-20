@@ -51,11 +51,13 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     REQUIRE(int8_768 != models.end());
     REQUIRE(int8_768->validated_for_macos);
     REQUIRE_FALSE(int8_768->packaged_for_macos);
+    REQUIRE(int8_768->packaged_for_windows);
     REQUIRE(int8_768->validated_hardware_tiers == std::vector<std::string>{"apple_silicon_16gb"});
 
     auto int8_1024 = find_model("corridorkey_int8_1024.onnx");
     REQUIRE(int8_1024 != models.end());
     REQUIRE_FALSE(int8_1024->validated_for_macos);
+    REQUIRE(int8_1024->packaged_for_windows);
 
     auto mlx_pack = find_model("corridorkey_mlx.safetensors");
     REQUIRE(mlx_pack != models.end());
@@ -71,6 +73,10 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     REQUIRE(fp16_1024->packaged_for_windows);
     REQUIRE(fp16_1024->recommended_backend == "tensorrt");
     REQUIRE(fp16_1024->intended_use == "windows_rtx_primary");
+
+    auto fp16_512 = find_model("corridorkey_fp16_512.onnx");
+    REQUIRE(fp16_512 != models.end());
+    REQUIRE(fp16_512->packaged_for_windows);
 }
 
 TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
@@ -196,6 +202,16 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
         windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default);
     REQUIRE(windows_cpu_model.has_value());
     REQUIRE(windows_cpu_model->filename == "corridorkey_int8_512.onnx");
+
+    RuntimeCapabilities windows_universal_capabilities;
+    windows_universal_capabilities.platform = "windows";
+    windows_universal_capabilities.supported_backends = {Backend::DirectML, Backend::CPU};
+
+    auto windows_universal_model = default_model_for_request(
+        windows_universal_capabilities, DeviceInfo{"AMD Radeon", 16384, Backend::DirectML},
+        std::nullopt);
+    REQUIRE(windows_universal_model.has_value());
+    REQUIRE(windows_universal_model->filename == "corridorkey_int8_1024.onnx");
 }
 
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {

@@ -53,6 +53,13 @@ RuntimeCapabilities windows_capabilities() {
     return capabilities;
 }
 
+RuntimeCapabilities windows_universal_capabilities() {
+    RuntimeCapabilities capabilities;
+    capabilities.platform = "windows";
+    capabilities.supported_backends = {Backend::DirectML, Backend::WindowsML, Backend::CPU};
+    return capabilities;
+}
+
 }  // namespace
 
 TEST_CASE("ofx bootstrap prefers mlx on apple silicon when bootstrap artifacts are present",
@@ -150,6 +157,22 @@ TEST_CASE("fixed windows tensorRT quality fails when the exact model is unavaila
     REQUIRE_FALSE(selection.has_value());
 }
 
+TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when packaged",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-preview");
+    touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityPreview, 1920, 1080);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 512);
+    REQUIRE(selection->effective_resolution == 512);
+    REQUIRE_FALSE(selection->used_fallback);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
+}
+
 TEST_CASE("auto windows tensorRT quality falls back to the highest packaged model",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto");
@@ -173,6 +196,51 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     REQUIRE(selection->effective_resolution == 1536);
     REQUIRE(selection->used_fallback);
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
+}
+
+TEST_CASE("windows universal bootstrap aligns int8 artifact selection with device memory",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-universal-bootstrap");
+    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_1024.onnx");
+
+    auto candidates = build_bootstrap_candidates(
+        windows_universal_capabilities(),
+        DeviceInfo{"AMD Radeon", 16384, Backend::DirectML}, temp_dir.path());
+
+    REQUIRE_FALSE(candidates.empty());
+    REQUIRE(candidates.front().device.backend == Backend::DirectML);
+    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_int8_1024.onnx");
+    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_int8_1024.onnx");
+    REQUIRE(candidates.front().requested_resolution == 1024);
+    REQUIRE(candidates.front().effective_resolution == 1024);
+}
+
+TEST_CASE("auto windows universal quality falls back to the highest packaged int8 model",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-universal-quality-auto");
+    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::DirectML, kQualityAuto, 4096, 2160);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 2048);
+    REQUIRE(selection->effective_resolution == 768);
+    REQUIRE(selection->used_fallback);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_int8_768.onnx");
+}
+
+TEST_CASE("cpu quality guardrail clamps manual qualities above preview",
+          "[unit][ofx][regression]") {
+    REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::CPU, kQualityPreview) ==
+            kQualityPreview);
+    REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::CPU, kQualityMaximum) ==
+            kQualityPreview);
+    REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::TensorRT, kQualityMaximum) ==
+            kQualityMaximum);
 }
 
 TEST_CASE("ofx defaults open new instances with source passthrough disabled",

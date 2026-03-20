@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <optional>
@@ -18,6 +19,8 @@ struct BootstrapEngineCandidate {
     DeviceInfo device = {};
     std::filesystem::path requested_model_path = {};
     std::filesystem::path executable_model_path = {};
+    int requested_resolution = 0;
+    int effective_resolution = 0;
 };
 
 struct QualityArtifactSelection {
@@ -48,6 +51,14 @@ inline bool is_fixed_quality_mode(int quality_mode) {
     return quality_mode != kQualityAuto;
 }
 
+inline int clamp_quality_mode_for_cpu_backend(Backend backend, int quality_mode) {
+    if (backend == Backend::CPU && is_fixed_quality_mode(quality_mode) &&
+        quality_mode != kQualityPreview) {
+        return kQualityPreview;
+    }
+    return quality_mode;
+}
+
 inline int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
     if (quality_mode == kQualityPreview) return 512;
     if (quality_mode == kQualityStandard) return 768;
@@ -64,6 +75,23 @@ inline int resolve_target_resolution(int quality_mode, int input_width, int inpu
 
 inline std::filesystem::path mlx_pack_path(const std::filesystem::path& models_root) {
     return models_root / "corridorkey_mlx.safetensors";
+}
+
+inline std::optional<int> resolution_from_model_path(const std::filesystem::path& path) {
+    std::string stem = path.stem().string();
+    std::size_t last_separator = stem.find_last_of('_');
+    if (last_separator == std::string::npos || last_separator + 1 >= stem.size()) {
+        return std::nullopt;
+    }
+
+    std::string token = stem.substr(last_separator + 1);
+    if (token.empty() ||
+        !std::all_of(token.begin(), token.end(),
+                     [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
+        return std::nullopt;
+    }
+
+    return std::stoi(token);
 }
 
 inline std::filesystem::path artifact_path_for_backend(const std::filesystem::path& models_root,
@@ -85,6 +113,35 @@ inline bool path_exists(const std::filesystem::path& path) {
 inline bool has_mlx_bootstrap_artifacts(const std::filesystem::path& models_root) {
     return path_exists(mlx_pack_path(models_root)) &&
            path_exists(artifact_path_for_backend(models_root, Backend::MLX, 512));
+}
+
+inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
+    const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
+    int input_height) {
+    std::vector<QualityArtifactSelection> candidates;
+    const int requested_resolution =
+        resolve_target_resolution(quality_mode, input_width, input_height);
+
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    for (int resolution : kFallbackResolutions) {
+        if (resolution > requested_resolution) {
+            continue;
+        }
+        if (is_fixed_quality_mode(quality_mode) && resolution != requested_resolution) {
+            continue;
+        }
+
+        auto artifact_path = artifact_path_for_backend(models_root, backend, resolution);
+        if (!path_exists(artifact_path)) {
+            continue;
+        }
+
+        candidates.push_back(QualityArtifactSelection{artifact_path, requested_resolution,
+                                                      resolution,
+                                                      resolution != requested_resolution});
+    }
+
+    return candidates;
 }
 
 inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
@@ -112,7 +169,9 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
         append_unique(
             {DeviceInfo{"Apple Silicon MLX", detected_device.available_memory_mb, Backend::MLX},
              mlx_pack_path(models_root),
-             artifact_path_for_backend(models_root, Backend::MLX, 512)});
+             artifact_path_for_backend(models_root, Backend::MLX, 512),
+             512,
+             512});
     }
 #else
     (void)capabilities;
@@ -138,7 +197,12 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
             }
         }
 
-        append_unique({device, requested_model_path, executable_model_path});
+        int effective_resolution = resolution_from_model_path(executable_model_path).value_or(512);
+        int requested_resolution =
+            resolution_from_model_path(requested_model_path).value_or(effective_resolution);
+        append_unique(
+            {device, requested_model_path, executable_model_path, requested_resolution,
+             effective_resolution});
     };
 
     append_default_candidate(detected_device);
@@ -153,25 +217,10 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
 inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height) {
-    const int requested_resolution =
-        resolve_target_resolution(quality_mode, input_width, input_height);
-
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
-    for (int resolution : kFallbackResolutions) {
-        if (resolution > requested_resolution) {
-            continue;
-        }
-        if (is_fixed_quality_mode(quality_mode) && resolution != requested_resolution) {
-            continue;
-        }
-
-        auto artifact_path = artifact_path_for_backend(models_root, backend, resolution);
-        if (!path_exists(artifact_path)) {
-            continue;
-        }
-
-        return QualityArtifactSelection{artifact_path, requested_resolution, resolution,
-                                        resolution != requested_resolution};
+    auto candidates =
+        quality_artifact_candidates(models_root, backend, quality_mode, input_width, input_height);
+    if (!candidates.empty()) {
+        return candidates.front();
     }
 
     return std::nullopt;

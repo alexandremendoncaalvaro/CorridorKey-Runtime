@@ -54,6 +54,8 @@ constexpr const char* kParamEdgeErode = "edge_erode";
 constexpr const char* kParamEdgeBlur = "edge_blur";
 constexpr const char* kParamRuntimeProcessing = "runtime_processing";
 constexpr const char* kParamRuntimeDevice = "runtime_device";
+constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality";
+constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
@@ -91,13 +93,19 @@ struct InstanceData {
     OfxParamHandle edge_blur_param = nullptr;
     OfxParamHandle runtime_processing_param = nullptr;
     OfxParamHandle runtime_device_param = nullptr;
+    OfxParamHandle runtime_requested_quality_param = nullptr;
+    OfxParamHandle runtime_effective_quality_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     DeviceInfo device = {};
+    DeviceInfo preferred_device = {};
     int active_quality_mode = kQualityAuto;
+    int requested_resolution = 0;
     int active_resolution = 0;
+    bool cpu_quality_guardrail_active = false;
+    std::uint64_t render_count = 0;
     std::string last_error = {};
 };
 
@@ -112,6 +120,7 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
                                int input_height = 0);
+void update_runtime_panel(InstanceData* data);
 
 OfxStatus on_load();
 OfxStatus describe(OfxImageEffectHandle descriptor);
