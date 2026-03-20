@@ -70,6 +70,8 @@ The current test builds already provide:
   reuse, and a packaged runtime server binary inside the OFX bundle/installers.
 - Automatic client-side session recovery when the runtime process loses the
   current session and can be re-prepared locally.
+- Runtime probe-based Windows validation that checks real backend availability
+  instead of relying only on DLL presence.
 - Version-scoped OFX runtime cache roots, shared-frame roots, ports, and log
   files so stale servers from older builds do not collide with the current
   plugin.
@@ -82,6 +84,8 @@ The current test builds already provide:
   packaging/validation flow.
 - Separate Windows test packages for the `TensorRT RTX` path and the official
   `DirectML` path.
+- A Windows release matrix helper that builds both RTX and DirectML packages in
+  one run.
 
 ## Release Blockers
 
@@ -145,7 +149,8 @@ policy together.
 - [ ] **2.7 Crash Containment and Recovery** -- detect server crashes, hung
   renders under load, and startup failures, then surface deterministic OFX
   errors without requiring a Resolve restart. Protocol mismatches and stale
-  version collisions are now handled as part of the baseline runtime path.
+  version collisions are now handled as part of the baseline runtime path; the
+  remaining gap is render-time hang detection and hard reset behavior.
 - [x] **2.8 Diagnostics Parity** -- preserve the current panel/log visibility
   for backend, artifact, quality, warmup state, fallback reason, and stage
   timings when execution is out-of-process.
