@@ -119,7 +119,11 @@ implemented.
   RTX and non-RTX model artifacts for the existing quality ladder.
 - [x] **1.4 Log-First Debugging** -- keep `ofx.log` and
   `corridorkey_ofx_delayload.log` as required evidence for test builds.
-- [ ] **1.5 Current Field Validation** -- keep validating the live macOS and
+- [x] **1.5 Windows DirectML Packaging** -- ship the official DirectML runtime
+  path and validate it via runtime probe, not just DLL presence.
+- [x] **1.6 Windows Release Matrix Helper** -- build both RTX and DirectML
+  Resolve packages in one run using the official packaging flow.
+- [ ] **1.7 Current Field Validation** -- keep validating the live macOS and
   Windows test builds on real Resolve systems before each release candidate.
 
 ## Workstream 2 - Out-of-Process OFX Runtime
