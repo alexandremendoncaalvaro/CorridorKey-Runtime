@@ -43,6 +43,8 @@ The current test builds already provide:
 - Resolve OFX builds for macOS Apple Silicon and Windows.
 - A packaged out-of-process OFX runtime path backed by the `corridorkey`
   runtime server.
+- Deferred runtime bootstrap for out-of-process OFX instances so model/session
+  creation happens on first render instead of during instance creation.
 - Requested versus effective quality feedback in the runtime panel.
 - Visible plugin version in the panel header.
 - Quality modes from `Preview (512)` through `Maximum (2048)`.
@@ -61,8 +63,12 @@ The current test builds already provide:
   instead of silent success on a drifted backend.
 - Structured OFX logging for bootstrap, quality switches, render stages, and
   lifecycle timing.
-- Shared-frame transport, session reuse, and a packaged runtime server binary
-  inside the OFX bundle/installers.
+- Shared-frame transport hardened for cross-process access on Windows, session
+  reuse, and a packaged runtime server binary inside the OFX bundle/installers.
+- Automatic client-side session recovery when the runtime process loses the
+  current session and can be re-prepared locally.
+- Windows Resolve installers and ZIP packages built from the official
+  packaging/validation flow.
 
 ## Release Blockers
 
@@ -70,12 +76,16 @@ These issues still block the final Resolve goal:
 
 - Windows RTX can still fall from GPU to CPU at `1536` or `2048`, especially on
   the first rendered frame.
-- Copy/paste and first-instance latency remain too expensive because inference
-  state is still owned per OFX instance.
+- Copy/paste and first-instance latency need another field-validation pass after
+  deferred bootstrap; the eager `768` bootstrap path is gone, but we still need
+  Resolve-side confirmation that duplication is now acceptably fast.
+- `Preview (512)` still shows too much steady-state CPU-side cost in the
+  current logs, especially around frame extraction/output staging.
 - The current Windows universal path is not honestly AMD/Intel GPU-ready until
   the required provider DLLs and a validated non-NVIDIA execution path exist.
-- The current in-process architecture still couples Resolve stability to runtime
-  crashes, VRAM spikes, and warmup behavior.
+- The out-of-process runtime still needs hardened recovery for server crashes,
+  hung renders, protocol mismatches, and restart scenarios before it can be
+  treated as release-hard.
 
 ## Workstream 1 - Resolve Test Baseline
 
@@ -124,8 +134,9 @@ policy together.
   for backend, artifact, quality, warmup state, fallback reason, and stage
   timings when execution is out-of-process.
 - [ ] **2.9 Rollout Gates** -- validate first-frame latency, copy/paste
-  latency, multi-instance behavior, 4K throughput, VRAM exhaustion behavior,
-  restart flow, and installer simplicity before making this the default path.
+  latency after deferred bootstrap, multi-instance behavior, 4K throughput,
+  VRAM exhaustion behavior, restart flow, and installer simplicity before
+  making this the default path.
 - [x] **2.10 Temporary Compatibility Path** -- keep the current in-process path
   available only as a temporary development fallback until the out-of-process
   path reaches feature parity.
@@ -147,6 +158,9 @@ the out-of-process architecture.
 - [ ] **3.5 Honest Universal Claim** -- only claim Windows universal GPU
   compatibility once AMD/Intel systems can load the required provider path and
   actually execute on GPU.
+- [ ] **3.6 Steady-State Preview Throughput** -- reduce the remaining CPU-side
+  cost in the `512` render path so preview mode stays responsive even after the
+  new out-of-process architecture is in place.
 
 ## Workstream 4 - Compositing Workflow Surface
 
