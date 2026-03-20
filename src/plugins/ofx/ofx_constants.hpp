@@ -23,5 +23,7 @@ constexpr int kOutputSourceMatte = 3;
 constexpr int kDefaultSourcePassthroughEnabled = 0;
 constexpr int kDefaultEdgeErode = 3;
 constexpr int kDefaultEdgeBlur = 7;
+constexpr int kMaxEdgeErode = 32;
+constexpr int kMaxEdgeBlur = 64;
 
 }  // namespace corridorkey::ofx

@@ -261,6 +261,8 @@ TEST_CASE("ofx defaults open new instances with source passthrough disabled",
     REQUIRE(kDefaultSourcePassthroughEnabled == 0);
     REQUIRE(kDefaultEdgeErode == 3);
     REQUIRE(kDefaultEdgeBlur == 7);
+    REQUIRE(kMaxEdgeErode == 32);
+    REQUIRE(kMaxEdgeBlur == 64);
 }
 
 TEST_CASE("ofx runtime panel fields are read-only dynamic strings", "[unit][ofx][regression]") {

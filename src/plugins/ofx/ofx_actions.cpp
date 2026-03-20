@@ -311,13 +311,14 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                       "Blend original source pixels into high-confidence alpha regions "
                       "for sharper interior detail.",
                       "keying_group");
-    define_int_param(param_set, kParamEdgeErode, "Edge Erode", kDefaultEdgeErode, 0, 10,
+    define_int_param(param_set, kParamEdgeErode, "Edge Erode", kDefaultEdgeErode, 0,
+                     kMaxEdgeErode,
                      "Erosion radius for the passthrough interior mask. "
-                     "Higher values widen the transition zone at edges.",
+                     "Higher values widen the transition zone at edges and cost more CPU.",
                      "keying_group");
-    define_int_param(param_set, kParamEdgeBlur, "Edge Blur", kDefaultEdgeBlur, 0, 20,
+    define_int_param(param_set, kParamEdgeBlur, "Edge Blur", kDefaultEdgeBlur, 0, kMaxEdgeBlur,
                      "Blur radius for smoothing the passthrough transition. "
-                     "Higher values create a softer blend between source and model.",
+                     "Higher values create a softer blend between source and model and cost more CPU.",
                      "keying_group");
 
     define_group_param(param_set, "alpha_group", "Alpha", true);
