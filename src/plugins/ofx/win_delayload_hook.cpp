@@ -2,8 +2,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+// clang-format off
+// delayimp.h depends on Windows types/macros from windows.h.
 #include <windows.h>
 #include <delayimp.h>
+// clang-format on
 
 #include <chrono>
 #include <ctime>
@@ -55,7 +58,8 @@ static FARPROC WINAPI corridorkey_delay_load_hook(unsigned dliNotify, PDelayLoad
 
             HMODULE hPlugin = nullptr;
             BOOL result = GetModuleHandleExW(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                 reinterpret_cast<LPCWSTR>(&corridorkey_delay_load_hook), &hPlugin);
 
             if (!result) {

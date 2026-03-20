@@ -241,10 +241,9 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         return windows_rtx_model();
     }
 
-    if (capabilities.platform == "windows" &&
-        (requested_device.backend == Backend::DirectML ||
-         requested_device.backend == Backend::WindowsML ||
-         requested_device.backend == Backend::OpenVINO)) {
+    if (capabilities.platform == "windows" && (requested_device.backend == Backend::DirectML ||
+                                               requested_device.backend == Backend::WindowsML ||
+                                               requested_device.backend == Backend::OpenVINO)) {
         return windows_universal_model();
     }
 

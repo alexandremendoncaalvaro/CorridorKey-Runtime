@@ -1,5 +1,4 @@
 #include <catch2/catch_all.hpp>
-
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -39,14 +38,14 @@ std::uint16_t reserve_local_port() {
     REQUIRE(socket_handle >= 0);
 #endif
 
-    sockaddr_in address {};
+    sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons(0);
 
     REQUIRE(bind(socket_handle, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0);
 
-    sockaddr_in bound_address {};
+    sockaddr_in bound_address{};
 #if defined(_WIN32)
     int length = sizeof(bound_address);
     REQUIRE(getsockname(socket_handle, reinterpret_cast<sockaddr*>(&bound_address), &length) == 0);
@@ -64,9 +63,8 @@ std::uint16_t reserve_local_port() {
 TEST_CASE("ofx runtime service responds to health and shutdown commands",
           "[integration][ofx][runtime]") {
     const auto port = reserve_local_port();
-    const auto log_path =
-        std::filesystem::temp_directory_path() / ("corridorkey_ofx_runtime_" +
-                                                  std::to_string(port) + ".log");
+    const auto log_path = std::filesystem::temp_directory_path() /
+                          ("corridorkey_ofx_runtime_" + std::to_string(port) + ".log");
 
     OfxRuntimeServiceOptions options;
     options.endpoint = LocalJsonEndpoint{"127.0.0.1", port};
@@ -85,7 +83,8 @@ TEST_CASE("ofx runtime service responds to health and shutdown commands",
         OfxRuntimeRequestEnvelope shutdown_request;
         shutdown_request.command = OfxRuntimeCommand::Shutdown;
         shutdown_request.payload = to_json(OfxRuntimeShutdownRequest{"test_shutdown"});
-        auto shutdown_response = send_json_request(options.endpoint, to_json(shutdown_request), 2000);
+        auto shutdown_response =
+            send_json_request(options.endpoint, to_json(shutdown_request), 2000);
         if (shutdown_response) {
             auto parsed = ofx_runtime_response_from_json(*shutdown_response);
             REQUIRE(parsed.has_value());

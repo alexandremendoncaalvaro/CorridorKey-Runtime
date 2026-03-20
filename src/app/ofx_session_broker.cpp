@@ -43,7 +43,9 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     }
 
     std::vector<StageTiming> timings;
-    StageTimingCallback on_stage = [&](const StageTiming& timing) { append_timing(timings, timing); };
+    StageTimingCallback on_stage = [&](const StageTiming& timing) {
+        append_timing(timings, timing);
+    };
 
     auto engine = Engine::create(request.model_path, request.requested_device, on_stage,
                                  request.engine_options);
@@ -86,16 +88,17 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
         return Unexpected<Error>(transport.error());
     }
     if (transport->width() != request.width || transport->height() != request.height) {
-        return Unexpected<Error>(
-            broker_error(ErrorCode::InvalidParameters,
-                         "Shared frame size does not match render request."));
+        return Unexpected<Error>(broker_error(ErrorCode::InvalidParameters,
+                                              "Shared frame size does not match render request."));
     }
 
     std::vector<StageTiming> timings;
-    StageTimingCallback on_stage = [&](const StageTiming& timing) { append_timing(timings, timing); };
+    StageTimingCallback on_stage = [&](const StageTiming& timing) {
+        append_timing(timings, timing);
+    };
 
-    auto result = session->second.engine->process_frame(transport->rgb_view(), transport->hint_view(),
-                                                        request.params, on_stage);
+    auto result = session->second.engine->process_frame(
+        transport->rgb_view(), transport->hint_view(), request.params, on_stage);
     if (!result) {
         return Unexpected<Error>(result.error());
     }
@@ -132,9 +135,9 @@ std::size_t OfxSessionBroker::session_count() const {
 }
 
 std::size_t OfxSessionBroker::active_session_count() const {
-    return static_cast<std::size_t>(std::count_if(
-        m_sessions.begin(), m_sessions.end(),
-        [](const auto& pair) { return pair.second.snapshot.ref_count > 0; }));
+    return static_cast<std::size_t>(
+        std::count_if(m_sessions.begin(), m_sessions.end(),
+                      [](const auto& pair) { return pair.second.snapshot.ref_count > 0; }));
 }
 
 void OfxSessionBroker::cleanup_idle_sessions() {
@@ -154,16 +157,11 @@ std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest&
     if (error) {
         canonical_model_path = request.model_path;
     }
-    return std::to_string(common::detail::fnv1a_64(canonical_model_path.string() + "|" +
-                                                   request.artifact_name + "|" +
-                                                   std::to_string(static_cast<int>(
-                                                       request.requested_device.backend)) +
-                                                   "|" +
-                                                   std::to_string(request.engine_options
-                                                                      .allow_cpu_fallback) +
-                                                   "|" +
-                                                   std::to_string(request.engine_options
-                                                                      .disable_cpu_ep_fallback)));
+    return std::to_string(common::detail::fnv1a_64(
+        canonical_model_path.string() + "|" + request.artifact_name + "|" +
+        std::to_string(static_cast<int>(request.requested_device.backend)) + "|" +
+        std::to_string(request.engine_options.allow_cpu_fallback) + "|" +
+        std::to_string(request.engine_options.disable_cpu_ep_fallback)));
 }
 
 std::vector<StageTiming> OfxSessionBroker::collect_stage_timings(StageTimingCallback& callback) {

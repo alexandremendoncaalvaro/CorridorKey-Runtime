@@ -60,8 +60,8 @@ std::string response_detail(const OfxRuntimeResponseEnvelope& response) {
 Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
     RuntimeLogger logger(options.log_path.empty() ? common::ofx_runtime_server_log_path()
                                                   : options.log_path);
-    logger.log("event=server_start pid=" + std::to_string(current_process_id()) + " port=" +
-               std::to_string(options.endpoint.port));
+    logger.log("event=server_start pid=" + std::to_string(current_process_id()) +
+               " port=" + std::to_string(options.endpoint.port));
 
     auto server = common::LocalJsonServer::listen(options.endpoint);
     if (!server) {
@@ -86,7 +86,8 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         auto request_json = (*client)->read_json(static_cast<int>(options.idle_timeout.count()));
         if (!request_json) {
             auto response = error_response(request_json.error());
-            logger.log("event=request_failed stage=read_json detail=" + request_json.error().message);
+            logger.log("event=request_failed stage=read_json detail=" +
+                       request_json.error().message);
             (*client)->write_json(to_json(response));
             continue;
         }
@@ -99,12 +100,12 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
             continue;
         }
 
-        logger.log("event=request_received command=" +
-                   ofx_runtime_command_to_string(request->command) + " protocol_version=" +
-                   std::to_string(request->protocol_version));
+        logger.log(
+            "event=request_received command=" + ofx_runtime_command_to_string(request->command) +
+            " protocol_version=" + std::to_string(request->protocol_version));
 
-        OfxRuntimeResponseEnvelope response = error_response(
-            Error{ErrorCode::InvalidParameters, "Unsupported OFX runtime command."});
+        OfxRuntimeResponseEnvelope response =
+            error_response(Error{ErrorCode::InvalidParameters, "Unsupported OFX runtime command."});
 
         switch (request->command) {
             case OfxRuntimeCommand::Health: {
@@ -162,9 +163,10 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         }
 
         (*client)->write_json(to_json(response));
-        logger.log("event=request_completed command=" +
-                   ofx_runtime_command_to_string(request->command) + " success=" +
-                   std::to_string(response.success) + " detail=" + response_detail(response));
+        logger.log(
+            "event=request_completed command=" + ofx_runtime_command_to_string(request->command) +
+            " success=" + std::to_string(response.success) +
+            " detail=" + response_detail(response));
         broker.cleanup_idle_sessions();
     }
 

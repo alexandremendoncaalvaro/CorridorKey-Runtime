@@ -1,11 +1,11 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useJobStore } from "@/lib/job";
 import { Button } from "@/components/ui/button";
-import { 
-  FileVideo, 
-  FolderDown, 
-  Zap, 
-  AlertCircle, 
+import {
+  FileVideo,
+  FolderDown,
+  Zap,
+  AlertCircle,
   CheckCircle2,
   ChevronRight,
   Terminal,
@@ -20,18 +20,18 @@ interface JobMetrics {
 }
 
 export function ProcessFlow() {
-  const { 
-    inputPath, setInput, 
+  const {
+    inputPath, setInput,
     outputPath, setOutput,
     hintPath, setHint,
-    startJob, isProcessing, 
-    currentProgress, statusMessage, 
+    startJob, isProcessing,
+    currentProgress, statusMessage,
     error, activeBackend,
     logs
   } = useJobStore();
 
   const [showLogs, setShowLogs] = useState(false);
-  
+
   // Extract metrics from the last log entry if possible
   const lastLog = logs[logs.length - 1];
   let metrics: JobMetrics = {};
@@ -83,17 +83,17 @@ export function ProcessFlow() {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      
+
       {/* Steps Container */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
+
         {/* Step 1: Input */}
-        <div 
+        <div
           onClick={!isProcessing ? handleSelectInput : undefined}
           className={cn(
             "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
-            inputPath 
-              ? "border-brand/40 bg-brand/5" 
+            inputPath
+              ? "border-brand/40 bg-brand/5"
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
             isProcessing && "opacity-50 cursor-not-allowed"
           )}
@@ -110,12 +110,12 @@ export function ProcessFlow() {
         </div>
 
         {/* Step 2: Alpha Hint (Optional) */}
-        <div 
+        <div
           onClick={!isProcessing ? handleSelectHint : undefined}
           className={cn(
             "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4 relative",
-            hintPath 
-              ? "border-brand/40 bg-brand/5" 
+            hintPath
+              ? "border-brand/40 bg-brand/5"
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
             isProcessing && "opacity-50 cursor-not-allowed"
           )}
@@ -133,12 +133,12 @@ export function ProcessFlow() {
         </div>
 
         {/* Step 3: Output */}
-        <div 
+        <div
           onClick={!isProcessing ? handleSelectOutput : undefined}
           className={cn(
             "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
-            outputPath 
-              ? "border-brand/40 bg-brand/5" 
+            outputPath
+              ? "border-brand/40 bg-brand/5"
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
             isProcessing && "opacity-50 cursor-not-allowed"
           )}
@@ -180,7 +180,7 @@ export function ProcessFlow() {
                 </p>
               </div>
             </div>
-            
+
             <div className="flex gap-2">
               {activeBackend && (
                 <div className="px-2 py-1 rounded bg-zinc-800 text-zinc-400 text-[10px] font-mono font-bold uppercase tracking-wider">
@@ -198,8 +198,8 @@ export function ProcessFlow() {
           {!error && (
             <div className="space-y-2">
               <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-brand transition-all duration-500 ease-out shadow-[0_0_10px_rgba(14,165,233,0.5)]" 
+                <div
+                  className="h-full bg-brand transition-all duration-500 ease-out shadow-[0_0_10px_rgba(14,165,233,0.5)]"
                   style={{ width: `${currentProgress}%` }}
                 />
               </div>
@@ -216,7 +216,7 @@ export function ProcessFlow() {
           )}
 
           {/* Log Toggle */}
-          <button 
+          <button
             onClick={() => setShowLogs(!showLogs)}
             className="flex items-center gap-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -234,9 +234,9 @@ export function ProcessFlow() {
 
       {/* Action Area */}
       <div className="flex items-center justify-center pt-4">
-        <Button 
-          size="lg" 
-          disabled={!inputPath || !outputPath || isProcessing} 
+        <Button
+          size="lg"
+          disabled={!inputPath || !outputPath || isProcessing}
           onClick={startJob}
           className="group px-12 relative overflow-hidden"
         >

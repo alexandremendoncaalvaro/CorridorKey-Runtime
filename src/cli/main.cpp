@@ -404,9 +404,8 @@ int main(int argc, char* argv[]) {
         cxxopts::value<std::string>()->default_value("auto"))(
         "endpoint-port", "Local OFX runtime server control port", cxxopts::value<int>())(
         "idle-timeout-ms", "Local OFX runtime server idle timeout in milliseconds",
-        cxxopts::value<int>())(
-        "video-encode", "Video output encoding (lossless, balanced)",
-        cxxopts::value<std::string>()->default_value("lossless"))(
+        cxxopts::value<int>())("video-encode", "Video output encoding (lossless, balanced)",
+                               cxxopts::value<std::string>()->default_value("lossless"))(
         "variant", "ONNX model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",
         cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",

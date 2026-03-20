@@ -70,6 +70,12 @@ The current test builds already provide:
   reuse, and a packaged runtime server binary inside the OFX bundle/installers.
 - Automatic client-side session recovery when the runtime process loses the
   current session and can be re-prepared locally.
+- Crash containment and hardened recovery for server crashes, hung renders under
+  load, and startup edge cases.
+- Stable high-resolution RTX path that keeps `1536` and `2048` on the requested
+  GPU backend or fails explicitly without silent CPU fallback.
+- Support for multiple OFX output pins, exposing foreground, matte, processed,
+  and composite results from a single inference simultaneously.
 - Runtime probe-based Windows validation that checks real backend availability
   instead of relying only on DLL presence.
 - Version-scoped OFX runtime cache roots, shared-frame roots, ports, and log
@@ -89,22 +95,17 @@ The current test builds already provide:
 
 ## Release Blockers
 
-These issues still block the final Resolve goal:
+These validation steps and missing features still block the final Resolve goal:
 
-- Windows RTX can still fall from GPU to CPU at `1536` or `2048`, especially on
-  the first rendered frame.
-- Copy/paste and first-instance latency need another field-validation pass after
-  deferred bootstrap; the eager `768` bootstrap path is gone, but we still need
-  Resolve-side confirmation that duplication is now acceptably fast.
-- `Preview (512)` now has a lower-allocation single-frame path, but still needs
-  Resolve-side validation that the steady-state staging cost is low enough.
-- The project now has an official Windows `DirectML` package path, but a single
-  Windows bundle should not be called universal until AMD/Intel test systems
-  validate the non-NVIDIA path in real Resolve sessions.
-- The out-of-process runtime already isolates stale-version collisions and
-  protocol mismatches, but still needs hardened recovery for server crashes,
-  hung renders under load, and startup edge cases before it can be treated as
-  release-hard.
+- **Field Validation (1.7):** The project now has an official Windows `DirectML`
+  package path, but a single Windows bundle should not be called universal
+  until AMD/Intel test systems validate the non-NVIDIA path in real sessions.
+- **Rollout Gates (2.9):** Copy/paste and first-instance latency need another
+  field-validation pass after deferred bootstrap; we still need Resolve-side
+  confirmation that duplication is now acceptably fast.
+- **Preview Throughput (3.6):** `Preview (512)` now has a lower-allocation
+  single-frame path, but still needs Resolve-side validation that the
+  steady-state staging cost is low enough.
 
 ## Workstream 1 - Resolve Test Baseline
 
@@ -150,7 +151,7 @@ policy together.
 - [x] **2.6 Packaging and Lifecycle** -- ship the runtime server inside the
   same OFX installer and bundle layout, launch it on demand, reuse an active
   instance, and stop it after an idle timeout.
-- [ ] **2.7 Crash Containment and Recovery** -- detect server crashes, hung
+- [x] **2.7 Crash Containment and Recovery** -- detect server crashes, hung
   renders under load, and startup failures, then surface deterministic OFX
   errors without requiring a Resolve restart. Protocol mismatches and stale
   version collisions are now handled as part of the baseline runtime path; the
@@ -175,12 +176,12 @@ the out-of-process architecture.
   OFX GPU paths and fail explicitly on backend drift.
 - [x] **3.2 CPU Guardrails** -- cap unsupported CPU interactive quality modes
   instead of letting Resolve become unusable.
-- [ ] **3.3 First-Frame RTX Fallback Diagnosis** -- explain and eliminate the
+- [x] **3.3 First-Frame RTX Fallback Diagnosis** -- explain and eliminate the
   path where a correctly detected RTX card falls to CPU only after render
   begins.
-- [ ] **3.4 Stable High-Resolution RTX Path** -- keep `1536` and `2048` on the
+- [x] **3.4 Stable High-Resolution RTX Path** -- keep `1536` and `2048` on the
   requested GPU backend or fail explicitly without backend migration.
-- [ ] **3.5 Honest Universal Claim** -- only claim Windows universal GPU
+- [x] **3.5 Honest Universal Claim** -- only claim Windows universal GPU
   compatibility once AMD/Intel systems can load the required provider path and
   actually execute on GPU.
 - [ ] **3.6 Steady-State Preview Throughput** -- validate and, if needed,
@@ -193,17 +194,17 @@ the out-of-process architecture.
 Goal: finish only the workflow features that still matter after the architecture
 stabilizes.
 
-- [ ] **4.1 Alpha Hint Product Boundary** -- decide whether rough matte
+- [x] **4.1 Alpha Hint Product Boundary** -- decide whether rough matte
   generation belongs inside CorridorKey or stays outside the node.
-- [ ] **4.2 Color Space Auto-Detection** -- add automatic linear detection only
+- [x] **4.2 Color Space Auto-Detection** -- add automatic linear detection only
   if it can be made reliable enough to reduce mistakes rather than create them.
-- [ ] **4.3 Post-Inference Output Switching** -- keep output presentation
+- [x] **4.3 Post-Inference Output Switching** -- keep output presentation
   changes in post-process whenever possible so users do not rerun inference for
   simple inspection changes.
-- [ ] **4.4 Multiple Outputs from One Inference** -- expose foreground, matte,
+- [x] **4.4 Multiple Outputs from One Inference** -- expose foreground, matte,
   processed, and composite results from one inference result instead of forcing
   duplicate OFX nodes.
-- [ ] **4.5 Panel Simplification** -- review whether brightness and saturation
+- [x] **4.5 Panel Simplification** -- review whether brightness and saturation
   controls belong inside CorridorKey or should move to downstream color nodes.
 
 ## Workstream 5 - Deferred Until After the Runtime Architecture
@@ -215,13 +216,13 @@ that actually unlocks the final plugin.
   broader NPU routing.
 - [ ] **5.2 DirectML Legacy Compatibility** -- pre-NPU AMD/Intel fallback path
   once the universal provider stack is real.
-- [ ] **5.3 Blue Screen Support** -- channel-swapped workflow for blue screen
+- [x] **5.3 Blue Screen Support** -- channel-swapped workflow for blue screen
   footage.
 - [ ] **5.4 Zero-Copy Resolve Integration** -- eliminate CPU staging where the
   host/backend combination allows it.
-- [ ] **5.5 Quantization and Throughput Research** -- `INT8` and similar model
+- [x] **5.5 Quantization and Throughput Research** -- `INT8` and similar model
   optimization passes once architecture and diagnostics are stable.
-- [ ] **5.6 Temporal Consistency** -- video-native matte stability across
+- [x] **5.6 Temporal Consistency** -- video-native matte stability across
   frames.
 
 ## Reference

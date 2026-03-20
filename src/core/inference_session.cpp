@@ -1,6 +1,8 @@
 #include "inference_session.hpp"
 
 #include <cstdlib>
+#include <exception>
+#include <new>
 #include <string_view>
 #include <unordered_map>
 
@@ -517,6 +519,15 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& alpha_hint,
                                                 const InferenceParams& params, int model_res,
                                                 StageTimingCallback on_stage) {
+    if (model_res <= 0) {
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Invalid model resolution for tiled inference."});
+    }
+    if (rgb.width <= 0 || rgb.height <= 0) {
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Invalid input size for tiled inference."});
+    }
+
     struct PendingTile {
         int x_start = 0;
         int y_start = 0;
@@ -524,172 +535,220 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
         Image hint_view = {};
     };
 
-    int w = rgb.width;
-    int h = rgb.height;
-    int tile_size = model_res;
-    int overlap = std::clamp(params.tile_padding, 0, tile_size - 1);
-    int stride = core::tile_stride(tile_size, overlap);
-    int tile_batch_size = m_device.backend == Backend::CPU ? std::max(1, params.batch_size) : 1;
+    try {
+        int w = rgb.width;
+        int h = rgb.height;
+        int tile_size = model_res;
+        int overlap = std::clamp(params.tile_padding, 0, tile_size - 1);
+        int stride = core::tile_stride(tile_size, overlap);
+        int tile_batch_size = m_device.backend == Backend::CPU ? std::max(1, params.batch_size) : 1;
 
-    // Allocate accumulators
-    ImageBuffer acc_alpha(w, h, 1);
-    ImageBuffer acc_fg(w, h, 3);
-    ImageBuffer acc_weight(w, h, 1);
+        auto validate_buffer = [&](const ImageBuffer& buffer, int width, int height, int channels,
+                                   const char* label) -> Result<void> {
+            const size_t expected = static_cast<size_t>(width) * static_cast<size_t>(height) *
+                                    static_cast<size_t>(channels);
+            if (expected == 0) {
+                return {};
+            }
+            if (buffer.const_view().data.size() != expected) {
+                return Unexpected(
+                    Error{ErrorCode::InferenceFailed,
+                          std::string("Tiled inference failed to allocate ") + label + " buffer."});
+            }
+            return {};
+        };
 
-    std::fill(acc_alpha.view().data.begin(), acc_alpha.view().data.end(), 0.0f);
-    std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0f);
-    std::fill(acc_weight.view().data.begin(), acc_weight.view().data.end(), 0.0f);
+        // Allocate accumulators
+        ImageBuffer acc_alpha(w, h, 1);
+        ImageBuffer acc_fg(w, h, 3);
+        ImageBuffer acc_weight(w, h, 1);
 
-    if (m_tiled_weight_mask.view().width != tile_size || m_tiled_weight_padding != overlap) {
-        m_tiled_weight_mask = ImageBuffer(tile_size, tile_size, 1);
-        Image mask_view = m_tiled_weight_mask.view();
-        common::measure_stage(
-            on_stage, "tile_prepare_weights",
-            [&]() {
-                common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
-                    for (int y = y_begin; y < y_end; ++y) {
-                        float wy = 1.0f;
-                        if (overlap > 0 && y < overlap) {
-                            wy = static_cast<float>(y) / static_cast<float>(overlap);
-                        } else if (overlap > 0 && y >= tile_size - overlap) {
-                            wy =
-                                static_cast<float>(tile_size - 1 - y) / static_cast<float>(overlap);
-                        }
+        auto acc_alpha_ok = validate_buffer(acc_alpha, w, h, 1, "alpha accumulator");
+        if (!acc_alpha_ok) return Unexpected(acc_alpha_ok.error());
+        auto acc_fg_ok = validate_buffer(acc_fg, w, h, 3, "foreground accumulator");
+        if (!acc_fg_ok) return Unexpected(acc_fg_ok.error());
+        auto acc_weight_ok = validate_buffer(acc_weight, w, h, 1, "weight accumulator");
+        if (!acc_weight_ok) return Unexpected(acc_weight_ok.error());
 
-                        for (int x = 0; x < tile_size; ++x) {
-                            float wx = 1.0f;
-                            if (overlap > 0 && x < overlap) {
-                                wx = static_cast<float>(x) / static_cast<float>(overlap);
-                            } else if (overlap > 0 && x >= tile_size - overlap) {
-                                wx = static_cast<float>(tile_size - 1 - x) /
+        std::fill(acc_alpha.view().data.begin(), acc_alpha.view().data.end(), 0.0f);
+        std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0f);
+        std::fill(acc_weight.view().data.begin(), acc_weight.view().data.end(), 0.0f);
+
+        if (m_tiled_weight_mask.view().width != tile_size || m_tiled_weight_padding != overlap) {
+            m_tiled_weight_mask = ImageBuffer(tile_size, tile_size, 1);
+            Image mask_view = m_tiled_weight_mask.view();
+            common::measure_stage(
+                on_stage, "tile_prepare_weights",
+                [&]() {
+                    common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
+                        for (int y = y_begin; y < y_end; ++y) {
+                            float wy = 1.0f;
+                            if (overlap > 0 && y < overlap) {
+                                wy = static_cast<float>(y) / static_cast<float>(overlap);
+                            } else if (overlap > 0 && y >= tile_size - overlap) {
+                                wy = static_cast<float>(tile_size - 1 - y) /
                                      static_cast<float>(overlap);
                             }
-                            mask_view(y, x) = std::min(wx, wy);
+
+                            for (int x = 0; x < tile_size; ++x) {
+                                float wx = 1.0f;
+                                if (overlap > 0 && x < overlap) {
+                                    wx = static_cast<float>(x) / static_cast<float>(overlap);
+                                } else if (overlap > 0 && x >= tile_size - overlap) {
+                                    wx = static_cast<float>(tile_size - 1 - x) /
+                                         static_cast<float>(overlap);
+                                }
+                                mask_view(y, x) = std::min(wx, wy);
+                            }
                         }
-                    }
-                });
-            },
-            1);
-        m_tiled_weight_padding = overlap;
-    }
-
-    if (m_tiled_buffer_size != tile_size || m_tiled_pool_capacity != tile_batch_size) {
-        m_tiled_rgb_pool.clear();
-        m_tiled_hint_pool.clear();
-        m_tiled_rgb_pool.reserve(static_cast<size_t>(tile_batch_size));
-        m_tiled_hint_pool.reserve(static_cast<size_t>(tile_batch_size));
-        for (int i = 0; i < tile_batch_size; ++i) {
-            m_tiled_rgb_pool.emplace_back(tile_size, tile_size, 3);
-            m_tiled_hint_pool.emplace_back(tile_size, tile_size, 1);
+                    });
+                },
+                1);
+            m_tiled_weight_padding = overlap;
         }
-        m_tiled_buffer_size = tile_size;
-        m_tiled_pool_capacity = tile_batch_size;
-    }
-    Image mask = m_tiled_weight_mask.view();
 
-    // Iterate tiles
-    int nx = (w + stride - 1) / stride;
-    int ny = (h + stride - 1) / stride;
-    std::vector<PendingTile> pending_tiles;
-    pending_tiles.reserve(static_cast<size_t>(tile_batch_size));
+        auto mask_ok =
+            validate_buffer(m_tiled_weight_mask, tile_size, tile_size, 1, "tile weight mask");
+        if (!mask_ok) return Unexpected(mask_ok.error());
 
-    auto flush_pending_tiles = [&]() -> Result<void> {
-        if (pending_tiles.empty()) {
+        if (m_tiled_buffer_size != tile_size || m_tiled_pool_capacity != tile_batch_size) {
+            m_tiled_rgb_pool.clear();
+            m_tiled_hint_pool.clear();
+            m_tiled_rgb_pool.reserve(static_cast<size_t>(tile_batch_size));
+            m_tiled_hint_pool.reserve(static_cast<size_t>(tile_batch_size));
+            for (int i = 0; i < tile_batch_size; ++i) {
+                m_tiled_rgb_pool.emplace_back(tile_size, tile_size, 3);
+                m_tiled_hint_pool.emplace_back(tile_size, tile_size, 1);
+            }
+            m_tiled_buffer_size = tile_size;
+            m_tiled_pool_capacity = tile_batch_size;
+        }
+
+        for (const auto& tile : m_tiled_rgb_pool) {
+            auto pool_ok = validate_buffer(tile, tile_size, tile_size, 3, "tile rgb pool");
+            if (!pool_ok) return Unexpected(pool_ok.error());
+        }
+        for (const auto& tile : m_tiled_hint_pool) {
+            auto pool_ok = validate_buffer(tile, tile_size, tile_size, 1, "tile hint pool");
+            if (!pool_ok) return Unexpected(pool_ok.error());
+        }
+
+        Image mask = m_tiled_weight_mask.view();
+
+        // Iterate tiles
+        int nx = (w + stride - 1) / stride;
+        int ny = (h + stride - 1) / stride;
+        std::vector<PendingTile> pending_tiles;
+        pending_tiles.reserve(static_cast<size_t>(tile_batch_size));
+
+        auto flush_pending_tiles = [&]() -> Result<void> {
+            if (pending_tiles.empty()) {
+                return {};
+            }
+
+            std::vector<Image> rgb_tiles;
+            std::vector<Image> hint_tiles;
+            rgb_tiles.reserve(pending_tiles.size());
+            hint_tiles.reserve(pending_tiles.size());
+            for (const auto& tile : pending_tiles) {
+                rgb_tiles.push_back(tile.rgb_view);
+                hint_tiles.push_back(tile.hint_view);
+            }
+
+            auto batch_results = common::measure_stage(
+                on_stage, "tile_infer",
+                [&]() { return infer_batch_raw(rgb_tiles, hint_tiles, params, on_stage); },
+                pending_tiles.size());
+            if (!batch_results) {
+                return Unexpected(batch_results.error());
+            }
+
+            for (size_t tile_index = 0; tile_index < pending_tiles.size(); ++tile_index) {
+                auto& tile = pending_tiles[tile_index];
+                common::measure_stage(
+                    on_stage, "tile_accumulate",
+                    [&]() {
+                        common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
+                            accumulate_tile_rows(mask, (*batch_results)[tile_index],
+                                                 acc_alpha.view(), acc_fg.view(), acc_weight.view(),
+                                                 tile.y_start, tile.x_start, h, w, overlap, y_begin,
+                                                 y_end);
+                        });
+                    },
+                    1);
+            }
+
+            pending_tiles.clear();
             return {};
-        }
+        };
 
-        std::vector<Image> rgb_tiles;
-        std::vector<Image> hint_tiles;
-        rgb_tiles.reserve(pending_tiles.size());
-        hint_tiles.reserve(pending_tiles.size());
-        for (const auto& tile : pending_tiles) {
-            rgb_tiles.push_back(tile.rgb_view);
-            hint_tiles.push_back(tile.hint_view);
-        }
+        for (int ty = 0; ty < ny; ++ty) {
+            for (int tx = 0; tx < nx; ++tx) {
+                int x_start = tx * stride;
+                int y_start = ty * stride;
 
-        auto batch_results = common::measure_stage(
-            on_stage, "tile_infer",
-            [&]() { return infer_batch_raw(rgb_tiles, hint_tiles, params, on_stage); },
-            pending_tiles.size());
-        if (!batch_results) {
-            return Unexpected(batch_results.error());
-        }
+                // Center crop if last tile goes over edge
+                if (x_start + tile_size > w) x_start = std::max(0, w - tile_size);
+                if (y_start + tile_size > h) y_start = std::max(0, h - tile_size);
 
-        for (size_t tile_index = 0; tile_index < pending_tiles.size(); ++tile_index) {
-            auto& tile = pending_tiles[tile_index];
-            common::measure_stage(
-                on_stage, "tile_accumulate",
-                [&]() {
-                    common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
-                        accumulate_tile_rows(mask, (*batch_results)[tile_index], acc_alpha.view(),
-                                             acc_fg.view(), acc_weight.view(), tile.y_start,
-                                             tile.x_start, h, w, overlap, y_begin, y_end);
-                    });
-                },
-                1);
-        }
+                size_t tile_slot = pending_tiles.size();
+                Image rgb_tile = m_tiled_rgb_pool[tile_slot].view();
+                Image hint_tile = m_tiled_hint_pool[tile_slot].view();
 
-        pending_tiles.clear();
-        return {};
-    };
+                common::measure_stage(
+                    on_stage, "tile_extract",
+                    [&]() {
+                        common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
+                            extract_tile_rows(rgb, alpha_hint, rgb_tile, hint_tile, y_start,
+                                              x_start, y_begin, y_end);
+                        });
+                    },
+                    1);
 
-    for (int ty = 0; ty < ny; ++ty) {
-        for (int tx = 0; tx < nx; ++tx) {
-            int x_start = tx * stride;
-            int y_start = ty * stride;
-
-            // Center crop if last tile goes over edge
-            if (x_start + tile_size > w) x_start = std::max(0, w - tile_size);
-            if (y_start + tile_size > h) y_start = std::max(0, h - tile_size);
-
-            size_t tile_slot = pending_tiles.size();
-            Image rgb_tile = m_tiled_rgb_pool[tile_slot].view();
-            Image hint_tile = m_tiled_hint_pool[tile_slot].view();
-
-            common::measure_stage(
-                on_stage, "tile_extract",
-                [&]() {
-                    common::parallel_for_rows(tile_size, [&](int y_begin, int y_end) {
-                        extract_tile_rows(rgb, alpha_hint, rgb_tile, hint_tile, y_start, x_start,
-                                          y_begin, y_end);
-                    });
-                },
-                1);
-
-            pending_tiles.push_back(PendingTile{x_start, y_start, rgb_tile, hint_tile});
-            if (pending_tiles.size() == static_cast<size_t>(tile_batch_size)) {
-                auto flush_res = flush_pending_tiles();
-                if (!flush_res) {
-                    return Unexpected(flush_res.error());
+                pending_tiles.push_back(PendingTile{x_start, y_start, rgb_tile, hint_tile});
+                if (pending_tiles.size() == static_cast<size_t>(tile_batch_size)) {
+                    auto flush_res = flush_pending_tiles();
+                    if (!flush_res) {
+                        return Unexpected(flush_res.error());
+                    }
                 }
             }
         }
+
+        auto flush_res = flush_pending_tiles();
+        if (!flush_res) {
+            return Unexpected(flush_res.error());
+        }
+
+        common::measure_stage(
+            on_stage, "tile_normalize",
+            [&]() {
+                common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+                    normalize_accumulators(acc_alpha.view(), acc_fg.view(), acc_weight.view(),
+                                           y_begin, y_end);
+                });
+            },
+            1);
+
+        FrameResult result;
+        result.alpha = std::move(acc_alpha);
+        result.foreground = std::move(acc_fg);
+
+        common::measure_stage(
+            on_stage, "tile_post_process",
+            [&]() { apply_post_process(result, params, rgb, on_stage); }, 1);
+
+        return result;
+    } catch (const std::bad_alloc&) {
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed, "Tiled inference failed: out of memory."});
+    } catch (const std::exception& e) {
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed, std::string("Tiled inference failed: ") + e.what()});
+    } catch (...) {
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed, "Tiled inference failed due to an unknown error."});
     }
-
-    auto flush_res = flush_pending_tiles();
-    if (!flush_res) {
-        return Unexpected(flush_res.error());
-    }
-
-    common::measure_stage(
-        on_stage, "tile_normalize",
-        [&]() {
-            common::parallel_for_rows(h, [&](int y_begin, int y_end) {
-                normalize_accumulators(acc_alpha.view(), acc_fg.view(), acc_weight.view(), y_begin,
-                                       y_end);
-            });
-        },
-        1);
-
-    FrameResult result;
-    result.alpha = std::move(acc_alpha);
-    result.foreground = std::move(acc_fg);
-
-    common::measure_stage(
-        on_stage, "tile_post_process", [&]() { apply_post_process(result, params, rgb, on_stage); },
-        1);
-
-    return result;
 }
 
 void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params,
@@ -1042,13 +1101,14 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         size_t channel_stride = static_cast<size_t>(model_h) * static_cast<size_t>(model_w);
         size_t total_planar_size = 4 * channel_stride;
 
-        auto ensure_resize_buffer = [&](std::size_t index, int width, int height, int channels)
-            -> Image {
+        auto ensure_resize_buffer = [&](std::size_t index, int width, int height,
+                                        int channels) -> Image {
             if (m_resize_pool.size() <= index) {
                 m_resize_pool.resize(index + 1);
             }
             Image current = m_resize_pool[index].view();
-            if (current.width != width || current.height != height || current.channels != channels) {
+            if (current.width != width || current.height != height ||
+                current.channels != channels) {
                 m_resize_pool[index] = ImageBuffer(width, height, channels);
                 current = m_resize_pool[index].view();
             }
@@ -1063,10 +1123,10 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             }
         }
 
-        Image prepared_rgb = ensure_resize_buffer(0, static_cast<int>(model_w),
-                                                  static_cast<int>(model_h), 3);
-        Image prepared_hint = ensure_resize_buffer(1, static_cast<int>(model_w),
-                                                   static_cast<int>(model_h), 1);
+        Image prepared_rgb =
+            ensure_resize_buffer(0, static_cast<int>(model_w), static_cast<int>(model_h), 3);
+        Image prepared_hint =
+            ensure_resize_buffer(1, static_cast<int>(model_w), static_cast<int>(model_h), 1);
         float* planar_ptr = m_planar_pool[0].view().data.data();
 
         common::measure_stage(
@@ -1077,8 +1137,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
 
                 for (int y = 0; y < model_h; ++y) {
                     for (int x = 0; x < model_w; ++x) {
-                        size_t idx =
-                            static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
+                        size_t idx = static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
                         planar_ptr[0 * channel_stride + idx] =
                             (prepared_rgb(y, x, 0) - 0.485f) / 0.229f;
                         planar_ptr[1 * channel_stride + idx] =
@@ -1102,9 +1161,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
                 effective_shape.size()));
         } else {
-            input_tensors.push_back(Ort::Value::CreateTensor<float>(
-                memory_info, planar_ptr, total_planar_size, effective_shape.data(),
-                effective_shape.size()));
+            input_tensors.push_back(
+                Ort::Value::CreateTensor<float>(memory_info, planar_ptr, total_planar_size,
+                                                effective_shape.data(), effective_shape.size()));
         }
 
         auto output_tensors = common::measure_stage(

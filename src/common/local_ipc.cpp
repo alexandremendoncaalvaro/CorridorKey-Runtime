@@ -124,7 +124,7 @@ Result<void> write_json_line(NativeSocket socket_handle, const nlohmann::json& j
 }
 
 sockaddr_in make_address(const LocalJsonEndpoint& endpoint) {
-    sockaddr_in address {};
+    sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(endpoint.port);
     inet_pton(AF_INET, endpoint.host.c_str(), &address.sin_addr);
@@ -232,8 +232,7 @@ Result<std::optional<LocalJsonConnection>> LocalJsonServer::accept_one(int timeo
         return Unexpected<Error>(wait_result.error());
     }
 
-    auto client_socket =
-        accept(static_cast<NativeSocket>(m_socket), nullptr, nullptr);
+    auto client_socket = accept(static_cast<NativeSocket>(m_socket), nullptr, nullptr);
     if (client_socket == kInvalidSocket) {
         return Unexpected<Error>(socket_error("Failed to accept control connection."));
     }

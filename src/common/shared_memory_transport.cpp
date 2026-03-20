@@ -1,8 +1,8 @@
 #include "shared_memory_transport.hpp"
 
-#include <ctime>
 #include <chrono>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <thread>
 
@@ -29,8 +29,7 @@ Error transport_error(ErrorCode code, const std::string& message) {
 }
 
 #if defined(_WIN32)
-constexpr DWORD kSharedFrameShareMode =
-    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+constexpr DWORD kSharedFrameShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 #endif
 
 std::wstring wide_path(const std::filesystem::path& path) {
@@ -82,8 +81,8 @@ SharedFrameTransport& SharedFrameTransport::operator=(SharedFrameTransport&& oth
 Result<SharedFrameTransport> SharedFrameTransport::create(const std::filesystem::path& path,
                                                           int width, int height) {
     if (width <= 0 || height <= 0) {
-        return Unexpected<Error>(
-            transport_error(ErrorCode::InvalidParameters, "Shared frame dimensions must be positive."));
+        return Unexpected<Error>(transport_error(ErrorCode::InvalidParameters,
+                                                 "Shared frame dimensions must be positive."));
     }
 
     SharedFrameTransport transport;
@@ -134,8 +133,8 @@ SharedFrameTransportHeader SharedFrameTransport::build_header(int width, int hei
     header.rgb_offset = sizeof(SharedFrameTransportHeader);
     header.hint_offset =
         header.rgb_offset + payload_float_count(width, height, header.rgb_channels) * sizeof(float);
-    header.alpha_offset =
-        header.hint_offset + payload_float_count(width, height, header.hint_channels) * sizeof(float);
+    header.alpha_offset = header.hint_offset +
+                          payload_float_count(width, height, header.hint_channels) * sizeof(float);
     header.foreground_offset =
         header.alpha_offset +
         payload_float_count(width, height, header.alpha_channels) * sizeof(float);
@@ -150,9 +149,8 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
     std::error_code error;
     std::filesystem::create_directories(path.parent_path(), error);
     if (error) {
-        return Unexpected<Error>(
-            transport_error(ErrorCode::IoError, "Failed to create shared frame directory: " +
-                                                     error.message()));
+        return Unexpected<Error>(transport_error(
+            ErrorCode::IoError, "Failed to create shared frame directory: " + error.message()));
     }
 
 #if defined(_WIN32)
@@ -180,8 +178,8 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
             transport_error(ErrorCode::IoError, "Failed to create file mapping for shared frame."));
     }
 
-    auto mapping = static_cast<std::byte*>(
-        MapViewOfFile(mapping_handle, FILE_MAP_ALL_ACCESS, 0, 0, size));
+    auto mapping =
+        static_cast<std::byte*>(MapViewOfFile(mapping_handle, FILE_MAP_ALL_ACCESS, 0, 0, size));
     if (mapping == nullptr) {
         CloseHandle(mapping_handle);
         CloseHandle(file_handle);
@@ -202,8 +200,8 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to size shared frame file."));
     }
-    auto mapping = static_cast<std::byte*>(
-        mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+    auto mapping =
+        static_cast<std::byte*>(mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
     if (mapping == MAP_FAILED) {
         ::close(fd);
         return Unexpected<Error>(
@@ -222,9 +220,8 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
 
 Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path& path) {
     if (!std::filesystem::exists(path)) {
-        return Unexpected<Error>(
-            transport_error(ErrorCode::IoError, "Shared frame file does not exist: " +
-                                                     path.string()));
+        return Unexpected<Error>(transport_error(
+            ErrorCode::IoError, "Shared frame file does not exist: " + path.string()));
     }
 
 #if defined(_WIN32)
@@ -250,8 +247,8 @@ Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path
             transport_error(ErrorCode::IoError, "Failed to create file mapping for shared frame."));
     }
 
-    auto mapping = static_cast<std::byte*>(
-        MapViewOfFile(mapping_handle, FILE_MAP_ALL_ACCESS, 0, 0, 0));
+    auto mapping =
+        static_cast<std::byte*>(MapViewOfFile(mapping_handle, FILE_MAP_ALL_ACCESS, 0, 0, 0));
     if (mapping == nullptr) {
         CloseHandle(mapping_handle);
         CloseHandle(file_handle);
@@ -276,9 +273,9 @@ Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path
             transport_error(ErrorCode::IoError, "Failed to read shared frame size."));
     }
 
-    auto mapping = static_cast<std::byte*>(
-        mmap(nullptr, static_cast<std::size_t>(stat_buffer.st_size), PROT_READ | PROT_WRITE,
-             MAP_SHARED, fd, 0));
+    auto mapping =
+        static_cast<std::byte*>(mmap(nullptr, static_cast<std::size_t>(stat_buffer.st_size),
+                                     PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
     if (mapping == MAP_FAILED) {
         ::close(fd);
         return Unexpected<Error>(
@@ -380,11 +377,10 @@ Image SharedFrameTransport::hint_view() {
 }
 
 Image SharedFrameTransport::alpha_view() {
-    return Image{
-        width(), height(), static_cast<int>(m_header->alpha_channels),
-        std::span<float>(float_data_at(m_header->alpha_offset),
-                         payload_float_count(width(), height(),
-                                             static_cast<int>(m_header->alpha_channels)))};
+    return Image{width(), height(), static_cast<int>(m_header->alpha_channels),
+                 std::span<float>(float_data_at(m_header->alpha_offset),
+                                  payload_float_count(width(), height(),
+                                                      static_cast<int>(m_header->alpha_channels)))};
 }
 
 Image SharedFrameTransport::foreground_view() {
@@ -402,9 +398,8 @@ std::filesystem::path next_ofx_shared_frame_path() {
     const auto time_seed = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto thread_seed =
         static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
-    auto seed = std::to_string(detail::fnv1a_64(root.string() + "|" +
-                                                std::to_string(time_seed) + "|" +
-                                                std::to_string(thread_seed) + "|" +
+    auto seed = std::to_string(detail::fnv1a_64(root.string() + "|" + std::to_string(time_seed) +
+                                                "|" + std::to_string(thread_seed) + "|" +
                                                 std::to_string(std::time(nullptr))));
     return root / ("frame_" + seed + ".ckfx");
 }

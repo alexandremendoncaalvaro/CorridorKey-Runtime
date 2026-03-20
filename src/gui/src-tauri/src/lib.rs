@@ -114,7 +114,7 @@ async fn get_engine_status(app: AppHandle) -> Result<String, String> {
 
     let output = command.output()
         .map_err(|e| format!("Process Spawn Error: Could not start {}. Details: {}", engine_path.display(), e))?;
-    
+
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
@@ -128,7 +128,7 @@ async fn start_processing(app: AppHandle, input: String, output: String, hint: O
     let current_dir = engine_path.parent().unwrap().to_path_buf();
 
     let mut args = vec!["process".to_string(), "--input".to_string(), input, "--output".to_string(), output, "--json".to_string()];
-    
+
     if let Some(h) = hint {
         if !h.is_empty() {
             args.push("--alpha-hint".to_string());
@@ -156,7 +156,7 @@ async fn start_processing(app: AppHandle, input: String, output: String, hint: O
         .map_err(|e| format!("Process Spawn Error: {}", e))?;
 
     let stdout = child.stdout.take().unwrap();
-    
+
     // Spawn a standard thread to read stdout and emit to Tauri frontend
     thread::spawn(move || {
         let reader = BufReader::new(stdout);

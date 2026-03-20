@@ -2,6 +2,9 @@
 
 add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_image_utils.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_instance.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
     test_color_utils.cpp
     test_despill.cpp
     test_despeckle.cpp
@@ -10,6 +13,7 @@ add_executable(test_unit
     test_inference_session.cpp
     test_ofx_image_utils.cpp
     test_ofx_model_selection.cpp
+    test_ofx_runtime_panel.cpp
     test_ofx_runtime_protocol.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
@@ -20,6 +24,7 @@ add_executable(test_unit
     test_stage_profiler.cpp
     test_ofx_stubs.cpp
     test_tile_blend.cpp
+    test_warmup_policy.cpp
 )
 
 target_link_libraries(test_unit

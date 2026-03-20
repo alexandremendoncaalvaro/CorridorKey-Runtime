@@ -3,14 +3,30 @@ setlocal
 
 set "ScriptDir=%~dp0"
 set "SrcPath=%ScriptDir%CorridorKey.ofx.bundle"
-if not exist "%SrcPath%" (
-    set "SrcPath=%ScriptDir%dist\CorridorKey.ofx.bundle"
-)
+set "DistPath=%ScriptDir%dist\CorridorKey.ofx.bundle"
 
 set "DstPath=C:\Program Files\Common Files\OFX\Plugins\CorridorKey.ofx.bundle"
 set "CacheFile=%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
 
 echo Installing CorridorKey OFX Plugin...
+echo Packaging plugin bundle...
+if exist "%ScriptDir%scripts\package_ofx.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ScriptDir%scripts\package_ofx.ps1"
+    if errorlevel 1 (
+        echo.
+        echo ERROR: Packaging failed.
+        echo.
+        pause
+        exit /b 1
+    )
+) else (
+    echo Packaging script not found. Using prebuilt bundle in this folder.
+)
+
+if exist "%DistPath%" (
+    set "SrcPath=%DistPath%"
+)
+
 echo Source: "%SrcPath%"
 echo Destination: "%DstPath%"
 echo.
@@ -39,6 +55,15 @@ if not exist "%SrcPath%\Contents\Win64\onnxruntime.dll" (
 echo Bundle validation passed.
 echo.
 
+echo Checking if DaVinci Resolve is running...
+tasklist /fi "imagename eq Resolve.exe" | find /i "Resolve.exe" > NUL
+if not errorlevel 1 (
+    echo Closing DaVinci Resolve forcefully to release file locks...
+    taskkill /f /im Resolve.exe > NUL 2>NUL
+    timeout /t 2 /nobreak > NUL
+)
+echo.
+
 echo Removing old DaVinci Resolve OFX Cache...
 if exist "%CacheFile%" del /f /q "%CacheFile%"
 
@@ -48,5 +73,10 @@ if exist "%DstPath%" rmdir /s /q "%DstPath%"
 echo Copying new plugin bundle to OFX system directory...
 xcopy "%SrcPath%" "%DstPath%" /E /I /H /Y /Q
 
-echo Done! You can now start DaVinci Resolve.
+echo Starting DaVinci Resolve...
+if exist "C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe" (
+    start "" "C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe"
+)
+
+echo Done!
 pause

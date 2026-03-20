@@ -19,11 +19,14 @@ if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
 if ([string]::IsNullOrWhiteSpace($RtxOrtRoot)) {
+    $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
     $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
-    if (Test-Path $universalOrt) {
+    if (Test-Path $rtxOrt) {
+        $RtxOrtRoot = $rtxOrt
+    } elseif (Test-Path $universalOrt) {
         $RtxOrtRoot = $universalOrt
     } else {
-        $RtxOrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+        $RtxOrtRoot = $rtxOrt
     }
 }
 if ([string]::IsNullOrWhiteSpace($DirectMlOrtRoot)) {

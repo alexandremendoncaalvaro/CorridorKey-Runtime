@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <corridorkey/detail/warmup_policy.hpp>
 #include <corridorkey/engine.hpp>
 #include <corridorkey/frame_io.hpp>
 #include <deque>
@@ -22,15 +23,15 @@ class Engine::Impl {
     std::optional<DeviceInfo> cpu_fallback_device;
     std::optional<BackendFallbackInfo> fallback_info;
     EngineCreateOptions create_options = {};
-    std::once_flag warmup_once;
+    std::mutex warmup_mutex;
+    std::optional<int> last_warmup_resolution;
     std::optional<Error> warmup_error;
 
     Impl() = default;
 
     bool can_fallback_to_cpu() const {
         return create_options.allow_cpu_fallback && cpu_fallback_device.has_value() &&
-               session != nullptr &&
-               session->device().backend != Backend::CPU;
+               session != nullptr && session->device().backend != Backend::CPU;
     }
 
     Result<void> activate_cpu_fallback(std::string_view phase, const std::string& reason) {
@@ -45,9 +46,8 @@ class Engine::Impl {
         }
 
         session = std::move(*fallback_res);
-        fallback_info = BackendFallbackInfo{
-            failed_backend, session->device().backend,
-            std::string(phase) + ": " + reason};
+        fallback_info = BackendFallbackInfo{failed_backend, session->device().backend,
+                                            std::string(phase) + ": " + reason};
         return {};
     }
 
@@ -71,28 +71,40 @@ class Engine::Impl {
         return operation();
     }
 
-    Result<void> ensure_warmup(StageTimingCallback on_stage) {
-        std::call_once(warmup_once, [&]() {
-            int res = session != nullptr ? session->recommended_resolution() : 512;
-            ImageBuffer warm_rgb(res, res, 3);
-            ImageBuffer warm_hint(res, res, 1);
-            std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
-            std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
+    Result<void> ensure_warmup(StageTimingCallback on_stage, int target_resolution) {
+        std::lock_guard<std::mutex> lock(warmup_mutex);
 
-            auto warmup_frame = common::measure_stage(on_stage, "engine_warmup", [&]() {
-                return run_with_cpu_fallback<FrameResult>("warmup", [&]() {
-                    return session->run(warm_rgb.view(), warm_hint.view(), {}, on_stage);
-                });
-            });
-            if (!warmup_frame) {
-                warmup_error = warmup_frame.error();
+        int recommended = session != nullptr ? session->recommended_resolution() : 512;
+        int desired_resolution = detail::resolve_warmup_resolution(target_resolution, recommended);
+
+        if (!detail::should_run_warmup(desired_resolution, last_warmup_resolution)) {
+            if (warmup_error.has_value()) {
+                return Unexpected(*warmup_error);
             }
+            return {};
+        }
+
+        ImageBuffer warm_rgb(64, 64, 3);
+        ImageBuffer warm_hint(64, 64, 1);
+        std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
+        std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
+
+        InferenceParams warm_params;
+        warm_params.target_resolution = desired_resolution;
+
+        auto warmup_frame = common::measure_stage(on_stage, "engine_warmup", [&]() {
+            return run_with_cpu_fallback<FrameResult>("warmup", [&]() {
+                return session->run(warm_rgb.view(), warm_hint.view(), warm_params, on_stage);
+            });
         });
 
-        if (warmup_error.has_value()) {
+        last_warmup_resolution = desired_resolution;
+        if (!warmup_frame) {
+            warmup_error = warmup_frame.error();
             return Unexpected(*warmup_error);
         }
 
+        warmup_error.reset();
         return {};
     }
 };
@@ -178,9 +190,9 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
             return Unexpected(session_res.error());
         }
         engine->m_impl->session = std::move(*fallback_res);
-        engine->m_impl->fallback_info = BackendFallbackInfo{
-            requested_device.backend, Backend::CPU,
-            std::string("session_create: ") + session_res.error().message};
+        engine->m_impl->fallback_info =
+            BackendFallbackInfo{requested_device.backend, Backend::CPU,
+                                std::string("session_create: ") + session_res.error().message};
     } else if (!session_res) {
         return Unexpected(session_res.error());
     } else {
@@ -197,14 +209,13 @@ Result<FrameResult> Engine::process_frame(const Image& rgb, const Image& alpha_h
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
-    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    auto warmup_res = m_impl->ensure_warmup(on_stage, params.target_resolution);
     if (!warmup_res) {
         return Unexpected(warmup_res.error());
     }
 
     return m_impl->run_with_cpu_fallback<FrameResult>(
-        "render_frame",
-        [&]() { return m_impl->session->run(rgb, alpha_hint, params, on_stage); });
+        "render_frame", [&]() { return m_impl->session->run(rgb, alpha_hint, params, on_stage); });
 }
 
 Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<Image>& rgbs,
@@ -215,14 +226,14 @@ Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<I
         return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
     }
 
-    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    auto warmup_res = m_impl->ensure_warmup(on_stage, params.target_resolution);
     if (!warmup_res) {
         return Unexpected(warmup_res.error());
     }
 
-    return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
-        "render_batch",
-        [&]() { return m_impl->session->run_batch(rgbs, alpha_hints, params, on_stage); });
+    return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>("render_batch", [&]() {
+        return m_impl->session->run_batch(rgbs, alpha_hints, params, on_stage);
+    });
 }
 
 Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& inputs,
@@ -236,7 +247,7 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
             Error{ErrorCode::InvalidParameters, "Inputs and alpha hints size mismatch"});
     }
 
-    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    auto warmup_res = m_impl->ensure_warmup(on_stage, params.target_resolution);
     if (!warmup_res) {
         return Unexpected(warmup_res.error());
     }
@@ -289,7 +300,7 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
             [&]() {
                 return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
                     "sequence_infer_batch", [&]() {
-                    return m_impl->session->run_batch(rgb_views, hint_views, params, on_stage);
+                        return m_impl->session->run_batch(rgb_views, hint_views, params, on_stage);
                     });
             },
             current_batch_size);
@@ -328,7 +339,7 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         return Unexpected(Error{ErrorCode::InferenceFailed, "Engine not initialized"});
     }
 
-    auto warmup_res = m_impl->ensure_warmup(on_stage);
+    auto warmup_res = m_impl->ensure_warmup(on_stage, params.target_resolution);
     if (!warmup_res) {
         return Unexpected(warmup_res.error());
     }
@@ -508,8 +519,8 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
             [&]() {
                 return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
                     "video_infer_batch", [&]() {
-                    return m_impl->session->run_batch(current_batch.rgb_views,
-                                                      current_batch.hint_views, params, on_stage);
+                        return m_impl->session->run_batch(
+                            current_batch.rgb_views, current_batch.hint_views, params, on_stage);
                     });
             },
             current_batch.rgb_views.size());

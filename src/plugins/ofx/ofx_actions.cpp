@@ -107,6 +107,7 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
     g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0,
                                      kRuntimeStatusStringMode);
     g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, kRuntimeStatusEnabled);
+    g_suites.property->propSetInt(param_props, kOfxParamPropEvaluateOnChange, 0, 0);
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -114,8 +115,7 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
 }
 
 void define_info_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                       const char* default_value, const char* hint,
-                       const char* parent = nullptr) {
+                       const char* default_value, const char* hint, const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props) !=
         kOfxStatOK) {
@@ -127,6 +127,7 @@ void define_info_param(OfxParamSetHandle param_set, const char* name, const char
     g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0,
                                      kOfxParamStringIsLabel);
     g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, 0);
+    g_suites.property->propSetInt(param_props, kOfxParamPropEvaluateOnChange, 0, 0);
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -233,6 +234,26 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
                                      kOfxImageComponentRGBA);
 
+    if (g_suites.image_effect->clipDefine(descriptor, kClipMatteOutput, &clip_props) == kOfxStatOK) {
+        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
+                                         kOfxImageComponentRGBA);
+        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 1,
+                                         kOfxImageComponentAlpha);
+        g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
+    }
+    if (g_suites.image_effect->clipDefine(descriptor, kClipForegroundOutput, &clip_props) == kOfxStatOK) {
+        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
+                                         kOfxImageComponentRGBA);
+        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 1,
+                                         kOfxImageComponentRGB);
+        g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
+    }
+    if (g_suites.image_effect->clipDefine(descriptor, kClipCompositeOutput, &clip_props) == kOfxStatOK) {
+        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
+                                         kOfxImageComponentRGBA);
+        g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
+    }
+
     OfxParamSetHandle param_set = nullptr;
     if (g_suites.image_effect->getParamSet(descriptor, &param_set) != kOfxStatOK) {
         log_message("describe_in_context", "Failed to get param set.");
@@ -260,6 +281,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                 "Shows the actual model or bridge file loaded for the current "
                                 "quality mode.",
                                 "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeStatus, "Status", "Initializing...",
+        "Shows the last frame time or the most recent error during engine load or render.",
+        "runtime_group");
 
     define_group_param(param_set, "quality_group", "Quality", true);
 
@@ -268,6 +293,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                          "Maximum (2048)"},
                         "Inference resolution. Auto selects based on input size. "
                         "Higher values produce better detail at the cost of speed.",
+                        "quality_group");
+    define_choice_param(param_set, kParamQuantizationMode, "Quantization", kDefaultQuantizationMode,
+                        {"Auto", "FP16", "INT8"},
+                        "Preferred model precision for this instance. Auto uses the backend "
+                        "default. FP16 forces full-precision artifacts when available. INT8 "
+                        "prefers quantized artifacts when available.",
                         "quality_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process at native resolution using overlapping tiles. "
@@ -306,29 +337,40 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Minimum connected component area in pixels to keep.", "keying_group");
     define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
                         "Edge refinement strength. 0 disables the refiner.", "keying_group");
+    define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
+                        {"Green", "Blue"},
+                        "Select the dominant screen color. Blue swaps channels internally so "
+                        "the keyer treats blue screens like green screens.",
+                        "keying_group");
     define_bool_param(param_set, kParamSourcePassthrough, "Source Passthrough",
                       kDefaultSourcePassthroughEnabled,
                       "Blend original source pixels into high-confidence alpha regions "
                       "for sharper interior detail.",
                       "keying_group");
-    define_int_param(param_set, kParamEdgeErode, "Edge Erode", kDefaultEdgeErode, 0,
-                     kMaxEdgeErode,
+    define_int_param(param_set, kParamEdgeErode, "Edge Erode", kDefaultEdgeErode, 0, kMaxEdgeErode,
                      "Erosion radius for the passthrough interior mask. "
                      "Higher values widen the transition zone at edges and cost more CPU.",
                      "keying_group");
-    define_int_param(param_set, kParamEdgeBlur, "Edge Blur", kDefaultEdgeBlur, 0, kMaxEdgeBlur,
-                     "Blur radius for smoothing the passthrough transition. "
-                     "Higher values create a softer blend between source and model and cost more CPU.",
-                     "keying_group");
+    define_int_param(
+        param_set, kParamEdgeBlur, "Edge Blur", kDefaultEdgeBlur, 0, kMaxEdgeBlur,
+        "Blur radius for smoothing the passthrough transition. "
+        "Higher values create a softer blend between source and model and cost more CPU.",
+        "keying_group");
 
     define_group_param(param_set, "alpha_group", "Alpha", true);
     define_info_param(
         param_set, "alpha_hint_info", "Hint Input",
-        "RGBA uses A. Alpha uses its single channel. RGB falls back to R. No hint uses a rough matte.",
+        "RGBA uses A. Alpha uses its single channel. RGB falls back to R. No hint uses a rough "
+        "matte.",
         "The Alpha Hint clip accepts RGBA, Alpha, or RGB. RGBA uses the alpha channel. Alpha "
         "uses the single provided channel directly. RGB falls back to the red channel. If no "
         "hint is connected, CorridorKey generates a rough matte from the source image.",
         "alpha_group");
+    define_choice_param(param_set, kParamAlphaHintMode, "Alpha Hint Mode", kDefaultAlphaHintMode,
+                        {"Auto (Fallback)", "External Only"},
+                        "Auto falls back to a rough matte when no hint clip is available. "
+                        "External Only requires a connected hint clip.",
+                        "alpha_group");
 
     define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
                         "Remap alpha: values at or below this become fully transparent.",
@@ -340,21 +382,18 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "alpha_group");
     define_double_param(param_set, kParamAlphaSoftness, "Alpha Edge Softness", 0.0, 0.0, 5.0,
                         "Blur the alpha edge to soften transitions.", "alpha_group");
-
-    define_group_param(param_set, "color_group", "Color", true);
-
-    define_double_param(param_set, kParamBrightness, "Brightness", 1.0, 0.5, 2.0,
-                        "Foreground brightness adjustment applied in linear space.", "color_group");
-    define_double_param(param_set, kParamSaturation, "Saturation", 1.0, 0.0, 2.0,
-                        "Foreground saturation adjustment. 0 = grayscale, 1 = original.",
-                        "color_group");
+    define_double_param(
+        param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
+        1.0, "Blend current output with the previous frame for temporal stability.", "alpha_group");
 
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
-    define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
-                      "Enable only when source pixels are already linear. Processed and Source + "
-                      "Matte remain linear-premultiplied in this mode.",
-                      "advanced_group");
+    define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
+                        kDefaultInputColorSpace, {"Auto", "sRGB", "Linear"},
+                        "Auto matches legacy behavior (treats input as sRGB). "
+                        "Processed and Source + Matte remain linear-premultiplied when Linear is "
+                        "selected.",
+                        "advanced_group");
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;
@@ -381,14 +420,26 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
         }
     }
 
-    std::string components_key =
-        std::string("OfxImageClipPropComponents_") + kOfxImageEffectOutputClipName;
-    std::string depth_key = std::string("OfxImageClipPropDepth_") + kOfxImageEffectOutputClipName;
+    const char* output_clips[] = {
+        kOfxImageEffectOutputClipName,
+        kClipMatteOutput,
+        kClipForegroundOutput,
+        kClipCompositeOutput
+    };
 
-    g_suites.property->propSetString(out_args, components_key.c_str(), 0, kOfxImageComponentRGBA);
-    g_suites.property->propSetString(out_args, depth_key.c_str(), 0, depth_value);
-    g_suites.property->propSetString(out_args, kOfxImageEffectPropPreMultiplication, 0,
-                                     kOfxImagePreMultiplied);
+    for (const char* clip_name : output_clips) {
+        std::string components_key = std::string("OfxImageClipPropComponents_") + clip_name;
+        std::string depth_key = std::string("OfxImageClipPropDepth_") + clip_name;
+
+        g_suites.property->propSetString(out_args, components_key.c_str(), 0, kOfxImageComponentRGBA);
+        g_suites.property->propSetString(out_args, depth_key.c_str(), 0, depth_value);
+        if (std::strcmp(clip_name, kOfxImageEffectOutputClipName) == 0 ||
+            std::strcmp(clip_name, kClipCompositeOutput) == 0 ||
+            std::strcmp(clip_name, kClipForegroundOutput) == 0) {
+            std::string premult_key = std::string("OfxImageClipPropPreMultiplication_") + clip_name;
+            g_suites.property->propSetString(out_args, premult_key.c_str(), 0, kOfxImagePreMultiplied);
+        }
+    }
 
     log_message("get_clip_preferences", "Clip preferences set.");
     return kOfxStatOK;

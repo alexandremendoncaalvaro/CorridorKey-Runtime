@@ -30,16 +30,16 @@ std::optional<Json> get_optional_object_field(const Json& json, const char* name
 
 Result<std::string> required_string(const Json& json, const char* name) {
     if (!json.contains(name) || !json.at(name).is_string()) {
-        return Unexpected<Error>(invalid_protocol_error(std::string("Missing string field: ") +
-                                                       name));
+        return Unexpected<Error>(
+            invalid_protocol_error(std::string("Missing string field: ") + name));
     }
     return json.at(name).get<std::string>();
 }
 
 Result<int> required_int(const Json& json, const char* name) {
     if (!json.contains(name) || !json.at(name).is_number_integer()) {
-        return Unexpected<Error>(invalid_protocol_error(std::string("Missing integer field: ") +
-                                                       name));
+        return Unexpected<Error>(
+            invalid_protocol_error(std::string("Missing integer field: ") + name));
     }
     return json.at(name).get<int>();
 }
@@ -54,16 +54,16 @@ Result<std::uint64_t> required_uint64(const Json& json, const char* name) {
 
 Result<bool> required_bool(const Json& json, const char* name) {
     if (!json.contains(name) || !json.at(name).is_boolean()) {
-        return Unexpected<Error>(invalid_protocol_error(std::string("Missing boolean field: ") +
-                                                       name));
+        return Unexpected<Error>(
+            invalid_protocol_error(std::string("Missing boolean field: ") + name));
     }
     return json.at(name).get<bool>();
 }
 
 Result<Json> required_object(const Json& json, const char* name) {
     if (!json.contains(name) || !json.at(name).is_object()) {
-        return Unexpected<Error>(invalid_protocol_error(std::string("Missing object field: ") +
-                                                       name));
+        return Unexpected<Error>(
+            invalid_protocol_error(std::string("Missing object field: ") + name));
     }
     return json.at(name);
 }
@@ -170,8 +170,10 @@ nlohmann::json to_json(const DeviceInfo& device) {
 Result<DeviceInfo> device_from_json(const nlohmann::json& json) {
     auto name = required_string(json, "name");
     if (!name) return Unexpected<Error>(name.error());
-    if (!json.contains("available_memory_mb") || !json.at("available_memory_mb").is_number_integer()) {
-        return Unexpected<Error>(invalid_protocol_error("Missing integer field: available_memory_mb"));
+    if (!json.contains("available_memory_mb") ||
+        !json.at("available_memory_mb").is_number_integer()) {
+        return Unexpected<Error>(
+            invalid_protocol_error("Missing integer field: available_memory_mb"));
     }
     auto backend_string = required_string(json, "backend");
     if (!backend_string) return Unexpected<Error>(backend_string.error());
@@ -228,8 +230,8 @@ nlohmann::json to_json(const InferenceParams& params) {
                 {"batch_size", params.batch_size},
                 {"enable_tiling", params.enable_tiling},
                 {"tile_padding", params.tile_padding},
-                {"upscale_method", params.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4"
-                                                                                   : "bilinear"},
+                {"upscale_method",
+                 params.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear"},
                 {"source_passthrough", params.source_passthrough},
                 {"sp_erode_px", params.sp_erode_px},
                 {"sp_blur_px", params.sp_blur_px}};
@@ -523,8 +525,7 @@ nlohmann::json to_json(const OfxRuntimeRenderFrameResponse& response) {
     return Json{{"session", to_json(response.session)}, {"timings", timings}};
 }
 
-Result<OfxRuntimeRenderFrameResponse> render_frame_response_from_json(
-    const nlohmann::json& json) {
+Result<OfxRuntimeRenderFrameResponse> render_frame_response_from_json(const nlohmann::json& json) {
     auto session_json = required_object(json, "session");
     if (!session_json) return Unexpected<Error>(session_json.error());
     auto session = session_snapshot_from_json(*session_json);

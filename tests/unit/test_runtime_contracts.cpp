@@ -207,9 +207,9 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     windows_universal_capabilities.platform = "windows";
     windows_universal_capabilities.supported_backends = {Backend::DirectML, Backend::CPU};
 
-    auto windows_universal_model = default_model_for_request(
-        windows_universal_capabilities, DeviceInfo{"AMD Radeon", 16384, Backend::DirectML},
-        std::nullopt);
+    auto windows_universal_model =
+        default_model_for_request(windows_universal_capabilities,
+                                  DeviceInfo{"AMD Radeon", 16384, Backend::DirectML}, std::nullopt);
     REQUIRE(windows_universal_model.has_value());
     REQUIRE(windows_universal_model->filename == "corridorkey_int8_1024.onnx");
 }

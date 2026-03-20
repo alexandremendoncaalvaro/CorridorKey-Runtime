@@ -1,9 +1,9 @@
 import { cn } from "@/lib/utils";
-import { 
-  Zap, 
-  History, 
-  Cpu, 
-  Settings, 
+import {
+  Zap,
+  History,
+  Cpu,
+  Settings,
   HelpCircle
 } from "lucide-react";
 
@@ -20,8 +20,8 @@ function SidebarItem({ icon: Icon, label, active, onClick }: SidebarItemProps) {
       onClick={onClick}
       className={cn(
         "flex items-center w-full gap-3 px-3 py-2 transition-all rounded-lg text-sm font-medium",
-        active 
-          ? "bg-brand/10 text-brand" 
+        active
+          ? "bg-brand/10 text-brand"
           : "text-muted-foreground hover:bg-zinc-900 hover:text-zinc-100"
       )}
     >
@@ -43,7 +43,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <img src="/logo.png" className="w-6 h-6 object-contain shrink-0" alt="Logo" />
         <span className="font-bold tracking-tight text-lg">CorridorKey</span>
       </div>
-      
+
       <div className="flex-1 px-4 py-6 space-y-1">
         <SidebarItem icon={Zap} label="Workflow" active={activeTab === "Workflow"} onClick={() => onTabChange("Workflow")} />
         <SidebarItem icon={History} label="History" active={activeTab === "History"} onClick={() => onTabChange("History")} />

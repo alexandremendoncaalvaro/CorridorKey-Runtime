@@ -76,11 +76,14 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
 if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
+    $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
     $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
-    if (Test-Path $universalOrt) {
+    if (Test-Path $rtxOrt) {
+        $OrtRoot = $rtxOrt
+    } elseif (Test-Path $universalOrt) {
         $OrtRoot = $universalOrt
     } else {
-        $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+        $OrtRoot = $rtxOrt
     }
 }
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
@@ -163,6 +166,12 @@ ShowUninstDetails show
 
 Section "Install"
   SetRegView 64
+
+  DetailPrint "Closing DaVinci Resolve..."
+  nsExec::ExecToStack 'taskkill /F /IM Resolve.exe'
+  Pop `$0
+  Sleep 2000
+
   DetailPrint "Removing previous CorridorKey OFX bundle..."
   RMDir /r "`${PLUGIN_DEST}"
 
@@ -184,6 +193,9 @@ Section "Install"
 
   DetailPrint "Clearing DaVinci Resolve OFX cache..."
   Delete "`${CACHE_FILE}"
+
+  DetailPrint "Starting DaVinci Resolve..."
+  ExecShell "" "`$PROGRAMFILES64\Blackmagic Design\DaVinci Resolve\Resolve.exe"
 SectionEnd
 
 Section "Uninstall"

@@ -1,5 +1,5 @@
-#include <cstring>
 #include <cstdio>
+#include <cstring>
 
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
@@ -90,6 +90,10 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
     if (std::strcmp(action, kOfxImageEffectActionGetClipPreferences) == 0) {
         return get_clip_preferences(
             reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), out_args);
+    }
+    if (std::strcmp(action, kOfxActionInstanceChanged) == 0) {
+        return instance_changed(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
+                                in_args);
     }
     if (std::strcmp(action, kOfxImageEffectActionRender) == 0) {
         return render(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args,

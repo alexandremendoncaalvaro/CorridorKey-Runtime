@@ -1,8 +1,8 @@
 #pragma once
 
 #include <corridorkey/types.hpp>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>

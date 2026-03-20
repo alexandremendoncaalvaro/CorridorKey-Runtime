@@ -44,6 +44,14 @@ bool is_transport_error(const Error& error) {
     return error.code == ErrorCode::IoError;
 }
 
+bool is_timeout_error(const Error& error) {
+    if (error.code != ErrorCode::IoError) {
+        return false;
+    }
+    return error.message.find("timed out") != std::string::npos ||
+           error.message.find("Timed out") != std::string::npos;
+}
+
 bool is_protocol_mismatch_error(const Error& error) {
     return error.code == ErrorCode::InvalidParameters &&
            error.message.find("Unsupported OFX runtime protocol version") != std::string::npos;
@@ -59,8 +67,8 @@ Result<void> terminate_server_process(int server_pid) {
     }
 
 #if defined(_WIN32)
-    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE,
-                                 static_cast<DWORD>(server_pid));
+    HANDLE process =
+        OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, static_cast<DWORD>(server_pid));
     if (process == nullptr) {
         return {};
     }
@@ -110,12 +118,14 @@ std::filesystem::path resolve_ofx_runtime_server_binary(
 #endif
 }
 
-Result<std::unique_ptr<OfxRuntimeClient>> OfxRuntimeClient::create(OfxRuntimeClientOptions options) {
+Result<std::unique_ptr<OfxRuntimeClient>> OfxRuntimeClient::create(
+    OfxRuntimeClientOptions options) {
     auto client = std::unique_ptr<OfxRuntimeClient>(new OfxRuntimeClient(std::move(options)));
     return client;
 }
 
-OfxRuntimeClient::OfxRuntimeClient(OfxRuntimeClientOptions options) : m_options(std::move(options)) {}
+OfxRuntimeClient::OfxRuntimeClient(OfxRuntimeClientOptions options)
+    : m_options(std::move(options)) {}
 
 OfxRuntimeClient::~OfxRuntimeClient() {
     auto release_result = release_session();
@@ -154,7 +164,12 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
     }
 
     auto payload = app::to_json(request);
-    auto response = send_command(app::OfxRuntimeCommand::PrepareSession, payload);
+    auto ensure_result = ensure_server_running();
+    if (!ensure_result) {
+        return Unexpected<Error>(ensure_result.error());
+    }
+    auto response = send_command_without_launch(app::OfxRuntimeCommand::PrepareSession, payload,
+                                                m_options.prepare_timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
@@ -204,6 +219,20 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         };
 
         auto response = send_render_request();
+        if (!response && is_timeout_error(response.error())) {
+            log_message("ofx_runtime_client",
+                        "event=render_timeout reason=" + response.error().message);
+            auto restart_result = restart_server(response.error().message);
+            if (!restart_result) {
+                return Unexpected<Error>(restart_result.error());
+            }
+            auto recover_result = recover_runtime_session(on_stage);
+            if (!recover_result) {
+                return Unexpected<Error>(recover_result.error());
+            }
+            request.session_id = m_session.session_id;
+            response = send_render_request();
+        }
         if (!response &&
             (is_transport_error(response.error()) || is_session_missing_error(response.error()))) {
             log_message("ofx_runtime_client",
@@ -233,8 +262,7 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         std::copy(transport->alpha_view().data.begin(), transport->alpha_view().data.end(),
                   result.alpha.view().data.begin());
         std::copy(transport->foreground_view().data.begin(),
-                  transport->foreground_view().data.end(),
-                  result.foreground.view().data.begin());
+                  transport->foreground_view().data.end(), result.foreground.view().data.begin());
         return result;
     }();
 
@@ -291,8 +319,8 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
         const auto start_time = std::chrono::steady_clock::now();
         while (std::chrono::steady_clock::now() - start_time <
                std::chrono::milliseconds(m_options.launch_timeout_ms)) {
-            auto poll =
-                send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
+            auto poll = send_command_without_launch(app::OfxRuntimeCommand::Health,
+                                                    nlohmann::json::object());
             if (poll) {
                 auto health = app::health_response_from_json(*poll);
                 if (health) {
@@ -357,13 +385,18 @@ Result<nlohmann::json> OfxRuntimeClient::send_command(app::OfxRuntimeCommand com
 
 Result<nlohmann::json> OfxRuntimeClient::send_command_without_launch(
     app::OfxRuntimeCommand command, const nlohmann::json& payload) const {
+    return send_command_without_launch(command, payload, m_options.request_timeout_ms);
+}
 
+Result<nlohmann::json> OfxRuntimeClient::send_command_without_launch(app::OfxRuntimeCommand command,
+                                                                     const nlohmann::json& payload,
+                                                                     int timeout_ms) const {
     app::OfxRuntimeRequestEnvelope envelope;
     envelope.command = command;
     envelope.payload = payload;
 
-    auto response = common::send_json_request(m_options.endpoint, app::to_json(envelope),
-                                              m_options.request_timeout_ms);
+    auto response =
+        common::send_json_request(m_options.endpoint, app::to_json(envelope), timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
@@ -379,8 +412,13 @@ Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_st
     log_message("ofx_runtime_client", "event=recover_session_begin");
     m_session = {};
 
-    auto response = send_command(app::OfxRuntimeCommand::PrepareSession,
-                                 app::to_json(*m_last_prepare_request));
+    auto ensure_result = ensure_server_running();
+    if (!ensure_result) {
+        return Unexpected<Error>(ensure_result.error());
+    }
+    auto response = send_command_without_launch(app::OfxRuntimeCommand::PrepareSession,
+                                                app::to_json(*m_last_prepare_request),
+                                                m_options.prepare_timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
@@ -392,17 +430,15 @@ Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_st
 
     update_session_snapshot(parsed->session);
     replay_stage_timings(parsed->timings, on_stage);
-    log_message("ofx_runtime_client",
-                "event=recover_session_result reused_existing_session=" +
-                    std::to_string(parsed->session.reused_existing_session) + " session_id=" +
-                    parsed->session.session_id);
+    log_message("ofx_runtime_client", "event=recover_session_result reused_existing_session=" +
+                                          std::to_string(parsed->session.reused_existing_session) +
+                                          " session_id=" + parsed->session.session_id);
     return {};
 }
 
 Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
-    log_message("ofx_runtime_client",
-                "event=restart_server_begin pid=" + std::to_string(m_server_pid) +
-                    " reason=" + reason);
+    log_message("ofx_runtime_client", "event=restart_server_begin pid=" +
+                                          std::to_string(m_server_pid) + " reason=" + reason);
     auto terminate_result = terminate_server_process(m_server_pid);
     if (!terminate_result) {
         return Unexpected<Error>(terminate_result.error());
@@ -440,22 +476,22 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
 Result<void> OfxRuntimeClient::launch_server() {
     if (m_options.server_binary.empty() || !std::filesystem::exists(m_options.server_binary)) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "OFX runtime server binary was not found: " +
-                                          m_options.server_binary.string()});
+            Error{ErrorCode::IoError,
+                  "OFX runtime server binary was not found: " + m_options.server_binary.string()});
     }
 
     log_message("ofx_runtime_client",
                 "event=launch_server path=" + m_options.server_binary.string());
 
 #if defined(_WIN32)
-    std::wstring command_line =
-        L"\"" + m_options.server_binary.wstring() + L"\" ofx-runtime-server --endpoint-port " +
-        std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
-        std::to_wstring(m_options.idle_timeout_ms);
+    std::wstring command_line = L"\"" + m_options.server_binary.wstring() +
+                                L"\" ofx-runtime-server --endpoint-port " +
+                                std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
+                                std::to_wstring(m_options.idle_timeout_ms);
 
-    STARTUPINFOW startup_info {};
+    STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
-    PROCESS_INFORMATION process_info {};
+    PROCESS_INFORMATION process_info{};
     if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
                         DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &startup_info,
                         &process_info)) {
@@ -476,8 +512,8 @@ Result<void> OfxRuntimeClient::launch_server() {
                                idle_timeout.data(),
                                nullptr};
     pid_t pid = 0;
-    if (posix_spawn(&pid, m_options.server_binary.c_str(), nullptr, nullptr, argv.data(), environ) !=
-        0) {
+    if (posix_spawn(&pid, m_options.server_binary.c_str(), nullptr, nullptr, argv.data(),
+                    environ) != 0) {
         return Unexpected<Error>(
             Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
     }

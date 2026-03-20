@@ -34,20 +34,25 @@ constexpr const char* kPluginLabel = "CorridorKey";
 constexpr const char* kPluginGroup = "Keying";
 
 constexpr const char* kClipAlphaHint = "Alpha Hint";
+constexpr const char* kClipMatteOutput = "Matte Output";
+constexpr const char* kClipForegroundOutput = "Foreground Output";
+constexpr const char* kClipCompositeOutput = "Composite Output";
 
 constexpr const char* kParamQualityMode = "quality_mode";
 constexpr const char* kParamOutputMode = "output_mode";
+constexpr const char* kParamAlphaHintMode = "alpha_hint_mode";
+constexpr const char* kParamInputColorSpace = "input_color_space";
+constexpr const char* kParamQuantizationMode = "quantization_mode";
+constexpr const char* kParamScreenColor = "screen_color";
+constexpr const char* kParamTemporalSmoothing = "temporal_smoothing";
 constexpr const char* kParamDespillStrength = "despill_strength";
 constexpr const char* kParamAutoDespeckle = "auto_despeckle";
 constexpr const char* kParamDespeckleSize = "despeckle_size";
 constexpr const char* kParamRefinerScale = "refiner_scale";
-constexpr const char* kParamInputIsLinear = "input_is_linear";
 constexpr const char* kParamAlphaBlackPoint = "alpha_black_point";
 constexpr const char* kParamAlphaWhitePoint = "alpha_white_point";
 constexpr const char* kParamAlphaErode = "alpha_erode";
 constexpr const char* kParamAlphaSoftness = "alpha_softness";
-constexpr const char* kParamBrightness = "brightness";
-constexpr const char* kParamSaturation = "saturation";
 constexpr const char* kParamUpscaleMethod = "upscale_method";
 constexpr const char* kParamEnableTiling = "enable_tiling";
 constexpr const char* kParamTileOverlap = "tile_overlap";
@@ -59,6 +64,7 @@ constexpr const char* kParamRuntimeDevice = "runtime_device";
 constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality";
 constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
+constexpr const char* kParamRuntimeStatus = "runtime_status";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
 
@@ -74,19 +80,24 @@ struct InstanceData {
     OfxImageClipHandle source_clip = nullptr;
     OfxImageClipHandle alpha_hint_clip = nullptr;
     OfxImageClipHandle output_clip = nullptr;
+    OfxImageClipHandle matte_output_clip = nullptr;
+    OfxImageClipHandle foreground_output_clip = nullptr;
+    OfxImageClipHandle composite_output_clip = nullptr;
     OfxParamHandle quality_mode_param = nullptr;
     OfxParamHandle output_mode_param = nullptr;
+    OfxParamHandle alpha_hint_mode_param = nullptr;
+    OfxParamHandle input_color_space_param = nullptr;
+    OfxParamHandle quantization_mode_param = nullptr;
+    OfxParamHandle screen_color_param = nullptr;
+    OfxParamHandle temporal_smoothing_param = nullptr;
     OfxParamHandle despill_param = nullptr;
     OfxParamHandle despeckle_param = nullptr;
     OfxParamHandle despeckle_size_param = nullptr;
     OfxParamHandle refiner_param = nullptr;
-    OfxParamHandle input_is_linear_param = nullptr;
     OfxParamHandle alpha_black_point_param = nullptr;
     OfxParamHandle alpha_white_point_param = nullptr;
     OfxParamHandle alpha_erode_param = nullptr;
     OfxParamHandle alpha_softness_param = nullptr;
-    OfxParamHandle brightness_param = nullptr;
-    OfxParamHandle saturation_param = nullptr;
     OfxParamHandle upscale_method_param = nullptr;
     OfxParamHandle enable_tiling_param = nullptr;
     OfxParamHandle tile_overlap_param = nullptr;
@@ -98,6 +109,7 @@ struct InstanceData {
     OfxParamHandle runtime_requested_quality_param = nullptr;
     OfxParamHandle runtime_effective_quality_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
+    OfxParamHandle runtime_status_param = nullptr;
     std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
@@ -112,6 +124,35 @@ struct InstanceData {
     bool use_runtime_server = false;
     std::uint64_t render_count = 0;
     std::string last_error = {};
+    double last_frame_ms = 0.0;
+    double avg_frame_ms = 0.0;
+    std::uint64_t frame_time_samples = 0;
+    bool in_render = false;
+    bool runtime_panel_dirty = false;
+
+    FrameResult cached_result = {};
+    bool cached_result_valid = false;
+    double cached_time = 0.0;
+    int cached_width = 0;
+    int cached_height = 0;
+    std::uint64_t cached_signature = 0;
+    bool cached_signature_valid = false;
+    InferenceParams cached_params = {};
+    std::filesystem::path cached_model_path = {};
+    int cached_alpha_hint_mode = kDefaultAlphaHintMode;
+    int cached_screen_color = kDefaultScreenColor;
+    double cached_alpha_black_point = 0.0;
+    double cached_alpha_white_point = 1.0;
+    double cached_alpha_erode = 0.0;
+    double cached_alpha_softness = 0.0;
+    double cached_temporal_smoothing = kDefaultTemporalSmoothing;
+
+    ImageBuffer temporal_alpha = {};
+    ImageBuffer temporal_foreground = {};
+    bool temporal_state_valid = false;
+    double temporal_time = 0.0;
+    int temporal_width = 0;
+    int temporal_height = 0;
 };
 
 extern OfxHost* g_host;
@@ -124,8 +165,9 @@ InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
-                               int input_height = 0);
+                               int input_height = 0, int quantization_mode = kQuantizationAuto);
 void update_runtime_panel(InstanceData* data);
+OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
 
 OfxStatus on_load();
 OfxStatus describe(OfxImageEffectHandle descriptor);

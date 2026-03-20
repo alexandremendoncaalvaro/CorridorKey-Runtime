@@ -1,6 +1,5 @@
-#include <catch2/catch_all.hpp>
-
 #include <atomic>
+#include <catch2/catch_all.hpp>
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -43,14 +42,14 @@ std::uint16_t reserve_local_port() {
     REQUIRE(socket_handle >= 0);
 #endif
 
-    sockaddr_in address {};
+    sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons(0);
 
     REQUIRE(bind(socket_handle, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0);
 
-    sockaddr_in bound_address {};
+    sockaddr_in bound_address{};
 #if defined(_WIN32)
     int length = sizeof(bound_address);
     REQUIRE(getsockname(socket_handle, reinterpret_cast<sockaddr*>(&bound_address), &length) == 0);
@@ -173,8 +172,8 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
 
                     const int current_render = ++render_count;
                     if (current_render == 1) {
-                        (*client)->write_json(
-                            to_json(error_response("Runtime session is not prepared: lost-session")));
+                        (*client)->write_json(to_json(
+                            error_response("Runtime session is not prepared: lost-session")));
                         break;
                     }
 
@@ -218,7 +217,7 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
         auto health_response = send_json_request(
             endpoint,
             to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
-                                             .payload = nlohmann::json::object()}),
+                                              .payload = nlohmann::json::object()}),
             500);
         if (health_response) {
             ready = true;
@@ -273,7 +272,7 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
     auto shutdown_response = send_json_request(
         endpoint,
         to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
-                                         .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
+                                          .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
         2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
@@ -325,7 +324,7 @@ TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime 
         auto probe = send_json_request(
             endpoint,
             to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
-                                             .payload = nlohmann::json::object()}),
+                                              .payload = nlohmann::json::object()}),
             500);
         if (probe) {
             ready = true;

@@ -17,6 +17,7 @@ $win64Dir = Join-Path $BundlePath "Contents\Win64"
 $resourcesDir = Join-Path $BundlePath "Contents\Resources\models"
 $bundleDescriptor = [System.IO.Path]::GetFullPath($BundlePath)
 $expectsUniversalGpuPath = $bundleDescriptor -match 'Universal'
+$expectsDirectMlPath = $bundleDescriptor -match 'DirectML'
 
 # Check bundle structure
 if (-not (Test-Path $BundlePath)) {
@@ -45,8 +46,7 @@ Write-Host "[PASS] onnxruntime.dll exists" -ForegroundColor Green
 # Check all required DLLs
 $requiredDlls = @(
     "onnxruntime.dll",
-    "onnxruntime_providers_shared.dll",
-    "DirectML.dll"
+    "onnxruntime_providers_shared.dll"
 )
 
 foreach ($dll in $requiredDlls) {
@@ -72,6 +72,16 @@ $runtimeServer = Join-Path $win64Dir "corridorkey.exe"
 if (-not (Test-Path $runtimeServer)) {
     Write-Host "[FAIL] Runtime server binary not found" -ForegroundColor Red
     throw "Runtime server binary not found: corridorkey.exe"
+}
+
+$directmlDll = Join-Path $win64Dir "DirectML.dll"
+if (Test-Path $directmlDll) {
+    Write-Host "[PASS] Found DirectML.dll" -ForegroundColor Green
+} elseif ($expectsDirectMlPath) {
+    Write-Host "[FAIL] DirectML.dll not found in DirectML bundle" -ForegroundColor Red
+    throw "DirectML.dll is required for the DirectML bundle."
+} else {
+    Write-Host "[INFO] DirectML.dll not found (RTX bundle)" -ForegroundColor Cyan
 }
 
 $runtimeServerSize = (Get-Item $runtimeServer).Length
@@ -145,6 +155,11 @@ if ($foundUniversalProviders.Count -eq 0) {
     if (-not $hasUniversalGpuBackend) {
         Write-Host "[WARN] $message" -ForegroundColor Yellow
     }
+}
+
+if ($expectsDirectMlPath -and ($supportedBackends -notcontains "dml")) {
+    Write-Host "[FAIL] DirectML bundle did not report DML support in runtime probe." -ForegroundColor Red
+    throw "DirectML bundle missing DML runtime support."
 }
 
 # Check models

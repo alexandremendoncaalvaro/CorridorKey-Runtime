@@ -35,7 +35,8 @@ class CORRIDORKEY_API ColorUtils {
 
     /**
      * @brief Resize an image using bilinear interpolation.
-     * Returns an owned ImageBuffer.
+     * Returns an owned
+     * ImageBuffer.
      */
     static ImageBuffer resize(Image image, int new_width, int new_height);
     static void resize_into(Image image, Image dst);

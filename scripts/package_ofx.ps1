@@ -15,11 +15,14 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
 if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
+    $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
     $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
-    if (Test-Path $universalOrt) {
+    if (Test-Path $rtxOrt) {
+        $OrtRoot = $rtxOrt
+    } elseif (Test-Path $universalOrt) {
         $OrtRoot = $universalOrt
     } else {
-        $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+        $OrtRoot = $rtxOrt
     }
 }
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
@@ -115,7 +118,7 @@ Copy-Item $runtimeServerBinary $win64Dir -Force
 
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
-Copy-OrtDll -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir
+Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir | Out-Null
 
 $copiedUniversalProvider = $false
 foreach ($provider in @(

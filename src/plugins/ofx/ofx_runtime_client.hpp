@@ -14,6 +14,7 @@ struct OfxRuntimeClientOptions {
     common::LocalJsonEndpoint endpoint = {};
     std::filesystem::path server_binary = {};
     int request_timeout_ms = 30000;
+    int prepare_timeout_ms = 120000;
     int launch_timeout_ms = 10000;
     int idle_timeout_ms = 120000;
 };
@@ -26,7 +27,8 @@ class OfxRuntimeClient {
 
     Result<app::OfxRuntimeHealthResponse> health();
     Result<app::OfxRuntimePrepareSessionResponse> prepare_session(
-        const app::OfxRuntimePrepareSessionRequest& request, StageTimingCallback on_stage = nullptr);
+        const app::OfxRuntimePrepareSessionRequest& request,
+        StageTimingCallback on_stage = nullptr);
     Result<FrameResult> process_frame(const Image& rgb, const Image& alpha_hint,
                                       const InferenceParams& params, std::uint64_t render_index,
                                       StageTimingCallback on_stage = nullptr);
@@ -44,6 +46,9 @@ class OfxRuntimeClient {
                                         const nlohmann::json& payload);
     Result<nlohmann::json> send_command_without_launch(app::OfxRuntimeCommand command,
                                                        const nlohmann::json& payload) const;
+    Result<nlohmann::json> send_command_without_launch(app::OfxRuntimeCommand command,
+                                                       const nlohmann::json& payload,
+                                                       int timeout_ms) const;
     Result<void> launch_server();
     Result<void> recover_runtime_session(StageTimingCallback on_stage);
     Result<void> restart_server(const std::string& reason);

@@ -33,8 +33,8 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     snapshot.artifact_name = prepare_request.artifact_name;
     snapshot.requested_device = prepare_request.requested_device;
     snapshot.effective_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
-    snapshot.backend_fallback = BackendFallbackInfo{
-        Backend::TensorRT, Backend::CPU, "GPU residency was not maintained"};
+    snapshot.backend_fallback =
+        BackendFallbackInfo{Backend::TensorRT, Backend::CPU, "GPU residency was not maintained"};
     snapshot.requested_quality_mode = prepare_request.requested_quality_mode;
     snapshot.requested_resolution = prepare_request.requested_resolution;
     snapshot.effective_resolution = prepare_request.effective_resolution;
