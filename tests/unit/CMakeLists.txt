@@ -10,6 +10,7 @@ add_executable(test_unit
     test_inference_session.cpp
     test_ofx_image_utils.cpp
     test_ofx_model_selection.cpp
+    test_ofx_runtime_protocol.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
     test_runtime_contracts.cpp

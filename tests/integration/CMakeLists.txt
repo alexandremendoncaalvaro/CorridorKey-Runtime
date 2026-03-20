@@ -7,6 +7,7 @@ add_executable(test_integration
     test_engine_mlx.cpp
     test_engine_tiling.cpp
     test_exr_roundtrip.cpp
+    test_ofx_runtime_service.cpp
     test_png_roundtrip.cpp
     test_video_roundtrip.cpp
     test_post_process_chain.cpp
