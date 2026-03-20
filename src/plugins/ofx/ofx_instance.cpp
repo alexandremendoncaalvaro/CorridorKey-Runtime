@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <new>
@@ -113,6 +114,11 @@ std::string runtime_artifact_label(const std::filesystem::path& model_path) {
 
 std::string render_pass_label(std::uint64_t render_count) {
     return render_count == 0 ? "first_frame" : "subsequent_frame";
+}
+
+double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
+    const auto elapsed = std::chrono::steady_clock::now() - start_time;
+    return std::chrono::duration<double, std::milli>(elapsed).count();
 }
 
 void log_stage_timing(std::string_view scope, std::string_view phase,
@@ -302,14 +308,27 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data) {
 }
 
 OfxStatus create_instance(OfxImageEffectHandle instance) {
+    const auto create_start = std::chrono::steady_clock::now();
+    const auto log_create_total = [&](std::string_view outcome, std::string_view detail = {}) {
+        std::string message =
+            "event=instance_create_total total_ms=" + std::to_string(elapsed_ms_since(create_start)) +
+            " outcome=" + std::string(outcome);
+        if (!detail.empty()) {
+            message += " detail=" + std::string(detail);
+        }
+        log_message("create_instance", message);
+    };
+
     if (g_suites.image_effect == nullptr || g_suites.parameter == nullptr) {
         log_message("create_instance", "Missing required suites.");
+        log_create_total("missing_suites");
         return kOfxStatErrMissingHostFeature;
     }
 
     auto data = std::unique_ptr<InstanceData>(new (std::nothrow) InstanceData());
     if (!data) {
         log_message("create_instance", "Failed to allocate InstanceData.");
+        log_create_total("oom");
         return kOfxStatErrMemory;
     }
     data->effect = instance;
@@ -319,6 +338,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     if (g_suites.image_effect->clipGetHandle(instance, "Source", &data->source_clip, nullptr) !=
         kOfxStatOK) {
         log_message("create_instance", "Failed to get Source clip handle.");
+        log_create_total("source_clip_failed");
         return kOfxStatFailed;
     }
 
@@ -327,12 +347,14 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     if (g_suites.image_effect->clipGetHandle(instance, "Output", &data->output_clip, nullptr) !=
         kOfxStatOK) {
         log_message("create_instance", "Failed to get Output clip handle.");
+        log_create_total("output_clip_failed");
         return kOfxStatFailed;
     }
 
     OfxParamSetHandle param_set;
     if (g_suites.image_effect->getParamSet(instance, &param_set) != kOfxStatOK) {
         log_message("create_instance", "Failed to get param set.");
+        log_create_total("param_set_failed");
         return kOfxStatFailed;
     }
 
@@ -401,6 +423,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         log_message("create_instance", "No compatible model artifacts found for OFX bootstrap.");
         post_message(kOfxMessageError, "No compatible model artifacts found for this device.",
                      instance);
+        log_create_total("no_artifacts");
         return kOfxStatFailed;
     }
 
@@ -489,18 +512,33 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         update_runtime_panel_values(data.get());
 
         set_instance_data(instance, data.release());
+        log_create_total("success");
         return kOfxStatOK;
     }
 
     data->last_error = failure_summary;
     std::string failure_message = "Failed to load AI engine: " + failure_summary;
     post_message(kOfxMessageError, failure_message.c_str(), instance);
+    log_create_total("engine_create_failed", failure_summary);
     return kOfxStatFailed;
 }
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height) {
+    const auto quality_switch_start = std::chrono::steady_clock::now();
+    const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
+        std::string message =
+            "event=quality_switch_total total_ms=" +
+            std::to_string(elapsed_ms_since(quality_switch_start)) + " quality=" +
+            quality_mode_label(quality_mode) + " outcome=" + std::string(outcome);
+        if (!detail.empty()) {
+            message += " detail=" + std::string(detail);
+        }
+        log_message("ensure_engine_for_quality", message);
+    };
+
     if (data == nullptr || data->engine == nullptr) {
+        log_quality_total("no_engine");
         return true;
     }
 
@@ -538,6 +576,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                 ", but that artifact is missing.";
         }
         log_message("ensure_engine_for_quality", data->last_error);
+        log_quality_total("missing_artifact", data->last_error);
         return false;
     }
 
@@ -552,6 +591,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data->active_resolution = selection.effective_resolution;
             data->last_error.clear();
             update_runtime_panel_values(data);
+            log_quality_total("reused_engine");
             return true;
         }
 
@@ -579,6 +619,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                              engine_result.error().message);
             log_message("ensure_engine_for_quality", data->last_error);
             if (is_fixed_quality_mode(requested_quality_mode) && !cpu_quality_guardrail_active) {
+                log_quality_total("engine_create_error", data->last_error);
                 return false;
             }
             continue;
@@ -595,6 +636,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                 engine->backend_fallback());
             log_message("ensure_engine_for_quality", data->last_error);
             if (is_fixed_quality_mode(requested_quality_mode) && !cpu_quality_guardrail_active) {
+                log_quality_total("backend_mismatch", data->last_error);
                 return false;
             }
             continue;
@@ -629,9 +671,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         log_message("ensure_engine_for_quality",
                     "Effective resolution: " + std::to_string(data->active_resolution));
         update_runtime_panel_values(data);
+        log_quality_total("success");
         return true;
     }
 
+    log_quality_total("exhausted_candidates", data->last_error);
     return false;
 }
 
