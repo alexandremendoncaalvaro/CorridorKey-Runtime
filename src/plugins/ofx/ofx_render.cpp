@@ -299,10 +299,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     bool hint_from_clip = false;
+    bool hint_clip_connected = false;
     OfxPropertySetHandle hint_props = nullptr;
     ImageHandleGuard hint_guard{};
 
     if (is_clip_connected(data->alpha_hint_clip)) {
+        hint_clip_connected = true;
         if (fetch_image(data->alpha_hint_clip, time, hint_props)) {
             hint_guard.handle = hint_props;
             void* hint_data = nullptr;
@@ -318,12 +320,26 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                 get_string(hint_props, kOfxImageEffectPropComponents, hint_components)) {
                 copy_alpha_hint(hint_view, hint_data, hint_row_bytes, hint_depth, hint_components);
                 hint_from_clip = true;
-                log_message("render", "Using external alpha hint from connected clip.");
+                log_message("render", "Using external alpha hint from connected clip. components=" +
+                                          hint_components + " interpretation=" +
+                                          alpha_hint_interpretation_label(hint_components));
+            } else {
+                log_message("render",
+                            "Connected alpha hint clip could not be read. "
+                            "Falling back to rough matte generation.");
             }
+        } else {
+            log_message("render",
+                        "Connected alpha hint clip could not be fetched. "
+                        "Falling back to rough matte generation.");
         }
     }
 
     if (!hint_from_clip) {
+        if (!hint_clip_connected) {
+            log_message("render",
+                        "No alpha hint clip connected. Generating rough matte from source RGB.");
+        }
         ColorUtils::generate_rough_matte(rgb_view, hint_view);
     }
 

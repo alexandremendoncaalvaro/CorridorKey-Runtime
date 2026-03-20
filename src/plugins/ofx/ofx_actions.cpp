@@ -113,6 +113,26 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
     set_parent(param_props, parent);
 }
 
+void define_info_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                       const char* default_value, const char* hint,
+                       const char* parent = nullptr) {
+    OfxPropertySetHandle param_props = nullptr;
+    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props) !=
+        kOfxStatOK) {
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    g_suites.property->propSetString(param_props, kOfxParamPropDefault, 0, default_value);
+    g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0,
+                                     kOfxParamStringIsLabel);
+    g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, 0);
+    if (hint != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+    set_parent(param_props, parent);
+}
+
 void define_group_param(OfxParamSetHandle param_set, const char* name, const char* label, bool open,
                         const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
@@ -201,6 +221,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                      kOfxImageComponentRGBA);
     g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 1,
                                      kOfxImageComponentAlpha);
+    g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 2,
+                                     kOfxImageComponentRGB);
     g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
 
     if (g_suites.image_effect->clipDefine(descriptor, kOfxImageEffectOutputClipName, &clip_props) !=
@@ -255,10 +277,18 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Pixel overlap between tiles for seamless blending.", "quality_group");
 
     define_group_param(param_set, "output_group", "Output", true);
+    define_info_param(
+        param_set, "processed_output_info", "Processed Note",
+        "Processed and Source + Matte are premultiplied outputs. Linear inputs stay linear.",
+        "Processed and Source + Matte return premultiplied RGBA. With Input Is Linear off, "
+        "CorridorKey converts RGB back for display on write. With Input Is Linear on, those "
+        "outputs stay linear and should be viewed through a display transform.",
+        "output_group");
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
                         {"Processed", "Matte Only", "Foreground Only", "Source + Matte"},
-                        "What to output. Matte Only shows the alpha channel as grayscale.",
+                        "What to output. Processed and Source + Matte are premultiplied RGBA "
+                        "outputs. Matte Only shows the alpha channel as grayscale.",
                         "output_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleLanczos4,
                         {"Lanczos4", "Bilinear"},
@@ -291,6 +321,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "keying_group");
 
     define_group_param(param_set, "alpha_group", "Alpha", true);
+    define_info_param(
+        param_set, "alpha_hint_info", "Hint Input",
+        "RGBA uses A. Alpha uses its single channel. RGB falls back to R. No hint uses a rough matte.",
+        "The Alpha Hint clip accepts RGBA, Alpha, or RGB. RGBA uses the alpha channel. Alpha "
+        "uses the single provided channel directly. RGB falls back to the red channel. If no "
+        "hint is connected, CorridorKey generates a rough matte from the source image.",
+        "alpha_group");
 
     define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
                         "Remap alpha: values at or below this become fully transparent.",
@@ -314,7 +351,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
     define_bool_param(param_set, kParamInputIsLinear, "Input Is Linear", 0,
-                      "Disable sRGB to linear conversion for linear footage.", "advanced_group");
+                      "Enable only when source pixels are already linear. Processed and Source + "
+                      "Matte remain linear-premultiplied in this mode.",
+                      "advanced_group");
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;
