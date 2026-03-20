@@ -1,12 +1,14 @@
 # Unit tests for ColorUtils, Despill, Despeckle, DeviceDetection, and InferenceSession
 
 add_executable(test_unit
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_image_utils.cpp
     test_color_utils.cpp
     test_despill.cpp
     test_despeckle.cpp
     test_device_selection.cpp
     test_device_detection.cpp
     test_inference_session.cpp
+    test_ofx_image_utils.cpp
     test_ofx_model_selection.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
@@ -15,6 +17,7 @@ add_executable(test_unit
     test_session_policy.cpp
     test_source_passthrough.cpp
     test_stage_profiler.cpp
+    test_ofx_stubs.cpp
     test_tile_blend.cpp
 )
 
