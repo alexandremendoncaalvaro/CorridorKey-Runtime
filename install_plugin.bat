@@ -1,5 +1,12 @@
 @echo off
-set "SrcPath=%~dp0CorridorKey.ofx.bundle"
+setlocal
+
+set "ScriptDir=%~dp0"
+set "SrcPath=%ScriptDir%CorridorKey.ofx.bundle"
+if not exist "%SrcPath%" (
+    set "SrcPath=%ScriptDir%dist\CorridorKey.ofx.bundle"
+)
+
 set "DstPath=C:\Program Files\Common Files\OFX\Plugins\CorridorKey.ofx.bundle"
 set "CacheFile=%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
 
@@ -10,7 +17,12 @@ echo.
 
 if not exist "%SrcPath%" (
     echo ERROR: Plugin bundle not found at "%SrcPath%"
-    echo Please ensure you extracted the entire ZIP file.
+    echo.
+    echo Expected one of these locations:
+    echo   "%ScriptDir%CorridorKey.ofx.bundle"
+    echo   "%ScriptDir%dist\CorridorKey.ofx.bundle"
+    echo.
+    echo If you extracted a release ZIP, run install_plugin.bat from inside the extracted release folder.
     echo.
     pause
     exit /b 1
