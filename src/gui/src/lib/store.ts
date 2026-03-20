@@ -46,7 +46,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
         error: `Hardware Probe Failed: ${msg}`, 
         isLoading: false,
         info: {
-          version: "0.3.6",
+          version: "0.4.0",
           devices: [{ name: "CPU Baseline (Fallback)", memory_mb: 0, backend: "cpu" }],
           capabilities: { tensorrt_rtx_available: false, multi_gpu_available: false, cpu_fallback_available: true }
         }
