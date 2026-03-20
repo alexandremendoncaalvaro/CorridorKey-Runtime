@@ -41,6 +41,8 @@ service that:
 The current test builds already provide:
 
 - Resolve OFX builds for macOS Apple Silicon and Windows.
+- A packaged out-of-process OFX runtime path backed by the `corridorkey`
+  runtime server.
 - Requested versus effective quality feedback in the runtime panel.
 - Visible plugin version in the panel header.
 - Quality modes from `Preview (512)` through `Maximum (2048)`.
@@ -59,6 +61,8 @@ The current test builds already provide:
   instead of silent success on a drifted backend.
 - Structured OFX logging for bootstrap, quality switches, render stages, and
   lifecycle timing.
+- Shared-frame transport, session reuse, and a packaged runtime server binary
+  inside the OFX bundle/installers.
 
 ## Release Blockers
 
@@ -96,33 +100,33 @@ runtime service. This is the primary implementation track because it resolves
 copy/paste cost, first-frame warmup duplication, crash containment, and VRAM
 policy together.
 
-- [ ] **2.1 Product Boundary** -- make the OFX plugin a thin local client while
+- [x] **2.1 Product Boundary** -- make the OFX plugin a thin local client while
   a packaged runtime process owns backend selection, model/session lifetime,
   warmup, VRAM admission, and structured diagnostics.
-- [ ] **2.2 Stable IPC Contract** -- define a versioned request/reply and event
+- [x] **2.2 Stable IPC Contract** -- define a versioned request/reply and event
   contract for registration, render submission, quality switching, cancellation,
   health checks, and diagnostics.
-- [ ] **2.3 High-Bandwidth Frame Transport** -- move frame payloads through
+- [x] **2.3 High-Bandwidth Frame Transport** -- move frame payloads through
   shared memory or memory-mapped files with a lightweight local control channel.
-- [ ] **2.4 Session Broker and Residency Policy** -- pool sessions by backend,
+- [x] **2.4 Session Broker and Residency Policy** -- pool sessions by backend,
   artifact, and resolution so duplicate OFX instances do not recreate full
   inference state.
-- [ ] **2.5 OFX Thin-Client Refactor** -- keep clip fetch, Alpha Hint
+- [x] **2.5 OFX Thin-Client Refactor** -- keep clip fetch, Alpha Hint
   interpretation, parameter reads, and output writes inside the plugin, but
   replace direct `Engine` ownership with calls to the local runtime process.
-- [ ] **2.6 Packaging and Lifecycle** -- ship the runtime server inside the
+- [x] **2.6 Packaging and Lifecycle** -- ship the runtime server inside the
   same OFX installer and bundle layout, launch it on demand, reuse an active
   instance, and stop it after an idle timeout.
 - [ ] **2.7 Crash Containment and Recovery** -- detect server crashes, hung
   renders, protocol mismatches, and startup failures, then surface deterministic
   OFX errors without requiring a Resolve restart.
-- [ ] **2.8 Diagnostics Parity** -- preserve the current panel/log visibility
+- [x] **2.8 Diagnostics Parity** -- preserve the current panel/log visibility
   for backend, artifact, quality, warmup state, fallback reason, and stage
   timings when execution is out-of-process.
 - [ ] **2.9 Rollout Gates** -- validate first-frame latency, copy/paste
   latency, multi-instance behavior, 4K throughput, VRAM exhaustion behavior,
   restart flow, and installer simplicity before making this the default path.
-- [ ] **2.10 Temporary Compatibility Path** -- keep the current in-process path
+- [x] **2.10 Temporary Compatibility Path** -- keep the current in-process path
   available only as a temporary development fallback until the out-of-process
   path reaches feature parity.
 
