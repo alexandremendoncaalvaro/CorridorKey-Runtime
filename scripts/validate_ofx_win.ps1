@@ -77,6 +77,28 @@ if (-not (Test-Path $runtimeServer)) {
 $runtimeServerSize = (Get-Item $runtimeServer).Length
 Write-Host "[PASS] Found runtime server binary ($([math]::Round($runtimeServerSize / 1MB, 2)) MB)" -ForegroundColor Green
 
+$supportedBackends = @()
+Push-Location $win64Dir
+try {
+    $runtimeInfoJson = & ".\corridorkey.exe" info --json 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($runtimeInfoJson)) {
+        $runtimeInfo = $runtimeInfoJson | ConvertFrom-Json
+        if ($null -ne $runtimeInfo.capabilities -and
+            $null -ne $runtimeInfo.capabilities.supported_backends) {
+            $supportedBackends = @($runtimeInfo.capabilities.supported_backends)
+            Write-Host "[PASS] Runtime probe succeeded: $($supportedBackends -join ', ')" -ForegroundColor Green
+        } else {
+            Write-Host "[WARN] Runtime probe returned no supported_backends payload" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[WARN] Runtime probe failed; falling back to DLL inspection" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "[WARN] Runtime probe failed; falling back to DLL inspection" -ForegroundColor Yellow
+} finally {
+    Pop-Location
+}
+
 # Check CUDA runtime (optional but should be present for NVIDIA systems)
 $cudartFiles = @(Get-ChildItem -Path $win64Dir -Filter "cudart64_*.dll" -File -ErrorAction SilentlyContinue)
 if ($cudartFiles.Count -eq 0) {
@@ -113,11 +135,16 @@ foreach ($provider in $universalProviderDlls) {
 }
 if ($foundUniversalProviders.Count -eq 0) {
     $message = "No Windows universal GPU provider DLL found; AMD/Intel systems will fall back to CPU."
-    if ($expectsUniversalGpuPath) {
+    $hasUniversalGpuBackend = $supportedBackends -contains "dml" -or
+        $supportedBackends -contains "winml" -or
+        $supportedBackends -contains "openvino"
+    if ($expectsUniversalGpuPath -and -not $hasUniversalGpuBackend) {
         Write-Host "[FAIL] $message" -ForegroundColor Red
         throw $message
     }
-    Write-Host "[WARN] $message" -ForegroundColor Yellow
+    if (-not $hasUniversalGpuBackend) {
+        Write-Host "[WARN] $message" -ForegroundColor Yellow
+    }
 }
 
 # Check models

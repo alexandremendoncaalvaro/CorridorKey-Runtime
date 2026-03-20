@@ -8,6 +8,124 @@
 
 namespace corridorkey {
 
+namespace {
+
+void resize_bilinear_into(Image image, Image dst) {
+    const float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
+    const float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
+
+    for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
+        const float src_y = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
+        const int y0 = std::max(0, static_cast<int>(std::floor(src_y)));
+        const int y1 = std::min(y0 + 1, image.height - 1);
+        const float d_y = src_y - static_cast<float>(y0);
+
+        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+            const float src_x = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
+            const int x0 = std::max(0, static_cast<int>(std::floor(src_x)));
+            const int x1 = std::min(x0 + 1, image.width - 1);
+            const float d_x = src_x - static_cast<float>(x0);
+
+            for (int channel = 0; channel < image.channels; ++channel) {
+                const float v00 = image(y0, x0, channel);
+                const float v10 = image(y0, x1, channel);
+                const float v01 = image(y1, x0, channel);
+                const float v11 = image(y1, x1, channel);
+
+                const float val_y0 = v00 * (1.0F - d_x) + v10 * d_x;
+                const float val_y1 = v01 * (1.0F - d_x) + v11 * d_x;
+                dst(y_pos, x_pos, channel) = val_y0 * (1.0F - d_y) + val_y1 * d_y;
+            }
+        }
+    }
+}
+
+constexpr int kLanczosA = 4;
+constexpr float kPi = 3.14159265358979323846F;
+
+float lanczos_kernel(float x) {
+    if (x == 0.0F) return 1.0F;
+    if (x >= kLanczosA || x <= -kLanczosA) return 0.0F;
+    const float pi_x = kPi * x;
+    const float pi_x_a = pi_x / kLanczosA;
+    return (std::sin(pi_x) / pi_x) * (std::sin(pi_x_a) / pi_x_a);
+}
+
+// BORDER_REFLECT_101: gfedcb|abcdefgh|gfedcba (matches OpenCV default)
+inline int reflect_101(int idx, int len) {
+    if (idx < 0) idx = -idx;
+    if (idx >= len) idx = 2 * (len - 1) - idx;
+    return std::clamp(idx, 0, len - 1);
+}
+
+void resize_lanczos_into_impl(Image image, Image dst) {
+    const float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
+    const float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
+
+    ImageBuffer horizontal_buffer(dst.width, image.height, image.channels);
+    Image h_view = horizontal_buffer.view();
+
+    for (int y_pos = 0; y_pos < image.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+            const float center = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
+            const int i_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+            const int i_end = static_cast<int>(std::floor(center + kLanczosA));
+
+            float weight_sum = 0.0F;
+            for (int channel = 0; channel < image.channels; ++channel) {
+                h_view(y_pos, x_pos, channel) = 0.0F;
+            }
+
+            for (int i = i_start; i <= i_end; ++i) {
+                const int src_i = reflect_101(i, image.width);
+                const float weight = lanczos_kernel(static_cast<float>(i) - center);
+                weight_sum += weight;
+                for (int channel = 0; channel < image.channels; ++channel) {
+                    h_view(y_pos, x_pos, channel) += image(y_pos, src_i, channel) * weight;
+                }
+            }
+
+            if (weight_sum > 0.0F) {
+                const float inv_weight = 1.0F / weight_sum;
+                for (int channel = 0; channel < image.channels; ++channel) {
+                    h_view(y_pos, x_pos, channel) *= inv_weight;
+                }
+            }
+        }
+    }
+
+    for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
+        const float center = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
+        const int j_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+        const int j_end = static_cast<int>(std::floor(center + kLanczosA));
+
+        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+            float weight_sum = 0.0F;
+            for (int channel = 0; channel < image.channels; ++channel) {
+                dst(y_pos, x_pos, channel) = 0.0F;
+            }
+
+            for (int j = j_start; j <= j_end; ++j) {
+                const int src_j = reflect_101(j, h_view.height);
+                const float weight = lanczos_kernel(static_cast<float>(j) - center);
+                weight_sum += weight;
+                for (int channel = 0; channel < image.channels; ++channel) {
+                    dst(y_pos, x_pos, channel) += h_view(src_j, x_pos, channel) * weight;
+                }
+            }
+
+            if (weight_sum > 0.0F) {
+                const float inv_weight = 1.0F / weight_sum;
+                for (int channel = 0; channel < image.channels; ++channel) {
+                    dst(y_pos, x_pos, channel) *= inv_weight;
+                }
+            }
+        }
+    }
+}
+
+}  // namespace
+
 void ColorUtils::premultiply(Image rgb, Image alpha) {
     for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {
         for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
@@ -75,37 +193,12 @@ void ColorUtils::generate_rough_matte(Image rgb, Image alpha_hint) {
 
 ImageBuffer ColorUtils::resize(Image image, int new_width, int new_height) {
     ImageBuffer result(new_width, new_height, image.channels);
-    Image res_view = result.view();
-
-    const float scale_x = static_cast<float>(image.width) / static_cast<float>(new_width);
-    const float scale_y = static_cast<float>(image.height) / static_cast<float>(new_height);
-
-    for (int y_pos = 0; y_pos < new_height; ++y_pos) {
-        const float src_y = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
-        const int y0 = std::max(0, static_cast<int>(std::floor(src_y)));
-        const int y1 = std::min(y0 + 1, image.height - 1);
-        const float d_y = src_y - static_cast<float>(y0);
-
-        for (int x_pos = 0; x_pos < new_width; ++x_pos) {
-            const float src_x = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
-            const int x0 = std::max(0, static_cast<int>(std::floor(src_x)));
-            const int x1 = std::min(x0 + 1, image.width - 1);
-            const float d_x = src_x - static_cast<float>(x0);
-
-            for (int channel = 0; channel < image.channels; ++channel) {
-                const float v00 = image(y0, x0, channel);
-                const float v10 = image(y0, x1, channel);
-                const float v01 = image(y1, x0, channel);
-                const float v11 = image(y1, x1, channel);
-
-                const float val_y0 = v00 * (1.0F - d_x) + v10 * d_x;
-                const float val_y1 = v01 * (1.0F - d_x) + v11 * d_x;
-                res_view(y_pos, x_pos, channel) = val_y0 * (1.0F - d_y) + val_y1 * d_y;
-            }
-        }
-    }
-
+    resize_into(image, result.view());
     return result;
+}
+
+void ColorUtils::resize_into(Image image, Image dst) {
+    resize_bilinear_into(image, dst);
 }
 
 void ColorUtils::gaussian_blur(Image image, float sigma) {
@@ -164,12 +257,19 @@ void ColorUtils::gaussian_blur(Image image, float sigma) {
 }
 
 ImageBuffer ColorUtils::resize_area(Image image, int new_width, int new_height) {
-    float scale_x = static_cast<float>(image.width) / static_cast<float>(new_width);
-    float scale_y = static_cast<float>(image.height) / static_cast<float>(new_height);
+    ImageBuffer result(new_width, new_height, image.channels);
+    resize_area_into(image, result.view());
+    return result;
+}
+
+void ColorUtils::resize_area_into(Image image, Image dst) {
+    float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
+    float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
     float max_scale = std::max(scale_x, scale_y);
 
     if (max_scale <= 1.5F) {
-        return resize(image, new_width, new_height);
+        resize_into(image, dst);
+        return;
     }
 
     float sigma = (max_scale - 1.0F) * 0.5F;
@@ -179,102 +279,17 @@ ImageBuffer ColorUtils::resize_area(Image image, int new_width, int new_height) 
     std::copy(image.data.begin(), image.data.end(), blurred_view.data.begin());
     gaussian_blur(blurred_view, sigma);
 
-    return resize(blurred_view, new_width, new_height);
+    resize_into(blurred_view, dst);
 }
-
-namespace {
-
-constexpr int kLanczosA = 4;
-constexpr float kPi = 3.14159265358979323846F;
-
-float lanczos_kernel(float x) {
-    if (x == 0.0F) return 1.0F;
-    if (x >= kLanczosA || x <= -kLanczosA) return 0.0F;
-    const float pi_x = kPi * x;
-    const float pi_x_a = pi_x / kLanczosA;
-    return (std::sin(pi_x) / pi_x) * (std::sin(pi_x_a) / pi_x_a);
-}
-
-// BORDER_REFLECT_101: gfedcb|abcdefgh|gfedcba (matches OpenCV default)
-inline int reflect_101(int idx, int len) {
-    if (idx < 0) idx = -idx;
-    if (idx >= len) idx = 2 * (len - 1) - idx;
-    return std::clamp(idx, 0, len - 1);
-}
-
-}  // namespace
 
 ImageBuffer ColorUtils::resize_lanczos(Image image, int new_width, int new_height) {
-    const float scale_x = static_cast<float>(image.width) / static_cast<float>(new_width);
-    const float scale_y = static_cast<float>(image.height) / static_cast<float>(new_height);
-
-    // Horizontal pass: image (H x W) -> intermediate (H x new_width)
-    ImageBuffer h_buf(new_width, image.height, image.channels);
-    Image h_view = h_buf.view();
-
-    for (int y_pos = 0; y_pos < image.height; ++y_pos) {
-        for (int x_pos = 0; x_pos < new_width; ++x_pos) {
-            const float center = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
-            const int i_start = static_cast<int>(std::floor(center - kLanczosA + 1));
-            const int i_end = static_cast<int>(std::floor(center + kLanczosA));
-
-            float weight_sum = 0.0F;
-            for (int c = 0; c < image.channels; ++c) {
-                h_view(y_pos, x_pos, c) = 0.0F;
-            }
-
-            for (int i = i_start; i <= i_end; ++i) {
-                const int src_i = reflect_101(i, image.width);
-                const float w = lanczos_kernel(static_cast<float>(i) - center);
-                weight_sum += w;
-                for (int c = 0; c < image.channels; ++c) {
-                    h_view(y_pos, x_pos, c) += image(y_pos, src_i, c) * w;
-                }
-            }
-
-            if (weight_sum > 0.0F) {
-                const float inv_w = 1.0F / weight_sum;
-                for (int c = 0; c < image.channels; ++c) {
-                    h_view(y_pos, x_pos, c) *= inv_w;
-                }
-            }
-        }
-    }
-
-    // Vertical pass: intermediate (H x new_width) -> result (new_height x new_width)
     ImageBuffer result(new_width, new_height, image.channels);
-    Image res_view = result.view();
-
-    for (int y_pos = 0; y_pos < new_height; ++y_pos) {
-        const float center = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
-        const int j_start = static_cast<int>(std::floor(center - kLanczosA + 1));
-        const int j_end = static_cast<int>(std::floor(center + kLanczosA));
-
-        for (int x_pos = 0; x_pos < new_width; ++x_pos) {
-            float weight_sum = 0.0F;
-            for (int c = 0; c < image.channels; ++c) {
-                res_view(y_pos, x_pos, c) = 0.0F;
-            }
-
-            for (int j = j_start; j <= j_end; ++j) {
-                const int src_j = reflect_101(j, h_view.height);
-                const float w = lanczos_kernel(static_cast<float>(j) - center);
-                weight_sum += w;
-                for (int c = 0; c < image.channels; ++c) {
-                    res_view(y_pos, x_pos, c) += h_view(src_j, x_pos, c) * w;
-                }
-            }
-
-            if (weight_sum > 0.0F) {
-                const float inv_w = 1.0F / weight_sum;
-                for (int c = 0; c < image.channels; ++c) {
-                    res_view(y_pos, x_pos, c) *= inv_w;
-                }
-            }
-        }
-    }
-
+    resize_lanczos_into(image, result.view());
     return result;
+}
+
+void ColorUtils::resize_lanczos_into(Image image, Image dst) {
+    resize_lanczos_into_impl(image, dst);
 }
 
 void ColorUtils::clamp_image(Image image, float min_val, float max_val) {

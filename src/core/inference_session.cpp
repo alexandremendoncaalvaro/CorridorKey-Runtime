@@ -70,6 +70,7 @@ constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fall
 
 #ifdef _WIN32
 constexpr const char* kTensorRtRtxExecutionProvider = "NvTensorRTRTXExecutionProvider";
+using OrtDmlAppendExecutionProviderFn = OrtStatus*(ORT_API_CALL*)(OrtSessionOptions*, int);
 
 namespace tensorrt_rtx_option_names {
 #if defined(CORRIDORKEY_HAS_NV_TENSORRT_RTX_OPTIONS)
@@ -84,6 +85,31 @@ constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
 constexpr const char* kRuntimeCacheFile = "nv_runtime_cache_path";
 #endif
 }  // namespace tensorrt_rtx_option_names
+
+OrtDmlAppendExecutionProviderFn resolve_directml_append_function() {
+    HMODULE runtime_module = GetModuleHandleW(L"onnxruntime.dll");
+    if (runtime_module == nullptr) {
+        runtime_module = LoadLibraryW(L"onnxruntime.dll");
+    }
+    if (runtime_module == nullptr) {
+        return nullptr;
+    }
+
+    auto symbol = GetProcAddress(runtime_module, "OrtSessionOptionsAppendExecutionProvider_DML");
+    return reinterpret_cast<OrtDmlAppendExecutionProviderFn>(symbol);
+}
+
+void append_directml_execution_provider(Ort::SessionOptions& session_options) {
+    if (auto append = resolve_directml_append_function(); append != nullptr) {
+        debug_log("Adding DirectML execution provider via exported ORT DML API");
+        Ort::ThrowOnError(append(session_options, 0));
+        return;
+    }
+
+    debug_log("Adding DirectML execution provider via generic provider options");
+    std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
+    session_options.AppendExecutionProvider("DML", dml_options);
+}
 #endif
 
 #ifdef __APPLE__
@@ -294,10 +320,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         }
 #ifdef _WIN32
         case Backend::DirectML: {
-            debug_log("Adding DirectML execution provider");
-            // DirectML is the universal GPU path for Windows (AMD, Intel, old NVIDIA)
-            std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
-            m_session_options.AppendExecutionProvider("DML", dml_options);
+            append_directml_execution_provider(m_session_options);
             break;
         }
         case Backend::WindowsML: {
@@ -993,9 +1016,194 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
                                                 const InferenceParams& params,
                                                 StageTimingCallback on_stage) {
-    auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
-    if (!batch_res) return Unexpected(batch_res.error());
-    return std::move((*batch_res)[0]);
+    if (m_mlx_session != nullptr) {
+        auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
+        if (!batch_res) {
+            return Unexpected(batch_res.error());
+        }
+        return std::move((*batch_res)[0]);
+    }
+
+    try {
+        Ort::MemoryInfo memory_info =
+            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        int target_res =
+            params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+
+        bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
+        if (!is_concatenated) {
+            return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                    "Non-concatenated models are not yet supported."});
+        }
+
+        auto shape = m_input_node_dims[0];
+        int64_t model_h = shape[2] < 0 ? target_res : shape[2];
+        int64_t model_w = shape[3] < 0 ? target_res : shape[3];
+        size_t channel_stride = static_cast<size_t>(model_h) * static_cast<size_t>(model_w);
+        size_t total_planar_size = 4 * channel_stride;
+
+        auto ensure_resize_buffer = [&](std::size_t index, int width, int height, int channels)
+            -> Image {
+            if (m_resize_pool.size() <= index) {
+                m_resize_pool.resize(index + 1);
+            }
+            Image current = m_resize_pool[index].view();
+            if (current.width != width || current.height != height || current.channels != channels) {
+                m_resize_pool[index] = ImageBuffer(width, height, channels);
+                current = m_resize_pool[index].view();
+            }
+            return current;
+        };
+
+        if (m_planar_pool.empty() || m_planar_pool[0].view().data.size() != total_planar_size) {
+            if (m_planar_pool.empty()) {
+                m_planar_pool.emplace_back(static_cast<int>(total_planar_size), 1, 1);
+            } else {
+                m_planar_pool[0] = ImageBuffer(static_cast<int>(total_planar_size), 1, 1);
+            }
+        }
+
+        Image prepared_rgb = ensure_resize_buffer(0, static_cast<int>(model_w),
+                                                  static_cast<int>(model_h), 3);
+        Image prepared_hint = ensure_resize_buffer(1, static_cast<int>(model_w),
+                                                   static_cast<int>(model_h), 1);
+        float* planar_ptr = m_planar_pool[0].view().data.data();
+
+        common::measure_stage(
+            on_stage, "frame_prepare_inputs",
+            [&]() {
+                ColorUtils::resize_area_into(rgb, prepared_rgb);
+                ColorUtils::resize_area_into(alpha_hint, prepared_hint);
+
+                for (int y = 0; y < model_h; ++y) {
+                    for (int x = 0; x < model_w; ++x) {
+                        size_t idx =
+                            static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
+                        planar_ptr[0 * channel_stride + idx] =
+                            (prepared_rgb(y, x, 0) - 0.485f) / 0.229f;
+                        planar_ptr[1 * channel_stride + idx] =
+                            (prepared_rgb(y, x, 1) - 0.456f) / 0.224f;
+                        planar_ptr[2 * channel_stride + idx] =
+                            (prepared_rgb(y, x, 2) - 0.406f) / 0.225f;
+                        planar_ptr[3 * channel_stride + idx] = prepared_hint(y, x, 0);
+                    }
+                }
+            },
+            1);
+
+        std::vector<Ort::Value> input_tensors;
+        std::vector<int64_t> effective_shape = {1, 4, model_h, model_w};
+        if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            m_fp16_pool.resize(total_planar_size);
+            for (size_t index = 0; index < total_planar_size; ++index) {
+                m_fp16_pool[index] = Ort::Float16_t(planar_ptr[index]);
+            }
+            input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
+                memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
+                effective_shape.size()));
+        } else {
+            input_tensors.push_back(Ort::Value::CreateTensor<float>(
+                memory_info, planar_ptr, total_planar_size, effective_shape.data(),
+                effective_shape.size()));
+        }
+
+        auto output_tensors = common::measure_stage(
+            on_stage, "ort_run",
+            [&]() {
+                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                                     input_tensors.data(), input_tensors.size(),
+                                     m_output_node_names_ptr.data(),
+                                     m_output_node_names_ptr.size());
+            },
+            1);
+
+        if (output_tensors.empty()) {
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
+        }
+
+        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
+        auto alpha_type = alpha_info.GetElementType();
+        auto alpha_shape = alpha_info.GetShape();
+        size_t alpha_image_stride = static_cast<size_t>(alpha_shape[1]) *
+                                    static_cast<size_t>(alpha_shape[2]) *
+                                    static_cast<size_t>(alpha_shape[3]);
+
+        float* alpha_ptr = nullptr;
+        std::vector<float> alpha_fp32_conv;
+        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
+            alpha_fp32_conv.resize(alpha_image_stride);
+            for (size_t index = 0; index < alpha_image_stride; ++index) {
+                alpha_fp32_conv[index] = alpha_fp16[index].ToFloat();
+            }
+            alpha_ptr = alpha_fp32_conv.data();
+        } else {
+            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
+        }
+
+        float* fg_ptr = nullptr;
+        std::vector<float> fg_fp32_conv;
+        std::vector<int64_t> fg_shape;
+        size_t fg_image_stride = 0;
+        if (output_tensors.size() > 1) {
+            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
+            auto fg_type = fg_info.GetElementType();
+            fg_shape = fg_info.GetShape();
+            fg_image_stride = static_cast<size_t>(fg_shape[1]) * static_cast<size_t>(fg_shape[2]) *
+                              static_cast<size_t>(fg_shape[3]);
+            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
+                fg_fp32_conv.resize(fg_image_stride);
+                for (size_t index = 0; index < fg_image_stride; ++index) {
+                    fg_fp32_conv[index] = fg_fp16[index].ToFloat();
+                }
+                fg_ptr = fg_fp32_conv.data();
+            } else {
+                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
+            }
+        }
+
+        FrameResult result;
+        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
+        if (fg_ptr != nullptr) {
+            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+        }
+
+        bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+        Image model_alpha = ensure_resize_buffer(2, static_cast<int>(alpha_shape[3]),
+                                                 static_cast<int>(alpha_shape[2]),
+                                                 static_cast<int>(alpha_shape[1]));
+        common::measure_stage(
+            on_stage, "frame_extract_outputs",
+            [&]() {
+                ColorUtils::from_planar(alpha_ptr, model_alpha);
+                if (use_lanczos) {
+                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view());
+                } else {
+                    ColorUtils::resize_into(model_alpha, result.alpha.view());
+                }
+                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+
+                if (fg_ptr != nullptr) {
+                    Image model_fg = ensure_resize_buffer(3, static_cast<int>(fg_shape[3]),
+                                                          static_cast<int>(fg_shape[2]),
+                                                          static_cast<int>(fg_shape[1]));
+                    ColorUtils::from_planar(fg_ptr, model_fg);
+                    if (use_lanczos) {
+                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view());
+                    } else {
+                        ColorUtils::resize_into(model_fg, result.foreground.view());
+                    }
+                }
+            },
+            1);
+
+        return result;
+    } catch (const Ort::Exception& e) {
+        return Unexpected(Error{ErrorCode::InferenceFailed,
+                                std::string("ONNX Runtime execution failed: ") + e.what()});
+    }
 }
 
 Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,

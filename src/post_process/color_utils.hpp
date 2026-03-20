@@ -38,6 +38,7 @@ class CORRIDORKEY_API ColorUtils {
      * Returns an owned ImageBuffer.
      */
     static ImageBuffer resize(Image image, int new_width, int new_height);
+    static void resize_into(Image image, Image dst);
 
     /**
      * @brief Resize with Gaussian pre-filter for anti-aliased downscaling.
@@ -46,6 +47,7 @@ class CORRIDORKEY_API ColorUtils {
      * downscale ratios, behaves identically to resize().
      */
     static ImageBuffer resize_area(Image image, int new_width, int new_height);
+    static void resize_area_into(Image image, Image dst);
 
     /**
      * @brief Resize an image using Lanczos4 interpolation.
@@ -53,6 +55,7 @@ class CORRIDORKEY_API ColorUtils {
      * Higher quality than bilinear for upscaling. Returns an owned ImageBuffer.
      */
     static ImageBuffer resize_lanczos(Image image, int new_width, int new_height);
+    static void resize_lanczos_into(Image image, Image dst);
 
     /**
      * @brief Apply separable Gaussian blur in-place.

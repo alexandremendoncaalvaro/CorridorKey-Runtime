@@ -3,6 +3,7 @@ param(
     [string]$BuildDir = "",
     [string]$OrtRoot = "",
     [string]$ModelsDir = "",
+    [string]$ReleaseSuffix = "",
     [switch]$Skip2048
 )
 
@@ -86,7 +87,12 @@ if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
 
-$releaseBasename = "CorridorKey_Resolve_v${Version}_Windows"
+$normalizedSuffix = ""
+if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
+    $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
+}
+
+$releaseBasename = "CorridorKey_Resolve_v${Version}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
 $zipPath = Join-Path $repoRoot ("dist\" + $releaseBasename + ".zip")

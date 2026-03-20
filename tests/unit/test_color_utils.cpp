@@ -85,6 +85,24 @@ TEST_CASE("ColorUtils::resize bilinear", "[unit][color]") {
     }
 }
 
+TEST_CASE("ColorUtils::resize_into matches resize output", "[unit][color][regression]") {
+    ImageBuffer source_buf(2, 2, 1);
+    Image source = source_buf.view();
+    source.data[0] = 0.0f;
+    source.data[1] = 1.0f;
+    source.data[2] = 1.0f;
+    source.data[3] = 0.0f;
+
+    ImageBuffer expected = ColorUtils::resize(source, 3, 3);
+    ImageBuffer actual(3, 3, 1);
+    ColorUtils::resize_into(source, actual.view());
+
+    for (size_t index = 0; index < actual.view().data.size(); ++index) {
+        REQUIRE(actual.view().data[index] ==
+                Catch::Approx(expected.view().data[index]).margin(0.0001f));
+    }
+}
+
 TEST_CASE("ColorUtils::resize_lanczos upscale", "[unit][color]") {
     ImageBuffer buf(2, 2, 1);
     Image img = buf.view();
@@ -162,6 +180,26 @@ TEST_CASE("ColorUtils::resize_lanczos edge boundary reflect_101", "[unit][color]
             REQUIRE(out.data[i] >= -0.15f);
             REQUIRE(out.data[i] <= 1.15f);
         }
+    }
+}
+
+TEST_CASE("ColorUtils::resize_lanczos_into matches resize_lanczos output",
+          "[unit][color][regression]") {
+    ImageBuffer source_buf(4, 4, 1);
+    Image source = source_buf.view();
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            source(y, x) = static_cast<float>(x + y) / 6.0f;
+        }
+    }
+
+    ImageBuffer expected = ColorUtils::resize_lanczos(source, 6, 6);
+    ImageBuffer actual(6, 6, 1);
+    ColorUtils::resize_lanczos_into(source, actual.view());
+
+    for (size_t index = 0; index < actual.view().data.size(); ++index) {
+        REQUIRE(actual.view().data[index] ==
+                Catch::Approx(expected.view().data[index]).margin(0.0001f));
     }
 }
 
