@@ -498,6 +498,29 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     auto capabilities = runtime_capabilities();
     log_message("create_instance", std::string("Platform: ") + capabilities.platform);
 
+    int initial_quality_mode = kQualityAuto;
+    if (data->quality_mode_param != nullptr) {
+        g_suites.parameter->paramGetValue(data->quality_mode_param, &initial_quality_mode);
+    }
+
+    data->preferred_device = detected_device;
+    data->device = detected_device;
+    data->active_quality_mode = initial_quality_mode;
+    data->requested_resolution =
+        initial_requested_resolution_for_quality_mode(initial_quality_mode);
+    data->active_resolution = 0;
+    data->model_path.clear();
+    data->last_error.clear();
+
+    if (!should_prepare_bootstrap_during_instance_create(data->use_runtime_server)) {
+        log_message("create_instance",
+                    "Deferring runtime session bootstrap until first render.");
+        update_runtime_panel_values(data.get());
+        set_instance_data(instance, data.release());
+        log_create_total("success", "bootstrap=deferred");
+        return kOfxStatOK;
+    }
+
     auto bootstrap_candidates =
         build_bootstrap_candidates(capabilities, detected_device, data->models_root);
     if (bootstrap_candidates.empty()) {
@@ -553,6 +576,11 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
             }
             effective_device = prepare_result->session.effective_device;
             fallback = prepare_result->session.backend_fallback;
+            log_message("create_instance",
+                        "Runtime session prepared. reused_existing_session=" +
+                            std::to_string(prepare_result->session.reused_existing_session) +
+                            " ref_count=" +
+                            std::to_string(prepare_result->session.ref_count));
         } else {
             auto engine_result = Engine::create(
                 candidate.executable_model_path, candidate.device,
@@ -716,7 +744,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 
     if (!data->use_runtime_server && data->engine != nullptr) {
         data->device = data->engine->current_device();
-    } else if (data->use_runtime_server && data->runtime_client != nullptr) {
+    } else if (data->use_runtime_server && data->runtime_client != nullptr &&
+               data->runtime_client->has_session()) {
         data->device = data->runtime_client->current_device();
     }
     bool current_backend_matches = backend_matches_request(data->device, requested_device);
@@ -768,6 +797,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             }
             effective_device = prepare_result->session.effective_device;
             fallback = prepare_result->session.backend_fallback;
+            log_message("ensure_engine_for_quality",
+                        "Runtime session prepared. reused_existing_session=" +
+                            std::to_string(prepare_result->session.reused_existing_session) +
+                            " ref_count=" +
+                            std::to_string(prepare_result->session.ref_count));
         } else {
             auto engine_result = Engine::create(
                 selection.executable_model_path, requested_device,

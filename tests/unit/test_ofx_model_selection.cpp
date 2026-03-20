@@ -243,6 +243,19 @@ TEST_CASE("cpu quality guardrail clamps manual qualities above preview",
             kQualityMaximum);
 }
 
+TEST_CASE("out-of-process ofx instances defer bootstrap until first render",
+          "[unit][ofx][regression]") {
+    REQUIRE(should_prepare_bootstrap_during_instance_create(false));
+    REQUIRE_FALSE(should_prepare_bootstrap_during_instance_create(true));
+}
+
+TEST_CASE("unloaded quality state only resolves fixed manual resolutions",
+          "[unit][ofx][regression]") {
+    REQUIRE(initial_requested_resolution_for_quality_mode(kQualityAuto) == 0);
+    REQUIRE(initial_requested_resolution_for_quality_mode(kQualityPreview) == 512);
+    REQUIRE(initial_requested_resolution_for_quality_mode(kQualityMaximum) == 2048);
+}
+
 TEST_CASE("ofx defaults open new instances with source passthrough disabled",
           "[unit][ofx][regression]") {
     REQUIRE(kDefaultSourcePassthroughEnabled == 0);

@@ -59,6 +59,10 @@ inline int clamp_quality_mode_for_cpu_backend(Backend backend, int quality_mode)
     return quality_mode;
 }
 
+inline bool should_prepare_bootstrap_during_instance_create(bool use_runtime_server) {
+    return !use_runtime_server;
+}
+
 inline int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
     if (quality_mode == kQualityPreview) return 512;
     if (quality_mode == kQualityStandard) return 768;
@@ -71,6 +75,13 @@ inline int resolve_target_resolution(int quality_mode, int input_width, int inpu
     if (max_dim > 2000) return 1536;
     if (max_dim > 1000) return 1024;
     return 768;
+}
+
+inline int initial_requested_resolution_for_quality_mode(int quality_mode) {
+    if (!is_fixed_quality_mode(quality_mode)) {
+        return 0;
+    }
+    return resolve_target_resolution(quality_mode, 0, 0);
 }
 
 inline std::filesystem::path mlx_pack_path(const std::filesystem::path& models_root) {

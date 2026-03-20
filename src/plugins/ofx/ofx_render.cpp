@@ -51,6 +51,22 @@ DeviceInfo requested_device_for_render(const InstanceData* data) {
     return data->preferred_device;
 }
 
+DeviceInfo effective_device_for_render_log(const InstanceData* data) {
+    if (data == nullptr) {
+        return {};
+    }
+    if (data->use_runtime_server) {
+        if (data->runtime_client != nullptr && data->runtime_client->has_session()) {
+            return data->runtime_client->current_device();
+        }
+        return data->device;
+    }
+    if (data->engine != nullptr) {
+        return data->engine->current_device();
+    }
+    return data->device;
+}
+
 void log_render_stage(std::string_view phase, const DeviceInfo& requested_device,
                       const std::filesystem::path& artifact_path, int requested_resolution,
                       int effective_resolution, const StageTiming& timing) {
@@ -373,9 +389,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.sp_blur_px = edge_blur;
 
     const DeviceInfo requested_device = requested_device_for_render(data);
-    const DeviceInfo effective_device_before =
-        data->use_runtime_server ? data->runtime_client->current_device()
-                                 : data->engine->current_device();
+    const DeviceInfo effective_device_before = effective_device_for_render_log(data);
     const std::string render_phase = render_phase_label(data->render_count);
     log_render_event("render_begin", render_phase, requested_device, effective_device_before,
                      data->model_path, data->requested_resolution, data->active_resolution,
@@ -400,8 +414,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     ++data->render_count;
     if (!result) {
         log_render_event("render_result", render_phase, requested_device,
-                         data->use_runtime_server ? data->runtime_client->current_device()
-                                                  : data->engine->current_device(),
+                         effective_device_for_render_log(data),
                          data->model_path,
                          data->requested_resolution, data->active_resolution,
                          data->use_runtime_server ? data->runtime_client->backend_fallback()
