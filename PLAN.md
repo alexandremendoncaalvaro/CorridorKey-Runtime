@@ -10,18 +10,62 @@ establish the plugin as a production-ready tool inside DaVinci Resolve.
 
 ## Current State
 
-**Shipped (v0.2.0-mac):**
-- Functional OFX plugin for DaVinci Resolve on macOS Apple Silicon
-- MLX backend with CPU/CoreML fallback
-- Notarized DMG with PKG installer (system-wide / per-user)
-- Smart resolution selection (512/768/1024 Auto based on input size)
+**Available in the current test builds:**
+- Functional OFX plugin for DaVinci Resolve on macOS Apple Silicon and Windows
+- Runtime panel that exposes the effective backend, device, requested quality,
+  effective quality, and loaded artifact
+- Visible plugin version in the OFX panel header to confirm the installed build
+- Quality modes exposed as Auto, Preview (512), Standard (768), High (1024),
+  Ultra (1536), and Maximum (2048)
 - Lanczos4 output upscaling for maximum edge detail
-- Source detail restoration with soft green falloff
+- Source passthrough controls for restoring original source detail in opaque
+  regions
 - Alpha Hint external matte input
 - Output Mode selector (Processed, Matte Only, Foreground Only, Source+Matte)
 - Alpha Edge Controls (Erode/Dilate, Softness, Black/White Point)
 - Color Correction (Brightness, Saturation)
-- Correct color space pipeline (sRGB in, linear premultiplied out, sRGB conversion in write)
+- Tiling behavior aligned with the Python reference, including external frame
+  edge weighting and overlap semantics
+- Correct color space pipeline (sRGB in, linear premultiplied out, sRGB
+  conversion in write)
+- Official Windows OFX packaging now includes the `fp16 512` RTX artifact and
+  the `int8 768/1024` non-RTX artifacts required by the current quality
+  selection logic
+- Windows OFX validation now fails a "Universal" bundle that lacks the actual
+  non-TensorRT execution provider DLLs needed for AMD/Intel GPU acceleration
+- Windows OFX GPU backends now disable silent CPU fallback during session
+  creation and render execution; backend drift is treated as an explicit OFX
+  failure instead of a hidden success path
+- Windows OFX logging now captures structured `session_create`, `warmup`,
+  `first_frame`, and `subsequent_frame` timing/fallback events to support real
+  Resolve diagnostics on user machines
+
+**Known gaps confirmed by Resolve field testing:**
+- Reliable GPU residency is still the top release requirement. On real Windows
+  RTX hardware, the plugin can detect the correct GPU and still rebuild or fall
+  to CPU when rendering the first frame at `1536` or `2048`.
+- The current branch now exposes requested and effective quality separately,
+  but that improved runtime feedback still needs fresh Resolve validation on
+  user machines.
+- The current branch packages a valid TensorRT `512` artifact and updates the
+  runtime panel correctly, but this needs confirmation from the next Windows
+  test round on real Resolve systems.
+- High-resolution Windows RTX switches (`1536` and `2048`) can rebuild onto the
+  CPU path on real hardware and remain a release blocker until the effective
+  backend remains stable. The current branch now fails explicitly instead of
+  silently continuing on CPU, but the root cause still needs fixing.
+- The current Windows universal bundle is still not AMD-ready. Field logs show
+  Radeon systems falling back to `Windows CPU Baseline`, and the vendored
+  Windows runtime still does not contain the DirectML/WinML/OpenVINO provider
+  DLLs needed for real non-NVIDIA GPU execution.
+- Alpha Hint semantics are still under-explained in the UI: RGBA inputs use the
+  alpha channel, single-channel inputs use that channel directly, and RGB-only
+  hint expectations are currently mismatched with user intuition.
+- The OFX node still generates a rough matte internally when no Alpha Hint is
+  connected. If the product direction is to keep matte generation outside the
+  node, that fallback behavior needs a deliberate decision.
+- Copy/paste and first-instance latency still feel too heavy in Resolve and
+  likely correlate with per-instance engine creation and warmup.
 
 ## Phase 1 - Quality Parity with EZ-CorridorKey
 
@@ -51,6 +95,17 @@ Features requested by the community and critical for real-world compositing.
   heuristic: detect linear footage by checking if float pixel values
   exceed 1.0. For now, the "Input Is Linear" checkbox remains the
   reliable manual fallback.
+- [ ] **1.5.3 Alpha Hint UX Clarification** -- make the OFX UI explicit about
+  how hint inputs are interpreted: RGBA uses `A`, single-channel inputs use the
+  provided channel directly, and RGB-only hint expectations must either be
+  documented or handled with an explicit fallback policy.
+- [ ] **1.5.4 Alpha Hint Product Boundary** -- decide whether the OFX node
+  should keep generating an internal rough matte when no hint is connected, or
+  whether hint generation belongs strictly outside the node so CorridorKey stays
+  focused on keying.
+- [ ] **1.5.5 Alpha Hint RGB Fallback Policy** -- evaluate the proposed UX
+  fallback of using channel `R` when an RGB hint is connected without a valid
+  alpha channel.
 
 ## Phase 2 - Resolution and Quality Control
 
@@ -78,6 +133,12 @@ EZ-CorridorKey achieves on Apple Silicon.
   back to source resolution. All reference repos use Lanczos4 for this
   step. Bilinear retained for downscaling in `fit_pad` where it is
   appropriate. (`src/post_process/color_utils.cpp`)
+- [x] **2.4 Effective Quality Feedback** -- expose the requested quality and the
+  effective loaded artifact/resolution distinctly in the OFX panel so users can
+  trust Auto mode and understand when a fixed/manual switch fails.
+- [x] **2.5 CPU Guardrails for Quality Selection** -- block or downgrade
+  high-resolution manual quality requests when the effective backend is CPU so
+  Resolve does not become unusable on accidental backend fallback.
 
 ## Phase 3 - Output Control and Workflow
 
@@ -97,6 +158,18 @@ Goal: give compositors the control they expect from a professional keyer.
   then `write_output_image` applied `to_srgb()` again, causing gray banding
   at transparency edges. Now all output paths convert FG to linear before
   premultiplication, matching the reference repos exactly.
+- [ ] **3.5 Processed Output Presentation** -- clarify the expected appearance
+  of the `Processed` output in Resolve so users are not surprised by viewing
+  linear premultiplied RGB directly without a display transform.
+- [ ] **3.6 Panel Simplification** -- review whether Brightness and Saturation
+  belong inside CorridorKey or should be removed in favor of downstream color
+  nodes.
+- [ ] **3.7 Multiple Simultaneous Outputs** -- support emitting foreground,
+  matte, processed, and composite outputs from the same node without forcing
+  users to duplicate inference-heavy nodes just to inspect another result.
+- [ ] **3.8 Post-Inference Output Switching** -- keep output selection changes
+  in the post-process stage whenever possible so changing presentation does not
+  rerun inference.
 
 ## Phase 4 - Platform Parity (NVIDIA RTX)
 
@@ -109,20 +182,47 @@ Goal: ensure the Windows version matches macOS quality and performance.
   Visual Studio 2022 and managed ONNX Runtime dependencies.
 - [x] **4.4 Portable Installer** -- relative path installation script for
   professional distribution.
+- [x] **4.5 Preview (512) on Windows RTX** -- package and select a valid `512`
+  TensorRT artifact so the Preview mode actually switches engine state instead
+  of failing and leaving stale runtime information behind.
+- [x] **4.6 Strict OFX GPU Residency Policy** -- disable silent CPU fallback
+  for OFX GPU backends, disable ORT CPU EP fallback for those paths, and fail
+  explicitly if render execution drifts away from the requested GPU backend.
+- [ ] **4.7 Stable High-Resolution RTX Path** -- investigate why `1536` and
+  `2048` can recreate the engine onto the CPU backend on real RTX systems, then
+  either keep those resolutions on GPU or fail explicitly without an implicit
+  backend downgrade.
+- [ ] **4.8 First-Frame GPU Fallback Diagnostics** -- capture and explain the
+  case where a correctly detected RTX card falls to CPU only after the first
+  render, not during bootstrap. Structured OFX logging is now in place, but
+  diagnosis on real user logs is still pending.
+- [ ] **4.9 Copy/Paste Instance Cost** -- reduce the cold-start and copy/paste
+  cost of OFX instances so duplicating the node does not stall Resolve for
+  tens of seconds.
 
 ## Phase 5 - Universal Windows AI (AMD, Intel, Qualcomm)
 
 Goal: target the March 2026 Windows AI stack for maximum compatibility.
 
-- [ ] **5.1 Windows AI Platform (WinML) Backend** -- migrate from manual
+- [x] **5.1 Windows Universal Packaging Audit** -- make the official Windows
+  OFX package ship and validate the actual non-TensorRT execution-provider
+  stack required for AMD/Intel compatibility instead of assuming `DirectML.dll`
+  alone is sufficient.
+- [ ] **5.2 DirectML Compatibility Baseline** -- guarantee that AMD Radeon
+  systems can detect a GPU backend, load the correct provider path, and run
+  inference without falling immediately to `Windows CPU Baseline`.
+- [x] **5.3 Non-RTX Artifact Pack** -- include the `int8` artifacts required by
+  the non-TensorRT Windows path (`512`, `768`, and `1024` at minimum) so Auto
+  and manual quality selection are not pinned to the CPU-safe `512` fallback.
+- [ ] **5.4 Windows AI Platform (WinML) Backend** -- migrate from manual
   backend selection to the Windows ML orchestrator. This allows the OS to
   automatically route to the NPU on Copilot+ PCs or the GPU on AMD/Intel.
-- [ ] **5.2 NPU-First Strategy (QNN & OpenVINO 2026.0)** -- optimize models for
+- [ ] **5.5 NPU-First Strategy (QNN & OpenVINO 2026.0)** -- optimize models for
   the Snapdragon X2 Elite (Qualcomm QNN) and Intel Core Ultra (OpenVINO)
   NPUs to offload the GPU during video rendering.
-- [ ] **5.3 DirectML Fallback (Legacy Compatibility)** -- maintain DirectML for
+- [ ] **5.6 DirectML Fallback (Legacy Compatibility)** -- maintain DirectML for
   pre-2024 AMD/NVIDIA hardware where NPUs are unavailable.
-- [ ] **5.4 Blue Screen Support** -- channel-swap approach (swap B and G
+- [ ] **5.7 Blue Screen Support** -- channel-swap approach (swap B and G
   channels before inference, swap back after). Requires adapting despill
   and rough matte generation to work on the blue channel. No model
   retraining needed.
@@ -135,8 +235,15 @@ Goal: target the March 2026 Windows AI stack for maximum compatibility.
   to achieve 2x speedup on NPUs with minimal quality loss.
 - [ ] **6.3 Temporal Consistency (Video-Native)** -- frame-to-frame matte
   consistency to reduce flickering.
-- [ ] **6.4 2048px Windows Engine** -- expand Windows support to match the
-  2048px macOS bridge.
+- [ ] **6.4 2048px Windows Stability** -- keep the Windows `2048` path usable on
+  supported hardware without degrading to CPU or making Resolve effectively
+  unusable during interactive work.
+- [ ] **6.5 Instance Reuse and Warmup Strategy** -- investigate whether engine
+  caches, warmup reuse, or shared artifact state can reduce the heavy cost of
+  first placement and copy/paste in Resolve.
+- [ ] **6.6 Log-Guided Resolve Validation** -- keep using `ofx.log` and
+  `corridorkey_ofx_delayload.log` as required evidence for Windows test builds,
+  especially for backend fallback and provider-loading failures.
 
 ## Reference
 
