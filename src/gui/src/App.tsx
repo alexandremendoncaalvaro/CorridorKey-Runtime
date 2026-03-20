@@ -4,10 +4,10 @@ import { TopBar } from "./components/layout/topbar";
 import { ProcessFlow } from "./components/workflow/ProcessFlow";
 import { useEngineStore } from "./lib/store";
 import { useJobStore } from "./lib/job";
-import { 
-  Settings as SettingsIcon, 
-  History as HistoryIcon, 
-  Cpu, 
+import {
+  Settings as SettingsIcon,
+  History as HistoryIcon,
+  Cpu,
   ExternalLink,
   Trash2,
   Clock,
@@ -55,7 +55,7 @@ function App() {
                 </Button>
               )}
             </div>
-            
+
             {history.length === 0 ? (
               <div className="p-20 rounded-2xl border border-dashed border-zinc-800 text-center space-y-4">
                 <div className="mx-auto w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center">
@@ -180,7 +180,7 @@ function App() {
             <div className="space-y-2">
               <h2 className="text-3xl font-bold">Community & Support</h2>
               <p className="text-muted-foreground max-w-md mx-auto">
-                CorridorKey Runtime is an open-source production engine. 
+                CorridorKey Runtime is an open-source production engine.
                 Join our community to report bugs, suggest features, or get help.
               </p>
             </div>
@@ -226,17 +226,17 @@ function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent text-foreground selection:bg-brand/20">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
-      
+
       <main className="flex flex-col flex-1 min-w-0 bg-background/30 backdrop-blur-sm">
         <TopBar />
-        
+
         <div className="flex-1 overflow-y-auto p-8 lg:p-12">
           {engineError && (
             <div className="mb-8 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm animate-in shake-1 duration-500">
               <strong>Engine Error:</strong> {engineError}
             </div>
           )}
-          
+
           {renderContent()}
         </div>
       </main>

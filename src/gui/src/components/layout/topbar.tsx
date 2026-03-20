@@ -16,7 +16,7 @@ export function TopBar() {
           {isLoading ? "Probing Hardware..." : "Engine Standby"}
         </span>
       </div>
-      
+
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 text-[10px] font-bold border border-zinc-800">
           <Monitor className="w-3 h-3" />

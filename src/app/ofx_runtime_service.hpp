@@ -1,0 +1,24 @@
+#pragma once
+
+#include <chrono>
+#include <filesystem>
+
+#include "../common/local_ipc.hpp"
+#include "ofx_runtime_protocol.hpp"
+#include "ofx_session_broker.hpp"
+
+namespace corridorkey::app {
+
+struct OfxRuntimeServiceOptions {
+    common::LocalJsonEndpoint endpoint = {};
+    std::chrono::milliseconds idle_timeout = std::chrono::minutes(2);
+    std::filesystem::path log_path = {};
+    OfxSessionBrokerOptions broker = {};
+};
+
+class OfxRuntimeService {
+   public:
+    static Result<void> run(const OfxRuntimeServiceOptions& options);
+};
+
+}  // namespace corridorkey::app

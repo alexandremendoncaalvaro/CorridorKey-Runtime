@@ -13,6 +13,11 @@ TEST_CASE("Tile blend fades only across internal seams", "[unit][tiling][regress
         CHECK(core::tile_stride(1024, 64) == 960);
     }
 
+    SECTION("Tile stride never collapses to zero") {
+        CHECK(core::tile_stride(512, 512) == 1);
+        CHECK(core::tile_stride(512, 1024) == 1);
+    }
+
     SECTION("Interior tile keeps seam fade on both sides") {
         CHECK(core::edge_aware_tile_weight(0, 256, tile_size, overlap, false, false, false,
                                            false) == Catch::Approx(0.0F));

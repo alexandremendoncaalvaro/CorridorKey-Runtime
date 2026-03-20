@@ -12,7 +12,8 @@ fi
 # Extract version from version.hpp (single source of truth)
 _default_version=$(grep 'CORRIDORKEY_VERSION_STRING' "${REPO_ROOT_EARLY}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')
 VERSION="${CORRIDORKEY_VERSION:-${_default_version}}"
-DIST_DIR="dist/CorridorKey_Mac_v${VERSION}"
+DIST_BASENAME="CorridorKey_Runtime_v${VERSION}_macOS_AppleSilicon"
+DIST_DIR="dist/${DIST_BASENAME}"
 BIN_NAME="corridorkey"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
 SIGN_IDENTITY="${CORRIDORKEY_SIGN_IDENTITY:-}"
@@ -27,8 +28,8 @@ MLX_REQUIRED_PACK="models/corridorkey_mlx.safetensors"
 MLX_REQUIRED_BRIDGE="models/corridorkey_mlx_bridge_512.mlxfn"
 MLX_HIGH_RES_BRIDGE="models/corridorkey_mlx_bridge_1024.mlxfn"
 CPU_BASELINE_MODEL="models/corridorkey_int8_512.onnx"
-ZIP_PATH="dist/CorridorKey_Mac_v${VERSION}.zip"
-DMG_PATH="dist/CorridorKey_Mac_v${VERSION}.dmg"
+ZIP_PATH="dist/${DIST_BASENAME}.zip"
+DMG_PATH="dist/${DIST_BASENAME}.dmg"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IDENTITY_HELPER="${REPO_ROOT}/scripts/codesign-identity.sh"
 
@@ -299,8 +300,8 @@ LAUNCHER_EOF
 chmod +x "$DIST_DIR/corridorkey"
 
 cat <<README_EOF > "$DIST_DIR/README.txt"
-CorridorKey Runtime v${VERSION} - Mac Portable Release
-==================================================
+CorridorKey Runtime v${VERSION} - macOS Apple Silicon Portable Release
+=====================================================================
 
 This is a standalone, zero-python version of CorridorKey.
 
@@ -309,7 +310,7 @@ QUICK START:
 2. Navigate to this folder: cd "\$(dirname "\$0")"
 3. If macOS blocks the preview build after extraction, remove the quarantine
    attribute from this folder once:
-   xattr -dr com.apple.quarantine CorridorKey_Mac_v${VERSION}
+   xattr -dr com.apple.quarantine ${DIST_BASENAME}
 4. Check the bundle:
    ./corridorkey doctor
 5. Run the smoke test:

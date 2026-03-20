@@ -63,6 +63,27 @@ bool is_depth(const std::string& depth, const char* expected) {
     return std::strcmp(depth.c_str(), expected) == 0;
 }
 
+bool is_alpha_hint_single_channel(const std::string& components) {
+    return components == kOfxImageComponentAlpha;
+}
+
+bool is_alpha_hint_rgb(const std::string& components) {
+    return components == kOfxImageComponentRGB;
+}
+
+std::string alpha_hint_interpretation_label(const std::string& components) {
+    if (components == kOfxImageComponentRGBA) {
+        return "alpha_channel";
+    }
+    if (is_alpha_hint_single_channel(components)) {
+        return "single_channel";
+    }
+    if (is_alpha_hint_rgb(components)) {
+        return "red_channel";
+    }
+    return "channel_0";
+}
+
 void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
                            const std::string& depth) {
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
@@ -99,6 +120,8 @@ void copy_alpha_hint(Image dst, const void* src_data, int row_bytes, const std::
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
     const bool is_rgba = (components == kOfxImageComponentRGBA);
+    const bool is_alpha = is_alpha_hint_single_channel(components);
+    const bool is_rgb = is_alpha_hint_rgb(components);
 
     for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
         const auto* row = reinterpret_cast<const unsigned char*>(src_data) +
@@ -112,6 +135,16 @@ void copy_alpha_hint(Image dst, const void* src_data, int row_bytes, const std::
                     dst_row[x_pos] = src_pixel[3];
                     src_pixel += 4;
                 }
+            } else if (is_alpha) {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = src_pixel[0];
+                    ++src_pixel;
+                }
+            } else if (is_rgb) {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = src_pixel[0];
+                    src_pixel += 3;
+                }
             } else {
                 for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
                     dst_row[x_pos] = src_pixel[0];
@@ -124,6 +157,16 @@ void copy_alpha_hint(Image dst, const void* src_data, int row_bytes, const std::
                 for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
                     dst_row[x_pos] = static_cast<float>(src_pixel[3]) / 255.0f;
                     src_pixel += 4;
+                }
+            } else if (is_alpha) {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
+                    ++src_pixel;
+                }
+            } else if (is_rgb) {
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
+                    src_pixel += 3;
                 }
             } else {
                 for (int x_pos = 0; x_pos < dst.width; ++x_pos) {

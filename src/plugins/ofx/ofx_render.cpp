@@ -1,10 +1,17 @@
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <corridorkey/engine.hpp>
+#include <cstdint>
+#include <cstring>
+#include <optional>
 #include <string>
 
 #include "common/srgb_lut.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
+#include "ofx_runtime_client.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
@@ -50,6 +57,22 @@ DeviceInfo requested_device_for_render(const InstanceData* data) {
     return data->preferred_device;
 }
 
+DeviceInfo effective_device_for_render_log(const InstanceData* data) {
+    if (data == nullptr) {
+        return {};
+    }
+    if (data->use_runtime_server) {
+        if (data->runtime_client != nullptr && data->runtime_client->has_session()) {
+            return data->runtime_client->current_device();
+        }
+        return data->device;
+    }
+    if (data->engine != nullptr) {
+        return data->engine->current_device();
+    }
+    return data->device;
+}
+
 void log_render_stage(std::string_view phase, const DeviceInfo& requested_device,
                       const std::filesystem::path& artifact_path, int requested_resolution,
                       int effective_resolution, const StageTiming& timing) {
@@ -57,9 +80,8 @@ void log_render_stage(std::string_view phase, const DeviceInfo& requested_device
                               " total_ms=" + std::to_string(timing.total_ms) +
                               " requested_backend=" + backend_label(requested_device.backend) +
                               " artifact=" + artifact_path.filename().string() +
-                              " requested_resolution=" +
-                              std::to_string(requested_resolution) + " effective_resolution=" +
-                              std::to_string(effective_resolution));
+                              " requested_resolution=" + std::to_string(requested_resolution) +
+                              " effective_resolution=" + std::to_string(effective_resolution));
 }
 
 void log_render_event(std::string_view event, std::string_view phase,
@@ -72,10 +94,10 @@ void log_render_event(std::string_view event, std::string_view phase,
                           " requested_backend=" + backend_label(requested_device.backend) +
                           " effective_backend=" + backend_label(effective_device.backend) +
                           " requested_device=" + requested_device.name +
-                          " effective_device=" + effective_device.name + " artifact=" +
-                          artifact_path.filename().string() + " requested_resolution=" +
-                          std::to_string(requested_resolution) + " effective_resolution=" +
-                          std::to_string(effective_resolution);
+                          " effective_device=" + effective_device.name +
+                          " artifact=" + artifact_path.filename().string() +
+                          " requested_resolution=" + std::to_string(requested_resolution) +
+                          " effective_resolution=" + std::to_string(effective_resolution);
     if (fallback.has_value() && !fallback->reason.empty()) {
         message += " fallback_reason=" + fallback->reason;
     }
@@ -83,6 +105,212 @@ void log_render_event(std::string_view event, std::string_view phase,
         message += " detail=" + std::string(detail);
     }
     log_message("render", message);
+}
+
+void record_frame_timing(InstanceData* data, double elapsed_ms) {
+    if (data == nullptr || elapsed_ms <= 0.0) {
+        return;
+    }
+    data->last_frame_ms = elapsed_ms;
+    if (data->frame_time_samples == 0 || data->avg_frame_ms <= 0.0) {
+        data->avg_frame_ms = elapsed_ms;
+    } else {
+        constexpr double kSmoothing = 0.2;
+        data->avg_frame_ms = (1.0 - kSmoothing) * data->avg_frame_ms + kSmoothing * elapsed_ms;
+    }
+    ++data->frame_time_samples;
+    data->runtime_panel_dirty = true;
+}
+
+void set_runtime_error(InstanceData* data, const std::string& message,
+                       OfxImageEffectHandle instance) {
+    if (data != nullptr) {
+        data->last_error = message;
+        data->cached_result_valid = false;
+        data->runtime_panel_dirty = true;
+        update_runtime_panel(data);
+    }
+    post_message(kOfxMessageError, message.c_str(), instance);
+}
+
+bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& rhs) {
+    return lhs.target_resolution == rhs.target_resolution &&
+           lhs.despill_strength == rhs.despill_strength &&
+           lhs.auto_despeckle == rhs.auto_despeckle && lhs.despeckle_size == rhs.despeckle_size &&
+           lhs.refiner_scale == rhs.refiner_scale && lhs.input_is_linear == rhs.input_is_linear &&
+           lhs.batch_size == rhs.batch_size && lhs.enable_tiling == rhs.enable_tiling &&
+           lhs.tile_padding == rhs.tile_padding && lhs.upscale_method == rhs.upscale_method &&
+           lhs.source_passthrough == rhs.source_passthrough && lhs.sp_erode_px == rhs.sp_erode_px &&
+           lhs.sp_blur_px == rhs.sp_blur_px;
+}
+
+std::uint64_t mix_signature(std::uint64_t hash, float value) {
+    std::uint32_t bits = 0;
+    static_assert(sizeof(float) == sizeof(bits));
+    std::memcpy(&bits, &value, sizeof(bits));
+    hash ^= static_cast<std::uint64_t>(bits);
+    return hash * 1099511628211ULL;
+}
+
+std::uint64_t frame_signature(const Image& rgb, const Image& hint) {
+    constexpr std::uint64_t kOffsetBasis = 1469598103934665603ULL;
+    std::uint64_t hash = kOffsetBasis;
+    for (float value : rgb.data) {
+        hash = mix_signature(hash, value);
+    }
+    if (hint.width == rgb.width && hint.height == rgb.height) {
+        for (float value : hint.data) {
+            hash = mix_signature(hash, value);
+        }
+    }
+    hash = mix_signature(hash, static_cast<float>(rgb.width));
+    hash = mix_signature(hash, static_cast<float>(rgb.height));
+    hash = mix_signature(hash, static_cast<float>(rgb.channels));
+    return hash;
+}
+
+class RenderScope {
+   public:
+    explicit RenderScope(InstanceData* data) : m_data(data) {
+        if (m_data != nullptr) {
+            m_data->in_render = true;
+        }
+    }
+
+    ~RenderScope() {
+        if (m_data != nullptr) {
+            m_data->in_render = false;
+        }
+    }
+
+    RenderScope(const RenderScope&) = delete;
+    RenderScope& operator=(const RenderScope&) = delete;
+
+   private:
+    InstanceData* m_data = nullptr;
+};
+
+void swap_green_blue(Image image) {
+    if (image.channels < 3) {
+        return;
+    }
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            std::swap(image(y, x, 1), image(y, x, 2));
+        }
+    }
+}
+
+void write_rgba_pixel(float r, float g, float b, float a, unsigned char* dst, bool is_float,
+                      bool is_byte, bool apply_srgb, const SrgbLut& lut) {
+    if (is_float) {
+        float* dst_pixel = reinterpret_cast<float*>(dst);
+        if (apply_srgb) {
+            if (a > 0.0f) {
+                float inv_a = 1.0f / a;
+                dst_pixel[0] = lut.to_srgb(r * inv_a) * a;
+                dst_pixel[1] = lut.to_srgb(g * inv_a) * a;
+                dst_pixel[2] = lut.to_srgb(b * inv_a) * a;
+            } else {
+                dst_pixel[0] = 0.0f;
+                dst_pixel[1] = 0.0f;
+                dst_pixel[2] = 0.0f;
+            }
+        } else {
+            dst_pixel[0] = r;
+            dst_pixel[1] = g;
+            dst_pixel[2] = b;
+        }
+        dst_pixel[3] = a;
+        return;
+    }
+
+    if (is_byte) {
+        unsigned char* dst_pixel = dst;
+        float sr = 0.0f;
+        float sg = 0.0f;
+        float sb = 0.0f;
+        if (a > 0.0f) {
+            float inv_a = 1.0f / a;
+            sr = lut.to_srgb(r * inv_a) * a;
+            sg = lut.to_srgb(g * inv_a) * a;
+            sb = lut.to_srgb(b * inv_a) * a;
+        }
+        dst_pixel[0] = static_cast<unsigned char>(std::clamp(sr * 255.0f + 0.5f, 0.0f, 255.0f));
+        dst_pixel[1] = static_cast<unsigned char>(std::clamp(sg * 255.0f + 0.5f, 0.0f, 255.0f));
+        dst_pixel[2] = static_cast<unsigned char>(std::clamp(sb * 255.0f + 0.5f, 0.0f, 255.0f));
+        dst_pixel[3] = static_cast<unsigned char>(std::clamp(a * 255.0f + 0.5f, 0.0f, 255.0f));
+    }
+}
+
+void write_matte_output(const Image& alpha, void* dst_data, int row_bytes, const std::string& depth,
+                        const SrgbLut& lut) {
+    const bool is_float = is_depth(depth, kOfxBitDepthFloat);
+    const bool is_byte = is_depth(depth, kOfxBitDepthByte);
+    for (int y = 0; y < alpha.height; ++y) {
+        auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+        for (int x = 0; x < alpha.width; ++x) {
+            float a = alpha(y, x);
+            write_rgba_pixel(a, a, a, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                             false, lut);
+        }
+    }
+}
+
+void write_foreground_output(const Image& fg_linear, void* dst_data, int row_bytes,
+                             const std::string& depth, bool apply_srgb, const SrgbLut& lut) {
+    const bool is_float = is_depth(depth, kOfxBitDepthFloat);
+    const bool is_byte = is_depth(depth, kOfxBitDepthByte);
+    for (int y = 0; y < fg_linear.height; ++y) {
+        auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+        for (int x = 0; x < fg_linear.width; ++x) {
+            float r = fg_linear(y, x, 0);
+            float g = fg_linear(y, x, 1);
+            float b = fg_linear(y, x, 2);
+            write_rgba_pixel(r, g, b, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                             apply_srgb, lut);
+        }
+    }
+}
+
+void write_processed_output(const Image& fg_linear, const Image& alpha, void* dst_data,
+                            int row_bytes, const std::string& depth, bool apply_srgb,
+                            const SrgbLut& lut) {
+    const bool is_float = is_depth(depth, kOfxBitDepthFloat);
+    const bool is_byte = is_depth(depth, kOfxBitDepthByte);
+    for (int y = 0; y < fg_linear.height; ++y) {
+        auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+        for (int x = 0; x < fg_linear.width; ++x) {
+            float a = alpha(y, x);
+            float r = fg_linear(y, x, 0) * a;
+            float g = fg_linear(y, x, 1) * a;
+            float b = fg_linear(y, x, 2) * a;
+            write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                             apply_srgb, lut);
+        }
+    }
+}
+
+void write_source_matte_output(const Image& rgb_srgb, const Image& alpha, void* dst_data,
+                               int row_bytes, const std::string& depth, bool apply_srgb,
+                               const SrgbLut& lut) {
+    const bool is_float = is_depth(depth, kOfxBitDepthFloat);
+    const bool is_byte = is_depth(depth, kOfxBitDepthByte);
+    for (int y = 0; y < rgb_srgb.height; ++y) {
+        auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+        for (int x = 0; x < rgb_srgb.width; ++x) {
+            float a = alpha(y, x);
+            float r = lut.to_linear(rgb_srgb(y, x, 0)) * a;
+            float g = lut.to_linear(rgb_srgb(y, x, 1)) * a;
+            float b = lut.to_linear(rgb_srgb(y, x, 2)) * a;
+            write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                             apply_srgb, lut);
+        }
+    }
 }
 
 }  // namespace
@@ -96,11 +324,15 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     InstanceData* data = get_instance_data(instance);
-    if (data == nullptr || data->engine == nullptr) {
+    if (data == nullptr || (data->use_runtime_server && data->runtime_client == nullptr) ||
+        (!data->use_runtime_server && data->engine == nullptr)) {
         log_message("render", "Engine is not ready.");
-        post_message(kOfxMessageError, "CorridorKey engine is not ready.", instance);
+        set_runtime_error(data, "CorridorKey engine is not ready.", instance);
         return kOfxStatFailed;
     }
+
+    RenderScope render_scope(data);
+    const auto render_start = std::chrono::steady_clock::now();
 
     double time = 0.0;
     if (in_args != nullptr) {
@@ -110,7 +342,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     OfxPropertySetHandle source_props = nullptr;
     if (!fetch_image(data->source_clip, time, source_props)) {
         log_message("render", "Failed to fetch source image.");
-        post_message(kOfxMessageError, "Failed to fetch source image.", instance);
+        set_runtime_error(data, "Failed to fetch source image.", instance);
         return kOfxStatFailed;
     }
     ImageHandleGuard source_guard{source_props};
@@ -118,7 +350,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     OfxPropertySetHandle output_props = nullptr;
     if (!fetch_image(data->output_clip, time, output_props)) {
         log_message("render", "Failed to fetch output image.");
-        post_message(kOfxMessageError, "Failed to fetch output image.", instance);
+        set_runtime_error(data, "Failed to fetch output image.", instance);
         return kOfxStatFailed;
     }
     ImageHandleGuard output_guard{output_props};
@@ -128,7 +360,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             kOfxStatOK ||
         source_data == nullptr) {
         log_message("render", "Source image data unavailable.");
-        post_message(kOfxMessageError, "Source image data is unavailable.", instance);
+        set_runtime_error(data, "Source image data is unavailable.", instance);
         return kOfxStatFailed;
     }
 
@@ -137,28 +369,73 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             kOfxStatOK ||
         output_data == nullptr) {
         log_message("render", "Output image data unavailable.");
-        post_message(kOfxMessageError, "Output image data is unavailable.", instance);
+        set_runtime_error(data, "Output image data is unavailable.", instance);
         return kOfxStatFailed;
+    }
+
+    bool matte_connected = is_clip_connected(data->matte_output_clip);
+    OfxPropertySetHandle matte_props = nullptr;
+    ImageHandleGuard matte_guard{};
+    void* matte_data = nullptr;
+    int matte_row_bytes = 0;
+    std::string matte_depth;
+
+    if (matte_connected && fetch_image(data->matte_output_clip, time, matte_props)) {
+        matte_guard.handle = matte_props;
+        if (g_suites.property->propGetPointer(matte_props, kOfxImagePropData, 0, &matte_data) == kOfxStatOK && matte_data != nullptr) {
+            get_int(matte_props, kOfxImagePropRowBytes, matte_row_bytes);
+            get_string(matte_props, kOfxImageEffectPropPixelDepth, matte_depth);
+        }
+    }
+
+    bool fg_connected = is_clip_connected(data->foreground_output_clip);
+    OfxPropertySetHandle fg_props = nullptr;
+    ImageHandleGuard fg_guard{};
+    void* fg_data = nullptr;
+    int fg_row_bytes = 0;
+    std::string fg_depth;
+
+    if (fg_connected && fetch_image(data->foreground_output_clip, time, fg_props)) {
+        fg_guard.handle = fg_props;
+        if (g_suites.property->propGetPointer(fg_props, kOfxImagePropData, 0, &fg_data) == kOfxStatOK && fg_data != nullptr) {
+            get_int(fg_props, kOfxImagePropRowBytes, fg_row_bytes);
+            get_string(fg_props, kOfxImageEffectPropPixelDepth, fg_depth);
+        }
+    }
+
+    bool comp_connected = is_clip_connected(data->composite_output_clip);
+    OfxPropertySetHandle comp_props = nullptr;
+    ImageHandleGuard comp_guard{};
+    void* comp_data = nullptr;
+    int comp_row_bytes = 0;
+    std::string comp_depth;
+
+    if (comp_connected && fetch_image(data->composite_output_clip, time, comp_props)) {
+        comp_guard.handle = comp_props;
+        if (g_suites.property->propGetPointer(comp_props, kOfxImagePropData, 0, &comp_data) == kOfxStatOK && comp_data != nullptr) {
+            get_int(comp_props, kOfxImagePropRowBytes, comp_row_bytes);
+            get_string(comp_props, kOfxImageEffectPropPixelDepth, comp_depth);
+        }
     }
 
     OfxRectI source_bounds{};
     if (!get_rect_i(source_props, kOfxImagePropBounds, source_bounds)) {
         log_message("render", "Source bounds unavailable.");
-        post_message(kOfxMessageError, "Source bounds are unavailable.", instance);
+        set_runtime_error(data, "Source bounds are unavailable.", instance);
         return kOfxStatFailed;
     }
 
     int source_row_bytes = 0;
     if (!get_int(source_props, kOfxImagePropRowBytes, source_row_bytes)) {
         log_message("render", "Source row bytes unavailable.");
-        post_message(kOfxMessageError, "Source row bytes are unavailable.", instance);
+        set_runtime_error(data, "Source row bytes are unavailable.", instance);
         return kOfxStatFailed;
     }
 
     int output_row_bytes = 0;
     if (!get_int(output_props, kOfxImagePropRowBytes, output_row_bytes)) {
         log_message("render", "Output row bytes unavailable.");
-        post_message(kOfxMessageError, "Output row bytes are unavailable.", instance);
+        set_runtime_error(data, "Output row bytes are unavailable.", instance);
         return kOfxStatFailed;
     }
 
@@ -167,27 +444,17 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (!get_string(source_props, kOfxImageEffectPropPixelDepth, source_depth) ||
         !get_string(source_props, kOfxImageEffectPropComponents, source_components)) {
         log_message("render", "Source format unavailable.");
-        post_message(kOfxMessageError, "Source format is unavailable.", instance);
+        set_runtime_error(data, "Source format is unavailable.", instance);
         return kOfxStatFailed;
     }
     if (!is_depth(source_depth, kOfxBitDepthFloat) && !is_depth(source_depth, kOfxBitDepthByte)) {
         log_message("render", "Unsupported source bit depth.");
-        post_message(kOfxMessageError, "Unsupported source bit depth.", instance);
+        set_runtime_error(data, "Unsupported source bit depth.", instance);
         return kOfxStatFailed;
     }
     if (source_components != kOfxImageComponentRGBA) {
         log_message("render", "Unsupported source components.");
-        post_message(kOfxMessageError, "Only RGBA source images are supported.", instance);
-        return kOfxStatFailed;
-    }
-
-    std::string output_depth;
-    if (!get_string(output_props, kOfxImageEffectPropPixelDepth, output_depth)) {
-        output_depth = source_depth;
-    }
-    if (!is_depth(output_depth, kOfxBitDepthFloat) && !is_depth(output_depth, kOfxBitDepthByte)) {
-        log_message("render", "Unsupported output bit depth.");
-        post_message(kOfxMessageError, "Unsupported output bit depth.", instance);
+        set_runtime_error(data, "Only RGBA source images are supported.", instance);
         return kOfxStatFailed;
     }
 
@@ -195,30 +462,25 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int height = source_bounds.y2 - source_bounds.y1;
     if (width <= 0 || height <= 0) {
         log_message("render", "Invalid source bounds.");
-        post_message(kOfxMessageError, "Invalid source bounds.", instance);
+        set_runtime_error(data, "Invalid source bounds.", instance);
         return kOfxStatFailed;
     }
 
-    ImageBuffer rgb_buffer(width, height, 3);
-    ImageBuffer hint_buffer(width, height, 1);
-    Image rgb_view = rgb_buffer.view();
-    Image hint_view = hint_buffer.view();
-
-    copy_source_to_linear(rgb_view, source_data, source_row_bytes, source_depth);
-
     int quality_mode = kQualityAuto;
     int output_mode = kOutputProcessed;
+    int alpha_hint_mode = kDefaultAlphaHintMode;
+    int input_color_space = kDefaultInputColorSpace;
+    int quantization_mode = kDefaultQuantizationMode;
+    int screen_color = kDefaultScreenColor;
+    double temporal_smoothing = kDefaultTemporalSmoothing;
     int despeckle_enabled = 0;
     int despeckle_size = 400;
-    int input_is_linear = 0;
     double despill_strength = 0.5;
     double refiner_scale = 1.0;
     double alpha_black_point = 0.0;
     double alpha_white_point = 1.0;
     double alpha_erode = 0.0;
     double alpha_softness = 0.0;
-    double brightness = 1.0;
-    double saturation = 1.0;
     int upscale_method = kUpscaleLanczos4;
     int enable_tiling = 0;
     int tile_overlap = 64;
@@ -229,12 +491,78 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
     }
-    if (!ensure_engine_for_quality(data, quality_mode, width, height)) {
+    if (data->alpha_hint_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->alpha_hint_mode_param, time,
+                                                &alpha_hint_mode);
+    }
+    if (data->input_color_space_param) {
+        g_suites.parameter->paramGetValueAtTime(data->input_color_space_param, time,
+                                                &input_color_space);
+    }
+    if (data->quantization_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->quantization_mode_param, time,
+                                                &quantization_mode);
+    }
+    if (data->screen_color_param) {
+        g_suites.parameter->paramGetValueAtTime(data->screen_color_param, time, &screen_color);
+    }
+    if (data->temporal_smoothing_param) {
+        g_suites.parameter->paramGetValueAtTime(data->temporal_smoothing_param, time,
+                                                &temporal_smoothing);
+    }
+
+    bool input_is_linear = false;
+    switch (input_color_space) {
+        case kInputColorLinear:
+            input_is_linear = true;
+            break;
+        case kInputColorSrgb:
+            input_is_linear = false;
+            break;
+        case kInputColorAuto:
+        default:
+            input_is_linear = false;
+            break;
+    }
+
+    std::string output_depth;
+    if (!get_string(output_props, kOfxImageEffectPropPixelDepth, output_depth)) {
+        output_depth = source_depth;
+    }
+    if (!is_depth(output_depth, kOfxBitDepthFloat) && !is_depth(output_depth, kOfxBitDepthByte)) {
+        log_message("render", "Unsupported output bit depth.");
+        set_runtime_error(data, "Unsupported output bit depth.", instance);
+        return kOfxStatFailed;
+    }
+
+    ImageBuffer rgb_buffer(width, height, 3);
+    ImageBuffer hint_buffer(width, height, 1);
+    Image rgb_view = rgb_buffer.view();
+    Image hint_view = hint_buffer.view();
+
+    copy_source_to_linear(rgb_view, source_data, source_row_bytes, source_depth);
+
+    if (input_is_linear) {
+        const SrgbLut& lut = SrgbLut::instance();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                rgb_view(y, x, 0) = lut.to_srgb(rgb_view(y, x, 0));
+                rgb_view(y, x, 1) = lut.to_srgb(rgb_view(y, x, 1));
+                rgb_view(y, x, 2) = lut.to_srgb(rgb_view(y, x, 2));
+            }
+        }
+    }
+
+    const bool swap_screen = screen_color == kScreenColorBlue;
+    if (swap_screen) {
+        swap_green_blue(rgb_view);
+    }
+    if (!ensure_engine_for_quality(data, quality_mode, width, height, quantization_mode)) {
         const std::string quality_error =
             data->last_error.empty() ? "Failed to switch quality mode." : data->last_error;
         if (is_fixed_quality_mode(quality_mode)) {
             log_message("render", quality_error);
-            post_message(kOfxMessageError, quality_error.c_str(), instance);
+            set_runtime_error(data, quality_error, instance);
             return kOfxStatFailed;
         }
         log_message("render", quality_error + " Using current engine.");
@@ -247,10 +575,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->despeckle_size_param) {
         g_suites.parameter->paramGetValueAtTime(data->despeckle_size_param, time, &despeckle_size);
-    }
-    if (data->input_is_linear_param) {
-        g_suites.parameter->paramGetValueAtTime(data->input_is_linear_param, time,
-                                                &input_is_linear);
     }
     if (data->despill_param) {
         g_suites.parameter->paramGetValueAtTime(data->despill_param, time, &despill_strength);
@@ -271,12 +595,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->alpha_softness_param) {
         g_suites.parameter->paramGetValueAtTime(data->alpha_softness_param, time, &alpha_softness);
-    }
-    if (data->brightness_param) {
-        g_suites.parameter->paramGetValueAtTime(data->brightness_param, time, &brightness);
-    }
-    if (data->saturation_param) {
-        g_suites.parameter->paramGetValueAtTime(data->saturation_param, time, &saturation);
     }
     if (data->upscale_method_param) {
         g_suites.parameter->paramGetValueAtTime(data->upscale_method_param, time, &upscale_method);
@@ -299,10 +617,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     bool hint_from_clip = false;
+    bool hint_clip_connected = false;
     OfxPropertySetHandle hint_props = nullptr;
     ImageHandleGuard hint_guard{};
 
     if (is_clip_connected(data->alpha_hint_clip)) {
+        hint_clip_connected = true;
         if (fetch_image(data->alpha_hint_clip, time, hint_props)) {
             hint_guard.handle = hint_props;
             void* hint_data = nullptr;
@@ -318,25 +638,38 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                 get_string(hint_props, kOfxImageEffectPropComponents, hint_components)) {
                 copy_alpha_hint(hint_view, hint_data, hint_row_bytes, hint_depth, hint_components);
                 hint_from_clip = true;
-                log_message("render", "Using external alpha hint from connected clip.");
+                log_message(
+                    "render",
+                    "Using external alpha hint from connected clip. components=" + hint_components +
+                        " interpretation=" + alpha_hint_interpretation_label(hint_components));
+            } else {
+                log_message("render",
+                            "Connected alpha hint clip could not be read. "
+                            "Falling back to rough matte generation.");
             }
+        } else {
+            log_message("render",
+                        "Connected alpha hint clip could not be fetched. "
+                        "Falling back to rough matte generation.");
         }
     }
 
     if (!hint_from_clip) {
+        if (alpha_hint_mode == kAlphaHintExternalOnly) {
+            const std::string message =
+                "Alpha Hint Mode is External Only but no readable hint clip was provided.";
+            log_message("render", message);
+            set_runtime_error(data, message, instance);
+            return kOfxStatFailed;
+        }
+        if (!hint_clip_connected) {
+            log_message("render",
+                        "No alpha hint clip connected. Generating rough matte from source RGB.");
+        }
         ColorUtils::generate_rough_matte(rgb_view, hint_view);
     }
 
-    if (input_is_linear != 0) {
-        const SrgbLut& lut = SrgbLut::instance();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                rgb_view(y, x, 0) = lut.to_srgb(rgb_view(y, x, 0));
-                rgb_view(y, x, 1) = lut.to_srgb(rgb_view(y, x, 1));
-                rgb_view(y, x, 2) = lut.to_srgb(rgb_view(y, x, 2));
-            }
-        }
-    }
+    const std::uint64_t signature = frame_signature(rgb_view, hint_view);
 
     InferenceParams params;
     params.target_resolution = data->active_resolution;
@@ -344,7 +677,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
     params.refiner_scale = static_cast<float>(refiner_scale);
-    params.input_is_linear = input_is_linear != 0;
+    params.input_is_linear = input_is_linear;
     params.upscale_method =
         upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
     params.enable_tiling = enable_tiling != 0;
@@ -353,157 +686,230 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.sp_erode_px = edge_erode;
     params.sp_blur_px = edge_blur;
 
-    const DeviceInfo requested_device = requested_device_for_render(data);
-    const DeviceInfo effective_device_before = data->engine->current_device();
-    const std::string render_phase = render_phase_label(data->render_count);
-    log_render_event("render_begin", render_phase, requested_device, effective_device_before,
-                     data->model_path, data->requested_resolution, data->active_resolution,
-                     data->engine->backend_fallback());
-
-    auto result = data->engine->process_frame(
-        rgb_view, hint_view, params,
-        [&](const StageTiming& timing) {
-            log_render_stage(render_phase, requested_device, data->model_path,
-                             data->requested_resolution, data->active_resolution, timing);
-        });
-    ++data->render_count;
-    if (!result) {
-        log_render_event("render_result", render_phase, requested_device,
-                         data->engine->current_device(), data->model_path,
-                         data->requested_resolution, data->active_resolution,
-                         data->engine->backend_fallback(), result.error().message);
-        log_message("render", std::string("Engine processing failed: ") + result.error().message);
-        post_message(kOfxMessageError, result.error().message.c_str(), instance);
-        return kOfxStatFailed;
-    }
-
-    DeviceInfo effective_device = data->engine->current_device();
-    log_render_event("render_result", render_phase, requested_device, effective_device,
-                     data->model_path, data->requested_resolution, data->active_resolution,
-                     data->engine->backend_fallback());
-    if (effective_device.backend != data->device.backend || effective_device.name != data->device.name) {
-        data->device = effective_device;
-        update_runtime_panel(data);
-    }
-    if (requested_device.backend != Backend::Auto &&
-        effective_device.backend != requested_device.backend) {
-        std::string fallback_message =
-            "Render switched away from the requested backend while using " +
-            data->model_path.filename().string() + ".";
-        if (auto fallback = data->engine->backend_fallback();
-            fallback.has_value() && !fallback->reason.empty()) {
-            fallback_message += " Reason: " + fallback->reason;
-        }
-        data->last_error = fallback_message;
-        log_message("render", fallback_message);
-        post_message(kOfxMessageError, fallback_message.c_str(), instance);
-        return kOfxStatFailed;
-    }
-
-    Image alpha_view = result->alpha.view();
-    if (alpha_view.width != width || alpha_view.height != height) {
-        log_message("render", "Unexpected output size from engine.");
-        post_message(kOfxMessageError, "Unexpected output size from engine.", instance);
-        return kOfxStatFailed;
-    }
-
-    if (alpha_erode != 0.0) {
-        alpha_erode_dilate(alpha_view, static_cast<float>(alpha_erode));
-    }
-    if (alpha_softness > 0.0) {
-        alpha_blur(alpha_view, static_cast<float>(alpha_softness));
-    }
-    if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
-        alpha_levels(alpha_view, static_cast<float>(alpha_black_point),
-                     static_cast<float>(alpha_white_point));
-    }
+    const bool signature_matches =
+        data->cached_signature_valid && data->cached_signature == signature;
+    const bool cache_hit = data->cached_result_valid && signature_matches &&
+                           data->cached_width == width && data->cached_height == height &&
+                           data->cached_model_path == data->model_path &&
+                           inference_params_equal(data->cached_params, params) &&
+                           data->cached_alpha_hint_mode == alpha_hint_mode &&
+                           data->cached_screen_color == screen_color &&
+                           std::abs(data->cached_alpha_black_point - alpha_black_point) < 1e-6 &&
+                           std::abs(data->cached_alpha_white_point - alpha_white_point) < 1e-6 &&
+                           std::abs(data->cached_alpha_erode - alpha_erode) < 1e-6 &&
+                           std::abs(data->cached_alpha_softness - alpha_softness) < 1e-6 &&
+                           std::abs(data->cached_temporal_smoothing - temporal_smoothing) < 1e-6;
 
     const SrgbLut& lut = SrgbLut::instance();
-    Image fg_srgb_view = result->foreground.view();
-    ImageBuffer fg_linear_buf(width, height, 3);
-    Image fg_linear = fg_linear_buf.view();
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            fg_linear(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
-            fg_linear(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
-            fg_linear(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
-        }
-    }
+    Image alpha_view;
+    Image fg_linear;
 
-    if (brightness != 1.0 || saturation != 1.0) {
-        const float bright_f = static_cast<float>(brightness);
-        const float sat_f = static_cast<float>(saturation);
+    if (cache_hit) {
+        log_message("render", "event=cache_hit detail=output_switch");
+        alpha_view = data->cached_result.alpha.view();
+        fg_linear = data->cached_result.foreground.view();
+    } else {
+        const DeviceInfo requested_device = requested_device_for_render(data);
+        const DeviceInfo effective_device_before = effective_device_for_render_log(data);
+        const std::string render_phase = render_phase_label(data->render_count);
+        log_render_event("render_begin", render_phase, requested_device, effective_device_before,
+                         data->model_path, data->requested_resolution, data->active_resolution,
+                         data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                  : data->engine->backend_fallback());
+
+        auto result = data->use_runtime_server
+                          ? data->runtime_client->process_frame(
+                                rgb_view, hint_view, params, data->render_count,
+                                [&](const StageTiming& timing) {
+                                    log_render_stage(render_phase, requested_device,
+                                                     data->model_path, data->requested_resolution,
+                                                     data->active_resolution, timing);
+                                })
+                          : data->engine->process_frame(
+                                rgb_view, hint_view, params, [&](const StageTiming& timing) {
+                                    log_render_stage(render_phase, requested_device,
+                                                     data->model_path, data->requested_resolution,
+                                                     data->active_resolution, timing);
+                                });
+        ++data->render_count;
+        if (!result) {
+            log_render_event("render_result", render_phase, requested_device,
+                             effective_device_for_render_log(data), data->model_path,
+                             data->requested_resolution, data->active_resolution,
+                             data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                      : data->engine->backend_fallback(),
+                             result.error().message);
+            log_message("render",
+                        std::string("Engine processing failed: ") + result.error().message);
+            set_runtime_error(data, result.error().message, instance);
+            return kOfxStatFailed;
+        }
+
+        DeviceInfo effective_device = data->use_runtime_server
+                                          ? data->runtime_client->current_device()
+                                          : data->engine->current_device();
+        log_render_event("render_result", render_phase, requested_device, effective_device,
+                         data->model_path, data->requested_resolution, data->active_resolution,
+                         data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                  : data->engine->backend_fallback());
+        if (effective_device.backend != data->device.backend ||
+            effective_device.name != data->device.name) {
+            data->device = effective_device;
+            update_runtime_panel(data);
+        }
+        if (requested_device.backend != Backend::Auto &&
+            effective_device.backend != requested_device.backend) {
+            std::string fallback_message =
+                "Render switched away from the requested backend while using " +
+                data->model_path.filename().string() + ".";
+            if (auto fallback = data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                         : data->engine->backend_fallback();
+                fallback.has_value() && !fallback->reason.empty()) {
+                fallback_message += " Reason: " + fallback->reason;
+            }
+            data->last_error = fallback_message;
+            log_message("render", fallback_message);
+            set_runtime_error(data, fallback_message, instance);
+            return kOfxStatFailed;
+        }
+
+        Image alpha_view_local = result->alpha.view();
+        if (alpha_view_local.width != width || alpha_view_local.height != height) {
+            log_message("render", "Unexpected output size from engine.");
+            set_runtime_error(data, "Unexpected output size from engine.", instance);
+            return kOfxStatFailed;
+        }
+
+        if (alpha_erode != 0.0) {
+            alpha_erode_dilate(alpha_view_local, static_cast<float>(alpha_erode));
+        }
+        if (alpha_softness > 0.0) {
+            alpha_blur(alpha_view_local, static_cast<float>(alpha_softness));
+        }
+        if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
+            alpha_levels(alpha_view_local, static_cast<float>(alpha_black_point),
+                         static_cast<float>(alpha_white_point));
+        }
+
+        Image fg_srgb_view = result->foreground.view();
+        ImageBuffer fg_linear_buf(width, height, 3);
+        Image fg_linear_local = fg_linear_buf.view();
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
-                float r = fg_linear(y, x, 0) * bright_f;
-                float g = fg_linear(y, x, 1) * bright_f;
-                float b = fg_linear(y, x, 2) * bright_f;
-                if (sat_f != 1.0F) {
-                    float luma = 0.2126F * r + 0.7152F * g + 0.0722F * b;
-                    r = luma + sat_f * (r - luma);
-                    g = luma + sat_f * (g - luma);
-                    b = luma + sat_f * (b - luma);
-                }
-                fg_linear(y, x, 0) = r;
-                fg_linear(y, x, 1) = g;
-                fg_linear(y, x, 2) = b;
+                fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
+                fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
+                fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
             }
         }
+
+        if (swap_screen) {
+            swap_green_blue(fg_linear_local);
+        }
+
+        if (temporal_smoothing > 0.0) {
+            const float blend = static_cast<float>(std::clamp(temporal_smoothing, 0.0, 1.0));
+            const bool size_mismatch = !data->temporal_state_valid ||
+                                       data->temporal_width != width ||
+                                       data->temporal_height != height;
+            if (size_mismatch) {
+                data->temporal_alpha = ImageBuffer(width, height, 1);
+                data->temporal_foreground = ImageBuffer(width, height, 3);
+                data->temporal_width = width;
+                data->temporal_height = height;
+            }
+            Image prev_alpha = data->temporal_alpha.view();
+            Image prev_foreground = data->temporal_foreground.view();
+            if (size_mismatch || !data->temporal_state_valid) {
+                for (int y = 0; y < height; ++y) {
+                    for (int x = 0; x < width; ++x) {
+                        prev_alpha(y, x) = alpha_view_local(y, x);
+                        for (int c = 0; c < 3; ++c) {
+                            prev_foreground(y, x, c) = fg_linear_local(y, x, c);
+                        }
+                    }
+                }
+                data->temporal_state_valid = true;
+            } else {
+                for (int y = 0; y < height; ++y) {
+                    for (int x = 0; x < width; ++x) {
+                        float a_prev = prev_alpha(y, x);
+                        float a_cur = alpha_view_local(y, x);
+                        float a_out = a_cur * (1.0f - blend) + a_prev * blend;
+                        alpha_view_local(y, x) = a_out;
+                        prev_alpha(y, x) = a_out;
+                        for (int c = 0; c < 3; ++c) {
+                            float fg_prev = prev_foreground(y, x, c);
+                            float fg_cur = fg_linear_local(y, x, c);
+                            float fg_out = fg_cur * (1.0f - blend) + fg_prev * blend;
+                            fg_linear_local(y, x, c) = fg_out;
+                            prev_foreground(y, x, c) = fg_out;
+                        }
+                    }
+                }
+            }
+            data->temporal_time = time;
+        } else {
+            data->temporal_state_valid = false;
+        }
+
+        data->cached_result.alpha = std::move(result->alpha);
+        data->cached_result.foreground = std::move(fg_linear_buf);
+        data->cached_result_valid = true;
+        data->cached_time = time;
+        data->cached_width = width;
+        data->cached_height = height;
+        data->cached_params = params;
+        data->cached_model_path = data->model_path;
+        data->cached_alpha_hint_mode = alpha_hint_mode;
+        data->cached_screen_color = screen_color;
+        data->cached_alpha_black_point = alpha_black_point;
+        data->cached_alpha_white_point = alpha_white_point;
+        data->cached_alpha_erode = alpha_erode;
+        data->cached_alpha_softness = alpha_softness;
+        data->cached_temporal_smoothing = temporal_smoothing;
+        data->cached_signature = signature;
+        data->cached_signature_valid = true;
+
+        alpha_view = data->cached_result.alpha.view();
+        fg_linear = data->cached_result.foreground.view();
     }
 
-    bool apply_srgb = input_is_linear == 0;
+    if (swap_screen) {
+        swap_green_blue(rgb_view);
+    }
+
+    bool apply_srgb = !input_is_linear;
 
     if (output_mode == kOutputMatteOnly) {
-        ImageBuffer matte_rgba(width, height, 4);
-        Image matte_view = matte_rgba.view();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                float a = alpha_view(y, x);
-                matte_view(y, x, 0) = a;
-                matte_view(y, x, 1) = a;
-                matte_view(y, x, 2) = a;
-                matte_view(y, x, 3) = 1.0f;
-            }
-        }
-        write_output_image(matte_view, output_data, output_row_bytes, output_depth, false);
+        write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, lut);
     } else if (output_mode == kOutputForegroundOnly) {
-        ImageBuffer fg_rgba(width, height, 4);
-        Image out_view = fg_rgba.view();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                out_view(y, x, 0) = fg_linear(y, x, 0);
-                out_view(y, x, 1) = fg_linear(y, x, 1);
-                out_view(y, x, 2) = fg_linear(y, x, 2);
-                out_view(y, x, 3) = 1.0f;
-            }
-        }
-        write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
+        write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth, apply_srgb,
+                                lut);
     } else if (output_mode == kOutputSourceMatte) {
-        ImageBuffer src_rgba(width, height, 4);
-        Image out_view = src_rgba.view();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                float a = alpha_view(y, x);
-                out_view(y, x, 0) = lut.to_linear(rgb_view(y, x, 0)) * a;
-                out_view(y, x, 1) = lut.to_linear(rgb_view(y, x, 1)) * a;
-                out_view(y, x, 2) = lut.to_linear(rgb_view(y, x, 2)) * a;
-                out_view(y, x, 3) = a;
-            }
-        }
-        write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
+        write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes, output_depth,
+                                  apply_srgb, lut);
     } else {
-        ImageBuffer reprocessed(width, height, 4);
-        Image out_view = reprocessed.view();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                float a = alpha_view(y, x);
-                out_view(y, x, 0) = fg_linear(y, x, 0) * a;
-                out_view(y, x, 1) = fg_linear(y, x, 1) * a;
-                out_view(y, x, 2) = fg_linear(y, x, 2) * a;
-                out_view(y, x, 3) = a;
-            }
-        }
-        write_output_image(out_view, output_data, output_row_bytes, output_depth, apply_srgb);
+        write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth,
+                               apply_srgb, lut);
+    }
+
+    if (matte_data != nullptr) {
+        write_matte_output(alpha_view, matte_data, matte_row_bytes, matte_depth, lut);
+    }
+    if (fg_data != nullptr) {
+        write_foreground_output(fg_linear, fg_data, fg_row_bytes, fg_depth, apply_srgb, lut);
+    }
+    if (comp_data != nullptr) {
+        write_processed_output(fg_linear, alpha_view, comp_data, comp_row_bytes, comp_depth, apply_srgb, lut);
+    }
+
+    const double render_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_start)
+            .count();
+    record_frame_timing(data, render_ms);
+    if (data != nullptr) {
+        data->last_error.clear();
+        data->runtime_panel_dirty = true;
     }
     return kOfxStatOK;
 }

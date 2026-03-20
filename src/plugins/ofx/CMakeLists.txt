@@ -16,6 +16,8 @@ if(WIN32)
         ofx_render.cpp
         ofx_image_utils.hpp
         ofx_logging.hpp
+        ofx_runtime_client.cpp
+        ofx_runtime_client.hpp
         ofx_shared.hpp
     )
 else()
@@ -28,6 +30,8 @@ else()
         ofx_render.cpp
         ofx_image_utils.hpp
         ofx_logging.hpp
+        ofx_runtime_client.cpp
+        ofx_runtime_client.hpp
         ofx_shared.hpp
     )
 endif()
@@ -58,11 +62,17 @@ set_target_properties(corridorkey_ofx PROPERTIES
 )
 
 if(WIN32)
-    target_link_libraries(corridorkey_ofx PRIVATE delayimp.lib)
+    if(CORRIDORKEY_MSVC_DELAYIMP_LIB)
+        target_link_libraries(corridorkey_ofx PRIVATE "${CORRIDORKEY_MSVC_DELAYIMP_LIB}")
+    else()
+        target_link_libraries(corridorkey_ofx PRIVATE delayimp.lib)
+    endif()
+    corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx)
     set_property(TARGET corridorkey_ofx APPEND_STRING PROPERTY LINK_FLAGS " /DELAYLOAD:onnxruntime.dll")
 endif()
 
 if(WIN32)
+    add_dependencies(corridorkey_ofx corridorkey_cli)
     # Package the OFX bundle
     set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey.ofx.bundle")
 
@@ -73,6 +83,7 @@ if(WIN32)
 
         # Copy the plugin binary
         COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
 
         # Copy all auxiliary ONNX Runtime and TensorRT DLLs
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"

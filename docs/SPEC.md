@@ -18,8 +18,8 @@ The product direction is explicit:
 
 - **macOS first** to close runtime quality, diagnostics, and portable
   distribution on Apple Silicon.
-- **Windows Universal GPU next** as the current product track for predictable
-  deployment on NVIDIA (RTX/GTX), AMD, and Intel hardware.
+- **Windows GPU next** as the current product track for predictable
+  deployment on NVIDIA (RTX/GTX) and AMD/Intel hardware via separate RTX and DirectML packages.
 - **GUI and integration surfaces after that**, all consuming the same
   library-first runtime.
 
@@ -39,8 +39,8 @@ that is required to extract predictable performance from the target hardware.
   plugin, and pipeline integrations.
 - A hardware-aware runtime with **curated provider tracks**, delivering
   predictable performance across diverse GPU tiers.
-- A **platform-specific model-pack strategy** where Apple Silicon, Universal
-  GPU (RTX/GTX/AMD), and CPU fallback use optimized converted artifacts under
+- A **platform-specific model-pack strategy** where Apple Silicon, Windows GPU
+  tracks (RTX and DirectML), and CPU fallback use optimized converted artifacts under
   the same runtime contract.
 
 ### 1.2 What This Is NOT
@@ -58,8 +58,8 @@ that is required to extract predictable performance from the target hardware.
 ### 1.3 Intended Users
 
 - **Technical local operators** who want native execution without Python.
-- **Windows Universal GPU operators** who want predictable consumer-GPU
-  deployment across NVIDIA, AMD, and Intel.
+- **Windows GPU operators** who want predictable consumer-GPU
+  deployment across NVIDIA (RTX/GTX) and AMD/Intel via separate packages.
 - **Integrators** who need a reusable engine for apps, plugins, or pipelines.
 
 ### 1.4 Goals
@@ -68,7 +68,7 @@ that is required to extract predictable performance from the target hardware.
 |------|--------|
 | Native local execution | No Python, no pip, no venv |
 | macOS production runtime | Corpus passes on 8 GB and 16 GB Apple Silicon tiers with an Apple-specific accelerated artifact path |
-| Windows Universal GPU next | Product track covers TensorRT RTX, CUDA, and DirectML with CPU fallback |
+| Windows GPU track next | Product track covers TensorRT RTX/CUDA and DirectML with CPU fallback |
 | Operational predictability | `doctor`, `benchmark`, and `process --json` stay stable |
 | Platform-specific optimization | Separate model packs per product track without changing the runtime contract |
 | Quality parity with original model behavior | < 2% deviation on reference test set |
@@ -97,7 +97,7 @@ that is required to extract predictable performance from the target hardware.
 ├──────────────────────────────────────────────────────────┤
 │              Execution backends and model packs              │
 │   ┌────────────┬───────────────┬──────────┬──────────────┐ │
-│   │ Apple      │ Windows Univ. │ CPU      │ Secondary    │ │
+│   │ Apple      │ Windows GPU   │ CPU      │ Secondary    │ │
 │   │ model pack │ model pack    │ baseline │ exploratory  │ │
 │   │ (MLX or    │ (ONNX / TRT / │ (ONNX)   │ paths        │ │
 │   │ Core ML)   │ CUDA / DML)   │          │              │ │
@@ -125,9 +125,9 @@ performance.
 
 1. **Current release gate: macOS 14+ on Apple Silicon.**
    - MLX-first execution for high-performance native inference.
-2. **Next product track: Windows 11 (Universal GPU).**
+2. **Next product track: Windows 11 (GPU).**
    - Primary path: **TensorRT RTX** for maximum NVIDIA performance.
-   - Integrated support: **CUDA** for broad NVIDIA support and **DirectML** for
-     AMD/Intel.
+   - Separate DirectML package for AMD/Intel.
+   - "Universal" is only claimed when non-RTX provider DLLs are packaged and validated.
    - Distribution includes curated AI runtimes and optimized model packs.
 3. **Later integration surfaces:** GUI, sidecar, plugin, and pipeline embedding.

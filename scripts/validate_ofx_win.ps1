@@ -17,6 +17,7 @@ $win64Dir = Join-Path $BundlePath "Contents\Win64"
 $resourcesDir = Join-Path $BundlePath "Contents\Resources\models"
 $bundleDescriptor = [System.IO.Path]::GetFullPath($BundlePath)
 $expectsUniversalGpuPath = $bundleDescriptor -match 'Universal'
+$expectsDirectMlPath = $bundleDescriptor -match 'DirectML'
 
 # Check bundle structure
 if (-not (Test-Path $BundlePath)) {
@@ -45,8 +46,7 @@ Write-Host "[PASS] onnxruntime.dll exists" -ForegroundColor Green
 # Check all required DLLs
 $requiredDlls = @(
     "onnxruntime.dll",
-    "onnxruntime_providers_shared.dll",
-    "DirectML.dll"
+    "onnxruntime_providers_shared.dll"
 )
 
 foreach ($dll in $requiredDlls) {
@@ -67,6 +67,47 @@ if (-not (Test-Path $plugin)) {
 
 $pluginSize = (Get-Item $plugin).Length
 Write-Host "[PASS] Found plugin binary ($([math]::Round($pluginSize / 1MB, 2)) MB)" -ForegroundColor Green
+
+$runtimeServer = Join-Path $win64Dir "corridorkey.exe"
+if (-not (Test-Path $runtimeServer)) {
+    Write-Host "[FAIL] Runtime server binary not found" -ForegroundColor Red
+    throw "Runtime server binary not found: corridorkey.exe"
+}
+
+$directmlDll = Join-Path $win64Dir "DirectML.dll"
+if (Test-Path $directmlDll) {
+    Write-Host "[PASS] Found DirectML.dll" -ForegroundColor Green
+} elseif ($expectsDirectMlPath) {
+    Write-Host "[FAIL] DirectML.dll not found in DirectML bundle" -ForegroundColor Red
+    throw "DirectML.dll is required for the DirectML bundle."
+} else {
+    Write-Host "[INFO] DirectML.dll not found (RTX bundle)" -ForegroundColor Cyan
+}
+
+$runtimeServerSize = (Get-Item $runtimeServer).Length
+Write-Host "[PASS] Found runtime server binary ($([math]::Round($runtimeServerSize / 1MB, 2)) MB)" -ForegroundColor Green
+
+$supportedBackends = @()
+Push-Location $win64Dir
+try {
+    $runtimeInfoJson = & ".\corridorkey.exe" info --json 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($runtimeInfoJson)) {
+        $runtimeInfo = $runtimeInfoJson | ConvertFrom-Json
+        if ($null -ne $runtimeInfo.capabilities -and
+            $null -ne $runtimeInfo.capabilities.supported_backends) {
+            $supportedBackends = @($runtimeInfo.capabilities.supported_backends)
+            Write-Host "[PASS] Runtime probe succeeded: $($supportedBackends -join ', ')" -ForegroundColor Green
+        } else {
+            Write-Host "[WARN] Runtime probe returned no supported_backends payload" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[WARN] Runtime probe failed; falling back to DLL inspection" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "[WARN] Runtime probe failed; falling back to DLL inspection" -ForegroundColor Yellow
+} finally {
+    Pop-Location
+}
 
 # Check CUDA runtime (optional but should be present for NVIDIA systems)
 $cudartFiles = @(Get-ChildItem -Path $win64Dir -Filter "cudart64_*.dll" -File -ErrorAction SilentlyContinue)
@@ -104,11 +145,21 @@ foreach ($provider in $universalProviderDlls) {
 }
 if ($foundUniversalProviders.Count -eq 0) {
     $message = "No Windows universal GPU provider DLL found; AMD/Intel systems will fall back to CPU."
-    if ($expectsUniversalGpuPath) {
+    $hasUniversalGpuBackend = $supportedBackends -contains "dml" -or
+        $supportedBackends -contains "winml" -or
+        $supportedBackends -contains "openvino"
+    if ($expectsUniversalGpuPath -and -not $hasUniversalGpuBackend) {
         Write-Host "[FAIL] $message" -ForegroundColor Red
         throw $message
     }
-    Write-Host "[WARN] $message" -ForegroundColor Yellow
+    if (-not $hasUniversalGpuBackend) {
+        Write-Host "[WARN] $message" -ForegroundColor Yellow
+    }
+}
+
+if ($expectsDirectMlPath -and ($supportedBackends -notcontains "dml")) {
+    Write-Host "[FAIL] DirectML bundle did not report DML support in runtime probe." -ForegroundColor Red
+    throw "DirectML bundle missing DML runtime support."
 }
 
 # Check models

@@ -12,7 +12,7 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "primary", size = "md", asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    
+
     const variants = {
       primary: "bg-primary text-primary-foreground shadow-apple hover:bg-primary/90 active:scale-[0.98]",
       secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80 active:scale-[0.98]",

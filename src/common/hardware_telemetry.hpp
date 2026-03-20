@@ -7,8 +7,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+// clang-format off
+// psapi.h depends on Windows types/macros from windows.h.
 #include <windows.h>
 #include <psapi.h>
+// clang-format on
 #elif defined(__APPLE__)
 #include <mach/mach.h>
 #include <sys/sysctl.h>

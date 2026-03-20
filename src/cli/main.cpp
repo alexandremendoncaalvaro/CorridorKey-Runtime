@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <corridorkey/engine.hpp>
 #include <corridorkey/version.hpp>
 #include <cstdio>
@@ -17,7 +18,9 @@
 #include "../app/hardware_profile.hpp"
 #include "../app/job_orchestrator.hpp"
 #include "../app/model_compiler.hpp"
+#include "../app/ofx_runtime_service.hpp"
 #include "../app/runtime_contracts.hpp"
+#include "../common/local_ipc.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
@@ -384,7 +387,7 @@ int main(int argc, char* argv[]) {
     options.add_options()(
         "command",
         "Sub-command to run (info, process, download, doctor, benchmark, models, presets, "
-        "compile-context)",
+        "compile-context, ofx-runtime-server)",
         cxxopts::value<std::string>())("args", "Positional arguments",
                                        cxxopts::value<std::vector<std::string>>())(
         "i,input", "Input video or directory of frames", cxxopts::value<std::string>())(
@@ -399,8 +402,10 @@ int main(int argc, char* argv[]) {
         cxxopts::value<int>()->default_value("0"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
-        "video-encode", "Video output encoding (lossless, balanced)",
-        cxxopts::value<std::string>()->default_value("lossless"))(
+        "endpoint-port", "Local OFX runtime server control port", cxxopts::value<int>())(
+        "idle-timeout-ms", "Local OFX runtime server idle timeout in milliseconds",
+        cxxopts::value<int>())("video-encode", "Video output encoding (lossless, balanced)",
+                               cxxopts::value<std::string>()->default_value("lossless"))(
         "variant", "ONNX model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",
         cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
@@ -593,6 +598,29 @@ int main(int argc, char* argv[]) {
             } else {
                 std::cout << "Compiled TensorRT RTX context model: " << compile_res->string()
                           << std::endl;
+            }
+            return 0;
+        }
+
+        if (cmd == "ofx-runtime-server") {
+            app::OfxRuntimeServiceOptions service_options;
+            service_options.endpoint = common::default_ofx_runtime_endpoint();
+            service_options.log_path = common::ofx_runtime_server_log_path();
+            if (result.count("endpoint-port")) {
+                service_options.endpoint.port =
+                    static_cast<std::uint16_t>(result["endpoint-port"].as<int>());
+            }
+            if (result.count("idle-timeout-ms")) {
+                service_options.idle_timeout =
+                    std::chrono::milliseconds(result["idle-timeout-ms"].as<int>());
+            }
+
+            auto service_result = app::OfxRuntimeService::run(service_options);
+            if (!service_result) {
+                if (!use_json) {
+                    std::cerr << "Error: " << service_result.error().message << std::endl;
+                }
+                return 1;
             }
             return 0;
         }

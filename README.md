@@ -8,7 +8,7 @@ hardware.
 The runtime contract is shared across platform tracks. The model artifact is
 not. This product is designed to use the backend and converted model pack that
 best fit each hardware target instead of forcing one artifact shape across
-Apple Silicon, Universal Windows GPUs, and CPU fallback.
+Apple Silicon, Windows GPU tracks (RTX and DirectML), and CPU fallback.
 
 This repository is not trying to reproduce a generic Python workflow in another
 language. It exists to make CorridorKey usable as a native, predictable, and
@@ -18,8 +18,15 @@ without rebuilding the surrounding stack each time.
 The current delivery shape is explicit:
 
 - **macOS Apple Silicon** ships as a portable MLX-first runtime track.
-- **Windows (Universal GPU)** ships as a portable multi-backend runtime track. It prioritizes **TensorRT RTX** for performance, with integrated support for **CUDA** (GTX/Pascal+) and **DirectML** (AMD/Intel/Universal).
+- **Windows (GPU)** ships as two packages: **RTX** (TensorRT/CUDA) and **DirectML** (AMD/Intel). The term "Universal" is reserved for bundles that include the non-RTX provider DLLs and pass the validator.
 - **GUI, sidecar, and embedded integrations come after that**, all consuming the same library-first runtime contracts.
+
+Installer posture by release surface:
+
+- **Desktop Runtime / macOS Apple Silicon:** distributed as a DMG release.
+- **Resolve OFX / macOS Apple Silicon:** distributed as a signed `.pkg` inside a DMG.
+- **Desktop Runtime / Windows:** portable runtime remains the baseline packaged artifact, and the Tauri app now has an NSIS installer path layered on top of that runtime payload.
+- **Resolve OFX / Windows:** distributed as two installers (RTX and DirectML), with the packaged bundle plus `install_plugin.bat` kept as a manual fallback path.
 
 ## Who This Is For
 
@@ -45,11 +52,11 @@ The current delivery shape is explicit:
 - **macOS Apple Silicon track:** MLX is now the default operational path for
   Apple model packs, while ONNX remains the CPU-compatible compatibility and
   diagnostics baseline.
-- **Windows Universal GPU track:** TensorRT RTX is the primary high-performance Windows product path, with integrated support for **CUDA** (GTX) and **DirectML** (AMD/Intel).
+- **Windows GPU track:** TensorRT RTX is the primary high-performance Windows product path, with a separate DirectML package for AMD/Intel. "Universal" is only claimed when the required non-RTX provider DLLs are present.
 - **Operational tooling:** `doctor`, `benchmark`, `models`, `presets`, and
   `process --json` expose stable machine-readable diagnostics.
 - **Validated model catalog:** the packaged macOS set centers on
-  `corridorkey_mlx.safetensors`, while the Windows Universal GPU set centers on
+  `corridorkey_mlx.safetensors`, while the Windows GPU set centers on
   `corridorkey_fp16_768.onnx`, `corridorkey_fp16_1024.onnx`, and
   `corridorkey_int8_512.onnx` for fallback.
 - **Measured runtime behavior:** stage-level timings cover engine creation,
@@ -64,7 +71,7 @@ Validated runtime paths today:
 - **macOS 14+ on Apple Silicon:** MLX-first execution for Apple model packs,
   CPU fallback for ONNX baselines, structured diagnostics, and a curated model
   catalog.
-- **Windows 11 x64 (Universal GPU):** Primary path via TensorRT RTX for maximum performance, with CUDA (Pascal+) and DirectML (AMD/Intel) support. Portable bundle includes AI runtimes and curated model packs.
+- **Windows 11 x64 (GPU):** Two tracks: RTX (TensorRT/CUDA) and DirectML (AMD/Intel). Each bundle includes its matching runtime DLLs and curated model packs.
 
 Linux remains architecture-ready and deferred until the current macOS and
 Windows release tracks are both stable enough to stop consuming the majority of
@@ -82,8 +89,7 @@ per platform track.
   pack, not as a requirement to reuse the same ONNX artifact shipped for other
   targets. The approved Mac evaluation paths are `MLX` and direct `Core ML`
   conversion from the source checkpoint.
-- **Windows Universal GPU pack:** remains an ONNX-derived path aimed at `TensorRT RTX`
-  with a separate packaging and cache strategy.
+- **Windows GPU packs:** ONNX-derived artifacts packaged as two tracks: RTX (TensorRT/CUDA) and DirectML (AMD/Intel). The runtime stays the same, but the packaged providers differ.
 
 This means the runtime stays unified while acceleration can diverge where the
 hardware demands it.
@@ -200,7 +206,7 @@ export VCPKG_ROOT="$HOME/vcpkg"
 </details>
 
 <details>
-<summary>Windows (Universal GPU)</summary>
+<summary>Windows (GPU)</summary>
 
 ```powershell
 # Run the automated setup script
@@ -250,8 +256,8 @@ Current preview scope:
 First-run flow from the release zip:
 
 ```bash
-cd CorridorKey_Mac_v0.1.4
-xattr -dr com.apple.quarantine CorridorKey_Mac_v0.1.4
+cd CorridorKey_Runtime_vX.Y.Z_macOS_AppleSilicon
+xattr -dr com.apple.quarantine CorridorKey_Runtime_vX.Y.Z_macOS_AppleSilicon
 ./corridorkey doctor
 ./corridorkey process input.mp4 output.mp4
 ./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
@@ -290,36 +296,39 @@ For the official macOS bundle, the user-facing flow is now:
 The bundle already includes the packaged Apple model pack. End users do not
 need to pick `--model`, `--device`, or `--tiled` for the common path.
 
-## Windows Universal GPU Preview Testing
+## Windows GPU Preview Testing
 
 This section is the best starting point for Windows testers using the portable
 GitHub release.
 
 Current preview scope:
 
-- Supported hardware: **NVIDIA (RTX/GTX), AMD RX, or Intel Arc**
+- Supported hardware: **NVIDIA (RTX/GTX) via the RTX package, or AMD/Intel via the DirectML package**
 - Preferred OS target: **Windows 11 x64**
-- Runtime path: **Multi-backend (TensorRT RTX, CUDA, DirectML)**
+- Runtime path: **RTX (TensorRT/CUDA) or DirectML**
 - User expectation: **no separate CorridorKey, ONNX Runtime, or CUDA installation**
 - External dependency that still exists: **compatible GPU driver on the target machine**
+
+Use the RTX package for NVIDIA. Use the DirectML package for AMD/Intel. The RTX package will
+fall back to CPU on AMD/Intel hardware.
 
 First-run flow from the release zip:
 
 ```powershell
-cd CorridorKey_Windows_v0.1.4
-.\corridorkey.ps1 doctor
-.\corridorkey.ps1 process input.mp4 output.mp4
-.\corridorkey.ps1 process input_4k.mp4 output_4k.mp4 --preset max
+cd CorridorKey_Runtime_vX.Y.Z_Windows
+.\ck-engine.exe doctor
+.\ck-engine.exe process input.mp4 output.mp4
+.\ck-engine.exe process input_4k.mp4 output_4k.mp4 --preset max
 ```
 
 Useful commands for testers:
 
 ```powershell
-.\corridorkey.ps1 info
-.\corridorkey.ps1 doctor
-.\corridorkey.ps1 benchmark
-.\corridorkey.ps1 process input.mp4 output.mp4
-.\corridorkey.ps1 process --json --input input.mp4 --output output.mp4
+.\ck-engine.exe info
+.\ck-engine.exe doctor
+.\ck-engine.exe benchmark
+.\ck-engine.exe process input.mp4 output.mp4
+.\ck-engine.exe process --json --input input.mp4 --output output.mp4
 ```
 
 What we want reported back from testers:
@@ -340,30 +349,42 @@ Current known Windows limitation:
 For the official Windows bundle, the user-facing flow is now:
 
 ```powershell
-.\corridorkey.ps1 doctor
-.\corridorkey.ps1 process input.mp4 output.mp4
-.\corridorkey.ps1 process input_4k.mp4 output_4k.mp4 --preset max
+.\ck-engine.exe doctor
+.\ck-engine.exe process input.mp4 output.mp4
+.\ck-engine.exe process input_4k.mp4 output_4k.mp4 --preset max
 ```
 
-The bundle already includes the packaged Windows universal runtime DLLs and validated
-model set. End users do not need to point the runtime at a local SDK install.
+The bundle already includes the packaged runtime DLLs for its track (RTX or DirectML) and
+the validated model set. End users do not need to point the runtime at a local SDK install.
 
 ### DaVinci Resolve Plugin
 
-The Windows Universal GPU track now ships with a fully integrated **OpenFX Plugin** for Blackmagic DaVinci Resolve.
+The Windows GPU track now ships with a fully integrated **OpenFX Plugin** for Blackmagic DaVinci Resolve.
 
 **How to Install the OFX Plugin:**
-1. Download the `CorridorKey_Resolve_vX.Y.Z_Win_RTX.zip` package from the Releases page.
-2. Extract the folder to a safe location (e.g., Documents).
-3. Right-click the `install.bat` file and select **Run as Administrator**.
-4. The script will safely copy the `CorridorKey.ofx.bundle` to your system's OFX plugin directory and clear DaVinci's cache.
+1. Download the latest Windows **RTX** or **DirectML** installer from the Releases page.
+2. Run the installer as Administrator.
+3. Start DaVinci Resolve after the installer finishes.
+4. If you need the manual path, use the release ZIP and run `install_plugin.bat` as Administrator.
 
 **How to Use the OFX Plugin:**
 1. Open DaVinci Resolve and navigate to the **Color** or **Fusion** page.
 2. Search for "CorridorKey" in the OpenFX panel.
 3. Drag and drop the node onto your clip.
-4. The TensorRT Engine will compile the model into VRAM on the very first frame. DaVinci Resolve will briefly freeze for about 10–30 seconds.
+4. The TensorRT Engine will compile the model into VRAM on the very first frame. DaVinci Resolve will briefly freeze for about 10-30 seconds.
 5. Once compiled, you can adjust the Inspector settings (Despill, Despeckle, Linear Input) and scrub the timeline seamlessly.
+
+### Windows Resolve OFX Packaging (maintainers)
+
+Two official packaging paths exist:
+
+- **Release matrix (RTX + DirectML installers):** `scripts/package_ofx_release_matrix_windows.ps1`
+- **Single bundle for local testing (no installer):** `scripts/package_ofx.ps1` with `-OrtRoot` and `-OutputDir`
+
+Helper scripts:
+
+- `scripts/sync_onnxruntime_directml.ps1` refreshes the official DirectML runtime.
+- `scripts/validate_ofx_win.ps1` enforces that any bundle labeled "Universal" includes non-RTX provider DLLs.
 
 From source builds, maintainers can still use the lower-level commands below.
 
@@ -506,8 +527,8 @@ Alpha hints are part of the product contract, not an afterthought.
 
 1. **macOS portable runtime:** Apple Silicon track with MLX-first execution,
    curated Apple model packs, diagnostics, and CPU fallback.
-2. **Windows Universal GPU portable runtime:** multi-backend Windows track with
-   curated FP16 ONNX packs, packaged universal runtimes (TensorRT, CUDA, DirectML), diagnostics, and CPU fallback.
+2. **Windows GPU portable runtime:** two packages (RTX and DirectML) with
+   curated FP16 ONNX packs, packaged runtime DLLs, diagnostics, and CPU fallback.
 3. **Integration surfaces:** sidecar, GUI, plugin, and pipeline consumers over
    the same library-first contracts.
 4. **Broader platform expansion:** Linux and secondary providers after the
@@ -518,7 +539,7 @@ Alpha hints are part of the product contract, not an afterthought.
 | Platform | Primary path | Status | Notes |
 |----------|--------------|--------|-------|
 | macOS 14+ Apple Silicon | MLX-first Apple model packs; CPU ONNX fallback and diagnostics | Current release track | Runtime contracts are fixed; accelerated Mac artifacts are not assumed to match Windows |
-| Windows 11 (Universal GPU) | TensorRT RTX, CUDA, or DirectML + CPU fallback | Current release track | Portable bundle ships curated universal runtimes and optimized model packs |
+| Windows 11 (GPU) | TensorRT RTX/CUDA or DirectML + CPU fallback | Current release track | RTX and DirectML bundles; "Universal" only when non-RTX providers are packaged |
 | Linux | Architecture-ready later | Deferred | Not a current productized track |
 
 ## Documentation

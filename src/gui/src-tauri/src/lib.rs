@@ -10,15 +10,100 @@ use std::os::windows::process::CommandExt;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-fn get_engine_path() -> Result<std::path::PathBuf, String> {
-    let mut exe_path = env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
-    exe_path.pop();
-    Ok(exe_path.join("ck-engine.exe"))
+#[cfg(target_os = "windows")]
+fn engine_binary_name() -> &'static str {
+    "ck-engine.exe"
+}
+
+#[cfg(not(target_os = "windows"))]
+fn engine_binary_name() -> &'static str {
+    "corridorkey"
+}
+
+fn push_runtime_root(runtime_roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !runtime_roots.iter().any(|root| root == &candidate) {
+        runtime_roots.push(candidate);
+    }
+}
+
+fn candidate_runtime_roots(exe_dir: &std::path::Path, resource_dir: Option<&std::path::Path>) -> Vec<PathBuf> {
+    let mut runtime_roots: Vec<PathBuf> = Vec::new();
+
+    push_runtime_root(&mut runtime_roots, exe_dir.to_path_buf());
+    push_runtime_root(&mut runtime_roots, exe_dir.join("runtime"));
+    push_runtime_root(&mut runtime_roots, exe_dir.join("resources"));
+    push_runtime_root(&mut runtime_roots, exe_dir.join("resources").join("runtime"));
+
+    if let Some(resource_dir) = resource_dir {
+        push_runtime_root(&mut runtime_roots, resource_dir.to_path_buf());
+        push_runtime_root(&mut runtime_roots, resource_dir.join("runtime"));
+        push_runtime_root(&mut runtime_roots, resource_dir.join("resources"));
+        push_runtime_root(&mut runtime_roots, resource_dir.join("resources").join("runtime"));
+    }
+
+    runtime_roots
+}
+
+fn get_engine_path(app: Option<&AppHandle>) -> Result<std::path::PathBuf, String> {
+    let mut exe_dir = env::current_exe()
+        .map_err(|e| format!("Failed to get current exe path: {}", e))?;
+    exe_dir.pop();
+
+    let resource_dir = app
+        .and_then(|app_handle| app_handle.path().resource_dir().ok());
+    let runtime_roots = candidate_runtime_roots(&exe_dir, resource_dir.as_deref());
+
+    let binary_name = engine_binary_name();
+    for runtime_root in &runtime_roots {
+        let candidate = runtime_root.join(binary_name);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    let searched_roots = runtime_roots
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>()
+        .join("; ");
+
+    Err(format!(
+        "Engine binary not found. Looked for {} under: {}",
+        binary_name, searched_roots
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::candidate_runtime_roots;
+    use std::path::PathBuf;
+
+    #[test]
+    fn candidate_runtime_roots_covers_installed_windows_resources_layout() {
+        let exe_dir = PathBuf::from("CorridorKey");
+        let resource_dir = exe_dir.join("resources");
+
+        let roots = candidate_runtime_roots(&exe_dir, Some(resource_dir.as_path()));
+
+        assert!(roots.contains(&exe_dir.join("resources").join("runtime")));
+    }
+
+    #[test]
+    fn candidate_runtime_roots_deduplicates_resource_entries() {
+        let exe_dir = PathBuf::from("CorridorKey");
+        let resource_dir = exe_dir.join("resources");
+
+        let roots = candidate_runtime_roots(&exe_dir, Some(resource_dir.as_path()));
+        let runtime_entry = exe_dir.join("resources").join("runtime");
+        let count = roots.iter().filter(|path| **path == runtime_entry).count();
+
+        assert_eq!(count, 1);
+    }
 }
 
 #[tauri::command]
-async fn get_engine_status() -> Result<String, String> {
-    let engine_path = get_engine_path()?;
+async fn get_engine_status(app: AppHandle) -> Result<String, String> {
+    let engine_path = get_engine_path(Some(&app))?;
 
     let mut command = Command::new(&engine_path);
     command.args(["info", "--json"])
@@ -29,7 +114,7 @@ async fn get_engine_status() -> Result<String, String> {
 
     let output = command.output()
         .map_err(|e| format!("Process Spawn Error: Could not start {}. Details: {}", engine_path.display(), e))?;
-    
+
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
@@ -39,11 +124,11 @@ async fn get_engine_status() -> Result<String, String> {
 
 #[tauri::command]
 async fn start_processing(app: AppHandle, input: String, output: String, hint: Option<String>, video_encode: Option<String>) -> Result<(), String> {
-    let engine_path = get_engine_path()?;
+    let engine_path = get_engine_path(Some(&app))?;
     let current_dir = engine_path.parent().unwrap().to_path_buf();
 
     let mut args = vec!["process".to_string(), "--input".to_string(), input, "--output".to_string(), output, "--json".to_string()];
-    
+
     if let Some(h) = hint {
         if !h.is_empty() {
             args.push("--alpha-hint".to_string());
@@ -71,7 +156,7 @@ async fn start_processing(app: AppHandle, input: String, output: String, hint: O
         .map_err(|e| format!("Process Spawn Error: {}", e))?;
 
     let stdout = child.stdout.take().unwrap();
-    
+
     // Spawn a standard thread to read stdout and emit to Tauri frontend
     thread::spawn(move || {
         let reader = BufReader::new(stdout);

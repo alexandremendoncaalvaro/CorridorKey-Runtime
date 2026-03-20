@@ -18,7 +18,7 @@ if (!(Test-Path $vendorDir)) { New-Item -ItemType Directory -Path $vendorDir -Fo
 $ortTarget = Join-Path $vendorDir "onnxruntime-universal"
 if (!(Test-Path $ortTarget)) {
     New-Item -ItemType Directory -Path $ortTarget -Force | Out-Null
-    
+
     # Pillar 1: DirectML
     Write-Host "Downloading DirectML Core..." -ForegroundColor Yellow
     $dmlUrl = "https://www.nuget.org/api/v2/package/Microsoft.AI.DirectML/1.15.2"

@@ -105,8 +105,8 @@ TEST_CASE("fixed mlx quality resolves the exact requested bridge", "[unit][ofx][
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_2048.mlxfn");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840, 2160);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840,
+                                             2160, kQuantizationAuto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -121,8 +121,8 @@ TEST_CASE("fixed mlx quality fails when the exact bridge is unavailable",
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_512.mlxfn");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840, 2160);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840,
+                                             2160, kQuantizationAuto);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -134,8 +134,8 @@ TEST_CASE("auto mlx quality may fall back to the highest available lower bridge"
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1024.mlxfn");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityAuto, 4096, 2160);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityAuto, 4096,
+                                             2160, kQuantizationAuto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -151,8 +151,8 @@ TEST_CASE("fixed windows tensorRT quality fails when the exact model is unavaila
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum,
+                                             4096, 2160, kQuantizationAuto);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -163,8 +163,8 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityPreview, 1920, 1080);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityPreview,
+                                             1920, 1080, kQuantizationAuto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 512);
@@ -188,14 +188,29 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_768.onnx");
     REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_768.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096,
+                                             2160, kQuantizationAuto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
     REQUIRE(selection->effective_resolution == 1536);
     REQUIRE(selection->used_fallback);
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
+}
+
+TEST_CASE("auto windows tensorRT prefers fp16 when both fp16 and int8 artifacts exist",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-prefers-fp16");
+    touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
+
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 1920,
+                                             1080, kQuantizationAuto);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 1024);
+    REQUIRE(selection->effective_resolution == 768);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_768.onnx");
 }
 
 TEST_CASE("windows universal bootstrap aligns int8 artifact selection with device memory",
@@ -205,9 +220,9 @@ TEST_CASE("windows universal bootstrap aligns int8 artifact selection with devic
     touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
     touch_file(temp_dir.path() / "corridorkey_int8_1024.onnx");
 
-    auto candidates = build_bootstrap_candidates(
-        windows_universal_capabilities(),
-        DeviceInfo{"AMD Radeon", 16384, Backend::DirectML}, temp_dir.path());
+    auto candidates = build_bootstrap_candidates(windows_universal_capabilities(),
+                                                 DeviceInfo{"AMD Radeon", 16384, Backend::DirectML},
+                                                 temp_dir.path());
 
     REQUIRE_FALSE(candidates.empty());
     REQUIRE(candidates.front().device.backend == Backend::DirectML);
@@ -223,8 +238,8 @@ TEST_CASE("auto windows universal quality falls back to the highest packaged int
     touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
     touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::DirectML, kQualityAuto, 4096, 2160);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::DirectML, kQualityAuto, 4096,
+                                             2160, kQuantizationAuto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -235,12 +250,23 @@ TEST_CASE("auto windows universal quality falls back to the highest packaged int
 
 TEST_CASE("cpu quality guardrail clamps manual qualities above preview",
           "[unit][ofx][regression]") {
-    REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::CPU, kQualityPreview) ==
-            kQualityPreview);
-    REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::CPU, kQualityMaximum) ==
-            kQualityPreview);
+    REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::CPU, kQualityPreview) == kQualityPreview);
+    REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::CPU, kQualityMaximum) == kQualityPreview);
     REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::TensorRT, kQualityMaximum) ==
             kQualityMaximum);
+}
+
+TEST_CASE("out-of-process ofx instances defer bootstrap until first render",
+          "[unit][ofx][regression]") {
+    REQUIRE(should_prepare_bootstrap_during_instance_create(false));
+    REQUIRE_FALSE(should_prepare_bootstrap_during_instance_create(true));
+}
+
+TEST_CASE("unloaded quality state only resolves fixed manual resolutions",
+          "[unit][ofx][regression]") {
+    REQUIRE(initial_requested_resolution_for_quality_mode(kQualityAuto) == 0);
+    REQUIRE(initial_requested_resolution_for_quality_mode(kQualityPreview) == 512);
+    REQUIRE(initial_requested_resolution_for_quality_mode(kQualityMaximum) == 2048);
 }
 
 TEST_CASE("ofx defaults open new instances with source passthrough disabled",
@@ -248,6 +274,8 @@ TEST_CASE("ofx defaults open new instances with source passthrough disabled",
     REQUIRE(kDefaultSourcePassthroughEnabled == 0);
     REQUIRE(kDefaultEdgeErode == 3);
     REQUIRE(kDefaultEdgeBlur == 7);
+    REQUIRE(kMaxEdgeErode == 32);
+    REQUIRE(kMaxEdgeBlur == 64);
 }
 
 TEST_CASE("ofx runtime panel fields are read-only dynamic strings", "[unit][ofx][regression]") {

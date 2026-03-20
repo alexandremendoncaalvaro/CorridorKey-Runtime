@@ -102,12 +102,12 @@ export const useJobStore = create<JobState>((set, get) => ({
     if (!inputPath || !outputPath) return;
 
     const startTime = Date.now();
-    set({ 
-      isProcessing: true, 
-      currentProgress: 0, 
-      statusMessage: "Starting engine...", 
+    set({
+      isProcessing: true,
+      currentProgress: 0,
+      statusMessage: "Starting engine...",
       error: null,
-      logs: [] 
+      logs: []
     });
 
     try {
@@ -115,8 +115,8 @@ export const useJobStore = create<JobState>((set, get) => ({
         const line = event.payload;
         try {
           const payload = JSON.parse(line) as JobProgress;
-          
-          set((state) => ({ 
+
+          set((state) => ({
             logs: [...state.logs, line]
           }));
 
@@ -125,7 +125,7 @@ export const useJobStore = create<JobState>((set, get) => ({
               set({ activeBackend: payload.backend || null });
               break;
             case "progress":
-              set({ 
+              set({
                 currentProgress: (payload.progress || 0) * 100,
                 statusMessage: payload.message || `Processing...`
               });
@@ -159,9 +159,9 @@ export const useJobStore = create<JobState>((set, get) => ({
               };
               const updatedHistory = [newRecord, ...history].slice(0, 50);
               localStorage.setItem("corridorkey_history", JSON.stringify(updatedHistory));
-              set({ 
-                isProcessing: false, 
-                currentProgress: 100, 
+              set({
+                isProcessing: false,
+                currentProgress: 100,
                 statusMessage: "Finished",
                 history: updatedHistory
               });
@@ -177,13 +177,13 @@ export const useJobStore = create<JobState>((set, get) => ({
         }
       });
 
-      await invoke("start_processing", { 
-        input: inputPath, 
-        output: outputPath, 
+      await invoke("start_processing", {
+        input: inputPath,
+        output: outputPath,
         hint: hintPath,
         video_encode: videoEncodeMode
       });
-      
+
     } catch (err: any) {
       set({ isProcessing: false, error: err.toString() });
     }

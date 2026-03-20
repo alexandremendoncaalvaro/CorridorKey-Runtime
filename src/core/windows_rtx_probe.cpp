@@ -109,6 +109,17 @@ bool provider_available(const std::string& provider_name) {
     }
 }
 
+bool onnxruntime_export_available(const char* export_name) {
+    HMODULE runtime_module = GetModuleHandleW(L"onnxruntime.dll");
+    if (runtime_module == nullptr) {
+        runtime_module = LoadLibraryW(L"onnxruntime.dll");
+    }
+    if (runtime_module == nullptr) {
+        return false;
+    }
+    return GetProcAddress(runtime_module, export_name) != nullptr;
+}
+
 #endif
 
 }  // namespace
@@ -131,7 +142,9 @@ bool cuda_provider_available() {
 
 bool directml_provider_available() {
 #if defined(_WIN32)
-    return provider_available("DML") || provider_available("DirectML");
+    return onnxruntime_export_available("OrtSessionOptionsAppendExecutionProvider_DML") ||
+           provider_available("DML") || provider_available("DirectML") ||
+           provider_available("DMLExecutionProvider");
 #else
     return false;
 #endif
@@ -139,7 +152,7 @@ bool directml_provider_available() {
 
 bool winml_provider_available() {
 #if defined(_WIN32)
-    return provider_available("WinML");
+    return provider_available("WinML") || provider_available("WinMLExecutionProvider");
 #else
     return false;
 #endif
@@ -147,7 +160,7 @@ bool winml_provider_available() {
 
 bool openvino_provider_available() {
 #if defined(_WIN32)
-    return provider_available("OpenVINO");
+    return provider_available("OpenVINO") || provider_available("OpenVINOExecutionProvider");
 #else
     return false;
 #endif

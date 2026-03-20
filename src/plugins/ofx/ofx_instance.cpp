@@ -1,13 +1,18 @@
 #include <algorithm>
+#include <chrono>
 #include <corridorkey/engine.hpp>
 #include <filesystem>
+#include <iomanip>
 #include <new>
+#include <sstream>
 #include <string>
 
 #include "app/runtime_contracts.hpp"
 #include "common/runtime_paths.hpp"
+#include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
+#include "ofx_runtime_client.hpp"
 #include "ofx_shared.hpp"
 
 #if defined(__APPLE__)
@@ -73,6 +78,27 @@ std::string processing_device_label(const DeviceInfo& device) {
     return processing_backend_label(device.backend);
 }
 
+bool environment_flag_enabled(const char* name) {
+    if (auto value = common::environment_variable_copy(name); value.has_value()) {
+        return *value == "1" || *value == "true" || *value == "TRUE";
+    }
+    return false;
+}
+
+bool use_runtime_server_default(const std::filesystem::path& runtime_server_path) {
+    if (environment_flag_enabled("CORRIDORKEY_OFX_FORCE_INPROCESS")) {
+        return false;
+    }
+    return !runtime_server_path.empty() && std::filesystem::exists(runtime_server_path);
+}
+
+bool allow_inprocess_fallback() {
+    return environment_flag_enabled("CORRIDORKEY_OFX_ALLOW_INPROCESS_FALLBACK");
+}
+
+bool backend_matches_request(const DeviceInfo& effective_device,
+                             const DeviceInfo& requested_device);
+
 EngineCreateOptions ofx_engine_options(const DeviceInfo& requested_device) {
     EngineCreateOptions options;
     if (requested_device.backend != Backend::CPU) {
@@ -111,8 +137,47 @@ std::string runtime_artifact_label(const std::filesystem::path& model_path) {
     return model_path.filename().string();
 }
 
+std::string truncate_status_message(const std::string& message, std::size_t max_length) {
+    if (message.size() <= max_length) {
+        return message;
+    }
+    if (max_length <= 3) {
+        return message.substr(0, max_length);
+    }
+    return message.substr(0, max_length - 3) + "...";
+}
+
+std::string format_duration_ms(double ms) {
+    if (ms <= 0.0) {
+        return "n/a";
+    }
+    std::ostringstream oss;
+    if (ms >= 1000.0) {
+        oss << std::fixed << std::setprecision(1) << (ms / 1000.0) << " s";
+    } else {
+        oss << std::fixed << std::setprecision(1) << ms << " ms";
+    }
+    return oss.str();
+}
+
+std::string runtime_status_label(const InstanceData& data) {
+    if (!data.last_error.empty()) {
+        return "Error: " + truncate_status_message(data.last_error, 160);
+    }
+    if (data.last_frame_ms > 0.0) {
+        return "Last frame: " + format_duration_ms(data.last_frame_ms) +
+               " | Avg: " + format_duration_ms(data.avg_frame_ms);
+    }
+    return "Idle";
+}
+
 std::string render_pass_label(std::uint64_t render_count) {
     return render_count == 0 ? "first_frame" : "subsequent_frame";
+}
+
+double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
+    const auto elapsed = std::chrono::steady_clock::now() - start_time;
+    return std::chrono::duration<double, std::milli>(elapsed).count();
 }
 
 void log_stage_timing(std::string_view scope, std::string_view phase,
@@ -123,9 +188,8 @@ void log_stage_timing(std::string_view scope, std::string_view phase,
                            " total_ms=" + std::to_string(timing.total_ms) +
                            " requested_backend=" + backend_label(requested_device.backend) +
                            " artifact=" + artifact_path.filename().string() +
-                           " requested_resolution=" +
-                           std::to_string(requested_resolution) + " effective_resolution=" +
-                           std::to_string(effective_resolution));
+                           " requested_resolution=" + std::to_string(requested_resolution) +
+                           " effective_resolution=" + std::to_string(effective_resolution));
 }
 
 void log_engine_event(std::string_view scope, std::string_view event, std::string_view phase,
@@ -138,10 +202,10 @@ void log_engine_event(std::string_view scope, std::string_view event, std::strin
                           " requested_backend=" + backend_label(requested_device.backend) +
                           " effective_backend=" + backend_label(effective_device.backend) +
                           " requested_device=" + requested_device.name +
-                          " effective_device=" + effective_device.name + " artifact=" +
-                          artifact_path.filename().string() + " requested_resolution=" +
-                          std::to_string(requested_resolution) + " effective_resolution=" +
-                          std::to_string(effective_resolution);
+                          " effective_device=" + effective_device.name +
+                          " artifact=" + artifact_path.filename().string() +
+                          " requested_resolution=" + std::to_string(requested_resolution) +
+                          " effective_resolution=" + std::to_string(effective_resolution);
     if (fallback.has_value() && !fallback->reason.empty()) {
         message += " fallback_reason=" + fallback->reason;
     }
@@ -163,6 +227,14 @@ void update_runtime_panel_values(InstanceData* data) {
         return;
     }
 
+    bool has_session = false;
+    if (data->use_runtime_server) {
+        has_session = data->runtime_client != nullptr && data->runtime_client->has_session();
+    } else {
+        has_session = data->engine != nullptr;
+    }
+    const bool is_loading = !has_session && data->last_error.empty();
+
     set_string_param_value(data->runtime_processing_param,
                            processing_backend_label(data->device.backend));
     set_string_param_value(data->runtime_device_param, processing_device_label(data->device));
@@ -170,17 +242,19 @@ void update_runtime_panel_values(InstanceData* data) {
         data->runtime_requested_quality_param,
         requested_quality_label(data->active_quality_mode, data->requested_resolution,
                                 data->cpu_quality_guardrail_active));
-    set_string_param_value(data->runtime_effective_quality_param,
-                           effective_quality_label(data->active_resolution));
+    set_string_param_value(
+        data->runtime_effective_quality_param,
+        is_loading ? "Loading..." : effective_quality_label(data->active_resolution));
     set_string_param_value(data->runtime_artifact_param,
-                           runtime_artifact_label(data->model_path));
+                           is_loading ? "Loading..." : runtime_artifact_label(data->model_path));
+    set_string_param_value(data->runtime_status_param,
+                           is_loading ? "Loading..." : runtime_status_label(*data));
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
-                              const std::string& device,
-                              const std::string& requested_quality,
-                              const std::string& effective_quality,
-                              const std::string& artifact) {
+                              const std::string& device, const std::string& requested_quality,
+                              const std::string& effective_quality, const std::string& artifact,
+                              const std::string& status) {
     if (data == nullptr) {
         return;
     }
@@ -190,25 +264,31 @@ void set_runtime_panel_status(InstanceData* data, const std::string& processing,
     set_string_param_value(data->runtime_requested_quality_param, requested_quality);
     set_string_param_value(data->runtime_effective_quality_param, effective_quality);
     set_string_param_value(data->runtime_artifact_param, artifact);
+    set_string_param_value(data->runtime_status_param, status);
 }
 
 bool backend_matches_request(const Engine& engine, const DeviceInfo& requested_device) {
+    return backend_matches_request(engine.current_device(), requested_device);
+}
+
+bool backend_matches_request(const DeviceInfo& effective_device,
+                             const DeviceInfo& requested_device) {
     if (requested_device.backend == Backend::CPU) {
         return true;
     }
-    return engine.current_device().backend == requested_device.backend;
+    return effective_device.backend == requested_device.backend;
 }
 
-std::string backend_mismatch_message(const std::string& operation, const DeviceInfo& requested_device,
-                                     const Engine& engine,
+std::string backend_mismatch_message(const std::string& operation,
+                                     const DeviceInfo& requested_device, const Engine& engine,
                                      const std::filesystem::path& artifact_path) {
-    return operation + " requested backend " + backend_label(requested_device.backend) +
-           " for " + artifact_path.filename().string() + " but the engine is using " +
+    return operation + " requested backend " + backend_label(requested_device.backend) + " for " +
+           artifact_path.filename().string() + " but the engine is using " +
            backend_label(engine.current_device().backend) + ".";
 }
 
-std::string backend_mismatch_message(const std::string& operation, const DeviceInfo& requested_device,
-                                     const Engine& engine,
+std::string backend_mismatch_message(const std::string& operation,
+                                     const DeviceInfo& requested_device, const Engine& engine,
                                      const std::filesystem::path& artifact_path,
                                      const std::optional<BackendFallbackInfo>& fallback) {
     std::string message =
@@ -273,6 +353,35 @@ std::filesystem::path resolve_models_root() {
     return fallback;
 }
 
+app::OfxRuntimePrepareSessionRequest build_prepare_request(
+    const BootstrapEngineCandidate& candidate) {
+    app::OfxRuntimePrepareSessionRequest request;
+    request.client_instance_id = "bootstrap";
+    request.model_path = candidate.executable_model_path;
+    request.artifact_name = candidate.requested_model_path.filename().string();
+    request.requested_device = candidate.device;
+    request.engine_options = ofx_engine_options(candidate.device);
+    request.requested_quality_mode = kQualityAuto;
+    request.requested_resolution = candidate.requested_resolution;
+    request.effective_resolution = candidate.effective_resolution;
+    return request;
+}
+
+app::OfxRuntimePrepareSessionRequest build_prepare_request(
+    const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
+    int requested_quality_mode) {
+    app::OfxRuntimePrepareSessionRequest request;
+    request.client_instance_id = "quality_switch";
+    request.model_path = selection.executable_model_path;
+    request.artifact_name = selection.executable_model_path.filename().string();
+    request.requested_device = requested_device;
+    request.engine_options = ofx_engine_options(requested_device);
+    request.requested_quality_mode = requested_quality_mode;
+    request.requested_resolution = selection.requested_resolution;
+    request.effective_resolution = selection.effective_resolution;
+    return request;
+}
+
 }  // namespace
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance) {
@@ -302,14 +411,27 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data) {
 }
 
 OfxStatus create_instance(OfxImageEffectHandle instance) {
+    const auto create_start = std::chrono::steady_clock::now();
+    const auto log_create_total = [&](std::string_view outcome, std::string_view detail = {}) {
+        std::string message = "event=instance_create_total total_ms=" +
+                              std::to_string(elapsed_ms_since(create_start)) +
+                              " outcome=" + std::string(outcome);
+        if (!detail.empty()) {
+            message += " detail=" + std::string(detail);
+        }
+        log_message("create_instance", message);
+    };
+
     if (g_suites.image_effect == nullptr || g_suites.parameter == nullptr) {
         log_message("create_instance", "Missing required suites.");
+        log_create_total("missing_suites");
         return kOfxStatErrMissingHostFeature;
     }
 
     auto data = std::unique_ptr<InstanceData>(new (std::nothrow) InstanceData());
     if (!data) {
         log_message("create_instance", "Failed to allocate InstanceData.");
+        log_create_total("oom");
         return kOfxStatErrMemory;
     }
     data->effect = instance;
@@ -319,6 +441,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     if (g_suites.image_effect->clipGetHandle(instance, "Source", &data->source_clip, nullptr) !=
         kOfxStatOK) {
         log_message("create_instance", "Failed to get Source clip handle.");
+        log_create_total("source_clip_failed");
         return kOfxStatFailed;
     }
 
@@ -327,12 +450,18 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     if (g_suites.image_effect->clipGetHandle(instance, "Output", &data->output_clip, nullptr) !=
         kOfxStatOK) {
         log_message("create_instance", "Failed to get Output clip handle.");
+        log_create_total("output_clip_failed");
         return kOfxStatFailed;
     }
+
+    g_suites.image_effect->clipGetHandle(instance, kClipMatteOutput, &data->matte_output_clip, nullptr);
+    g_suites.image_effect->clipGetHandle(instance, kClipForegroundOutput, &data->foreground_output_clip, nullptr);
+    g_suites.image_effect->clipGetHandle(instance, kClipCompositeOutput, &data->composite_output_clip, nullptr);
 
     OfxParamSetHandle param_set;
     if (g_suites.image_effect->getParamSet(instance, &param_set) != kOfxStatOK) {
         log_message("create_instance", "Failed to get param set.");
+        log_create_total("param_set_failed");
         return kOfxStatFailed;
     }
 
@@ -340,6 +469,16 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamOutputMode, &data->output_mode_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamAlphaHintMode, &data->alpha_hint_mode_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamInputColorSpace,
+                                       &data->input_color_space_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamQuantizationMode,
+                                       &data->quantization_mode_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamScreenColor, &data->screen_color_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamTemporalSmoothing,
+                                       &data->temporal_smoothing_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamDespillStrength, &data->despill_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAutoDespeckle, &data->despeckle_param,
@@ -348,8 +487,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRefinerScale, &data->refiner_param,
                                        nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamInputIsLinear, &data->input_is_linear_param,
-                                       nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAlphaBlackPoint,
                                        &data->alpha_black_point_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAlphaWhitePoint,
@@ -357,10 +494,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     g_suites.parameter->paramGetHandle(param_set, kParamAlphaErode, &data->alpha_erode_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAlphaSoftness, &data->alpha_softness_param,
-                                       nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamBrightness, &data->brightness_param,
-                                       nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamSaturation, &data->saturation_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamUpscaleMethod, &data->upscale_method_param,
                                        nullptr);
@@ -383,9 +516,37 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_effective_quality_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeArtifact,
                                        &data->runtime_artifact_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeStatus, &data->runtime_status_param,
+                                       nullptr);
 
-    set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Initializing...",
-                             "Not loaded", "Not loaded");
+    set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
+                             "Loading...", "Loading...", "Loading...");
+
+    data->runtime_server_path =
+        resolve_ofx_runtime_server_binary(plugin_module_path().value_or(""));
+    data->use_runtime_server = use_runtime_server_default(data->runtime_server_path);
+    if (data->use_runtime_server) {
+        OfxRuntimeClientOptions client_options;
+        client_options.endpoint = common::default_ofx_runtime_endpoint();
+        client_options.server_binary = data->runtime_server_path;
+        auto runtime_client = OfxRuntimeClient::create(std::move(client_options));
+        if (!runtime_client) {
+            data->last_error = runtime_client.error().message;
+            log_message("create_instance",
+                        "Runtime client init failed: " + runtime_client.error().message);
+            if (!allow_inprocess_fallback()) {
+                post_message(kOfxMessageError, data->last_error.c_str(), instance);
+                log_create_total("runtime_client_failed", data->last_error);
+                return kOfxStatFailed;
+            }
+            data->use_runtime_server = false;
+        } else {
+            data->runtime_client = std::move(*runtime_client);
+            log_message("create_instance", "Using out-of-process OFX runtime.");
+        }
+    } else {
+        log_message("create_instance", "Using in-process OFX runtime.");
+    }
 
     data->models_root = resolve_models_root();
     DeviceInfo detected_device = auto_detect();
@@ -395,12 +556,35 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     auto capabilities = runtime_capabilities();
     log_message("create_instance", std::string("Platform: ") + capabilities.platform);
 
+    int initial_quality_mode = kQualityAuto;
+    if (data->quality_mode_param != nullptr) {
+        g_suites.parameter->paramGetValue(data->quality_mode_param, &initial_quality_mode);
+    }
+
+    data->preferred_device = detected_device;
+    data->device = detected_device;
+    data->active_quality_mode = initial_quality_mode;
+    data->requested_resolution =
+        initial_requested_resolution_for_quality_mode(initial_quality_mode);
+    data->active_resolution = 0;
+    data->model_path.clear();
+    data->last_error.clear();
+
+    if (!should_prepare_bootstrap_during_instance_create(data->use_runtime_server)) {
+        log_message("create_instance", "Deferring runtime session bootstrap until first render.");
+        update_runtime_panel_values(data.get());
+        set_instance_data(instance, data.release());
+        log_create_total("success", "bootstrap=deferred");
+        return kOfxStatOK;
+    }
+
     auto bootstrap_candidates =
         build_bootstrap_candidates(capabilities, detected_device, data->models_root);
     if (bootstrap_candidates.empty()) {
         log_message("create_instance", "No compatible model artifacts found for OFX bootstrap.");
         post_message(kOfxMessageError, "No compatible model artifacts found for this device.",
                      instance);
+        log_create_total("no_artifacts");
         return kOfxStatFailed;
     }
 
@@ -419,38 +603,92 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         log_engine_event("create_instance", "engine_create_begin", kBootstrapPhase,
                          candidate.device, candidate.device, candidate.executable_model_path,
                          candidate.requested_resolution, candidate.effective_resolution);
-        auto engine_result = Engine::create(
-            candidate.executable_model_path, candidate.device,
-            [&](const StageTiming& timing) {
-                log_stage_timing("create_instance", kBootstrapPhase, candidate.device,
+
+        DeviceInfo effective_device = candidate.device;
+        std::optional<BackendFallbackInfo> fallback = std::nullopt;
+        if (data->use_runtime_server && data->runtime_client != nullptr) {
+            auto prepare_result = data->runtime_client->prepare_session(
+                build_prepare_request(candidate), [&](const StageTiming& timing) {
+                    log_stage_timing("create_instance", kBootstrapPhase, candidate.device,
+                                     candidate.executable_model_path,
+                                     candidate.requested_resolution, candidate.effective_resolution,
+                                     timing);
+                });
+            if (!prepare_result) {
+                std::string failure =
+                    backend_label(candidate.device.backend) + ": " + prepare_result.error().message;
+                log_engine_event("create_instance", "engine_create_error", kBootstrapPhase,
+                                 candidate.device, candidate.device,
                                  candidate.executable_model_path, candidate.requested_resolution,
-                                 candidate.effective_resolution, timing);
-            },
-            ofx_engine_options(candidate.device));
-        if (!engine_result) {
-            std::string failure =
-                backend_label(candidate.device.backend) + ": " + engine_result.error().message;
-            log_engine_event("create_instance", "engine_create_error", kBootstrapPhase,
-                             candidate.device, candidate.device, candidate.executable_model_path,
-                             candidate.requested_resolution, candidate.effective_resolution,
-                             std::nullopt, engine_result.error().message);
-            log_message("create_instance", std::string("Engine create failed: ") + failure);
-            if (!failure_summary.empty()) {
-                failure_summary += " | ";
+                                 candidate.effective_resolution, std::nullopt,
+                                 prepare_result.error().message);
+                log_message("create_instance", std::string("Runtime prepare failed: ") + failure);
+                if (!failure_summary.empty()) {
+                    failure_summary += " | ";
+                }
+                failure_summary += failure;
+                continue;
             }
-            failure_summary += failure;
-            continue;
+            effective_device = prepare_result->session.effective_device;
+            fallback = prepare_result->session.backend_fallback;
+            log_message("create_instance",
+                        "Runtime session prepared. reused_existing_session=" +
+                            std::to_string(prepare_result->session.reused_existing_session) +
+                            " ref_count=" + std::to_string(prepare_result->session.ref_count));
+        } else {
+            auto engine_result = Engine::create(
+                candidate.executable_model_path, candidate.device,
+                [&](const StageTiming& timing) {
+                    log_stage_timing("create_instance", kBootstrapPhase, candidate.device,
+                                     candidate.executable_model_path,
+                                     candidate.requested_resolution, candidate.effective_resolution,
+                                     timing);
+                },
+                ofx_engine_options(candidate.device));
+            if (!engine_result) {
+                std::string failure =
+                    backend_label(candidate.device.backend) + ": " + engine_result.error().message;
+                log_engine_event("create_instance", "engine_create_error", kBootstrapPhase,
+                                 candidate.device, candidate.device,
+                                 candidate.executable_model_path, candidate.requested_resolution,
+                                 candidate.effective_resolution, std::nullopt,
+                                 engine_result.error().message);
+                log_message("create_instance", std::string("Engine create failed: ") + failure);
+                if (!failure_summary.empty()) {
+                    failure_summary += " | ";
+                }
+                failure_summary += failure;
+                continue;
+            }
+
+            auto engine = std::move(*engine_result);
+            effective_device = engine->current_device();
+            fallback = engine->backend_fallback();
+            if (!backend_matches_request(*engine, candidate.device)) {
+                std::string failure = backend_mismatch_message(
+                    "Bootstrap", candidate.device, *engine, candidate.executable_model_path,
+                    engine->backend_fallback());
+                log_message("create_instance", failure);
+                if (!failure_summary.empty()) {
+                    failure_summary += " | ";
+                }
+                failure_summary += failure;
+                continue;
+            }
+            data->engine = std::move(engine);
         }
 
-        auto engine = std::move(*engine_result);
         log_engine_event("create_instance", "engine_create_result", kBootstrapPhase,
-                         candidate.device, engine->current_device(),
-                         candidate.executable_model_path, candidate.requested_resolution,
-                         candidate.effective_resolution, engine->backend_fallback());
-        if (!backend_matches_request(*engine, candidate.device)) {
-            std::string failure = backend_mismatch_message(
-                "Bootstrap", candidate.device, *engine, candidate.executable_model_path,
-                engine->backend_fallback());
+                         candidate.device, effective_device, candidate.executable_model_path,
+                         candidate.requested_resolution, candidate.effective_resolution, fallback);
+        if (!backend_matches_request(effective_device, candidate.device)) {
+            std::string failure =
+                "Bootstrap requested backend " + backend_label(candidate.device.backend) + " for " +
+                candidate.executable_model_path.filename().string() + " but the runtime is using " +
+                backend_label(effective_device.backend) + ".";
+            if (fallback.has_value() && !fallback->reason.empty()) {
+                failure += " Reason: " + fallback->reason;
+            }
             log_message("create_instance", failure);
             if (!failure_summary.empty()) {
                 failure_summary += " | ";
@@ -459,16 +697,21 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
             continue;
         }
 
-        data->engine = std::move(engine);
         data->preferred_device = candidate.device;
-        data->device = data->engine->current_device();
+        data->device = effective_device;
         data->model_path = candidate.executable_model_path;
+        data->cached_result_valid = false;
+        data->cached_signature = 0;
+        data->cached_signature_valid = false;
         data->active_quality_mode = kQualityAuto;
         data->requested_resolution = candidate.requested_resolution;
         data->active_resolution = candidate.effective_resolution;
         data->cpu_quality_guardrail_active = false;
         data->render_count = 0;
         data->last_error.clear();
+        data->last_frame_ms = 0.0;
+        data->avg_frame_ms = 0.0;
+        data->frame_time_samples = 0;
 
         if (candidate.device.backend != detected_device.backend) {
             log_message("create_instance", std::string("Backend fallback: ") +
@@ -489,18 +732,34 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         update_runtime_panel_values(data.get());
 
         set_instance_data(instance, data.release());
+        log_create_total("success");
         return kOfxStatOK;
     }
 
     data->last_error = failure_summary;
     std::string failure_message = "Failed to load AI engine: " + failure_summary;
     post_message(kOfxMessageError, failure_message.c_str(), instance);
+    log_create_total("engine_create_failed", failure_summary);
     return kOfxStatFailed;
 }
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
-                               int input_height) {
-    if (data == nullptr || data->engine == nullptr) {
+                               int input_height, int quantization_mode) {
+    const auto quality_switch_start = std::chrono::steady_clock::now();
+    const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
+        std::string message = "event=quality_switch_total total_ms=" +
+                              std::to_string(elapsed_ms_since(quality_switch_start)) +
+                              " quality=" + quality_mode_label(quality_mode) +
+                              " outcome=" + std::string(outcome);
+        if (!detail.empty()) {
+            message += " detail=" + std::string(detail);
+        }
+        log_message("ensure_engine_for_quality", message);
+    };
+
+    if (data == nullptr || (!data->use_runtime_server && data->engine == nullptr) ||
+        (data->use_runtime_server && data->runtime_client == nullptr)) {
+        log_quality_total("no_engine");
         return true;
     }
 
@@ -515,9 +774,18 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     const bool cpu_quality_guardrail_active = effective_quality_mode != requested_quality_mode;
     const int requested_resolution =
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
+    if (requested_device.backend == Backend::TensorRT && quantization_mode == kQuantizationInt8) {
+        data->last_error =
+            "INT8 quantization is not supported by the TensorRT RTX execution provider. "
+            "Please use FP16.";
+        log_message("ensure_engine_for_quality", data->last_error);
+        update_runtime_panel(data);
+        log_quality_total("unsupported_quantization", data->last_error);
+        return false;
+    }
     auto selections = quality_artifact_candidates(data->models_root, requested_device.backend,
-                                                  effective_quality_mode, input_width,
-                                                  input_height);
+                                                  effective_quality_mode, input_width, input_height,
+                                                  quantization_mode);
     data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     if (cpu_quality_guardrail_active) {
         data->last_error = "CPU backend is limited to Preview (512) for interactive rendering. " +
@@ -533,16 +801,22 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         } else {
             data->last_error =
                 "Requested quality " + std::string(quality_mode_label(requested_quality_mode)) +
-                " requires a " + std::to_string(requested_resolution) +
-                "px artifact for backend " + backend_label(requested_device.backend) +
-                ", but that artifact is missing.";
+                " requires a " + std::to_string(requested_resolution) + "px artifact for backend " +
+                backend_label(requested_device.backend) + ", but that artifact is missing.";
         }
         log_message("ensure_engine_for_quality", data->last_error);
+        update_runtime_panel(data);
+        log_quality_total("missing_artifact", data->last_error);
         return false;
     }
 
-    data->device = data->engine->current_device();
-    bool current_backend_matches = backend_matches_request(*data->engine, requested_device);
+    if (!data->use_runtime_server && data->engine != nullptr) {
+        data->device = data->engine->current_device();
+    } else if (data->use_runtime_server && data->runtime_client != nullptr &&
+               data->runtime_client->has_session()) {
+        data->device = data->runtime_client->current_device();
+    }
+    bool current_backend_matches = backend_matches_request(data->device, requested_device);
 
     for (const auto& selection : selections) {
         if (current_backend_matches && selection.executable_model_path == data->model_path &&
@@ -552,6 +826,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data->active_resolution = selection.effective_resolution;
             data->last_error.clear();
             update_runtime_panel_values(data);
+            log_quality_total("reused_engine");
             return true;
         }
 
@@ -559,67 +834,134 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         log_engine_event("ensure_engine_for_quality", "engine_create_begin", kQualitySwitchPhase,
                          requested_device, requested_device, selection.executable_model_path,
                          requested_resolution, selection.effective_resolution);
-        auto engine_result = Engine::create(
-            selection.executable_model_path, requested_device,
-            [&](const StageTiming& timing) {
-                log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
-                                 requested_device, selection.executable_model_path,
-                                 requested_resolution, selection.effective_resolution, timing);
-            },
-            ofx_engine_options(requested_device));
-        if (!engine_result) {
-            data->last_error = "Failed to create engine for " +
-                               std::string(quality_mode_label(requested_quality_mode)) + " using " +
-                               selection.executable_model_path.filename().string() + ": " +
-                               engine_result.error().message;
-            log_engine_event("ensure_engine_for_quality", "engine_create_error",
-                             kQualitySwitchPhase, requested_device, requested_device,
-                             selection.executable_model_path, requested_resolution,
-                             selection.effective_resolution, std::nullopt,
-                             engine_result.error().message);
+
+        DeviceInfo effective_device = requested_device;
+        std::optional<BackendFallbackInfo> fallback = std::nullopt;
+        if (data->use_runtime_server && data->runtime_client != nullptr) {
+            auto prepare_result = data->runtime_client->prepare_session(
+                build_prepare_request(requested_device, selection, requested_quality_mode),
+                [&](const StageTiming& timing) {
+                    log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
+                                     requested_device, selection.executable_model_path,
+                                     requested_resolution, selection.effective_resolution, timing);
+                });
+            if (!prepare_result) {
+                data->last_error = "Failed to prepare runtime session for " +
+                                   std::string(quality_mode_label(requested_quality_mode)) +
+                                   " using " + selection.executable_model_path.filename().string() +
+                                   ": " + prepare_result.error().message;
+                log_engine_event("ensure_engine_for_quality", "engine_create_error",
+                                 kQualitySwitchPhase, requested_device, requested_device,
+                                 selection.executable_model_path, requested_resolution,
+                                 selection.effective_resolution, std::nullopt,
+                                 prepare_result.error().message);
+                log_message("ensure_engine_for_quality", data->last_error);
+                if (is_fixed_quality_mode(requested_quality_mode) &&
+                    !cpu_quality_guardrail_active) {
+                    update_runtime_panel(data);
+                    log_quality_total("engine_create_error", data->last_error);
+                    return false;
+                }
+                continue;
+            }
+            effective_device = prepare_result->session.effective_device;
+            fallback = prepare_result->session.backend_fallback;
+            log_message("ensure_engine_for_quality",
+                        "Runtime session prepared. reused_existing_session=" +
+                            std::to_string(prepare_result->session.reused_existing_session) +
+                            " ref_count=" + std::to_string(prepare_result->session.ref_count));
+        } else {
+            auto engine_result = Engine::create(
+                selection.executable_model_path, requested_device,
+                [&](const StageTiming& timing) {
+                    log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
+                                     requested_device, selection.executable_model_path,
+                                     requested_resolution, selection.effective_resolution, timing);
+                },
+                ofx_engine_options(requested_device));
+            if (!engine_result) {
+                data->last_error = "Failed to create engine for " +
+                                   std::string(quality_mode_label(requested_quality_mode)) +
+                                   " using " + selection.executable_model_path.filename().string() +
+                                   ": " + engine_result.error().message;
+                log_engine_event("ensure_engine_for_quality", "engine_create_error",
+                                 kQualitySwitchPhase, requested_device, requested_device,
+                                 selection.executable_model_path, requested_resolution,
+                                 selection.effective_resolution, std::nullopt,
+                                 engine_result.error().message);
+                log_message("ensure_engine_for_quality", data->last_error);
+                if (is_fixed_quality_mode(requested_quality_mode) &&
+                    !cpu_quality_guardrail_active) {
+                    update_runtime_panel(data);
+                    log_quality_total("engine_create_error", data->last_error);
+                    return false;
+                }
+                continue;
+            }
+
+            auto engine = std::move(*engine_result);
+            effective_device = engine->current_device();
+            fallback = engine->backend_fallback();
+            if (!backend_matches_request(*engine, requested_device)) {
+                data->last_error = backend_mismatch_message(
+                    "Quality switch", requested_device, *engine, selection.executable_model_path,
+                    engine->backend_fallback());
+                log_message("ensure_engine_for_quality", data->last_error);
+                if (is_fixed_quality_mode(requested_quality_mode) &&
+                    !cpu_quality_guardrail_active) {
+                    update_runtime_panel(data);
+                    log_quality_total("backend_mismatch", data->last_error);
+                    return false;
+                }
+                continue;
+            }
+            data->engine = std::move(engine);
+        }
+
+        log_engine_event("ensure_engine_for_quality", "engine_create_result", kQualitySwitchPhase,
+                         requested_device, effective_device, selection.executable_model_path,
+                         requested_resolution, selection.effective_resolution, fallback);
+        if (!backend_matches_request(effective_device, requested_device)) {
+            data->last_error =
+                "Quality switch requested backend " + backend_label(requested_device.backend) +
+                " for " + selection.executable_model_path.filename().string() +
+                " but the runtime is using " + backend_label(effective_device.backend) + ".";
+            if (fallback.has_value() && !fallback->reason.empty()) {
+                data->last_error += " Reason: " + fallback->reason;
+            }
             log_message("ensure_engine_for_quality", data->last_error);
             if (is_fixed_quality_mode(requested_quality_mode) && !cpu_quality_guardrail_active) {
+                update_runtime_panel(data);
+                log_quality_total("backend_mismatch", data->last_error);
                 return false;
             }
             continue;
         }
 
-        auto engine = std::move(*engine_result);
-        log_engine_event("ensure_engine_for_quality", "engine_create_result",
-                         kQualitySwitchPhase, requested_device, engine->current_device(),
-                         selection.executable_model_path, requested_resolution,
-                         selection.effective_resolution, engine->backend_fallback());
-        if (!backend_matches_request(*engine, requested_device)) {
-            data->last_error = backend_mismatch_message(
-                "Quality switch", requested_device, *engine, selection.executable_model_path,
-                engine->backend_fallback());
-            log_message("ensure_engine_for_quality", data->last_error);
-            if (is_fixed_quality_mode(requested_quality_mode) && !cpu_quality_guardrail_active) {
-                return false;
-            }
-            continue;
-        }
-
-        data->engine = std::move(engine);
-        data->device = data->engine->current_device();
+        data->device = effective_device;
         data->model_path = selection.executable_model_path;
+        data->cached_result_valid = false;
+        data->cached_signature = 0;
+        data->cached_signature_valid = false;
         data->active_quality_mode = requested_quality_mode;
         data->requested_resolution = requested_resolution;
         data->active_resolution = selection.effective_resolution;
         data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
         data->render_count = 0;
         data->last_error.clear();
+        data->last_frame_ms = 0.0;
+        data->avg_frame_ms = 0.0;
+        data->frame_time_samples = 0;
         if (selection.used_fallback) {
             log_message("ensure_engine_for_quality",
                         "Auto quality requested " + std::to_string(selection.requested_resolution) +
-                            " and fell back to " +
-                            std::to_string(selection.effective_resolution));
+                            " and fell back to " + std::to_string(selection.effective_resolution));
         }
         if (cpu_quality_guardrail_active) {
-            log_message("ensure_engine_for_quality",
-                        "CPU guardrail active: " +
-                            std::string(quality_mode_label(requested_quality_mode)) +
-                            " is capped to Preview (512).");
+            log_message(
+                "ensure_engine_for_quality",
+                "CPU guardrail active: " + std::string(quality_mode_label(requested_quality_mode)) +
+                    " is capped to Preview (512).");
         }
         log_message("ensure_engine_for_quality",
                     std::string("Switched to artifact ") +
@@ -629,14 +971,63 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         log_message("ensure_engine_for_quality",
                     "Effective resolution: " + std::to_string(data->active_resolution));
         update_runtime_panel_values(data);
+        log_quality_total("success");
         return true;
     }
 
+    log_quality_total("exhausted_candidates", data->last_error);
+    update_runtime_panel(data);
     return false;
 }
 
 void update_runtime_panel(InstanceData* data) {
+    if (data == nullptr) {
+        return;
+    }
+    data->runtime_panel_dirty = true;
+    if (data->in_render) {
+        return;
+    }
+    data->runtime_panel_dirty = false;
     update_runtime_panel_values(data);
+}
+
+OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args) {
+    InstanceData* data = get_instance_data(instance);
+    if (data == nullptr) {
+        return kOfxStatReplyDefault;
+    }
+    if (in_args != nullptr && g_suites.property != nullptr) {
+        std::string changed_param;
+        if (get_string(in_args, kOfxPropName, changed_param)) {
+            if (changed_param == kParamQuantizationMode) {
+                int quant = 0;
+                if (data->quantization_mode_param && g_suites.parameter->paramGetValue(data->quantization_mode_param, &quant) == kOfxStatOK) {
+                    DeviceInfo requested_device = data->preferred_device;
+                    if (requested_device.backend == Backend::Auto) {
+                        requested_device = data->device;
+                    }
+                    if (requested_device.backend == Backend::TensorRT && quant == kQuantizationInt8) {
+                        data->last_error = "INT8 quantization is not supported by the TensorRT RTX execution provider. Please use FP16.";
+                        data->runtime_panel_dirty = true;
+                    } else if (data->last_error.find("INT8") != std::string::npos) {
+                        data->last_error.clear();
+                        data->runtime_panel_dirty = true;
+                    }
+                }
+            }
+        }
+        std::string change_reason;
+        if (get_string(in_args, kOfxPropChangeReason, change_reason) &&
+            change_reason == kOfxChangePluginEdited) {
+            return kOfxStatOK;
+        }
+    }
+    if (data->runtime_panel_dirty && !data->in_render) {
+        data->runtime_panel_dirty = false;
+        update_runtime_panel_values(data);
+    }
+    return kOfxStatOK;
 }
 
 OfxStatus destroy_instance(OfxImageEffectHandle instance) {
