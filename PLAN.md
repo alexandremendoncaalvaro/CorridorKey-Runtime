@@ -245,6 +245,56 @@ Goal: target the March 2026 Windows AI stack for maximum compatibility.
   `corridorkey_ofx_delayload.log` as required evidence for Windows test builds,
   especially for backend fallback and provider-loading failures.
 
+## Phase 7 - Out-of-Process Runtime for OFX
+
+Goal: move Resolve OFX execution from per-instance in-process inference to a
+packaged local runtime service that isolates backend and VRAM failures, reuses
+warmup and session state across instances, and preserves one-step installation.
+
+- [ ] **7.1 Product Boundary** -- make the OFX plugin a thin local client while
+  a packaged runtime server owns backend selection, model/session lifetime,
+  warmup, VRAM admission, and structured diagnostics. Scope stays strictly
+  local-machine; this is not a remote or distributed service feature.
+- [ ] **7.2 Stable IPC Contract** -- define a versioned request/reply and event
+  contract for instance registration, render submission, quality switching,
+  cancellation, health checks, and diagnostics. Reuse the existing JSON/NDJSON
+  runtime vocabulary where it already fits instead of inventing a second
+  incompatible protocol surface.
+- [ ] **7.3 High-Bandwidth Frame Transport** -- move frame payloads through
+  shared memory or memory-mapped files with a lightweight local control channel
+  (`Named Pipe` on Windows, `Unix Domain Socket` on macOS). Do not serialize
+  full-resolution frame buffers through text transport.
+- [ ] **7.4 Session Broker and Residency Policy** -- keep pooled runtime
+  sessions keyed by backend, artifact, and resolution so first-frame warmup and
+  copy/paste duplication no longer recreate full inference state per OFX
+  instance. The broker must enforce explicit VRAM budgeting and refuse or
+  downgrade work before Resolve reaches unsafe memory pressure.
+- [ ] **7.5 OFX Thin-Client Refactor** -- keep clip fetch, alpha-hint
+  interpretation, OFX parameter reads, and output image writes inside the
+  plugin, but replace direct `Engine` ownership with request/response calls to
+  the local runtime process.
+- [ ] **7.6 Packaging and Lifecycle** -- ship the runtime server executable
+  inside the same OFX installer and bundle layout, discover it relative to the
+  plugin at runtime, launch on demand, reuse an already-running instance, and
+  stop after an idle timeout. No extra installer, service registration, or
+  admin-only setup is allowed.
+- [ ] **7.7 Crash Containment and Recovery** -- detect server crashes, hung
+  renders, protocol mismatches, and startup failures, then surface deterministic
+  OFX errors while allowing the runtime process to be restarted without
+  restarting Resolve.
+- [ ] **7.8 Diagnostics Parity** -- preserve and extend the current runtime
+  panel and log evidence so the user can still see requested backend, effective
+  backend, artifact, quality, warmup state, fallback reason, and stage timings
+  when execution is out-of-process.
+- [ ] **7.9 Rollout Gates** -- before making this the default architecture,
+  validate first-frame latency, copy/paste latency, multi-instance behavior, 4K
+  throughput, VRAM exhaustion behavior, server restart flow, and installer
+  simplicity on both macOS and Windows Resolve builds.
+- [ ] **7.10 Temporary Compatibility Path** -- keep the current in-process
+  architecture available as a temporary development fallback until the
+  out-of-process path reaches feature parity, then explicitly decide whether to
+  remove it or quarantine it behind a debug-only switch.
+
 ## Reference
 
 - **Original CorridorKey:** github.com/nikopueringer/CorridorKey (creator's
