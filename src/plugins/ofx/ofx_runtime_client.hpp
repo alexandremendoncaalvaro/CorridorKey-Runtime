@@ -3,6 +3,7 @@
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 #include "app/ofx_runtime_protocol.hpp"
 #include "common/local_ipc.hpp"
@@ -41,11 +42,15 @@ class OfxRuntimeClient {
     Result<void> ensure_server_running();
     Result<nlohmann::json> send_command(app::OfxRuntimeCommand command,
                                         const nlohmann::json& payload);
+    Result<nlohmann::json> send_command_without_launch(app::OfxRuntimeCommand command,
+                                                       const nlohmann::json& payload) const;
     Result<void> launch_server();
+    Result<void> recover_runtime_session(StageTimingCallback on_stage);
     void update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot);
 
     OfxRuntimeClientOptions m_options = {};
     app::OfxRuntimeSessionSnapshot m_session = {};
+    std::optional<app::OfxRuntimePrepareSessionRequest> m_last_prepare_request = std::nullopt;
 };
 
 std::filesystem::path resolve_ofx_runtime_server_binary(

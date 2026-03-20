@@ -31,6 +31,15 @@ Result<nlohmann::json> unwrap_response(const nlohmann::json& json) {
     return envelope->payload;
 }
 
+bool is_session_missing_error(const Error& error) {
+    return error.code == ErrorCode::InferenceFailed &&
+           error.message.find("Runtime session is not prepared") != std::string::npos;
+}
+
+bool is_transport_error(const Error& error) {
+    return error.code == ErrorCode::IoError;
+}
+
 void replay_stage_timings(const std::vector<StageTiming>& timings, StageTimingCallback on_stage) {
     if (!on_stage) {
         return;
@@ -91,7 +100,7 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
 
     if (!m_session.session_id.empty()) {
         auto release_result = release_session();
-        if (!release_result) {
+        if (!release_result && !is_transport_error(release_result.error())) {
             return Unexpected<Error>(release_result.error());
         }
     }
@@ -108,6 +117,7 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
     }
 
     update_session_snapshot(parsed->session);
+    m_last_prepare_request = request;
     replay_stage_timings(parsed->timings, on_stage);
     return parsed;
 }
@@ -141,8 +151,22 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         request.params = params;
         request.render_index = render_index;
 
-        auto response =
-            send_command(app::OfxRuntimeCommand::RenderFrame, app::to_json(request));
+        auto send_render_request = [&]() {
+            return send_command(app::OfxRuntimeCommand::RenderFrame, app::to_json(request));
+        };
+
+        auto response = send_render_request();
+        if (!response &&
+            (is_transport_error(response.error()) || is_session_missing_error(response.error()))) {
+            log_message("ofx_runtime_client",
+                        "event=render_frame_recover reason=" + response.error().message);
+            auto recover_result = recover_runtime_session(on_stage);
+            if (!recover_result) {
+                return Unexpected<Error>(recover_result.error());
+            }
+            request.session_id = m_session.session_id;
+            response = send_render_request();
+        }
         if (!response) {
             return Unexpected<Error>(response.error());
         }
@@ -186,14 +210,17 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
 
 Result<void> OfxRuntimeClient::release_session() {
     if (m_session.session_id.empty()) {
+        m_last_prepare_request = std::nullopt;
         return {};
     }
 
     app::OfxRuntimeReleaseSessionRequest request;
     request.session_id = m_session.session_id;
-    auto response = send_command(app::OfxRuntimeCommand::ReleaseSession, app::to_json(request));
+    auto response =
+        send_command_without_launch(app::OfxRuntimeCommand::ReleaseSession, app::to_json(request));
     m_session = {};
-    if (!response) {
+    m_last_prepare_request = std::nullopt;
+    if (!response && !is_transport_error(response.error())) {
         return Unexpected<Error>(response.error());
     }
     return {};
@@ -212,17 +239,9 @@ bool OfxRuntimeClient::has_session() const {
 }
 
 Result<void> OfxRuntimeClient::ensure_server_running() {
-    auto health_response = common::send_json_request(
-        m_options.endpoint,
-        app::to_json(app::OfxRuntimeRequestEnvelope{app::kOfxRuntimeProtocolVersion,
-                                                   app::OfxRuntimeCommand::Health,
-                                                   nlohmann::json::object()}),
-        m_options.request_timeout_ms);
+    auto health_response =
+        send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
     if (health_response) {
-        auto payload = unwrap_response(*health_response);
-        if (!payload) {
-            return Unexpected<Error>(payload.error());
-        }
         return {};
     }
 
@@ -261,6 +280,12 @@ Result<nlohmann::json> OfxRuntimeClient::send_command(app::OfxRuntimeCommand com
         return Unexpected<Error>(ensure_result.error());
     }
 
+    return send_command_without_launch(command, payload);
+}
+
+Result<nlohmann::json> OfxRuntimeClient::send_command_without_launch(
+    app::OfxRuntimeCommand command, const nlohmann::json& payload) const {
+
     app::OfxRuntimeRequestEnvelope envelope;
     envelope.command = command;
     envelope.payload = payload;
@@ -271,6 +296,35 @@ Result<nlohmann::json> OfxRuntimeClient::send_command(app::OfxRuntimeCommand com
         return Unexpected<Error>(response.error());
     }
     return unwrap_response(*response);
+}
+
+Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_stage) {
+    if (!m_last_prepare_request.has_value()) {
+        return Unexpected<Error>(
+            Error{ErrorCode::IoError, "The OFX runtime session was lost and cannot be recovered."});
+    }
+
+    log_message("ofx_runtime_client", "event=recover_session_begin");
+    m_session = {};
+
+    auto response = send_command(app::OfxRuntimeCommand::PrepareSession,
+                                 app::to_json(*m_last_prepare_request));
+    if (!response) {
+        return Unexpected<Error>(response.error());
+    }
+
+    auto parsed = app::prepare_session_response_from_json(*response);
+    if (!parsed) {
+        return Unexpected<Error>(parsed.error());
+    }
+
+    update_session_snapshot(parsed->session);
+    replay_stage_timings(parsed->timings, on_stage);
+    log_message("ofx_runtime_client",
+                "event=recover_session_result reused_existing_session=" +
+                    std::to_string(parsed->session.reused_existing_session) + " session_id=" +
+                    parsed->session.session_id);
+    return {};
 }
 
 Result<void> OfxRuntimeClient::launch_server() {

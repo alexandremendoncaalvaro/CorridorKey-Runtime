@@ -1,12 +1,15 @@
 # Integration tests (with files, no GPU)
 
 add_executable(test_integration
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
     test_cache_fallback.cpp
     test_doctor_report.cpp
     test_engine_fallback_policy.cpp
     test_engine_mlx.cpp
     test_engine_tiling.cpp
     test_exr_roundtrip.cpp
+    test_ofx_runtime_client.cpp
     test_ofx_runtime_service.cpp
     test_png_roundtrip.cpp
     test_video_roundtrip.cpp
