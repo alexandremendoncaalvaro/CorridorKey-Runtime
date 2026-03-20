@@ -1,4 +1,5 @@
 #include <corridorkey/engine.hpp>
+#include <string>
 
 #include "common/srgb_lut.hpp"
 #include "ofx_image_utils.hpp"
@@ -9,6 +10,82 @@
 #include "post_process/color_utils.hpp"
 
 namespace corridorkey::ofx {
+
+namespace {
+
+std::string backend_label(Backend backend) {
+    switch (backend) {
+        case Backend::CPU:
+            return "cpu";
+        case Backend::CoreML:
+            return "coreml";
+        case Backend::CUDA:
+            return "cuda";
+        case Backend::TensorRT:
+            return "tensorrt";
+        case Backend::DirectML:
+            return "dml";
+        case Backend::WindowsML:
+            return "winml";
+        case Backend::OpenVINO:
+            return "openvino";
+        case Backend::MLX:
+            return "mlx";
+        default:
+            return "auto";
+    }
+}
+
+std::string render_phase_label(std::uint64_t render_count) {
+    return render_count == 0 ? "first_frame" : "subsequent_frame";
+}
+
+DeviceInfo requested_device_for_render(const InstanceData* data) {
+    if (data == nullptr) {
+        return {};
+    }
+    if (data->preferred_device.backend == Backend::Auto) {
+        return data->device;
+    }
+    return data->preferred_device;
+}
+
+void log_render_stage(std::string_view phase, const DeviceInfo& requested_device,
+                      const std::filesystem::path& artifact_path, int requested_resolution,
+                      int effective_resolution, const StageTiming& timing) {
+    log_message("render", "event=stage phase=" + std::string(phase) + " stage=" + timing.name +
+                              " total_ms=" + std::to_string(timing.total_ms) +
+                              " requested_backend=" + backend_label(requested_device.backend) +
+                              " artifact=" + artifact_path.filename().string() +
+                              " requested_resolution=" +
+                              std::to_string(requested_resolution) + " effective_resolution=" +
+                              std::to_string(effective_resolution));
+}
+
+void log_render_event(std::string_view event, std::string_view phase,
+                      const DeviceInfo& requested_device, const DeviceInfo& effective_device,
+                      const std::filesystem::path& artifact_path, int requested_resolution,
+                      int effective_resolution,
+                      const std::optional<BackendFallbackInfo>& fallback = std::nullopt,
+                      std::string_view detail = {}) {
+    std::string message = "event=" + std::string(event) + " phase=" + std::string(phase) +
+                          " requested_backend=" + backend_label(requested_device.backend) +
+                          " effective_backend=" + backend_label(effective_device.backend) +
+                          " requested_device=" + requested_device.name +
+                          " effective_device=" + effective_device.name + " artifact=" +
+                          artifact_path.filename().string() + " requested_resolution=" +
+                          std::to_string(requested_resolution) + " effective_resolution=" +
+                          std::to_string(effective_resolution);
+    if (fallback.has_value() && !fallback->reason.empty()) {
+        message += " fallback_reason=" + fallback->reason;
+    }
+    if (!detail.empty()) {
+        message += " detail=" + std::string(detail);
+    }
+    log_message("render", message);
+}
+
+}  // namespace
 
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle /*out_args*/) {
@@ -262,6 +339,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     InferenceParams params;
+    params.target_resolution = data->active_resolution;
     params.despill_strength = static_cast<float>(despill_strength);
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
@@ -275,10 +353,50 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.sp_erode_px = edge_erode;
     params.sp_blur_px = edge_blur;
 
-    auto result = data->engine->process_frame(rgb_view, hint_view, params);
+    const DeviceInfo requested_device = requested_device_for_render(data);
+    const DeviceInfo effective_device_before = data->engine->current_device();
+    const std::string render_phase = render_phase_label(data->render_count);
+    log_render_event("render_begin", render_phase, requested_device, effective_device_before,
+                     data->model_path, data->requested_resolution, data->active_resolution,
+                     data->engine->backend_fallback());
+
+    auto result = data->engine->process_frame(
+        rgb_view, hint_view, params,
+        [&](const StageTiming& timing) {
+            log_render_stage(render_phase, requested_device, data->model_path,
+                             data->requested_resolution, data->active_resolution, timing);
+        });
+    ++data->render_count;
     if (!result) {
+        log_render_event("render_result", render_phase, requested_device,
+                         data->engine->current_device(), data->model_path,
+                         data->requested_resolution, data->active_resolution,
+                         data->engine->backend_fallback(), result.error().message);
         log_message("render", std::string("Engine processing failed: ") + result.error().message);
         post_message(kOfxMessageError, result.error().message.c_str(), instance);
+        return kOfxStatFailed;
+    }
+
+    DeviceInfo effective_device = data->engine->current_device();
+    log_render_event("render_result", render_phase, requested_device, effective_device,
+                     data->model_path, data->requested_resolution, data->active_resolution,
+                     data->engine->backend_fallback());
+    if (effective_device.backend != data->device.backend || effective_device.name != data->device.name) {
+        data->device = effective_device;
+        update_runtime_panel(data);
+    }
+    if (requested_device.backend != Backend::Auto &&
+        effective_device.backend != requested_device.backend) {
+        std::string fallback_message =
+            "Render switched away from the requested backend while using " +
+            data->model_path.filename().string() + ".";
+        if (auto fallback = data->engine->backend_fallback();
+            fallback.has_value() && !fallback->reason.empty()) {
+            fallback_message += " Reason: " + fallback->reason;
+        }
+        data->last_error = fallback_message;
+        log_message("render", fallback_message);
+        post_message(kOfxMessageError, fallback_message.c_str(), instance);
         return kOfxStatFailed;
     }
 

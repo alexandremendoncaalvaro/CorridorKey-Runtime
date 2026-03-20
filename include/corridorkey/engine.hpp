@@ -46,6 +46,14 @@ using ProgressCallback = std::function<bool(float progress, const std::string& s
 using JobEventCallback = std::function<bool(const JobEvent& event)>;
 
 /**
+ * @brief Controls how the engine handles backend fallback during session creation and execution.
+ */
+struct EngineCreateOptions {
+    bool allow_cpu_fallback = true;
+    bool disable_cpu_ep_fallback = false;
+};
+
+/**
  * @brief The main inference engine for CorridorKey.
  * Implements the PIMPL pattern to hide ONNX Runtime details.
  */
@@ -59,11 +67,14 @@ class CORRIDORKEY_API Engine {
      * @brief Factory method to create and initialize the engine.
      * @param model_path Path to the ONNX model file.
      * @param device The device to use for inference. Defaults to auto-detection.
+     * @param on_stage Optional callback for stage timing diagnostics.
+     * @param options Controls CPU fallback policy for interactive vs. tolerant workflows.
      * @return A unique pointer to the initialized Engine or an error.
      */
     static Result<std::unique_ptr<Engine>> create(const std::filesystem::path& model_path,
                                                   DeviceInfo device = auto_detect(),
-                                                  StageTimingCallback on_stage = nullptr);
+                                                  StageTimingCallback on_stage = nullptr,
+                                                  EngineCreateOptions options = {});
 
     /**
      * @brief Destructor (virtual for safety, though Engine is usually not inherited).

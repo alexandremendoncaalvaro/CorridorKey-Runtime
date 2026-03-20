@@ -5,6 +5,7 @@
 #include <deque>
 #include <future>
 #include <mutex>
+#include <string_view>
 
 #include "../frame_io/video_io.hpp"
 #include "../post_process/color_utils.hpp"
@@ -20,17 +21,19 @@ class Engine::Impl {
     std::filesystem::path model_path;
     std::optional<DeviceInfo> cpu_fallback_device;
     std::optional<BackendFallbackInfo> fallback_info;
+    EngineCreateOptions create_options = {};
     std::once_flag warmup_once;
     std::optional<Error> warmup_error;
 
     Impl() = default;
 
     bool can_fallback_to_cpu() const {
-        return cpu_fallback_device.has_value() && session != nullptr &&
+        return create_options.allow_cpu_fallback && cpu_fallback_device.has_value() &&
+               session != nullptr &&
                session->device().backend != Backend::CPU;
     }
 
-    Result<void> activate_cpu_fallback(const std::string& reason) {
+    Result<void> activate_cpu_fallback(std::string_view phase, const std::string& reason) {
         if (!can_fallback_to_cpu()) {
             return {};
         }
@@ -42,7 +45,9 @@ class Engine::Impl {
         }
 
         session = std::move(*fallback_res);
-        fallback_info = BackendFallbackInfo{failed_backend, session->device().backend, reason};
+        fallback_info = BackendFallbackInfo{
+            failed_backend, session->device().backend,
+            std::string(phase) + ": " + reason};
         return {};
     }
 
@@ -52,13 +57,13 @@ class Engine::Impl {
     }
 
     template <typename T, typename Operation>
-    Result<T> run_with_cpu_fallback(Operation&& operation) {
+    Result<T> run_with_cpu_fallback(std::string_view phase, Operation&& operation) {
         auto result = operation();
         if (result || !can_fallback_to_cpu() || !should_retry_on_cpu(result.error())) {
             return result;
         }
 
-        auto fallback_res = activate_cpu_fallback(result.error().message);
+        auto fallback_res = activate_cpu_fallback(phase, result.error().message);
         if (!fallback_res) {
             return result;
         }
@@ -75,7 +80,7 @@ class Engine::Impl {
             std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
 
             auto warmup_frame = common::measure_stage(on_stage, "engine_warmup", [&]() {
-                return run_with_cpu_fallback<FrameResult>([&]() {
+                return run_with_cpu_fallback<FrameResult>("warmup", [&]() {
                     return session->run(warm_rgb.view(), warm_hint.view(), {}, on_stage);
                 });
             });
@@ -147,16 +152,23 @@ Engine::Engine(Engine&&) noexcept = default;
 Engine& Engine::operator=(Engine&&) noexcept = default;
 
 Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& model_path,
-                                               DeviceInfo device, StageTimingCallback on_stage) {
+                                               DeviceInfo device, StageTimingCallback on_stage,
+                                               EngineCreateOptions options) {
     auto engine = std::unique_ptr<Engine>(new Engine());
     engine->m_impl->model_path = model_path;
+    engine->m_impl->create_options = options;
 
     DeviceInfo requested_device =
         device.backend == Backend::Auto ? resolve_auto_device_for_model(model_path) : device;
-    engine->m_impl->cpu_fallback_device = build_cpu_fallback_device(requested_device);
+    if (options.allow_cpu_fallback) {
+        engine->m_impl->cpu_fallback_device = build_cpu_fallback_device(requested_device);
+    }
+
+    SessionCreateOptions session_options;
+    session_options.disable_cpu_ep_fallback = options.disable_cpu_ep_fallback;
 
     auto session_res = common::measure_stage(on_stage, "session_create_requested", [&]() {
-        return InferenceSession::create(model_path, requested_device);
+        return InferenceSession::create(model_path, requested_device, session_options);
     });
     if (!session_res && engine->m_impl->cpu_fallback_device.has_value()) {
         auto fallback_res = common::measure_stage(on_stage, "session_create_cpu_fallback", [&]() {
@@ -166,8 +178,9 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
             return Unexpected(session_res.error());
         }
         engine->m_impl->session = std::move(*fallback_res);
-        engine->m_impl->fallback_info = BackendFallbackInfo{requested_device.backend, Backend::CPU,
-                                                            session_res.error().message};
+        engine->m_impl->fallback_info = BackendFallbackInfo{
+            requested_device.backend, Backend::CPU,
+            std::string("session_create: ") + session_res.error().message};
     } else if (!session_res) {
         return Unexpected(session_res.error());
     } else {
@@ -190,6 +203,7 @@ Result<FrameResult> Engine::process_frame(const Image& rgb, const Image& alpha_h
     }
 
     return m_impl->run_with_cpu_fallback<FrameResult>(
+        "render_frame",
         [&]() { return m_impl->session->run(rgb, alpha_hint, params, on_stage); });
 }
 
@@ -207,6 +221,7 @@ Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<I
     }
 
     return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
+        "render_batch",
         [&]() { return m_impl->session->run_batch(rgbs, alpha_hints, params, on_stage); });
 }
 
@@ -272,9 +287,10 @@ Result<void> Engine::process_sequence(const std::vector<std::filesystem::path>& 
         auto results = common::measure_stage(
             on_stage, "sequence_infer_batch",
             [&]() {
-                return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>([&]() {
+                return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
+                    "sequence_infer_batch", [&]() {
                     return m_impl->session->run_batch(rgb_views, hint_views, params, on_stage);
-                });
+                    });
             },
             current_batch_size);
         if (!results) return Unexpected(results.error());
@@ -490,10 +506,11 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         auto results = common::measure_stage(
             on_stage, "video_infer_batch",
             [&]() {
-                return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>([&]() {
+                return m_impl->run_with_cpu_fallback<std::vector<FrameResult>>(
+                    "video_infer_batch", [&]() {
                     return m_impl->session->run_batch(current_batch.rgb_views,
                                                       current_batch.hint_views, params, on_stage);
-                });
+                    });
             },
             current_batch.rgb_views.size());
         if (!results) return Unexpected(results.error());
