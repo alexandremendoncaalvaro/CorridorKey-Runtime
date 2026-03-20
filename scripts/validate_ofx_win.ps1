@@ -68,6 +68,15 @@ if (-not (Test-Path $plugin)) {
 $pluginSize = (Get-Item $plugin).Length
 Write-Host "[PASS] Found plugin binary ($([math]::Round($pluginSize / 1MB, 2)) MB)" -ForegroundColor Green
 
+$runtimeServer = Join-Path $win64Dir "corridorkey.exe"
+if (-not (Test-Path $runtimeServer)) {
+    Write-Host "[FAIL] Runtime server binary not found" -ForegroundColor Red
+    throw "Runtime server binary not found: corridorkey.exe"
+}
+
+$runtimeServerSize = (Get-Item $runtimeServer).Length
+Write-Host "[PASS] Found runtime server binary ($([math]::Round($runtimeServerSize / 1MB, 2)) MB)" -ForegroundColor Green
+
 # Check CUDA runtime (optional but should be present for NVIDIA systems)
 $cudartFiles = @(Get-ChildItem -Path $win64Dir -Filter "cudart64_*.dll" -File -ErrorAction SilentlyContinue)
 if ($cudartFiles.Count -eq 0) {

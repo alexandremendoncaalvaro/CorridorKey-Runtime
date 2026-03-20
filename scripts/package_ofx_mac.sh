@@ -28,6 +28,7 @@ BUNDLE_DIR="${WORK_DIR}/${BUNDLE_NAME}"
 MACOS_DIR="${BUNDLE_DIR}/Contents/MacOS"
 RESOURCES_DIR="${BUNDLE_DIR}/Contents/Resources"
 MODELS_DIR="${RESOURCES_DIR}/models"
+BIN_DIR="${RESOURCES_DIR}/bin"
 PKG_DIR="${WORK_DIR}/pkgs"
 PKG_PATH="${DIST_DIR}/${DIST_BASENAME}.pkg"
 DMG_PATH="${REPO_ROOT}/dist/${DIST_BASENAME}.dmg"
@@ -41,6 +42,7 @@ MLX_METALLIB="${CORRIDORKEY_MLX_METALLIB:-}"
 PLUGINS_SCRIPTS_DIR="${REPO_ROOT}/scripts/ofx_pkg"
 
 PLUGIN_BINARY="${BUILD_DIR}/src/plugins/ofx/CorridorKey.ofx"
+CLI_BINARY="${BUILD_DIR}/src/cli/corridorkey"
 CORE_LIB="${BUILD_DIR}/src/libcorridorkey_core.dylib"
 CPU_BASELINE_MODEL="${REPO_ROOT}/models/corridorkey_int8_512.onnx"
 MLX_REQUIRED_PACK="${REPO_ROOT}/models/corridorkey_mlx.safetensors"
@@ -211,6 +213,7 @@ if [ -z "${MLX_METALLIB:-}" ] || [ ! -f "$MLX_METALLIB" ]; then
 fi
 
 require_file "$PLUGIN_BINARY"
+require_file "$CLI_BINARY"
 require_file "$CORE_LIB"
 require_file "$CPU_BASELINE_MODEL"
 require_file "$MLX_REQUIRED_PACK"
@@ -247,15 +250,17 @@ echo "[1/7] Cleaning packaging workspace..."
 rm -rf "$WORK_DIR"
 rm -rf "$DIST_DIR"
 mkdir -p "$MACOS_DIR" "$MODELS_DIR" "$PKG_DIR" "$DIST_DIR"
+mkdir -p "$BIN_DIR"
 
 echo "[2/7] Copying bundle payload..."
 cp "$PLUGIN_BINARY" "$MACOS_DIR/$PLUGIN_NAME"
+cp "$CLI_BINARY" "$BIN_DIR/corridorkey"
 cp "$CORE_LIB" "$MACOS_DIR/$CORE_LIB_NAME"
 cp "$MLX_LIB" "$MACOS_DIR/$MLX_LIB_NAME"
 cp "$MLX_METALLIB" "$MACOS_DIR/$MLX_METALLIB_NAME"
 cp "$RUNTIME_LIB_REAL" "$MACOS_DIR/$RUNTIME_LINK_NAME"
 
-chmod u+w "$MACOS_DIR/$PLUGIN_NAME" "$MACOS_DIR/$CORE_LIB_NAME" \
+chmod u+w "$MACOS_DIR/$PLUGIN_NAME" "$BIN_DIR/corridorkey" "$MACOS_DIR/$CORE_LIB_NAME" \
     "$MACOS_DIR/$RUNTIME_LINK_NAME" "$MACOS_DIR/$MLX_LIB_NAME" \
     "$MACOS_DIR/$MLX_METALLIB_NAME"
 
@@ -293,6 +298,7 @@ PLIST_EOF
 
 echo "[3/7] Stripping debug symbols..."
 strip -x "$MACOS_DIR/$PLUGIN_NAME"
+strip -x "$BIN_DIR/corridorkey"
 strip -x "$MACOS_DIR/$CORE_LIB_NAME"
 strip -x "$MACOS_DIR/$RUNTIME_LINK_NAME"
 strip -x "$MACOS_DIR/$MLX_LIB_NAME"
@@ -302,6 +308,8 @@ install_name_tool -id "@rpath/${RUNTIME_LINK_NAME}" "$MACOS_DIR/$RUNTIME_LINK_NA
 
 rewrite_dependency "$MACOS_DIR/$PLUGIN_NAME" "@rpath/libcorridorkey_core.dylib" \
     "@loader_path/$CORE_LIB_NAME"
+rewrite_dependency "$BIN_DIR/corridorkey" "@rpath/libcorridorkey_core.dylib" \
+    "@executable_path/../../MacOS/$CORE_LIB_NAME"
 
 CORE_RUNTIME_DEPENDENCY="$(runtime_dependency_name "$MACOS_DIR/$CORE_LIB_NAME")"
 if [ -n "${CORE_RUNTIME_DEPENDENCY:-}" ]; then
@@ -319,6 +327,7 @@ fi
 rewrite_dependency "$MACOS_DIR/$CORE_LIB_NAME" "@rpath/libmlx.dylib" "@loader_path/$MLX_LIB_NAME"
 
 delete_absolute_rpaths "$MACOS_DIR/$PLUGIN_NAME"
+delete_absolute_rpaths "$BIN_DIR/corridorkey"
 delete_absolute_rpaths "$MACOS_DIR/$CORE_LIB_NAME"
 delete_absolute_rpaths "$MACOS_DIR/$RUNTIME_LINK_NAME"
 delete_absolute_rpaths "$MACOS_DIR/$MLX_LIB_NAME"
@@ -328,6 +337,7 @@ sign_binary "$MACOS_DIR/$RUNTIME_LINK_NAME"
 sign_binary "$MACOS_DIR/$MLX_LIB_NAME"
 sign_resource "$MACOS_DIR/$MLX_METALLIB_NAME"
 sign_binary "$MACOS_DIR/$CORE_LIB_NAME"
+sign_binary "$BIN_DIR/corridorkey"
 sign_binary "$MACOS_DIR/$PLUGIN_NAME"
 clear_provenance_xattrs "$BUNDLE_DIR"
 
