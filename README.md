@@ -4,7 +4,7 @@ CorridorKey Runtime is a production-oriented native engine for neural green scre
 
 This repository provides the core CLI and a production-grade **OpenFX Plugin** for DaVinci Resolve.
 
-![CorridorKey OFX Plugin](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/assets/placeholder_image) *(Placeholder for hero image/gif)*
+![CorridorKey OFX Plugin](./assets/ofx_example.gif)
 
 ## Key Features
 
