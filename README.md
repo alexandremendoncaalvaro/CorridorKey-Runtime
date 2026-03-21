@@ -1,221 +1,89 @@
 # CorridorKey Runtime
 
-CorridorKey Runtime is a production-oriented native engine for CorridorKey
-inference. It packages model execution, diagnostics, validated model catalogs,
-and stable machine-readable contracts into a distributable C++ runtime for real
-hardware.
+CorridorKey Runtime is a production-oriented native engine for neural green screen keying. It packages the CorridorKey model execution into a high-performance C++ runtime, delivering predictable, hardware-accelerated inference without the friction of Python virtual environments. 
 
-The runtime contract is shared across platform tracks. The model artifact is
-not. This product is designed to use the backend and converted model pack that
-best fit each hardware target instead of forcing one artifact shape across
-Apple Silicon, Windows GPU tracks (RTX and DirectML), and CPU fallback.
+This repository provides the core CLI and a production-grade **OpenFX Plugin** for DaVinci Resolve.
 
-This repository is not trying to reproduce a generic Python workflow in another
-language. It exists to make CorridorKey usable as a native, predictable, and
-integrable engine that can be installed, benchmarked, automated, and embedded
-without rebuilding the surrounding stack each time.
+![CorridorKey OFX Plugin](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/assets/placeholder_image) *(Placeholder for hero image/gif)*
 
-The current delivery shape is explicit:
+## Key Features
 
-- **macOS Apple Silicon** ships as a portable MLX-first runtime track.
-- **Windows (GPU)** ships as two packages: **RTX** (TensorRT/CUDA) and **DirectML** (AMD/Intel). The term "Universal" is reserved for bundles that include the non-RTX provider DLLs and pass the validator.
-- **GUI, sidecar, and embedded integrations come after that**, all consuming the same library-first runtime contracts.
+- **Native Execution:** A single-binary C++ workflow with zero Python dependencies.
+- **Hardware Accelerated:** Curated GPU backends for maximum performance:
+  - **macOS:** Native Apple Silicon acceleration via MLX.
+  - **Windows:** Dedicated TensorRT (RTX) and DirectML (AMD/Intel) tracks.
+- **DaVinci Resolve OFX:** A fully integrated plugin that isolates backend and VRAM failures, compiling models on-the-fly for real-time scrubbing.
+- **Production Built:** Predictable stage-level diagnostics, stable machine-readable contracts (JSON/NDJSON), and advanced alpha hinting capabilities for professional compositing.
 
-Installer posture by release surface:
+## Downloads & Installation
 
-- **Desktop Runtime / macOS Apple Silicon:** distributed as a DMG release.
-- **Resolve OFX / macOS Apple Silicon:** distributed as a signed `.pkg` inside a DMG.
-- **Desktop Runtime / Windows:** portable runtime remains the baseline packaged artifact, and the Tauri app now has an NSIS installer path layered on top of that runtime payload.
-- **Resolve OFX / Windows:** distributed as two installers (RTX and DirectML), with the packaged bundle plus `install_plugin.bat` kept as a manual fallback path.
+We provide pre-packaged releases for standard use cases. See the [Releases](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases) page for the latest downloads.
 
-## Who This Is For
+### DaVinci Resolve OFX Plugin
 
-- **Technical operators** who want to run CorridorKey without Python, virtual environments, or fragile setup.
-- **Windows users** (NVIDIA, AMD, Intel) who care about predictable installation and reproducible performance on consumer GPUs.
-- **Integrators** who want a native engine they can embed into an application, plugin, or sidecar without re-implementing business logic.
+The project ships with a fully integrated OpenFX Plugin for Windows and macOS.
 
-## Why This Exists vs. Original Workflow
+#### Windows
+1. Download the latest `.exe` installer for your hardware:
+   - **RTX Version:** For NVIDIA Ampere / RTX 30 Series or newer (Maximum performance via TensorRT).
+   - **DirectML Version:** For AMD, Intel, or older NVIDIA GPUs (Hardware acceleration via DirectX 12).
+2. Run the installer as Administrator (DaVinci Resolve must be closed).
+3. Open DaVinci Resolve, navigate to the **Color** or **Fusion** page, and search for "CorridorKey" in the OpenFX Library.
+4. Drag and drop the node onto your clip. *Note: TensorRT compilation on the first frame may take 10-30 seconds.*
 
-- **Native execution:** single-binary workflow with a C++ core and no Python
-  runtime dependency.
-- **Low-friction distribution:** portable CLI packaging, validated model
-  catalogs, and explicit hardware tracks.
-- **Operational predictability:** `doctor`, `benchmark`, JSON/NDJSON contracts,
-  fallback reasons, and stage timings make runtime behavior inspectable.
-- **Library-first integration:** CLI, future GUI, sidecar, and embedded use
-  cases all sit on the same engine instead of copying behavior across surfaces.
+#### macOS (Apple Silicon)
+1. Download the latest `.pkg` Apple Silicon installer from the Releases page.
+2. Run the installer package (DaVinci Resolve must be closed).
+3. Open DaVinci Resolve, navigate to the **Color** or **Fusion** page, and search for "CorridorKey".
+4. The plugin automatically uses the MLX-accelerated path for fast inference on M-series chips.
 
-## Features
+### Portable CLI (macOS & Windows)
 
-- **Platform-specific model packs:** the runtime stays library-first and stable
-  while each hardware track can use a different converted artifact.
-- **macOS Apple Silicon track:** MLX is now the default operational path for
-  Apple model packs, while ONNX remains the CPU-compatible compatibility and
-  diagnostics baseline.
-- **Windows GPU track:** TensorRT RTX is the primary high-performance Windows product path, with a separate DirectML package for AMD/Intel. "Universal" is only claimed when the required non-RTX provider DLLs are present.
-- **Operational tooling:** `doctor`, `benchmark`, `models`, `presets`, and
-  `process --json` expose stable machine-readable diagnostics.
-- **Validated model catalog:** the packaged macOS set centers on
-  `corridorkey_mlx.safetensors`, while the Windows GPU set centers on
-  `corridorkey_fp16_768.onnx`, `corridorkey_fp16_1024.onnx`, and
-  `corridorkey_int8_512.onnx` for fallback.
-- **Measured runtime behavior:** stage-level timings cover engine creation,
-  warmup, inference, tiling, decode, encode, and full-job execution.
-- **Library + CLI:** the runtime is reusable as a C++ library and exposed
-  through a thin CLI contract.
+If you prefer the command line or want to integrate the engine into your own pipeline, download the portable `.zip` or `.dmg` releases.
 
-## Quick Start
+## CLI Usage
 
-Validated runtime paths today:
+The runtime operates through a clean CLI contract. If `corridorkey` is in your `PATH`:
 
-- **macOS 14+ on Apple Silicon:** MLX-first execution for Apple model packs,
-  CPU fallback for ONNX baselines, structured diagnostics, and a curated model
-  catalog.
-- **Windows 11 x64 (GPU):** Two tracks: RTX (TensorRT/CUDA) and DirectML (AMD/Intel). Each bundle includes its matching runtime DLLs and curated model packs.
-
-Linux remains architecture-ready and deferred until the current macOS and
-Windows release tracks are both stable enough to stop consuming the majority of
-runtime validation effort.
-
-## Model Packs and Platform Tracks
-
-The product boundary is the runtime and its contracts. Model packs are curated
-per platform track.
-
-- **Baseline ONNX packs:** `corridorkey_int8_512.onnx` remains the packaged CPU
-  smoke and fallback baseline, while `corridorkey_int8_768.onnx` stays
-  available as a manual CPU compatibility baseline for 16 GB-class Macs.
-- **macOS Apple Silicon accelerated pack:** treated as an Apple-specific model
-  pack, not as a requirement to reuse the same ONNX artifact shipped for other
-  targets. The approved Mac evaluation paths are `MLX` and direct `Core ML`
-  conversion from the source checkpoint.
-- **Windows GPU packs:** ONNX-derived artifacts packaged as two tracks: RTX (TensorRT/CUDA) and DirectML (AMD/Intel). The runtime stays the same, but the packaged providers differ.
-
-This means the runtime stays unified while acceleration can diverge where the
-hardware demands it.
-
-## Current Apple Silicon Finding
-
-The current Mac conclusion is no longer hypothetical:
-
-- The **short-path accelerated artifact that is already validated in the
-  upstream Apple Silicon stack is `corridorkey_mlx.safetensors`**, not the
-  current ONNX `int8` packs used for CPU fallback and diagnostics here.
-- On a real 4K greenscreen frame from
-  `assets/video_samples/mixkit-girl-dancing-with-her-earphones-on-a-green-background-28306-4k.mp4`
-  with a controlled coarse hint, the official `corridorkey-mlx` engine running
-  `tiled_1024` completed in **52354.714 ms** with **3487.092 MB** peak memory.
-- The current runtime on the **same frame and same hint** using
-  `corridorkey_int8_768.onnx`, `cpu`, `--tiled`, and `--batch-size 2`
-  completed in **110488.172 ms**. That puts the validated MLX path at roughly
-  **2.11x faster** than the current CPU baseline on this machine.
-- The current `ONNX -> ORT CoreML EP` path remains a **diagnostic baseline**
-  only. It still partitions onto CPU with the current ONNX artifacts and is
-  not the preferred Mac acceleration track.
-- The packaged Mac runtime now ships the official `corridorkey_mlx.safetensors`
-  weights together with bundled `.mlxfn` bridge exports. The pack stays the
-  public Apple artifact; the bridge exports are the execution layer used by the
-  runtime today.
-
-The immediate Mac implementation path is now:
-
-1. Run Apple model packs through **MLX by default** on macOS.
-2. Keep `ONNX/CoreML EP` for compatibility diagnostics and CPU fallback
-   investigation only.
-3. Evaluate **direct `PyTorch -> Core ML` conversion** in parallel as the
-   candidate final distributable Apple artifact once the runtime surface is
-   proven on MLX.
-
-### Preparing The MLX Model Pack
-
-The repository now includes a helper to materialize the Apple model pack and
-the bridge exports required by the runtime bundle:
-
+**Check your hardware capability:**
 ```bash
-source .venv-macos-mlx/bin/activate
-python scripts/prepare_mlx_model_pack.py \
-  --output-dir models \
-  --tag v1.0.0
+corridorkey doctor
 ```
 
-This step is **maintainer-facing**, not part of the user workflow for official
-releases. Python is allowed here because this script lives in the release/tool
-pipeline. The portable macOS bundle is expected to ship with the prepared MLX
-pack already included, so end users do not need Python to install or run the
-runtime.
+**Process a single video using the hardware-aware defaults:**
+```bash
+corridorkey process input.mp4 output.mp4
+```
 
-By default this prepares:
+**Process a 4K video using the maximum quality preset:**
+```bash
+corridorkey process input_4k.mp4 output_4k.mp4 --preset max
+```
 
-- `corridorkey_mlx.safetensors`
-- `corridorkey_mlx_bridge_512.mlxfn`
-- `corridorkey_mlx_bridge_1024.mlxfn`
+**Process with an external Alpha Hint for high-fidelity control:**
+```bash
+corridorkey process input.mp4 output.mp4 --alpha-hint hint.mp4
+```
 
-For local builds, CMake now tries these MLX discovery paths in order:
+*For structured pipeline integration, append `--json` to receive NDJSON event streams.*
 
-1. `CORRIDORKEY_MLX_CMAKE_DIR`
-2. `CORRIDORKEY_MLX_PYTHON`
-3. active `VIRTUAL_ENV`
-4. repository-local `.venv-macos-mlx`
-5. default `Python3_EXECUTABLE`
+## Compiling from Source
 
-After configuring and building with MLX available, `corridorkey doctor --json`
-should report:
-
-- `mlx.probe_available = true`
-- `mlx.primary_pack_ready = true`
-- `mlx.bridge_ready = true` when the bundled bridge exports are present
-- `mlx.backend_integrated = true` when the runtime can execute the packaged MLX path
-- `summary.apple_acceleration_probe_ready = true`
-- `summary.apple_acceleration_backend_integrated = true` when the packaged MLX
-  path is linked and importable
-
-The current native execution path is labeled `mlx_pack_with_bridge_exports` in
-`doctor --json`. That is the current shipping runtime path for Apple Silicon.
-
-On this machine, the current runtime benchmark at synthetic `512` reports:
-
-- `MLX`: `avg_latency_ms = 601.189`
-- `CPU int8_512`: `avg_latency_ms = 1050.283`
-
-That puts the current MLX runtime path at roughly `1.75x` the
-throughput of the CPU baseline at the same synthetic resolution.
+For developers who wish to build the engine from source.
 
 ### Prerequisites
 
-- **C++20 compiler**:
-  - Windows: [Visual Studio 2022](https://visualstudio.microsoft.com/vs/community/) (v17.4+) with "Desktop development with C++"
-  - macOS: Apple Clang 15+ (Xcode 15+)
-  - Linux: GCC 12+ or Clang 16+
+- **C++20 compiler:** Visual Studio 2022 (v17.4+), Apple Clang 15+, or GCC 12+/Clang 16+
 - [CMake 3.28+](https://cmake.org/download/)
 - [Ninja](https://ninja-build.org/) build system
 - [vcpkg](https://github.com/microsoft/vcpkg) package manager
 
-### 1. Install vcpkg
+### Build Flow
 
-Skip this step if `VCPKG_ROOT` is already set.
-
-<details>
-<summary>Linux / macOS</summary>
-
-```bash
-git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
-~/vcpkg/bootstrap-vcpkg.sh
-export VCPKG_ROOT="$HOME/vcpkg"
-```
-
-</details>
-
-<details>
-<summary>Windows (GPU)</summary>
-
-```powershell
-# Run the automated setup script
-.\scripts\setup_windows.ps1
-```
-
-</details>
-
-### 2. Build
+1. **Install vcpkg** (Skip if `VCPKG_ROOT` is set):
+   - **Unix:** `git clone https://github.com/microsoft/vcpkg.git ~/vcpkg && ~/vcpkg/bootstrap-vcpkg.sh && export VCPKG_ROOT="$HOME/vcpkg"`
+   - **Windows:** Run `.\scripts\setup_windows.ps1`
+2. **Configure and Build:**
 
 ```bash
 git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
@@ -224,352 +92,32 @@ cmake --preset release
 cmake --build build/release --parallel
 ```
 
-### 3. Add to PATH (optional)
-
-```bash
-export PATH="$(pwd)/build/release/src/cli:$PATH"
-```
-
-If you prefer a symlink:
-
-```bash
-sudo ln -s "$(pwd)/build/release/src/cli/corridorkey" /usr/local/bin/corridorkey
-```
-
-## Usage
-
-If `corridorkey` is not on your `PATH`, replace it with
-`./build/release/src/cli/corridorkey`.
-
-## macOS Preview Testing
-
-This section is the best starting point for Apple Silicon testers using the
-portable GitHub release.
-
-Current preview scope:
-
-- Supported hardware: **Mac with Apple Silicon (M-series, including M5)**
-- Preferred OS target: **macOS 14+**
-- Runtime path: **MLX-first Apple pack bundled inside the release**
-- User expectation: **no Python required to install or run the release**
-
-First-run flow from the release zip:
-
-```bash
-cd CorridorKey_Runtime_vX.Y.Z_macOS_AppleSilicon
-xattr -dr com.apple.quarantine CorridorKey_Runtime_vX.Y.Z_macOS_AppleSilicon
-./corridorkey doctor
-./corridorkey process input.mp4 output.mp4
-./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
-```
-
-The quarantine-removal step is the recommended first-run path for the current
-preview builds because they are not notarized yet.
-
-Useful commands for testers:
-
-```bash
-./corridorkey doctor
-./corridorkey benchmark
-./corridorkey process input.mp4 output.mp4
-./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
-./corridorkey process --json input.mp4 output.mp4
-```
-
-What we want reported back from testers:
-
-- Mac model and RAM
-- macOS version
-- whether `doctor` passed cleanly
-- whether the app opened and processed a real file
-- rough runtime for a short clip or 4K sample
-- crashes, stalls, incorrect output, or strange visual artifacts
-
-For the official macOS bundle, the user-facing flow is now:
-
-```bash
-./corridorkey doctor
-./corridorkey process input.mp4 output.mp4
-./corridorkey process input_4k.mp4 output_4k.mp4 --preset max
-```
-
-The bundle already includes the packaged Apple model pack. End users do not
-need to pick `--model`, `--device`, or `--tiled` for the common path.
-
-## Windows GPU Preview Testing
-
-This section is the best starting point for Windows testers using the portable
-GitHub release.
-
-Current preview scope:
-
-- Supported hardware: **NVIDIA (RTX/GTX) via the RTX package, or AMD/Intel via the DirectML package**
-- Preferred OS target: **Windows 11 x64**
-- Runtime path: **RTX (TensorRT/CUDA) or DirectML**
-- User expectation: **no separate CorridorKey, ONNX Runtime, or CUDA installation**
-- External dependency that still exists: **compatible GPU driver on the target machine**
-
-Use the RTX package for NVIDIA. Use the DirectML package for AMD/Intel. The RTX package will
-fall back to CPU on AMD/Intel hardware.
-
-First-run flow from the release zip:
-
-```powershell
-cd CorridorKey_Runtime_vX.Y.Z_Windows
-.\ck-engine.exe doctor
-.\ck-engine.exe process input.mp4 output.mp4
-.\ck-engine.exe process input_4k.mp4 output_4k.mp4 --preset max
-```
-
-Useful commands for testers:
-
-```powershell
-.\ck-engine.exe info
-.\ck-engine.exe doctor
-.\ck-engine.exe benchmark
-.\ck-engine.exe process input.mp4 output.mp4
-.\ck-engine.exe process --json --input input.mp4 --output output.mp4
-```
-
-What we want reported back from testers:
-
-- GPU model and VRAM
-- Windows version
-- whether `doctor` passed with `healthy=true`
-- which backend was automatically selected (TensorRT, CUDA, or DirectML)
-- rough runtime for a short clip or 4K sample
-- crashes, stalls, or visual artifacts
-
-Current known Windows limitation:
-
-- the portable video path still reports `mpeg4` as the default encoder in the
-  current release bundle
-- TensorRT compilation on first run may take up to 30 seconds (cached thereafter)
-
-For the official Windows bundle, the user-facing flow is now:
-
-```powershell
-.\ck-engine.exe doctor
-.\ck-engine.exe process input.mp4 output.mp4
-.\ck-engine.exe process input_4k.mp4 output_4k.mp4 --preset max
-```
-
-The bundle already includes the packaged runtime DLLs for its track (RTX or DirectML) and
-the validated model set. End users do not need to point the runtime at a local SDK install.
-
-### DaVinci Resolve Plugin
-
-The Windows GPU track now ships with a fully integrated **OpenFX Plugin** for Blackmagic DaVinci Resolve.
-
-**How to Install the OFX Plugin:**
-1. Download the latest Windows **RTX** or **DirectML** installer from the Releases page.
-2. Run the installer as Administrator.
-3. Start DaVinci Resolve after the installer finishes.
-4. If you need the manual path, use the release ZIP and run `install_plugin.bat` as Administrator.
-
-**How to Use the OFX Plugin:**
-1. Open DaVinci Resolve and navigate to the **Color** or **Fusion** page.
-2. Search for "CorridorKey" in the OpenFX panel.
-3. Drag and drop the node onto your clip.
-4. The TensorRT Engine will compile the model into VRAM on the very first frame. DaVinci Resolve will briefly freeze for about 10-30 seconds.
-5. Once compiled, you can adjust the Inspector settings (Despill, Despeckle, Linear Input) and scrub the timeline seamlessly.
-
-### Windows Resolve OFX Packaging (maintainers)
-
-Two official packaging paths exist:
-
-- **Release matrix (RTX + DirectML installers):** `scripts/package_ofx_release_matrix_windows.ps1`
-- **Single bundle for local testing (no installer):** `scripts/package_ofx.ps1` with `-OrtRoot` and `-OutputDir`
-
-Helper scripts:
-
-- `scripts/sync_onnxruntime_directml.ps1` refreshes the official DirectML runtime.
-- `scripts/validate_ofx_win.ps1` enforces that any bundle labeled "Universal" includes non-RTX provider DLLs.
-
-From source builds, maintainers can still use the lower-level commands below.
-
-**Download ONNX baseline packs**:
-
-```bash
-corridorkey download --variant int8
-```
-
-**Prepare the Apple Silicon MLX pack**:
-
-```bash
-python scripts/prepare_mlx_model_pack.py --output-dir models
-```
-
-**Inspect runtime capabilities and hardware recommendation**:
-
-```bash
-corridorkey info
-corridorkey doctor
-corridorkey doctor --json
-```
-
-**Inspect validated models and presets**:
-
-```bash
-corridorkey models --json
-corridorkey presets --json
-```
-
-**Run a synthetic benchmark with timings**:
-
-```bash
-corridorkey benchmark
-corridorkey benchmark --json
-```
-
-**Run a real-workload benchmark on the Apple path**:
-
-```bash
-corridorkey benchmark --input input.mp4 --output benchmark_output.mp4
-corridorkey benchmark --json --input input.mp4 --output benchmark_output.mp4 --preset max
-```
-
-**Process a single video with the default Apple Silicon path**:
-
-```bash
-corridorkey process input.mp4 output.mp4
-```
-
-**Process a single video with NDJSON events**:
-
-```bash
-corridorkey process --json --input input.mp4 --alpha-hint hint.mp4 --output output.mp4
-```
-
-**Enable cleanup for slower, higher-quality runs**:
-
-```bash
-corridorkey process input.mp4 output.mp4 --preset max
-corridorkey process input.mp4 output.mp4 --despeckle
-```
-
-**Process a directory of frames with the CPU baseline**:
-
-```bash
-corridorkey process --input ./Input/ --alpha-hint ./AlphaHint/ --output ./Output/ --model models/corridorkey_int8_512.onnx
-```
-
-**Use tiled inference for larger inputs on the Apple path**:
-
-```bash
-corridorkey process input_4k.mp4 output_4k.mp4 --preset max
-corridorkey process --input input_4k.mp4 --output output_4k.mp4 --model models/corridorkey_mlx.safetensors --tiled
-```
-
-### Output
-
-```text
-Output/
-  Matte/       # Alpha channel — EXR 16-bit linear
-  FG/          # Foreground straight color — EXR 16-bit linear
-  Processed/   # Premultiplied RGBA — EXR 16-bit linear
-  Comp/        # Preview on checkerboard — PNG 8-bit sRGB
-```
-
-## AlphaHint Strategy
-
-Alpha hints are part of the product contract, not an afterthought.
-
-- The runtime accepts hints as a single frame, an image sequence, or a video
-  input.
-- If no hint is provided, the runtime falls back to its internal rough matte
-  generation path.
-- External hints remain the preferred path for higher-quality and more
-  controlled results.
-- Rough matte fallback exists for smoke tests, low-friction usage, and simpler
-  cases, not as a replacement for dedicated hint workflows.
-- The default Apple path does not enable morphological cleanup implicitly.
-  Turn on `--despeckle` for slower, higher-quality runs when the artifact
-  budget justifies it.
-
-## Machine-Readable Interfaces
-
-- `info`, `doctor`, `benchmark`, `models`, and `presets` return a single JSON
-  document when `--json` is present.
-- `benchmark --json` supports:
-  - `synthetic` for controlled throughput and latency checks without external
-    I/O
-  - `workload` for end-to-end measurement on a real image sequence or video
-- `benchmark --json` reports backend selection, structured fallback details,
-  and `stage_timings`.
-- `process --json` emits NDJSON events:
-  - `job_started`
-  - `backend_selected`
-  - `progress`
-  - `warning`
-  - `artifact_written`
-  - `completed`
-  - `failed`
-  - `cancelled`
-- Terminal `process --json` events include aggregated stage timings for the
-  full job.
-
-## Operational Promise
-
-- **Consistent hardware tiers:** on the current macOS release track, `auto`
-  is model-aware. Apple MLX packs resolve to the MLX backend at the engine's
-  recommended resolution, while ONNX baselines stay on CPU with conservative
-  per-tier resolution defaults.
-- **Observable execution:** warmup, inference, tiling, decode, encode, and
-  full-job timings are inspectable without an external profiler.
-- **Curated provider support:** the product validates a few provider tracks
-  deeply instead of claiming broad parity across every ONNX Runtime backend or
-  pretending one model artifact should fit every platform equally well.
-- **Stable automation contract:** JSON and NDJSON outputs are part of the
-  product surface, not debug-only output.
-
-## Delivery Sequence
-
-1. **macOS portable runtime:** Apple Silicon track with MLX-first execution,
-   curated Apple model packs, diagnostics, and CPU fallback.
-2. **Windows GPU portable runtime:** two packages (RTX and DirectML) with
-   curated FP16 ONNX packs, packaged runtime DLLs, diagnostics, and CPU fallback.
-3. **Integration surfaces:** sidecar, GUI, plugin, and pipeline consumers over
-   the same library-first contracts.
-4. **Broader platform expansion:** Linux and secondary providers after the
-   current macOS and Windows runtime tracks are stable.
-
-## Platform Status
-
-| Platform | Primary path | Status | Notes |
-|----------|--------------|--------|-------|
-| macOS 14+ Apple Silicon | MLX-first Apple model packs; CPU ONNX fallback and diagnostics | Current release track | Runtime contracts are fixed; accelerated Mac artifacts are not assumed to match Windows |
-| Windows 11 (GPU) | TensorRT RTX/CUDA or DirectML + CPU fallback | Current release track | RTX and DirectML bundles; "Universal" only when non-RTX providers are packaged |
-| Linux | Architecture-ready later | Deferred | Not a current productized track |
-
 ## Documentation
 
-- [Technical Specification](docs/SPEC.md) — Product direction, contracts,
-  technical decisions, delivery phases
-- [Architecture](docs/ARCHITECTURE.md) — Library-first structure and dependency
-  rules
-- [Frontend](docs/FRONTEND.md) — GUI constraints and sidecar contract
-- [Engineering Guidelines](docs/GUIDELINES.md) — Code standards, testing
-  strategy, linting, git hooks
+For deep technical insights, architecture guidelines, and engineering standards:
+
+- [Technical Specification](docs/SPEC.md) — Product direction, delivery phases, and IPC contracts.
+- [Architecture](docs/ARCHITECTURE.md) — Library-first structure and dependency rules.
+- [Frontend](docs/FRONTEND.md) — GUI constraints, UI/UX specifications, and tech stack.
+- [Engineering Guidelines](docs/GUIDELINES.md) — Code standards, testing strategy, and project rules.
+- [Release Guidelines](docs/RELEASE_GUIDELINES.md) — Standard operating procedure for building and releasing.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards,
-and how to submit changes.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and how to submit pull requests. Planners and maintainers should review the [PLAN.md](docs/PLAN.md) checklist for ongoing workstreams.
 
 ## License
 
 [CC BY-NC-SA 4.0](LICENSE) — Same license as the original CorridorKey project.
 
-You may use this software to process commercial video. You may not repackage
-and sell the software itself or offer it as a paid service. See
-[LICENSE](LICENSE) for full terms.
+You may use this software to process commercial video. You may not repackage and sell the software itself or offer it as a paid service. See [LICENSE](LICENSE) for full terms.
 
-## Credits
+## Acknowledgements & Credits
 
-- [CorridorKey](https://github.com/nikopueringer/CorridorKey) by Niko Pueringer
-  / Corridor Digital — the original neural green screen keyer
-- [ONNX Runtime](https://onnxruntime.ai/) by Microsoft — model execution and
-  execution-provider infrastructure
-- [OpenEXR](https://openexr.com/) by Academy Software Foundation — VFX image
-  format
+This runtime is built on the shoulders of these incredible projects:
+
+- **Original CorridorKey:** [github.com/nikopueringer/CorridorKey](https://github.com/nikopueringer/CorridorKey)
+- **EZ-CorridorKey:** [github.com/edenaion/EZ-CorridorKey](https://github.com/edenaion/EZ-CorridorKey)
+- **CorridorKey-Engine:** [github.com/99oblivius/CorridorKey-Engine](https://github.com/99oblivius/CorridorKey-Engine)
+- **ONNX Runtime** by Microsoft — model execution infrastructure.
+- **OpenEXR** by Academy Software Foundation — VFX image format support.
