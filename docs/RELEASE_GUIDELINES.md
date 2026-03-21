@@ -80,7 +80,7 @@ Use the exact template below for every release:
 - **Other Windows GPUs (RTX 20 Series, AMD, Intel):** Download `CorridorKey_Resolve_vX.Y.Z_Windows_DirectML_Installer.exe`. This version provides hardware acceleration across all DirectX 12 compatible GPUs.
 
 ### macOS
-- **Apple Silicon (M1/M2/M3):** [Coming soon]
+- **Apple Silicon (M-Series):** [Coming soon]
 
 ## Installation Instructions
 
