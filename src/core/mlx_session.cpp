@@ -99,6 +99,9 @@ class MlxSession::Impl {
     ImageBuffer input_buffer = {};
     ImageBuffer alpha_buffer = {};
     ImageBuffer foreground_buffer = {};
+    ImageBuffer prepared_rgb = {};
+    ImageBuffer prepared_hint = {};
+    ColorUtils::State color_utils_state = {};
 
 #if CORRIDORKEY_WITH_MLX
     std::optional<mlx::core::ImportedFunction> imported_function = std::nullopt;
@@ -172,12 +175,16 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
     try {
         int model_res = m_impl->model_resolution;
 
-        ImageBuffer prepared_rgb = ColorUtils::resize_area(rgb, model_res, model_res);
-        ImageBuffer prepared_hint = ColorUtils::resize_area(alpha_hint, model_res, model_res);
+        ensure_buffer_shape(m_impl->prepared_rgb, model_res, model_res, 3);
+        ColorUtils::resize_area_into(rgb, m_impl->prepared_rgb.view(), m_impl->color_utils_state);
+
+        ensure_buffer_shape(m_impl->prepared_hint, model_res, model_res, 1);
+        ColorUtils::resize_area_into(alpha_hint, m_impl->prepared_hint.view(), m_impl->color_utils_state);
+
 
         Image input = m_impl->input_buffer.view();
-        Image rgb_view = prepared_rgb.view();
-        Image hint_view = prepared_hint.view();
+        Image rgb_view = m_impl->prepared_rgb.view();
+        Image hint_view = m_impl->prepared_hint.view();
 
         common::measure_stage(
             on_stage, "mlx_prepare_inputs",
@@ -264,10 +271,10 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         FrameResult result;
         bool use_lanczos = upscale_method == UpscaleMethod::Lanczos4;
 
-        result.alpha = use_lanczos ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height)
+        result.alpha = use_lanczos ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height, m_impl->color_utils_state)
                                    : ColorUtils::resize(full_alpha, rgb.width, rgb.height);
         ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-        result.foreground = use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height)
+        result.foreground = use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height, m_impl->color_utils_state)
                                         : ColorUtils::resize(full_fg, rgb.width, rgb.height);
         return result;
     } catch (const std::exception& error) {

@@ -740,10 +740,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
 
         if (alpha_erode != 0.0) {
-            alpha_erode_dilate(alpha_view_local, static_cast<float>(alpha_erode));
+            alpha_erode_dilate(alpha_view_local, static_cast<float>(alpha_erode), data->alpha_edge_state);
         }
         if (alpha_softness > 0.0) {
-            alpha_blur(alpha_view_local, static_cast<float>(alpha_softness));
+            alpha_blur(alpha_view_local, static_cast<float>(alpha_softness), data->alpha_edge_state);
         }
         if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
             alpha_levels(alpha_view_local, static_cast<float>(alpha_black_point),

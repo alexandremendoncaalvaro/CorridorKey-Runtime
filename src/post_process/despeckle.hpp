@@ -18,6 +18,16 @@ namespace corridorkey {
  * @param dilation        Elliptical dilation radius (default 25, kernel = 2*dilation+1)
  * @param blur_size       Gaussian blur half-size (default 5, kernel = 2*blur_size+1)
  */
-void despeckle(Image alpha, int area_threshold, int dilation = 25, int blur_size = 5);
+struct DespeckleState {
+    std::vector<uint8_t> mask;
+    std::vector<int> labels;
+    std::vector<int> areas;
+    std::vector<uint8_t> cleaned;
+    std::vector<uint8_t> temp_mask;
+    std::vector<float> safe_zone;
+    std::vector<float> blur_temp;
+};
+
+void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilation = 25, int blur_size = 5);
 
 }  // namespace corridorkey

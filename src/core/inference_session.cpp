@@ -769,7 +769,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
             [&]() {
                 corridorkey::source_passthrough(source_rgb, result.foreground.view(),
                                                 result.alpha.view(), params.sp_erode_px,
-                                                params.sp_blur_px);
+                                                params.sp_blur_px, m_color_utils_state);
             },
             1);
     }
@@ -778,7 +778,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     if (params.auto_despeckle) {
         common::measure_stage(
             on_stage, "post_despeckle",
-            [&]() { despeckle(result.alpha.view(), params.despeckle_size); }, 1);
+            [&]() { despeckle(result.alpha.view(), params.despeckle_size, m_despeckle_state); }, 1);
     }
 
     // 3. Despill foreground (operates on combined fg after source passthrough)
@@ -914,13 +914,22 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 on_stage, "batch_prepare_inputs",
                 [&]() {
                     for (size_t b = 0; b < batch_size; ++b) {
-                        ImageBuffer prepared_rgb =
-                            ColorUtils::resize_area(rgbs[b], (int)model_w, (int)model_h);
-                        ImageBuffer prepared_hint =
-                            ColorUtils::resize_area(alpha_hints[b], (int)model_w, (int)model_h);
+                        if (m_resize_pool.size() <= b * 2 + 1) {
+                            m_resize_pool.resize(b * 2 + 2);
+                        }
+                        Image cur_rgb = m_resize_pool[b * 2].view();
+                        if (cur_rgb.width != model_w || cur_rgb.height != model_h || cur_rgb.channels != 3) {
+                            m_resize_pool[b * 2] = ImageBuffer(static_cast<int>(model_w), static_cast<int>(model_h), 3);
+                            cur_rgb = m_resize_pool[b * 2].view();
+                        }
+                        ColorUtils::resize_area_into(rgbs[b], cur_rgb, m_color_utils_state);
 
-                        Image cur_rgb = prepared_rgb.view();
-                        Image cur_hint = prepared_hint.view();
+                        Image cur_hint = m_resize_pool[b * 2 + 1].view();
+                        if (cur_hint.width != model_w || cur_hint.height != model_h || cur_hint.channels != 1) {
+                            m_resize_pool[b * 2 + 1] = ImageBuffer(static_cast<int>(model_w), static_cast<int>(model_h), 1);
+                            cur_hint = m_resize_pool[b * 2 + 1].view();
+                        }
+                        ColorUtils::resize_area_into(alpha_hints[b], cur_hint, m_color_utils_state);
                         float* dst = dst_base + (b * image_stride);
 
                         for (int y = 0; y < model_h; ++y) {
@@ -1049,7 +1058,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                     result.alpha =
                         use_lanczos
                             ? ColorUtils::resize_lanczos(model_alpha.view(), rgbs[b].width,
-                                                         rgbs[b].height)
+                                                         rgbs[b].height, m_color_utils_state)
                             : ColorUtils::resize(model_alpha.view(), rgbs[b].width, rgbs[b].height);
                     ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
 
@@ -1059,7 +1068,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
                         result.foreground =
                             use_lanczos ? ColorUtils::resize_lanczos(model_fg.view(), rgbs[b].width,
-                                                                     rgbs[b].height)
+                                                                     rgbs[b].height, m_color_utils_state)
                                         : ColorUtils::resize(model_fg.view(), rgbs[b].width,
                                                              rgbs[b].height);
                     }
@@ -1135,8 +1144,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         common::measure_stage(
             on_stage, "frame_prepare_inputs",
             [&]() {
-                ColorUtils::resize_area_into(rgb, prepared_rgb);
-                ColorUtils::resize_area_into(alpha_hint, prepared_hint);
+                ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
+                ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
 
                 for (int y = 0; y < model_h; ++y) {
                     for (int x = 0; x < model_w; ++x) {
@@ -1241,7 +1250,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             [&]() {
                 ColorUtils::from_planar(alpha_ptr, model_alpha);
                 if (use_lanczos) {
-                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view());
+                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(), m_color_utils_state);
                 } else {
                     ColorUtils::resize_into(model_alpha, result.alpha.view());
                 }
@@ -1253,7 +1262,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                                                           static_cast<int>(fg_shape[1]));
                     ColorUtils::from_planar(fg_ptr, model_fg);
                     if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view());
+                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(), m_color_utils_state);
                     } else {
                         ColorUtils::resize_into(model_fg, result.foreground.view());
                     }

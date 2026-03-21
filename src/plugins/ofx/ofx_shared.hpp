@@ -13,6 +13,7 @@
 #include "ofxParam.h"
 #include "ofxProperty.h"
 #include "ofx_constants.hpp"
+#include "post_process/alpha_edge.hpp"
 
 #if defined(_WIN32)
 #define CORRIDORKEY_OFX_EXPORT OfxExport
@@ -146,6 +147,8 @@ struct InstanceData {
     double temporal_time = 0.0;
     int temporal_width = 0;
     int temporal_height = 0;
+
+    AlphaEdgeState alpha_edge_state = {};
 };
 
 extern OfxHost* g_host;

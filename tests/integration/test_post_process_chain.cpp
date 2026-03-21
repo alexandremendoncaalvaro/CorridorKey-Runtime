@@ -34,7 +34,8 @@ TEST_CASE("Full post-process chain matching original Python pipeline",
     // 4. Composite in linear, convert to sRGB
 
     // 1. Despeckle (use small threshold so 4x4 region is not removed)
-    despeckle(alpha, 2, 0, 0);
+    DespeckleState despeckle_state;
+    despeckle(alpha, 2, despeckle_state, 0, 0);
 
     // 2. Despill in sRGB space (no alpha parameter, matching original)
     float green_before = rgb.data[1];

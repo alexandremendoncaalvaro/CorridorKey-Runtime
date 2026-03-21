@@ -26,7 +26,8 @@ TEST_CASE("source_passthrough is no-op for transparent regions", "[unit][passthr
         }
     }
 
-    source_passthrough(src, fg, alpha, 0, 0);
+    ColorUtils::State state;
+    source_passthrough(src, fg, alpha, 0, 0, state);
 
     // Foreground should remain green (source not blended in)
     for (int y = 0; y < 8; ++y) {
@@ -60,7 +61,8 @@ TEST_CASE("source_passthrough blends source in fully opaque regions", "[unit][pa
         }
     }
 
-    source_passthrough(src, fg, alpha, 0, 0);
+    ColorUtils::State state;
+    source_passthrough(src, fg, alpha, 0, 0, state);
 
     // With zero erode and zero blur, all pixels above threshold should be source
     for (int y = 0; y < 32; ++y) {
@@ -93,7 +95,8 @@ TEST_CASE("source_passthrough respects threshold at 0.95", "[unit][passthrough]"
         }
     }
 
-    source_passthrough(src, fg, alpha, 0, 0);
+    ColorUtils::State state;
+    source_passthrough(src, fg, alpha, 0, 0, state);
 
     // Below threshold -> model fg unchanged (black)
     CHECK(fg(0, 0, 0) == Catch::Approx(0.0F));
@@ -108,7 +111,7 @@ TEST_CASE("source_passthrough respects threshold at 0.95", "[unit][passthrough]"
         }
     }
 
-    source_passthrough(src, fg, alpha, 0, 0);
+    source_passthrough(src, fg, alpha, 0, 0, state);
 
     // Above threshold -> source (white)
     CHECK(fg(0, 0, 0) == Catch::Approx(1.0F));
@@ -119,10 +122,11 @@ TEST_CASE("source_passthrough handles empty images", "[unit][passthrough]") {
     ImageBuffer fg_buf(4, 4, 3);
     ImageBuffer alpha_buf(4, 4, 1);
 
+    ColorUtils::State state;
     // Should not crash
-    source_passthrough(empty.view(), fg_buf.view(), alpha_buf.view(), 3, 7);
-    source_passthrough(fg_buf.view(), empty.view(), alpha_buf.view(), 3, 7);
-    source_passthrough(fg_buf.view(), fg_buf.view(), empty.view(), 3, 7);
+    source_passthrough(empty.view(), fg_buf.view(), alpha_buf.view(), 3, 7, state);
+    source_passthrough(fg_buf.view(), empty.view(), alpha_buf.view(), 3, 7, state);
+    source_passthrough(fg_buf.view(), fg_buf.view(), empty.view(), 3, 7, state);
 }
 
 TEST_CASE("source_passthrough with erosion shrinks interior", "[unit][passthrough]") {
@@ -150,7 +154,8 @@ TEST_CASE("source_passthrough with erosion shrinks interior", "[unit][passthroug
         }
     }
 
-    source_passthrough(src, fg, alpha, 3, 0);
+    ColorUtils::State state;
+    source_passthrough(src, fg, alpha, 3, 0, state);
 
     // Center pixel (16,16) should be source (red) -- well inside the circle
     CHECK(fg(16, 16, 0) == Catch::Approx(1.0F));

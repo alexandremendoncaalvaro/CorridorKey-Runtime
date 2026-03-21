@@ -23,7 +23,7 @@ void threshold_alpha(Image alpha, Image mask) {
     });
 }
 
-void erode_elliptical(Image mask, int radius) {
+void erode_elliptical(Image mask, int radius, Image temp_view) {
     if (radius <= 0) return;
 
     int w = mask.width;
@@ -40,9 +40,6 @@ void erode_elliptical(Image mask, int radius) {
             }
         }
     }
-
-    ImageBuffer temp(w, h, 1);
-    Image temp_view = temp.view();
 
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
@@ -80,23 +77,27 @@ void blend_source(Image source_rgb, Image model_fg, Image mask) {
 
 }  // namespace
 
-void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode_px, int blur_px) {
+void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode_px, int blur_px, ColorUtils::State& state) {
     if (source_rgb.empty() || model_fg.empty() || alpha.empty()) return;
 
+    size_t size_1c = static_cast<size_t>(alpha.width) * alpha.height;
+    state.sp_mask.resize(size_1c);
+    state.sp_temp.resize(size_1c);
+
     // 1. Threshold alpha to binary interior mask
-    ImageBuffer mask_buf(alpha.width, alpha.height, 1);
-    Image mask = mask_buf.view();
+    Image mask = {alpha.width, alpha.height, 1, state.sp_mask};
     threshold_alpha(alpha, mask);
 
     // 2. Erode inward to create safety margin at edges
-    erode_elliptical(mask, erode_px);
+    Image temp_view = {alpha.width, alpha.height, 1, state.sp_temp};
+    erode_elliptical(mask, erode_px, temp_view);
 
     // 3. Gaussian blur for smooth transition band
     if (blur_px > 0) {
         // Match OpenCV auto-sigma: sigma = 0.3*((ksize-1)*0.5 - 1) + 0.8
         float ksize = static_cast<float>(blur_px * 2 + 1);
         float sigma = 0.3F * ((ksize - 1.0F) * 0.5F - 1.0F) + 0.8F;
-        ColorUtils::gaussian_blur(mask, sigma);
+        ColorUtils::gaussian_blur(mask, sigma, state);
     }
 
     // 4. Blend: mask * source + (1 - mask) * model_fg

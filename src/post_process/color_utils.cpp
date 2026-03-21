@@ -58,12 +58,13 @@ inline int reflect_101(int idx, int len) {
     return std::clamp(idx, 0, len - 1);
 }
 
-void resize_lanczos_into_impl(Image image, Image dst) {
+void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) {
     const float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
     const float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
 
-    ImageBuffer horizontal_buffer(dst.width, image.height, image.channels);
-    Image h_view = horizontal_buffer.view();
+    size_t h_size = static_cast<size_t>(dst.width) * image.height * image.channels;
+    state.resize_lanczos_h.resize(h_size);
+    Image h_view = {dst.width, image.height, image.channels, state.resize_lanczos_h};
 
     for (int y_pos = 0; y_pos < image.height; ++y_pos) {
         for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
@@ -201,7 +202,7 @@ void ColorUtils::resize_into(Image image, Image dst) {
     resize_bilinear_into(image, dst);
 }
 
-void ColorUtils::gaussian_blur(Image image, float sigma) {
+void ColorUtils::gaussian_blur(Image image, float sigma, State& state) {
     if (image.empty() || sigma <= 0.0F) return;
 
     int w = image.width;
@@ -210,30 +211,30 @@ void ColorUtils::gaussian_blur(Image image, float sigma) {
     int kernel = static_cast<int>(std::ceil(sigma * 3.0F));
     if (kernel < 1) kernel = 1;
 
-    std::vector<float> weights(static_cast<size_t>(kernel) + 1);
+    state.blur_weights.resize(static_cast<size_t>(kernel) + 1);
     float sum = 0.0F;
     for (int i = 0; i <= kernel; ++i) {
         float fi = static_cast<float>(i);
-        weights[i] = std::exp(-(fi * fi) / (2.0F * sigma * sigma));
-        sum += (i == 0) ? weights[i] : 2.0F * weights[i];
+        state.blur_weights[i] = std::exp(-(fi * fi) / (2.0F * sigma * sigma));
+        sum += (i == 0) ? state.blur_weights[i] : 2.0F * state.blur_weights[i];
     }
     for (int i = 0; i <= kernel; ++i) {
-        weights[i] /= sum;
+        state.blur_weights[i] /= sum;
     }
 
     size_t buf_size = static_cast<size_t>(w) * h * channels;
-    std::vector<float> temp(buf_size);
+    state.blur_temp.resize(buf_size);
 
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             for (int c = 0; c < channels; ++c) {
-                float acc = image(y, x, c) * weights[0];
+                float acc = image(y, x, c) * state.blur_weights[0];
                 for (int dx = 1; dx <= kernel; ++dx) {
                     int xl = std::max(x - dx, 0);
                     int xr = std::min(x + dx, w - 1);
-                    acc += (image(y, xl, c) + image(y, xr, c)) * weights[dx];
+                    acc += (image(y, xl, c) + image(y, xr, c)) * state.blur_weights[dx];
                 }
-                temp[(static_cast<size_t>(y) * w + x) * channels + c] = acc;
+                state.blur_temp[(static_cast<size_t>(y) * w + x) * channels + c] = acc;
             }
         }
     }
@@ -242,13 +243,13 @@ void ColorUtils::gaussian_blur(Image image, float sigma) {
         for (int x = 0; x < w; ++x) {
             for (int c = 0; c < channels; ++c) {
                 size_t idx = (static_cast<size_t>(y) * w + x) * channels + c;
-                float acc = temp[idx] * weights[0];
+                float acc = state.blur_temp[idx] * state.blur_weights[0];
                 for (int dy = 1; dy <= kernel; ++dy) {
                     int yt = std::max(y - dy, 0);
                     int yb = std::min(y + dy, h - 1);
-                    acc += (temp[(static_cast<size_t>(yt) * w + x) * channels + c] +
-                            temp[(static_cast<size_t>(yb) * w + x) * channels + c]) *
-                           weights[dy];
+                    acc += (state.blur_temp[(static_cast<size_t>(yt) * w + x) * channels + c] +
+                            state.blur_temp[(static_cast<size_t>(yb) * w + x) * channels + c]) *
+                           state.blur_weights[dy];
                 }
                 image(y, x, c) = acc;
             }
@@ -256,13 +257,13 @@ void ColorUtils::gaussian_blur(Image image, float sigma) {
     }
 }
 
-ImageBuffer ColorUtils::resize_area(Image image, int new_width, int new_height) {
+ImageBuffer ColorUtils::resize_area(Image image, int new_width, int new_height, State& state) {
     ImageBuffer result(new_width, new_height, image.channels);
-    resize_area_into(image, result.view());
+    resize_area_into(image, result.view(), state);
     return result;
 }
 
-void ColorUtils::resize_area_into(Image image, Image dst) {
+void ColorUtils::resize_area_into(Image image, Image dst, State& state) {
     float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
     float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
     float max_scale = std::max(scale_x, scale_y);
@@ -274,22 +275,23 @@ void ColorUtils::resize_area_into(Image image, Image dst) {
 
     float sigma = (max_scale - 1.0F) * 0.5F;
 
-    ImageBuffer blurred(image.width, image.height, image.channels);
-    Image blurred_view = blurred.view();
+    size_t buf_size = static_cast<size_t>(image.width) * image.height * image.channels;
+    state.resize_temp.resize(buf_size);
+    Image blurred_view = {image.width, image.height, image.channels, state.resize_temp};
     std::copy(image.data.begin(), image.data.end(), blurred_view.data.begin());
-    gaussian_blur(blurred_view, sigma);
+    gaussian_blur(blurred_view, sigma, state);
 
     resize_into(blurred_view, dst);
 }
 
-ImageBuffer ColorUtils::resize_lanczos(Image image, int new_width, int new_height) {
+ImageBuffer ColorUtils::resize_lanczos(Image image, int new_width, int new_height, State& state) {
     ImageBuffer result(new_width, new_height, image.channels);
-    resize_lanczos_into(image, result.view());
+    resize_lanczos_into(image, result.view(), state);
     return result;
 }
 
-void ColorUtils::resize_lanczos_into(Image image, Image dst) {
-    resize_lanczos_into_impl(image, dst);
+void ColorUtils::resize_lanczos_into(Image image, Image dst, State& state) {
+    resize_lanczos_into_impl(image, dst, state);
 }
 
 void ColorUtils::clamp_image(Image image, float min_val, float max_val) {

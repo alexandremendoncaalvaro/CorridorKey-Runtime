@@ -15,6 +15,9 @@
 #error "ONNX Runtime C++ headers not found"
 #endif
 
+#include "post_process/despeckle.hpp"
+#include "post_process/color_utils.hpp"
+
 #ifdef __APPLE__
 #if __has_include(<onnxruntime/coreml_provider_factory.h>)
 #include <onnxruntime/coreml_provider_factory.h>
@@ -135,6 +138,9 @@ class InferenceSession {
     int m_tiled_buffer_size = 0;
     int m_tiled_pool_capacity = 0;
     int m_tiled_weight_padding = -1;
+
+    DespeckleState m_despeckle_state = {};
+    ColorUtils::State m_color_utils_state = {};
 };
 
 }  // namespace corridorkey

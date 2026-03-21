@@ -157,7 +157,8 @@ These rules protect the performance advantage.
   `target_compile_options`.
 - **CMakePresets.json** is the source of truth for build configurations.
   Contains presets for `debug`, `release`, and `ci`.
-- A developer runs `cmake --preset debug` and gets a working build.
+- **Local Windows Build Environment:** To build on Windows, you MUST run CMake from within the **x64 Native Tools Command Prompt for VS**. This ensures the C++ standard libraries (like `<string_view>`, `<type_traits>`, etc.) and Windows SDK are natively exposed to Ninja. A normal PowerShell or CMD window is insufficient.
+- A developer runs `cmake --preset debug` from the Native Tools Prompt and gets a working build.
 
 ### 4.2 Dependencies (vcpkg)
 
@@ -434,3 +435,17 @@ reliably than any comment, because it is verified on every build.
 - FFmpeg input is treated as untrusted. Use FFmpeg's built-in limits and
   timeouts.
 - Dependency audit via vcpkg vulnerability scanning in CI.
+
+---
+
+## 11. OpenFX Robustness
+
+### 11.1 Zero Exception Leakage
+OpenFX is a pure C API. If a C++ exception escapes any of our exported plugin functions, the host application (like DaVinci Resolve) will instantaneously crash to desktop. 
+- All `extern "C"` endpoints and the OFX `plugin_main_entry` must be safely wrapped in a global `try/catch` block.
+- Internal exceptions must be intercepted, logged, and gracefully translated into a safe C status code (e.g., `kOfxStatFailed`).
+
+### 11.2 Zero-Allocation Post Processing
+Because DaVinci Resolve schedules aggressive parallel render threads (one per frame/core), memory fragmentation and out-of-memory errors are the primary cause of OFX instability.
+- Do not instantiate large local containers (`std::vector<T>`) inside per-pixel or per-frame functions (e.g., inside `src/post_process/`).
+- Utilize persistent `ScratchState` structs that use `std::vector::reserve()` and `std::vector::resize()` to maintain capacities across continuous frames, avoiding calls to the OS memory allocator. Memory must belong to the OFX instance lifecycle or the Job Orchestrator, rather than being discarded at the end of every frame.

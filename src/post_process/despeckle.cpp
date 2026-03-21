@@ -107,22 +107,22 @@ std::vector<std::pair<int, int>> make_elliptical_kernel(int radius) {
 }
 
 // Morphological dilation with elliptical kernel
-void dilate_binary(std::vector<uint8_t>& mask, int w, int h, int radius) {
+void dilate_binary(std::vector<uint8_t>& mask, std::vector<uint8_t>& temp_result, int w, int h, int radius) {
     if (radius <= 0) return;
 
     auto offsets = make_elliptical_kernel(radius);
-    std::vector<uint8_t> result(mask.size(), 0);
+    std::fill(temp_result.begin(), temp_result.end(), 0);
 
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
             for (int x = 0; x < w; ++x) {
-                if (result[y * w + x] == 255) continue;
+                if (temp_result[y * w + x] == 255) continue;
                 for (const auto& [dy, dx] : offsets) {
                     int ny = y + dy;
                     int nx = x + dx;
                     if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
                         if (mask[ny * w + nx] == 255) {
-                            result[y * w + x] = 255;
+                            temp_result[y * w + x] = 255;
                             break;
                         }
                     }
@@ -131,7 +131,7 @@ void dilate_binary(std::vector<uint8_t>& mask, int w, int h, int radius) {
         }
     });
 
-    mask = std::move(result);
+    mask.swap(temp_result);
 }
 
 void threshold_mask(const Image& alpha, std::vector<uint8_t>& mask) {
@@ -163,12 +163,11 @@ std::vector<float> make_gaussian_kernel(int half_size) {
 }
 
 // Separable Gaussian blur on float buffer
-void gaussian_blur(std::vector<float>& data, int w, int h, int half_size) {
+void gaussian_blur(std::vector<float>& data, std::vector<float>& temp, int w, int h, int half_size) {
     if (half_size <= 0) return;
 
     auto kernel = make_gaussian_kernel(half_size);
     int ksize = 2 * half_size + 1;
-    std::vector<float> temp(data.size());
 
     // Horizontal pass
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
@@ -240,7 +239,7 @@ void apply_safe_zone(Image alpha, const std::vector<float>& safe_zone) {
 
 }  // anonymous namespace
 
-void despeckle(Image alpha, int area_threshold, int dilation, int blur_size) {
+void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilation, int blur_size) {
     if (alpha.empty() || area_threshold <= 0) return;
 
     int w = alpha.width;
@@ -248,27 +247,30 @@ void despeckle(Image alpha, int area_threshold, int dilation, int blur_size) {
     int n = w * h;
 
     // Step 1: Threshold alpha at 0.5 to binary mask
-    std::vector<uint8_t> mask(n);
-    threshold_mask(alpha, mask);
+    state.mask.resize(n);
+    threshold_mask(alpha, state.mask);
 
     // Step 2: Find connected components and filter by area
-    std::vector<int> labels;
-    std::vector<int> areas;
-    find_components(mask, w, h, labels, areas);
+    state.labels.resize(n);
+    state.areas.resize(n);
+    find_components(state.mask, w, h, state.labels, state.areas);
 
-    std::vector<uint8_t> cleaned(n, 0);
-    filter_components(labels, areas, cleaned, w, h, area_threshold);
+    state.cleaned.resize(n);
+    filter_components(state.labels, state.areas, state.cleaned, w, h, area_threshold);
 
     // Step 3: Dilate with elliptical kernel
-    dilate_binary(cleaned, w, h, dilation);
+    state.temp_mask.resize(n);
+    dilate_binary(state.cleaned, state.temp_mask, w, h, dilation);
 
     // Step 4: Gaussian blur for smooth edges
-    std::vector<float> safe_zone(n);
-    convert_cleaned_to_safe_zone(cleaned, safe_zone, w, h);
-    gaussian_blur(safe_zone, w, h, blur_size);
+    state.safe_zone.resize(n);
+    convert_cleaned_to_safe_zone(state.cleaned, state.safe_zone, w, h);
+    
+    state.blur_temp.resize(n);
+    gaussian_blur(state.safe_zone, state.blur_temp, w, h, blur_size);
 
     // Step 5: Multiply original alpha by safe zone
-    apply_safe_zone(alpha, safe_zone);
+    apply_safe_zone(alpha, state.safe_zone);
 }
 
 }  // namespace corridorkey

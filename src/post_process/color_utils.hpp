@@ -11,6 +11,15 @@ namespace corridorkey {
  */
 class CORRIDORKEY_API ColorUtils {
    public:
+    struct State {
+        std::vector<float> blur_temp;
+        std::vector<float> blur_weights;
+        std::vector<float> resize_temp;
+        std::vector<float> resize_lanczos_h;
+        std::vector<float> sp_mask;
+        std::vector<float> sp_temp;
+    };
+
     /**
      * @brief Apply premultiplication: RGB * Alpha.
      */
@@ -47,23 +56,23 @@ class CORRIDORKEY_API ColorUtils {
      * bilinear interpolation to prevent aliasing. For upscaling or small
      * downscale ratios, behaves identically to resize().
      */
-    static ImageBuffer resize_area(Image image, int new_width, int new_height);
-    static void resize_area_into(Image image, Image dst);
+    static ImageBuffer resize_area(Image image, int new_width, int new_height, State& state);
+    static void resize_area_into(Image image, Image dst, State& state);
 
     /**
      * @brief Resize an image using Lanczos4 interpolation.
      * Uses BORDER_REFLECT_101 boundary handling matching OpenCV.
      * Higher quality than bilinear for upscaling. Returns an owned ImageBuffer.
      */
-    static ImageBuffer resize_lanczos(Image image, int new_width, int new_height);
-    static void resize_lanczos_into(Image image, Image dst);
+    static ImageBuffer resize_lanczos(Image image, int new_width, int new_height, State& state);
+    static void resize_lanczos_into(Image image, Image dst, State& state);
 
     /**
      * @brief Apply separable Gaussian blur in-place.
      * @param image Single-channel or multi-channel image to blur.
      * @param sigma Standard deviation of the Gaussian kernel.
      */
-    static void gaussian_blur(Image image, float sigma);
+    static void gaussian_blur(Image image, float sigma, State& state);
 
     /**
      * @brief Clamp all pixel values to [min_val, max_val].

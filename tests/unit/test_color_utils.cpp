@@ -113,7 +113,8 @@ TEST_CASE("ColorUtils::resize_lanczos upscale", "[unit][color]") {
     img.data[3] = 0.5f;
 
     SECTION("Upscale uniform 2x2 to 4x4") {
-        ImageBuffer resized_buf = ColorUtils::resize_lanczos(img, 4, 4);
+        ColorUtils::State state;
+        ImageBuffer resized_buf = ColorUtils::resize_lanczos(img, 4, 4, state);
         Image resized = resized_buf.view();
         REQUIRE(resized.width == 4);
         REQUIRE(resized.height == 4);
@@ -123,7 +124,8 @@ TEST_CASE("ColorUtils::resize_lanczos upscale", "[unit][color]") {
     }
 
     SECTION("Upscale to same size is identity") {
-        ImageBuffer resized_buf = ColorUtils::resize_lanczos(img, 2, 2);
+        ColorUtils::State state;
+        ImageBuffer resized_buf = ColorUtils::resize_lanczos(img, 2, 2, state);
         Image resized = resized_buf.view();
         for (size_t i = 0; i < resized.data.size(); ++i) {
             REQUIRE(resized.data[i] == Catch::Approx(img.data[i]).margin(0.001f));
@@ -139,7 +141,8 @@ TEST_CASE("ColorUtils::resize_lanczos edge boundary reflect_101", "[unit][color]
     SECTION("Single-pixel image upscale preserves value") {
         ImageBuffer buf(1, 1, 1);
         buf.view().data[0] = 0.8f;
-        ImageBuffer result = ColorUtils::resize_lanczos(buf.view(), 4, 4);
+        ColorUtils::State state;
+        ImageBuffer result = ColorUtils::resize_lanczos(buf.view(), 4, 4, state);
         Image out = result.view();
         for (size_t i = 0; i < out.data.size(); ++i) {
             REQUIRE(out.data[i] == Catch::Approx(0.8f).margin(0.01f));
@@ -153,7 +156,8 @@ TEST_CASE("ColorUtils::resize_lanczos edge boundary reflect_101", "[unit][color]
             img(0, x) = static_cast<float>(x) / 7.0f;
         }
 
-        ImageBuffer result = ColorUtils::resize_lanczos(img, 16, 1);
+        ColorUtils::State state;
+        ImageBuffer result = ColorUtils::resize_lanczos(img, 16, 1, state);
         Image out = result.view();
 
         // With reflect_101, an ascending ramp from 0..1 should produce a
@@ -172,7 +176,8 @@ TEST_CASE("ColorUtils::resize_lanczos edge boundary reflect_101", "[unit][color]
             }
         }
 
-        ImageBuffer result = ColorUtils::resize_lanczos(img, 16, 16);
+        ColorUtils::State state;
+        ImageBuffer result = ColorUtils::resize_lanczos(img, 16, 16, state);
         Image out = result.view();
         for (size_t i = 0; i < out.data.size(); ++i) {
             // Lanczos ringing may produce slight overshoot, but reflect_101
@@ -193,9 +198,10 @@ TEST_CASE("ColorUtils::resize_lanczos_into matches resize_lanczos output",
         }
     }
 
-    ImageBuffer expected = ColorUtils::resize_lanczos(source, 6, 6);
+    ColorUtils::State state;
+    ImageBuffer expected = ColorUtils::resize_lanczos(source, 6, 6, state);
     ImageBuffer actual(6, 6, 1);
-    ColorUtils::resize_lanczos_into(source, actual.view());
+    ColorUtils::resize_lanczos_into(source, actual.view(), state);
 
     for (size_t index = 0; index < actual.view().data.size(); ++index) {
         REQUIRE(actual.view().data[index] ==
@@ -223,7 +229,8 @@ TEST_CASE("ColorUtils::gaussian_blur smooths alpha", "[unit][color]") {
         Image img = buf.view();
         std::fill(img.data.begin(), img.data.end(), 0.7f);
 
-        ColorUtils::gaussian_blur(img, 1.0f);
+        ColorUtils::State state;
+        ColorUtils::gaussian_blur(img, 1.0f, state);
         for (size_t i = 0; i < img.data.size(); ++i) {
             REQUIRE(img.data[i] == Catch::Approx(0.7f).margin(0.001f));
         }
@@ -236,7 +243,8 @@ TEST_CASE("ColorUtils::gaussian_blur smooths alpha", "[unit][color]") {
             img(0, x) = x < 8 ? 0.0f : 1.0f;
         }
 
-        ColorUtils::gaussian_blur(img, 1.5f);
+        ColorUtils::State state;
+        ColorUtils::gaussian_blur(img, 1.5f, state);
 
         // Pixels far from edge should stay near original
         REQUIRE(img(0, 0) < 0.05f);
@@ -254,7 +262,8 @@ TEST_CASE("ColorUtils::gaussian_blur smooths alpha", "[unit][color]") {
         img(0, 0) = 1.0f;
         img(0, 1) = 0.0f;
 
-        ColorUtils::gaussian_blur(img, 0.0f);
+        ColorUtils::State state;
+        ColorUtils::gaussian_blur(img, 0.0f, state);
         REQUIRE(img(0, 0) == 1.0f);
         REQUIRE(img(0, 1) == 0.0f);
     }
@@ -266,7 +275,8 @@ TEST_CASE("ColorUtils::resize_area anti-aliased downscale", "[unit][color]") {
         Image img = buf.view();
         std::fill(img.data.begin(), img.data.end(), 0.5f);
 
-        ImageBuffer result = ColorUtils::resize_area(img, 3, 3);
+        ColorUtils::State state;
+        ImageBuffer result = ColorUtils::resize_area(img, 3, 3, state);
         ImageBuffer ref = ColorUtils::resize(img, 3, 3);
 
         for (size_t i = 0; i < result.view().data.size(); ++i) {
@@ -284,7 +294,8 @@ TEST_CASE("ColorUtils::resize_area anti-aliased downscale", "[unit][color]") {
         }
 
         // Downscale 32 -> 6 = 5.3x factor (well above 1.5x threshold)
-        ImageBuffer area_result = ColorUtils::resize_area(img, 6, 1);
+        ColorUtils::State state;
+        ImageBuffer area_result = ColorUtils::resize_area(img, 6, 1, state);
         Image area = area_result.view();
 
         // After pre-filtering, all output values should be near 0.5
