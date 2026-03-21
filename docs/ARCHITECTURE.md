@@ -164,7 +164,7 @@ tools/
 
 ---
 
-## 4. Engineering Standards (2026)
+## 4. Engineering Standards
 
 1. **Zero-Copy Data Flow:** We use `std::span` (via the `Image` struct) to pass data between modules without copying.
 2. **SIMD Alignment:** All image buffers are 64-byte aligned for AVX-512/NEON efficiency.

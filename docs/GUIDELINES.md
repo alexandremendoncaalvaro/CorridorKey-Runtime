@@ -384,6 +384,9 @@ building, using, or contributing to the project.
 | `docs/SPEC.md` | What to build and why | Architects, developers |
 | `docs/GUIDELINES.md` | How to build it (this document) | Developers |
 | `docs/ARCHITECTURE.md` | Where code lives | Developers |
+| `docs/FRONTEND.md` | UI/UX specifications and frontend tech stack | Frontend developers |
+| `docs/PLAN.md` | Explicit exception for active implementation context and checklists | Maintainers |
+| `docs/RELEASE_GUIDELINES.md`| Standard operating procedure for building and releasing | Release maintainers |
 | `CLAUDE.md` | Machine-readable rule summary | AI tools |
 
 ### 9.5 Living Documentation in Code
