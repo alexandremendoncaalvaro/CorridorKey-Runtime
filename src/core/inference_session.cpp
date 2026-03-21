@@ -80,11 +80,13 @@ constexpr const char* kDeviceId = onnxruntime::nv::provider_option_names::kDevic
 constexpr const char* kDumpSubgraphs = onnxruntime::nv::provider_option_names::kDumpSubgraphs;
 constexpr const char* kDetailedBuildLog = onnxruntime::nv::provider_option_names::kDetailedBuildLog;
 constexpr const char* kRuntimeCacheFile = onnxruntime::nv::provider_option_names::kRuntimeCacheFile;
+constexpr const char* kMaxWorkspaceSize = onnxruntime::nv::provider_option_names::kMaxWorkspaceSize;
 #else
 constexpr const char* kDeviceId = "device_id";
 constexpr const char* kDumpSubgraphs = "nv_dump_subgraphs";
 constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
 constexpr const char* kRuntimeCacheFile = "nv_runtime_cache_path";
+constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
 #endif
 }  // namespace tensorrt_rtx_option_names
 
@@ -146,6 +148,7 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
     debug_log("Configuring TensorRT RTX execution provider");
     std::unordered_map<std::string, std::string> provider_options = {
         {tensorrt_rtx_option_names::kDeviceId, "0"},
+        {tensorrt_rtx_option_names::kMaxWorkspaceSize, "2147483647"}, // 2GB max workspace size
     };
 
     debug_log("Setting up runtime cache");
