@@ -134,8 +134,7 @@ inline std::vector<std::filesystem::path> artifact_paths_for_backend(
                 return {fp16_path, int8_path};
             case kQuantizationInt8:
                 return {int8_path, fp16_path};
-            case kQuantizationAuto:
-            default:
+            default: // kQuantizationAuto
                 return {int8_path, fp16_path};
         }
     }
@@ -145,7 +144,6 @@ inline std::vector<std::filesystem::path> artifact_paths_for_backend(
             return {fp16_path, int8_path};
         case kQuantizationInt8:
             return {int8_path, fp16_path};
-        case kQuantizationAuto:
         default:
             return {int8_path, fp16_path};
     }
