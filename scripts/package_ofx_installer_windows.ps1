@@ -76,15 +76,23 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
 if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
-    $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
-    $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
-    if (Test-Path $rtxOrt) {
-        $OrtRoot = $rtxOrt
-    } elseif (Test-Path $universalOrt) {
-        $OrtRoot = $universalOrt
+    if ($ReleaseSuffix -match "DirectML" -or $ReleaseSuffix -match "DML") {
+        $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-dml"
     } else {
-        $OrtRoot = $rtxOrt
+        $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+        $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
+        if (Test-Path $rtxOrt) {
+            $OrtRoot = $rtxOrt
+        } elseif (Test-Path $universalOrt) {
+            $OrtRoot = $universalOrt
+        } else {
+            $OrtRoot = $rtxOrt
+        }
     }
+}
+
+if (-not (Test-Path $OrtRoot)) {
+    throw "ONNX Runtime root directory not found at: $OrtRoot. Ensure the vendor dependencies are correctly extracted."
 }
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"

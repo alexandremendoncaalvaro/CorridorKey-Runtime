@@ -1,7 +1,8 @@
 param(
     [string]$Version = "",
     [string]$BuildDir = "",
-    [string]$OrtRoot = ""
+    [string]$OrtRoot = "",
+    [string]$ReleaseSuffix = ""
 )
 
 Set-StrictMode -Version Latest
@@ -102,14 +103,35 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
 if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
-    $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+    if ($ReleaseSuffix -match "DirectML" -or $ReleaseSuffix -match "DML") {
+        $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-dml"
+    } else {
+        $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+        $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
+        if (Test-Path $rtxOrt) {
+            $OrtRoot = $rtxOrt
+        } elseif (Test-Path $universalOrt) {
+            $OrtRoot = $universalOrt
+        } else {
+            $OrtRoot = $rtxOrt
+        }
+    }
+}
+
+if (-not (Test-Path $OrtRoot)) {
+    throw "ONNX Runtime root directory not found at: $OrtRoot. Ensure the vendor dependencies are correctly extracted."
 }
 
 $vsDevCmd = Resolve-VsDevCmd
 $cargoBinDir = Resolve-CargoBinDir
 $nsisBinDirs = Resolve-NsisBinDirs
 $installerBundleDir = Join-Path $tauriRoot "target\release\bundle\nsis"
-$releaseInstallerPath = Join-Path $repoRoot ("dist\CorridorKey_Runtime_v${Version}_Windows_Installer.exe")
+
+$normalizedSuffix = ""
+if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
+    $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
+}
+$releaseInstallerPath = Join-Path $repoRoot ("dist\CorridorKey_Runtime_v${Version}_Windows${normalizedSuffix}_Installer.exe")
 $tempCmdPath = Join-Path $env:TEMP ("corridorkey_tauri_nsis_" + [System.Guid]::NewGuid().ToString("N") + ".cmd")
 
 $stageArgs = @{
