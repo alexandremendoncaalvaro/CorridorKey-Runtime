@@ -1,7 +1,8 @@
 param(
     [string]$Version = "",
     [string]$BuildDir = "",
-    [string]$OrtRoot = ""
+    [string]$OrtRoot = "",
+    [string]$ReleaseSuffix = ""
 )
 
 Set-StrictMode -Version Latest
@@ -40,6 +41,9 @@ if (-not [string]::IsNullOrWhiteSpace($BuildDir)) {
 if (-not [string]::IsNullOrWhiteSpace($OrtRoot)) {
     $portableArgs["OrtRoot"] = $OrtRoot
 }
+if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
+    $portableArgs["ReleaseSuffix"] = $ReleaseSuffix
+}
 
 Write-Host "[1/3] Building the portable Windows runtime bundle..." -ForegroundColor Cyan
 & (Join-Path $repoRoot "scripts\package_windows.ps1") @portableArgs
@@ -47,7 +51,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable Windows runtime packaging failed."
 }
 
-$portableBundleDir = Join-Path $repoRoot ("dist\CorridorKey_Runtime_v${Version}_Windows")
+$normalizedSuffix = ""
+if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
+    $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
+}
+$portableBundleDir = Join-Path $repoRoot ("dist\CorridorKey_Runtime_v${Version}_Windows${normalizedSuffix}")
 if (-not (Test-Path $portableBundleDir)) {
     throw "Expected portable runtime bundle at $portableBundleDir"
 }

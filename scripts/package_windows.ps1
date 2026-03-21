@@ -2,6 +2,7 @@ param(
     [string]$Version = "",
     [string]$BuildDir = "",
     [string]$OrtRoot = "",
+    [string]$ReleaseSuffix = "",
     [switch]$CompileContexts,
     [string[]]$ForbiddenPathPrefix = @()
 )
@@ -34,10 +35,30 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
 if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
-    $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+    if ($ReleaseSuffix -match "DirectML" -or $ReleaseSuffix -match "DML") {
+        $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-dml"
+    } else {
+        $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
+        $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
+        if (Test-Path $rtxOrt) {
+            $OrtRoot = $rtxOrt
+        } elseif (Test-Path $universalOrt) {
+            $OrtRoot = $universalOrt
+        } else {
+            $OrtRoot = $rtxOrt
+        }
+    }
 }
 
-$releaseBasename = "CorridorKey_Runtime_v${Version}_Windows"
+if (-not (Test-Path $OrtRoot)) {
+    throw "ONNX Runtime root directory not found at: $OrtRoot. Ensure the vendor dependencies are correctly extracted."
+}
+
+$normalizedSuffix = ""
+if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
+    $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
+}
+$releaseBasename = "CorridorKey_Runtime_v${Version}_Windows${normalizedSuffix}"
 $distDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $zipPath = Join-Path $repoRoot ("dist\" + $releaseBasename + ".zip")
 $engineSource = Join-Path $BuildDir "src\cli\corridorkey.exe"
