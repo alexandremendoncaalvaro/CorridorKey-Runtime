@@ -95,44 +95,6 @@ Responsible for:
 
 ---
 
-## Product direction
-
-The frontend must not be treated as “GUI first”.
-It must be a **guided workflow layer** on top of a **runtime-first / CLI-first** architecture.
-
-The implementation order is fixed:
-
-1. macOS production runtime
-2. Windows RTX product track
-3. stable sidecar/bridge contract
-4. desktop GUI implementation
-5. broader platform expansion
-
-Primary product goal:
-
-- install
-- drop file
-- choose preset
-- process
-- export
-
-The frontend should make the runtime feel **obvious**, not merely powerful.
-Power must remain available, but through **progressive disclosure**.
-
-That includes showing the user the validated path for their machine instead of
-dumping a flat list of backends or model files. The UI should present a curated
-platform track, preset intent, and fallback state.
-
-### Product audiences
-
-- **Technical local operator:** wants to install, run, diagnose, and export
-  without rebuilding a Python environment.
-- **Windows RTX operator:** wants predictable provider behavior, reproducible
-  benchmarks, and hardware-aware defaults.
-- **Integrator:** wants to evaluate the runtime as a future sidecar, plugin, or
-  embedded engine.
-
----
 
 ## UX model
 

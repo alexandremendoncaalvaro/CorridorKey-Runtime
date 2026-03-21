@@ -105,7 +105,14 @@ that is required to extract predictable performance from the target hardware.
 └──────────────────────────────────────────────────────────┘
 ```
 
-... [Rest of the SPEC remains technical, just ensuring headers and Tiers match] ...
+### 2.2 Out-of-Process OFX Architecture
+
+For environments like DaVinci Resolve that are prone to host crashes and VRAM contention, the plugin is intentionally implemented as a thin local client backed by a packaged runtime process.
+
+- **Crash Containment:** The runtime server isolates backend, VRAM, and ONNX session failures from the host application.
+- **Session Residency:** The server pools models and sessions by backend, preventing duplicate OFX node instances from repeating expensive GPU warmups.
+- **Transport:** High-bandwidth frame transport via shared memory or memory-mapped files, orchestrated by a versioned IPC request/reply contract.
+- **Diagnostics Parity:** The out-of-process runtime surfaces all fallback details, stage timings, and initialization logs back to the local client seamlessly.
 
 ## 4. Hardware Tiers
 
