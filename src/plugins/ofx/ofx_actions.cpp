@@ -268,17 +268,16 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_group_param(param_set, "quality_group", "Quality", true);
 
-    define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityAuto,
+    define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityPreview,
                         {"Auto", "Preview (512)", "Standard (768)", "High (1024)", "Ultra (1536)",
                          "Maximum (2048)"},
                         "Inference resolution. Auto selects based on input size. "
                         "Higher values produce better detail at the cost of speed.",
                         "quality_group");
     define_choice_param(param_set, kParamQuantizationMode, "Quantization", kDefaultQuantizationMode,
-                        {"Auto", "FP16", "INT8"},
-                        "Preferred model precision for this instance. Auto uses the backend "
-                        "default. FP16 forces full-precision artifacts when available. INT8 "
-                        "prefers quantized artifacts when available.",
+                        {"FP16", "INT8"},
+                        "Preferred model precision for this instance. FP16 selects full-precision files. INT8 "
+                        "selects memory-efficient quantized files.",
                         "quality_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process at native resolution using overlapping tiles. "
@@ -315,8 +314,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                       "Clean small alpha speckles automatically.", "keying_group");
     define_int_param(param_set, kParamDespeckleSize, "Despeckle Size", 400, 50, 2000,
                      "Minimum connected component area in pixels to keep.", "keying_group");
-    define_double_param(param_set, kParamRefinerScale, "Refiner Scale", 1.0, 0.0, 3.0,
-                        "Edge refinement strength. 0 disables the refiner.", "keying_group");
     define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
                         {"Green", "Blue"},
                         "Select the dominant screen color. Blue swaps channels internally so "
@@ -340,17 +337,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "alpha_group", "Alpha", true);
     define_info_param(
         param_set, "alpha_hint_info", "Hint Input",
-        "RGBA uses A. Alpha uses its single channel. RGB falls back to R. No hint uses a rough "
-        "matte.",
+        "RGBA uses A. Alpha uses its single channel. RGB falls back to R.",
         "The Alpha Hint clip accepts RGBA, Alpha, or RGB. RGBA uses the alpha channel. Alpha "
-        "uses the single provided channel directly. RGB falls back to the red channel. If no "
-        "hint is connected, CorridorKey generates a rough matte from the source image.",
+        "uses the single provided channel directly. RGB falls back to the red channel. You must "
+        "connect an external mask or alpha source to the hint pin.",
         "alpha_group");
-    define_choice_param(param_set, kParamAlphaHintMode, "Alpha Hint Mode", kDefaultAlphaHintMode,
-                        {"Auto (Fallback)", "External Only"},
-                        "Auto falls back to a rough matte when no hint clip is available. "
-                        "External Only requires a connected hint clip.",
-                        "alpha_group");
 
     define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
                         "Remap alpha: values at or below this become fully transparent.",
@@ -369,10 +360,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
     define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
-                        kDefaultInputColorSpace, {"Auto", "sRGB", "Linear"},
-                        "Auto matches legacy behavior (treats input as sRGB). "
-                        "Processed and Source + Matte remain linear-premultiplied when Linear is "
-                        "selected.",
+                        kDefaultInputColorSpace, {"sRGB", "Linear"},
+                        "Source interpretation mode. Processed outputs remain linear when "
+                        "Linear is selected.",
                         "advanced_group");
 
     log_message("describe_in_context", "Describe in context completed.");

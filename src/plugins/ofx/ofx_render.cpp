@@ -424,7 +424,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     int quality_mode = kQualityAuto;
     int output_mode = kOutputProcessed;
-    int alpha_hint_mode = kDefaultAlphaHintMode;
     int input_color_space = kDefaultInputColorSpace;
     int quantization_mode = kDefaultQuantizationMode;
     int screen_color = kDefaultScreenColor;
@@ -432,7 +431,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int despeckle_enabled = 0;
     int despeckle_size = 400;
     double despill_strength = 0.5;
-    double refiner_scale = 1.0;
     double alpha_black_point = 0.0;
     double alpha_white_point = 1.0;
     double alpha_erode = 0.0;
@@ -446,10 +444,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
-    }
-    if (data->alpha_hint_mode_param) {
-        g_suites.parameter->paramGetValueAtTime(data->alpha_hint_mode_param, time,
-                                                &alpha_hint_mode);
     }
     if (data->input_color_space_param) {
         g_suites.parameter->paramGetValueAtTime(data->input_color_space_param, time,
@@ -473,9 +467,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             input_is_linear = true;
             break;
         case kInputColorSrgb:
-            input_is_linear = false;
-            break;
-        case kInputColorAuto:
         default:
             input_is_linear = false;
             break;
@@ -534,9 +525,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->despill_param) {
         g_suites.parameter->paramGetValueAtTime(data->despill_param, time, &despill_strength);
-    }
-    if (data->refiner_param) {
-        g_suites.parameter->paramGetValueAtTime(data->refiner_param, time, &refiner_scale);
     }
     if (data->alpha_black_point_param) {
         g_suites.parameter->paramGetValueAtTime(data->alpha_black_point_param, time,
@@ -611,18 +599,34 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     if (!hint_from_clip) {
-        if (alpha_hint_mode == kAlphaHintExternalOnly) {
-            const std::string message =
-                "Alpha Hint Mode is External Only but no readable hint clip was provided.";
-            log_message("render", message);
-            set_runtime_error(data, message, instance);
-            return kOfxStatFailed;
+        const std::string message = "No valid alpha hint clip connected. Please connect the Alpha Hint pin.";
+        log_message("render", message);
+        set_runtime_error(data, message, instance);
+
+        ImageBuffer alpha_buf(width, height, 1);
+        ImageBuffer fg_buf(width, height, 3);
+        auto alpha_view = alpha_buf.view();
+        auto fg_linear = fg_buf.view();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                alpha_view(y, x) = 0.0f;
+                fg_linear(y, x, 0) = 0.0f;
+                fg_linear(y, x, 1) = 0.0f;
+                fg_linear(y, x, 2) = 0.0f;
+            }
         }
-        if (!hint_clip_connected) {
-            log_message("render",
-                        "No alpha hint clip connected. Generating rough matte from source RGB.");
+        
+        bool apply_srgb = !input_is_linear;
+        if (output_mode == kOutputMatteOnly) {
+            write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, SrgbLut::instance());
+        } else if (output_mode == kOutputForegroundOnly) {
+            write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
+        } else if (output_mode == kOutputSourceMatte) {
+            write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
+        } else {
+            write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
         }
-        ColorUtils::generate_rough_matte(rgb_view, hint_view);
+        return kOfxStatOK;
     }
 
     const std::uint64_t signature = frame_signature(rgb_view, hint_view);
@@ -632,7 +636,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.despill_strength = static_cast<float>(despill_strength);
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
-    params.refiner_scale = static_cast<float>(refiner_scale);
+    params.refiner_scale = 1.0f;
     params.input_is_linear = input_is_linear;
     params.upscale_method =
         upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
@@ -648,7 +652,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                            data->cached_width == width && data->cached_height == height &&
                            data->cached_model_path == data->model_path &&
                            inference_params_equal(data->cached_params, params) &&
-                           data->cached_alpha_hint_mode == alpha_hint_mode &&
                            data->cached_screen_color == screen_color &&
                            std::abs(data->cached_alpha_black_point - alpha_black_point) < 1e-6 &&
                            std::abs(data->cached_alpha_white_point - alpha_white_point) < 1e-6 &&
@@ -816,7 +819,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         data->cached_height = height;
         data->cached_params = params;
         data->cached_model_path = data->model_path;
-        data->cached_alpha_hint_mode = alpha_hint_mode;
         data->cached_screen_color = screen_color;
         data->cached_alpha_black_point = alpha_black_point;
         data->cached_alpha_white_point = alpha_white_point;

@@ -25,14 +25,12 @@ constexpr int kAlphaHintAuto = 0;
 constexpr int kAlphaHintExternalOnly = 1;
 
 // Input color space
-constexpr int kInputColorAuto = 0;
-constexpr int kInputColorSrgb = 1;
-constexpr int kInputColorLinear = 2;
+constexpr int kInputColorSrgb = 0;
+constexpr int kInputColorLinear = 1;
 
 // Quantization mode
-constexpr int kQuantizationAuto = 0;
-constexpr int kQuantizationFp16 = 1;
-constexpr int kQuantizationInt8 = 2;
+constexpr int kQuantizationFp16 = 0;
+constexpr int kQuantizationInt8 = 1;
 
 // Screen color
 constexpr int kScreenColorGreen = 0;
@@ -43,9 +41,8 @@ constexpr int kDefaultEdgeErode = 3;
 constexpr int kDefaultEdgeBlur = 7;
 constexpr int kMaxEdgeErode = 32;
 constexpr int kMaxEdgeBlur = 64;
-constexpr int kDefaultAlphaHintMode = kAlphaHintAuto;
-constexpr int kDefaultInputColorSpace = kInputColorSrgb;
-constexpr int kDefaultQuantizationMode = kQuantizationAuto;
+constexpr int kDefaultInputColorSpace = kInputColorLinear;
+constexpr int kDefaultQuantizationMode = kQuantizationFp16;
 constexpr int kDefaultScreenColor = kScreenColorGreen;
 constexpr double kDefaultTemporalSmoothing = 0.0;
 

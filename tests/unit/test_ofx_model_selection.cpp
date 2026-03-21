@@ -106,7 +106,7 @@ TEST_CASE("fixed mlx quality resolves the exact requested bridge", "[unit][ofx][
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_2048.mlxfn");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840,
-                                             2160, kQuantizationAuto);
+                                             2160, kQuantizationFp16);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -122,7 +122,7 @@ TEST_CASE("fixed mlx quality fails when the exact bridge is unavailable",
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840,
-                                             2160, kQuantizationAuto);
+                                             2160, kQuantizationFp16);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -135,7 +135,7 @@ TEST_CASE("auto mlx quality may fall back to the highest available lower bridge"
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityAuto, 4096,
-                                             2160, kQuantizationAuto);
+                                             2160, kQuantizationFp16);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -152,7 +152,7 @@ TEST_CASE("fixed windows tensorRT quality fails when the exact model is unavaila
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum,
-                                             4096, 2160, kQuantizationAuto);
+                                             4096, 2160, kQuantizationFp16);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -164,7 +164,7 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityPreview,
-                                             1920, 1080, kQuantizationAuto);
+                                             1920, 1080, kQuantizationFp16);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 512);
@@ -189,7 +189,7 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_768.onnx");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096,
-                                             2160, kQuantizationAuto);
+                                             2160, kQuantizationFp16);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -205,7 +205,7 @@ TEST_CASE("auto windows tensorRT prefers fp16 when both fp16 and int8 artifacts 
     touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 1920,
-                                             1080, kQuantizationAuto);
+                                             1080, kQuantizationFp16);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 1024);
@@ -239,7 +239,7 @@ TEST_CASE("auto windows universal quality falls back to the highest packaged int
     touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::DirectML, kQualityAuto, 4096,
-                                             2160, kQuantizationAuto);
+                                             2160, kQuantizationFp16);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);

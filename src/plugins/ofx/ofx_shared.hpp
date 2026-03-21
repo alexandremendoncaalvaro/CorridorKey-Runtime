@@ -4,6 +4,7 @@
 #include <corridorkey/version.hpp>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "ofxCore.h"
@@ -40,7 +41,6 @@ constexpr const char* kClipCompositeOutput = "Composite Output";
 
 constexpr const char* kParamQualityMode = "quality_mode";
 constexpr const char* kParamOutputMode = "output_mode";
-constexpr const char* kParamAlphaHintMode = "alpha_hint_mode";
 constexpr const char* kParamInputColorSpace = "input_color_space";
 constexpr const char* kParamQuantizationMode = "quantization_mode";
 constexpr const char* kParamScreenColor = "screen_color";
@@ -48,7 +48,6 @@ constexpr const char* kParamTemporalSmoothing = "temporal_smoothing";
 constexpr const char* kParamDespillStrength = "despill_strength";
 constexpr const char* kParamAutoDespeckle = "auto_despeckle";
 constexpr const char* kParamDespeckleSize = "despeckle_size";
-constexpr const char* kParamRefinerScale = "refiner_scale";
 constexpr const char* kParamAlphaBlackPoint = "alpha_black_point";
 constexpr const char* kParamAlphaWhitePoint = "alpha_white_point";
 constexpr const char* kParamAlphaErode = "alpha_erode";
@@ -82,7 +81,6 @@ struct InstanceData {
     OfxImageClipHandle output_clip = nullptr;
     OfxParamHandle quality_mode_param = nullptr;
     OfxParamHandle output_mode_param = nullptr;
-    OfxParamHandle alpha_hint_mode_param = nullptr;
     OfxParamHandle input_color_space_param = nullptr;
     OfxParamHandle quantization_mode_param = nullptr;
     OfxParamHandle screen_color_param = nullptr;
@@ -90,7 +88,6 @@ struct InstanceData {
     OfxParamHandle despill_param = nullptr;
     OfxParamHandle despeckle_param = nullptr;
     OfxParamHandle despeckle_size_param = nullptr;
-    OfxParamHandle refiner_param = nullptr;
     OfxParamHandle alpha_black_point_param = nullptr;
     OfxParamHandle alpha_white_point_param = nullptr;
     OfxParamHandle alpha_erode_param = nullptr;
@@ -136,7 +133,6 @@ struct InstanceData {
     bool cached_signature_valid = false;
     InferenceParams cached_params = {};
     std::filesystem::path cached_model_path = {};
-    int cached_alpha_hint_mode = kDefaultAlphaHintMode;
     int cached_screen_color = kDefaultScreenColor;
     double cached_alpha_black_point = 0.0;
     double cached_alpha_white_point = 1.0;
@@ -161,8 +157,12 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
+struct QualityArtifactSelection;
+std::optional<QualityArtifactSelection> select_quality_artifact(
+    const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
+    int input_width = 0, int input_height = 0, int quantization_mode = kQuantizationFp16);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
-                               int input_height = 0, int quantization_mode = kQuantizationAuto);
+                               int input_height = 0, int quantization_mode = kQuantizationFp16);
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
