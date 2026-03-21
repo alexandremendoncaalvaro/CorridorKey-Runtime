@@ -2,16 +2,27 @@
 setlocal
 
 set "ScriptDir=%~dp0"
-set "SrcPath=%ScriptDir%CorridorKey.ofx.bundle"
-set "DistPath=%ScriptDir%dist\CorridorKey.ofx.bundle"
+set "RepoDir=%~dp0..\"
+
+:: Check if running from inside the 'scripts' folder (development) or a release folder
+set "SrcPath=%RepoDir%CorridorKey.ofx.bundle"
+set "DistPath=%RepoDir%dist\CorridorKey.ofx.bundle"
+set "PackageScript=%ScriptDir%package_ofx.ps1"
+
+if not exist "%PackageScript%" (
+    :: Fallback: Running from a release folder where install_plugin.bat is at the root
+    set "SrcPath=%ScriptDir%CorridorKey.ofx.bundle"
+    set "DistPath=%ScriptDir%dist\CorridorKey.ofx.bundle"
+    set "PackageScript=%ScriptDir%scripts\package_ofx.ps1"
+)
 
 set "DstPath=C:\Program Files\Common Files\OFX\Plugins\CorridorKey.ofx.bundle"
 set "CacheFile=%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
 
 echo Installing CorridorKey OFX Plugin...
 echo Packaging plugin bundle...
-if exist "%ScriptDir%scripts\package_ofx.ps1" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%ScriptDir%scripts\package_ofx.ps1"
+if exist "%PackageScript%" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%PackageScript%"
     if errorlevel 1 (
         echo.
         echo ERROR: Packaging failed.
@@ -35,8 +46,8 @@ if not exist "%SrcPath%" (
     echo ERROR: Plugin bundle not found at "%SrcPath%"
     echo.
     echo Expected one of these locations:
-    echo   "%ScriptDir%CorridorKey.ofx.bundle"
-    echo   "%ScriptDir%dist\CorridorKey.ofx.bundle"
+    echo   "%SrcPath%"
+    echo   "%DistPath%"
     echo.
     echo If you extracted a release ZIP, run install_plugin.bat from inside the extracted release folder.
     echo.

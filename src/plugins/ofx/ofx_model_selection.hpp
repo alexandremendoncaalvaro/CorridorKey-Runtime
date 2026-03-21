@@ -52,8 +52,7 @@ inline bool is_fixed_quality_mode(int quality_mode) {
 }
 
 inline int clamp_quality_mode_for_cpu_backend(Backend backend, int quality_mode) {
-    if (backend == Backend::CPU && is_fixed_quality_mode(quality_mode) &&
-        quality_mode != kQualityPreview) {
+    if (backend == Backend::CPU) {
         return kQualityPreview;
     }
     return quality_mode;

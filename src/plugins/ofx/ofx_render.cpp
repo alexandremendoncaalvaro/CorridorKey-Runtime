@@ -180,6 +180,7 @@ class RenderScope {
     ~RenderScope() {
         if (m_data != nullptr) {
             m_data->in_render = false;
+            flush_runtime_panel(m_data);
         }
     }
 
@@ -371,51 +372,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         log_message("render", "Output image data unavailable.");
         set_runtime_error(data, "Output image data is unavailable.", instance);
         return kOfxStatFailed;
-    }
-
-    bool matte_connected = is_clip_connected(data->matte_output_clip);
-    OfxPropertySetHandle matte_props = nullptr;
-    ImageHandleGuard matte_guard{};
-    void* matte_data = nullptr;
-    int matte_row_bytes = 0;
-    std::string matte_depth;
-
-    if (matte_connected && fetch_image(data->matte_output_clip, time, matte_props)) {
-        matte_guard.handle = matte_props;
-        if (g_suites.property->propGetPointer(matte_props, kOfxImagePropData, 0, &matte_data) == kOfxStatOK && matte_data != nullptr) {
-            get_int(matte_props, kOfxImagePropRowBytes, matte_row_bytes);
-            get_string(matte_props, kOfxImageEffectPropPixelDepth, matte_depth);
-        }
-    }
-
-    bool fg_connected = is_clip_connected(data->foreground_output_clip);
-    OfxPropertySetHandle fg_props = nullptr;
-    ImageHandleGuard fg_guard{};
-    void* fg_data = nullptr;
-    int fg_row_bytes = 0;
-    std::string fg_depth;
-
-    if (fg_connected && fetch_image(data->foreground_output_clip, time, fg_props)) {
-        fg_guard.handle = fg_props;
-        if (g_suites.property->propGetPointer(fg_props, kOfxImagePropData, 0, &fg_data) == kOfxStatOK && fg_data != nullptr) {
-            get_int(fg_props, kOfxImagePropRowBytes, fg_row_bytes);
-            get_string(fg_props, kOfxImageEffectPropPixelDepth, fg_depth);
-        }
-    }
-
-    bool comp_connected = is_clip_connected(data->composite_output_clip);
-    OfxPropertySetHandle comp_props = nullptr;
-    ImageHandleGuard comp_guard{};
-    void* comp_data = nullptr;
-    int comp_row_bytes = 0;
-    std::string comp_depth;
-
-    if (comp_connected && fetch_image(data->composite_output_clip, time, comp_props)) {
-        comp_guard.handle = comp_props;
-        if (g_suites.property->propGetPointer(comp_props, kOfxImagePropData, 0, &comp_data) == kOfxStatOK && comp_data != nullptr) {
-            get_int(comp_props, kOfxImagePropRowBytes, comp_row_bytes);
-            get_string(comp_props, kOfxImageEffectPropPixelDepth, comp_depth);
-        }
     }
 
     OfxRectI source_bounds{};
@@ -891,16 +847,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     } else {
         write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth,
                                apply_srgb, lut);
-    }
-
-    if (matte_data != nullptr) {
-        write_matte_output(alpha_view, matte_data, matte_row_bytes, matte_depth, lut);
-    }
-    if (fg_data != nullptr) {
-        write_foreground_output(fg_linear, fg_data, fg_row_bytes, fg_depth, apply_srgb, lut);
-    }
-    if (comp_data != nullptr) {
-        write_processed_output(fg_linear, alpha_view, comp_data, comp_row_bytes, comp_depth, apply_srgb, lut);
     }
 
     const double render_ms =

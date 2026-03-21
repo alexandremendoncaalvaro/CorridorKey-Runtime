@@ -234,26 +234,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
                                      kOfxImageComponentRGBA);
 
-    if (g_suites.image_effect->clipDefine(descriptor, kClipMatteOutput, &clip_props) == kOfxStatOK) {
-        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
-                                         kOfxImageComponentRGBA);
-        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 1,
-                                         kOfxImageComponentAlpha);
-        g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
-    }
-    if (g_suites.image_effect->clipDefine(descriptor, kClipForegroundOutput, &clip_props) == kOfxStatOK) {
-        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
-                                         kOfxImageComponentRGBA);
-        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 1,
-                                         kOfxImageComponentRGB);
-        g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
-    }
-    if (g_suites.image_effect->clipDefine(descriptor, kClipCompositeOutput, &clip_props) == kOfxStatOK) {
-        g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
-                                         kOfxImageComponentRGBA);
-        g_suites.property->propSetInt(clip_props, kOfxImageClipPropOptional, 0, 1);
-    }
-
     OfxParamSetHandle param_set = nullptr;
     if (g_suites.image_effect->getParamSet(descriptor, &param_set) != kOfxStatOK) {
         log_message("describe_in_context", "Failed to get param set.");
@@ -421,10 +401,7 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
     }
 
     const char* output_clips[] = {
-        kOfxImageEffectOutputClipName,
-        kClipMatteOutput,
-        kClipForegroundOutput,
-        kClipCompositeOutput
+        kOfxImageEffectOutputClipName
     };
 
     for (const char* clip_name : output_clips) {
@@ -433,9 +410,7 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
 
         g_suites.property->propSetString(out_args, components_key.c_str(), 0, kOfxImageComponentRGBA);
         g_suites.property->propSetString(out_args, depth_key.c_str(), 0, depth_value);
-        if (std::strcmp(clip_name, kOfxImageEffectOutputClipName) == 0 ||
-            std::strcmp(clip_name, kClipCompositeOutput) == 0 ||
-            std::strcmp(clip_name, kClipForegroundOutput) == 0) {
+        if (std::strcmp(clip_name, kOfxImageEffectOutputClipName) == 0) {
             std::string premult_key = std::string("OfxImageClipPropPreMultiplication_") + clip_name;
             g_suites.property->propSetString(out_args, premult_key.c_str(), 0, kOfxImagePreMultiplied);
         }

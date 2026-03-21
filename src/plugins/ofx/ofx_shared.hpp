@@ -80,9 +80,6 @@ struct InstanceData {
     OfxImageClipHandle source_clip = nullptr;
     OfxImageClipHandle alpha_hint_clip = nullptr;
     OfxImageClipHandle output_clip = nullptr;
-    OfxImageClipHandle matte_output_clip = nullptr;
-    OfxImageClipHandle foreground_output_clip = nullptr;
-    OfxImageClipHandle composite_output_clip = nullptr;
     OfxParamHandle quality_mode_param = nullptr;
     OfxParamHandle output_mode_param = nullptr;
     OfxParamHandle alpha_hint_mode_param = nullptr;
@@ -167,6 +164,7 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
                                int input_height = 0, int quantization_mode = kQuantizationAuto);
 void update_runtime_panel(InstanceData* data);
+void flush_runtime_panel(InstanceData* data);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
 
 OfxStatus on_load();

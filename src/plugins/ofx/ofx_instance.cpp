@@ -454,9 +454,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatFailed;
     }
 
-    g_suites.image_effect->clipGetHandle(instance, kClipMatteOutput, &data->matte_output_clip, nullptr);
-    g_suites.image_effect->clipGetHandle(instance, kClipForegroundOutput, &data->foreground_output_clip, nullptr);
-    g_suites.image_effect->clipGetHandle(instance, kClipCompositeOutput, &data->composite_output_clip, nullptr);
 
     OfxParamSetHandle param_set;
     if (g_suites.image_effect->getParamSet(instance, &param_set) != kOfxStatOK) {
@@ -990,6 +987,13 @@ void update_runtime_panel(InstanceData* data) {
     }
     data->runtime_panel_dirty = false;
     update_runtime_panel_values(data);
+}
+
+void flush_runtime_panel(InstanceData* data) {
+    if (data != nullptr && data->runtime_panel_dirty && !data->in_render) {
+        data->runtime_panel_dirty = false;
+        update_runtime_panel_values(data);
+    }
 }
 
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args) {

@@ -140,7 +140,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[4/5] Assembling release folder..." -ForegroundColor Cyan
-Copy-Item (Join-Path $repoRoot "install_plugin.bat") $installScriptPath -Force
+Copy-Item (Join-Path $repoRoot "scripts\install_plugin.bat") $installScriptPath -Force
 Write-ReleaseReadme -Path $readmePath -Version $Version
 Compress-Archive -Path $releaseDir -DestinationPath $zipPath -CompressionLevel Optimal
 
