@@ -169,7 +169,7 @@ bool directml_provider_available() {
 #if defined(_WIN32)
     return onnxruntime_export_available("OrtSessionOptionsAppendExecutionProvider_DML") ||
            provider_available("DML") || provider_available("DirectML") ||
-           provider_available("DMLExecutionProvider");
+           provider_available("DmlExecutionProvider");
 #else
     return false;
 #endif

@@ -2,6 +2,7 @@
 
 add_executable(test_regression
     test_placeholder.cpp
+    test_regression_dml_provider.cpp
 )
 
 target_link_libraries(test_regression

@@ -122,7 +122,6 @@ Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64D
 
 $copiedUniversalProvider = $false
 foreach ($provider in @(
-        "onnxruntime_providers_dml.dll",
         "onnxruntime_providers_winml.dll",
         "onnxruntime_providers_openvino.dll"
     )) {
@@ -132,10 +131,19 @@ foreach ($provider in @(
     }
 }
 if (-not $copiedUniversalProvider) {
+    # Check if DirectML is available even if no separate provider DLL exists
+    # (since it can be built into onnxruntime.dll in some packages)
     $supportedBackends = Get-RuntimeSupportedBackends -RuntimeDir $win64Dir
     $hasUniversalGpuRuntime = $supportedBackends -contains "dml" -or
         $supportedBackends -contains "winml" -or
         $supportedBackends -contains "openvino"
+    if (-not $hasUniversalGpuRuntime) {
+        if (Test-Path (Join-Path $win64Dir "DirectML.dll")) {
+             Write-Host "DirectML.dll is present, assuming DirectML support is built into onnxruntime.dll"
+             $hasUniversalGpuRuntime = $true
+        }
+    }
+
     if (-not $hasUniversalGpuRuntime) {
         Write-Warning "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot. AMD/Intel systems will fall back to CPU."
     } else {

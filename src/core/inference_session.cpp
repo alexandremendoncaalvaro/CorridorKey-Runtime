@@ -104,6 +104,9 @@ OrtDmlAppendExecutionProviderFn resolve_directml_append_function() {
 }
 
 void append_directml_execution_provider(Ort::SessionOptions& session_options) {
+    session_options.DisableMemPattern();
+    session_options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+
     if (auto append = resolve_directml_append_function(); append != nullptr) {
         debug_log("Adding DirectML execution provider via exported ORT DML API");
         Ort::ThrowOnError(append(session_options, 0));
@@ -112,7 +115,7 @@ void append_directml_execution_provider(Ort::SessionOptions& session_options) {
 
     debug_log("Adding DirectML execution provider via generic provider options");
     std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
-    session_options.AppendExecutionProvider("DML", dml_options);
+    session_options.AppendExecutionProvider("DmlExecutionProvider", dml_options);
 }
 #endif
 
