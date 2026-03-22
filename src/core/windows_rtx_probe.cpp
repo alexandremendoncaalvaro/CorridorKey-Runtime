@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <corridorkey/detail/constants.hpp>
+#include <corridorkey/engine.hpp>
 #include <string_view>
 
 #if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
@@ -151,7 +153,7 @@ bool onnxruntime_export_available(const char* export_name) {
 
 bool tensorrt_rtx_provider_available() {
 #if defined(_WIN32)
-    return provider_available("NvTensorRTRTXExecutionProvider");
+    return provider_available(std::string(corridorkey::detail::providers::TENSORRT));
 #else
     return false;
 #endif
@@ -159,7 +161,7 @@ bool tensorrt_rtx_provider_available() {
 
 bool cuda_provider_available() {
 #if defined(_WIN32)
-    return provider_available("CUDAExecutionProvider");
+    return provider_available(std::string(corridorkey::detail::providers::CUDA));
 #else
     return false;
 #endif
@@ -169,7 +171,7 @@ bool directml_provider_available() {
 #if defined(_WIN32)
     return onnxruntime_export_available("OrtSessionOptionsAppendExecutionProvider_DML") ||
            provider_available("DML") || provider_available("DirectML") ||
-           provider_available("DmlExecutionProvider");
+           provider_available(std::string(corridorkey::detail::providers::DIRECTML));
 #else
     return false;
 #endif
@@ -177,7 +179,7 @@ bool directml_provider_available() {
 
 bool winml_provider_available() {
 #if defined(_WIN32)
-    return provider_available("WinML") || provider_available("WinMLExecutionProvider");
+    return provider_available("WinML") || provider_available(std::string(corridorkey::detail::providers::WINML));
 #else
     return false;
 #endif
@@ -185,7 +187,7 @@ bool winml_provider_available() {
 
 bool openvino_provider_available() {
 #if defined(_WIN32)
-    return provider_available("OpenVINO") || provider_available("OpenVINOExecutionProvider");
+    return provider_available("OpenVINO") || provider_available(std::string(corridorkey::detail::providers::OPENVINO));
 #else
     return false;
 #endif

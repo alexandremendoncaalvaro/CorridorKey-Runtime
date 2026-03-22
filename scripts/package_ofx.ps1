@@ -148,6 +148,27 @@ if (-not $copiedUniversalProvider) {
         Write-Warning "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot. AMD/Intel systems will fall back to CPU."
     } else {
         Write-Host "Detected packaged universal GPU backend(s): $($supportedBackends -join ', ')"
+        
+        # FINAL SENIOR VALIDATION: Run the newly built binary with the staged DLLs to ensure it can actually LOAD DirectML
+        Write-Host "Validating DirectML backend loadability..." -ForegroundColor Cyan
+        $cliPath = Join-Path $win64Dir "corridorkey.exe"
+        if (Test-Path $cliPath) {
+            $envPathOld = $env:PATH
+            try {
+                # Temporarily add staging dir to PATH so it finds the DLLs
+                $env:PATH = "$win64Dir;$envPathOld"
+                $infoOutput = & $cliPath info 2>&1 | Out-String
+                if ($infoOutput -match "directml") {
+                    Write-Host "[VERIFIED] DirectML backend is functional in the package." -ForegroundColor Green
+                } else {
+                    Write-Error "CRITICAL: DirectML backend validation failed! 'corridorkey info' does not report directml as supported."
+                    Write-Error "Output was: $infoOutput"
+                    exit 1
+                }
+            } finally {
+                $env:PATH = $envPathOld
+            }
+        }
     }
 }
 

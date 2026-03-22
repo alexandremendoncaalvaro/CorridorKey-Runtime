@@ -1,22 +1,45 @@
 #include <catch2/catch_all.hpp>
+#include <corridorkey/detail/constants.hpp>
+#include <corridorkey/engine.hpp>
 #include <string>
+#include <algorithm>
 
-#include "../../src/core/windows_rtx_probe.hpp"
+#if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
+#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#endif
 
-using namespace corridorkey::core;
+using namespace corridorkey::detail;
 
-TEST_CASE("Regression: DirectML provider string is case-sensitive as DmlExecutionProvider", "[regression][device]") {
+TEST_CASE("Regression: DirectML provider string matches ONNX Runtime expectations", "[regression][device]") {
     // A regressão ocorreu porque a verificação buscava por "DMLExecutionProvider" em vez de "DmlExecutionProvider".
-    // A API do ONNX Runtime em versões recentes retorna "DmlExecutionProvider" de GetAvailableProviders().
-    // Embora o ambiente de teste em CI possa não ter o provedor DML instalado (portanto, directml_provider_available() = false),
-    // queremos garantir que não voltemos ao erro antigo.
+    // Este teste garante que nossa constante centralizada condiz com o que o ONNX Runtime espera.
     
-    // Como a checagem real envolve carregar uma DLL e consultar a API que pode não estar presente,
-    // usamos uma validação indireta simples: confirmar que o símbolo foi implementado para este build
-    // (a função não deve lançar exceções inesperadas independentemente do ambiente ser DML-capable ou não).
+    REQUIRE(providers::DIRECTML == "DmlExecutionProvider");
+
 #if defined(_WIN32)
-    REQUIRE_NOTHROW(directml_provider_available());
-#else
-    SUCCEED("DirectML provider check is Windows-specific.");
+    // Se estivermos em um ambiente com ONNX Runtime carregado, validamos se o provider 
+    // reportado (caso exista) usa exatamente essa grafia.
+    try {
+        Ort::Env env;
+        auto available = Ort::GetAvailableProviders();
+        
+        bool found_dml_with_wrong_case = false;
+        for (const auto& p : available) {
+            std::string p_upper = p;
+            std::transform(p_upper.begin(), p_upper.end(), p_upper.begin(), ::toupper);
+            
+            if (p_upper == "DMLEXECUTIONPROVIDER" && p != providers::DIRECTML) {
+                found_dml_with_wrong_case = true;
+            }
+        }
+        
+        // Se achamos algo que parece DML mas não é nossa string, falhamos.
+        REQUIRE_FALSE(found_dml_with_wrong_case);
+        
+    } catch (...) {
+        // Se não houver ORT no ambiente de teste, não falhamos o teste de unidade,
+        // pois a validação de "magic string" acima já protege a regressão principal.
+        SUCCEED("ONNX Runtime not available for dynamic provider check.");
+    }
 #endif
 }

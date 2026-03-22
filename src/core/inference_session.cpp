@@ -1,5 +1,6 @@
 #include "inference_session.hpp"
 
+#include <corridorkey/detail/constants.hpp>
 #include <cstdlib>
 #include <exception>
 #include <new>
@@ -114,8 +115,8 @@ void append_directml_execution_provider(Ort::SessionOptions& session_options) {
     }
 
     debug_log("Adding DirectML execution provider via generic provider options");
-    std::unordered_map<std::string, std::string> dml_options = {{"device_id", "0"}};
-    session_options.AppendExecutionProvider("DmlExecutionProvider", dml_options);
+    std::unordered_map<std::string, std::string> dml_options = {{std::string(corridorkey::detail::session_options::DEVICE_ID), "0"}};
+    session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::DIRECTML), dml_options);
 }
 #endif
 
