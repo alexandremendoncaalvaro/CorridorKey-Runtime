@@ -163,8 +163,12 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode) {
     std::vector<QualityArtifactSelection> candidates;
-    const int requested_resolution =
+    int requested_resolution =
         resolve_target_resolution(quality_mode, input_width, input_height);
+
+    if (backend == Backend::DirectML && requested_resolution > 1536) {
+        requested_resolution = 1536;
+    }
 
     constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
     for (int resolution : kFallbackResolutions) {
