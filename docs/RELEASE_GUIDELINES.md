@@ -39,8 +39,12 @@ Raw `.zip` packages for manual installation must follow the same naming pattern.
 All releases must be built strictly through standardized scripts to eliminate manual errors and prevent crossing dependencies (e.g., packaging RTX DLLs into a DirectML installer).
 
 ### Windows Build Steps
-1. **Configure CMake:** Use the defined `CMakePresets.json` (e.g., `release` preset).
-2. **Build:** Run Ninja/MSBuild.
+All Windows binaries must be built using the appropriate developer environment (e.g., VS Code or x64 Native Tools Command Prompt) to ensure MSVC headers are available, avoiding `Cannot open include file` errors in automated agents.
+
+1. **Compile:** Build the project using the CMake `release` preset:
+   ```powershell
+   cmake --build --preset release
+   ```
 3. **Package RTX:**
    ```powershell
    .\scripts\package_ofx_installer_windows.ps1 -ReleaseSuffix "RTX" -OrtRoot "vendor\onnxruntime-windows-rtx"
