@@ -56,7 +56,13 @@ All releases must be built strictly through standardized scripts to eliminate ma
 
 Release notes must be purely informational, focusing strictly on what the user needs to know. Exclude historical speculation, internal engineering debates, or formatting like emojis. Documentation lives strictly in Git history; the release text is an instruction manual for the update.
 
-Use the exact template below for every release:
+## 4. GitHub Release Publishing
+
+The GitHub release metadata requires a standardized title to maintain consistency across the page.
+- **Release Title:** `CorridorKey Resolve OFX vX.Y.Z (Windows)` (For Windows builds)
+
+Use the exact template below for every release description:
+
 
 ```markdown
 ## Overview
