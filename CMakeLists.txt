@@ -13,9 +13,14 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.4.9
+    VERSION 0.4.11
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
+)
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/corridorkey/version.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/include/corridorkey/version.hpp
 )
 
 if(WIN32 AND MSVC)
@@ -291,6 +296,7 @@ include(CTest)
 add_library(corridorkey_headers INTERFACE)
 target_include_directories(corridorkey_headers INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> # Allow #include "vendor/..."
     $<INSTALL_INTERFACE:include>
 )
