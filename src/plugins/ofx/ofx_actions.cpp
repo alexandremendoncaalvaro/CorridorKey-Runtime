@@ -336,11 +336,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_group_param(param_set, "alpha_group", "Alpha", true);
     define_info_param(
-        param_set, "alpha_hint_info", "Hint Input",
-        "RGBA uses A. Alpha uses its single channel. RGB falls back to R.",
-        "The Alpha Hint clip accepts RGBA, Alpha, or RGB. RGBA uses the alpha channel. Alpha "
-        "uses the single provided channel directly. RGB falls back to the red channel. You must "
-        "connect an external mask or alpha source to the hint pin.",
+        param_set, "alpha_hint_info", "Mask Input Guide",
+        "Accepts Alpha Channels (transparency) or Luma Mattes (black & white).",
+        "CorridorKey dynamically detects the input type. You can supply an Alpha channel or a "
+        "solid Luma Matte (it will read the luminance).\n\n"
+        "Fusion: Connect your matte to the secondary 'Alpha Hint' pin.\n"
+        "Color Page: Right-click this node -> 'Add OFX Input', then route a Qualifier or 3D Keyer "
+        "output into the new green input.",
         "alpha_group");
 
     define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
