@@ -812,7 +812,12 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     bool current_backend_matches = backend_matches_request(data->device, requested_device);
 
     for (const auto& selection : selections) {
-        if (current_backend_matches && selection.executable_model_path == data->model_path &&
+        const bool session_alive =
+            data->use_runtime_server
+                ? (data->runtime_client != nullptr && data->runtime_client->has_session())
+                : (data->engine != nullptr);
+        if (current_backend_matches && session_alive &&
+            selection.executable_model_path == data->model_path &&
             selection.effective_resolution == data->active_resolution) {
             data->active_quality_mode = requested_quality_mode;
             data->requested_resolution = requested_resolution;
