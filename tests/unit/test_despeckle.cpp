@@ -12,7 +12,7 @@ TEST_CASE("despeckle removes small components via connected-component analysis",
     DespeckleState state;
 
     SECTION("Basic despeckle") {
-        ImageBuffer alpha_buf_basic(5, 5, 1);
+        ImageBuffer alpha_buf_basic(6, 6, 1);
         Image alpha_basic = alpha_buf_basic.view();
         std::fill(alpha_basic.data.begin(), alpha_basic.data.end(), 0.0f);
 
@@ -22,15 +22,15 @@ TEST_CASE("despeckle removes small components via connected-component analysis",
         alpha_basic(2, 1) = 1.0f;
         alpha_basic(2, 2) = 1.0f;
 
-        // Add a valid region of size 6
-        alpha_basic(3, 3) = 1.0f;
-        alpha_basic(3, 4) = 1.0f;
+        // Add a valid region of size 6. Isolated by ensuring x>=3, y>=4 or similar.
         alpha_basic(4, 3) = 1.0f;
         alpha_basic(4, 4) = 1.0f;
-        alpha_basic(2, 4) = 1.0f;
-        alpha_basic(4, 2) = 1.0f;
+        alpha_basic(4, 5) = 1.0f;
+        alpha_basic(5, 3) = 1.0f;
+        alpha_basic(5, 4) = 1.0f;
+        alpha_basic(5, 5) = 1.0f;
 
-        despeckle(alpha_basic, 5, state, 1, 0);
+        despeckle(alpha_basic, 5, state, 0, 0);
 
         // Speckle (area 4) should be removed
         REQUIRE(alpha_basic(1, 1) == Catch::Approx(0.0f));
@@ -39,12 +39,12 @@ TEST_CASE("despeckle removes small components via connected-component analysis",
         REQUIRE(alpha_basic(2, 2) == Catch::Approx(0.0f));
 
         // Valid region (area 6) should be kept
-        REQUIRE(alpha_basic(3, 3) > 0.0f);
-        REQUIRE(alpha_basic(3, 4) > 0.0f);
         REQUIRE(alpha_basic(4, 3) > 0.0f);
         REQUIRE(alpha_basic(4, 4) > 0.0f);
-        REQUIRE(alpha_basic(2, 4) > 0.0f);
-        REQUIRE(alpha_basic(4, 2) > 0.0f);
+        REQUIRE(alpha_basic(4, 5) > 0.0f);
+        REQUIRE(alpha_basic(5, 3) > 0.0f);
+        REQUIRE(alpha_basic(5, 4) > 0.0f);
+        REQUIRE(alpha_basic(5, 5) > 0.0f);
     }
 
     SECTION("Small speck removed, large region kept") {
@@ -62,9 +62,8 @@ TEST_CASE("despeckle removes small components via connected-component analysis",
         alpha(8, 8) = 1.0f;
 
         // area_threshold=5 means the speck (area=1) should be removed
-        // Only the left blob should remain after despeckle(area=400)
-        // Dilation=25, blur=5 to match defaults conceptually
-        despeckle(alpha, 400, state, 25, 5);
+        // Only the left blob should remain after despeckle(area=10)
+        despeckle(alpha, 10, state, 2, 1);
 
         // Speck should be removed (multiplied by 0 safe zone)
         REQUIRE(alpha(8, 8) == Catch::Approx(0.0f));

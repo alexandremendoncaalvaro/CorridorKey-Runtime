@@ -4,6 +4,7 @@
 #include <cmath>
 #include <numeric>
 #include <vector>
+#include <iostream>
 
 #include "common/parallel_for.hpp"
 
@@ -43,7 +44,7 @@ void find_components(const std::vector<uint8_t>& mask, int w, int h, std::vector
                      std::vector<int>& areas) {
     int n = w * h;
     UnionFind uf(n);
-    labels.resize(n, -1);
+    labels.assign(n, -1);
 
     // First pass: label and merge
     for (int y = 0; y < h; ++y) {
