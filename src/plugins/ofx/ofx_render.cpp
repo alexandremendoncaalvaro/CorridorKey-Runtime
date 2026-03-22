@@ -314,6 +314,20 @@ void write_source_matte_output(const Image& rgb_srgb, const Image& alpha, void* 
     }
 }
 
+void bypass_with_source(const void* source_data, void* output_data, int width, int height,
+                        int source_row_bytes, int output_row_bytes,
+                        const std::string& source_depth) {
+    const int pixel_bytes = is_depth(source_depth, kOfxBitDepthFloat) ? 16 : 4;
+    const int copy_bytes = width * pixel_bytes;
+    for (int y = 0; y < height; ++y) {
+        const auto* src_row = reinterpret_cast<const unsigned char*>(source_data) +
+                              static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(source_row_bytes);
+        auto* dst_row = reinterpret_cast<unsigned char*>(output_data) +
+                        static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(output_row_bytes);
+        std::memcpy(dst_row, src_row, static_cast<size_t>(copy_bytes));
+    }
+}
+
 }  // namespace
 
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
@@ -510,7 +524,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         if (is_fixed_quality_mode(quality_mode)) {
             log_message("render", quality_error);
             set_runtime_error(data, quality_error, instance);
-            return kOfxStatFailed;
+            bypass_with_source(source_data, output_data, width, height,
+                               source_row_bytes, output_row_bytes, source_depth);
+            return kOfxStatOK;
         }
         log_message("render", quality_error + " Using current engine.");
     }
@@ -599,20 +615,34 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     if (!hint_from_clip) {
-        const std::string message = "No valid alpha hint clip connected. Please connect the Alpha Hint pin.";
+        const std::string message = "Waiting for Alpha Hint connection.";
         log_message("render", message);
-        set_runtime_error(data, message, instance);
+        
+        if (data != nullptr) {
+            data->last_error = message;
+            data->cached_result_valid = false;
+            data->runtime_panel_dirty = true;
+            update_runtime_panel(data);
+        }
 
         ImageBuffer alpha_buf(width, height, 1);
         ImageBuffer fg_buf(width, height, 3);
         auto alpha_view = alpha_buf.view();
         auto fg_linear = fg_buf.view();
+        const SrgbLut& lut = SrgbLut::instance();
+        
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
-                alpha_view(y, x) = 0.0f;
-                fg_linear(y, x, 0) = 0.0f;
-                fg_linear(y, x, 1) = 0.0f;
-                fg_linear(y, x, 2) = 0.0f;
+                alpha_view(y, x) = 1.0f;
+                if (swap_screen) {
+                    fg_linear(y, x, 0) = lut.to_linear(rgb_view(y, x, 0));
+                    fg_linear(y, x, 1) = lut.to_linear(rgb_view(y, x, 2));
+                    fg_linear(y, x, 2) = lut.to_linear(rgb_view(y, x, 1));
+                } else {
+                    fg_linear(y, x, 0) = lut.to_linear(rgb_view(y, x, 0));
+                    fg_linear(y, x, 1) = lut.to_linear(rgb_view(y, x, 1));
+                    fg_linear(y, x, 2) = lut.to_linear(rgb_view(y, x, 2));
+                }
             }
         }
         
@@ -701,7 +731,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             log_message("render",
                         std::string("Engine processing failed: ") + result.error().message);
             set_runtime_error(data, result.error().message, instance);
-            return kOfxStatFailed;
+            bypass_with_source(source_data, output_data, width, height,
+                               source_row_bytes, output_row_bytes, source_depth);
+            return kOfxStatOK;
         }
 
         DeviceInfo effective_device = data->use_runtime_server
