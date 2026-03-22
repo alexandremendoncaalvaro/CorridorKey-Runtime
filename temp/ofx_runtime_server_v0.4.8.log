@@ -1,0 +1,702 @@
+event=server_start pid=5812 port=43694
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=prepare_session protocol_version=1
+event=request_completed command=prepare_session success=1 detail=ok
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=request_received command=health protocol_version=1
+event=request_completed command=health success=1 detail=ok
+event=request_received command=render_frame protocol_version=1
+event=request_completed command=render_frame success=0 detail=ONNX Runtime execution failed: Non-zero status code returned while running MatMul node. Name:'/model/encoder/blocks.0/attn/MatMul' Status Message: E:\_work\1\s\onnxruntime\core\providers\dml\DmlExecutionProvider\src\MLOperatorAuthorImpl.cpp(2508)\onnxruntime.dll!00007FFF7D2AC215: (caller: 00007FFF7D2AB87F) Exception(3) tid(13f8) 80070057 The parameter is incorrect.
+
+event=server_idle_exit
+event=server_stop

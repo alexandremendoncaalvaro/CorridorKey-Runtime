@@ -20,6 +20,8 @@ struct WindowsGpuInfo {
     bool winml_available = false;
     bool openvino_available = false;
     bool is_rtx = false;
+    int compute_capability_major = 0;
+    int compute_capability_minor = 0;
 };
 
 CORRIDORKEY_API std::vector<WindowsGpuInfo> list_windows_gpus();

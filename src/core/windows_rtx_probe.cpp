@@ -71,33 +71,58 @@ bool has_rtx_branding(const std::string& adapter_name) {
     return upper_copy(adapter_name).find("RTX") != std::string::npos;
 }
 
-std::optional<std::string> query_driver_version_for_gpu(const std::string& adapter_name) {
-    std::string command = "nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>NUL";
+struct NvidiaQueryData {
+    std::string driver_version;
+    int compute_major = 0;
+    int compute_minor = 0;
+};
+
+std::optional<NvidiaQueryData> query_nvidia_gpu_properties(const std::string& adapter_name) {
+    std::string command = "nvidia-smi --query-gpu=name,driver_version,compute_cap --format=csv,noheader 2>NUL";
     FILE* pipe = _popen(command.c_str(), "r");
     if (pipe == nullptr) {
         return std::nullopt;
     }
 
     std::array<char, 512> buffer{};
-    std::optional<std::string> version = std::nullopt;
+    std::optional<NvidiaQueryData> result = std::nullopt;
     while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
         std::string line = trim_copy(buffer.data());
-        auto separator = line.find(',');
-        if (separator == std::string::npos) {
+        size_t first_comma = line.find(',');
+        if (first_comma == std::string::npos) {
             continue;
         }
 
-        std::string queried_name = trim_copy(line.substr(0, separator));
-        std::string queried_driver = trim_copy(line.substr(separator + 1));
+        size_t second_comma = line.find(',', first_comma + 1);
+        if (second_comma == std::string::npos) {
+            continue;
+        }
+
+        std::string queried_name = trim_copy(line.substr(0, first_comma));
+        std::string queried_driver = trim_copy(line.substr(first_comma + 1, second_comma - first_comma - 1));
+        std::string queried_cap = trim_copy(line.substr(second_comma + 1));
+
         if (queried_name == adapter_name) {
-            version = queried_driver;
+            NvidiaQueryData data;
+            data.driver_version = queried_driver;
+            size_t dot_pos = queried_cap.find('.');
+            if (dot_pos != std::string::npos) {
+                try {
+                    data.compute_major = std::stoi(trim_copy(queried_cap.substr(0, dot_pos)));
+                    data.compute_minor = std::stoi(trim_copy(queried_cap.substr(dot_pos + 1)));
+                } catch (...) {
+                    // Ignore parse errors
+                }
+            }
+            result = data;
             break;
         }
     }
 
     _pclose(pipe);
-    return version;
+    return result;
 }
+
 
 bool provider_available(const std::string& provider_name) {
     try {
@@ -208,12 +233,21 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
 
         if (info.vendor_id == kNvidiaVendorId) {
             info.cuda_available = cuda_available;
-            info.tensorrt_rtx_available = info.is_rtx && trt_available;
 
-            auto driver = query_driver_version_for_gpu(info.adapter_name);
-            if (driver.has_value()) {
+            auto props = query_nvidia_gpu_properties(info.adapter_name);
+            if (props.has_value()) {
                 info.driver_query_available = true;
-                info.driver_version = *driver;
+                info.driver_version = props->driver_version;
+                info.compute_capability_major = props->compute_major;
+                info.compute_capability_minor = props->compute_minor;
+                
+                // TensorRT RTX EP requires CC 8.6, 8.9, 12.0 and above.
+                bool cc_supported = (info.compute_capability_major > 8) || 
+                                    (info.compute_capability_major == 8 && info.compute_capability_minor >= 6);
+                
+                info.tensorrt_rtx_available = info.is_rtx && trt_available && cc_supported;
+            } else {
+                info.tensorrt_rtx_available = false; // Disable if we can't verify compute capability
             }
         } else if (info.vendor_id == kIntelVendorId) {
             // Intel specific optimizations (OpenVINO)
