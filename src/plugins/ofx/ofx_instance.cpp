@@ -103,7 +103,7 @@ EngineCreateOptions ofx_engine_options(const DeviceInfo& requested_device) {
     EngineCreateOptions options;
     if (requested_device.backend != Backend::CPU) {
         options.allow_cpu_fallback = false;
-        options.disable_cpu_ep_fallback = true;
+        options.disable_cpu_ep_fallback = false;
     }
     return options;
 }
