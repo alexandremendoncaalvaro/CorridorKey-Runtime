@@ -11,6 +11,8 @@ add_executable(test_integration
     test_exr_roundtrip.cpp
     test_ofx_runtime_client.cpp
     test_ofx_runtime_service.cpp
+    test_ofx_plugin_exceptions.cpp
+    test_job_orchestrator.cpp
     test_png_roundtrip.cpp
     test_video_roundtrip.cpp
     test_post_process_chain.cpp
@@ -24,6 +26,8 @@ target_link_libraries(test_integration
         corridorkey_core_static
         Catch2::Catch2WithMain
 )
+
+target_include_directories(test_integration PRIVATE ${PROJECT_SOURCE_DIR}/vendor/openfx/include)
 
 corridorkey_stage_ort_runtime(test_integration)
 

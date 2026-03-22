@@ -2,6 +2,7 @@
 
 add_executable(test_e2e
     test_full_pipeline.cpp
+    test_cli_flags.cpp
 )
 
 target_link_libraries(test_e2e
@@ -19,6 +20,8 @@ else()
 endif()
 
 target_compile_definitions(test_e2e PRIVATE PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(test_e2e PRIVATE CLI_EXECUTABLE_PATH="$<TARGET_FILE:corridorkey_cli>")
 
 add_test(NAME e2e_tests COMMAND test_e2e)
 set_tests_properties(e2e_tests PROPERTIES LABELS "e2e")
+add_dependencies(test_e2e corridorkey_cli)

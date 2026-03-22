@@ -12,6 +12,7 @@ add_executable(test_unit
     test_device_selection.cpp
     test_device_detection.cpp
     test_inference_session.cpp
+    test_local_ipc.cpp
     test_ofx_image_utils.cpp
     test_ofx_model_selection.cpp
     test_ofx_runtime_panel.cpp
