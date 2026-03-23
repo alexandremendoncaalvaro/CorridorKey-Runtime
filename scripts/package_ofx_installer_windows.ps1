@@ -157,7 +157,7 @@ $escapedInstallerPath = $installerPath.Replace('\', '\\')
 $nsiScript = @"
 Unicode True
 RequestExecutionLevel admin
-SetCompressor /SOLID lzma
+SetCompressor /SOLID zlib
 Name "CorridorKey Resolve OFX $Version"
 OutFile "$escapedInstallerPath"
 InstallDir "`$PROGRAMFILES64\CorridorKey Resolve OFX"

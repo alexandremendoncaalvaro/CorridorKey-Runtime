@@ -11,14 +11,9 @@
 using namespace corridorkey::detail;
 
 TEST_CASE("Regression: DirectML provider string matches ONNX Runtime expectations", "[regression][device]") {
-    // A regressão ocorreu porque a verificação buscava por "DMLExecutionProvider" em vez de "DmlExecutionProvider".
-    // Este teste garante que nossa constante centralizada condiz com o que o ONNX Runtime espera.
-    
     REQUIRE(providers::DIRECTML == "DmlExecutionProvider");
 
 #if defined(_WIN32)
-    // Se estivermos em um ambiente com ONNX Runtime carregado, validamos se o provider 
-    // reportado (caso exista) usa exatamente essa grafia.
     try {
         Ort::Env env;
         auto available = Ort::GetAvailableProviders();
@@ -33,12 +28,9 @@ TEST_CASE("Regression: DirectML provider string matches ONNX Runtime expectation
             }
         }
         
-        // Se achamos algo que parece DML mas não é nossa string, falhamos.
         REQUIRE_FALSE(found_dml_with_wrong_case);
         
     } catch (...) {
-        // Se não houver ORT no ambiente de teste, não falhamos o teste de unidade,
-        // pois a validação de "magic string" acima já protege a regressão principal.
         SUCCEED("ONNX Runtime not available for dynamic provider check.");
     }
 #endif

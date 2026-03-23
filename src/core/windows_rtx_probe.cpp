@@ -243,9 +243,9 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
                 info.compute_capability_major = props->compute_major;
                 info.compute_capability_minor = props->compute_minor;
                 
-                // TensorRT RTX EP requires CC 8.6, 8.9, 12.0 and above.
-                bool cc_supported = (info.compute_capability_major > 8) || 
-                                    (info.compute_capability_major == 8 && info.compute_capability_minor >= 6);
+                // TensorRT RTX EP requires CC 7.5 (Turing) and above for predictable performance.
+                bool cc_supported = (info.compute_capability_major > 7) || 
+                                    (info.compute_capability_major == 7 && info.compute_capability_minor >= 5);
                 
                 info.tensorrt_rtx_available = info.is_rtx && trt_available && cc_supported;
             } else {

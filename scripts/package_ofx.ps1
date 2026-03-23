@@ -116,6 +116,7 @@ Assert-FileExists -Path $runtimeServerBinary -Message "Runtime server binary not
 Copy-Item $pluginBinary $win64Dir -Force
 Copy-Item $runtimeServerBinary $win64Dir -Force
 
+Write-Host "Staging ONNX Runtime core DLLs from $OrtRoot" -ForegroundColor Cyan
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
 Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir | Out-Null
@@ -149,8 +150,8 @@ if (-not $copiedUniversalProvider) {
     } else {
         Write-Host "Detected packaged universal GPU backend(s): $($supportedBackends -join ', ')"
         
-        # FINAL SENIOR VALIDATION: Run the newly built binary with the staged DLLs to ensure it can actually LOAD DirectML
-        Write-Host "Validating DirectML backend loadability..." -ForegroundColor Cyan
+        # FINAL SENIOR VALIDATION: Run the newly built binary with the staged DLLs to ensure it can actually LOAD backends
+        Write-Host "Validating packaged backends loadability..." -ForegroundColor Cyan
         $cliPath = Join-Path $win64Dir "corridorkey.exe"
         if (Test-Path $cliPath) {
             $envPathOld = $env:PATH
@@ -158,10 +159,13 @@ if (-not $copiedUniversalProvider) {
                 # Temporarily add staging dir to PATH so it finds the DLLs
                 $env:PATH = "$win64Dir;$envPathOld"
                 $infoOutput = & $cliPath info 2>&1 | Out-String
-                if ($infoOutput -match "directml") {
-                    Write-Host "[VERIFIED] DirectML backend is functional in the package." -ForegroundColor Green
+                
+                $requiredBackend = if ($OrtRoot -match "rtx") { "tensorrt" } else { "directml" }
+                
+                if ($infoOutput -match $requiredBackend) {
+                    Write-Host "[VERIFIED] $requiredBackend backend is functional in the package." -ForegroundColor Green
                 } else {
-                    Write-Error "CRITICAL: DirectML backend validation failed! 'corridorkey info' does not report directml as supported."
+                    Write-Error "CRITICAL: Backend validation failed! 'corridorkey info' does not report $requiredBackend as supported."
                     Write-Error "Output was: $infoOutput"
                     exit 1
                 }

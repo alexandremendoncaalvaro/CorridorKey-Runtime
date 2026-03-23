@@ -71,51 +71,61 @@ DeviceInfo auto_detect() {
     auto gpus = core::list_windows_gpus();
 
     // Tier 1: NVIDIA RTX (Best Performance)
-    for (const auto& gpu : gpus) {
+    for (size_t i = 0; i < gpus.size(); ++i) {
+        const auto& gpu = gpus[i];
         if (gpu.tensorrt_rtx_available) {
             device.name = gpu.adapter_name;
             device.backend = Backend::TensorRT;
             device.available_memory_mb = gpu.dedicated_memory_mb;
+            device.device_index = static_cast<int>(i);
             return device;
         }
     }
 
     // Tier 2: Windows ML (Modern Universal / NPU)
-    for (const auto& gpu : gpus) {
+    for (size_t i = 0; i < gpus.size(); ++i) {
+        const auto& gpu = gpus[i];
         if (gpu.winml_available) {
             device.name = gpu.adapter_name + " (Windows AI)";
             device.backend = Backend::WindowsML;
             device.available_memory_mb = gpu.dedicated_memory_mb;
+            device.device_index = static_cast<int>(i);
             return device;
         }
     }
 
     // Tier 3: Intel OpenVINO (NPU/iGPU)
-    for (const auto& gpu : gpus) {
+    for (size_t i = 0; i < gpus.size(); ++i) {
+        const auto& gpu = gpus[i];
         if (gpu.openvino_available) {
             device.name = gpu.adapter_name + " (OpenVINO)";
             device.backend = Backend::OpenVINO;
             device.available_memory_mb = gpu.dedicated_memory_mb;
+            device.device_index = static_cast<int>(i);
             return device;
         }
     }
 
     // Tier 4: NVIDIA GTX (CUDA Fallback)
-    for (const auto& gpu : gpus) {
+    for (size_t i = 0; i < gpus.size(); ++i) {
+        const auto& gpu = gpus[i];
         if (gpu.cuda_available) {
             device.name = gpu.adapter_name + " (CUDA)";
             device.backend = Backend::CUDA;
             device.available_memory_mb = gpu.dedicated_memory_mb;
+            device.device_index = static_cast<int>(i);
             return device;
         }
     }
 
     // Tier 5: AMD / Universal (DirectML Fallback)
-    for (const auto& gpu : gpus) {
+    for (size_t i = 0; i < gpus.size(); ++i) {
+        const auto& gpu = gpus[i];
         if (gpu.directml_available) {
             device.name = gpu.adapter_name + " (DirectML)";
             device.backend = Backend::DirectML;
             device.available_memory_mb = gpu.dedicated_memory_mb;
+            device.device_index = static_cast<int>(i);
             return device;
         }
     }
@@ -151,29 +161,30 @@ std::vector<DeviceInfo> list_devices() {
     }
 #elif defined(_WIN32)
     auto gpus = core::list_windows_gpus();
-    for (const auto& gpu : gpus) {
+    for (size_t i = 0; i < gpus.size(); ++i) {
+        const auto& gpu = gpus[i];
         if (gpu.tensorrt_rtx_available) {
-            devices.push_back(
-                {gpu.adapter_name + " (TensorRT)", gpu.dedicated_memory_mb, Backend::TensorRT});
+            devices.push_back({gpu.adapter_name + " (TensorRT)", gpu.dedicated_memory_mb,
+                               Backend::TensorRT, static_cast<int>(i)});
         }
         if (gpu.cuda_available) {
-            devices.push_back(
-                {gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb, Backend::CUDA});
+            devices.push_back({gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb, Backend::CUDA,
+                               static_cast<int>(i)});
         }
         if (gpu.directml_available) {
-            devices.push_back(
-                {gpu.adapter_name + " (DirectML)", gpu.dedicated_memory_mb, Backend::DirectML});
+            devices.push_back({gpu.adapter_name + " (DirectML)", gpu.dedicated_memory_mb,
+                               Backend::DirectML, static_cast<int>(i)});
         }
         if (gpu.winml_available) {
-            devices.push_back(
-                {gpu.adapter_name + " (Windows AI)", gpu.dedicated_memory_mb, Backend::WindowsML});
+            devices.push_back({gpu.adapter_name + " (Windows AI)", gpu.dedicated_memory_mb,
+                               Backend::WindowsML, static_cast<int>(i)});
         }
         if (gpu.openvino_available) {
-            devices.push_back(
-                {gpu.adapter_name + " (OpenVINO)", gpu.dedicated_memory_mb, Backend::OpenVINO});
+            devices.push_back({gpu.adapter_name + " (OpenVINO)", gpu.dedicated_memory_mb,
+                               Backend::OpenVINO, static_cast<int>(i)});
         }
     }
-    devices.push_back({"Generic CPU", 0, Backend::CPU});
+    devices.push_back({"Generic CPU", 0, Backend::CPU, 0});
 #else
     devices.push_back(auto_detect());
 #endif

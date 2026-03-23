@@ -150,6 +150,7 @@ struct DeviceInfo {
     std::string name = "";
     int64_t available_memory_mb = 0;
     Backend backend = Backend::Auto;
+    int device_index = 0;
 };
 
 /**

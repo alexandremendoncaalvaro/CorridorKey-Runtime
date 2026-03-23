@@ -104,18 +104,20 @@ OrtDmlAppendExecutionProviderFn resolve_directml_append_function() {
     return reinterpret_cast<OrtDmlAppendExecutionProviderFn>(symbol);
 }
 
-void append_directml_execution_provider(Ort::SessionOptions& session_options) {
+void append_directml_execution_provider(Ort::SessionOptions& session_options, int device_index) {
+    // Microsoft officially recommends disabling the memory pattern for DirectML
+    // to allow the DML EP to handle memory allocation and alignment natively.
     session_options.DisableMemPattern();
     session_options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
 
     if (auto append = resolve_directml_append_function(); append != nullptr) {
-        debug_log("Adding DirectML execution provider via exported ORT DML API");
-        Ort::ThrowOnError(append(session_options, 0));
+        debug_log("Adding DirectML execution provider via exported ORT DML API for device index: " + std::to_string(device_index));
+        Ort::ThrowOnError(append(session_options, device_index));
         return;
     }
 
-    debug_log("Adding DirectML execution provider via generic provider options");
-    std::unordered_map<std::string, std::string> dml_options = {{std::string(corridorkey::detail::session_options::DEVICE_ID), "0"}};
+    debug_log("Adding DirectML execution provider via generic provider options for device index: " + std::to_string(device_index));
+    std::unordered_map<std::string, std::string> dml_options = {{std::string(corridorkey::detail::session_options::DEVICE_ID), std::to_string(device_index)}};
     session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::DIRECTML), dml_options);
 }
 #endif
@@ -284,16 +286,28 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
 
     debug_log("Setting graph optimization level");
-    m_session_options.SetGraphOptimizationLevel(use_optimized_model_cache
-                                                    ? GraphOptimizationLevel::ORT_DISABLE_ALL
-                                                    : GraphOptimizationLevel::ORT_ENABLE_ALL);
+    if (use_optimized_model_cache) {
+        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
+    } else if (m_device.backend == Backend::DirectML) {
+        // Microsoft strongly recommends avoiding ORT_ENABLE_ALL (level 3) for DirectML
+        // because it enables CPU-specific memory layout optimizations that crash DML execution.
+        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+    } else {
+        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    }
 
     debug_log("Setting log severity level");
     m_session_options.SetLogSeverityLevel(options.log_severity);
 
-    if (options.disable_cpu_ep_fallback && m_device.backend != Backend::CPU) {
-        debug_log("Disabling CPU EP fallback");
-        m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
+    if (m_device.backend != Backend::CPU) {
+        if (options.disable_cpu_ep_fallback) {
+            debug_log("Disabling CPU EP fallback");
+            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
+        } else {
+            // Explicitly enable CPU EP fallback to avoid issues in some DirectML environments
+            // where ORT might default to disabling it when an EP is added.
+            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "0");
+        }
     }
 
     debug_log("Configuring execution provider for backend: " +
@@ -329,7 +343,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         }
 #ifdef _WIN32
         case Backend::DirectML: {
-            append_directml_execution_provider(m_session_options);
+            append_directml_execution_provider(m_session_options, m_device.device_index);
             break;
         }
         case Backend::WindowsML: {
