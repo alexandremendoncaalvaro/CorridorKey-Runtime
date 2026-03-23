@@ -223,6 +223,7 @@ Result<EngineCreateOptions> engine_create_options_from_json(const nlohmann::json
 nlohmann::json to_json(const InferenceParams& params) {
     return Json{{"target_resolution", params.target_resolution},
                 {"despill_strength", params.despill_strength},
+                {"spill_method", params.spill_method},
                 {"auto_despeckle", params.auto_despeckle},
                 {"despeckle_size", params.despeckle_size},
                 {"refiner_scale", params.refiner_scale},
@@ -246,6 +247,12 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
         return Unexpected<Error>(invalid_protocol_error("Missing numeric field: despill_strength"));
     }
     params.despill_strength = json.at("despill_strength").get<float>();
+    if (json.contains("spill_method") && json.at("spill_method").is_number_integer()) {
+        int method = json.at("spill_method").get<int>();
+        if (method >= 0 && method <= 2) {
+            params.spill_method = method;
+        }
+    }
     auto auto_despeckle = required_bool(json, "auto_despeckle");
     if (!auto_despeckle) return Unexpected<Error>(auto_despeckle.error());
     params.auto_despeckle = *auto_despeckle;

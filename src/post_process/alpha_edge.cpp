@@ -1,6 +1,7 @@
 #include "alpha_edge.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -19,6 +20,33 @@ void alpha_levels(Image alpha, float black_point, float white_point) {
             for (int x = 0; x < alpha.width; ++x) {
                 float val = (alpha(y, x) - black_point) * inv_range;
                 alpha(y, x) = std::clamp(val, 0.0f, 1.0f);
+            }
+        }
+    });
+}
+
+void alpha_gamma_correct(Image alpha, float gamma) {
+    if (alpha.empty() || gamma <= 0.0f) return;
+    float inv_gamma = 1.0f / gamma;
+
+    constexpr int kLutSize = 1024;
+    std::array<float, kLutSize + 1> lut{};
+    for (int i = 0; i <= kLutSize; ++i) {
+        float t = static_cast<float>(i) / static_cast<float>(kLutSize);
+        lut[static_cast<std::size_t>(i)] = std::pow(t, inv_gamma);
+    }
+
+    common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = 0; x < alpha.width; ++x) {
+                float val = alpha(y, x);
+                if (val > 0.0f && val < 1.0f) {
+                    float idx = val * static_cast<float>(kLutSize);
+                    int lo = static_cast<int>(idx);
+                    float frac = idx - static_cast<float>(lo);
+                    alpha(y, x) = lut[static_cast<std::size_t>(lo)] * (1.0f - frac) +
+                                  lut[static_cast<std::size_t>(lo) + 1] * frac;
+                }
             }
         }
     });

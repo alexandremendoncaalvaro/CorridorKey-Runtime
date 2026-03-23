@@ -11,6 +11,7 @@ struct AlphaEdgeState {
 };
 
 CORRIDORKEY_API void alpha_levels(Image alpha, float black_point, float white_point);
+CORRIDORKEY_API void alpha_gamma_correct(Image alpha, float gamma);
 CORRIDORKEY_API void alpha_erode_dilate(Image alpha, float radius, AlphaEdgeState& state);
 CORRIDORKEY_API void alpha_blur(Image alpha, float radius, AlphaEdgeState& state);
 

@@ -600,6 +600,7 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     nlohmann::json params;
     params["target_resolution"] = preset.params.target_resolution;
     params["despill_strength"] = preset.params.despill_strength;
+    params["spill_method"] = preset.params.spill_method;
     params["auto_despeckle"] = preset.params.auto_despeckle;
     params["despeckle_size"] = preset.params.despeckle_size;
     params["refiner_scale"] = preset.params.refiner_scale;

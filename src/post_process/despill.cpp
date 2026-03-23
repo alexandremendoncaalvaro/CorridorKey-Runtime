@@ -13,7 +13,7 @@
 
 namespace corridorkey {
 
-void despill(Image rgb, float strength) {
+void despill(Image rgb, float strength, SpillMethod method) {
     if (rgb.empty() || strength <= 0.0f) return;
 
     int h = rgb.height;
@@ -27,14 +27,32 @@ void despill(Image rgb, float strength) {
             float g = rgb(y, x, 1);
             float b = rgb(y, x, 2);
 
-            float limit = (r + b) * 0.5f;
-            float spill = std::max(0.0f, g - limit);
+            float limit = 0.0f;
+            switch (method) {
+                case SpillMethod::DoubleLimit:
+                    limit = std::max(r, b);
+                    break;
+                case SpillMethod::Neutral:
+                case SpillMethod::Average:
+                    limit = (r + b) * 0.5f;
+                    break;
+            }
 
+            float spill = std::max(0.0f, g - limit);
             if (spill > 0.0f) {
                 float effective_spill = spill * strength;
-                rgb(y, x, 0) = r + effective_spill * 0.5f;
-                rgb(y, x, 1) = g - effective_spill;
-                rgb(y, x, 2) = b + effective_spill * 0.5f;
+                float new_g = g - effective_spill;
+                rgb(y, x, 1) = new_g;
+
+                if (method == SpillMethod::Neutral) {
+                    float gray = (r + new_g + b) / 3.0f;
+                    float fill = effective_spill * 0.5f;
+                    rgb(y, x, 0) = r + fill * (gray / std::max(r, 1e-6f));
+                    rgb(y, x, 2) = b + fill * (gray / std::max(b, 1e-6f));
+                } else {
+                    rgb(y, x, 0) = r + effective_spill * 0.5f;
+                    rgb(y, x, 2) = b + effective_spill * 0.5f;
+                }
             }
         }
     });

@@ -358,6 +358,7 @@ enum class UpscaleMethod : std::uint8_t { Lanczos4, Bilinear };
 struct InferenceParams {
     int target_resolution = 0;  // 0 = Auto-detect based on hardware
     float despill_strength = 0.5F;
+    int spill_method = 0;  // 0=Average, 1=DoubleLimit, 2=Neutral
     bool auto_despeckle = false;
     int despeckle_size = 400;
     float refiner_scale = 1.0F;

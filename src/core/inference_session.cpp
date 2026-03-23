@@ -59,6 +59,23 @@ void debug_log(const std::string& message) {
         }
         free(local_app_data);
     }
+#elif defined(__APPLE__)
+    auto log_dir = corridorkey::common::default_logs_root();
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ec) {
+        auto log_path = log_dir / "ofx.log";
+        static std::mutex log_mutex;
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::ofstream log_file(log_path, std::ios::app);
+        if (log_file.is_open()) {
+            std::time_t now = std::time(nullptr);
+            char buf[32];
+            auto* tm = std::localtime(&now);
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
+            log_file << buf << " [InferenceSession] " << message << std::endl;
+        }
+    }
 #else
     (void)message;
 #endif
@@ -111,14 +128,19 @@ void append_directml_execution_provider(Ort::SessionOptions& session_options, in
     session_options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
 
     if (auto append = resolve_directml_append_function(); append != nullptr) {
-        debug_log("Adding DirectML execution provider via exported ORT DML API for device index: " + std::to_string(device_index));
+        debug_log("Adding DirectML execution provider via exported ORT DML API for device index: " +
+                  std::to_string(device_index));
         Ort::ThrowOnError(append(session_options, device_index));
         return;
     }
 
-    debug_log("Adding DirectML execution provider via generic provider options for device index: " + std::to_string(device_index));
-    std::unordered_map<std::string, std::string> dml_options = {{std::string(corridorkey::detail::session_options::DEVICE_ID), std::to_string(device_index)}};
-    session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::DIRECTML), dml_options);
+    debug_log("Adding DirectML execution provider via generic provider options for device index: " +
+              std::to_string(device_index));
+    std::unordered_map<std::string, std::string> dml_options = {
+        {std::string(corridorkey::detail::session_options::DEVICE_ID),
+         std::to_string(device_index)}};
+    session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::DIRECTML),
+                                            dml_options);
 }
 #endif
 
@@ -139,7 +161,8 @@ void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
         }
     }
 
-    session_options.AppendExecutionProvider("CoreML", provider_options);
+    session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::COREML_API),
+                                            provider_options);
 #else
     uint32_t coreml_flags = COREML_FLAG_ONLY_ALLOW_STATIC_INPUT_SHAPES;
     Ort::ThrowOnError(
@@ -154,7 +177,7 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
     debug_log("Configuring TensorRT RTX execution provider");
     std::unordered_map<std::string, std::string> provider_options = {
         {tensorrt_rtx_option_names::kDeviceId, "0"},
-        {tensorrt_rtx_option_names::kMaxWorkspaceSize, "2147483647"}, // 2GB max workspace size
+        {tensorrt_rtx_option_names::kMaxWorkspaceSize, "2147483647"},  // 2GB max workspace size
     };
 
     debug_log("Setting up runtime cache");
@@ -802,7 +825,11 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     // 3. Despill foreground (operates on combined fg after source passthrough)
     common::measure_stage(
         on_stage, "post_despill",
-        [&]() { despill(result.foreground.view(), params.despill_strength); }, 1);
+        [&]() {
+            despill(result.foreground.view(), params.despill_strength,
+                    static_cast<SpillMethod>(params.spill_method));
+        },
+        1);
 
     // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
     const auto& lut = SrgbLut::instance();
@@ -936,15 +963,19 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                             m_resize_pool.resize(b * 2 + 2);
                         }
                         Image cur_rgb = m_resize_pool[b * 2].view();
-                        if (cur_rgb.width != model_w || cur_rgb.height != model_h || cur_rgb.channels != 3) {
-                            m_resize_pool[b * 2] = ImageBuffer(static_cast<int>(model_w), static_cast<int>(model_h), 3);
+                        if (cur_rgb.width != model_w || cur_rgb.height != model_h ||
+                            cur_rgb.channels != 3) {
+                            m_resize_pool[b * 2] = ImageBuffer(static_cast<int>(model_w),
+                                                               static_cast<int>(model_h), 3);
                             cur_rgb = m_resize_pool[b * 2].view();
                         }
                         ColorUtils::resize_area_into(rgbs[b], cur_rgb, m_color_utils_state);
 
                         Image cur_hint = m_resize_pool[b * 2 + 1].view();
-                        if (cur_hint.width != model_w || cur_hint.height != model_h || cur_hint.channels != 1) {
-                            m_resize_pool[b * 2 + 1] = ImageBuffer(static_cast<int>(model_w), static_cast<int>(model_h), 1);
+                        if (cur_hint.width != model_w || cur_hint.height != model_h ||
+                            cur_hint.channels != 1) {
+                            m_resize_pool[b * 2 + 1] = ImageBuffer(static_cast<int>(model_w),
+                                                                   static_cast<int>(model_h), 1);
                             cur_hint = m_resize_pool[b * 2 + 1].view();
                         }
                         ColorUtils::resize_area_into(alpha_hints[b], cur_hint, m_color_utils_state);
@@ -1085,10 +1116,11 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                         ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), model_fg.view());
 
                         result.foreground =
-                            use_lanczos ? ColorUtils::resize_lanczos(model_fg.view(), rgbs[b].width,
-                                                                     rgbs[b].height, m_color_utils_state)
-                                        : ColorUtils::resize(model_fg.view(), rgbs[b].width,
-                                                             rgbs[b].height);
+                            use_lanczos
+                                ? ColorUtils::resize_lanczos(model_fg.view(), rgbs[b].width,
+                                                             rgbs[b].height, m_color_utils_state)
+                                : ColorUtils::resize(model_fg.view(), rgbs[b].width,
+                                                     rgbs[b].height);
                     }
                 }
             },
@@ -1268,7 +1300,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             [&]() {
                 ColorUtils::from_planar(alpha_ptr, model_alpha);
                 if (use_lanczos) {
-                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(), m_color_utils_state);
+                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
+                                                    m_color_utils_state);
                 } else {
                     ColorUtils::resize_into(model_alpha, result.alpha.view());
                 }
@@ -1280,7 +1313,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                                                           static_cast<int>(fg_shape[1]));
                     ColorUtils::from_planar(fg_ptr, model_fg);
                     if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(), m_color_utils_state);
+                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
+                                                        m_color_utils_state);
                     } else {
                         ColorUtils::resize_into(model_fg, result.foreground.view());
                     }
