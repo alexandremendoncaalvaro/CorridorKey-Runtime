@@ -31,7 +31,10 @@ target_include_directories(test_integration PRIVATE ${PROJECT_SOURCE_DIR}/vendor
 
 corridorkey_stage_ort_runtime(test_integration)
 
-target_compile_definitions(test_integration PRIVATE PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(test_integration PRIVATE
+    PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
+    OFX_PLUGIN_PATH="$<TARGET_FILE:corridorkey_ofx>"
+)
 
 if(NOT MSVC)
     target_compile_options(test_integration PRIVATE -Wall -Wextra -Wpedantic -Werror)

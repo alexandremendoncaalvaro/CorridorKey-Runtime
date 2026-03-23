@@ -19,7 +19,7 @@ extern "C" {
 // Mock Property Suite that intentionally throws
 #if defined(_MSC_VER)
 #pragma warning(push)
-#pragma warning(disable : 4297) // function assumed not to throw an exception but does
+#pragma warning(disable : 4297)  // function assumed not to throw an exception but does
 #endif
 OfxStatus mock_propGetString(OfxPropertySetHandle /*properties*/, const char* /*property*/,
                              int /*index*/, char** /*value*/) {
@@ -54,20 +54,15 @@ OfxHost g_mock_host = {nullptr, mock_fetchSuite};
 
 TEST_CASE("OFX C-API Boundary catches exceptions and returns kOfxStatFailed",
           "[integration][ofx][exceptions]") {
-    
     // Resolve the path to the built DLL
 #if defined(_WIN32)
-    std::string plugin_path = "CorridorKey.ofx.bundle/Contents/Win64/CorridorKey.ofx";
+    std::string plugin_path = OFX_PLUGIN_PATH;
     HMODULE handle = LoadLibraryA(plugin_path.c_str());
-    if (handle == nullptr) {
-        plugin_path = "../../CorridorKey.ofx.bundle/Contents/Win64/CorridorKey.ofx";
-        handle = LoadLibraryA(plugin_path.c_str());
-    }
     REQUIRE(handle != nullptr);
     auto p_OfxGetPlugin = (OfxGetPluginFunc)GetProcAddress(handle, "OfxGetPlugin");
     auto p_OfxSetHost = (OfxSetHostFunc)GetProcAddress(handle, "OfxSetHost");
 #else
-    std::string plugin_path = "./CorridorKey.ofx";
+    std::string plugin_path = OFX_PLUGIN_PATH;
     void* handle = dlopen(plugin_path.c_str(), RTLD_LAZY);
     REQUIRE(handle != nullptr);
     auto p_OfxGetPlugin = (OfxGetPluginFunc)dlsym(handle, "OfxGetPlugin");
@@ -89,13 +84,12 @@ TEST_CASE("OFX C-API Boundary catches exceptions and returns kOfxStatFailed",
 
     // 3. Fire an Action that queries the Property Suite
     int dummy_in_args = 42;
-    OfxStatus exception_status =
-        plugin->mainEntry(kOfxImageEffectActionDescribeInContext, nullptr,
-                          (OfxPropertySetHandle)&dummy_in_args, nullptr);
+    OfxStatus exception_status = plugin->mainEntry(kOfxImageEffectActionDescribeInContext, nullptr,
+                                                   (OfxPropertySetHandle)&dummy_in_args, nullptr);
 
     // 4. Validate that the host application did not crash and gracefully captured kOfxStatFailed
     REQUIRE(exception_status == kOfxStatFailed);
-    
+
 #if defined(_WIN32)
     FreeLibrary(handle);
 #else

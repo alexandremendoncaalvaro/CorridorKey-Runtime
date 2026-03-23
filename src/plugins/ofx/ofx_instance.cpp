@@ -406,6 +406,9 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data) {
     g_suites.property->propSetPointer(props, kOfxPropInstanceData, 0, data);
 }
 
+void set_param_enabled(OfxParamHandle param, bool enabled);
+void sync_dependent_params(InstanceData* data);
+
 OfxStatus create_instance(OfxImageEffectHandle instance) {
     const auto create_start = std::chrono::steady_clock::now();
     const auto log_create_total = [&](std::string_view outcome, std::string_view detail = {}) {

@@ -269,9 +269,9 @@ TEST_CASE("unloaded quality state only resolves fixed manual resolutions",
     REQUIRE(initial_requested_resolution_for_quality_mode(kQualityMaximum) == 2048);
 }
 
-TEST_CASE("ofx defaults open new instances with source passthrough disabled",
+TEST_CASE("ofx defaults open new instances with source passthrough enabled",
           "[unit][ofx][regression]") {
-    REQUIRE(kDefaultSourcePassthroughEnabled == 0);
+    REQUIRE(kDefaultSourcePassthroughEnabled == 1);
     REQUIRE(kDefaultEdgeErode == 3);
     REQUIRE(kDefaultEdgeBlur == 7);
     REQUIRE(kMaxEdgeErode == 32);
