@@ -14,7 +14,7 @@ struct LocalJsonEndpoint {
     std::uint16_t port = 0;
 };
 
-class LocalJsonConnection {
+class CORRIDORKEY_API LocalJsonConnection {
    public:
     LocalJsonConnection();
     ~LocalJsonConnection();
@@ -36,7 +36,7 @@ class LocalJsonConnection {
     std::intptr_t m_socket = -1;
 };
 
-class LocalJsonServer {
+class CORRIDORKEY_API LocalJsonServer {
    public:
     static Result<LocalJsonServer> listen(const LocalJsonEndpoint& endpoint);
 
@@ -57,9 +57,10 @@ class LocalJsonServer {
     std::intptr_t m_socket = -1;
 };
 
-LocalJsonEndpoint default_ofx_runtime_endpoint();
+CORRIDORKEY_API LocalJsonEndpoint default_ofx_runtime_endpoint();
 
-Result<nlohmann::json> send_json_request(const LocalJsonEndpoint& endpoint,
-                                         const nlohmann::json& request, int timeout_ms);
+CORRIDORKEY_API Result<nlohmann::json> send_json_request(const LocalJsonEndpoint& endpoint,
+                                                         const nlohmann::json& request,
+                                                         int timeout_ms);
 
 }  // namespace corridorkey::common

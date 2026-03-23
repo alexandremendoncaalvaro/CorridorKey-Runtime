@@ -6,13 +6,18 @@ using namespace corridorkey::detail;
 
 TEST_CASE("Regression: Hardware Provider Identifiers must be EXACT", "[regression][hardware]") {
     // These strings are case-sensitive and required by ONNX Runtime.
-    
+
     SECTION("NVIDIA RTX (TensorRT specialized)") {
         REQUIRE(providers::TENSORRT == "NvTensorRTRTXExecutionProvider");
     }
 
     SECTION("DirectML (AMD/Intel/Legacy RTX)") {
         REQUIRE(providers::DIRECTML == "DmlExecutionProvider");
+    }
+
+    SECTION("CoreML (Apple Silicon)") {
+        REQUIRE(providers::COREML == "CoreMLExecutionProvider");
+        REQUIRE(providers::COREML_API == "CoreML");
     }
 
     SECTION("Standard Providers") {

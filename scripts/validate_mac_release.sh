@@ -3,7 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
-DEFAULT_VERSION="$(grep 'CORRIDORKEY_VERSION_STRING' "${ROOT_DIR}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')"
+_version_header="${ROOT_DIR}/${BUILD_DIR}/generated/include/corridorkey/version.hpp"
+if [ ! -f "$_version_header" ]; then
+    _version_header="${ROOT_DIR}/include/corridorkey/version.hpp"
+fi
+DEFAULT_VERSION="$(grep 'CORRIDORKEY_VERSION_STRING' "$_version_header" | sed 's/.*"\(.*\)".*/\1/')"
 VERSION="${CORRIDORKEY_VERSION:-${DEFAULT_VERSION}}"
 DIST_BASENAME="CorridorKey_Runtime_v${VERSION}_macOS_AppleSilicon"
 DIST_ZIP="${ROOT_DIR}/dist/${DIST_BASENAME}.zip"

@@ -32,14 +32,11 @@ Error transport_error(ErrorCode code, const std::string& message) {
 constexpr DWORD kSharedFrameShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 #endif
 
-std::wstring wide_path(const std::filesystem::path& path) {
 #if defined(_WIN32)
+std::wstring wide_path(const std::filesystem::path& path) {
     return path.wstring();
-#else
-    (void)path;
-    return {};
-#endif
 }
+#endif
 
 }  // namespace
 

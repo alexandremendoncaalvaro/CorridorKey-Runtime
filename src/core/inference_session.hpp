@@ -7,16 +7,18 @@
 #include <vector>
 
 // Include ONNX Runtime (only in private headers)
-#if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
-#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
-#elif __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
+// Prefer the top-level path so that coreml_provider_factory.h (which also uses
+// the top-level onnxruntime_c_api.h) does not trigger duplicate type definitions.
+#if __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
 #include <onnxruntime/onnxruntime_cxx_api.h>
+#elif __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
+#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
 #else
 #error "ONNX Runtime C++ headers not found"
 #endif
 
-#include "post_process/despeckle.hpp"
 #include "post_process/color_utils.hpp"
+#include "post_process/despeckle.hpp"
 
 #ifdef __APPLE__
 #if __has_include(<onnxruntime/coreml_provider_factory.h>)

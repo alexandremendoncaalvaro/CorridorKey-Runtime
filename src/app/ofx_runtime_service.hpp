@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <corridorkey/api_export.hpp>
 #include <filesystem>
 
 #include "../common/local_ipc.hpp"
@@ -16,7 +17,7 @@ struct OfxRuntimeServiceOptions {
     OfxSessionBrokerOptions broker = {};
 };
 
-class OfxRuntimeService {
+class CORRIDORKEY_API OfxRuntimeService {
    public:
     static Result<void> run(const OfxRuntimeServiceOptions& options);
 };

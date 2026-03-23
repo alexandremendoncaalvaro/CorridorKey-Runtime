@@ -8,22 +8,23 @@ namespace corridorkey::detail {
  * @brief ONNX Runtime Execution Provider names.
  */
 namespace providers {
-    static constexpr std::string_view CPU = "CPUExecutionProvider";
-    static constexpr std::string_view CUDA = "CUDAExecutionProvider";
-    static constexpr std::string_view TENSORRT = "NvTensorRTRTXExecutionProvider";
-    static constexpr std::string_view COREML = "CoreMLExecutionProvider";
-    static constexpr std::string_view DIRECTML = "DmlExecutionProvider";
-    static constexpr std::string_view WINML = "WinMLExecutionProvider";
-    static constexpr std::string_view OPENVINO = "OpenVINOExecutionProvider";
-    static constexpr std::string_view SNPE = "SNPEExecutionProvider";
-    static constexpr std::string_view QNN = "QNNExecutionProvider";
-}
+static constexpr std::string_view CPU = "CPUExecutionProvider";
+static constexpr std::string_view CUDA = "CUDAExecutionProvider";
+static constexpr std::string_view TENSORRT = "NvTensorRTRTXExecutionProvider";
+static constexpr std::string_view COREML = "CoreMLExecutionProvider";
+static constexpr std::string_view COREML_API = "CoreML";
+static constexpr std::string_view DIRECTML = "DmlExecutionProvider";
+static constexpr std::string_view WINML = "WinMLExecutionProvider";
+static constexpr std::string_view OPENVINO = "OpenVINOExecutionProvider";
+static constexpr std::string_view SNPE = "SNPEExecutionProvider";
+static constexpr std::string_view QNN = "QNNExecutionProvider";
+}  // namespace providers
 
 /**
  * @brief ONNX Runtime Session Option keys.
  */
 namespace session_options {
-    static constexpr std::string_view DEVICE_ID = "device_id";
+static constexpr std::string_view DEVICE_ID = "device_id";
 }
 
-} // namespace corridorkey::detail
+}  // namespace corridorkey::detail

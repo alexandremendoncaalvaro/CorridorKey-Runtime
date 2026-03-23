@@ -11,8 +11,12 @@ if [ -f "${REPO_ROOT}/.env" ]; then
     set +a
 fi
 
-# Extract version from version.hpp (single source of truth)
-_default_version=$(grep 'CORRIDORKEY_VERSION_STRING' "${REPO_ROOT}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')
+# Extract version from generated version.hpp (single source of truth)
+_version_header="${CORRIDORKEY_BUILD_DIR:-${REPO_ROOT}/build/release-macos-portable}/generated/include/corridorkey/version.hpp"
+if [ ! -f "$_version_header" ]; then
+    _version_header="${REPO_ROOT}/include/corridorkey/version.hpp"
+fi
+_default_version=$(grep 'CORRIDORKEY_VERSION_STRING' "$_version_header" | sed 's/.*"\(.*\)".*/\1/')
 VERSION="${CORRIDORKEY_VERSION:-${_default_version}}"
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-${REPO_ROOT}/build/release-macos-portable}"
 REQUIRE_MLX_2048="${CORRIDORKEY_REQUIRE_MLX_2048:-1}"
@@ -340,6 +344,10 @@ sign_binary "$MACOS_DIR/$CORE_LIB_NAME"
 sign_binary "$BIN_DIR/corridorkey"
 sign_binary "$MACOS_DIR/$PLUGIN_NAME"
 clear_provenance_xattrs "$BUNDLE_DIR"
+
+echo "[5.5/7] Validating packaged binaries..."
+"$BIN_DIR/corridorkey" info --json > /dev/null
+"$BIN_DIR/corridorkey" doctor --json > /dev/null
 
 echo "[6/7] Building installer package..."
 SYSTEM_ROOT="${WORK_DIR}/system_root"

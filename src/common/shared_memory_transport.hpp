@@ -1,5 +1,6 @@
 #pragma once
 
+#include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -26,7 +27,7 @@ struct SharedFrameTransportHeader {
     std::uint64_t total_bytes = 0;
 };
 
-class SharedFrameTransport {
+class CORRIDORKEY_API SharedFrameTransport {
    public:
     static Result<SharedFrameTransport> create(const std::filesystem::path& path, int width,
                                                int height);
@@ -74,6 +75,6 @@ class SharedFrameTransport {
 #endif
 };
 
-std::filesystem::path next_ofx_shared_frame_path();
+CORRIDORKEY_API std::filesystem::path next_ofx_shared_frame_path();
 
 }  // namespace corridorkey::common
