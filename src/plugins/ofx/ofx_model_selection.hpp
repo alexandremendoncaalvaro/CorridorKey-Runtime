@@ -33,7 +33,7 @@ struct QualityArtifactSelection {
 inline const char* quality_mode_label(int quality_mode) {
     switch (quality_mode) {
         case kQualityPreview:
-            return "Preview (512)";
+            return "Draft (512)";
         case kQualityStandard:
             return "Standard (768)";
         case kQualityHigh:
@@ -134,7 +134,7 @@ inline std::vector<std::filesystem::path> artifact_paths_for_backend(
                 return {fp16_path, int8_path};
             case kQuantizationInt8:
                 return {int8_path, fp16_path};
-            default: // kQuantizationAuto
+            default:  // kQuantizationAuto
                 return {int8_path, fp16_path};
         }
     }
@@ -163,8 +163,7 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode) {
     std::vector<QualityArtifactSelection> candidates;
-    int requested_resolution =
-        resolve_target_resolution(quality_mode, input_width, input_height);
+    int requested_resolution = resolve_target_resolution(quality_mode, input_width, input_height);
 
     if (backend == Backend::DirectML && requested_resolution > 1536) {
         requested_resolution = 1536;

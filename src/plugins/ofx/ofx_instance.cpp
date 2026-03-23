@@ -171,10 +171,6 @@ std::string runtime_status_label(const InstanceData& data) {
     return "Idle";
 }
 
-std::string render_pass_label(std::uint64_t render_count) {
-    return render_count == 0 ? "first_frame" : "subsequent_frame";
-}
-
 double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
     const auto elapsed = std::chrono::steady_clock::now() - start_time;
     return std::chrono::duration<double, std::milli>(elapsed).count();
@@ -454,7 +450,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatFailed;
     }
 
-
     OfxParamSetHandle param_set;
     if (g_suites.image_effect->getParamSet(instance, &param_set) != kOfxStatOK) {
         log_message("create_instance", "Failed to get param set.");
@@ -476,6 +471,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->temporal_smoothing_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamDespillStrength, &data->despill_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamSpillMethod, &data->spill_method_param,
+                                       nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAutoDespeckle, &data->despeckle_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamDespeckleSize, &data->despeckle_size_param,
@@ -487,6 +484,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     g_suites.parameter->paramGetHandle(param_set, kParamAlphaErode, &data->alpha_erode_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAlphaSoftness, &data->alpha_softness_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamAlphaGamma, &data->alpha_gamma_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamUpscaleMethod, &data->upscale_method_param,
                                        nullptr);
@@ -511,9 +510,24 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_artifact_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeStatus, &data->runtime_status_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRenderTimeout, &data->render_timeout_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamPrepareTimeout,
+                                       &data->prepare_timeout_param, nullptr);
+
+    sync_dependent_params(data.get());
 
     set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
                              "Loading...", "Loading...", "Loading...");
+
+    int render_timeout_s = 30;
+    int prepare_timeout_s = 120;
+    if (data->render_timeout_param != nullptr) {
+        g_suites.parameter->paramGetValue(data->render_timeout_param, &render_timeout_s);
+    }
+    if (data->prepare_timeout_param != nullptr) {
+        g_suites.parameter->paramGetValue(data->prepare_timeout_param, &prepare_timeout_s);
+    }
 
     data->runtime_server_path =
         resolve_ofx_runtime_server_binary(plugin_module_path().value_or(""));
@@ -522,6 +536,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         OfxRuntimeClientOptions client_options;
         client_options.endpoint = common::default_ofx_runtime_endpoint();
         client_options.server_binary = data->runtime_server_path;
+        client_options.request_timeout_ms = render_timeout_s * 1000;
+        client_options.prepare_timeout_ms = prepare_timeout_s * 1000;
         auto runtime_client = OfxRuntimeClient::create(std::move(client_options));
         if (!runtime_client) {
             data->last_error = runtime_client.error().message;
@@ -554,7 +570,15 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         g_suites.parameter->paramGetValue(data->quality_mode_param, &initial_quality_mode);
     }
 
-    data->preferred_device = detected_device;
+    DeviceInfo preferred_device = detected_device;
+#if defined(__APPLE__)
+    if (capabilities.apple_silicon && capabilities.mlx_probe_available &&
+        has_mlx_bootstrap_artifacts(data->models_root)) {
+        preferred_device =
+            DeviceInfo{"Apple Silicon MLX", detected_device.available_memory_mb, Backend::MLX};
+    }
+#endif
+    data->preferred_device = preferred_device;
     data->device = detected_device;
     data->active_quality_mode = initial_quality_mode;
     data->requested_resolution =
@@ -781,15 +805,15 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                                   quantization_mode);
     data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     if (cpu_quality_guardrail_active) {
-        data->last_error = "CPU backend is limited to Preview (512) for interactive rendering. " +
+        data->last_error = "CPU backend is limited to Draft (512) for interactive rendering. " +
                            std::string(quality_mode_label(requested_quality_mode)) +
-                           " will run as Preview (512).";
+                           " will run as Draft (512).";
         log_message("ensure_engine_for_quality", data->last_error);
     }
     if (selections.empty()) {
         if (cpu_quality_guardrail_active) {
             data->last_error =
-                "CPU backend is limited to Preview (512), but the 512 artifact is missing for " +
+                "CPU backend is limited to Draft (512), but the 512 artifact is missing for " +
                 backend_label(requested_device.backend) + ".";
         } else {
             data->last_error =
@@ -812,10 +836,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     bool current_backend_matches = backend_matches_request(data->device, requested_device);
 
     for (const auto& selection : selections) {
-        const bool session_alive =
-            data->use_runtime_server
-                ? (data->runtime_client != nullptr && data->runtime_client->has_session())
-                : (data->engine != nullptr);
+        const bool session_alive = data->use_runtime_server ? (data->runtime_client != nullptr &&
+                                                               data->runtime_client->has_session())
+                                                            : (data->engine != nullptr);
         if (current_backend_matches && session_alive &&
             selection.executable_model_path == data->model_path &&
             selection.effective_resolution == data->active_resolution) {
@@ -959,7 +982,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             log_message(
                 "ensure_engine_for_quality",
                 "CPU guardrail active: " + std::string(quality_mode_label(requested_quality_mode)) +
-                    " is capped to Preview (512).");
+                    " is capped to Draft (512).");
         }
         log_message("ensure_engine_for_quality",
                     std::string("Switched to artifact ") +
@@ -997,6 +1020,37 @@ void flush_runtime_panel(InstanceData* data) {
     }
 }
 
+void set_param_enabled(OfxParamHandle param, bool enabled) {
+    if (param == nullptr) {
+        return;
+    }
+    OfxPropertySetHandle props = nullptr;
+    if (g_suites.parameter->paramGetPropertySet(param, &props) == kOfxStatOK) {
+        g_suites.property->propSetInt(props, kOfxParamPropEnabled, 0, enabled ? 1 : 0);
+    }
+}
+
+void sync_dependent_params(InstanceData* data) {
+    int tiling_enabled = 0;
+    if (data->enable_tiling_param) {
+        g_suites.parameter->paramGetValue(data->enable_tiling_param, &tiling_enabled);
+    }
+    set_param_enabled(data->tile_overlap_param, tiling_enabled != 0);
+
+    int despeckle_enabled = 0;
+    if (data->despeckle_param) {
+        g_suites.parameter->paramGetValue(data->despeckle_param, &despeckle_enabled);
+    }
+    set_param_enabled(data->despeckle_size_param, despeckle_enabled != 0);
+
+    int source_passthrough = 0;
+    if (data->source_passthrough_param) {
+        g_suites.parameter->paramGetValue(data->source_passthrough_param, &source_passthrough);
+    }
+    set_param_enabled(data->edge_erode_param, source_passthrough != 0);
+    set_param_enabled(data->edge_blur_param, source_passthrough != 0);
+}
+
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args) {
     InstanceData* data = get_instance_data(instance);
     if (data == nullptr) {
@@ -1005,18 +1059,43 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
     if (in_args != nullptr && g_suites.property != nullptr) {
         std::string changed_param;
         if (get_string(in_args, kOfxPropName, changed_param)) {
+            if (changed_param == kParamEnableTiling || changed_param == kParamAutoDespeckle ||
+                changed_param == kParamSourcePassthrough) {
+                sync_dependent_params(data);
+            }
+            if (changed_param == kParamRenderTimeout || changed_param == kParamPrepareTimeout) {
+                if (data->runtime_client) {
+                    int render_t = 30;
+                    int prepare_t = 120;
+                    if (data->render_timeout_param) {
+                        g_suites.parameter->paramGetValue(data->render_timeout_param, &render_t);
+                    }
+                    if (data->prepare_timeout_param) {
+                        g_suites.parameter->paramGetValue(data->prepare_timeout_param, &prepare_t);
+                    }
+                    data->runtime_client->set_request_timeout_ms(render_t * 1000);
+                    data->runtime_client->set_prepare_timeout_ms(prepare_t * 1000);
+                }
+            }
             if (changed_param == kParamQuantizationMode) {
                 int quant = 0;
-                if (data->quantization_mode_param && g_suites.parameter->paramGetValue(data->quantization_mode_param, &quant) == kOfxStatOK) {
+                if (data->quantization_mode_param &&
+                    g_suites.parameter->paramGetValue(data->quantization_mode_param, &quant) ==
+                        kOfxStatOK) {
                     DeviceInfo requested_device = data->preferred_device;
                     if (requested_device.backend == Backend::Auto) {
                         requested_device = data->device;
                     }
-                    if (requested_device.backend == Backend::TensorRT && quant == kQuantizationInt8) {
-                        data->last_error = "INT8 quantization is not supported by the TensorRT RTX execution provider. Please use FP16.";
+                    if (requested_device.backend == Backend::TensorRT &&
+                        quant == kQuantizationInt8) {
+                        data->last_error =
+                            "Compact precision is not supported by the "
+                            "TensorRT RTX provider. Please use Full precision.";
+                        data->quantization_error_active = true;
                         data->runtime_panel_dirty = true;
-                    } else if (data->last_error.find("INT8") != std::string::npos) {
+                    } else if (data->quantization_error_active) {
                         data->last_error.clear();
+                        data->quantization_error_active = false;
                         data->runtime_panel_dirty = true;
                     }
                 }

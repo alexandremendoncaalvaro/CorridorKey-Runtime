@@ -47,12 +47,14 @@ constexpr const char* kParamQuantizationMode = "quantization_mode";
 constexpr const char* kParamScreenColor = "screen_color";
 constexpr const char* kParamTemporalSmoothing = "temporal_smoothing";
 constexpr const char* kParamDespillStrength = "despill_strength";
+constexpr const char* kParamSpillMethod = "spill_method";
 constexpr const char* kParamAutoDespeckle = "auto_despeckle";
 constexpr const char* kParamDespeckleSize = "despeckle_size";
 constexpr const char* kParamAlphaBlackPoint = "alpha_black_point";
 constexpr const char* kParamAlphaWhitePoint = "alpha_white_point";
 constexpr const char* kParamAlphaErode = "alpha_erode";
 constexpr const char* kParamAlphaSoftness = "alpha_softness";
+constexpr const char* kParamAlphaGamma = "alpha_gamma";
 constexpr const char* kParamUpscaleMethod = "upscale_method";
 constexpr const char* kParamEnableTiling = "enable_tiling";
 constexpr const char* kParamTileOverlap = "tile_overlap";
@@ -65,6 +67,8 @@ constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality
 constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
 constexpr const char* kParamRuntimeStatus = "runtime_status";
+constexpr const char* kParamRenderTimeout = "render_timeout";
+constexpr const char* kParamPrepareTimeout = "prepare_timeout";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
 
@@ -87,12 +91,14 @@ struct InstanceData {
     OfxParamHandle screen_color_param = nullptr;
     OfxParamHandle temporal_smoothing_param = nullptr;
     OfxParamHandle despill_param = nullptr;
+    OfxParamHandle spill_method_param = nullptr;
     OfxParamHandle despeckle_param = nullptr;
     OfxParamHandle despeckle_size_param = nullptr;
     OfxParamHandle alpha_black_point_param = nullptr;
     OfxParamHandle alpha_white_point_param = nullptr;
     OfxParamHandle alpha_erode_param = nullptr;
     OfxParamHandle alpha_softness_param = nullptr;
+    OfxParamHandle alpha_gamma_param = nullptr;
     OfxParamHandle upscale_method_param = nullptr;
     OfxParamHandle enable_tiling_param = nullptr;
     OfxParamHandle tile_overlap_param = nullptr;
@@ -105,6 +111,8 @@ struct InstanceData {
     OfxParamHandle runtime_effective_quality_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
     OfxParamHandle runtime_status_param = nullptr;
+    OfxParamHandle render_timeout_param = nullptr;
+    OfxParamHandle prepare_timeout_param = nullptr;
     std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
@@ -124,6 +132,7 @@ struct InstanceData {
     std::uint64_t frame_time_samples = 0;
     bool in_render = false;
     bool runtime_panel_dirty = false;
+    bool quantization_error_active = false;
 
     FrameResult cached_result = {};
     bool cached_result_valid = false;
@@ -139,6 +148,7 @@ struct InstanceData {
     double cached_alpha_white_point = 1.0;
     double cached_alpha_erode = 0.0;
     double cached_alpha_softness = 0.0;
+    double cached_alpha_gamma = 1.0;
     double cached_temporal_smoothing = kDefaultTemporalSmoothing;
 
     ImageBuffer temporal_alpha = {};

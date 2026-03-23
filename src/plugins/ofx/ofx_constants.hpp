@@ -36,14 +36,20 @@ constexpr int kQuantizationInt8 = 1;
 constexpr int kScreenColorGreen = 0;
 constexpr int kScreenColorBlue = 1;
 
-constexpr int kDefaultSourcePassthroughEnabled = 0;
+constexpr int kDefaultSourcePassthroughEnabled = 1;
 constexpr int kDefaultEdgeErode = 3;
 constexpr int kDefaultEdgeBlur = 7;
 constexpr int kMaxEdgeErode = 32;
 constexpr int kMaxEdgeBlur = 64;
-constexpr int kDefaultInputColorSpace = kInputColorLinear;
+constexpr int kDefaultInputColorSpace = kInputColorSrgb;
 constexpr int kDefaultQuantizationMode = kQuantizationFp16;
 constexpr int kDefaultScreenColor = kScreenColorGreen;
 constexpr double kDefaultTemporalSmoothing = 0.0;
+
+// Spill replacement method
+constexpr int kSpillMethodAverage = 0;
+constexpr int kSpillMethodDoubleLimit = 1;
+constexpr int kSpillMethodNeutral = 2;
+constexpr int kDefaultSpillMethod = kSpillMethodAverage;
 
 }  // namespace corridorkey::ofx

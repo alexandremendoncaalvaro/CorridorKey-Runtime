@@ -240,8 +240,124 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         return kOfxStatFailed;
     }
 
+    // --- Group 1: Key Setup (the two choices that determine the AI result) ---
+    define_group_param(param_set, "setup_group", "Key Setup", true);
+
+    define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
+                        {"Green", "Blue"},
+                        "Select the dominant screen color. Blue swaps channels internally so "
+                        "the keyer treats blue screens like green screens.",
+                        "setup_group");
+    define_choice_param(
+        param_set, kParamQualityMode, "Quality", kQualityAuto,
+        {"Auto", "Draft", "Standard", "High", "Ultra", "Maximum"},
+        "Inference quality. Auto selects based on input size and hardware. "
+        "Higher values produce better detail at the cost of speed. "
+        "Resolutions: Draft 512, Standard 768, High 1024, Ultra 1536, Maximum 2048.",
+        "setup_group");
+
+    // --- Group 2: Matte (refine the AI-generated alpha) ---
+    define_group_param(param_set, "matte_group", "Matte", true);
+
+    define_info_param(
+        param_set, "alpha_hint_info", "Matte Input Guide",
+        "Accepts Alpha Channels (transparency) or Luma Mattes (black & white).",
+        "CorridorKey dynamically detects the input type. You can supply an Alpha channel or a "
+        "solid Luma Matte (it will read the luminance).\n\n"
+        "Fusion: Connect your matte to the secondary 'Alpha Hint' pin.\n"
+        "Color Page: Right-click this node -> 'Add OFX Input', then route a Qualifier or 3D Keyer "
+        "output into the new green input.",
+        "matte_group");
+    define_double_param(param_set, kParamAlphaBlackPoint, "Matte Clip Black", 0.0, 0.0, 1.0,
+                        "Remap matte: values at or below this become fully transparent.",
+                        "matte_group");
+    define_double_param(param_set, kParamAlphaWhitePoint, "Matte Clip White", 1.0, 0.0, 1.0,
+                        "Remap matte: values at or above this become fully opaque.", "matte_group");
+    define_double_param(param_set, kParamAlphaErode, "Matte Shrink/Grow", 0.0, -10.0, 10.0,
+                        "Shrink (negative) or expand (positive) the matte edge in pixels.",
+                        "matte_group");
+    define_double_param(param_set, kParamAlphaSoftness, "Matte Edge Blur", 0.0, 0.0, 5.0,
+                        "Blur the matte edge to soften transitions.", "matte_group");
+    define_double_param(param_set, kParamAlphaGamma, "Matte Gamma", 1.0, 0.1, 10.0,
+                        "Non-linear matte curve. Values below 1.0 brighten semi-transparent "
+                        "areas (recover hair/motion blur). Values above 1.0 darken them "
+                        "(tighten the matte). Default 1.0 is neutral.",
+                        "matte_group");
+    define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
+                      "Clean small matte speckles automatically.", "matte_group");
+    define_int_param(param_set, kParamDespeckleSize, "Min Region Size", 400, 50, 2000,
+                     "Minimum connected component area in pixels to keep. "
+                     "Regions smaller than this are removed.",
+                     "matte_group");
+    define_double_param(
+        param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
+        1.0, "Blend current output with the previous frame for temporal stability.", "matte_group");
+
+    // --- Group 3: Edge & Spill (fix edges and color spill) ---
+    define_group_param(param_set, "edge_spill_group", "Edge & Spill", true);
+
+    define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
+                        "Strength of screen color spill suppression on foreground edges.",
+                        "edge_spill_group");
+    define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
+                        {"Average", "Double Limit", "Neutral"},
+                        "How removed spill color is replaced. Average redistributes to "
+                        "red and blue. Double Limit uses the stronger neighbor channel. "
+                        "Neutral replaces with gray to avoid color shifts.",
+                        "edge_spill_group");
+    define_bool_param(param_set, kParamSourcePassthrough, "Core Detail Recovery",
+                      kDefaultSourcePassthroughEnabled,
+                      "Blend original source pixels into high-confidence matte regions "
+                      "for sharper interior detail.",
+                      "edge_spill_group");
+    define_int_param(param_set, kParamEdgeErode, "Detail Mask Shrink", kDefaultEdgeErode, 0,
+                     kMaxEdgeErode,
+                     "Shrink the interior mask before blending source detail. "
+                     "Higher values widen the transition zone at edges.",
+                     "edge_spill_group");
+    define_int_param(param_set, kParamEdgeBlur, "Detail Mask Feather", kDefaultEdgeBlur, 0,
+                     kMaxEdgeBlur,
+                     "Feather the interior mask for a smoother blend between source and model.",
+                     "edge_spill_group");
+
+    // --- Group 4: Output ---
+    define_group_param(param_set, "output_group", "Output", true);
+
+    define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
+                        {"Processed", "Matte Only", "Foreground Only", "Source + Matte"},
+                        "What to output. Processed and Source + Matte are premultiplied RGBA. "
+                        "Matte Only shows the alpha channel as grayscale.",
+                        "output_group");
+    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleLanczos4,
+                        {"Lanczos4", "Bilinear"},
+                        "Method used to upscale model output to source resolution. "
+                        "Lanczos4 is sharper; Bilinear is smoother.",
+                        "output_group");
+
+    // --- Group 5: Performance ---
+    define_group_param(param_set, "performance_group", "Performance", false);
+
+    define_choice_param(
+        param_set, kParamQuantizationMode, "Precision", kDefaultQuantizationMode,
+        {"Full", "Compact"},
+        "Model precision. Full (FP16) selects highest quality files. "
+        "Compact (INT8) selects memory-efficient quantized files for faster inference.",
+        "performance_group");
+    define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
+                      "Process at native resolution using overlapping tiles. "
+                      "Sharper details but slower.",
+                      "performance_group");
+    define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
+                     "Pixel overlap between tiles for seamless blending.", "performance_group");
+    define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
+                        kDefaultInputColorSpace, {"sRGB", "Linear"},
+                        "Source interpretation mode. Set to Linear when working in a "
+                        "linear-light pipeline. Most Resolve Color page workflows use sRGB.",
+                        "performance_group");
+
+    // --- Group 6: Status (diagnostics, collapsed at bottom) ---
     std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
-    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
+    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), false);
 
     define_runtime_status_param(
         param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
@@ -266,106 +382,17 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Shows the last frame time or the most recent error during engine load or render.",
         "runtime_group");
 
-    define_group_param(param_set, "quality_group", "Quality", true);
-
-    define_choice_param(param_set, kParamQualityMode, "Quality Mode", kQualityPreview,
-                        {"Auto", "Preview (512)", "Standard (768)", "High (1024)", "Ultra (1536)",
-                         "Maximum (2048)"},
-                        "Inference resolution. Auto selects based on input size. "
-                        "Higher values produce better detail at the cost of speed.",
-                        "quality_group");
-    define_choice_param(param_set, kParamQuantizationMode, "Quantization", kDefaultQuantizationMode,
-                        {"FP16", "INT8"},
-                        "Preferred model precision for this instance. FP16 selects full-precision files. INT8 "
-                        "selects memory-efficient quantized files.",
-                        "quality_group");
-    define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
-                      "Process at native resolution using overlapping tiles. "
-                      "Sharper details but slower.",
-                      "quality_group");
-    define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
-                     "Pixel overlap between tiles for seamless blending.", "quality_group");
-
-    define_group_param(param_set, "output_group", "Output", true);
-    define_info_param(
-        param_set, "processed_output_info", "Processed Note",
-        "Processed and Source + Matte are premultiplied outputs. Linear inputs stay linear.",
-        "Processed and Source + Matte return premultiplied RGBA. With Input Is Linear off, "
-        "CorridorKey converts RGB back for display on write. With Input Is Linear on, those "
-        "outputs stay linear and should be viewed through a display transform.",
-        "output_group");
-
-    define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
-                        {"Processed", "Matte Only", "Foreground Only", "Source + Matte"},
-                        "What to output. Processed and Source + Matte are premultiplied RGBA "
-                        "outputs. Matte Only shows the alpha channel as grayscale.",
-                        "output_group");
-    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleLanczos4,
-                        {"Lanczos4", "Bilinear"},
-                        "Method used to upscale model output to source resolution. "
-                        "Lanczos4 is sharper; Bilinear is smoother.",
-                        "output_group");
-
-    define_group_param(param_set, "keying_group", "Keying", true);
-
-    define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
-                        "Strength of green spill suppression.", "keying_group");
-    define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
-                      "Clean small alpha speckles automatically.", "keying_group");
-    define_int_param(param_set, kParamDespeckleSize, "Despeckle Size", 400, 50, 2000,
-                     "Minimum connected component area in pixels to keep.", "keying_group");
-    define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
-                        {"Green", "Blue"},
-                        "Select the dominant screen color. Blue swaps channels internally so "
-                        "the keyer treats blue screens like green screens.",
-                        "keying_group");
-    define_bool_param(param_set, kParamSourcePassthrough, "Source Passthrough",
-                      kDefaultSourcePassthroughEnabled,
-                      "Blend original source pixels into high-confidence alpha regions "
-                      "for sharper interior detail.",
-                      "keying_group");
-    define_int_param(param_set, kParamEdgeErode, "Edge Erode", kDefaultEdgeErode, 0, kMaxEdgeErode,
-                     "Erosion radius for the passthrough interior mask. "
-                     "Higher values widen the transition zone at edges and cost more CPU.",
-                     "keying_group");
-    define_int_param(
-        param_set, kParamEdgeBlur, "Edge Blur", kDefaultEdgeBlur, 0, kMaxEdgeBlur,
-        "Blur radius for smoothing the passthrough transition. "
-        "Higher values create a softer blend between source and model and cost more CPU.",
-        "keying_group");
-
-    define_group_param(param_set, "alpha_group", "Alpha", true);
-    define_info_param(
-        param_set, "alpha_hint_info", "Mask Input Guide",
-        "Accepts Alpha Channels (transparency) or Luma Mattes (black & white).",
-        "CorridorKey dynamically detects the input type. You can supply an Alpha channel or a "
-        "solid Luma Matte (it will read the luminance).\n\n"
-        "Fusion: Connect your matte to the secondary 'Alpha Hint' pin.\n"
-        "Color Page: Right-click this node -> 'Add OFX Input', then route a Qualifier or 3D Keyer "
-        "output into the new green input.",
-        "alpha_group");
-
-    define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,
-                        "Remap alpha: values at or below this become fully transparent.",
-                        "alpha_group");
-    define_double_param(param_set, kParamAlphaWhitePoint, "Alpha White Point", 1.0, 0.0, 1.0,
-                        "Remap alpha: values at or above this become fully opaque.", "alpha_group");
-    define_double_param(param_set, kParamAlphaErode, "Alpha Erode/Dilate", 0.0, -10.0, 10.0,
-                        "Shrink (negative) or expand (positive) the alpha edge in pixels.",
-                        "alpha_group");
-    define_double_param(param_set, kParamAlphaSoftness, "Alpha Edge Softness", 0.0, 0.0, 5.0,
-                        "Blur the alpha edge to soften transitions.", "alpha_group");
-    define_double_param(
-        param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
-        1.0, "Blend current output with the previous frame for temporal stability.", "alpha_group");
-
+    // --- Group 7: Advanced (timeouts) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
-    define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
-                        kDefaultInputColorSpace, {"sRGB", "Linear"},
-                        "Source interpretation mode. Processed outputs remain linear when "
-                        "Linear is selected.",
-                        "advanced_group");
+    define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)", 30, 10, 300,
+                     "Maximum time in seconds to wait for a single frame render. "
+                     "Increase for high-resolution modes on slower hardware.",
+                     "advanced_group");
+    define_int_param(param_set, kParamPrepareTimeout, "Prepare Timeout (s)", 120, 30, 600,
+                     "Maximum time in seconds to wait for model loading and bootstrap. "
+                     "Increase if first-frame initialization times out.",
+                     "advanced_group");
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;
@@ -392,19 +419,19 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
         }
     }
 
-    const char* output_clips[] = {
-        kOfxImageEffectOutputClipName
-    };
+    const char* output_clips[] = {kOfxImageEffectOutputClipName};
 
     for (const char* clip_name : output_clips) {
         std::string components_key = std::string("OfxImageClipPropComponents_") + clip_name;
         std::string depth_key = std::string("OfxImageClipPropDepth_") + clip_name;
 
-        g_suites.property->propSetString(out_args, components_key.c_str(), 0, kOfxImageComponentRGBA);
+        g_suites.property->propSetString(out_args, components_key.c_str(), 0,
+                                         kOfxImageComponentRGBA);
         g_suites.property->propSetString(out_args, depth_key.c_str(), 0, depth_value);
         if (std::strcmp(clip_name, kOfxImageEffectOutputClipName) == 0) {
             std::string premult_key = std::string("OfxImageClipPropPreMultiplication_") + clip_name;
-            g_suites.property->propSetString(out_args, premult_key.c_str(), 0, kOfxImagePreMultiplied);
+            g_suites.property->propSetString(out_args, premult_key.c_str(), 0,
+                                             kOfxImagePreMultiplied);
         }
     }
 

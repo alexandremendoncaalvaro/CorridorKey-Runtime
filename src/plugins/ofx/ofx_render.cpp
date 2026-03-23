@@ -135,7 +135,7 @@ void set_runtime_error(InstanceData* data, const std::string& message,
 
 bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& rhs) {
     return lhs.target_resolution == rhs.target_resolution &&
-           lhs.despill_strength == rhs.despill_strength &&
+           lhs.despill_strength == rhs.despill_strength && lhs.spill_method == rhs.spill_method &&
            lhs.auto_despeckle == rhs.auto_despeckle && lhs.despeckle_size == rhs.despeckle_size &&
            lhs.refiner_scale == rhs.refiner_scale && lhs.input_is_linear == rhs.input_is_linear &&
            lhs.batch_size == rhs.batch_size && lhs.enable_tiling == rhs.enable_tiling &&
@@ -445,10 +445,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int despeckle_enabled = 0;
     int despeckle_size = 400;
     double despill_strength = 0.5;
+    int spill_method = kDefaultSpillMethod;
     double alpha_black_point = 0.0;
     double alpha_white_point = 1.0;
     double alpha_erode = 0.0;
     double alpha_softness = 0.0;
+    double alpha_gamma = 1.0;
     int upscale_method = kUpscaleLanczos4;
     int enable_tiling = 0;
     int tile_overlap = 64;
@@ -524,8 +526,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         if (is_fixed_quality_mode(quality_mode)) {
             log_message("render", quality_error);
             set_runtime_error(data, quality_error, instance);
-            bypass_with_source(source_data, output_data, width, height,
-                               source_row_bytes, output_row_bytes, source_depth);
+            bypass_with_source(source_data, output_data, width, height, source_row_bytes,
+                               output_row_bytes, source_depth);
             return kOfxStatOK;
         }
         log_message("render", quality_error + " Using current engine.");
@@ -542,6 +544,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->despill_param) {
         g_suites.parameter->paramGetValueAtTime(data->despill_param, time, &despill_strength);
     }
+    if (data->spill_method_param) {
+        g_suites.parameter->paramGetValueAtTime(data->spill_method_param, time, &spill_method);
+    }
     if (data->alpha_black_point_param) {
         g_suites.parameter->paramGetValueAtTime(data->alpha_black_point_param, time,
                                                 &alpha_black_point);
@@ -555,6 +560,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->alpha_softness_param) {
         g_suites.parameter->paramGetValueAtTime(data->alpha_softness_param, time, &alpha_softness);
+    }
+    if (data->alpha_gamma_param) {
+        g_suites.parameter->paramGetValueAtTime(data->alpha_gamma_param, time, &alpha_gamma);
     }
     if (data->upscale_method_param) {
         g_suites.parameter->paramGetValueAtTime(data->upscale_method_param, time, &upscale_method);
@@ -577,12 +585,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     bool hint_from_clip = false;
-    bool hint_clip_connected = false;
     OfxPropertySetHandle hint_props = nullptr;
     ImageHandleGuard hint_guard{};
 
     if (is_clip_connected(data->alpha_hint_clip)) {
-        hint_clip_connected = true;
         if (fetch_image(data->alpha_hint_clip, time, hint_props)) {
             hint_guard.handle = hint_props;
             void* hint_data = nullptr;
@@ -617,7 +623,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (!hint_from_clip) {
         const std::string message = "Waiting for Alpha Hint connection.";
         log_message("render", message);
-        
+
         if (data != nullptr) {
             data->last_error = message;
             data->cached_result_valid = false;
@@ -630,7 +636,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         auto alpha_view = alpha_buf.view();
         auto fg_linear = fg_buf.view();
         const SrgbLut& lut = SrgbLut::instance();
-        
+
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 alpha_view(y, x) = 1.0f;
@@ -645,16 +651,20 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                 }
             }
         }
-        
+
         bool apply_srgb = !input_is_linear;
         if (output_mode == kOutputMatteOnly) {
-            write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, SrgbLut::instance());
+            write_matte_output(alpha_view, output_data, output_row_bytes, output_depth,
+                               SrgbLut::instance());
         } else if (output_mode == kOutputForegroundOnly) {
-            write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
+            write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth,
+                                    apply_srgb, SrgbLut::instance());
         } else if (output_mode == kOutputSourceMatte) {
-            write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
+            write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes,
+                                      output_depth, apply_srgb, SrgbLut::instance());
         } else {
-            write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
+            write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
+                                   output_depth, apply_srgb, SrgbLut::instance());
         }
         return kOfxStatOK;
     }
@@ -664,6 +674,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     InferenceParams params;
     params.target_resolution = data->active_resolution;
     params.despill_strength = static_cast<float>(despill_strength);
+    params.spill_method = spill_method;
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
     params.refiner_scale = 1.0f;
@@ -687,6 +698,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                            std::abs(data->cached_alpha_white_point - alpha_white_point) < 1e-6 &&
                            std::abs(data->cached_alpha_erode - alpha_erode) < 1e-6 &&
                            std::abs(data->cached_alpha_softness - alpha_softness) < 1e-6 &&
+                           std::abs(data->cached_alpha_gamma - alpha_gamma) < 1e-6 &&
                            std::abs(data->cached_temporal_smoothing - temporal_smoothing) < 1e-6;
 
     const SrgbLut& lut = SrgbLut::instance();
@@ -731,8 +743,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             log_message("render",
                         std::string("Engine processing failed: ") + result.error().message);
             set_runtime_error(data, result.error().message, instance);
-            bypass_with_source(source_data, output_data, width, height,
-                               source_row_bytes, output_row_bytes, source_depth);
+            bypass_with_source(source_data, output_data, width, height, source_row_bytes,
+                               output_row_bytes, source_depth);
             return kOfxStatOK;
         }
 
@@ -772,14 +784,19 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
 
         if (alpha_erode != 0.0) {
-            alpha_erode_dilate(alpha_view_local, static_cast<float>(alpha_erode), data->alpha_edge_state);
+            alpha_erode_dilate(alpha_view_local, static_cast<float>(alpha_erode),
+                               data->alpha_edge_state);
         }
         if (alpha_softness > 0.0) {
-            alpha_blur(alpha_view_local, static_cast<float>(alpha_softness), data->alpha_edge_state);
+            alpha_blur(alpha_view_local, static_cast<float>(alpha_softness),
+                       data->alpha_edge_state);
         }
         if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
             alpha_levels(alpha_view_local, static_cast<float>(alpha_black_point),
                          static_cast<float>(alpha_white_point));
+        }
+        if (std::abs(alpha_gamma - 1.0) > 1e-6) {
+            alpha_gamma_correct(alpha_view_local, static_cast<float>(alpha_gamma));
         }
 
         Image fg_srgb_view = result->foreground.view();
@@ -856,6 +873,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         data->cached_alpha_white_point = alpha_white_point;
         data->cached_alpha_erode = alpha_erode;
         data->cached_alpha_softness = alpha_softness;
+        data->cached_alpha_gamma = alpha_gamma;
         data->cached_temporal_smoothing = temporal_smoothing;
         data->cached_signature = signature;
         data->cached_signature_valid = true;
