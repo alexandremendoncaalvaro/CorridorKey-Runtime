@@ -173,6 +173,29 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
+TEST_CASE("fixed windows tensorRT quality keeps lower packaged fallbacks after the exact model",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-fixed-fallbacks");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
+
+    auto candidates = quality_artifact_candidates(temp_dir.path(), Backend::TensorRT,
+                                                  kQualityMaximum, 4096, 2160, kQuantizationFp16);
+
+    REQUIRE(candidates.size() == 3);
+    REQUIRE(candidates[0].requested_resolution == 2048);
+    REQUIRE(candidates[0].effective_resolution == 2048);
+    REQUIRE_FALSE(candidates[0].used_fallback);
+    REQUIRE(candidates[0].executable_model_path.filename() == "corridorkey_fp16_2048.onnx");
+    REQUIRE(candidates[1].effective_resolution == 1536);
+    REQUIRE(candidates[1].used_fallback);
+    REQUIRE(candidates[1].executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
+    REQUIRE(candidates[2].effective_resolution == 1024);
+    REQUIRE(candidates[2].used_fallback);
+    REQUIRE(candidates[2].executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
+}
+
 TEST_CASE("auto windows tensorRT quality falls back to the highest packaged model",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto");
