@@ -1,0 +1,17 @@
+#!/bin/bash
+set -euo pipefail
+
+console_user="$(stat -f%Su /dev/console)"
+if [ -z "$console_user" ] || [ "$console_user" = "root" ]; then
+    exit 0
+fi
+
+resolve_app="/Applications/DaVinci Resolve/DaVinci Resolve.app"
+if [ ! -d "$resolve_app" ]; then
+    resolve_app="/Applications/DaVinci Resolve Studio/DaVinci Resolve Studio.app"
+fi
+if [ -d "$resolve_app" ]; then
+    su "$console_user" -c "open \"$resolve_app\"" 2>/dev/null || true
+fi
+
+exit 0

@@ -23,6 +23,7 @@ SAMPLE_VIDEO_CLIP="${OUTPUT_ROOT}/sample_video_clip.mp4"
 EXPECTED_MINOS="${CORRIDORKEY_EXPECTED_MACOS_MINOS:-14.0}"
 ARCHIVE_FORMAT="${CORRIDORKEY_ARCHIVE_FORMAT:-zip}"
 REQUIRE_GATEKEEPER="${CORRIDORKEY_REQUIRE_GATEKEEPER:-0}"
+REQUIRE_MLX_2048="${CORRIDORKEY_REQUIRE_MLX_2048:-0}"
 MOUNTED_DMG=0
 
 require_file() {
@@ -139,7 +140,12 @@ require_file "${BUNDLE_ROOT}/bin/libcorridorkey_core.dylib"
 require_file "${BUNDLE_ROOT}/bin/libonnxruntime.1.24.3.dylib"
 require_file "${MODELS_DIR}/corridorkey_mlx.safetensors"
 require_file "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn"
+require_file "${MODELS_DIR}/corridorkey_mlx_bridge_768.mlxfn"
 require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn"
+require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn"
+if [ "$REQUIRE_MLX_2048" = "1" ]; then
+    require_file "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn"
+fi
 require_file "${MODELS_DIR}/corridorkey_int8_512.onnx"
 
 chmod +x "$CLI"

@@ -16,6 +16,7 @@
 #include "ofx_shared.hpp"
 
 #if defined(__APPLE__)
+#include <crt_externs.h>
 #include <dlfcn.h>
 #include <spawn.h>
 #elif defined(_WIN32)
@@ -38,16 +39,14 @@ std::string help_doc_url(const char* filename) {
 bool open_external_url(const std::string& url) {
 #if defined(_WIN32)
     std::wstring wide_url(url.begin(), url.end());
-    auto result =
-        reinterpret_cast<std::intptr_t>(ShellExecuteW(nullptr, L"open", wide_url.c_str(), nullptr,
-                                                      nullptr, SW_SHOWNORMAL));
+    auto result = reinterpret_cast<std::intptr_t>(
+        ShellExecuteW(nullptr, L"open", wide_url.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
     return result > 32;
 #elif defined(__APPLE__)
-    extern char** environ;
-    char* const argv[] = {const_cast<char*>("/usr/bin/open"),
-                          const_cast<char*>(url.c_str()), nullptr};
+    char* const argv[] = {const_cast<char*>("/usr/bin/open"), const_cast<char*>(url.c_str()),
+                          nullptr};
     pid_t pid = 0;
-    return posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, environ) == 0;
+    return posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, *_NSGetEnviron()) == 0;
 #else
     (void)url;
     return false;

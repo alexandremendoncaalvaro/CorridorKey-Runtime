@@ -29,8 +29,12 @@ CORE_LIB="${BUILD_DIR}/src/libcorridorkey_core.dylib"
 MLX_LIB="${CORRIDORKEY_MLX_LIB:-}"
 MLX_METALLIB="${CORRIDORKEY_MLX_METALLIB:-}"
 MLX_REQUIRED_PACK="models/corridorkey_mlx.safetensors"
-MLX_REQUIRED_BRIDGE="models/corridorkey_mlx_bridge_512.mlxfn"
-MLX_HIGH_RES_BRIDGE="models/corridorkey_mlx_bridge_1024.mlxfn"
+MLX_BRIDGE_512="models/corridorkey_mlx_bridge_512.mlxfn"
+MLX_BRIDGE_768="models/corridorkey_mlx_bridge_768.mlxfn"
+MLX_BRIDGE_1024="models/corridorkey_mlx_bridge_1024.mlxfn"
+MLX_BRIDGE_1536="models/corridorkey_mlx_bridge_1536.mlxfn"
+MLX_BRIDGE_2048="models/corridorkey_mlx_bridge_2048.mlxfn"
+REQUIRE_MLX_2048="${CORRIDORKEY_REQUIRE_MLX_2048:-0}"
 CPU_BASELINE_MODEL="models/corridorkey_int8_512.onnx"
 ZIP_PATH="dist/${DIST_BASENAME}.zip"
 DMG_PATH="dist/${DIST_BASENAME}.dmg"
@@ -196,13 +200,14 @@ if [ ! -f "$MLX_REQUIRED_PACK" ]; then
     exit 1
 fi
 
-if [ ! -f "$MLX_REQUIRED_BRIDGE" ]; then
-    echo "ERROR: Missing required MLX bridge: $MLX_REQUIRED_BRIDGE"
-    exit 1
-fi
-
-if [ ! -f "$MLX_HIGH_RES_BRIDGE" ]; then
-    echo "ERROR: Missing required high-resolution MLX bridge: $MLX_HIGH_RES_BRIDGE"
+for bridge in "$MLX_BRIDGE_512" "$MLX_BRIDGE_768" "$MLX_BRIDGE_1024" "$MLX_BRIDGE_1536"; do
+    if [ ! -f "$bridge" ]; then
+        echo "ERROR: Missing required MLX bridge: $bridge"
+        exit 1
+    fi
+done
+if [ "$REQUIRE_MLX_2048" = "1" ] && [ ! -f "$MLX_BRIDGE_2048" ]; then
+    echo "ERROR: Missing required MLX 2048 bridge: $MLX_BRIDGE_2048"
     exit 1
 fi
 
@@ -269,9 +274,12 @@ if [ "$RUNTIME_LIB_NAME" != "$RUNTIME_LINK_NAME" ]; then
     ln -sf "$RUNTIME_LIB_NAME" "$DIST_DIR/bin/$RUNTIME_LINK_NAME"
 fi
 
-for model in corridorkey_int8_512.onnx corridorkey_mlx.safetensors corridorkey_mlx_bridge_512.mlxfn corridorkey_mlx_bridge_1024.mlxfn; do
+for model in corridorkey_int8_512.onnx corridorkey_mlx.safetensors corridorkey_mlx_bridge_512.mlxfn corridorkey_mlx_bridge_768.mlxfn corridorkey_mlx_bridge_1024.mlxfn corridorkey_mlx_bridge_1536.mlxfn; do
     cp "models/$model" "$DIST_DIR/models/"
 done
+if [ -f "$MLX_BRIDGE_2048" ]; then
+    cp "$MLX_BRIDGE_2048" "$DIST_DIR/models/"
+fi
 
 echo "[3/5] Fixing library paths for portability..."
 install_name_tool -change "@rpath/libcorridorkey_core.dylib" "@executable_path/$CORE_LIB_NAME" \
