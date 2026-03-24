@@ -50,6 +50,25 @@ inline bool is_fixed_quality_mode(int quality_mode) {
     return quality_mode != kQualityAuto;
 }
 
+inline std::optional<std::string> unsupported_quantization_message(Backend backend,
+                                                                   int quantization_mode) {
+    if (quantization_mode != kQuantizationInt8) {
+        return std::nullopt;
+    }
+
+    if (backend == Backend::TensorRT) {
+        return "INT8 (Compact) is not supported by the TensorRT RTX execution provider. "
+               "Please use FP16 (Full).";
+    }
+
+    if (backend == Backend::DirectML) {
+        return "INT8 (Compact) is not yet validated for the DirectML execution provider. "
+               "Please use FP16 (Full) for AMD/DirectML runs.";
+    }
+
+    return std::nullopt;
+}
+
 inline int clamp_quality_mode_for_cpu_backend(Backend backend, int quality_mode) {
     if (backend == Backend::CPU) {
         return kQualityPreview;

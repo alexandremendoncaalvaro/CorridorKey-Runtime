@@ -298,6 +298,21 @@ TEST_CASE("auto windows universal quality falls back to the highest packaged int
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_int8_768.onnx");
 }
 
+TEST_CASE("unsupported OFX quantization combinations report product-safe guidance",
+          "[unit][ofx][regression]") {
+    auto tensorrt_message = unsupported_quantization_message(Backend::TensorRT, kQuantizationInt8);
+    REQUIRE(tensorrt_message.has_value());
+    REQUIRE(tensorrt_message->find("TensorRT RTX") != std::string::npos);
+
+    auto directml_message = unsupported_quantization_message(Backend::DirectML, kQuantizationInt8);
+    REQUIRE(directml_message.has_value());
+    REQUIRE(directml_message->find("DirectML") != std::string::npos);
+    REQUIRE(directml_message->find("FP16") != std::string::npos);
+
+    REQUIRE_FALSE(unsupported_quantization_message(Backend::DirectML, kQuantizationFp16).has_value());
+    REQUIRE_FALSE(unsupported_quantization_message(Backend::CPU, kQuantizationInt8).has_value());
+}
+
 TEST_CASE("cpu quality guardrail clamps manual qualities above preview",
           "[unit][ofx][regression]") {
     REQUIRE(clamp_quality_mode_for_cpu_backend(Backend::CPU, kQualityPreview) == kQualityPreview);

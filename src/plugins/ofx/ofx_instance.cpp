@@ -830,10 +830,10 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     const bool cpu_quality_guardrail_active = effective_quality_mode != requested_quality_mode;
     const int requested_resolution =
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
-    if (requested_device.backend == Backend::TensorRT && quantization_mode == kQuantizationInt8) {
-        data->last_error =
-            "INT8 (Compact) is not supported by the TensorRT RTX execution provider. "
-            "Please use FP16 (Full).";
+    if (auto unsupported_quantization =
+            unsupported_quantization_message(requested_device.backend, quantization_mode);
+        unsupported_quantization.has_value()) {
+        data->last_error = *unsupported_quantization;
         log_message("ensure_engine_for_quality", data->last_error);
         update_runtime_panel(data);
         log_quality_total("unsupported_quantization", data->last_error);
@@ -1153,11 +1153,10 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                     if (requested_device.backend == Backend::Auto) {
                         requested_device = data->device;
                     }
-                    if (requested_device.backend == Backend::TensorRT &&
-                        quant == kQuantizationInt8) {
-                        data->last_error =
-                            "INT8 (Compact) is not supported by the "
-                            "TensorRT RTX provider. Please use FP16 (Full).";
+                    if (auto unsupported_quantization =
+                            unsupported_quantization_message(requested_device.backend, quant);
+                        unsupported_quantization.has_value()) {
+                        data->last_error = *unsupported_quantization;
                         data->quantization_error_active = true;
                         data->runtime_panel_dirty = true;
                     } else if (data->quantization_error_active) {
