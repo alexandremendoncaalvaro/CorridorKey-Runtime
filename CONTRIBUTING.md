@@ -203,7 +203,8 @@ perf: parallelize frame decode pipeline
 CorridorKey-Runtime/
   .github/              GitHub Actions, issue/PR templates
   cmake/                CMake modules and helpers
-  docs/                 Technical specification and guidelines
+  docs/                 Development specification, architecture, and release rules
+  help/                 User-facing OFX guides, tutorials, and troubleshooting
   include/corridorkey/  Public API headers
   src/
     cli/                CLI entry point (thin consumer of the library)
