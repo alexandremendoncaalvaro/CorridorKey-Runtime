@@ -282,29 +282,29 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "runtime_group");
 
     // --- Group 2: Help & Docs (actionable links only) ---
-    define_group_param(param_set, "help_group", "Help & Docs", false);
+    define_group_param(param_set, kParamHelpGroup, "Help & Docs", false);
 
     define_push_button_param(
         param_set, kParamOpenStartHereGuide, "Open Start Here Guide",
-        "Open the quick-start guide for CorridorKey in Resolve.", "help_group");
+        "Open the quick-start guide for CorridorKey in Resolve.", kParamHelpGroup);
     define_push_button_param(
         param_set, kParamOpenQualityGuide, "Open Quality Guide",
-        "Open the quality and fallback guide for CorridorKey.", "help_group");
+        "Open the quality and fallback guide for CorridorKey.", kParamHelpGroup);
     define_push_button_param(
         param_set, kParamOpenAlphaHintGuide, "Open Alpha Hint Guide",
-        "Open the Alpha Hint setup guide and input-format reference.", "help_group");
+        "Open the Alpha Hint setup guide and input-format reference.", kParamHelpGroup);
     define_push_button_param(
         param_set, kParamOpenRecoverDetailsGuide, "Open Recover Details Guide",
-        "Open the Recover Original Details guide.", "help_group");
+        "Open the Recover Original Details guide.", kParamHelpGroup);
     define_push_button_param(
         param_set, kParamOpenTilingGuide, "Open Tiling Guide",
-        "Open the tiling guide and trade-offs.", "help_group");
+        "Open the tiling guide and trade-offs.", kParamHelpGroup);
     define_push_button_param(
         param_set, kParamOpenResolveTutorial, "Open Resolve Tutorial",
-        "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", "help_group");
+        "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", kParamHelpGroup);
     define_push_button_param(
         param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
-        "Open the troubleshooting guide on GitHub.", "help_group");
+        "Open the troubleshooting guide on GitHub.", kParamHelpGroup);
 
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
