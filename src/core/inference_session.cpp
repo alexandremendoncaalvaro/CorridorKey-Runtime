@@ -142,6 +142,19 @@ void append_directml_execution_provider(Ort::SessionOptions& session_options, in
     session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::DIRECTML),
                                             dml_options);
 }
+
+void override_windows_universal_free_dimensions(Ort::SessionOptions& session_options,
+                                                Backend backend) {
+    if (backend != Backend::DirectML && backend != Backend::WindowsML) {
+        return;
+    }
+
+    // The DirectML guidance recommends overriding free dimensions during session creation so the
+    // provider can optimize and specialize the graph for the actual runtime shape.
+    debug_log("Overriding free dimension 'batch_size' to 1 for Windows universal backend");
+    Ort::ThrowOnError(
+        Ort::GetApi().AddFreeDimensionOverrideByName(session_options, "batch_size", 1));
+}
 #endif
 
 #ifdef __APPLE__
@@ -329,6 +342,10 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 
     debug_log("Setting log severity level");
     m_session_options.SetLogSeverityLevel(options.log_severity);
+
+#ifdef _WIN32
+    override_windows_universal_free_dimensions(m_session_options, m_device.backend);
+#endif
 
     if (m_device.backend != Backend::CPU) {
         if (options.disable_cpu_ep_fallback) {
