@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
 
 #include "color_utils.hpp"
 #include "common/parallel_for.hpp"
@@ -23,31 +22,45 @@ void threshold_alpha(Image alpha, Image mask) {
     });
 }
 
-void erode_elliptical(Image mask, int radius, Image temp_view) {
-    if (radius <= 0) return;
+void ensure_elliptical_offsets(int radius, ColorUtils::State& state) {
+    if (radius <= 0) {
+        state.sp_offsets.clear();
+        state.sp_offsets_radius = radius;
+        return;
+    }
+    if (state.sp_offsets_radius == radius && !state.sp_offsets.empty()) {
+        return;
+    }
 
-    int w = mask.width;
-    int h = mask.height;
+    state.sp_offsets.clear();
+    state.sp_offsets.reserve(static_cast<size_t>((radius * 2 + 1) * (radius * 2 + 1)));
 
-    // Pre-compute elliptical footprint offsets
-    std::vector<std::pair<int, int>> offsets;
     float r_sq = static_cast<float>(radius) * static_cast<float>(radius);
     for (int dy = -radius; dy <= radius; ++dy) {
         for (int dx = -radius; dx <= radius; ++dx) {
             float dist_sq = static_cast<float>(dy * dy + dx * dx);
             if (dist_sq <= r_sq) {
-                offsets.emplace_back(dy, dx);
+                state.sp_offsets.push_back({dy, dx});
             }
         }
     }
+    state.sp_offsets_radius = radius;
+}
+
+void erode_elliptical(Image mask, int radius, Image temp_view, ColorUtils::State& state) {
+    if (radius <= 0) return;
+
+    int w = mask.width;
+    int h = mask.height;
+    ensure_elliptical_offsets(radius, state);
 
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
             for (int x = 0; x < w; ++x) {
                 float min_val = mask(y, x);
-                for (const auto& [dy, dx] : offsets) {
-                    int ny = y + dy;
-                    int nx = x + dx;
+                for (const auto& offset : state.sp_offsets) {
+                    int ny = y + offset.dy;
+                    int nx = x + offset.dx;
                     float val = (ny < 0 || ny >= h || nx < 0 || nx >= w) ? 0.0F : mask(ny, nx);
                     min_val = std::min(min_val, val);
                     if (min_val == 0.0F) break;
@@ -90,7 +103,7 @@ void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode
 
     // 2. Erode inward to create safety margin at edges
     Image temp_view = {alpha.width, alpha.height, 1, state.sp_temp};
-    erode_elliptical(mask, erode_px, temp_view);
+    erode_elliptical(mask, erode_px, temp_view, state);
 
     // 3. Gaussian blur for smooth transition band
     if (blur_px > 0) {

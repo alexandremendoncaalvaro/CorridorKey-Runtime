@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.4.13",
+    [string]$Version = "",
     [switch]$SkipTests,
     [switch]$CleanOnly
 )
@@ -16,7 +16,27 @@ function Write-Success([string]$msg) {
     Write-Host "[SUCCESS] $msg" -ForegroundColor Green
 }
 
+function Get-ProjectVersion {
+    param([string]$RepoRoot)
+
+    $cmakePath = Join-Path $RepoRoot "CMakeLists.txt"
+    if (-not (Test-Path $cmakePath)) {
+        throw "Could not determine project version because CMakeLists.txt was not found at $cmakePath"
+    }
+
+    $versionLine = Select-String -Path $cmakePath -Pattern '^\s*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\s*$'
+    if ($null -ne $versionLine) {
+        return $versionLine.Matches[0].Groups[1].Value
+    }
+
+    throw "Could not determine project version from $cmakePath"
+}
+
 try {
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        $Version = Get-ProjectVersion -RepoRoot $repoRoot
+    }
+
     # 1. Limpeza de Ambiente
     Write-Step "Sanitizing Environment"
     $dirsToClean = @("build/release", "dist", "temp")

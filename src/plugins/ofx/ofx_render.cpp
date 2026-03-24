@@ -652,7 +652,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             }
         }
 
-        bool apply_srgb = !input_is_linear;
+        bool apply_srgb = should_apply_srgb_to_output(output_mode, input_is_linear);
         if (output_mode == kOutputMatteOnly) {
             write_matte_output(alpha_view, output_data, output_row_bytes, output_depth,
                                SrgbLut::instance());
@@ -662,8 +662,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         } else if (output_mode == kOutputSourceMatte) {
             write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes,
                                       output_depth, apply_srgb, SrgbLut::instance());
-        } else if (output_mode == kOutputFGMatte) {
-            // Always linear premultiplied -- no sRGB correction regardless of input color space.
+        } else if (output_mode_uses_linear_premultiplied_rgba(output_mode)) {
             write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
                                    output_depth, false, SrgbLut::instance());
         } else {
@@ -890,7 +889,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         swap_green_blue(rgb_view);
     }
 
-    bool apply_srgb = !input_is_linear;
+    bool apply_srgb = should_apply_srgb_to_output(output_mode, input_is_linear);
 
     if (output_mode == kOutputMatteOnly) {
         write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, lut);
@@ -900,8 +899,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     } else if (output_mode == kOutputSourceMatte) {
         write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes, output_depth,
                                   apply_srgb, lut);
-    } else if (output_mode == kOutputFGMatte) {
-        // Always linear premultiplied -- no sRGB correction regardless of input color space.
+    } else if (output_mode_uses_linear_premultiplied_rgba(output_mode)) {
         write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth,
                                false, lut);
     } else {

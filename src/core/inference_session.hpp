@@ -6,15 +6,26 @@
 #include <string>
 #include <vector>
 
-// Include ONNX Runtime (only in private headers)
-// Prefer the top-level path so that coreml_provider_factory.h (which also uses
-// the top-level onnxruntime_c_api.h) does not trigger duplicate type definitions.
+// Keep the C++ wrapper aligned with the provider header layout for each platform.
+// The curated Windows RTX package only ships the core/session layout; falling back
+// to the vcpkg top-level wrapper alongside vendor provider headers causes duplicate
+// ONNX Runtime type definitions during compilation.
+#if defined(_WIN32)
+#if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
+#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
+#elif __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
+#include <onnxruntime/onnxruntime_cxx_api.h>
+#else
+#error "ONNX Runtime C++ headers not found"
+#endif
+#else
 #if __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
 #include <onnxruntime/onnxruntime_cxx_api.h>
 #elif __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
 #include <onnxruntime/core/session/onnxruntime_cxx_api.h>
 #else
 #error "ONNX Runtime C++ headers not found"
+#endif
 #endif
 
 #include "post_process/color_utils.hpp"

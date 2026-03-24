@@ -17,13 +17,42 @@
 
 #if defined(__APPLE__)
 #include <dlfcn.h>
+#include <spawn.h>
 #elif defined(_WIN32)
+#include <shellapi.h>
 #include <windows.h>
 #endif
 
 namespace corridorkey::ofx {
 
 namespace {
+
+constexpr const char* kRepoDocsBaseUrl =
+    "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/blob/"
+    "main/docs/";
+
+std::string help_doc_url(const char* filename) {
+    return std::string(kRepoDocsBaseUrl) + filename;
+}
+
+bool open_external_url(const std::string& url) {
+#if defined(_WIN32)
+    std::wstring wide_url(url.begin(), url.end());
+    auto result =
+        reinterpret_cast<std::intptr_t>(ShellExecuteW(nullptr, L"open", wide_url.c_str(), nullptr,
+                                                      nullptr, SW_SHOWNORMAL));
+    return result > 32;
+#elif defined(__APPLE__)
+    extern char** environ;
+    char* const argv[] = {const_cast<char*>("/usr/bin/open"),
+                          const_cast<char*>(url.c_str()), nullptr};
+    pid_t pid = 0;
+    return posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, environ) == 0;
+#else
+    (void)url;
+    return false;
+#endif
+}
 
 std::string backend_label(Backend backend) {
     switch (backend) {
@@ -855,6 +884,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data->active_quality_mode = requested_quality_mode;
             data->requested_resolution = requested_resolution;
             data->active_resolution = selection.effective_resolution;
+            data->last_warning = quality_fallback_warning(requested_quality_mode, selection);
             data->last_error.clear();
             update_runtime_panel_values(data);
             log_quality_total("reused_engine");
@@ -981,16 +1011,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         data->last_frame_ms = 0.0;
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
-        if (selection.used_fallback) {
-            const std::string fallback_note =
-                std::string(quality_mode_label(requested_quality_mode)) + " (" +
-                std::to_string(selection.requested_resolution) +
-                "px) unavailable on this hardware -- using " +
-                std::to_string(selection.effective_resolution) + "px";
-            data->last_warning = fallback_note;
-            log_message("ensure_engine_for_quality", "fallback_note=" + fallback_note);
-        } else {
-            data->last_warning.clear();
+        data->last_warning = quality_fallback_warning(requested_quality_mode, selection);
+        if (!data->last_warning.empty()) {
+            log_message("ensure_engine_for_quality", "fallback_note=" + data->last_warning);
         }
         if (cpu_quality_guardrail_active) {
             log_message(
@@ -1073,6 +1096,36 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
     if (in_args != nullptr && g_suites.property != nullptr) {
         std::string changed_param;
         if (get_string(in_args, kOfxPropName, changed_param)) {
+            if (changed_param == kParamOpenStartHereGuide ||
+                changed_param == kParamOpenQualityGuide ||
+                changed_param == kParamOpenAlphaHintGuide ||
+                changed_param == kParamOpenRecoverDetailsGuide ||
+                changed_param == kParamOpenTilingGuide ||
+                changed_param == kParamOpenResolveTutorial ||
+                changed_param == kParamOpenTroubleshooting) {
+                std::string url;
+                if (changed_param == kParamOpenStartHereGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#start-here");
+                } else if (changed_param == kParamOpenQualityGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#quality");
+                } else if (changed_param == kParamOpenAlphaHintGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#alpha-hint");
+                } else if (changed_param == kParamOpenRecoverDetailsGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#recover-original-details");
+                } else if (changed_param == kParamOpenTilingGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#tiling");
+                } else if (changed_param == kParamOpenResolveTutorial) {
+                    url = help_doc_url("OFX_RESOLVE_TUTORIALS.md");
+                } else {
+                    url = help_doc_url("TROUBLESHOOTING.md");
+                }
+
+                if (!open_external_url(url)) {
+                    post_message(kOfxMessageError,
+                                 ("Failed to open documentation URL: " + url).c_str(), instance);
+                }
+                return kOfxStatOK;
+            }
             if (changed_param == kParamEnableTiling || changed_param == kParamAutoDespeckle ||
                 changed_param == kParamSourcePassthrough) {
                 sync_dependent_params(data);

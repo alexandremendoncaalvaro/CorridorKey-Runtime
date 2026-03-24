@@ -31,20 +31,19 @@ struct QualityArtifactSelection {
 };
 
 inline const char* quality_mode_label(int quality_mode) {
-    switch (quality_mode) {
-        case kQualityPreview:
-            return "Draft (512)";
-        case kQualityStandard:
-            return "Standard (768)";
-        case kQualityHigh:
-            return "High (1024)";
-        case kQualityUltra:
-            return "Ultra (1536)";
-        case kQualityMaximum:
-            return "Maximum (2048)";
-        default:
-            return "Auto";
+    return quality_mode_ui_label(quality_mode);
+}
+
+inline std::string quality_fallback_warning(int quality_mode,
+                                            const QualityArtifactSelection& selection) {
+    if (!selection.used_fallback) {
+        return {};
     }
+
+    return std::string(quality_mode_label(quality_mode)) + " (" +
+           std::to_string(selection.requested_resolution) +
+           "px) unavailable on this hardware -- using " +
+           std::to_string(selection.effective_resolution) + "px";
 }
 
 inline bool is_fixed_quality_mode(int quality_mode) {
@@ -170,27 +169,37 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     }
 
     constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    bool exact_artifact_available = false;
     for (int resolution : kFallbackResolutions) {
         if (resolution > requested_resolution) {
             continue;
         }
-        // Fixed quality modes only consider the exact resolution. If the artifact is missing,
-        // return an empty list so the caller can report a clear error. Fallback on engine
-        // compilation failure is handled by ensure_engine_for_quality, not here.
-        // Auto mode iterates all lower resolutions to find the best available artifact.
-        if (is_fixed_quality_mode(quality_mode) && resolution != requested_resolution) {
-            break;
+        // Fixed quality modes still need lower packaged artifacts after the exact match so
+        // ensure_engine_for_quality can downgrade on engine compilation failure. However, if the
+        // exact artifact itself is missing, return an empty list so the caller can report a clear
+        // missing-artifact error instead of silently selecting a lower packaged model.
+        if (is_fixed_quality_mode(quality_mode) && resolution != requested_resolution &&
+            !exact_artifact_available) {
+            continue;
         }
 
         auto artifact_paths =
             artifact_paths_for_backend(models_root, backend, resolution, quantization_mode);
+        bool found_for_resolution = false;
         for (const auto& artifact_path : artifact_paths) {
             if (!path_exists(artifact_path)) {
                 continue;
             }
+            found_for_resolution = true;
             candidates.push_back(QualityArtifactSelection{artifact_path, requested_resolution,
                                                           resolution,
                                                           resolution != requested_resolution});
+        }
+        if (is_fixed_quality_mode(quality_mode) && resolution == requested_resolution) {
+            if (!found_for_resolution) {
+                return {};
+            }
+            exact_artifact_available = true;
         }
     }
 

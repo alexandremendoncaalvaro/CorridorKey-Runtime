@@ -114,8 +114,23 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
     set_parent(param_props, parent);
 }
 
+void define_push_button_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                              const char* hint, const char* parent = nullptr) {
+    OfxPropertySetHandle param_props = nullptr;
+    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypePushButton, name, &param_props) !=
+        kOfxStatOK) {
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    if (hint != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+    set_parent(param_props, parent);
+}
+
 void define_info_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                       const char* default_value, const char* hint, const char* parent = nullptr) {
+                       const char* value, const char* hint, const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props) !=
         kOfxStatOK) {
@@ -123,9 +138,8 @@ void define_info_param(OfxParamSetHandle param_set, const char* name, const char
     }
 
     g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
-    g_suites.property->propSetString(param_props, kOfxParamPropDefault, 0, default_value);
-    g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0,
-                                     kOfxParamStringIsLabel);
+    g_suites.property->propSetString(param_props, kOfxParamPropDefault, 0, value);
+    g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0, kOfxParamStringIsLabel);
     g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, 0);
     g_suites.property->propSetInt(param_props, kOfxParamPropEvaluateOnChange, 0, 0);
     if (hint != nullptr) {
@@ -240,7 +254,59 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         return kOfxStatFailed;
     }
 
-    // --- Group 1: Key Setup (the two choices that determine the AI result) ---
+    // --- Group 1: Status (runtime diagnostics and current version at the top) ---
+    std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
+    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
+
+    define_runtime_status_param(
+        param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
+        "Shows the backend currently used by this OFX instance.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
+        "Shows the device selected for this OFX instance.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
+        "Shows the quality mode currently requested by the OFX controls.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
+        "Shows the actual resolution currently used for inference after artifact selection.",
+        "runtime_group");
+    define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
+                                "Initializing...",
+                                "Shows the actual model or bridge file loaded for the current "
+                                "quality mode.",
+                                "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeStatus, "Status", "Initializing...",
+        "Shows the last frame time or the most recent error during engine load or render.",
+        "runtime_group");
+
+    // --- Group 2: Help & Docs (actionable links only) ---
+    define_group_param(param_set, "help_group", "Help & Docs", false);
+
+    define_push_button_param(
+        param_set, kParamOpenStartHereGuide, "Open Start Here Guide",
+        "Open the quick-start guide for CorridorKey in Resolve.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenQualityGuide, "Open Quality Guide",
+        "Open the quality and fallback guide for CorridorKey.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenAlphaHintGuide, "Open Alpha Hint Guide",
+        "Open the Alpha Hint guide for difficult shots.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenRecoverDetailsGuide, "Open Recover Details Guide",
+        "Open the Recover Original Details guide.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenTilingGuide, "Open Tiling Guide",
+        "Open the tiling guide and trade-offs.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenResolveTutorial, "Open Resolve Tutorial",
+        "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
+        "Open the troubleshooting guide on GitHub.", "help_group");
+
+    // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
 
     define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
@@ -250,20 +316,24 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "setup_group");
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityAuto,
-        {"Auto", "Draft", "Standard", "High", "Ultra", "Maximum"},
+        {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
+         quality_mode_ui_label(kQualityStandard), quality_mode_ui_label(kQualityHigh),
+         quality_mode_ui_label(kQualityUltra), quality_mode_ui_label(kQualityMaximum)},
         "Inference quality. Auto selects based on input size and hardware. "
         "Higher values produce better detail at the cost of speed. "
-        "Resolutions: Draft 512, Standard 768, High 1024, Ultra 1536, Maximum 2048.",
+        "Resolutions: Draft (512), Standard (768), High (1024), Ultra (1536), "
+        "Maximum (2048).",
         "setup_group");
 
-    // --- Group 2: Matte (refine the AI-generated alpha) ---
+    // --- Group 4: Matte (refine the AI-generated alpha) ---
     define_group_param(param_set, "matte_group", "Matte", true);
 
     define_info_param(
         param_set, "alpha_hint_info", "Matte Input Guide",
         "Accepts Alpha Channels (transparency) or Luma Mattes (black & white).",
         "CorridorKey dynamically detects the input type. You can supply an Alpha channel or a "
-        "solid Luma Matte (it will read the luminance).\n\n"
+        "solid Luma Matte (it will read the luminance). The controls below adjust the output "
+        "matte generated by CorridorKey, not the incoming hint clip.\n\n"
         "Fusion: Connect your matte to the secondary 'Alpha Hint' pin.\n"
         "Color Page: Right-click this node -> 'Add OFX Input', then route a Qualifier or 3D Keyer "
         "output into the new green input.",
@@ -293,7 +363,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
         1.0, "Blend current output with the previous frame for temporal stability.", "matte_group");
 
-    // --- Group 3: Edge & Spill (fix edges and color spill) ---
+    // --- Group 5: Edge & Spill (fix edges and color spill) ---
     define_group_param(param_set, "edge_spill_group", "Edge & Spill", true);
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
@@ -305,33 +375,36 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "red and blue. Double Limit uses the stronger neighbor channel. "
                         "Neutral replaces with gray to avoid color shifts.",
                         "edge_spill_group");
-    define_bool_param(param_set, kParamSourcePassthrough, "Core Detail Recovery",
+    define_bool_param(param_set, kParamSourcePassthrough, "Recover Original Details",
                       kDefaultSourcePassthroughEnabled,
-                      "Blend original source pixels into high-confidence matte regions "
-                      "for sharper interior detail.",
+                      "Blend original source pixels into high-confidence matte regions for "
+                      "sharper interior detail. Enable this to activate the Details Edge "
+                      "controls below.",
                       "edge_spill_group");
-    define_int_param(param_set, kParamEdgeErode, "Detail Mask Shrink", kDefaultEdgeErode, 0,
+    define_int_param(param_set, kParamEdgeErode, "Details Edge Shrink", kDefaultEdgeErode, 0,
                      kMaxEdgeErode,
-                     "Shrink the interior mask before blending source detail. "
+                     "Shrink the recovered-details mask before blending source detail. "
                      "Higher values widen the transition zone at edges.",
                      "edge_spill_group");
-    define_int_param(param_set, kParamEdgeBlur, "Detail Mask Feather", kDefaultEdgeBlur, 0,
+    define_int_param(param_set, kParamEdgeBlur, "Details Edge Feather", kDefaultEdgeBlur, 0,
                      kMaxEdgeBlur,
-                     "Feather the interior mask for a smoother blend between source and model.",
+                     "Feather the recovered-details mask for a smoother blend between source and "
+                     "model.",
                      "edge_spill_group");
 
-    // --- Group 4: Output ---
+    // --- Group 6: Output ---
     define_group_param(param_set, "output_group", "Output", true);
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
                         {"Processed", "Matte Only", "Foreground Only", "Source+Matte", "FG+Matte"},
                         "What to output.\n"
-                        "Processed: convenience composite, premultiplied.\n"
+                        "Processed: CorridorKey's linear premultiplied RGBA output. "
+                        "Matches the runtime's processed result and is safe for compositing.\n"
                         "Matte Only: alpha as grayscale.\n"
                         "Foreground Only: despilled foreground, full alpha.\n"
                         "Source+Matte: original source premultiplied by AI matte.\n"
-                        "FG+Matte: model foreground premultiplied by AI matte, always linear "
-                        "-- use this for manual compositing.",
+                        "FG+Matte: explicit linear foreground+matte alias of Processed for "
+                        "manual compositing workflows and backward compatibility.",
                         "output_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},
@@ -339,7 +412,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Lanczos4 is sharper; Bilinear is smoother.",
                         "output_group");
 
-    // --- Group 5: Performance ---
+    // --- Group 7: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
 
     define_choice_param(
@@ -349,45 +422,23 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "INT8 (Compact) selects memory-efficient quantized files for faster inference.",
         "performance_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
-                      "Process at native resolution using overlapping tiles. "
-                      "Sharper details but slower.",
+                      "Process at native resolution using overlapping tiles. Use this when lower "
+                      "quality modes lose too much detail or when you want sharper results than "
+                      "the model resolution alone can provide. It is slower and increases memory "
+                      "use.",
                       "performance_group");
     define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
-                     "Pixel overlap between tiles for seamless blending.", "performance_group");
+                     "Pixel overlap between tiles for seam-safe blending. Larger values reduce "
+                     "tile boundary artifacts at the cost of more work.",
+                     "performance_group");
     define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
                         kDefaultInputColorSpace, {"sRGB", "Linear"},
-                        "Source interpretation mode. Set to Linear when working in a "
-                        "linear-light pipeline. Most Resolve Color page workflows use sRGB.",
+                        "Source interpretation mode. Linear is the default because CorridorKey's "
+                        "compositing-safe outputs are intended for linear-light workflows. Switch "
+                        "to sRGB only when the source reaching this OFX is already display-referred.",
                         "performance_group");
 
-    // --- Group 6: Status (diagnostics, collapsed at bottom) ---
-    std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
-    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
-
-    define_runtime_status_param(
-        param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
-        "Shows the backend currently used by this OFX instance.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
-        "Shows the device selected for this OFX instance.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
-        "Shows the quality mode currently requested by the OFX controls.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
-        "Shows the actual resolution currently used for inference after artifact selection.",
-        "runtime_group");
-    define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
-                                "Initializing...",
-                                "Shows the actual model or bridge file loaded for the current "
-                                "quality mode.",
-                                "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeStatus, "Status", "Initializing...",
-        "Shows the last frame time or the most recent error during engine load or render.",
-        "runtime_group");
-
-    // --- Group 7: Advanced (timeouts) ---
+    // --- Group 8: Advanced (timeouts) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
     define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)", 30, 10, 300,
