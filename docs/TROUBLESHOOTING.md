@@ -178,7 +178,7 @@ Before filing a bug report, collect the following:
 
 2. **Runtime log.** The runtime writes a log file during operation:
    - macOS: `~/Library/Logs/CorridorKey/`
-   - Windows: `%AppData%\CorridorKey\logs\`
+   - Windows: `%LOCALAPPDATA%\CorridorKey\Logs\`
 
 3. **Resolve OFX log** (if the issue is plugin-specific):
    - macOS: `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/logs/`

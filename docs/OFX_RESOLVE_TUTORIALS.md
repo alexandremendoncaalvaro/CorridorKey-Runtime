@@ -2,7 +2,7 @@
 
 This guide exists to show reliable CorridorKey workflows in DaVinci Resolve.
 It focuses on decisions that matter in real sessions: how to get a clean first
-result fast, when to add an Alpha Hint, and when to use Recover Original
+result fast, when to connect an Alpha Hint matte, and when to use Recover Original
 Details or Tiling.
 
 ## Tutorial 1: Fast First Key
@@ -22,7 +22,8 @@ do not keep pushing that machine. Stay on the highest stable setting.
 
 ## Tutorial 2: Difficult Hair Or Motion Blur With Alpha Hint
 
-Use this when hair, fur, motion blur, or weak edges need guidance.
+Use this when you already have a rough matte that describes hair, fur, motion
+blur, or weak edges better than the model alone.
 
 ### Color Page
 
@@ -38,8 +39,8 @@ Use this when hair, fur, motion blur, or weak edges need guidance.
 2. Connect it to the CorridorKey **Alpha Hint** input.
 3. Re-check the result in **Processed** and **Matte Only**.
 
-Use the hint to steer ambiguous regions, not to replace CorridorKey's matte
-logic entirely.
+Use the hint to steer ambiguous regions. It is still a rough guide matte, not a
+replacement for CorridorKey's matte generation.
 
 ## Tutorial 3: Recover Opaque Texture
 
@@ -75,8 +76,8 @@ Before blaming model quality, isolate the actual problem.
 
 1. Use **Matte Only** to inspect the alpha.
 2. Use **Foreground Only** to inspect despill and foreground texture.
-3. Use **Source+Matte** if you want to compare CorridorKey's matte against the
-   original source.
+3. Use **Source+Matte** if you want to inspect the original source premultiplied
+   by CorridorKey's matte.
 4. Read the runtime panel after every quality change.
 
 If the top status panel says the machine is not keeping the requested quality,

@@ -24,6 +24,8 @@ dropdown alone.
 
 Use quality as a stability ladder, not as a vanity setting.
 
+- **Auto** chooses a model based on input size and hardware. Use it when you
+  want the plugin to pick the first reasonable target for the current shot.
 - Start with **High (1024)**.
 - Move to **Ultra (1536)** only if the status panel stays on `1536px`.
 - Move to **Maximum (2048)** only if the status panel stays on `2048px`.
@@ -35,7 +37,9 @@ paths, first-run compilation can be much slower than steady-state rendering.
 
 ## Alpha Hint
 
-Use **Alpha Hint** when the base key needs direction.
+**Alpha Hint** is an optional secondary matte input. Use it when you already
+have a rough matte from Resolve that describes difficult regions better than
+the model alone.
 
 Good use cases:
 
@@ -50,14 +54,22 @@ The hint input is optional. Feed CorridorKey either:
 - an alpha channel
 - a black-and-white luma matte
 
+Practical sources inside Resolve:
+
+- a Qualifier result
+- a 3D Keyer result
+- a garbage matte or hand-shaped matte
+- a matte built in Fusion
+
 The **Matte** controls in the panel still adjust CorridorKey's output matte.
 They do not modify the incoming hint clip.
 
 ## Recover Original Details
 
-**Recover Original Details** blends trusted source pixels back into solid
-foreground regions. Use it to keep real texture in clothing, skin, and other
-opaque areas that can look too processed after inference.
+**Recover Original Details** blends original source detail back into opaque
+foreground regions where CorridorKey is already confident about the matte. Use
+it to keep real texture in clothing, skin, and other solid areas that can look
+too processed after inference.
 
 Use it when:
 
@@ -92,7 +104,8 @@ Use it when:
 - the image is high resolution and model upscaling looks too soft
 - you want to trade render time for extra detail
 
-Do not use it by default. Tiling is slower and uses more memory.
+Do not use it by default. Tiling is slower, increases memory use, and is a
+detail tool, not a fix for backend or model-load failures.
 
 If you enable tiling:
 
@@ -106,23 +119,23 @@ If you enable tiling:
 Choose output mode based on the job you are doing.
 
 - **Processed** is CorridorKey's linear premultiplied RGBA output. This is the
-  normal result.
+  default result for viewing and compositing.
 - **Matte Only** is for inspecting the alpha.
 - **Foreground Only** is for inspecting the despilled foreground.
-- **Source+Matte** is useful when you want to see the original source shaped by
-  the matte.
-- **FG+Matte** is an explicit foreground-plus-alpha workflow for manual comp
-  setups.
+- **Source+Matte** is the original source premultiplied by CorridorKey's matte.
+- **FG+Matte** is an explicit alias of **Processed** for workflows that want a
+  foreground-plus-alpha label.
 
 ## Start Here
 
 1. Set **Quality** to `High (1024)`.
 2. Confirm the top status panel says `1024px`, not a fallback.
 3. Keep **Recover Original Details** enabled unless it makes edges worse.
-4. Use **Alpha Hint** only when CorridorKey needs guidance.
+4. Add **Alpha Hint** only if you already have a rough matte that improves
+   difficult regions.
 5. Enable **Tiling** only after confirming normal `High (1024)` is not enough.
-6. Check **Processed** first, then switch outputs only when diagnosing a
-   specific problem.
+6. Use **Processed** as the normal output. Switch outputs only when diagnosing
+   a specific problem.
 
 ## When A Higher Quality Fails
 
