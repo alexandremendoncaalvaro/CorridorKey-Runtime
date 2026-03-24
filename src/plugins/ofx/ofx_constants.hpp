@@ -19,6 +19,9 @@ constexpr int kOutputProcessed = 0;
 constexpr int kOutputMatteOnly = 1;
 constexpr int kOutputForegroundOnly = 2;
 constexpr int kOutputSourceMatte = 3;
+// FG+Matte: model foreground premultiplied by AI matte, alpha in A channel.
+// Never applies sRGB correction — always outputs linear premultiplied for manual compositing.
+constexpr int kOutputFGMatte = 4;
 
 // Alpha hint source mode
 constexpr int kAlphaHintAuto = 0;
