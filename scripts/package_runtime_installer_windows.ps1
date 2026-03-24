@@ -139,6 +139,9 @@ $stageArgs = @{
     BuildDir = $BuildDir
     OrtRoot = $OrtRoot
 }
+if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
+    $stageArgs["ReleaseSuffix"] = $ReleaseSuffix
+}
 
 try {
     Write-Host "[1/4] Staging runtime payload for the Windows installer..." -ForegroundColor Cyan
