@@ -128,6 +128,242 @@ std::filesystem::path current_executable_path() {
     return {};
 }
 
+std::string backend_to_diagnostic_string(Backend backend) {
+    switch (backend) {
+        case Backend::CPU:
+            return "cpu";
+        case Backend::CUDA:
+            return "cuda";
+        case Backend::TensorRT:
+            return "tensorrt";
+        case Backend::CoreML:
+            return "coreml";
+        case Backend::DirectML:
+            return "dml";
+        case Backend::MLX:
+            return "mlx";
+        case Backend::WindowsML:
+            return "winml";
+        case Backend::OpenVINO:
+            return "openvino";
+        case Backend::Auto:
+        default:
+            return "auto";
+    }
+}
+
+Backend diagnostic_backend_from_string(const std::string& value) {
+    if (value == "cuda") {
+        return Backend::CUDA;
+    }
+    if (value == "tensorrt") {
+        return Backend::TensorRT;
+    }
+    if (value == "coreml") {
+        return Backend::CoreML;
+    }
+    if (value == "dml") {
+        return Backend::DirectML;
+    }
+    if (value == "mlx") {
+        return Backend::MLX;
+    }
+    if (value == "winml") {
+        return Backend::WindowsML;
+    }
+    if (value == "openvino") {
+        return Backend::OpenVINO;
+    }
+    return Backend::CPU;
+}
+
+std::optional<int> resolution_from_model_filename(const std::string& filename) {
+    auto stem = std::filesystem::path(filename).stem().string();
+    auto separator = stem.find_last_of('_');
+    if (separator == std::string::npos || separator + 1 >= stem.size()) {
+        return std::nullopt;
+    }
+
+    auto token = stem.substr(separator + 1);
+    if (token.empty() ||
+        !std::all_of(token.begin(), token.end(),
+                     [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
+        return std::nullopt;
+    }
+
+    return std::stoi(token);
+}
+
+void append_unique_model(std::vector<std::string>& models, const std::string& filename) {
+    if (std::find(models.begin(), models.end(), filename) == models.end()) {
+        models.push_back(filename);
+    }
+}
+
+std::vector<std::string> windows_universal_probe_models(const DeviceInfo& device) {
+    std::vector<std::string> models;
+    if (device.available_memory_mb >= 10000) {
+        append_unique_model(models, "corridorkey_fp16_1024.onnx");
+    } else if (device.available_memory_mb >= 8000) {
+        append_unique_model(models, "corridorkey_fp16_768.onnx");
+    } else {
+        append_unique_model(models, "corridorkey_fp16_512.onnx");
+    }
+
+    append_unique_model(models, "corridorkey_fp16_512.onnx");
+    append_unique_model(models, "corridorkey_int8_512.onnx");
+    return models;
+}
+
+std::string windows_backend_device_name(const core::WindowsGpuInfo& gpu, Backend backend) {
+    switch (backend) {
+        case Backend::DirectML:
+            return gpu.adapter_name + " (DirectML)";
+        case Backend::WindowsML:
+            return gpu.adapter_name + " (Windows AI)";
+        case Backend::OpenVINO:
+            return gpu.adapter_name + " (OpenVINO)";
+        default:
+            return gpu.adapter_name;
+    }
+}
+
+int backend_probe_priority(Backend backend) {
+    switch (backend) {
+        case Backend::WindowsML:
+            return 0;
+        case Backend::DirectML:
+            return 1;
+        case Backend::OpenVINO:
+            return 2;
+        default:
+            return 3;
+    }
+}
+
+nlohmann::json probe_windows_backend_execution(const std::filesystem::path& models_dir,
+                                              const DeviceInfo& device,
+                                              const std::string& model_filename,
+                                              const std::string& docs_guidance) {
+    nlohmann::json json;
+    json["backend"] = backend_to_diagnostic_string(device.backend);
+    json["device_name"] = device.name;
+    json["device_index"] = device.device_index;
+    json["model"] = model_filename;
+    json["requested_resolution"] = resolution_from_model_filename(model_filename).value_or(512);
+    json["model_found"] = false;
+    json["session_create_ok"] = false;
+    json["frame_execute_ok"] = false;
+    json["effective_backend"] = "";
+    json["effective_device"] = "";
+    json["fallback_used"] = false;
+    json["docs_guidance"] = docs_guidance;
+    json["probe_policy"] =
+        "strict_engine_create_and_synthetic_frame_no_cpu_fallback";
+    json["error"] = "";
+
+    auto model_path = models_dir / model_filename;
+    std::error_code error;
+    if (!std::filesystem::exists(model_path, error) || error) {
+        json["error"] = "Model not found: " + model_filename;
+        return json;
+    }
+
+    json["model_found"] = true;
+
+    EngineCreateOptions options;
+    options.allow_cpu_fallback = false;
+    options.disable_cpu_ep_fallback = true;
+
+    auto engine = Engine::create(model_path, device, nullptr, options);
+    if (!engine) {
+        json["error"] = engine.error().message;
+        return json;
+    }
+
+    json["session_create_ok"] = true;
+    json["effective_backend"] = backend_to_diagnostic_string((*engine)->current_device().backend);
+    json["effective_device"] = (*engine)->current_device().name;
+    json["fallback_used"] = (*engine)->backend_fallback().has_value();
+
+    ImageBuffer rgb(64, 64, 3);
+    ImageBuffer hint(64, 64, 1);
+    std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.0f);
+    std::fill(hint.view().data.begin(), hint.view().data.end(), 0.0f);
+
+    InferenceParams params;
+    params.target_resolution = json["requested_resolution"].get<int>();
+
+    auto frame = (*engine)->process_frame(rgb.view(), hint.view(), params, nullptr);
+    if (!frame) {
+        json["error"] = frame.error().message;
+        return json;
+    }
+
+    const auto effective_backend = (*engine)->current_device().backend;
+    if (effective_backend != device.backend || (*engine)->backend_fallback().has_value()) {
+        json["error"] = "Strict probe completed on unexpected backend: " +
+                        backend_to_diagnostic_string(effective_backend);
+        return json;
+    }
+
+    json["frame_execute_ok"] = true;
+    return json;
+}
+
+bool is_successful_windows_probe(const nlohmann::json& probe) {
+    return probe.value("session_create_ok", false) && probe.value("frame_execute_ok", false) &&
+           !probe.value("fallback_used", false);
+}
+
+std::optional<nlohmann::json> preferred_windows_probe(const nlohmann::json& probes) {
+    if (!probes.is_array()) {
+        return std::nullopt;
+    }
+
+    std::optional<nlohmann::json> preferred = std::nullopt;
+    for (const auto& probe : probes) {
+        if (!is_successful_windows_probe(probe)) {
+            continue;
+        }
+
+        if (!preferred.has_value()) {
+            preferred = probe;
+            continue;
+        }
+
+        const auto current_backend = diagnostic_backend_from_string(preferred->value("backend", "cpu"));
+        const auto candidate_backend = diagnostic_backend_from_string(probe.value("backend", "cpu"));
+        const int current_backend_rank = backend_probe_priority(current_backend);
+        const int candidate_backend_rank = backend_probe_priority(candidate_backend);
+        if (candidate_backend_rank != current_backend_rank) {
+            if (candidate_backend_rank < current_backend_rank) {
+                preferred = probe;
+            }
+            continue;
+        }
+
+        const auto current_model = preferred->value("model", "");
+        const auto candidate_model = probe.value("model", "");
+        const bool current_fp16 = current_model.find("fp16") != std::string::npos;
+        const bool candidate_fp16 = candidate_model.find("fp16") != std::string::npos;
+        if (current_fp16 != candidate_fp16) {
+            if (candidate_fp16) {
+                preferred = probe;
+            }
+            continue;
+        }
+
+        const int current_resolution = preferred->value("requested_resolution", 0);
+        const int candidate_resolution = probe.value("requested_resolution", 0);
+        if (candidate_resolution > current_resolution) {
+            preferred = probe;
+        }
+    }
+
+    return preferred;
+}
+
 std::optional<std::filesystem::path> find_runtime_library(const std::filesystem::path& directory) {
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) {
@@ -750,6 +986,13 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["gpu_memory_mb"] = 0;
     json["packaged_models"] = nlohmann::json::array();
     json["compiled_context_models"] = nlohmann::json::array();
+    json["execution_probe_policy"] =
+        "strict_engine_create_and_synthetic_frame_no_cpu_fallback";
+    json["execution_probes"] = nlohmann::json::array();
+    json["recommended_backend"] = "cpu";
+    json["recommended_model"] = "";
+    json["recommended_backend_reason"] =
+        "No Windows universal GPU backend completed a strict execution probe.";
 
 #if !defined(_WIN32)
     (void)models_dir;
@@ -762,8 +1005,10 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["gpu_detected"] = !gpus.empty();
     json["gpus"] = nlohmann::json::array();
 
-    bool any_gpu_healthy = false;
-    for (const auto& gpu : gpus) {
+    bool any_provider_available = false;
+    nlohmann::json probes = nlohmann::json::array();
+    for (size_t index = 0; index < gpus.size(); ++index) {
+        const auto& gpu = gpus[index];
         nlohmann::json gpu_json;
         gpu_json["name"] = gpu.adapter_name;
         gpu_json["memory_mb"] = gpu.dedicated_memory_mb;
@@ -774,25 +1019,47 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         gpu_json["driver_version"] = gpu.driver_version;
         json["gpus"].push_back(gpu_json);
 
-        if (gpu.tensorrt_rtx_available || gpu.cuda_available || gpu.directml_available) {
-            any_gpu_healthy = true;
+        const bool has_windows_universal_provider =
+            gpu.directml_available || gpu.winml_available || gpu.openvino_available;
+        any_provider_available = any_provider_available || has_windows_universal_provider;
+        if (has_windows_universal_provider && json["gpu_name"] == "") {
+            json["gpu_name"] = gpu.adapter_name;
+            json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
         }
 
-        // Legacy fields for backward compatibility with existing UI/CLI expectations
         if (gpu.tensorrt_rtx_available && json["gpu_name"] == "") {
             json["gpu_name"] = gpu.adapter_name;
             json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
-            json["provider_available"] = true;
             json["ampere_or_newer"] = gpu.is_rtx;
             json["driver_version"] = gpu.driver_version;
         }
+
+        const auto queue_backend_probes = [&](Backend backend, bool available,
+                                              const std::string& docs_guidance) {
+            if (!available) {
+                return;
+            }
+
+            DeviceInfo device{windows_backend_device_name(gpu, backend), gpu.dedicated_memory_mb,
+                              backend, static_cast<int>(index)};
+            for (const auto& model_filename : windows_universal_probe_models(device)) {
+                probes.push_back(
+                    probe_windows_backend_execution(models_dir, device, model_filename, docs_guidance));
+            }
+        };
+
+        queue_backend_probes(Backend::WindowsML, gpu.winml_available,
+                             "Recommended by ONNX Runtime for new Windows deployments.");
+        queue_backend_probes(Backend::DirectML, gpu.directml_available,
+                             "Supported by ONNX Runtime, but DirectML is in sustained engineering.");
+        queue_backend_probes(Backend::OpenVINO, gpu.openvino_available,
+                             "Intel-managed Windows acceleration path.");
     }
 
-    auto runtime_cache_dir = common::tensorrt_rtx_runtime_cache_root();
-    json["runtime_cache_dir"] =
-        runtime_cache_dir.has_value() ? runtime_cache_dir->string() : std::string();
-    json["runtime_cache_ready"] = runtime_cache_dir.has_value();
-    json["backend_integrated"] = any_gpu_healthy;
+    json["provider_available"] = any_provider_available;
+    json["execution_probes"] = probes;
+    json["runtime_cache_dir"] = "";
+    json["runtime_cache_ready"] = true;
 
     bool packaged_models_ready = true;
     bool any_packaged_model_found = false;
@@ -837,11 +1104,33 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
 
+    auto preferred_probe = preferred_windows_probe(probes);
+    if (preferred_probe.has_value()) {
+        json["backend_integrated"] = true;
+        json["recommended_backend"] = preferred_probe->value("backend", "cpu");
+        json["recommended_model"] = preferred_probe->value("model", "");
+        if (preferred_probe->value("backend", "") == "winml") {
+            json["recommended_backend_reason"] =
+                "WinML completed a strict execution probe and ONNX Runtime recommends WinML for "
+                "new Windows deployments.";
+        } else {
+            json["recommended_backend_reason"] =
+                "This backend completed a strict execution probe on the packaged model while "
+                "higher-priority Windows universal backends did not.";
+        }
+    } else if (any_provider_available) {
+        json["recommended_backend_reason"] =
+            "Windows universal GPU providers were detected, but none completed a strict execution "
+            "probe on the packaged models.";
+    } else {
+        json["recommended_backend_reason"] =
+            "No Windows universal GPU provider is available in this runtime package.";
+    }
+
     bool backend_ok = json.value("backend_integrated", false);
-    bool cache_ok = json.value("runtime_cache_ready", false);
     bool models_ok = json.value("packaged_models_ready", false);
 
-    json["healthy"] = backend_ok && cache_ok && models_ok;
+    json["healthy"] = backend_ok && models_ok;
 #endif
 
     return json;

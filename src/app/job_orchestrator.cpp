@@ -593,9 +593,16 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["summary"]["windows_universal_provider_ready"] =
         !report["windows_universal"]["applicable"].get<bool>() ||
         report["windows_universal"]["provider_available"].get<bool>();
+    report["summary"]["windows_universal_execution_ready"] =
+        !report["windows_universal"]["applicable"].get<bool>() ||
+        report["windows_universal"]["backend_integrated"].get<bool>();
     report["summary"]["windows_universal_packaged_models_present"] =
         !report["windows_universal"]["applicable"].get<bool>() || !any_packaged_windows_model ||
         packaged_windows_models_present;
+    report["summary"]["windows_universal_preferred_backend"] =
+        report["windows_universal"]["recommended_backend"];
+    report["summary"]["windows_universal_preferred_model"] =
+        report["windows_universal"]["recommended_model"];
     report["summary"]["windows_universal_healthy"] =
         !report["windows_universal"]["applicable"].get<bool>() ||
         report["windows_universal"]["healthy"].get<bool>();

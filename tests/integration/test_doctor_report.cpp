@@ -87,13 +87,22 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["windows_universal"].contains("runtime_cache_ready"));
     REQUIRE(report["windows_universal"].contains("packaged_models"));
     REQUIRE(report["windows_universal"].contains("compiled_context_models"));
+    REQUIRE(report["windows_universal"].contains("execution_probe_policy"));
+    REQUIRE(report["windows_universal"].contains("execution_probes"));
+    REQUIRE(report["windows_universal"].contains("recommended_backend"));
+    REQUIRE(report["windows_universal"].contains("recommended_model"));
+    REQUIRE(report["windows_universal"].contains("recommended_backend_reason"));
+    REQUIRE(report["windows_universal"]["execution_probes"].is_array());
     REQUIRE(report["summary"].contains("coreml_healthy"));
     REQUIRE(report["summary"].contains("apple_acceleration_probe_ready"));
     REQUIRE(report["summary"].contains("apple_acceleration_bridge_ready"));
     REQUIRE(report["summary"].contains("apple_acceleration_backend_integrated"));
     REQUIRE(report["summary"].contains("apple_acceleration_healthy"));
     REQUIRE(report["summary"].contains("windows_universal_provider_ready"));
+    REQUIRE(report["summary"].contains("windows_universal_execution_ready"));
     REQUIRE(report["summary"].contains("windows_universal_packaged_models_present"));
+    REQUIRE(report["summary"].contains("windows_universal_preferred_backend"));
+    REQUIRE(report["summary"].contains("windows_universal_preferred_model"));
     REQUIRE(report["summary"].contains("windows_universal_healthy"));
     REQUIRE(report["summary"].contains("validated_models_present"));
 }
