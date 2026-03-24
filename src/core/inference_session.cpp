@@ -154,10 +154,12 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
     debug_log("Configuring TensorRT RTX execution provider");
     // Use 8 GB workspace for large models (1536 / 2048) to allow TensorRT to fuse kernels that
     // fail at the 2 GB limit. Smaller models keep 2 GB to reduce compile-time overhead.
+    constexpr const char* kWorkspaceDefault = "2147483647";  // 2 GB
+    constexpr const char* kWorkspaceLarge = "8589934592";    // 8 GB
     auto filename = model_path.filename().string();
     const bool is_large_model = filename.find("_1536") != std::string::npos ||
                                 filename.find("_2048") != std::string::npos;
-    const std::string workspace_size = is_large_model ? "8589934592" : "2147483647";
+    const std::string workspace_size = is_large_model ? kWorkspaceLarge : kWorkspaceDefault;
     std::unordered_map<std::string, std::string> provider_options = {
         {tensorrt_rtx_option_names::kDeviceId, "0"},
         {tensorrt_rtx_option_names::kMaxWorkspaceSize, workspace_size},

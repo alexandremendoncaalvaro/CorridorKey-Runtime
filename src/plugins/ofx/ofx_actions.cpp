@@ -306,7 +306,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Foreground Only: despilled foreground, full alpha.\n"
                         "Source+Matte: original source premultiplied by AI matte.\n"
                         "FG+Matte: model foreground premultiplied by AI matte, always linear "
-                        "— use this for manual compositing.",
+                        "-- use this for manual compositing.",
                         "output_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},
@@ -337,7 +337,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      kMaxEdgeErode,
                      "Shrinks the interior region where original source pixels are blended in. "
                      "Larger values push the blend zone further from the subject edge. "
-                     "Effect is relative to the inference resolution — at lower quality settings "
+                     "Effect is relative to the inference resolution -- at lower quality settings "
                      "smaller values have less visible impact.",
                      "keying_group");
     define_int_param(
