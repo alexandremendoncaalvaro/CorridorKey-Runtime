@@ -373,6 +373,12 @@ pkgbuild --nopayload \
     --scripts "${PLUGINS_SCRIPTS_DIR}/clear_cache" \
     "$PKG_DIR/corridorkey_ofx_clear_cache.pkg"
 
+pkgbuild --nopayload \
+    --identifier "com.corridorkey.ofx.relaunch" \
+    --version "$VERSION" \
+    --scripts "${PLUGINS_SCRIPTS_DIR}/relaunch_resolve" \
+    "$PKG_DIR/corridorkey_ofx_relaunch.pkg"
+
 DIST_XML="${WORK_DIR}/Distribution.xml"
 sed "s/@VERSION@/${VERSION}/g" "${PLUGINS_SCRIPTS_DIR}/Distribution.xml" > "$DIST_XML"
 

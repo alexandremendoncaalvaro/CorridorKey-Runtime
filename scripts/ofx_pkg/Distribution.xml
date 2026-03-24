@@ -11,6 +11,7 @@
             <line choice="install_user"/>
         </line>
         <line choice="clear_cache"/>
+        <line choice="relaunch_resolve"/>
     </choices-outline>
 
     <choice id="destination_choice" title="Install Location" description="Choose where to install the OFX plugin." exclusive="true"/>
@@ -24,8 +25,12 @@
     <choice id="clear_cache" title="Clear DaVinci Resolve plugin cache after install" selected="true">
         <pkg-ref id="com.corridorkey.ofx.clear_cache"/>
     </choice>
+    <choice id="relaunch_resolve" title="Reopen DaVinci Resolve after install" selected="true">
+        <pkg-ref id="com.corridorkey.ofx.relaunch"/>
+    </choice>
 
     <pkg-ref id="com.corridorkey.ofx.system" version="@VERSION@" auth="Root">corridorkey_ofx_system.pkg</pkg-ref>
     <pkg-ref id="com.corridorkey.ofx.user" version="@VERSION@" auth="Root">corridorkey_ofx_user.pkg</pkg-ref>
     <pkg-ref id="com.corridorkey.ofx.clear_cache" version="@VERSION@" auth="Root">corridorkey_ofx_clear_cache.pkg</pkg-ref>
+    <pkg-ref id="com.corridorkey.ofx.relaunch" version="@VERSION@" auth="Root">corridorkey_ofx_relaunch.pkg</pkg-ref>
 </installer-gui-script>

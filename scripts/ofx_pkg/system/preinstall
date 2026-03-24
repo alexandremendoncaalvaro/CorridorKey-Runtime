@@ -1,6 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
+# Close DaVinci Resolve gracefully before replacing the plugin.
+# Try AppleScript quit first (gives Resolve a chance to save state),
+# then fall back to SIGTERM if it is still running after 5 seconds.
+for app_name in "DaVinci Resolve" "DaVinci Resolve Lite" "DaVinci Resolve Studio"; do
+    if pgrep -xq "$app_name" 2>/dev/null; then
+        osascript -e "tell application \"$app_name\" to quit" 2>/dev/null || true
+    fi
+done
+# Brief wait for graceful shutdown; force-kill stragglers.
+sleep 2
+for proc_name in "DaVinci Resolve" "DaVinci Resolve Lite" "DaVinci Resolve Studio"; do
+    pkill -x "$proc_name" 2>/dev/null || true
+done
+
 system_bundle="/Library/OFX/Plugins/CorridorKey.ofx.bundle"
 if [ -d "$system_bundle" ]; then
     rm -rf "$system_bundle"
@@ -19,6 +33,12 @@ fi
 user_bundle="${user_home}/Library/OFX/Plugins/CorridorKey.ofx.bundle"
 if [ -d "$user_bundle" ]; then
     rm -rf "$user_bundle"
+fi
+
+# Clean stale CorridorKey runtime logs.
+log_dir="${user_home}/Library/Logs/CorridorKey"
+if [ -d "$log_dir" ]; then
+    rm -rf "$log_dir"
 fi
 
 exit 0
