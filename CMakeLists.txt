@@ -13,7 +13,7 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.4.17
+    VERSION 0.4.18
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
