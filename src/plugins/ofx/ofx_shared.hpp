@@ -120,7 +120,7 @@ struct InstanceData {
     std::uint64_t render_count = 0;
     std::string last_error = {};
     // Non-fatal status note shown alongside frame timings. Set when the engine fell back to a
-    // lower resolution because the requested one failed to compile (e.g. TensorRT 2048 → 1536).
+    // lower resolution because the requested one failed to compile (e.g. TensorRT 2048 -> 1536).
     std::string last_warning = {};
     double last_frame_ms = 0.0;
     double avg_frame_ms = 0.0;

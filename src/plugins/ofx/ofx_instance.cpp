@@ -776,8 +776,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
     if (requested_device.backend == Backend::TensorRT && quantization_mode == kQuantizationInt8) {
         data->last_error =
-            "INT8 quantization is not supported by the TensorRT RTX execution provider. "
-            "Please use FP16.";
+            "INT8 (Compressed) is not supported by the TensorRT RTX execution provider. "
+            "Please use FP16 (Full).";
         log_message("ensure_engine_for_quality", data->last_error);
         update_runtime_panel(data);
         log_quality_total("unsupported_quantization", data->last_error);
@@ -866,7 +866,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                  prepare_result.error().message);
                 log_message("ensure_engine_for_quality", data->last_error);
                 // Continue to the next lower resolution candidate. For fixed quality modes this
-                // is a compile failure fallback, not a missing-artifact case — the user will see
+                // is a compile failure fallback, not a missing-artifact case -- the user will see
                 // a Note in the status panel once the fallback resolution succeeds.
                 continue;
             }
@@ -877,6 +877,10 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                             std::to_string(prepare_result->session.reused_existing_session) +
                             " ref_count=" + std::to_string(prepare_result->session.ref_count));
         } else {
+            set_string_param_value(data->runtime_status_param,
+                                   "Preparing " +
+                                       std::string(quality_mode_label(requested_quality_mode)) +
+                                       "...");
             auto engine_result = Engine::create(
                 selection.executable_model_path, requested_device,
                 [&](const StageTiming& timing) {
@@ -957,7 +961,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             const std::string fallback_note =
                 std::string(quality_mode_label(requested_quality_mode)) + " (" +
                 std::to_string(selection.requested_resolution) +
-                "px) unavailable on this hardware — using " +
+                "px) unavailable on this hardware -- using " +
                 std::to_string(selection.effective_resolution) + "px";
             data->last_warning = fallback_note;
             log_message("ensure_engine_for_quality", "fallback_note=" + fallback_note);

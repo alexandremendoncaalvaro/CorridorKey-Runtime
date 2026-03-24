@@ -654,7 +654,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         } else if (output_mode == kOutputSourceMatte) {
             write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
         } else if (output_mode == kOutputFGMatte) {
-            // Always linear premultiplied — no sRGB correction regardless of input color space.
+            // Always linear premultiplied -- no sRGB correction regardless of input color space.
             write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth, false, SrgbLut::instance());
         } else {
             write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth, apply_srgb, SrgbLut::instance());
@@ -882,7 +882,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes, output_depth,
                                   apply_srgb, lut);
     } else if (output_mode == kOutputFGMatte) {
-        // Always linear premultiplied — no sRGB correction regardless of input color space.
+        // Always linear premultiplied -- no sRGB correction regardless of input color space.
         write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth,
                                false, lut);
     } else {
