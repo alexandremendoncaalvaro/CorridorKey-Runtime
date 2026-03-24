@@ -61,6 +61,33 @@ behavior.
 
 ---
 
+## Status Says "Waiting for Alpha Hint connection."
+
+**Symptom:** The runtime panel says `Waiting for Alpha Hint connection.` and the
+result looks like a pass-through image instead of a keyed result.
+
+The current Resolve OFX path does not run inference until the **Alpha Hint**
+input is connected.
+
+**Steps:**
+
+1. On the Color page, right-click the CorridorKey node and choose
+   **Add OFX Input**.
+
+2. Connect a rough matte from a Qualifier, 3D Keyer, garbage matte, or another
+   matte source into the new green input.
+
+3. In Fusion, connect the guide matte to CorridorKey's secondary
+   **Alpha Hint** input.
+
+4. Prefer a true alpha or single-channel matte. If you feed an RGB image, the
+   plugin reads the red channel.
+
+5. Check the runtime panel again. Do not evaluate quality or matte controls
+   until the waiting message is gone.
+
+---
+
 ## Hardware Path Not Activating
 
 **Symptom:** `corridorkey doctor` reports a fallback to CPU, or the wrong
