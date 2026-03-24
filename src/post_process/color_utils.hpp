@@ -12,12 +12,19 @@ namespace corridorkey {
 class CORRIDORKEY_API ColorUtils {
    public:
     struct State {
+        struct Offset2D {
+            int dy = 0;
+            int dx = 0;
+        };
+
         std::vector<float> blur_temp;
         std::vector<float> blur_weights;
         std::vector<float> resize_temp;
         std::vector<float> resize_lanczos_h;
         std::vector<float> sp_mask;
         std::vector<float> sp_temp;
+        std::vector<Offset2D> sp_offsets;
+        int sp_offsets_radius = -1;
     };
 
     /**

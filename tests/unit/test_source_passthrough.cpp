@@ -170,3 +170,46 @@ TEST_CASE("source_passthrough with erosion shrinks interior", "[unit][passthroug
     // After erosion, should be eroded away -> model fg (blue)
     CHECK(fg(16, 27, 2) == Catch::Approx(1.0F));
 }
+
+TEST_CASE("source_passthrough preserves behavior when cached erosion footprint changes",
+          "[unit][passthrough][regression]") {
+    ImageBuffer src_buf(32, 32, 3);
+    ImageBuffer fg_buf(32, 32, 3);
+    ImageBuffer alpha_buf(32, 32, 1);
+
+    Image src = src_buf.view();
+    Image fg = fg_buf.view();
+    Image alpha = alpha_buf.view();
+
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            src(y, x, 0) = 0.9F;
+            src(y, x, 1) = 0.1F;
+            src(y, x, 2) = 0.0F;
+            fg(y, x, 0) = 0.0F;
+            fg(y, x, 1) = 0.0F;
+            fg(y, x, 2) = 1.0F;
+
+            float dy = static_cast<float>(y) - 16.0F;
+            float dx = static_cast<float>(x) - 16.0F;
+            alpha(y, x) = (dy * dy + dx * dx < 13.0F * 13.0F) ? 1.0F : 0.0F;
+        }
+    }
+
+    ColorUtils::State state;
+    source_passthrough(src, fg, alpha, 3, 0, state);
+    CHECK(fg(16, 16, 0) == Catch::Approx(0.9F));
+    CHECK(fg(16, 28, 2) == Catch::Approx(1.0F));
+
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            fg(y, x, 0) = 0.0F;
+            fg(y, x, 1) = 0.0F;
+            fg(y, x, 2) = 1.0F;
+        }
+    }
+
+    source_passthrough(src, fg, alpha, 5, 0, state);
+    CHECK(fg(16, 16, 0) == Catch::Approx(0.9F));
+    CHECK(fg(16, 27, 2) == Catch::Approx(1.0F));
+}
