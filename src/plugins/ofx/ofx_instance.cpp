@@ -27,12 +27,12 @@ namespace corridorkey::ofx {
 
 namespace {
 
-constexpr const char* kRepoDocsBaseUrl =
+constexpr const char* kRepoHelpBaseUrl =
     "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/blob/"
-    "main/docs/";
+    "main/help/";
 
 std::string help_doc_url(const char* filename) {
-    return std::string(kRepoDocsBaseUrl) + filename;
+    return std::string(kRepoHelpBaseUrl) + filename;
 }
 
 bool open_external_url(const std::string& url) {

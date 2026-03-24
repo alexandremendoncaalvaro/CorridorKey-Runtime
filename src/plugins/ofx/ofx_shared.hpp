@@ -76,6 +76,7 @@ constexpr const char* kParamOpenRecoverDetailsGuide = "open_recover_details_guid
 constexpr const char* kParamOpenTilingGuide = "open_tiling_guide";
 constexpr const char* kParamOpenResolveTutorial = "open_resolve_tutorial";
 constexpr const char* kParamOpenTroubleshooting = "open_troubleshooting";
+constexpr const char* kParamHelpGroup = "help_group";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
 
