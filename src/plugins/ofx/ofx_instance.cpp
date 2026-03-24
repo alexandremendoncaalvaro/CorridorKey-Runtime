@@ -855,6 +855,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data->active_quality_mode = requested_quality_mode;
             data->requested_resolution = requested_resolution;
             data->active_resolution = selection.effective_resolution;
+            data->last_warning = quality_fallback_warning(requested_quality_mode, selection);
             data->last_error.clear();
             update_runtime_panel_values(data);
             log_quality_total("reused_engine");
@@ -981,16 +982,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         data->last_frame_ms = 0.0;
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
-        if (selection.used_fallback) {
-            const std::string fallback_note =
-                std::string(quality_mode_label(requested_quality_mode)) + " (" +
-                std::to_string(selection.requested_resolution) +
-                "px) unavailable on this hardware -- using " +
-                std::to_string(selection.effective_resolution) + "px";
-            data->last_warning = fallback_note;
-            log_message("ensure_engine_for_quality", "fallback_note=" + fallback_note);
-        } else {
-            data->last_warning.clear();
+        data->last_warning = quality_fallback_warning(requested_quality_mode, selection);
+        if (!data->last_warning.empty()) {
+            log_message("ensure_engine_for_quality", "fallback_note=" + data->last_warning);
         }
         if (cpu_quality_guardrail_active) {
             log_message(

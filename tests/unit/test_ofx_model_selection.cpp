@@ -183,6 +183,23 @@ TEST_CASE("ofx quality mode labels expose fixed resolutions in the UI",
     REQUIRE(std::string(quality_mode_ui_label(kQualityMaximum)) == "Maximum (2048)");
 }
 
+TEST_CASE("quality fallback warning clears when selection matches the requested resolution",
+          "[unit][ofx][regression]") {
+    QualityArtifactSelection exact_selection{};
+    exact_selection.requested_resolution = 1024;
+    exact_selection.effective_resolution = 1024;
+    exact_selection.used_fallback = false;
+
+    QualityArtifactSelection fallback_selection{};
+    fallback_selection.requested_resolution = 1536;
+    fallback_selection.effective_resolution = 1024;
+    fallback_selection.used_fallback = true;
+
+    REQUIRE(quality_fallback_warning(kQualityHigh, exact_selection).empty());
+    REQUIRE(quality_fallback_warning(kQualityUltra, fallback_selection) ==
+            "Ultra (1536) (1536px) unavailable on this hardware -- using 1024px");
+}
+
 TEST_CASE("fixed windows tensorRT quality keeps lower packaged fallbacks after the exact model",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-fixed-fallbacks");

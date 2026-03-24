@@ -34,6 +34,18 @@ inline const char* quality_mode_label(int quality_mode) {
     return quality_mode_ui_label(quality_mode);
 }
 
+inline std::string quality_fallback_warning(int quality_mode,
+                                            const QualityArtifactSelection& selection) {
+    if (!selection.used_fallback) {
+        return {};
+    }
+
+    return std::string(quality_mode_label(quality_mode)) + " (" +
+           std::to_string(selection.requested_resolution) +
+           "px) unavailable on this hardware -- using " +
+           std::to_string(selection.effective_resolution) + "px";
+}
+
 inline bool is_fixed_quality_mode(int quality_mode) {
     return quality_mode != kQualityAuto;
 }
