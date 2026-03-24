@@ -19,9 +19,24 @@ constexpr int kOutputProcessed = 0;
 constexpr int kOutputMatteOnly = 1;
 constexpr int kOutputForegroundOnly = 2;
 constexpr int kOutputSourceMatte = 3;
+// Processed: post-processed model foreground premultiplied by the AI matte in linear space.
+// Matches the runtime's core `FrameResult::processed` semantics.
+// Never applies sRGB correction -- safe for compositing.
+//
 // FG+Matte: model foreground premultiplied by AI matte, alpha in A channel.
 // Never applies sRGB correction -- always outputs linear premultiplied for manual compositing.
 constexpr int kOutputFGMatte = 4;
+
+inline bool output_mode_uses_linear_premultiplied_rgba(int output_mode) {
+    return output_mode == kOutputProcessed || output_mode == kOutputFGMatte;
+}
+
+inline bool should_apply_srgb_to_output(int output_mode, bool input_is_linear) {
+    if (output_mode == kOutputMatteOnly) {
+        return false;
+    }
+    return !output_mode_uses_linear_premultiplied_rgba(output_mode) && !input_is_linear;
+}
 
 // Alpha hint source mode
 constexpr int kAlphaHintAuto = 0;
