@@ -199,6 +199,10 @@ Section "Install"
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoRepair" 1
 
+  DetailPrint "Clearing CorridorKey logs..."
+  ExpandEnvStrings `$0 "%LOCALAPPDATA%\CorridorKey\Logs"
+  RMDir /r "`$0"
+
   DetailPrint "Clearing DaVinci Resolve OFX cache..."
   Delete "`${CACHE_FILE}"
 

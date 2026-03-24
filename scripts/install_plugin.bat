@@ -18,6 +18,7 @@ if not exist "%PackageScript%" (
 
 set "DstPath=C:\Program Files\Common Files\OFX\Plugins\CorridorKey.ofx.bundle"
 set "CacheFile=%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
+set "LogsDir=%LOCALAPPDATA%\CorridorKey\Logs"
 
 echo Installing CorridorKey OFX Plugin...
 echo Packaging plugin bundle...
@@ -77,6 +78,9 @@ echo.
 
 echo Removing old DaVinci Resolve OFX Cache...
 if exist "%CacheFile%" del /f /q "%CacheFile%"
+
+echo Removing old CorridorKey logs...
+if exist "%LogsDir%" rmdir /s /q "%LogsDir%"
 
 echo Removing any old plugin installation...
 if exist "%DstPath%" rmdir /s /q "%DstPath%"
