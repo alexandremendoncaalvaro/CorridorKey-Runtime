@@ -344,9 +344,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_choice_param(
         param_set, kParamQuantizationMode, "Precision", kDefaultQuantizationMode,
-        {"Full", "Compact"},
-        "Model precision. Full (FP16) selects highest quality files. "
-        "Compact (INT8) selects memory-efficient quantized files for faster inference.",
+        {"FP16 (Full)", "INT8 (Compact)"},
+        "Model precision. FP16 (Full) selects highest quality files. "
+        "INT8 (Compact) selects memory-efficient quantized files for faster inference.",
         "performance_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process at native resolution using overlapping tiles. "
@@ -362,7 +362,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     // --- Group 6: Status (diagnostics, collapsed at bottom) ---
     std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
-    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), false);
+    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
     define_runtime_status_param(
         param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",

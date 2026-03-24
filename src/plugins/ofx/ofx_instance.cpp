@@ -803,7 +803,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
     if (requested_device.backend == Backend::TensorRT && quantization_mode == kQuantizationInt8) {
         data->last_error =
-            "INT8 (Compressed) is not supported by the TensorRT RTX execution provider. "
+            "INT8 (Compact) is not supported by the TensorRT RTX execution provider. "
             "Please use FP16 (Full).";
         log_message("ensure_engine_for_quality", data->last_error);
         update_runtime_panel(data);
@@ -1103,8 +1103,8 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                     if (requested_device.backend == Backend::TensorRT &&
                         quant == kQuantizationInt8) {
                         data->last_error =
-                            "Compact precision is not supported by the "
-                            "TensorRT RTX provider. Please use Full precision.";
+                            "INT8 (Compact) is not supported by the "
+                            "TensorRT RTX provider. Please use FP16 (Full).";
                         data->quantization_error_active = true;
                         data->runtime_panel_dirty = true;
                     } else if (data->quantization_error_active) {
