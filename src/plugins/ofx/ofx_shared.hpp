@@ -69,6 +69,9 @@ constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
 constexpr const char* kParamRuntimeStatus = "runtime_status";
 constexpr const char* kParamRenderTimeout = "render_timeout";
 constexpr const char* kParamPrepareTimeout = "prepare_timeout";
+constexpr const char* kParamOpenPanelGuide = "open_panel_guide";
+constexpr const char* kParamOpenResolveTutorial = "open_resolve_tutorial";
+constexpr const char* kParamOpenTroubleshooting = "open_troubleshooting";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
 

@@ -114,6 +114,21 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
     set_parent(param_props, parent);
 }
 
+void define_push_button_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                              const char* hint, const char* parent = nullptr) {
+    OfxPropertySetHandle param_props = nullptr;
+    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypePushButton, name, &param_props) !=
+        kOfxStatOK) {
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    if (hint != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+    set_parent(param_props, parent);
+}
+
 void define_info_param(OfxParamSetHandle param_set, const char* name, const char* label,
                        const char* default_value, const char* hint, const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
@@ -267,33 +282,42 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Shows the last frame time or the most recent error during engine load or render.",
         "runtime_group");
 
-    // --- Group 2: Quick Help (host-visible guidance, not hover-dependent) ---
-    define_group_param(param_set, "help_group", "Quick Help", false);
+    // --- Group 2: Help & Docs (host-visible guidance, not hover-dependent) ---
+    define_group_param(param_set, "help_group", "Help & Docs", false);
 
     define_info_param(
-        param_set, "help_quality_info", "Quality & Tiling",
-        "Higher quality loads larger models. Enable Tiling for sharper native-resolution detail "
-        "when model resolution alone is not enough. Tiling is slower and uses more memory.",
-        "Visible help for the two most important performance controls.",
+        param_set, "help_quality_info", "Start Here",
+        "Start with High (1024). Only move to Ultra (1536) or Maximum (2048) if the status panel "
+        "stays on that resolution without falling back.",
+        "Visible quick-start guidance for picking a stable quality level.",
         "help_group");
     define_info_param(
         param_set, "help_alpha_hint_info", "Alpha Hint",
-        "Optional guide input. Connect an existing alpha or a black-and-white luma matte when "
-        "you want to steer CorridorKey in difficult areas.",
-        "Visible help for the optional Alpha Hint input.",
+        "Optional guide matte for hair, motion blur, bad spill, and weak edges. Feed a luma or "
+        "alpha matte into the Alpha Hint input when CorridorKey needs direction.",
+        "Visible help for the optional Alpha Hint input and when to use it.",
         "help_group");
     define_info_param(
         param_set, "help_recover_details_info", "Recover Original Details",
-        "Blends source pixels back into solid foreground regions for crisper opaque detail. "
-        "Details Edge Shrink and Feather only affect this recovered-details mask.",
-        "Visible help for Recover Original Details and its dependent controls.",
+        "Keeps trusted foreground texture from the source for sharper interiors. If edges get too "
+        "crunchy, reduce Details Edge Shrink and Feather or disable this option.",
+        "Visible help for Recover Original Details and the edge controls it enables.",
         "help_group");
     define_info_param(
-        param_set, "help_output_info", "Output Modes",
-        "Processed is CorridorKey's linear premultiplied RGBA output. Use Matte Only for alpha "
-        "inspection. Use Foreground Only or Source+Matte for debugging specific stages.",
-        "Visible help for output mode selection.",
+        param_set, "help_output_info", "Tiling",
+        "Enable Tiling only when model resolution is the bottleneck. It can recover fine detail "
+        "at native resolution, but it is slower and increases memory use.",
+        "Visible help for when tiling is worth the extra render cost.",
         "help_group");
+    define_push_button_param(
+        param_set, kParamOpenPanelGuide, "Open Panel Guide",
+        "Open a detailed guide for the CorridorKey OFX controls on GitHub.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenResolveTutorial, "Open Resolve Tutorial",
+        "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", "help_group");
+    define_push_button_param(
+        param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
+        "Open the troubleshooting guide on GitHub.", "help_group");
 
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);

@@ -17,13 +17,42 @@
 
 #if defined(__APPLE__)
 #include <dlfcn.h>
+#include <spawn.h>
 #elif defined(_WIN32)
+#include <shellapi.h>
 #include <windows.h>
 #endif
 
 namespace corridorkey::ofx {
 
 namespace {
+
+constexpr const char* kRepoDocsBaseUrl =
+    "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/blob/"
+    "codex/niko-ofx-fixes-release/docs/";
+
+std::string help_doc_url(const char* filename) {
+    return std::string(kRepoDocsBaseUrl) + filename;
+}
+
+bool open_external_url(const std::string& url) {
+#if defined(_WIN32)
+    std::wstring wide_url(url.begin(), url.end());
+    auto result =
+        reinterpret_cast<std::intptr_t>(ShellExecuteW(nullptr, L"open", wide_url.c_str(), nullptr,
+                                                      nullptr, SW_SHOWNORMAL));
+    return result > 32;
+#elif defined(__APPLE__)
+    extern char** environ;
+    char* const argv[] = {const_cast<char*>("/usr/bin/open"),
+                          const_cast<char*>(url.c_str()), nullptr};
+    pid_t pid = 0;
+    return posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, environ) == 0;
+#else
+    (void)url;
+    return false;
+#endif
+}
 
 std::string backend_label(Backend backend) {
     switch (backend) {
@@ -1067,6 +1096,24 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
     if (in_args != nullptr && g_suites.property != nullptr) {
         std::string changed_param;
         if (get_string(in_args, kOfxPropName, changed_param)) {
+            if (changed_param == kParamOpenPanelGuide ||
+                changed_param == kParamOpenResolveTutorial ||
+                changed_param == kParamOpenTroubleshooting) {
+                std::string url;
+                if (changed_param == kParamOpenPanelGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md");
+                } else if (changed_param == kParamOpenResolveTutorial) {
+                    url = help_doc_url("OFX_RESOLVE_TUTORIALS.md");
+                } else {
+                    url = help_doc_url("TROUBLESHOOTING.md");
+                }
+
+                if (!open_external_url(url)) {
+                    post_message(kOfxMessageError,
+                                 ("Failed to open documentation URL: " + url).c_str(), instance);
+                }
+                return kOfxStatOK;
+            }
             if (changed_param == kParamEnableTiling || changed_param == kParamAutoDespeckle ||
                 changed_param == kParamSourcePassthrough) {
                 sync_dependent_params(data);
