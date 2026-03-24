@@ -353,8 +353,10 @@ project is, what it does, how it works, and why specific choices were made.
 | `docs/SPEC.md` | Product scope and support philosophy | Architects, developers |
 | `docs/ARCHITECTURE.md` | Source structure and dependency rules | Developers |
 | `docs/GUIDELINES.md` | Code standards, testing, build rules (this document) | Developers |
-| `docs/SUPPORT_MATRIX.md` | Support status by platform and hardware | Users, operators |
-| `docs/TROUBLESHOOTING.md` | Practical operational troubleshooting | Users, operators |
+| `help/SUPPORT_MATRIX.md` | Support status by platform and hardware | Users, operators |
+| `help/TROUBLESHOOTING.md` | Practical operational troubleshooting | Users, operators |
+| `help/OFX_PANEL_GUIDE.md` | Practical OFX control guide for Resolve | Users, operators |
+| `help/OFX_RESOLVE_TUTORIALS.md` | Step-by-step Resolve workflows | Users, operators |
 | `docs/RELEASE_GUIDELINES.md` | Release build and packaging procedure | Release maintainers |
 | `CLAUDE.md` | Machine-readable rule summary for AI tools | AI tools |
 

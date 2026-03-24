@@ -19,7 +19,7 @@ Pre-packaged releases are available on the
 page. Download the package that matches your platform and hardware path.
 
 For supported hardware configurations and explicit support status per platform,
-see [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md).
+see [help/SUPPORT_MATRIX.md](help/SUPPORT_MATRIX.md).
 
 ### OFX Plugin — macOS (Apple Silicon)
 
@@ -42,7 +42,7 @@ see [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md).
    take 10–30 seconds.
 
 For plugin discovery issues, version mismatches, or unsupported hardware
-fallback behavior, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+fallback behavior, see [help/TROUBLESHOOTING.md](help/TROUBLESHOOTING.md).
 
 ### CLI
 
@@ -96,10 +96,19 @@ On Windows, run CMake from the x64 Native Tools Command Prompt for VS 2022.
 
 ## Documentation
 
-- [Support Matrix](docs/SUPPORT_MATRIX.md) — official support status by
+### User Help
+
+- [OFX Panel Guide](help/OFX_PANEL_GUIDE.md) — practical control-by-control
+  guide for CorridorKey inside Resolve.
+- [Resolve Tutorials](help/OFX_RESOLVE_TUTORIALS.md) — step-by-step workflows
+  for getting a usable key and diagnosing common issues.
+- [Support Matrix](help/SUPPORT_MATRIX.md) — official support status by
   platform, hardware, and Resolve version.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — practical guide for plugin
+- [Troubleshooting](help/TROUBLESHOOTING.md) — practical guide for plugin
   discovery, hardware fallback, first-run behavior, and bug reporting.
+
+### Development Docs
+
 - [Technical Specification](docs/SPEC.md) — product scope and support
   philosophy.
 - [Architecture](docs/ARCHITECTURE.md) — source structure and dependency
