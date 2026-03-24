@@ -274,10 +274,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Inference resolution. Auto selects based on input size. "
                         "Higher values produce better detail at the cost of speed.",
                         "quality_group");
-    define_choice_param(param_set, kParamQuantizationMode, "Quantization", kDefaultQuantizationMode,
-                        {"FP16", "INT8"},
-                        "Preferred model precision for this instance. FP16 selects full-precision files. INT8 "
-                        "selects memory-efficient quantized files.",
+    define_choice_param(param_set, kParamQuantizationMode, "Processing Precision",
+                        kDefaultQuantizationMode,
+                        {"FP16 (Full)", "INT8 (Compressed)"},
+                        "Model precision. FP16 (Full) uses full-precision weights for best quality. "
+                        "INT8 (Compressed) uses quantized weights for reduced memory and faster "
+                        "load times at a small quality cost.",
                         "quality_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process at native resolution using overlapping tiles. "
@@ -288,22 +290,29 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_group_param(param_set, "output_group", "Output", true);
     define_info_param(
-        param_set, "processed_output_info", "Processed Note",
-        "Processed and Source + Matte are premultiplied outputs. Linear inputs stay linear.",
-        "Processed and Source + Matte return premultiplied RGBA. With Input Is Linear off, "
-        "CorridorKey converts RGB back for display on write. With Input Is Linear on, those "
-        "outputs stay linear and should be viewed through a display transform.",
+        param_set, "processed_output_info", "Output Note",
+        "Processed, FG+Matte, and Source+Matte are premultiplied outputs. Linear inputs stay linear.",
+        "Processed, FG+Matte, and Source+Matte return premultiplied RGBA. "
+        "With Input Color Space set to Linear, RGB values stay linear. "
+        "FG+Matte always outputs linear premultiplied regardless of Input Color Space "
+        "and is intended for manual compositing in a linear working space.",
         "output_group");
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
-                        {"Processed", "Matte Only", "Foreground Only", "Source + Matte"},
-                        "What to output. Processed and Source + Matte are premultiplied RGBA "
-                        "outputs. Matte Only shows the alpha channel as grayscale.",
+                        {"Processed", "Matte Only", "Foreground Only", "Source+Matte", "FG+Matte"},
+                        "What to output.\n"
+                        "Processed: convenience composite, premultiplied.\n"
+                        "Matte Only: alpha as grayscale.\n"
+                        "Foreground Only: despilled foreground, full alpha.\n"
+                        "Source+Matte: original source premultiplied by AI matte.\n"
+                        "FG+Matte: model foreground premultiplied by AI matte, always linear "
+                        "— use this for manual compositing.",
                         "output_group");
-    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleLanczos4,
+    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},
-                        "Method used to upscale model output to source resolution. "
-                        "Lanczos4 is sharper; Bilinear is smoother.",
+                        "Method used to scale frames to and from the inference resolution. "
+                        "Bilinear is fast and sufficient for most output. "
+                        "Lanczos4 is sharper but adds significant CPU time at 4K and above.",
                         "output_group");
 
     define_group_param(param_set, "keying_group", "Keying", true);
@@ -314,35 +323,39 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                       "Clean small alpha speckles automatically.", "keying_group");
     define_int_param(param_set, kParamDespeckleSize, "Despeckle Size", 400, 50, 2000,
                      "Minimum connected component area in pixels to keep.", "keying_group");
-    define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
+    define_choice_param(param_set, kParamScreenColor, "Screen Type", kDefaultScreenColor,
                         {"Green", "Blue"},
-                        "Select the dominant screen color. Blue swaps channels internally so "
-                        "the keyer treats blue screens like green screens.",
+                        "Select the screen type. Blue swaps the green and blue channels internally "
+                        "so the keyer processes blue screens as green screens.",
                         "keying_group");
-    define_bool_param(param_set, kParamSourcePassthrough, "Source Passthrough",
+    define_bool_param(param_set, kParamSourcePassthrough, "Preserve Source Detail",
                       kDefaultSourcePassthroughEnabled,
-                      "Blend original source pixels into high-confidence alpha regions "
-                      "for sharper interior detail.",
+                      "Blend original source pixels into high-confidence interior regions "
+                      "to recover fine detail that the model may soften.",
                       "keying_group");
-    define_int_param(param_set, kParamEdgeErode, "Edge Erode", kDefaultEdgeErode, 0, kMaxEdgeErode,
-                     "Erosion radius for the passthrough interior mask. "
-                     "Higher values widen the transition zone at edges and cost more CPU.",
+    define_int_param(param_set, kParamEdgeErode, "Detail Mask Shrink", kDefaultEdgeErode, 0,
+                     kMaxEdgeErode,
+                     "Shrinks the interior region where original source pixels are blended in. "
+                     "Larger values push the blend zone further from the subject edge. "
+                     "Effect is relative to the inference resolution — at lower quality settings "
+                     "smaller values have less visible impact.",
                      "keying_group");
     define_int_param(
-        param_set, kParamEdgeBlur, "Edge Blur", kDefaultEdgeBlur, 0, kMaxEdgeBlur,
-        "Blur radius for smoothing the passthrough transition. "
-        "Higher values create a softer blend between source and model and cost more CPU.",
+        param_set, kParamEdgeBlur, "Detail Mask Feather", kDefaultEdgeBlur, 0, kMaxEdgeBlur,
+        "Softens the transition between the source passthrough region and the model output. "
+        "Larger values produce a smoother blend at the cost of CPU time.",
         "keying_group");
 
-    define_group_param(param_set, "alpha_group", "Alpha", true);
+    define_group_param(param_set, "alpha_group", "Matte", true);
     define_info_param(
-        param_set, "alpha_hint_info", "Mask Input Guide",
+        param_set, "alpha_hint_info", "Alpha Hint Input",
         "Accepts Alpha Channels (transparency) or Luma Mattes (black & white).",
-        "CorridorKey dynamically detects the input type. You can supply an Alpha channel or a "
-        "solid Luma Matte (it will read the luminance).\n\n"
+        "Connect an external matte or luma image to guide the AI keyer. "
+        "CorridorKey detects the input type automatically.\n\n"
         "Fusion: Connect your matte to the secondary 'Alpha Hint' pin.\n"
         "Color Page: Right-click this node -> 'Add OFX Input', then route a Qualifier or 3D Keyer "
-        "output into the new green input.",
+        "output into the new green input.\n\n"
+        "The controls below adjust the output matte produced by CorridorKey.",
         "alpha_group");
 
     define_double_param(param_set, kParamAlphaBlackPoint, "Alpha Black Point", 0.0, 0.0, 1.0,

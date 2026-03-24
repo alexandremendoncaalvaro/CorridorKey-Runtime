@@ -175,9 +175,9 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
         if (resolution > requested_resolution) {
             continue;
         }
-        if (is_fixed_quality_mode(quality_mode) && resolution != requested_resolution) {
-            continue;
-        }
+        // Lower resolutions are included even for fixed quality modes. ensure_engine_for_quality
+        // still tries the exact resolution first and only falls back when engine compilation
+        // fails — the is_fallback_resolution flag on each candidate signals that distinction.
 
         auto artifact_paths =
             artifact_paths_for_backend(models_root, backend, resolution, quantization_mode);
