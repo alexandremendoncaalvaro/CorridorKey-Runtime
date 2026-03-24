@@ -10,6 +10,23 @@ constexpr int kQualityHigh = 3;
 constexpr int kQualityUltra = 4;
 constexpr int kQualityMaximum = 5;
 
+inline const char* quality_mode_ui_label(int quality_mode) {
+    switch (quality_mode) {
+        case kQualityPreview:
+            return "Draft (512)";
+        case kQualityStandard:
+            return "Standard (768)";
+        case kQualityHigh:
+            return "High (1024)";
+        case kQualityUltra:
+            return "Ultra (1536)";
+        case kQualityMaximum:
+            return "Maximum (2048)";
+        default:
+            return "Auto";
+    }
+}
+
 // Upscale method choice indices
 constexpr int kUpscaleLanczos4 = 0;
 constexpr int kUpscaleBilinear = 1;

@@ -250,10 +250,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "setup_group");
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityAuto,
-        {"Auto", "Draft", "Standard", "High", "Ultra", "Maximum"},
+        {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
+         quality_mode_ui_label(kQualityStandard), quality_mode_ui_label(kQualityHigh),
+         quality_mode_ui_label(kQualityUltra), quality_mode_ui_label(kQualityMaximum)},
         "Inference quality. Auto selects based on input size and hardware. "
         "Higher values produce better detail at the cost of speed. "
-        "Resolutions: Draft 512, Standard 768, High 1024, Ultra 1536, Maximum 2048.",
+        "Resolutions: Draft (512), Standard (768), High (1024), Ultra (1536), "
+        "Maximum (2048).",
         "setup_group");
 
     // --- Group 2: Matte (refine the AI-generated alpha) ---

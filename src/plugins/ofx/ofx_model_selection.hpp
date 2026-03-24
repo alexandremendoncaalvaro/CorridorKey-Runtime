@@ -31,20 +31,7 @@ struct QualityArtifactSelection {
 };
 
 inline const char* quality_mode_label(int quality_mode) {
-    switch (quality_mode) {
-        case kQualityPreview:
-            return "Draft (512)";
-        case kQualityStandard:
-            return "Standard (768)";
-        case kQualityHigh:
-            return "High (1024)";
-        case kQualityUltra:
-            return "Ultra (1536)";
-        case kQualityMaximum:
-            return "Maximum (2048)";
-        default:
-            return "Auto";
-    }
+    return quality_mode_ui_label(quality_mode);
 }
 
 inline bool is_fixed_quality_mode(int quality_mode) {

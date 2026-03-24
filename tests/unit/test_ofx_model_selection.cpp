@@ -173,6 +173,16 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
+TEST_CASE("ofx quality mode labels expose fixed resolutions in the UI",
+          "[unit][ofx][regression]") {
+    REQUIRE(std::string(quality_mode_ui_label(kQualityAuto)) == "Auto");
+    REQUIRE(std::string(quality_mode_ui_label(kQualityPreview)) == "Draft (512)");
+    REQUIRE(std::string(quality_mode_ui_label(kQualityStandard)) == "Standard (768)");
+    REQUIRE(std::string(quality_mode_ui_label(kQualityHigh)) == "High (1024)");
+    REQUIRE(std::string(quality_mode_ui_label(kQualityUltra)) == "Ultra (1536)");
+    REQUIRE(std::string(quality_mode_ui_label(kQualityMaximum)) == "Maximum (2048)");
+}
+
 TEST_CASE("fixed windows tensorRT quality keeps lower packaged fallbacks after the exact model",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-fixed-fallbacks");
