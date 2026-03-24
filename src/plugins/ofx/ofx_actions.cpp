@@ -240,7 +240,62 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         return kOfxStatFailed;
     }
 
-    // --- Group 1: Key Setup (the two choices that determine the AI result) ---
+    // --- Group 1: Status (runtime diagnostics and current version at the top) ---
+    std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
+    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
+
+    define_runtime_status_param(
+        param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
+        "Shows the backend currently used by this OFX instance.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
+        "Shows the device selected for this OFX instance.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
+        "Shows the quality mode currently requested by the OFX controls.", "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
+        "Shows the actual resolution currently used for inference after artifact selection.",
+        "runtime_group");
+    define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
+                                "Initializing...",
+                                "Shows the actual model or bridge file loaded for the current "
+                                "quality mode.",
+                                "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeStatus, "Status", "Initializing...",
+        "Shows the last frame time or the most recent error during engine load or render.",
+        "runtime_group");
+
+    // --- Group 2: Quick Help (host-visible guidance, not hover-dependent) ---
+    define_group_param(param_set, "help_group", "Quick Help", false);
+
+    define_info_param(
+        param_set, "help_quality_info", "Quality & Tiling",
+        "Higher quality loads larger models. Enable Tiling for sharper native-resolution detail "
+        "when model resolution alone is not enough. Tiling is slower and uses more memory.",
+        "Visible help for the two most important performance controls.",
+        "help_group");
+    define_info_param(
+        param_set, "help_alpha_hint_info", "Alpha Hint",
+        "Optional guide input. Connect an existing alpha or a black-and-white luma matte when "
+        "you want to steer CorridorKey in difficult areas.",
+        "Visible help for the optional Alpha Hint input.",
+        "help_group");
+    define_info_param(
+        param_set, "help_recover_details_info", "Recover Original Details",
+        "Blends source pixels back into solid foreground regions for crisper opaque detail. "
+        "Details Edge Shrink and Feather only affect this recovered-details mask.",
+        "Visible help for Recover Original Details and its dependent controls.",
+        "help_group");
+    define_info_param(
+        param_set, "help_output_info", "Output Modes",
+        "Processed is CorridorKey's linear premultiplied RGBA output. Use Matte Only for alpha "
+        "inspection. Use Foreground Only or Source+Matte for debugging specific stages.",
+        "Visible help for output mode selection.",
+        "help_group");
+
+    // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
 
     define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
@@ -259,7 +314,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Maximum (2048).",
         "setup_group");
 
-    // --- Group 2: Matte (refine the AI-generated alpha) ---
+    // --- Group 4: Matte (refine the AI-generated alpha) ---
     define_group_param(param_set, "matte_group", "Matte", true);
 
     define_info_param(
@@ -297,34 +352,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
         1.0, "Blend current output with the previous frame for temporal stability.", "matte_group");
 
-    // --- Group 3: Status (runtime diagnostics near the top) ---
-    std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
-    define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
-
-    define_runtime_status_param(
-        param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
-        "Shows the backend currently used by this OFX instance.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
-        "Shows the device selected for this OFX instance.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
-        "Shows the quality mode currently requested by the OFX controls.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
-        "Shows the actual resolution currently used for inference after artifact selection.",
-        "runtime_group");
-    define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
-                                "Initializing...",
-                                "Shows the actual model or bridge file loaded for the current "
-                                "quality mode.",
-                                "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeStatus, "Status", "Initializing...",
-        "Shows the last frame time or the most recent error during engine load or render.",
-        "runtime_group");
-
-    // --- Group 4: Edge & Spill (fix edges and color spill) ---
+    // --- Group 5: Edge & Spill (fix edges and color spill) ---
     define_group_param(param_set, "edge_spill_group", "Edge & Spill", true);
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
@@ -353,7 +381,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "model.",
                      "edge_spill_group");
 
-    // --- Group 5: Output ---
+    // --- Group 6: Output ---
     define_group_param(param_set, "output_group", "Output", true);
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
@@ -373,7 +401,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Lanczos4 is sharper; Bilinear is smoother.",
                         "output_group");
 
-    // --- Group 6: Performance ---
+    // --- Group 7: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
 
     define_choice_param(
@@ -399,7 +427,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "to sRGB only when the source reaching this OFX is already display-referred.",
                         "performance_group");
 
-    // --- Group 7: Advanced (timeouts) ---
+    // --- Group 8: Advanced (timeouts) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
     define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)", 30, 10, 300,
