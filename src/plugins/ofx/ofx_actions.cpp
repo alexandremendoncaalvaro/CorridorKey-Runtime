@@ -324,11 +324,16 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "output_group", "Output", true);
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
-                        {"Processed", "Matte Only", "Foreground Only", "Source + Matte"},
-                        "What to output. Processed and Source + Matte are premultiplied RGBA. "
-                        "Matte Only shows the alpha channel as grayscale.",
+                        {"Processed", "Matte Only", "Foreground Only", "Source+Matte", "FG+Matte"},
+                        "What to output.\n"
+                        "Processed: convenience composite, premultiplied.\n"
+                        "Matte Only: alpha as grayscale.\n"
+                        "Foreground Only: despilled foreground, full alpha.\n"
+                        "Source+Matte: original source premultiplied by AI matte.\n"
+                        "FG+Matte: model foreground premultiplied by AI matte, always linear "
+                        "-- use this for manual compositing.",
                         "output_group");
-    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleLanczos4,
+    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},
                         "Method used to upscale model output to source resolution. "
                         "Lanczos4 is sharper; Bilinear is smoother.",

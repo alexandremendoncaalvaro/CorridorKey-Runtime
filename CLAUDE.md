@@ -23,6 +23,8 @@ It contains the non-negotiable rules for this project.
   - `src/core/` — inference engine, device detection, ONNX Runtime wrapper
   - `src/frame_io/` — EXR, PNG, video I/O (OpenEXR, stb, FFmpeg confined here)
   - `src/post_process/` — pure pixel math (color utils, despill, despeckle)
+  - `src/app/` — application orchestration, OFX runtime service, diagnostics
+  - `src/plugins/ofx/` — OFX plugin (thin IPC client over the app-layer service)
 - Tests go in `tests/unit/`, `tests/integration/`, or `tests/e2e/` by level
 - External library types (OrtSession, Imf::*, AVFrame, etc.) NEVER appear in
   public headers — they are wrapped in `src/`
@@ -67,7 +69,7 @@ It contains the non-negotiable rules for this project.
   `docs:`, `perf:`
 - Do not commit to `main` directly — use feature branches
 
-## Documentation Rules (see docs/GUIDELINES.md section 6 for details)
+## Documentation Rules (see docs/GUIDELINES.md section 10 for details)
 
 - Documentation contains **definitions and decisions**, not speculation,
   history, or unfounded plans

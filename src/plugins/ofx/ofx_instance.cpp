@@ -164,11 +164,18 @@ std::string runtime_status_label(const InstanceData& data) {
     if (!data.last_error.empty()) {
         return "Error: " + truncate_status_message(data.last_error, 160);
     }
-    if (data.last_frame_ms > 0.0) {
-        return "Last frame: " + format_duration_ms(data.last_frame_ms) +
-               " | Avg: " + format_duration_ms(data.avg_frame_ms);
+    std::string status;
+    if (!data.last_warning.empty()) {
+        status = "Note: " + truncate_status_message(data.last_warning, 100);
     }
-    return "Idle";
+    if (data.last_frame_ms > 0.0) {
+        if (!status.empty()) {
+            status += " | ";
+        }
+        status += "Last frame: " + format_duration_ms(data.last_frame_ms) +
+                  " | Avg: " + format_duration_ms(data.avg_frame_ms);
+    }
+    return status.empty() ? "Idle" : status;
 }
 
 double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
@@ -796,8 +803,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
     if (requested_device.backend == Backend::TensorRT && quantization_mode == kQuantizationInt8) {
         data->last_error =
-            "INT8 quantization is not supported by the TensorRT RTX execution provider. "
-            "Please use FP16.";
+            "INT8 (Compressed) is not supported by the TensorRT RTX execution provider. "
+            "Please use FP16 (Full).";
         log_message("ensure_engine_for_quality", data->last_error);
         update_runtime_panel(data);
         log_quality_total("unsupported_quantization", data->last_error);
@@ -862,6 +869,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         DeviceInfo effective_device = requested_device;
         std::optional<BackendFallbackInfo> fallback = std::nullopt;
         if (data->use_runtime_server && data->runtime_client != nullptr) {
+            set_string_param_value(
+                data->runtime_status_param,
+                "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
             auto prepare_result = data->runtime_client->prepare_session(
                 build_prepare_request(requested_device, selection, requested_quality_mode),
                 [&](const StageTiming& timing) {
@@ -880,12 +890,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                  selection.effective_resolution, std::nullopt,
                                  prepare_result.error().message);
                 log_message("ensure_engine_for_quality", data->last_error);
-                if (is_fixed_quality_mode(requested_quality_mode) &&
-                    !cpu_quality_guardrail_active) {
-                    update_runtime_panel(data);
-                    log_quality_total("engine_create_error", data->last_error);
-                    return false;
-                }
+                // Continue to the next lower resolution candidate. For fixed quality modes this
+                // is a compile failure fallback, not a missing-artifact case -- the user will see
+                // a Note in the status panel once the fallback resolution succeeds.
                 continue;
             }
             effective_device = prepare_result->session.effective_device;
@@ -895,6 +902,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                             std::to_string(prepare_result->session.reused_existing_session) +
                             " ref_count=" + std::to_string(prepare_result->session.ref_count));
         } else {
+            set_string_param_value(
+                data->runtime_status_param,
+                "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
             auto engine_result = Engine::create(
                 selection.executable_model_path, requested_device,
                 [&](const StageTiming& timing) {
@@ -914,12 +924,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                  selection.effective_resolution, std::nullopt,
                                  engine_result.error().message);
                 log_message("ensure_engine_for_quality", data->last_error);
-                if (is_fixed_quality_mode(requested_quality_mode) &&
-                    !cpu_quality_guardrail_active) {
-                    update_runtime_panel(data);
-                    log_quality_total("engine_create_error", data->last_error);
-                    return false;
-                }
+                // Continue to the next lower resolution candidate (same rationale as above).
                 continue;
             }
 
@@ -977,9 +982,15 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
         if (selection.used_fallback) {
-            log_message("ensure_engine_for_quality",
-                        "Auto quality requested " + std::to_string(selection.requested_resolution) +
-                            " and fell back to " + std::to_string(selection.effective_resolution));
+            const std::string fallback_note =
+                std::string(quality_mode_label(requested_quality_mode)) + " (" +
+                std::to_string(selection.requested_resolution) +
+                "px) unavailable on this hardware -- using " +
+                std::to_string(selection.effective_resolution) + "px";
+            data->last_warning = fallback_note;
+            log_message("ensure_engine_for_quality", "fallback_note=" + fallback_note);
+        } else {
+            data->last_warning.clear();
         }
         if (cpu_quality_guardrail_active) {
             log_message(
