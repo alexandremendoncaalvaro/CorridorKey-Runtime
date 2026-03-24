@@ -5,6 +5,32 @@ Resolve by explaining what the current CorridorKey OFX build actually does. It
 focuses on the controls that change behavior, the status messages that matter,
 and the order that avoids dead ends.
 
+## What CorridorKey Is Solving
+
+CorridorKey is not just a matte viewer. Its job is to produce two linked
+results from a greenscreen plate:
+
+- a foreground RGB result with spill suppression and recovered detail
+- an alpha result that describes transparency
+
+In the current Resolve OFX path, that prediction is driven by a connected
+**Alpha Hint** matte. The practical workflow is therefore:
+
+1. give CorridorKey a rough subject guide
+2. confirm the model is actually running
+3. refine the generated alpha
+4. recover texture or add detail only if the keyed result already basically
+   works
+
+If you skip step 1, the current OFX build does not produce a real keyed result.
+
+## If You Only Remember Three Things
+
+- Connect **Alpha Hint** first. Until then, the node is waiting, not keying.
+- Trust **Effective Quality**, not the dropdown alone.
+- Use **Processed** for the normal result, then switch outputs only when you
+  are diagnosing a specific problem.
+
 ## Start With Runtime Status
 
 The runtime panel at the top is the first place to look after any change.
@@ -23,13 +49,11 @@ Treat the status panel as the source of truth. Two messages matter most:
 - `Note: ... unavailable on this hardware -- using ...` means the plugin
   loaded a lower packaged model than the requested mode.
 
-## Current OFX Behavior
+## Current Resolve OFX Workflow
 
 The current Resolve OFX path does not run inference until an **Alpha Hint**
 input is connected.
 
-- The OFX clip is optional to the host, so the node can exist without a
-  connection.
 - The render path still waits for a connected Alpha Hint before running the
   model.
 - While waiting, CorridorKey outputs a pass-through image with opaque alpha
@@ -72,6 +96,18 @@ Use quality as a stability ladder:
 2. Confirm **Effective Quality** matches what you asked for.
 3. Only move up if the current mode is stable and clearly too soft.
 
+For basic users:
+
+- Stay on the highest mode that loads cleanly.
+- Do not treat `Ultra` or `Maximum` as automatically better if the runtime
+  panel is already falling back.
+
+For advanced users:
+
+- `Auto` is deterministic from input size, not an adaptive quality estimator.
+- Fixed modes still keep a lower-resolution fallback chain when the requested
+  artifact exists but session preparation fails.
+
 On TensorRT paths, first use can be much slower than steady-state rendering
 because the runtime may need to prepare and cache an optimized engine for that
 GPU.
@@ -80,6 +116,17 @@ GPU.
 
 **Alpha Hint** is the guide-matte input that CorridorKey currently expects in
 the Resolve OFX path.
+
+Why this matters:
+
+- the guide matte tells CorridorKey where the subject broadly is
+- CorridorKey then generates the output alpha and foreground from that guided
+  region
+- the panel's matte controls refine CorridorKey's output, not your incoming
+  guide
+
+That makes Alpha Hint the setup step, not an optional polish step, in the
+current OFX workflow.
 
 ### What the plugin reads
 
@@ -107,6 +154,11 @@ Good sources include:
 - a garbage matte or hand-shaped matte
 - a matte built in Fusion
 
+For a basic user, the goal is simple: give CorridorKey a rough but believable
+subject silhouette. It does not need perfect strands of hair. It does need the
+subject separated from the screen well enough for the model to know what region
+to solve.
+
 ### How to connect it in Resolve
 
 **Color Page**
@@ -130,6 +182,14 @@ They refine CorridorKey's generated output alpha after inference.
 These controls operate on CorridorKey's generated alpha, not on the incoming
 Alpha Hint.
 
+Recommended order:
+
+1. lock black and white points
+2. adjust edge size
+3. soften only if needed
+4. use gamma for semi-transparent balancing
+5. despeckle last
+
 - **Matte Clip Black** remaps alpha so values at or below the chosen black
   point become fully transparent.
 - **Matte Clip White** remaps alpha so values at or above the chosen white
@@ -150,6 +210,8 @@ Alpha Hint.
 
 **Recover Original Details** blends original source RGB back into opaque
 interior regions after CorridorKey generates the matte and foreground.
+
+Think of this as an interior-texture control, not a matte-generation control.
 
 What it is good at:
 
@@ -189,6 +251,9 @@ These sliders are only active when **Recover Original Details** is enabled.
 **Enable Tiling** runs inference on overlapping tiles when the input frame is
 larger than the active model resolution.
 
+This is the detail-recovery path for shots that are already working but are
+limited by model resolution.
+
 Use it when:
 
 - you already have a stable non-tiled result
@@ -226,6 +291,13 @@ Choose output mode based on what you need to inspect or deliver.
   generated matte.
 - **FG+Matte** is an explicit alias of **Processed** for workflows that want a
   foreground-plus-alpha label.
+
+For advanced users:
+
+- `Processed` and `FG+Matte` share the same linear-premultiplied semantics in
+  the current code path.
+- `Source+Matte` is useful for comparing the generated alpha against the
+  original source plate, not for inspecting despill quality.
 
 If the status panel still says `Waiting for Alpha Hint connection.`, these
 outputs are not showing a keyed result yet.
