@@ -114,7 +114,7 @@ Choose output mode based on the job you are doing.
 - **FG+Matte** is an explicit foreground-plus-alpha workflow for manual comp
   setups.
 
-## Practical Default Workflow
+## Start Here
 
 1. Set **Quality** to `High (1024)`.
 2. Confirm the top status panel says `1024px`, not a fallback.

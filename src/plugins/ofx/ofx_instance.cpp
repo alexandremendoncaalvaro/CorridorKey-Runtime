@@ -29,7 +29,7 @@ namespace {
 
 constexpr const char* kRepoDocsBaseUrl =
     "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/blob/"
-    "codex/niko-ofx-fixes-release/docs/";
+    "main/docs/";
 
 std::string help_doc_url(const char* filename) {
     return std::string(kRepoDocsBaseUrl) + filename;
@@ -1096,12 +1096,24 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
     if (in_args != nullptr && g_suites.property != nullptr) {
         std::string changed_param;
         if (get_string(in_args, kOfxPropName, changed_param)) {
-            if (changed_param == kParamOpenPanelGuide ||
+            if (changed_param == kParamOpenStartHereGuide ||
+                changed_param == kParamOpenQualityGuide ||
+                changed_param == kParamOpenAlphaHintGuide ||
+                changed_param == kParamOpenRecoverDetailsGuide ||
+                changed_param == kParamOpenTilingGuide ||
                 changed_param == kParamOpenResolveTutorial ||
                 changed_param == kParamOpenTroubleshooting) {
                 std::string url;
-                if (changed_param == kParamOpenPanelGuide) {
-                    url = help_doc_url("OFX_PANEL_GUIDE.md");
+                if (changed_param == kParamOpenStartHereGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#start-here");
+                } else if (changed_param == kParamOpenQualityGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#quality");
+                } else if (changed_param == kParamOpenAlphaHintGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#alpha-hint");
+                } else if (changed_param == kParamOpenRecoverDetailsGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#recover-original-details");
+                } else if (changed_param == kParamOpenTilingGuide) {
+                    url = help_doc_url("OFX_PANEL_GUIDE.md#tiling");
                 } else if (changed_param == kParamOpenResolveTutorial) {
                     url = help_doc_url("OFX_RESOLVE_TUTORIALS.md");
                 } else {
