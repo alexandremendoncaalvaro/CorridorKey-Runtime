@@ -143,15 +143,18 @@ void append_directml_execution_provider(Ort::SessionOptions& session_options, in
                                             dml_options);
 }
 
-void override_windows_universal_free_dimensions(Ort::SessionOptions& session_options,
-                                                Backend backend) {
-    if (backend != Backend::DirectML && backend != Backend::WindowsML) {
+void override_windows_free_dimensions(Ort::SessionOptions& session_options, Backend backend) {
+    if (backend != Backend::DirectML && backend != Backend::WindowsML &&
+        backend != Backend::TensorRT) {
         return;
     }
 
-    // The DirectML guidance recommends overriding free dimensions during session creation so the
-    // provider can optimize and specialize the graph for the actual runtime shape.
-    debug_log("Overriding free dimension 'batch_size' to 1 for Windows universal backend");
+    // Override the symbolic batch_size dimension so the execution provider receives a fully static
+    // graph. GPU inference always uses batch_size=1. Without this override, TensorRT must build
+    // engines for dynamic shapes, which fails for large models (1536/2048) because the builder
+    // cannot find valid tactics for the unresolved dynamic dimension at those tensor sizes.
+    debug_log("Overriding free dimension 'batch_size' to 1 for backend " +
+              std::to_string(static_cast<int>(backend)));
     Ort::ThrowOnError(
         Ort::GetApi().AddFreeDimensionOverrideByName(session_options, "batch_size", 1));
 }
@@ -188,17 +191,13 @@ void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
 void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options,
                                             const std::filesystem::path& model_path) {
     debug_log("Configuring TensorRT RTX execution provider");
-    // Use 8 GB workspace for large models (1536 / 2048) to allow TensorRT to fuse kernels that
-    // fail at the 2 GB limit. Smaller models keep 2 GB to reduce compile-time overhead.
-    constexpr const char* kWorkspaceDefault = "2147483647";  // 2 GB
-    constexpr const char* kWorkspaceLarge = "8589934592";    // 8 GB
-    auto filename = model_path.filename().string();
-    const bool is_large_model =
-        filename.find("_1536") != std::string::npos || filename.find("_2048") != std::string::npos;
-    const std::string workspace_size = is_large_model ? kWorkspaceLarge : kWorkspaceDefault;
+    // Workspace of 0 allows TensorRT to use all available device memory, matching its default
+    // behaviour. Previous artificial caps (2 GB / 8 GB) prevented valid tactic discovery for
+    // large models (1536 / 2048).
+    constexpr const char* kWorkspaceUnlimited = "0";
     std::unordered_map<std::string, std::string> provider_options = {
         {tensorrt_rtx_option_names::kDeviceId, "0"},
-        {tensorrt_rtx_option_names::kMaxWorkspaceSize, workspace_size},
+        {tensorrt_rtx_option_names::kMaxWorkspaceSize, kWorkspaceUnlimited},
     };
 
     debug_log("Setting up runtime cache");
@@ -344,7 +343,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     m_session_options.SetLogSeverityLevel(options.log_severity);
 
 #ifdef _WIN32
-    override_windows_universal_free_dimensions(m_session_options, m_device.backend);
+    override_windows_free_dimensions(m_session_options, m_device.backend);
 #endif
 
     if (m_device.backend != Backend::CPU) {

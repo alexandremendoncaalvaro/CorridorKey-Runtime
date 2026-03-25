@@ -171,6 +171,10 @@ Section "Install"
   ExpandEnvStrings `$0 "%LOCALAPPDATA%\CorridorKey\Logs"
   RMDir /r "`$0"
 
+  DetailPrint "Clearing TensorRT engine cache..."
+  ExpandEnvStrings `$0 "%LOCALAPPDATA%\CorridorKey\Cache\tensorrt_rtx"
+  RMDir /r "`$0"
+
   DetailPrint "Clearing DaVinci Resolve OFX cache..."
   Delete "`${CACHE_FILE}"
 
