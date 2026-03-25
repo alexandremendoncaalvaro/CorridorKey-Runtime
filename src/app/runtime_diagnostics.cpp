@@ -128,6 +128,7 @@ std::filesystem::path current_executable_path() {
     return {};
 }
 
+#if defined(_WIN32)
 std::string backend_to_diagnostic_string(Backend backend) {
     switch (backend) {
         case Backend::CPU:
@@ -176,7 +177,6 @@ Backend diagnostic_backend_from_string(const std::string& value) {
     }
     return Backend::CPU;
 }
-
 std::optional<int> resolution_from_model_filename(const std::string& filename) {
     auto stem = std::filesystem::path(filename).stem().string();
     auto separator = stem.find_last_of('_');
@@ -185,9 +185,8 @@ std::optional<int> resolution_from_model_filename(const std::string& filename) {
     }
 
     auto token = stem.substr(separator + 1);
-    if (token.empty() ||
-        !std::all_of(token.begin(), token.end(),
-                     [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
+    if (token.empty() || !std::all_of(token.begin(), token.end(),
+                                      [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
         return std::nullopt;
     }
 
@@ -242,9 +241,9 @@ int backend_probe_priority(Backend backend) {
 }
 
 nlohmann::json probe_windows_backend_execution(const std::filesystem::path& models_dir,
-                                              const DeviceInfo& device,
-                                              const std::string& model_filename,
-                                              const std::string& docs_guidance) {
+                                               const DeviceInfo& device,
+                                               const std::string& model_filename,
+                                               const std::string& docs_guidance) {
     nlohmann::json json;
     json["backend"] = backend_to_diagnostic_string(device.backend);
     json["device_name"] = device.name;
@@ -258,8 +257,7 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
     json["effective_device"] = "";
     json["fallback_used"] = false;
     json["docs_guidance"] = docs_guidance;
-    json["probe_policy"] =
-        "strict_engine_create_and_synthetic_frame_no_cpu_fallback";
+    json["probe_policy"] = "strict_engine_create_and_synthetic_frame_no_cpu_fallback";
     json["error"] = "";
 
     auto model_path = models_dir / model_filename;
@@ -332,8 +330,10 @@ std::optional<nlohmann::json> preferred_windows_probe(const nlohmann::json& prob
             continue;
         }
 
-        const auto current_backend = diagnostic_backend_from_string(preferred->value("backend", "cpu"));
-        const auto candidate_backend = diagnostic_backend_from_string(probe.value("backend", "cpu"));
+        const auto current_backend =
+            diagnostic_backend_from_string(preferred->value("backend", "cpu"));
+        const auto candidate_backend =
+            diagnostic_backend_from_string(probe.value("backend", "cpu"));
         const int current_backend_rank = backend_probe_priority(current_backend);
         const int candidate_backend_rank = backend_probe_priority(candidate_backend);
         if (candidate_backend_rank != current_backend_rank) {
@@ -363,6 +363,7 @@ std::optional<nlohmann::json> preferred_windows_probe(const nlohmann::json& prob
 
     return preferred;
 }
+#endif
 
 std::optional<std::filesystem::path> find_runtime_library(const std::filesystem::path& directory) {
     std::error_code error;
@@ -986,8 +987,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["gpu_memory_mb"] = 0;
     json["packaged_models"] = nlohmann::json::array();
     json["compiled_context_models"] = nlohmann::json::array();
-    json["execution_probe_policy"] =
-        "strict_engine_create_and_synthetic_frame_no_cpu_fallback";
+    json["execution_probe_policy"] = "strict_engine_create_and_synthetic_frame_no_cpu_fallback";
     json["execution_probes"] = nlohmann::json::array();
     json["recommended_backend"] = "cpu";
     json["recommended_model"] = "";
@@ -1043,15 +1043,16 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
             DeviceInfo device{windows_backend_device_name(gpu, backend), gpu.dedicated_memory_mb,
                               backend, static_cast<int>(index)};
             for (const auto& model_filename : windows_universal_probe_models(device)) {
-                probes.push_back(
-                    probe_windows_backend_execution(models_dir, device, model_filename, docs_guidance));
+                probes.push_back(probe_windows_backend_execution(models_dir, device, model_filename,
+                                                                 docs_guidance));
             }
         };
 
         queue_backend_probes(Backend::WindowsML, gpu.winml_available,
                              "Recommended by ONNX Runtime for new Windows deployments.");
-        queue_backend_probes(Backend::DirectML, gpu.directml_available,
-                             "Supported by ONNX Runtime, but DirectML is in sustained engineering.");
+        queue_backend_probes(
+            Backend::DirectML, gpu.directml_available,
+            "Supported by ONNX Runtime, but DirectML is in sustained engineering.");
         queue_backend_probes(Backend::OpenVINO, gpu.openvino_available,
                              "Intel-managed Windows acceleration path.");
     }
