@@ -22,6 +22,7 @@ add_executable(test_unit
     test_ofx_runtime_protocol.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
+    test_runtime_diagnostics.cpp
     test_runtime_contracts.cpp
     test_session_cache_policy.cpp
     test_session_policy.cpp

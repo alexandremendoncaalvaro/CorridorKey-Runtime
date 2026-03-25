@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <corridorkey/engine.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -30,6 +31,33 @@ struct QualityArtifactSelection {
     bool used_fallback = false;
 };
 
+struct QualityCompileFailureCacheContext {
+    std::filesystem::path models_root = {};
+    std::uint64_t models_bundle_token = 0;
+    Backend backend = Backend::Auto;
+    int device_index = 0;
+    std::int64_t available_memory_mb = 0;
+    int quantization_mode = kQuantizationFp16;
+};
+
+struct QualityCompileFailureEntry {
+    std::filesystem::path artifact_path = {};
+    int requested_resolution = 0;
+    int effective_resolution = 0;
+    std::string error_message = {};
+};
+
+struct QualityCompileFailureCache {
+    QualityCompileFailureCacheContext context = {};
+    std::vector<QualityCompileFailureEntry> entries = {};
+    bool initialized = false;
+};
+
+struct CachedQualityCompileFailure {
+    QualityArtifactSelection selection = {};
+    std::string error_message = {};
+};
+
 inline const char* quality_mode_label(int quality_mode) {
     return quality_mode_ui_label(quality_mode);
 }
@@ -48,6 +76,112 @@ inline std::string quality_fallback_warning(int quality_mode,
 
 inline bool is_fixed_quality_mode(int quality_mode) {
     return quality_mode != kQualityAuto;
+}
+
+inline bool use_quality_compile_failure_cache(Backend backend) {
+    return backend == Backend::TensorRT;
+}
+
+inline bool quality_compile_failure_cache_matches(
+    const QualityCompileFailureCache& cache,
+    const QualityCompileFailureCacheContext& context) {
+    return cache.initialized && cache.context.models_root == context.models_root &&
+           cache.context.models_bundle_token == context.models_bundle_token &&
+           cache.context.backend == context.backend &&
+           cache.context.device_index == context.device_index &&
+           cache.context.available_memory_mb == context.available_memory_mb &&
+           cache.context.quantization_mode == context.quantization_mode;
+}
+
+inline void prepare_quality_compile_failure_cache(
+    QualityCompileFailureCache& cache, const QualityCompileFailureCacheContext& context) {
+    if (!quality_compile_failure_cache_matches(cache, context)) {
+        cache.context = context;
+        cache.entries.clear();
+        cache.initialized = true;
+    }
+}
+
+inline std::optional<CachedQualityCompileFailure> cached_quality_compile_failure(
+    const QualityCompileFailureCache& cache,
+    const QualityCompileFailureCacheContext& context,
+    const QualityArtifactSelection& selection) {
+    if (!use_quality_compile_failure_cache(context.backend) ||
+        !quality_compile_failure_cache_matches(cache, context)) {
+        return std::nullopt;
+    }
+
+    auto existing = std::find_if(
+        cache.entries.begin(), cache.entries.end(),
+        [&](const QualityCompileFailureEntry& entry) {
+            return entry.artifact_path == selection.executable_model_path &&
+                   entry.requested_resolution == selection.requested_resolution &&
+                   entry.effective_resolution == selection.effective_resolution;
+        });
+    if (existing == cache.entries.end()) {
+        return std::nullopt;
+    }
+
+    CachedQualityCompileFailure cached;
+    cached.selection = selection;
+    cached.error_message = existing->error_message;
+    return cached;
+}
+
+inline void record_quality_compile_failure(QualityCompileFailureCache& cache,
+                                           const QualityCompileFailureCacheContext& context,
+                                           const QualityArtifactSelection& selection,
+                                           const std::string& error_message) {
+    if (!use_quality_compile_failure_cache(context.backend)) {
+        return;
+    }
+
+    prepare_quality_compile_failure_cache(cache, context);
+    auto existing = std::find_if(
+        cache.entries.begin(), cache.entries.end(),
+        [&](const QualityCompileFailureEntry& entry) {
+            return entry.artifact_path == selection.executable_model_path &&
+                   entry.requested_resolution == selection.requested_resolution &&
+                   entry.effective_resolution == selection.effective_resolution;
+        });
+    if (existing != cache.entries.end()) {
+        existing->error_message = error_message;
+        return;
+    }
+
+    cache.entries.push_back(QualityCompileFailureEntry{
+        selection.executable_model_path,
+        selection.requested_resolution,
+        selection.effective_resolution,
+        error_message,
+    });
+}
+
+inline std::vector<QualityArtifactSelection> filter_quality_artifacts_with_compile_cache(
+    const std::vector<QualityArtifactSelection>& candidates,
+    const QualityCompileFailureCache& cache,
+    const QualityCompileFailureCacheContext& context) {
+    if (!use_quality_compile_failure_cache(context.backend) ||
+        !quality_compile_failure_cache_matches(cache, context)) {
+        return candidates;
+    }
+
+    std::vector<QualityArtifactSelection> filtered;
+    filtered.reserve(candidates.size());
+    for (const auto& candidate : candidates) {
+        if (!cached_quality_compile_failure(cache, context, candidate).has_value()) {
+            filtered.push_back(candidate);
+        }
+    }
+    return filtered;
+}
+
+inline bool should_abort_quality_fallback_after_compile_failure(
+    Backend backend, int quality_mode, bool cpu_quality_guardrail_active,
+    const QualityArtifactSelection& selection) {
+    return use_quality_compile_failure_cache(backend) && is_fixed_quality_mode(quality_mode) &&
+           !cpu_quality_guardrail_active &&
+           selection.effective_resolution == selection.requested_resolution;
 }
 
 inline std::optional<std::string> unsupported_quantization_message(Backend backend,

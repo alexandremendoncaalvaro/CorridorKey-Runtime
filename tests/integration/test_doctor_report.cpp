@@ -93,6 +93,15 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     REQUIRE(report["windows_universal"].contains("recommended_model"));
     REQUIRE(report["windows_universal"].contains("recommended_backend_reason"));
     REQUIRE(report["windows_universal"]["execution_probes"].is_array());
+    if (!report["windows_universal"]["execution_probes"].empty()) {
+        auto entry = report["windows_universal"]["execution_probes"].front();
+        REQUIRE(entry.contains("backend"));
+        REQUIRE(entry.contains("model"));
+        REQUIRE(entry.contains("requested_resolution"));
+        REQUIRE(entry.contains("session_create_ok"));
+        REQUIRE(entry.contains("frame_execute_ok"));
+        REQUIRE(entry.contains("fallback_used"));
+    }
     REQUIRE(report["summary"].contains("coreml_healthy"));
     REQUIRE(report["summary"].contains("apple_acceleration_probe_ready"));
     REQUIRE(report["summary"].contains("apple_acceleration_bridge_ready"));

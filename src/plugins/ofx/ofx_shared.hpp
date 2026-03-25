@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "ofxCore.h"
 #include "ofxImageEffect.h"
@@ -13,6 +14,7 @@
 #include "ofxParam.h"
 #include "ofxProperty.h"
 #include "ofx_constants.hpp"
+#include "ofx_model_selection.hpp"
 #include "post_process/alpha_edge.hpp"
 
 #if defined(_WIN32)
@@ -87,6 +89,14 @@ struct OfxSuites {
     const OfxMessageSuiteV2* message = nullptr;
 };
 
+struct RuntimePanelState {
+    int requested_quality_mode = kQualityAuto;
+    int requested_resolution = 0;
+    int effective_resolution = 0;
+    bool cpu_quality_guardrail_active = false;
+    std::filesystem::path artifact_path = {};
+};
+
 struct InstanceData {
     OfxImageEffectHandle effect = nullptr;
     OfxImageClipHandle source_clip = nullptr;
@@ -132,6 +142,8 @@ struct InstanceData {
     int requested_resolution = 0;
     int active_resolution = 0;
     bool cpu_quality_guardrail_active = false;
+    RuntimePanelState runtime_panel_state = {};
+    QualityCompileFailureCache quality_compile_failure_cache = {};
     bool use_runtime_server = false;
     std::uint64_t render_count = 0;
     std::string last_error = {};
@@ -182,7 +194,6 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
-struct QualityArtifactSelection;
 std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
     int input_width = 0, int input_height = 0, int quantization_mode = kQuantizationFp16);

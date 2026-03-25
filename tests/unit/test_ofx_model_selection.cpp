@@ -222,6 +222,104 @@ TEST_CASE("fixed windows tensorRT quality keeps lower packaged fallbacks after t
     REQUIRE(candidates[2].executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
 }
 
+TEST_CASE("fixed TensorRT compile failures block exact retries and lower fallback",
+          "[unit][ofx][regression]") {
+    const QualityCompileFailureCacheContext context{
+        .models_root = "C:/models",
+        .models_bundle_token = 11,
+        .backend = Backend::TensorRT,
+        .device_index = 2,
+        .available_memory_mb = 24576,
+        .quantization_mode = kQuantizationFp16,
+    };
+
+    std::vector<QualityArtifactSelection> candidates{
+        {std::filesystem::path("corridorkey_fp16_2048.onnx"), 2048, 2048, false},
+        {std::filesystem::path("corridorkey_fp16_1536.onnx"), 2048, 1536, true},
+        {std::filesystem::path("corridorkey_fp16_1024.onnx"), 2048, 1024, true},
+    };
+
+    QualityCompileFailureCache cache;
+    record_quality_compile_failure(
+        cache, context, candidates.front(),
+        "Failed to create engine for Maximum (2048) using corridorkey_fp16_2048.onnx: compile "
+        "failed");
+
+    auto cached = cached_quality_compile_failure(cache, context, candidates.front());
+    REQUIRE(cached.has_value());
+    REQUIRE(cached->error_message.find("2048") != std::string::npos);
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(
+        Backend::TensorRT, kQualityMaximum, false, candidates.front()));
+
+    auto filtered = filter_quality_artifacts_with_compile_cache(candidates, cache, context);
+    REQUIRE(filtered.size() == 2);
+    REQUIRE(filtered.front().effective_resolution == 1536);
+    REQUIRE(filtered[1].effective_resolution == 1024);
+}
+
+TEST_CASE("auto TensorRT quality skips cached compile failures and keeps working fallback",
+          "[unit][ofx][regression]") {
+    const QualityCompileFailureCacheContext context{
+        .models_root = "C:/models",
+        .models_bundle_token = 12,
+        .backend = Backend::TensorRT,
+        .device_index = 0,
+        .available_memory_mb = 16384,
+        .quantization_mode = kQuantizationFp16,
+    };
+
+    std::vector<QualityArtifactSelection> candidates{
+        {std::filesystem::path("corridorkey_fp16_2048.onnx"), 2048, 2048, false},
+        {std::filesystem::path("corridorkey_fp16_1536.onnx"), 2048, 1536, true},
+        {std::filesystem::path("corridorkey_fp16_1024.onnx"), 2048, 1024, true},
+    };
+
+    QualityCompileFailureCache cache;
+    record_quality_compile_failure(cache, context, candidates[0], "2048 compile failed");
+    record_quality_compile_failure(cache, context, candidates[1], "1536 compile failed");
+
+    auto filtered = filter_quality_artifacts_with_compile_cache(candidates, cache, context);
+    REQUIRE(filtered.size() == 1);
+    REQUIRE(filtered.front().effective_resolution == 1024);
+    REQUIRE(filtered.front().used_fallback);
+}
+
+TEST_CASE("quality compile failure cache invalidates when backend device or model bundle changes",
+          "[unit][ofx][regression]") {
+    const QualityCompileFailureCacheContext initial_context{
+        .models_root = "C:/models",
+        .models_bundle_token = 21,
+        .backend = Backend::TensorRT,
+        .device_index = 1,
+        .available_memory_mb = 16384,
+        .quantization_mode = kQuantizationFp16,
+    };
+
+    QualityCompileFailureCache cache;
+    record_quality_compile_failure(
+        cache, initial_context,
+        QualityArtifactSelection{std::filesystem::path("corridorkey_fp16_2048.onnx"), 2048, 2048,
+                                 false},
+        "compile failed");
+    REQUIRE(cache.entries.size() == 1);
+
+    QualityCompileFailureCacheContext changed_context = initial_context;
+    changed_context.device_index = 3;
+    prepare_quality_compile_failure_cache(cache, changed_context);
+    REQUIRE(cache.entries.empty());
+
+    record_quality_compile_failure(
+        cache, changed_context,
+        QualityArtifactSelection{std::filesystem::path("corridorkey_fp16_1536.onnx"), 1536, 1536,
+                                 false},
+        "compile failed");
+    REQUIRE(cache.entries.size() == 1);
+
+    changed_context.models_bundle_token = 22;
+    prepare_quality_compile_failure_cache(cache, changed_context);
+    REQUIRE(cache.entries.empty());
+}
+
 TEST_CASE("auto windows tensorRT quality falls back to the highest packaged model",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto");

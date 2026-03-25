@@ -128,8 +128,9 @@ std::filesystem::path current_executable_path() {
     return {};
 }
 
-#if defined(_WIN32)
-std::string backend_to_diagnostic_string(Backend backend) {
+}  // namespace
+
+std::string diagnostic_backend_label(Backend backend) {
     switch (backend) {
         case Backend::CPU:
             return "cpu";
@@ -152,6 +153,8 @@ std::string backend_to_diagnostic_string(Backend backend) {
             return "auto";
     }
 }
+
+namespace {
 
 Backend diagnostic_backend_from_string(const std::string& value) {
     if (value == "cuda") {
@@ -177,6 +180,7 @@ Backend diagnostic_backend_from_string(const std::string& value) {
     }
     return Backend::CPU;
 }
+
 std::optional<int> resolution_from_model_filename(const std::string& filename) {
     auto stem = std::filesystem::path(filename).stem().string();
     auto separator = stem.find_last_of('_');
@@ -199,8 +203,21 @@ void append_unique_model(std::vector<std::string>& models, const std::string& fi
     }
 }
 
-std::vector<std::string> windows_universal_probe_models(const DeviceInfo& device) {
+}  // namespace
+
+std::vector<std::string> windows_probe_models_for_backend(Backend backend,
+                                                          const DeviceInfo& device) {
     std::vector<std::string> models;
+
+    if (backend == Backend::TensorRT) {
+        for (const auto* model : {"corridorkey_fp16_2048.onnx", "corridorkey_fp16_1536.onnx",
+                                  "corridorkey_fp16_1024.onnx", "corridorkey_fp16_768.onnx",
+                                  "corridorkey_fp16_512.onnx"}) {
+            append_unique_model(models, model);
+        }
+        return models;
+    }
+
     if (device.available_memory_mb >= 10000) {
         append_unique_model(models, "corridorkey_fp16_1024.onnx");
     } else if (device.available_memory_mb >= 8000) {
@@ -227,25 +244,28 @@ std::string windows_backend_device_name(const core::WindowsGpuInfo& gpu, Backend
     }
 }
 
-int backend_probe_priority(Backend backend) {
+int windows_backend_probe_priority(Backend backend) {
     switch (backend) {
-        case Backend::WindowsML:
+        case Backend::TensorRT:
             return 0;
-        case Backend::DirectML:
+        case Backend::WindowsML:
             return 1;
-        case Backend::OpenVINO:
+        case Backend::DirectML:
             return 2;
-        default:
+        case Backend::OpenVINO:
             return 3;
+        default:
+            return 4;
     }
 }
 
+#if defined(_WIN32)
 nlohmann::json probe_windows_backend_execution(const std::filesystem::path& models_dir,
                                                const DeviceInfo& device,
                                                const std::string& model_filename,
                                                const std::string& docs_guidance) {
     nlohmann::json json;
-    json["backend"] = backend_to_diagnostic_string(device.backend);
+    json["backend"] = diagnostic_backend_label(device.backend);
     json["device_name"] = device.name;
     json["device_index"] = device.device_index;
     json["model"] = model_filename;
@@ -280,7 +300,7 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
     }
 
     json["session_create_ok"] = true;
-    json["effective_backend"] = backend_to_diagnostic_string((*engine)->current_device().backend);
+    json["effective_backend"] = diagnostic_backend_label((*engine)->current_device().backend);
     json["effective_device"] = (*engine)->current_device().name;
     json["fallback_used"] = (*engine)->backend_fallback().has_value();
 
@@ -301,13 +321,14 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
     const auto effective_backend = (*engine)->current_device().backend;
     if (effective_backend != device.backend || (*engine)->backend_fallback().has_value()) {
         json["error"] = "Strict probe completed on unexpected backend: " +
-                        backend_to_diagnostic_string(effective_backend);
+                        diagnostic_backend_label(effective_backend);
         return json;
     }
 
     json["frame_execute_ok"] = true;
     return json;
 }
+#endif
 
 bool is_successful_windows_probe(const nlohmann::json& probe) {
     return probe.value("session_create_ok", false) && probe.value("frame_execute_ok", false) &&
@@ -334,8 +355,8 @@ std::optional<nlohmann::json> preferred_windows_probe(const nlohmann::json& prob
             diagnostic_backend_from_string(preferred->value("backend", "cpu"));
         const auto candidate_backend =
             diagnostic_backend_from_string(probe.value("backend", "cpu"));
-        const int current_backend_rank = backend_probe_priority(current_backend);
-        const int candidate_backend_rank = backend_probe_priority(candidate_backend);
+        const int current_backend_rank = windows_backend_probe_priority(current_backend);
+        const int candidate_backend_rank = windows_backend_probe_priority(candidate_backend);
         if (candidate_backend_rank != current_backend_rank) {
             if (candidate_backend_rank < current_backend_rank) {
                 preferred = probe;
@@ -363,7 +384,8 @@ std::optional<nlohmann::json> preferred_windows_probe(const nlohmann::json& prob
 
     return preferred;
 }
-#endif
+
+namespace {
 
 std::optional<std::filesystem::path> find_runtime_library(const std::filesystem::path& directory) {
     std::error_code error;
@@ -992,7 +1014,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["recommended_backend"] = "cpu";
     json["recommended_model"] = "";
     json["recommended_backend_reason"] =
-        "No Windows universal GPU backend completed a strict execution probe.";
+        "No Windows GPU backend completed a strict execution probe.";
 
 #if !defined(_WIN32)
     (void)models_dir;
@@ -1019,10 +1041,10 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         gpu_json["driver_version"] = gpu.driver_version;
         json["gpus"].push_back(gpu_json);
 
-        const bool has_windows_universal_provider =
-            gpu.directml_available || gpu.winml_available || gpu.openvino_available;
-        any_provider_available = any_provider_available || has_windows_universal_provider;
-        if (has_windows_universal_provider && json["gpu_name"] == "") {
+        const bool has_windows_provider = gpu.tensorrt_rtx_available || gpu.directml_available ||
+                                          gpu.winml_available || gpu.openvino_available;
+        any_provider_available = any_provider_available || has_windows_provider;
+        if (has_windows_provider && json["gpu_name"] == "") {
             json["gpu_name"] = gpu.adapter_name;
             json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
         }
@@ -1042,12 +1064,14 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 
             DeviceInfo device{windows_backend_device_name(gpu, backend), gpu.dedicated_memory_mb,
                               backend, static_cast<int>(index)};
-            for (const auto& model_filename : windows_universal_probe_models(device)) {
+            for (const auto& model_filename : windows_probe_models_for_backend(backend, device)) {
                 probes.push_back(probe_windows_backend_execution(models_dir, device, model_filename,
                                                                  docs_guidance));
             }
         };
 
+        queue_backend_probes(Backend::TensorRT, gpu.tensorrt_rtx_available,
+                             "Primary Windows RTX path with strict FP16 engine compilation.");
         queue_backend_probes(Backend::WindowsML, gpu.winml_available,
                              "Recommended by ONNX Runtime for new Windows deployments.");
         queue_backend_probes(
@@ -1110,7 +1134,11 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         json["backend_integrated"] = true;
         json["recommended_backend"] = preferred_probe->value("backend", "cpu");
         json["recommended_model"] = preferred_probe->value("model", "");
-        if (preferred_probe->value("backend", "") == "winml") {
+        if (preferred_probe->value("backend", "") == "tensorrt") {
+            json["recommended_backend_reason"] =
+                "TensorRT RTX completed a strict execution probe on the packaged FP16 model and "
+                "remains the preferred Windows RTX backend when it executes successfully.";
+        } else if (preferred_probe->value("backend", "") == "winml") {
             json["recommended_backend_reason"] =
                 "WinML completed a strict execution probe and ONNX Runtime recommends WinML for "
                 "new Windows deployments.";
@@ -1121,11 +1149,11 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         }
     } else if (any_provider_available) {
         json["recommended_backend_reason"] =
-            "Windows universal GPU providers were detected, but none completed a strict execution "
-            "probe on the packaged models.";
+            "TensorRT RTX or Windows universal GPU providers were detected, but none completed a "
+            "strict execution probe on the packaged models.";
     } else {
         json["recommended_backend_reason"] =
-            "No Windows universal GPU provider is available in this runtime package.";
+            "No Windows GPU execution provider is available in this runtime package.";
     }
 
     bool backend_ok = json.value("backend_integrated", false);
