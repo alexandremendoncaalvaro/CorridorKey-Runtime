@@ -38,9 +38,15 @@ constexpr const char* kEpContextFilePath = "ep.context_file_path";
 constexpr const char* kEpContextEmbedMode = "ep.context_embed_mode";
 #endif
 
+constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
+
 void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options) {
+    Ort::ThrowOnError(
+        Ort::GetApi().AddFreeDimensionOverrideByName(session_options, "batch_size", 1));
+
     std::unordered_map<std::string, std::string> provider_options = {
         {kDeviceId, "0"},
+        {kMaxWorkspaceSize, "0"},
     };
 
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
