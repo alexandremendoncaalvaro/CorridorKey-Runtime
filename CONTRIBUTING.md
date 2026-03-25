@@ -72,8 +72,8 @@ Windows rules:
 - `scripts/build.ps1` is the canonical developer entrypoint.
 - `scripts/prepare_windows_rtx_release.ps1` is the canonical RTX preparation flow.
 - `scripts/release_pipeline_windows.ps1` is the canonical Windows release flow.
-- `scripts/setup_windows.ps1` and `scripts/corridorkey.ps1` were removed. Do not recreate ad-hoc setup wrappers.
-- `vendor\onnxruntime-universal` was removed from the supported flow and must not be used as a fallback runtime root.
+- Do not add alternate Windows setup wrappers. Use the canonical entrypoints above.
+- Do not use `vendor\onnxruntime-universal` as a Windows runtime root.
 - Do not rely on globally installed ONNX Runtime for Windows builds. Use `CORRIDORKEY_WINDOWS_ORT_ROOT` or stage one of the curated vendor roots.
 - The supported repo-local Windows runtime locations are only `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
 

@@ -26,7 +26,7 @@ Generated via `scripts/package_ofx_installer_windows.ps1` and `scripts/package_r
 - **TensorRT RTX (Primary):** `CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe`
 - **DirectML (Fallback):** `CorridorKey_Resolve_vX.Y.Z_Windows_DirectML_Installer.exe`
 
-### macOS Installers (Upcoming)
+### macOS Installers
 - **Apple Silicon (CoreML/MLX):** `CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg`
 
 ### Release Archives
@@ -52,7 +52,7 @@ The supported Windows entrypoints are:
 - `scripts\prepare_windows_rtx_release.ps1` for staging the curated RTX runtime and assets
 - `scripts\release_pipeline_windows.ps1` for full Windows release packaging
 
-Legacy setup wrappers were removed. The supported repo-local runtime locations are only `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
+The supported repo-local runtime locations are only `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
 
 1. **Prepare the RTX runtime when needed:** build or refresh the curated RTX runtime and package inputs:
    ```powershell
@@ -69,8 +69,6 @@ Legacy setup wrappers were removed. The supported repo-local runtime locations a
    ```
 
 *Note: Scripts are configured to validate paths. If `-OrtRoot` does not map to the exact expected curated runtime root, packaging aborts.*
-
-## 4. GitHub Release Notes Template
 
 ## 4. GitHub Release Publishing
 
@@ -111,7 +109,8 @@ Use the exact template below for every release description:
 - **Other Windows GPUs (RTX 20 Series, AMD, Intel):** Download `CorridorKey_Resolve_vX.Y.Z_Windows_DirectML_Installer.exe`. This version provides hardware acceleration across all DirectX 12 compatible GPUs.
 
 ### macOS
-- **Apple Silicon (M-Series):** [Coming soon]
+- Include this section only when the release contains a macOS installer.
+- **Apple Silicon (M-Series):** Download `CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg`.
 
 ## Installation Instructions
 
