@@ -1,5 +1,6 @@
 #include <array>
 #include <cstring>
+#include <initializer_list>
 #include <vector>
 
 #include "ofx_logging.hpp"
@@ -8,6 +9,20 @@
 namespace corridorkey::ofx {
 
 namespace {
+
+std::string clip_property_key(const char* property_name, const char* clip_name) {
+    return std::string(property_name) + "_" + clip_name;
+}
+
+void set_preferred_colourspaces(OfxPropertySetHandle props, const char* clip_name,
+                                std::initializer_list<const char*> colourspaces) {
+    const std::string property_key =
+        clip_property_key(kOfxImageClipPropPreferredColourspaces, clip_name);
+    int index = 0;
+    for (const char* colourspace : colourspaces) {
+        g_suites.property->propSetString(props, property_key.c_str(), index++, colourspace);
+    }
+}
 
 void set_parent(OfxPropertySetHandle param_props, const char* parent) {
     if (parent != nullptr) {
@@ -139,7 +154,8 @@ void define_info_param(OfxParamSetHandle param_set, const char* name, const char
 
     g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
     g_suites.property->propSetString(param_props, kOfxParamPropDefault, 0, value);
-    g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0, kOfxParamStringIsLabel);
+    g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0,
+                                     kOfxParamStringIsLabel);
     g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, 0);
     g_suites.property->propSetInt(param_props, kOfxParamPropEvaluateOnChange, 0, 0);
     if (hint != nullptr) {
@@ -202,6 +218,10 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsTiles, 0, 0);
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsMultiResolution, 0, 1);
     g_suites.property->propSetInt(props, kOfxImageEffectPropTemporalClipAccess, 0, 0);
+    g_suites.property->propSetString(props, kOfxImageEffectPropColourManagementStyle, 0,
+                                     kOfxImageEffectColourManagementCore);
+    g_suites.property->propSetString(props, kOfxImageEffectPropColourManagementAvailableConfigs, 0,
+                                     kOfxConfigIdentifier);
 
     log_message("describe", "Describe completed.");
     return kOfxStatOK;
@@ -284,27 +304,24 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 2: Help & Docs (actionable links only) ---
     define_group_param(param_set, kParamHelpGroup, "Help & Docs", false);
 
-    define_push_button_param(
-        param_set, kParamOpenStartHereGuide, "Open Start Here Guide",
-        "Open the quick-start guide for CorridorKey in Resolve.", kParamHelpGroup);
-    define_push_button_param(
-        param_set, kParamOpenQualityGuide, "Open Quality Guide",
-        "Open the quality and fallback guide for CorridorKey.", kParamHelpGroup);
-    define_push_button_param(
-        param_set, kParamOpenAlphaHintGuide, "Open Alpha Hint Guide",
-        "Open the Alpha Hint setup guide and input-format reference.", kParamHelpGroup);
-    define_push_button_param(
-        param_set, kParamOpenRecoverDetailsGuide, "Open Recover Details Guide",
-        "Open the Recover Original Details guide.", kParamHelpGroup);
-    define_push_button_param(
-        param_set, kParamOpenTilingGuide, "Open Tiling Guide",
-        "Open the tiling guide and trade-offs.", kParamHelpGroup);
+    define_push_button_param(param_set, kParamOpenStartHereGuide, "Open Start Here Guide",
+                             "Open the quick-start guide for CorridorKey in Resolve.",
+                             kParamHelpGroup);
+    define_push_button_param(param_set, kParamOpenQualityGuide, "Open Quality Guide",
+                             "Open the quality and fallback guide for CorridorKey.",
+                             kParamHelpGroup);
+    define_push_button_param(param_set, kParamOpenAlphaHintGuide, "Open Alpha Hint Guide",
+                             "Open the Alpha Hint setup guide and input-format reference.",
+                             kParamHelpGroup);
+    define_push_button_param(param_set, kParamOpenRecoverDetailsGuide, "Open Recover Details Guide",
+                             "Open the Recover Original Details guide.", kParamHelpGroup);
+    define_push_button_param(param_set, kParamOpenTilingGuide, "Open Tiling Guide",
+                             "Open the tiling guide and trade-offs.", kParamHelpGroup);
     define_push_button_param(
         param_set, kParamOpenResolveTutorial, "Open Resolve Tutorial",
         "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", kParamHelpGroup);
-    define_push_button_param(
-        param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
-        "Open the troubleshooting guide on GitHub.", kParamHelpGroup);
+    define_push_button_param(param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
+                             "Open the troubleshooting guide on GitHub.", kParamHelpGroup);
 
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
@@ -325,7 +342,28 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Maximum (2048).",
         "setup_group");
 
-    // --- Group 4: Matte (refine the AI-generated alpha) ---
+    // --- Group 4: Interior Detail (recover opaque source texture, not edge fixes) ---
+    define_group_param(param_set, "interior_detail_group", "Interior Detail", true);
+
+    define_bool_param(param_set, kParamSourcePassthrough, "Recover Original Details",
+                      kDefaultSourcePassthroughEnabled,
+                      "Blend original source pixels back into opaque interior regions for "
+                      "sharper texture. This is not an edge-fix tool. The recovered pixels still "
+                      "flow through despill after the blend.",
+                      "interior_detail_group");
+    define_int_param(param_set, kParamEdgeErode, "Details Edge Shrink", kDefaultEdgeErode, 0,
+                     kMaxEdgeErode,
+                     "Shrink the recovered-details mask before blending source detail. "
+                     "Values scale with the source long edge using a 1920px baseline.",
+                     "interior_detail_group");
+    define_int_param(param_set, kParamEdgeBlur, "Details Edge Feather", kDefaultEdgeBlur, 0,
+                     kMaxEdgeBlur,
+                     "Feather the recovered-details mask for a smoother handoff between source "
+                     "detail and model foreground. Values scale with the source long edge using "
+                     "a 1920px baseline.",
+                     "interior_detail_group");
+
+    // --- Group 5: Matte (refine the AI-generated alpha) ---
     define_group_param(param_set, "matte_group", "Matte", true);
 
     define_info_param(
@@ -345,14 +383,17 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_double_param(param_set, kParamAlphaWhitePoint, "Matte Clip White", 1.0, 0.0, 1.0,
                         "Remap matte: values at or above this become fully opaque.", "matte_group");
     define_double_param(param_set, kParamAlphaErode, "Matte Shrink/Grow", 0.0, -10.0, 10.0,
-                        "Shrink (negative) or expand (positive) the matte edge in pixels.",
+                        "Shrink (negative) or expand (positive) the matte edge. The effective "
+                        "pixel radius scales with the source long edge using a 1920px baseline.",
                         "matte_group");
     define_double_param(param_set, kParamAlphaSoftness, "Matte Edge Blur", 0.0, 0.0, 5.0,
-                        "Blur the matte edge to soften transitions.", "matte_group");
+                        "Blur the matte edge to soften transitions. The effective pixel radius "
+                        "scales with the source long edge using a 1920px baseline.",
+                        "matte_group");
     define_double_param(param_set, kParamAlphaGamma, "Matte Gamma", 1.0, 0.1, 10.0,
-                        "Non-linear matte curve. Values below 1.0 brighten semi-transparent "
-                        "areas (recover hair/motion blur). Values above 1.0 darken them "
-                        "(tighten the matte). Default 1.0 is neutral.",
+                        "Non-linear matte curve. Values above 1.0 brighten semi-transparent "
+                        "areas. Values below 1.0 darken and tighten them. Default 1.0 is "
+                        "neutral.",
                         "matte_group");
     define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
                       "Clean small matte speckles automatically.", "matte_group");
@@ -364,7 +405,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
         1.0, "Blend current output with the previous frame for temporal stability.", "matte_group");
 
-    // --- Group 5: Edge & Spill (fix edges and color spill) ---
+    // --- Group 6: Edge & Spill (despill and boundary cleanup only) ---
     define_group_param(param_set, "edge_spill_group", "Edge & Spill", true);
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
@@ -376,24 +417,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "red and blue. Double Limit uses the stronger neighbor channel. "
                         "Neutral replaces with gray to avoid color shifts.",
                         "edge_spill_group");
-    define_bool_param(param_set, kParamSourcePassthrough, "Recover Original Details",
-                      kDefaultSourcePassthroughEnabled,
-                      "Blend original source pixels into high-confidence matte regions for "
-                      "sharper interior detail. Enable this to activate the Details Edge "
-                      "controls below.",
-                      "edge_spill_group");
-    define_int_param(param_set, kParamEdgeErode, "Details Edge Shrink", kDefaultEdgeErode, 0,
-                     kMaxEdgeErode,
-                     "Shrink the recovered-details mask before blending source detail. "
-                     "Higher values widen the transition zone at edges.",
-                     "edge_spill_group");
-    define_int_param(param_set, kParamEdgeBlur, "Details Edge Feather", kDefaultEdgeBlur, 0,
-                     kMaxEdgeBlur,
-                     "Feather the recovered-details mask for a smoother blend between source and "
-                     "model.",
-                     "edge_spill_group");
 
-    // --- Group 6: Output ---
+    // --- Group 7: Output ---
     define_group_param(param_set, "output_group", "Output", true);
 
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
@@ -413,7 +438,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Lanczos4 is sharper; Bilinear is smoother.",
                         "output_group");
 
-    // --- Group 7: Performance ---
+    // --- Group 8: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
 
     define_choice_param(
@@ -433,13 +458,15 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "tile boundary artifacts at the cost of more work.",
                      "performance_group");
     define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
-                        kDefaultInputColorSpace, {"sRGB", "Linear"},
-                        "Source interpretation mode. Linear is the default because CorridorKey's "
-                        "compositing-safe outputs are intended for linear-light workflows. Switch "
-                        "to sRGB only when the source reaching this OFX is already display-referred.",
+                        kDefaultInputColorSpace, {"sRGB", "Linear", "Auto (Host Managed)"},
+                        "How CorridorKey should interpret the incoming source. Auto requests "
+                        "host-managed color using sRGB Texture or Linear Rec.709 (sRGB). "
+                        "Linear means Linear Rec.709 (sRGB), not an arbitrary project-linear "
+                        "space. If host-managed color is unavailable, Auto falls back to the "
+                        "manual Linear path.",
                         "performance_group");
 
-    // --- Group 8: Advanced (timeouts) ---
+    // --- Group 9: Advanced (timeouts) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
     define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)", 30, 10, 300,
@@ -478,6 +505,10 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
 
     const char* output_clips[] = {kOfxImageEffectOutputClipName};
 
+    set_preferred_colourspaces(out_args, kOfxImageEffectSimpleSourceClipName,
+                               {kOfxColourspaceSrgbTx, kOfxColourspaceLinRec709Srgb});
+    set_preferred_colourspaces(out_args, kClipAlphaHint, {kOfxColourspaceRaw});
+
     for (const char* clip_name : output_clips) {
         std::string components_key = std::string("OfxImageClipPropComponents_") + clip_name;
         std::string depth_key = std::string("OfxImageClipPropDepth_") + clip_name;
@@ -493,6 +524,24 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
     }
 
     log_message("get_clip_preferences", "Clip preferences set.");
+    return kOfxStatOK;
+}
+
+OfxStatus get_output_colourspace(OfxImageEffectHandle instance, OfxPropertySetHandle /*in_args*/,
+                                 OfxPropertySetHandle out_args) {
+    if (out_args == nullptr || g_suites.property == nullptr) {
+        log_message("get_output_colourspace", "Missing out_args or property suite.");
+        return kOfxStatFailed;
+    }
+
+    int output_mode = kOutputProcessed;
+    if (InstanceData* data = get_instance_data(instance);
+        data != nullptr && data->output_mode_param != nullptr && g_suites.parameter != nullptr) {
+        g_suites.parameter->paramGetValue(data->output_mode_param, &output_mode);
+    }
+
+    g_suites.property->propSetString(out_args, kOfxImageClipPropColourspace, 0,
+                                     output_colourspace_for_output_mode(output_mode));
     return kOfxStatOK;
 }
 

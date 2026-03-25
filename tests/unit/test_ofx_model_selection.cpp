@@ -173,8 +173,7 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
-TEST_CASE("ofx quality mode labels expose fixed resolutions in the UI",
-          "[unit][ofx][regression]") {
+TEST_CASE("ofx quality mode labels expose fixed resolutions in the UI", "[unit][ofx][regression]") {
     REQUIRE(std::string(quality_mode_ui_label(kQualityAuto)) == "Auto");
     REQUIRE(std::string(quality_mode_ui_label(kQualityPreview)) == "Draft (512)");
     REQUIRE(std::string(quality_mode_ui_label(kQualityStandard)) == "Standard (768)");
@@ -309,7 +308,8 @@ TEST_CASE("unsupported OFX quantization combinations report product-safe guidanc
     REQUIRE(directml_message->find("DirectML") != std::string::npos);
     REQUIRE(directml_message->find("FP16") != std::string::npos);
 
-    REQUIRE_FALSE(unsupported_quantization_message(Backend::DirectML, kQuantizationFp16).has_value());
+    REQUIRE_FALSE(
+        unsupported_quantization_message(Backend::DirectML, kQuantizationFp16).has_value());
     REQUIRE_FALSE(unsupported_quantization_message(Backend::CPU, kQuantizationInt8).has_value());
 }
 
@@ -339,8 +339,9 @@ TEST_CASE("ofx defaults open new instances with source passthrough enabled",
     REQUIRE(kDefaultSourcePassthroughEnabled == 1);
     REQUIRE(kDefaultEdgeErode == 3);
     REQUIRE(kDefaultEdgeBlur == 7);
-    REQUIRE(kMaxEdgeErode == 32);
-    REQUIRE(kMaxEdgeBlur == 64);
+    REQUIRE(kMaxEdgeErode == 100);
+    REQUIRE(kMaxEdgeBlur == 100);
+    REQUIRE(kDefaultInputColorSpace == kInputColorAutoHostManaged);
 }
 
 TEST_CASE("ofx runtime panel fields are read-only dynamic strings", "[unit][ofx][regression]") {

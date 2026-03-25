@@ -136,12 +136,12 @@ EngineCreateOptions ofx_engine_options(const DeviceInfo& requested_device) {
     return options;
 }
 
-std::string requested_quality_label(int quality_mode, int requested_resolution,
-                                    bool cpu_quality_guardrail_active) {
+std::string requested_quality_runtime_label_impl(int quality_mode, int requested_resolution,
+                                                 bool cpu_quality_guardrail_active) {
     std::string label;
     if (quality_mode == kQualityAuto && requested_resolution > 0) {
         label = std::string(quality_mode_label(quality_mode)) + " (" +
-                std::to_string(requested_resolution) + "px target)";
+                "source-size target: " + std::to_string(requested_resolution) + "px)";
     } else {
         label = quality_mode_label(quality_mode);
     }
@@ -188,13 +188,19 @@ std::string format_duration_ms(double ms) {
     return oss.str();
 }
 
-std::string runtime_status_label(const InstanceData& data) {
+std::string runtime_status_runtime_label_impl(const InstanceData& data) {
     if (!data.last_error.empty()) {
         return "Error: " + truncate_status_message(data.last_error, 160);
     }
     std::string status;
+    if (!data.color_management_status.empty()) {
+        status = truncate_status_message(data.color_management_status, 100);
+    }
     if (!data.last_warning.empty()) {
-        status = "Note: " + truncate_status_message(data.last_warning, 100);
+        if (!status.empty()) {
+            status += " | ";
+        }
+        status += "Note: " + truncate_status_message(data.last_warning, 100);
     }
     if (data.last_frame_ms > 0.0) {
         if (!status.empty()) {
@@ -271,15 +277,15 @@ void update_runtime_panel_values(InstanceData* data) {
     set_string_param_value(data->runtime_device_param, processing_device_label(data->device));
     set_string_param_value(
         data->runtime_requested_quality_param,
-        requested_quality_label(data->active_quality_mode, data->requested_resolution,
-                                data->cpu_quality_guardrail_active));
+        requested_quality_runtime_label(data->active_quality_mode, data->requested_resolution,
+                                        data->cpu_quality_guardrail_active));
     set_string_param_value(
         data->runtime_effective_quality_param,
         is_loading ? "Loading..." : effective_quality_label(data->active_resolution));
     set_string_param_value(data->runtime_artifact_param,
                            is_loading ? "Loading..." : runtime_artifact_label(data->model_path));
     set_string_param_value(data->runtime_status_param,
-                           is_loading ? "Loading..." : runtime_status_label(*data));
+                           is_loading ? "Loading..." : runtime_status_runtime_label(*data));
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
@@ -414,6 +420,16 @@ app::OfxRuntimePrepareSessionRequest build_prepare_request(
 }
 
 }  // namespace
+
+std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
+                                            bool cpu_quality_guardrail_active) {
+    return requested_quality_runtime_label_impl(quality_mode, requested_resolution,
+                                                cpu_quality_guardrail_active);
+}
+
+std::string runtime_status_runtime_label(const InstanceData& data) {
+    return runtime_status_runtime_label_impl(data);
+}
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance) {
     if (g_suites.property == nullptr || g_suites.image_effect == nullptr) {

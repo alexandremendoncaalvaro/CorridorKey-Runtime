@@ -20,6 +20,25 @@ Three concepts make the rest of the guide easier:
 If you are completely new to the plugin, do **Tutorial 1** first and do not
 skip the runtime panel checks.
 
+## Color-Managed Reminder
+
+Resolve color-managed workflows should usually leave **Input Color Space** on
+**Auto (Host Managed)**.
+
+Current supported host-managed inputs are:
+
+- `srgb_tx`
+- `lin_rec709_srgb`
+
+Important limitation:
+
+- **Linear** in CorridorKey means **Linear Rec.709 (sRGB)**. It does not mean
+  an arbitrary project-linear space.
+
+If `Auto (Host Managed)` cannot negotiate one of the supported colourspaces,
+the plugin falls back to the manual **Linear** path and reports that in the
+runtime panel.
+
 ## Tutorial 1: First Usable Result on the Color Page
 
 Use this when you want the fastest path to a working key inside the Color page.
@@ -31,8 +50,10 @@ Use this when you want the fastest path to a working key inside the Color page.
 5. Check the runtime panel. Do not continue until the status stops saying
    `Waiting for Alpha Hint connection.`
 6. Set **Quality** to **High (1024)**.
-7. Leave **Output Mode** on **Processed**.
-8. Confirm **Effective Quality** matches the mode you asked for.
+7. Leave **Input Color Space** on **Auto (Host Managed)** unless you are
+   deliberately overriding it.
+8. Leave **Output Mode** on **Processed**.
+9. Confirm **Effective Quality** matches the mode you asked for.
 
 If the runtime panel reports a fallback, stay on the highest stable quality
 instead of forcing a higher one that the machine is not keeping active.
@@ -127,6 +148,10 @@ Use this when the keyed subject interior looks too plastic or too smooth.
 
 This feature is for opaque interior texture. It is not a substitute for a good
 Alpha Hint or a clean matte edge.
+
+The recovered pixels still pass through despill after the blend, and the
+Details Edge controls scale with source size using a `1920px` long-edge
+baseline.
 
 If you are unsure whether it is helping, toggle it on and off while looking at
 solid areas only. Do not judge it by hair or edge haze.

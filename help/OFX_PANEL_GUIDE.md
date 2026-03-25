@@ -37,17 +37,26 @@ The runtime panel at the top is the first place to look after any change.
 
 - **Processing Backend** tells you which execution path is active.
 - **Processing Device** tells you which device the plugin is using.
-- **Requested Quality** tells you what you asked for.
+- **Requested Quality** tells you what you asked for. In `Auto`, it shows the
+  source-size-derived target, not a fixed mode default.
 - **Effective Quality** tells you what resolution is actually running.
 - **Loaded Artifact** tells you which packaged model file is active.
-- **Status** tells you whether the plugin is waiting, loading, rendering, or
-  falling back.
+- **Status** tells you whether the plugin is waiting, loading, rendering,
+  falling back, or using a host-managed versus manual color path.
 
 Treat the status panel as the source of truth. Two messages matter most:
 
 - `Waiting for Alpha Hint connection.` means CorridorKey is not keying yet.
 - `Note: ... unavailable on this hardware -- using ...` means the plugin
   loaded a lower packaged model than the requested mode.
+
+Color-management messages are also actionable:
+
+- `Color: Host Managed (...)` means the host negotiated a supported colourspace
+  for CorridorKey.
+- `Color: Auto fallback to Manual Linear Rec.709 (sRGB)` means `Auto (Host
+  Managed)` could not negotiate a supported host colourspace and the plugin
+  fell back to its manual linear path.
 
 ## Current Resolve OFX Workflow
 
@@ -111,6 +120,38 @@ For advanced users:
 On TensorRT paths, first use can be much slower than steady-state rendering
 because the runtime may need to prepare and cache an optimized engine for that
 GPU.
+
+## Input Color Space
+
+This control tells CorridorKey how to interpret the RGB image arriving at the
+OFX node before inference.
+
+Current options:
+
+- **Auto (Host Managed)** asks the host for one of two supported colourspaces:
+  `srgb_tx` or `lin_rec709_srgb`.
+- **sRGB** is the manual override for display-referred sRGB-style input.
+- **Linear** is the manual override for **Linear Rec.709 (sRGB)**. It is not a
+  promise to handle arbitrary project-linear spaces.
+
+Recommended use:
+
+- In Resolve color-managed workflows, leave this on **Auto (Host Managed)**.
+- Use **sRGB** only when the image reaching CorridorKey is already
+  display-referred.
+- Use **Linear** only when you know the image reaching CorridorKey is Linear
+  Rec.709 (sRGB).
+
+Current fallback rule:
+
+- If **Auto (Host Managed)** cannot negotiate `srgb_tx` or `lin_rec709_srgb`,
+  CorridorKey falls back to the manual **Linear** path and reports that in the
+  runtime panel.
+
+Output rule:
+
+- Color outputs are treated as linear under host-managed operation.
+- **Matte Only** is treated as raw data, not a colour-managed image.
 
 ## Alpha Hint
 
@@ -195,8 +236,10 @@ Recommended order:
 - **Matte Clip White** remaps alpha so values at or above the chosen white
   point become fully opaque.
 - **Matte Shrink/Grow** changes the matte footprint. Negative values erode
-  inward; positive values dilate outward.
-- **Matte Edge Blur** softens the alpha edge.
+  inward; positive values dilate outward. The effective pixel radius scales
+  with the source long edge using a `1920px` baseline.
+- **Matte Edge Blur** softens the alpha edge. The effective pixel radius also
+  scales with the source long edge using a `1920px` baseline.
 - **Matte Gamma** changes matte midtones non-linearly. Values above `1.0`
   brighten semi-transparent regions; values below `1.0` darken and tighten
   them.
@@ -208,8 +251,9 @@ Recommended order:
 
 ## Recover Original Details
 
-**Recover Original Details** blends original source RGB back into opaque
-interior regions after CorridorKey generates the matte and foreground.
+**Recover Original Details** lives in the **Interior Detail** group and blends
+original source RGB back into opaque interior regions after CorridorKey
+generates the matte and foreground.
 
 Think of this as an interior-texture control, not a matte-generation control.
 
@@ -230,6 +274,7 @@ Current behavior:
 - it starts from strongly opaque regions
 - it shrinks that recovery mask before blending
 - it feathers the recovery mask before the final blend
+- recovered pixels still pass through despill after the blend
 
 That is why it helps interior texture but should not be treated as an edge-fix
 tool.
@@ -237,12 +282,15 @@ tool.
 ### Details Edge Shrink
 
 This narrows the recovery mask before source detail is blended back. Higher
-values keep recovered source texture farther away from unstable edges.
+values keep recovered source texture farther away from unstable edges. The
+effective pixel radius scales with the source long edge using a `1920px`
+baseline.
 
 ### Details Edge Feather
 
 This softens the recovery mask so the transition between model foreground and
-source detail is less abrupt.
+source detail is less abrupt. The effective pixel radius scales with the source
+long edge using a `1920px` baseline.
 
 These sliders are only active when **Recover Original Details** is enabled.
 

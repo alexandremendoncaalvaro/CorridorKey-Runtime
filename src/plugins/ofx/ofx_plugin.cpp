@@ -84,22 +84,29 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
                 reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), context_value);
         }
         if (std::strcmp(action, kOfxActionCreateInstance) == 0) {
-            return create_instance(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
+            return create_instance(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
         }
         if (std::strcmp(action, kOfxActionDestroyInstance) == 0) {
-            return destroy_instance(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
+            return destroy_instance(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
         }
         if (std::strcmp(action, kOfxImageEffectActionGetClipPreferences) == 0) {
             return get_clip_preferences(
                 reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), out_args);
         }
+        if (std::strcmp(action, kOfxImageEffectActionGetOutputColourspace) == 0) {
+            return get_output_colourspace(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args,
+                out_args);
+        }
         if (std::strcmp(action, kOfxActionInstanceChanged) == 0) {
-            return instance_changed(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
-                                    in_args);
+            return instance_changed(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args);
         }
         if (std::strcmp(action, kOfxImageEffectActionRender) == 0) {
-            return render(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args,
-                          out_args);
+            return render(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
+                          in_args, out_args);
         }
 
         if (std::strcmp(action, kOfxActionUnload) == 0) {
@@ -154,8 +161,8 @@ CORRIDORKEY_OFX_EXPORT int OfxGetNumberOfPlugins(void) {
 CORRIDORKEY_OFX_EXPORT OfxPlugin* OfxGetPlugin(int nth) {
     try {
         std::fprintf(stderr, "[OFX] OfxGetPlugin called with index %d\n", nth);
-        corridorkey::ofx::log_message("OfxGetPlugin",
-                                      nth == 0 ? "Returning plugin 0." : "Requested invalid index.");
+        corridorkey::ofx::log_message(
+            "OfxGetPlugin", nth == 0 ? "Returning plugin 0." : "Requested invalid index.");
         if (nth == 0) {
             std::fprintf(stderr, "[OFX] OfxGetPlugin returning plugin 0\n");
             return &corridorkey::ofx::g_plugin;
