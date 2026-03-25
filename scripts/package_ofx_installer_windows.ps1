@@ -11,22 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-
-function Get-ProjectVersion {
-    param([string]$RepoRoot)
-
-    $cmakePath = Join-Path $RepoRoot "CMakeLists.txt"
-    if (-not (Test-Path $cmakePath)) {
-        throw "Could not determine project version because CMakeLists.txt was not found at $cmakePath"
-    }
-
-    $versionLine = Select-String -Path $cmakePath -Pattern '^\s*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\s*$'
-    if ($null -ne $versionLine) {
-        return $versionLine.Matches[0].Groups[1].Value
-    }
-
-    throw "Could not determine project version from $cmakePath"
-}
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
 function Resolve-NsisCompiler {
     $candidates = @(
@@ -70,30 +55,13 @@ Manual fallback path:
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-ProjectVersion -RepoRoot $repoRoot
+    $Version = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
 }
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
-if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
-    if ($ReleaseSuffix -match "DirectML" -or $ReleaseSuffix -match "DML") {
-        $OrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-dml"
-    } else {
-        $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
-        $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
-        if (Test-Path $rtxOrt) {
-            $OrtRoot = $rtxOrt
-        } elseif (Test-Path $universalOrt) {
-            $OrtRoot = $universalOrt
-        } else {
-            $OrtRoot = $rtxOrt
-        }
-    }
-}
-
-if (-not (Test-Path $OrtRoot)) {
-    throw "ONNX Runtime root directory not found at: $OrtRoot. Ensure the vendor dependencies are correctly extracted."
-}
+$preferredTrack = Get-CorridorKeyWindowsTrackFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix -DefaultTrack "rtx"
+$OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack $preferredTrack
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }

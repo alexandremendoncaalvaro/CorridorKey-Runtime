@@ -49,19 +49,33 @@ cmake --build build/debug --parallel
 </details>
 
 <details>
-<summary>Windows (Universal GPU)</summary>
+<summary>Windows</summary>
 
 ```powershell
 # Set VCPKG_ROOT — required by CMakePresets.json
-$env:VCPKG_ROOT = "C:\tools\vcpkg" # Adjust to your path
+$env:VCPKG_ROOT = "D:\dev\vcpkg" # Adjust to your path
 
-# Run the automated setup script
-# This script handles multi-backend dependencies (TensorRT, CUDA, DirectML)
-.\scripts\setup_windows.ps1
+# Canonical Windows runtime roots
+# RTX release track:
+#   vendor\onnxruntime-windows-rtx
+# DirectML release track:
+#   vendor\onnxruntime-windows-dml
+#
+# To prepare the curated RTX runtime from scratch:
+#   .\scripts\prepare_windows_rtx_release.ps1
 
-# Build (release mode for GPU performance)
-cmake --build --preset release
+# Build using the canonical wrapper
+.\scripts\build.ps1 -Preset release
 ```
+
+Windows rules:
+- `scripts/build.ps1` is the canonical developer entrypoint.
+- `scripts/prepare_windows_rtx_release.ps1` is the canonical RTX preparation flow.
+- `scripts/release_pipeline_windows.ps1` is the canonical Windows release flow.
+- `scripts/setup_windows.ps1` and `scripts/corridorkey.ps1` were removed. Do not recreate ad-hoc setup wrappers.
+- `vendor\onnxruntime-universal` was removed from the supported flow and must not be used as a fallback runtime root.
+- Do not rely on globally installed ONNX Runtime for Windows builds. Use `CORRIDORKEY_WINDOWS_ORT_ROOT` or stage one of the curated vendor roots.
+- The supported repo-local Windows runtime locations are only `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
 
 </details>
 

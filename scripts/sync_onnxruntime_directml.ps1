@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
 function Resolve-OrtVersion {
     param([string]$RepoRoot)
@@ -15,12 +16,9 @@ function Resolve-OrtVersion {
         return $Version
     }
 
-    $candidate = Join-Path $RepoRoot "vendor\onnxruntime-universal\onnxruntime.dll"
+    $candidate = Join-Path $RepoRoot "vendor\onnxruntime-windows-rtx\onnxruntime.dll"
     if (-not (Test-Path $candidate)) {
-        $candidate = Join-Path $RepoRoot "vendor\onnxruntime-windows-rtx\onnxruntime.dll"
-    }
-    if (-not (Test-Path $candidate)) {
-        throw "Unable to infer ONNX Runtime version. Pass -Version explicitly."
+        throw "Unable to infer ONNX Runtime version from vendor\onnxruntime-windows-rtx\onnxruntime.dll. Pass -Version explicitly or stage the curated RTX runtime first."
     }
 
     return (Get-Item $candidate).VersionInfo.ProductVersion
@@ -51,7 +49,7 @@ function Extract-Package {
 
 $resolvedVersion = Resolve-OrtVersion -RepoRoot $repoRoot
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-    $OutputDir = Join-Path $repoRoot "vendor\onnxruntime-windows-dml"
+    $OutputDir = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "dml"
 }
 
 $tempRoot = Join-Path $env:TEMP ("corridorkey-ort-dml-sync-" + [System.Guid]::NewGuid().ToString("N"))

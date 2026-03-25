@@ -39,22 +39,36 @@ Raw `.zip` packages for manual installation must follow the same naming pattern.
 All releases must be built strictly through standardized scripts to eliminate manual errors and prevent crossing dependencies (e.g., packaging RTX DLLs into a DirectML installer).
 
 ### Windows Build Steps
-All Windows binaries must be built using the appropriate developer environment (e.g., VS Code or x64 Native Tools Command Prompt) to ensure MSVC headers are available, avoiding `Cannot open include file` errors in automated agents.
+Windows has two curated runtime roots and one canonical release entrypoint:
 
-1. **Compile:** Build the project using the CMake `release` preset:
+- `vendor\onnxruntime-windows-rtx` — curated TensorRT RTX runtime
+- `vendor\onnxruntime-windows-dml` — curated DirectML runtime
+- `scripts\release_pipeline_windows.ps1` — canonical Windows release pipeline
+
+Do not use global ONNX Runtime installations or `vendor\onnxruntime-universal` as a fallback path. The release flow must resolve one of the curated runtime roots explicitly.
+
+The supported Windows entrypoints are:
+- `scripts\build.ps1` for normal development builds
+- `scripts\prepare_windows_rtx_release.ps1` for staging the curated RTX runtime and assets
+- `scripts\release_pipeline_windows.ps1` for full Windows release packaging
+
+Legacy setup wrappers were removed. The supported repo-local runtime locations are only `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
+
+1. **Prepare the RTX runtime when needed:** build or refresh the curated RTX runtime and package inputs:
    ```powershell
-   cmake --build --preset release
+   .\scripts\prepare_windows_rtx_release.ps1
    ```
-3. **Package RTX:**
+2. **Run the canonical Windows release pipeline:**
+   ```powershell
+   .\scripts\release_pipeline_windows.ps1
+   ```
+3. **Use lower-level packaging scripts only for manual recovery or debugging:**
    ```powershell
    .\scripts\package_ofx_installer_windows.ps1 -ReleaseSuffix "RTX" -OrtRoot "vendor\onnxruntime-windows-rtx"
-   ```
-4. **Package DirectML:**
-   ```powershell
    .\scripts\package_ofx_installer_windows.ps1 -ReleaseSuffix "DirectML" -OrtRoot "vendor\onnxruntime-windows-dml"
    ```
 
-*Note: Scripts are configured to validate paths. If `-OrtRoot` does not map to the exact expected vendor DLLs, the packaging script will abort.*
+*Note: Scripts are configured to validate paths. If `-OrtRoot` does not map to the exact expected curated runtime root, packaging aborts.*
 
 ## 4. GitHub Release Notes Template
 

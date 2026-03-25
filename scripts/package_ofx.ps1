@@ -10,21 +10,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
-if ([string]::IsNullOrWhiteSpace($OrtRoot)) {
-    $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
-    $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
-    if (Test-Path $rtxOrt) {
-        $OrtRoot = $rtxOrt
-    } elseif (Test-Path $universalOrt) {
-        $OrtRoot = $universalOrt
-    } else {
-        $OrtRoot = $rtxOrt
-    }
-}
+$OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack "rtx"
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
@@ -121,36 +112,36 @@ Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
 Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir | Out-Null
 
-$copiedUniversalProvider = $false
+$copiedOptionalGpuProvider = $false
 foreach ($provider in @(
         "onnxruntime_providers_winml.dll",
         "onnxruntime_providers_openvino.dll"
     )) {
     if (Copy-OrtDllIfPresent -Root $OrtRoot -Name $provider -DestinationDir $win64Dir) {
         Write-Host "Copied optional runtime DLL: $provider"
-        $copiedUniversalProvider = $true
+        $copiedOptionalGpuProvider = $true
     }
 }
-if (-not $copiedUniversalProvider) {
+if (-not $copiedOptionalGpuProvider) {
     # Check if DirectML is available even if no separate provider DLL exists
     # (since it can be built into onnxruntime.dll in some packages)
     $supportedBackends = Get-RuntimeSupportedBackends -RuntimeDir $win64Dir
-    $hasUniversalGpuRuntime = $supportedBackends -contains "dml" -or
+    $hasOptionalGpuRuntime = $supportedBackends -contains "dml" -or
         $supportedBackends -contains "winml" -or
         $supportedBackends -contains "openvino"
-    if (-not $hasUniversalGpuRuntime) {
+    if (-not $hasOptionalGpuRuntime) {
         if (Test-Path (Join-Path $win64Dir "DirectML.dll")) {
              Write-Host "DirectML.dll is present, assuming DirectML support is built into onnxruntime.dll"
-             $hasUniversalGpuRuntime = $true
+             $hasOptionalGpuRuntime = $true
         }
     }
 
-    if (-not $hasUniversalGpuRuntime) {
+    if (-not $hasOptionalGpuRuntime) {
         Write-Warning "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot. AMD/Intel systems will fall back to CPU."
     } else {
-        Write-Host "Detected packaged universal GPU backend(s): $($supportedBackends -join ', ')"
-        
-        # FINAL SENIOR VALIDATION: Run the newly built binary with the staged DLLs to ensure it can actually LOAD backends
+        Write-Host "Detected packaged optional GPU backend(s): $($supportedBackends -join ', ')"
+
+        # Validate the staged bundle with the staged DLL set, not the developer machine.
         Write-Host "Validating packaged backends loadability..." -ForegroundColor Cyan
         $cliPath = Join-Path $win64Dir "corridorkey.exe"
         if (Test-Path $cliPath) {
@@ -159,9 +150,9 @@ if (-not $copiedUniversalProvider) {
                 # Temporarily add staging dir to PATH so it finds the DLLs
                 $env:PATH = "$win64Dir;$envPathOld"
                 $infoOutput = & $cliPath info 2>&1 | Out-String
-                
-                $requiredBackend = if ($OrtRoot -match "rtx") { "tensorrt" } else { "directml" }
-                
+
+                $requiredBackend = if ($OrtRoot -match "rtx") { "tensorrt" } else { "dml" }
+
                 if ($infoOutput -match $requiredBackend) {
                     Write-Host "[VERIFIED] $requiredBackend backend is functional in the package." -ForegroundColor Green
                 } else {

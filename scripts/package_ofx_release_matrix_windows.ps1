@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
@@ -19,18 +20,10 @@ if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
 if ([string]::IsNullOrWhiteSpace($RtxOrtRoot)) {
-    $rtxOrt = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
-    $universalOrt = Join-Path $repoRoot "vendor\onnxruntime-universal"
-    if (Test-Path $rtxOrt) {
-        $RtxOrtRoot = $rtxOrt
-    } elseif (Test-Path $universalOrt) {
-        $RtxOrtRoot = $universalOrt
-    } else {
-        $RtxOrtRoot = $rtxOrt
-    }
+    $RtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
 }
 if ([string]::IsNullOrWhiteSpace($DirectMlOrtRoot)) {
-    $DirectMlOrtRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-dml"
+    $DirectMlOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "dml"
 }
 
 $installerScript = Join-Path $PSScriptRoot "package_ofx_installer_windows.ps1"

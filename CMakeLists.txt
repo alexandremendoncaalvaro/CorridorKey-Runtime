@@ -70,7 +70,7 @@ option(CORRIDORKEY_ENABLE_MLX "Enable optional MLX probe support on Apple platfo
 set(CORRIDORKEY_MLX_CMAKE_DIR "" CACHE PATH "Optional MLX CMake package directory")
 set(CORRIDORKEY_MLX_PYTHON "" CACHE FILEPATH "Optional Python interpreter used to discover MLX")
 set(CORRIDORKEY_WINDOWS_ORT_ROOT "" CACHE PATH
-    "Optional ONNX Runtime root for the curated Windows RTX build")
+    "Curated Windows ONNX Runtime root (vendor/onnxruntime-windows-rtx or vendor/onnxruntime-windows-dml)")
 set(CORRIDORKEY_ORT_RUNTIME_DIR "" CACHE INTERNAL "Resolved ONNX Runtime DLL directory")
 
 # --- Project Rules & Standards ---
@@ -233,6 +233,11 @@ else()
             set(_corridorkey_windows_ort_root
                 "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-windows-rtx")
         endif()
+        if(_corridorkey_windows_ort_root STREQUAL "" AND
+           EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-windows-dml")
+            set(_corridorkey_windows_ort_root
+                "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-windows-dml")
+        endif()
 
         if(NOT _corridorkey_windows_ort_root STREQUAL "")
             set(_corridorkey_windows_ort_include "${_corridorkey_windows_ort_root}/include")
@@ -260,19 +265,8 @@ else()
                     "Configured CORRIDORKEY_WINDOWS_ORT_ROOT is missing include/onnxruntime or lib/onnxruntime.{dll,lib}: ${_corridorkey_windows_ort_root}")
             endif()
         else()
-            find_package(onnxruntime REQUIRED)
-            set(CORRIDORKEY_ORT_INCLUDE_DIRS ${onnxruntime_INCLUDE_DIRS})
-            get_target_property(_corridorkey_ort_dll onnxruntime::onnxruntime IMPORTED_LOCATION_RELEASE)
-            if(NOT _corridorkey_ort_dll)
-                get_target_property(_corridorkey_ort_dll onnxruntime::onnxruntime IMPORTED_LOCATION)
-            endif()
-            if(NOT _corridorkey_ort_dll)
-                get_target_property(_corridorkey_ort_dll onnxruntime::onnxruntime IMPORTED_LOCATION_NOCONFIG)
-            endif()
-            if(_corridorkey_ort_dll)
-                get_filename_component(CORRIDORKEY_ORT_RUNTIME_DIR
-                    "${_corridorkey_ort_dll}" DIRECTORY)
-            endif()
+            message(FATAL_ERROR
+                "Windows builds require a curated ONNX Runtime root. Set CORRIDORKEY_WINDOWS_ORT_ROOT or stage vendor/onnxruntime-windows-rtx or vendor/onnxruntime-windows-dml.")
         endif()
     else()
         find_package(onnxruntime REQUIRED)
