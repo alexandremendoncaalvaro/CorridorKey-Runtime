@@ -38,9 +38,44 @@ constexpr const char* kEpContextFilePath = "ep.context_file_path";
 constexpr const char* kEpContextEmbedMode = "ep.context_embed_mode";
 #endif
 
-void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options) {
+constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
+constexpr const char* kProfilesMinShapes = "nv_profile_min_shapes";
+constexpr const char* kProfilesMaxShapes = "nv_profile_max_shapes";
+constexpr const char* kProfilesOptShapes = "nv_profile_opt_shapes";
+
+int extract_model_resolution(const std::filesystem::path& model_path) {
+    auto filename = model_path.filename().string();
+    for (int res : {2048, 1536, 1024, 768, 512}) {
+        if (filename.find("_" + std::to_string(res)) != std::string::npos) {
+            return res;
+        }
+    }
+    return 1024;
+}
+
+void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options,
+                                  const std::filesystem::path& model_path) {
+    int model_res = extract_model_resolution(model_path);
+
+    constexpr const char* kWorkspace2GB = "2147483648";
+    constexpr const char* kWorkspace4GB = "4294967296";
+    constexpr const char* kWorkspace8GB = "8589934592";
+    const char* workspace_size = kWorkspace2GB;
+    if (model_res >= 2048) {
+        workspace_size = kWorkspace8GB;
+    } else if (model_res >= 1536) {
+        workspace_size = kWorkspace4GB;
+    }
+
+    std::string profile_shape = "input_rgb_hint:1x4x" + std::to_string(model_res) + "x" +
+                                std::to_string(model_res);
+
     std::unordered_map<std::string, std::string> provider_options = {
         {kDeviceId, "0"},
+        {kMaxWorkspaceSize, workspace_size},
+        {kProfilesMinShapes, profile_shape},
+        {kProfilesMaxShapes, profile_shape},
+        {kProfilesOptShapes, profile_shape},
     };
 
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
@@ -53,7 +88,7 @@ Result<std::filesystem::path> compile_with_compile_api(
         Ort::SessionOptions session_options;
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         session_options.SetLogSeverityLevel(ORT_LOGGING_LEVEL_WARNING);
-        append_tensorrt_rtx_provider(session_options);
+        append_tensorrt_rtx_provider(session_options, input_model_path);
 
         Ort::ModelCompilationOptions compile_options(env, session_options);
 #if defined(_WIN32)
@@ -90,7 +125,7 @@ Result<std::filesystem::path> compile_with_ep_context_dump(
         Ort::SessionOptions session_options;
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         session_options.SetLogSeverityLevel(ORT_LOGGING_LEVEL_WARNING);
-        append_tensorrt_rtx_provider(session_options);
+        append_tensorrt_rtx_provider(session_options, input_model_path);
         session_options.AddConfigEntry(kEpContextEnable, kEnableValue);
         session_options.AddConfigEntry(kEpContextFilePath, output_model_path.string().c_str());
         session_options.AddConfigEntry(kEpContextEmbedMode, kEnableValue);

@@ -99,12 +99,18 @@ constexpr const char* kDumpSubgraphs = onnxruntime::nv::provider_option_names::k
 constexpr const char* kDetailedBuildLog = onnxruntime::nv::provider_option_names::kDetailedBuildLog;
 constexpr const char* kRuntimeCacheFile = onnxruntime::nv::provider_option_names::kRuntimeCacheFile;
 constexpr const char* kMaxWorkspaceSize = onnxruntime::nv::provider_option_names::kMaxWorkspaceSize;
+constexpr const char* kProfilesMinShapes = onnxruntime::nv::provider_option_names::kProfilesMinShapes;
+constexpr const char* kProfilesMaxShapes = onnxruntime::nv::provider_option_names::kProfilesMaxShapes;
+constexpr const char* kProfilesOptShapes = onnxruntime::nv::provider_option_names::kProfilesOptShapes;
 #else
 constexpr const char* kDeviceId = "device_id";
 constexpr const char* kDumpSubgraphs = "nv_dump_subgraphs";
 constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
 constexpr const char* kRuntimeCacheFile = "nv_runtime_cache_path";
 constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
+constexpr const char* kProfilesMinShapes = "nv_profile_min_shapes";
+constexpr const char* kProfilesMaxShapes = "nv_profile_max_shapes";
+constexpr const char* kProfilesOptShapes = "nv_profile_opt_shapes";
 #endif
 }  // namespace tensorrt_rtx_option_names
 
@@ -185,20 +191,50 @@ void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
 #endif
 
 #ifdef _WIN32
+int extract_model_resolution(const std::filesystem::path& model_path) {
+    auto filename = model_path.filename().string();
+    for (int res : {2048, 1536, 1024, 768, 512}) {
+        if (filename.find("_" + std::to_string(res)) != std::string::npos) {
+            return res;
+        }
+    }
+    return 1024;
+}
+
 void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options,
                                             const std::filesystem::path& model_path) {
     debug_log("Configuring TensorRT RTX execution provider");
-    // Use 8 GB workspace for large models (1536 / 2048) to allow TensorRT to fuse kernels that
-    // fail at the 2 GB limit. Smaller models keep 2 GB to reduce compile-time overhead.
-    constexpr const char* kWorkspaceDefault = "2147483647";  // 2 GB
-    constexpr const char* kWorkspaceLarge = "8589934592";    // 8 GB
-    auto filename = model_path.filename().string();
-    const bool is_large_model =
-        filename.find("_1536") != std::string::npos || filename.find("_2048") != std::string::npos;
-    const std::string workspace_size = is_large_model ? kWorkspaceLarge : kWorkspaceDefault;
+
+    int model_res = extract_model_resolution(model_path);
+    debug_log("Detected model resolution: " + std::to_string(model_res));
+
+    // Workspace scales proportionally with spatial resolution. TensorRT uses workspace as an upper
+    // bound for tactic discovery during engine build; it only allocates what each tactic actually
+    // needs at runtime.
+    constexpr const char* kWorkspace2GB = "2147483648";   // 512, 768, 1024
+    constexpr const char* kWorkspace4GB = "4294967296";   // 1536
+    constexpr const char* kWorkspace8GB = "8589934592";   // 2048
+    const char* workspace_size = kWorkspace2GB;
+    if (model_res >= 2048) {
+        workspace_size = kWorkspace8GB;
+    } else if (model_res >= 1536) {
+        workspace_size = kWorkspace4GB;
+    }
+
+    // Explicit optimization profiles tell TRT exactly what input shape to build for. Since GPU
+    // inference always uses batch_size=1 and each model has a fixed spatial resolution, we set
+    // min=max=opt to the same static shape. This eliminates the dynamic-shape tactic search that
+    // causes engine build failures on large models (1536/2048).
+    std::string profile_shape = "input_rgb_hint:1x4x" + std::to_string(model_res) + "x" +
+                                std::to_string(model_res);
+    debug_log("Profile shape: " + profile_shape);
+
     std::unordered_map<std::string, std::string> provider_options = {
         {tensorrt_rtx_option_names::kDeviceId, "0"},
         {tensorrt_rtx_option_names::kMaxWorkspaceSize, workspace_size},
+        {tensorrt_rtx_option_names::kProfilesMinShapes, profile_shape},
+        {tensorrt_rtx_option_names::kProfilesMaxShapes, profile_shape},
+        {tensorrt_rtx_option_names::kProfilesOptShapes, profile_shape},
     };
 
     debug_log("Setting up runtime cache");
