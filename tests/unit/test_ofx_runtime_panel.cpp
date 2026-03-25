@@ -117,3 +117,29 @@ TEST_CASE("instance_changed flushes pending updates for user edits", "[unit][ofx
     g_suites.property = previous_suite;
     g_suites.image_effect = previous_image_suite;
 }
+
+TEST_CASE("runtime status omits frame timings when a dedicated timings field exists",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.render_count = 4;
+    data.last_frame_ms = 12.0;
+    data.avg_frame_ms = 10.5;
+
+    REQUIRE(runtime_status_runtime_label(data) == "Ready");
+    REQUIRE(runtime_timings_runtime_label(data) == "Last frame: 12.0 ms | Avg: 10.5 ms");
+}
+
+TEST_CASE("runtime status still prioritizes errors and warnings while timings stay separate",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.last_error = "TensorRT compile failed";
+    data.last_warning = "Using 1024px fallback";
+    data.last_frame_ms = 18.0;
+    data.avg_frame_ms = 15.0;
+
+    REQUIRE(runtime_status_runtime_label(data) == "Error: TensorRT compile failed");
+    REQUIRE(runtime_timings_runtime_label(data) == "Last frame: 18.0 ms | Avg: 15.0 ms");
+
+    data.last_error.clear();
+    REQUIRE(runtime_status_runtime_label(data) == "Note: Using 1024px fallback");
+}

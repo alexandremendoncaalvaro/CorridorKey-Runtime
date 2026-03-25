@@ -18,6 +18,7 @@ add_executable(test_unit
     test_ofx_image_utils.cpp
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
+    test_ofx_runtime_client.cpp
     test_ofx_runtime_panel.cpp
     test_ofx_runtime_protocol.cpp
     test_output_path_utils.cpp

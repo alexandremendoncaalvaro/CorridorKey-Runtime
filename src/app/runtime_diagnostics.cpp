@@ -289,20 +289,25 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
 
     json["model_found"] = true;
 
-    EngineCreateOptions options;
-    options.allow_cpu_fallback = false;
-    options.disable_cpu_ep_fallback = true;
-
-    auto engine = Engine::create(model_path, device, nullptr, options);
-    if (!engine) {
-        json["error"] = engine.error().message;
+    auto session = InferenceSession::create(
+        model_path, device,
+        SessionCreateOptions{.disable_cpu_ep_fallback = true,
+                             .log_severity = ORT_LOGGING_LEVEL_FATAL});
+    if (!session) {
+        json["error"] = session.error().message;
         return json;
     }
 
     json["session_create_ok"] = true;
-    json["effective_backend"] = diagnostic_backend_label((*engine)->current_device().backend);
-    json["effective_device"] = (*engine)->current_device().name;
-    json["fallback_used"] = (*engine)->backend_fallback().has_value();
+    json["effective_backend"] = diagnostic_backend_label((*session)->device().backend);
+    json["effective_device"] = (*session)->device().name;
+    json["fallback_used"] = false;
+
+    if ((*session)->device().backend != device.backend) {
+        json["error"] = "Strict probe completed on unexpected backend: " +
+                        diagnostic_backend_label((*session)->device().backend);
+        return json;
+    }
 
     ImageBuffer rgb(64, 64, 3);
     ImageBuffer hint(64, 64, 1);
@@ -312,16 +317,9 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
     InferenceParams params;
     params.target_resolution = json["requested_resolution"].get<int>();
 
-    auto frame = (*engine)->process_frame(rgb.view(), hint.view(), params, nullptr);
+    auto frame = (*session)->run(rgb.view(), hint.view(), params, nullptr);
     if (!frame) {
         json["error"] = frame.error().message;
-        return json;
-    }
-
-    const auto effective_backend = (*engine)->current_device().backend;
-    if (effective_backend != device.backend || (*engine)->backend_fallback().has_value()) {
-        json["error"] = "Strict probe completed on unexpected backend: " +
-                        diagnostic_backend_label(effective_backend);
         return json;
     }
 

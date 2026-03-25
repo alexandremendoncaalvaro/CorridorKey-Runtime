@@ -4,6 +4,7 @@
 #include <corridorkey/api_export.hpp>
 #include <filesystem>
 
+#include "../common/ofx_runtime_defaults.hpp"
 #include "../common/local_ipc.hpp"
 #include "ofx_runtime_protocol.hpp"
 #include "ofx_session_broker.hpp"
@@ -12,7 +13,7 @@ namespace corridorkey::app {
 
 struct OfxRuntimeServiceOptions {
     common::LocalJsonEndpoint endpoint = {};
-    std::chrono::milliseconds idle_timeout = std::chrono::minutes(2);
+    std::chrono::milliseconds idle_timeout = common::kDefaultOfxIdleTimeout;
     std::filesystem::path log_path = {};
     OfxSessionBrokerOptions broker = {};
 };

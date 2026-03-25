@@ -69,6 +69,7 @@ constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality
 constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
 constexpr const char* kParamRuntimeStatus = "runtime_status";
+constexpr const char* kParamRuntimeTimings = "runtime_timings";
 constexpr const char* kParamRenderTimeout = "render_timeout";
 constexpr const char* kParamPrepareTimeout = "prepare_timeout";
 constexpr const char* kParamOpenStartHereGuide = "open_start_here_guide";
@@ -129,6 +130,7 @@ struct InstanceData {
     OfxParamHandle runtime_effective_quality_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
     OfxParamHandle runtime_status_param = nullptr;
+    OfxParamHandle runtime_timings_param = nullptr;
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
     std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
@@ -202,6 +204,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
                                             bool cpu_quality_guardrail_active);
 std::string runtime_status_runtime_label(const InstanceData& data);
+std::string runtime_timings_runtime_label(const InstanceData& data);
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);

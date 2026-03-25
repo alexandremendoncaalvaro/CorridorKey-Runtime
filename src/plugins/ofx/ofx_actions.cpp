@@ -3,6 +3,7 @@
 #include <initializer_list>
 #include <vector>
 
+#include "common/ofx_runtime_defaults.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
 
@@ -298,7 +299,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                 "runtime_group");
     define_runtime_status_param(
         param_set, kParamRuntimeStatus, "Status", "Initializing...",
-        "Shows the last frame time or the most recent error during engine load or render.",
+        "Shows the current runtime state, warnings, or the most recent error during engine load "
+        "or render.",
+        "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeTimings, "Frame Times", "Initializing...",
+        "Shows the most recent frame time and rolling average for this OFX instance.",
         "runtime_group");
 
     // --- Group 2: Help & Docs (actionable links only) ---
@@ -469,11 +475,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 9: Advanced (timeouts) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
-    define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)", 30, 10, 300,
+    define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)",
+                     common::kDefaultOfxRenderTimeoutSeconds, 10, 300,
                      "Maximum time in seconds to wait for a single frame render. "
                      "Increase for high-resolution modes on slower hardware.",
                      "advanced_group");
-    define_int_param(param_set, kParamPrepareTimeout, "Prepare Timeout (s)", 120, 30, 600,
+    define_int_param(param_set, kParamPrepareTimeout, "Prepare Timeout (s)",
+                     common::kDefaultOfxPrepareTimeoutSeconds, 30, 600,
                      "Maximum time in seconds to wait for model loading and bootstrap. "
                      "Increase if first-frame initialization times out.",
                      "advanced_group");

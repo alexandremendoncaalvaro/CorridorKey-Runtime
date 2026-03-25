@@ -7,16 +7,17 @@
 
 #include "app/ofx_runtime_protocol.hpp"
 #include "common/local_ipc.hpp"
+#include "common/ofx_runtime_defaults.hpp"
 
 namespace corridorkey::ofx {
 
 struct OfxRuntimeClientOptions {
     common::LocalJsonEndpoint endpoint = {};
     std::filesystem::path server_binary = {};
-    int request_timeout_ms = 30000;
-    int prepare_timeout_ms = 120000;
+    int request_timeout_ms = common::kDefaultOfxRequestTimeoutMs;
+    int prepare_timeout_ms = common::kDefaultOfxPrepareTimeoutMs;
     int launch_timeout_ms = 10000;
-    int idle_timeout_ms = 120000;
+    int idle_timeout_ms = common::kDefaultOfxIdleTimeoutMs;
 };
 
 class OfxRuntimeClient {

@@ -173,6 +173,30 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
+TEST_CASE("fixed windows tensorRT ultra and maximum resolve exact packaged models",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-exact-high-end");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
+
+    auto ultra = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 2560,
+                                         1440, kQuantizationFp16);
+    REQUIRE(ultra.has_value());
+    REQUIRE(ultra->requested_resolution == 1536);
+    REQUIRE(ultra->effective_resolution == 1536);
+    REQUIRE_FALSE(ultra->used_fallback);
+    REQUIRE(ultra->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
+
+    auto maximum = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum,
+                                           4096, 2160, kQuantizationFp16);
+    REQUIRE(maximum.has_value());
+    REQUIRE(maximum->requested_resolution == 2048);
+    REQUIRE(maximum->effective_resolution == 2048);
+    REQUIRE_FALSE(maximum->used_fallback);
+    REQUIRE(maximum->executable_model_path.filename() == "corridorkey_fp16_2048.onnx");
+}
+
 TEST_CASE("ofx quality mode labels expose fixed resolutions in the UI", "[unit][ofx][regression]") {
     REQUIRE(std::string(quality_mode_ui_label(kQualityAuto)) == "Auto");
     REQUIRE(std::string(quality_mode_ui_label(kQualityPreview)) == "Draft (512)");
@@ -255,6 +279,21 @@ TEST_CASE("fixed TensorRT compile failures block exact retries and lower fallbac
     REQUIRE(filtered.size() == 2);
     REQUIRE(filtered.front().effective_resolution == 1536);
     REQUIRE(filtered[1].effective_resolution == 1024);
+}
+
+TEST_CASE("fixed TensorRT abort predicate only trips on the exact requested artifact",
+          "[unit][ofx][regression]") {
+    QualityArtifactSelection exact_selection{
+        std::filesystem::path("corridorkey_fp16_2048.onnx"), 2048, 2048, false};
+    QualityArtifactSelection fallback_selection{
+        std::filesystem::path("corridorkey_fp16_1536.onnx"), 2048, 1536, true};
+
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(
+        Backend::TensorRT, kQualityMaximum, false, exact_selection));
+    REQUIRE_FALSE(should_abort_quality_fallback_after_compile_failure(
+        Backend::TensorRT, kQualityMaximum, false, fallback_selection));
+    REQUIRE_FALSE(should_abort_quality_fallback_after_compile_failure(
+        Backend::TensorRT, kQualityAuto, false, exact_selection));
 }
 
 TEST_CASE("auto TensorRT quality skips cached compile failures and keeps working fallback",

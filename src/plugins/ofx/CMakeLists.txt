@@ -74,22 +74,48 @@ if(WIN32)
     add_dependencies(corridorkey_ofx corridorkey_cli)
     # Package the OFX bundle
     set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey.ofx.bundle")
+    file(GLOB _corridorkey_ofx_runtime_dlls
+        "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
 
-    add_custom_command(TARGET corridorkey_ofx POST_BUILD
-        # Create bundle directories
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
+    if(_corridorkey_ofx_runtime_dlls)
+        add_custom_command(TARGET corridorkey_ofx POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_corridorkey_ofx_runtime_dlls}
+                "$<TARGET_FILE_DIR:corridorkey_ofx>"
+            # Create bundle directories
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
 
-        # Copy the plugin binary
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
+            # Copy the plugin binary
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
 
-        # Copy all auxiliary ONNX Runtime and TensorRT DLLs
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
+            # Copy all auxiliary ONNX Runtime and TensorRT DLLs
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
 
-        # Copy models
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
+            # Copy models
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
 
-        COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
-    )
+            COMMAND_EXPAND_LISTS
+            COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
+        )
+    else()
+        add_custom_command(TARGET corridorkey_ofx POST_BUILD
+            # Create bundle directories
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
+
+            # Copy the plugin binary
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
+
+            # Copy all auxiliary ONNX Runtime and TensorRT DLLs
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
+
+            # Copy models
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
+
+            COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
+        )
+    endif()
 endif()

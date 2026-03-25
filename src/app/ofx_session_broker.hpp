@@ -6,13 +6,14 @@
 #include <string>
 #include <unordered_map>
 
+#include "../common/ofx_runtime_defaults.hpp"
 #include "ofx_runtime_protocol.hpp"
 
 namespace corridorkey::app {
 
 struct OfxSessionBrokerOptions {
     std::size_t max_cached_sessions = 4;
-    std::chrono::milliseconds idle_session_ttl = std::chrono::minutes(2);
+    std::chrono::milliseconds idle_session_ttl = common::kDefaultOfxIdleTimeout;
 };
 
 class OfxSessionBroker {

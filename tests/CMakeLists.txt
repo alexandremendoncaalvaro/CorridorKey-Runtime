@@ -7,16 +7,18 @@ function(corridorkey_stage_ort_runtime target_name)
     if(CORRIDORKEY_ORT_RUNTIME_DIR STREQUAL "")
         return()
     endif()
-    foreach(_corridorkey_dll IN ITEMS onnxruntime.dll onnxruntime_providers_shared.dll)
-        set(_corridorkey_dll_path "${CORRIDORKEY_ORT_RUNTIME_DIR}/${_corridorkey_dll}")
-        if(EXISTS "${_corridorkey_dll_path}")
-            add_custom_command(TARGET ${target_name} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_corridorkey_dll_path}" "$<TARGET_FILE_DIR:${target_name}>"
-                COMMENT "Staging ${_corridorkey_dll} for ${target_name}"
-            )
-        endif()
-    endforeach()
+    file(GLOB _corridorkey_runtime_dlls "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
+    if(NOT _corridorkey_runtime_dlls)
+        return()
+    endif()
+
+    add_custom_command(TARGET ${target_name} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_corridorkey_runtime_dlls}
+            "$<TARGET_FILE_DIR:${target_name}>"
+        COMMAND_EXPAND_LISTS
+        COMMENT "Staging ONNX Runtime DLLs for ${target_name}"
+    )
 endfunction()
 
 add_subdirectory(unit)

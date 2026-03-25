@@ -95,6 +95,37 @@ function Get-RuntimeSupportedBackends {
     }
 }
 
+function Test-RuntimeBackendSupport {
+    param(
+        [string]$RuntimeDir,
+        [string]$RequiredBackend
+    )
+
+    $runtimeBinary = Join-Path $RuntimeDir "corridorkey.exe"
+    if (-not (Test-Path $runtimeBinary)) {
+        return $false
+    }
+
+    Push-Location $RuntimeDir
+    try {
+        $json = & $runtimeBinary info --json 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
+            return $false
+        }
+
+        $parsed = $json | ConvertFrom-Json
+        if ($null -eq $parsed.capabilities -or $null -eq $parsed.capabilities.supported_backends) {
+            return $false
+        }
+
+        return @($parsed.capabilities.supported_backends) -contains $RequiredBackend
+    } catch {
+        return $false
+    } finally {
+        Pop-Location
+    }
+}
+
 if (Test-Path $OutputDir) {
     Remove-Item $OutputDir -Recurse -Force
 }
@@ -111,6 +142,8 @@ Write-Host "Staging ONNX Runtime core DLLs from $OrtRoot" -ForegroundColor Cyan
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
 Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir | Out-Null
+
+$isRtxRuntime = $OrtRoot -match "rtx"
 
 $copiedOptionalGpuProvider = $false
 foreach ($provider in @(
@@ -137,7 +170,11 @@ if (-not $copiedOptionalGpuProvider) {
     }
 
     if (-not $hasOptionalGpuRuntime) {
-        Write-Warning "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot. AMD/Intel systems will fall back to CPU."
+        if ($isRtxRuntime) {
+            Write-Host "RTX runtime intentionally omits DirectML/WinML/OpenVINO provider support." -ForegroundColor Cyan
+        } else {
+            Write-Host "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot." -ForegroundColor Cyan
+        }
     } else {
         Write-Host "Detected packaged optional GPU backend(s): $($supportedBackends -join ', ')"
 
@@ -149,16 +186,12 @@ if (-not $copiedOptionalGpuProvider) {
             try {
                 # Temporarily add staging dir to PATH so it finds the DLLs
                 $env:PATH = "$win64Dir;$envPathOld"
-                $infoOutput = & $cliPath info 2>&1 | Out-String
+                $requiredBackend = if ($isRtxRuntime) { "tensorrt" } else { "dml" }
 
-                $requiredBackend = if ($OrtRoot -match "rtx") { "tensorrt" } else { "dml" }
-
-                if ($infoOutput -match $requiredBackend) {
+                if (Test-RuntimeBackendSupport -RuntimeDir $win64Dir -RequiredBackend $requiredBackend) {
                     Write-Host "[VERIFIED] $requiredBackend backend is functional in the package." -ForegroundColor Green
                 } else {
-                    Write-Error "CRITICAL: Backend validation failed! 'corridorkey info' does not report $requiredBackend as supported."
-                    Write-Error "Output was: $infoOutput"
-                    exit 1
+                    throw "CRITICAL: Backend validation failed! 'corridorkey info --json' does not report $requiredBackend as supported."
                 }
             } finally {
                 $env:PATH = $envPathOld

@@ -112,7 +112,11 @@ try {
 # Check CUDA runtime (optional but should be present for NVIDIA systems)
 $cudartFiles = @(Get-ChildItem -Path $win64Dir -Filter "cudart64_*.dll" -File -ErrorAction SilentlyContinue)
 if ($cudartFiles.Count -eq 0) {
-    Write-Host "[WARN] No CUDA runtime DLL found (cudart64_*.dll)" -ForegroundColor Yellow
+    if ($expectsDirectMlPath) {
+        Write-Host "[INFO] No CUDA runtime DLL found (expected for DirectML bundle)" -ForegroundColor Cyan
+    } else {
+        Write-Host "[WARN] No CUDA runtime DLL found (cudart64_*.dll)" -ForegroundColor Yellow
+    }
 } else {
     foreach ($cudart in $cudartFiles) {
         Write-Host "[PASS] Found $($cudart.Name)" -ForegroundColor Green
@@ -153,7 +157,11 @@ if ($foundUniversalProviders.Count -eq 0) {
         throw $message
     }
     if (-not $hasUniversalGpuBackend) {
-        Write-Host "[WARN] $message" -ForegroundColor Yellow
+        if ($expectsDirectMlPath) {
+            Write-Host "[FAIL] $message" -ForegroundColor Red
+            throw $message
+        }
+        Write-Host "[INFO] $message" -ForegroundColor Cyan
     }
 }
 

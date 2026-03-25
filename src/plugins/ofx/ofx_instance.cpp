@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "app/runtime_contracts.hpp"
+#include "common/ofx_runtime_defaults.hpp"
 #include "common/runtime_paths.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
@@ -298,14 +299,18 @@ std::string runtime_status_runtime_label_impl(const InstanceData& data) {
         }
         status += "Note: " + truncate_status_message(data.last_warning, 100);
     }
-    if (data.last_frame_ms > 0.0) {
-        if (!status.empty()) {
-            status += " | ";
-        }
-        status += "Last frame: " + format_duration_ms(data.last_frame_ms) +
-                  " | Avg: " + format_duration_ms(data.avg_frame_ms);
+    if (!status.empty()) {
+        return status;
     }
-    return status.empty() ? "Idle" : status;
+    return data.render_count > 0 ? "Ready" : "Idle";
+}
+
+std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
+    if (data.last_frame_ms <= 0.0) {
+        return "No frames yet";
+    }
+    return "Last frame: " + format_duration_ms(data.last_frame_ms) +
+           " | Avg: " + format_duration_ms(data.avg_frame_ms);
 }
 
 double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
@@ -385,12 +390,14 @@ void update_runtime_panel_values(InstanceData* data) {
                                       : runtime_artifact_label(data->runtime_panel_state.artifact_path));
     set_string_param_value(data->runtime_status_param,
                            is_loading ? "Loading..." : runtime_status_runtime_label(*data));
+    set_string_param_value(data->runtime_timings_param,
+                           is_loading ? "Loading..." : runtime_timings_runtime_label(*data));
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
                               const std::string& device, const std::string& requested_quality,
                               const std::string& effective_quality, const std::string& artifact,
-                              const std::string& status) {
+                              const std::string& status, const std::string& timings) {
     if (data == nullptr) {
         return;
     }
@@ -401,6 +408,7 @@ void set_runtime_panel_status(InstanceData* data, const std::string& processing,
     set_string_param_value(data->runtime_effective_quality_param, effective_quality);
     set_string_param_value(data->runtime_artifact_param, artifact);
     set_string_param_value(data->runtime_status_param, status);
+    set_string_param_value(data->runtime_timings_param, timings);
 }
 
 bool backend_matches_request(const Engine& engine, const DeviceInfo& requested_device) {
@@ -528,6 +536,10 @@ std::string requested_quality_runtime_label(int quality_mode, int requested_reso
 
 std::string runtime_status_runtime_label(const InstanceData& data) {
     return runtime_status_runtime_label_impl(data);
+}
+
+std::string runtime_timings_runtime_label(const InstanceData& data) {
+    return runtime_timings_runtime_label_impl(data);
 }
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance) {
@@ -663,6 +675,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_artifact_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeStatus, &data->runtime_status_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeTimings,
+                                       &data->runtime_timings_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRenderTimeout, &data->render_timeout_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamPrepareTimeout,
@@ -671,10 +685,10 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     sync_dependent_params(data.get());
 
     set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
-                             "Loading...", "Loading...", "Loading...");
+                             "Loading...", "Loading...", "Loading...", "Loading...");
 
-    int render_timeout_s = 30;
-    int prepare_timeout_s = 120;
+    int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
+    int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;
     if (data->render_timeout_param != nullptr) {
         g_suites.parameter->paramGetValue(data->render_timeout_param, &render_timeout_s);
     }
@@ -1066,6 +1080,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             set_string_param_value(
                 data->runtime_status_param,
                 "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
+            set_string_param_value(data->runtime_timings_param, "Loading...");
             auto prepare_result = data->runtime_client->prepare_session(
                 build_prepare_request(requested_device, selection, requested_quality_mode),
                 [&](const StageTiming& timing) {
@@ -1113,6 +1128,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             set_string_param_value(
                 data->runtime_status_param,
                 "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
+            set_string_param_value(data->runtime_timings_param, "Loading...");
             auto engine_result = Engine::create(
                 selection.executable_model_path, requested_device,
                 [&](const StageTiming& timing) {
@@ -1348,8 +1364,8 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
             }
             if (changed_param == kParamRenderTimeout || changed_param == kParamPrepareTimeout) {
                 if (data->runtime_client) {
-                    int render_t = 30;
-                    int prepare_t = 120;
+                    int render_t = common::kDefaultOfxRenderTimeoutSeconds;
+                    int prepare_t = common::kDefaultOfxPrepareTimeoutSeconds;
                     if (data->render_timeout_param) {
                         g_suites.parameter->paramGetValue(data->render_timeout_param, &render_t);
                     }
