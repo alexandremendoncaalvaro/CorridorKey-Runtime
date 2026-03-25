@@ -133,6 +133,35 @@ void set_runtime_error(InstanceData* data, const std::string& message,
     post_message(kOfxMessageError, message.c_str(), instance);
 }
 
+std::string input_color_runtime_status(InputColorRuntimeMode mode) {
+    switch (mode) {
+        case InputColorRuntimeMode::ManualSrgb:
+            return "Color: Manual sRGB";
+        case InputColorRuntimeMode::ManualLinear:
+            return "Color: Manual Linear Rec.709 (sRGB)";
+        case InputColorRuntimeMode::HostManagedSrgbTx:
+            return "Color: Host Managed (sRGB Texture)";
+        case InputColorRuntimeMode::HostManagedLinearRec709Srgb:
+            return "Color: Host Managed (Linear Rec.709 (sRGB))";
+        case InputColorRuntimeMode::AutoFallbackLinear:
+        default:
+            return "Color: Auto fallback to Manual Linear Rec.709 (sRGB)";
+    }
+}
+
+bool update_color_management_status(InstanceData* data, InputColorRuntimeMode mode) {
+    if (data == nullptr) {
+        return false;
+    }
+    const std::string status = input_color_runtime_status(mode);
+    if (data->color_management_status != status) {
+        data->color_management_status = status;
+        data->runtime_panel_dirty = true;
+        return true;
+    }
+    return false;
+}
+
 bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& rhs) {
     return lhs.target_resolution == rhs.target_resolution &&
            lhs.despill_strength == rhs.despill_strength && lhs.spill_method == rhs.spill_method &&
@@ -477,15 +506,28 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                                                 &temporal_smoothing);
     }
 
-    bool input_is_linear = false;
-    switch (input_color_space) {
-        case kInputColorLinear:
-            input_is_linear = true;
-            break;
-        case kInputColorSrgb:
-        default:
-            input_is_linear = false;
-            break;
+    std::string source_colourspace;
+    bool has_source_colourspace =
+        get_string(source_props, kOfxImageClipPropColourspace, source_colourspace);
+    if (!has_source_colourspace && data->source_clip != nullptr) {
+        OfxPropertySetHandle source_clip_props = nullptr;
+        if (g_suites.image_effect->clipGetPropertySet(data->source_clip, &source_clip_props) ==
+                kOfxStatOK &&
+            source_clip_props != nullptr) {
+            has_source_colourspace =
+                get_string(source_clip_props, kOfxImageClipPropColourspace, source_colourspace);
+        }
+    }
+    const InputColorRuntimeMode input_color_mode = resolve_input_color_runtime_mode(
+        input_color_space, has_source_colourspace ? source_colourspace : "");
+    const bool input_is_linear = input_color_runtime_mode_is_linear(input_color_mode);
+    const bool host_managed_color = input_color_runtime_mode_is_host_managed(input_color_mode);
+    const bool color_status_changed = update_color_management_status(data, input_color_mode);
+    if (input_color_space == kInputColorAutoHostManaged &&
+        input_color_runtime_mode_used_manual_fallback(input_color_mode) && color_status_changed) {
+        log_message("render",
+                    "Host-managed color unavailable or unsupported; falling back to manual "
+                    "Linear Rec.709 (sRGB).");
     }
 
     std::string output_depth;
@@ -652,7 +694,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             }
         }
 
-        bool apply_srgb = should_apply_srgb_to_output(output_mode, input_is_linear);
+        bool apply_srgb =
+            should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);
         if (output_mode == kOutputMatteOnly) {
             write_matte_output(alpha_view, output_data, output_row_bytes, output_depth,
                                SrgbLut::instance());
@@ -673,6 +716,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     const std::uint64_t signature = frame_signature(rgb_view, hint_view);
+    const double effective_alpha_erode =
+        scale_pixels_to_source_long_edge(alpha_erode, width, height);
+    const double effective_alpha_softness =
+        scale_pixels_to_source_long_edge(alpha_softness, width, height);
+    const int effective_edge_erode =
+        scale_integer_pixels_to_source_long_edge(edge_erode, width, height);
+    const int effective_edge_blur =
+        scale_integer_pixels_to_source_long_edge(edge_blur, width, height);
 
     InferenceParams params;
     params.target_resolution = data->active_resolution;
@@ -687,8 +738,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.enable_tiling = enable_tiling != 0;
     params.tile_padding = tile_overlap;
     params.source_passthrough = source_passthrough_enabled != 0;
-    params.sp_erode_px = edge_erode;
-    params.sp_blur_px = edge_blur;
+    params.sp_erode_px = effective_edge_erode;
+    params.sp_blur_px = effective_edge_blur;
 
     const bool signature_matches =
         data->cached_signature_valid && data->cached_signature == signature;
@@ -786,12 +837,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             return kOfxStatFailed;
         }
 
-        if (alpha_erode != 0.0) {
-            alpha_erode_dilate(alpha_view_local, static_cast<float>(alpha_erode),
+        if (effective_alpha_erode != 0.0) {
+            alpha_erode_dilate(alpha_view_local, static_cast<float>(effective_alpha_erode),
                                data->alpha_edge_state);
         }
-        if (alpha_softness > 0.0) {
-            alpha_blur(alpha_view_local, static_cast<float>(alpha_softness),
+        if (effective_alpha_softness > 0.0) {
+            alpha_blur(alpha_view_local, static_cast<float>(effective_alpha_softness),
                        data->alpha_edge_state);
         }
         if (alpha_black_point > 0.0 || alpha_white_point < 1.0) {
@@ -889,7 +940,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         swap_green_blue(rgb_view);
     }
 
-    bool apply_srgb = should_apply_srgb_to_output(output_mode, input_is_linear);
+    bool apply_srgb = should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);
 
     if (output_mode == kOutputMatteOnly) {
         write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, lut);

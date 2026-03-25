@@ -1,5 +1,11 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <string_view>
+
+#include "ofxColour.h"
+
 namespace corridorkey::ofx {
 
 // Quality mode choice indices
@@ -48,11 +54,18 @@ inline bool output_mode_uses_linear_premultiplied_rgba(int output_mode) {
     return output_mode == kOutputProcessed || output_mode == kOutputFGMatte;
 }
 
-inline bool should_apply_srgb_to_output(int output_mode, bool input_is_linear) {
+inline bool should_apply_srgb_to_output(int output_mode, bool host_managed, bool input_is_linear) {
     if (output_mode == kOutputMatteOnly) {
         return false;
     }
+    if (host_managed) {
+        return false;
+    }
     return !output_mode_uses_linear_premultiplied_rgba(output_mode) && !input_is_linear;
+}
+
+inline const char* output_colourspace_for_output_mode(int output_mode) {
+    return output_mode == kOutputMatteOnly ? kOfxColourspaceRaw : kOfxColourspaceLinRec709Srgb;
 }
 
 // Alpha hint source mode
@@ -62,6 +75,47 @@ constexpr int kAlphaHintExternalOnly = 1;
 // Input color space
 constexpr int kInputColorSrgb = 0;
 constexpr int kInputColorLinear = 1;
+constexpr int kInputColorAutoHostManaged = 2;
+
+enum class InputColorRuntimeMode {
+    ManualSrgb,
+    ManualLinear,
+    HostManagedSrgbTx,
+    HostManagedLinearRec709Srgb,
+    AutoFallbackLinear,
+};
+
+inline InputColorRuntimeMode resolve_input_color_runtime_mode(int input_color_space,
+                                                              std::string_view source_colourspace) {
+    if (input_color_space == kInputColorSrgb) {
+        return InputColorRuntimeMode::ManualSrgb;
+    }
+    if (input_color_space == kInputColorLinear) {
+        return InputColorRuntimeMode::ManualLinear;
+    }
+    if (source_colourspace == kOfxColourspaceSrgbTx) {
+        return InputColorRuntimeMode::HostManagedSrgbTx;
+    }
+    if (source_colourspace == kOfxColourspaceLinRec709Srgb) {
+        return InputColorRuntimeMode::HostManagedLinearRec709Srgb;
+    }
+    return InputColorRuntimeMode::AutoFallbackLinear;
+}
+
+inline bool input_color_runtime_mode_is_host_managed(InputColorRuntimeMode mode) {
+    return mode == InputColorRuntimeMode::HostManagedSrgbTx ||
+           mode == InputColorRuntimeMode::HostManagedLinearRec709Srgb;
+}
+
+inline bool input_color_runtime_mode_used_manual_fallback(InputColorRuntimeMode mode) {
+    return mode == InputColorRuntimeMode::AutoFallbackLinear;
+}
+
+inline bool input_color_runtime_mode_is_linear(InputColorRuntimeMode mode) {
+    return mode == InputColorRuntimeMode::ManualLinear ||
+           mode == InputColorRuntimeMode::HostManagedLinearRec709Srgb ||
+           mode == InputColorRuntimeMode::AutoFallbackLinear;
+}
 
 // Quantization mode
 constexpr int kQuantizationFp16 = 0;
@@ -74,9 +128,10 @@ constexpr int kScreenColorBlue = 1;
 constexpr int kDefaultSourcePassthroughEnabled = 1;
 constexpr int kDefaultEdgeErode = 3;
 constexpr int kDefaultEdgeBlur = 7;
-constexpr int kMaxEdgeErode = 32;
-constexpr int kMaxEdgeBlur = 64;
-constexpr int kDefaultInputColorSpace = kInputColorLinear;
+constexpr int kMaxEdgeErode = 100;
+constexpr int kMaxEdgeBlur = 100;
+constexpr int kDefaultInputColorSpace = kInputColorAutoHostManaged;
+constexpr double kResolutionScaleBaselineLongEdge = 1920.0;
 constexpr int kDefaultQuantizationMode = kQuantizationFp16;
 constexpr int kDefaultScreenColor = kScreenColorGreen;
 constexpr double kDefaultTemporalSmoothing = 0.0;
@@ -86,5 +141,22 @@ constexpr int kSpillMethodAverage = 0;
 constexpr int kSpillMethodDoubleLimit = 1;
 constexpr int kSpillMethodNeutral = 2;
 constexpr int kDefaultSpillMethod = kSpillMethodAverage;
+
+inline double source_long_edge_scale_factor(int width, int height) {
+    const int long_edge = std::max(width, height);
+    if (long_edge <= 0) {
+        return 1.0;
+    }
+    return static_cast<double>(long_edge) / kResolutionScaleBaselineLongEdge;
+}
+
+inline double scale_pixels_to_source_long_edge(double pixels_at_baseline, int width, int height) {
+    return pixels_at_baseline * source_long_edge_scale_factor(width, height);
+}
+
+inline int scale_integer_pixels_to_source_long_edge(int pixels_at_baseline, int width, int height) {
+    return std::max(0, static_cast<int>(std::lround(
+                           scale_pixels_to_source_long_edge(pixels_at_baseline, width, height))));
+}
 
 }  // namespace corridorkey::ofx

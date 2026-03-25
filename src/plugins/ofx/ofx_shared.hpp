@@ -138,6 +138,7 @@ struct InstanceData {
     // Non-fatal status note shown alongside frame timings. Set when the engine fell back to a
     // lower resolution because the requested one failed to compile (e.g. TensorRT 2048 -> 1536).
     std::string last_warning = {};
+    std::string color_management_status = {};
     double last_frame_ms = 0.0;
     double avg_frame_ms = 0.0;
     std::uint64_t frame_time_samples = 0;
@@ -187,6 +188,9 @@ std::optional<QualityArtifactSelection> select_quality_artifact(
     int input_width = 0, int input_height = 0, int quantization_mode = kQuantizationFp16);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
                                int input_height = 0, int quantization_mode = kQuantizationFp16);
+std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
+                                            bool cpu_quality_guardrail_active);
+std::string runtime_status_runtime_label(const InstanceData& data);
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
@@ -199,5 +203,7 @@ OfxStatus destroy_instance(OfxImageEffectHandle instance);
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle out_args);
 OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHandle out_args);
+OfxStatus get_output_colourspace(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
+                                 OfxPropertySetHandle out_args);
 
 }  // namespace corridorkey::ofx
