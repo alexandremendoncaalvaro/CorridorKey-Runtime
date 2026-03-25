@@ -87,8 +87,11 @@ inline std::string portable_model_fingerprint(const std::filesystem::path& model
     auto timestamp = std::filesystem::last_write_time(model_path, error);
     long long ticks = error ? 0LL : static_cast<long long>(timestamp.time_since_epoch().count());
 
+    // Include the application version so any binary update (which may change EP configuration
+    // such as optimization profiles) automatically invalidates stale cached engines.
     auto key = model_path.filename().string() + "|" + std::to_string(file_size) + "|" +
-               std::to_string(ticks) + "|" + backend_token(backend);
+               std::to_string(ticks) + "|" + backend_token(backend) + "|" +
+               std::string(CORRIDORKEY_VERSION_STRING);
     return std::to_string(fnv1a_64(key));
 }
 
