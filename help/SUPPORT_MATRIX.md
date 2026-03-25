@@ -40,7 +40,7 @@ does not appear in Resolve 18, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 | Configuration | Support |
 |---------------|---------|
-| Apple Silicon (M1, M2, M3, M4) — macOS 14+ | Officially supported |
+| Apple Silicon (M1, M2, M3, M4, M5) — macOS 14+ | Officially supported |
 | Apple Silicon — macOS 13 | Best-effort |
 | Intel Mac | Unsupported |
 
@@ -58,7 +58,7 @@ whole does not have a single designation.
 |----------|---------|---------|
 | NVIDIA Ampere (RTX 30 series) | TensorRT | Officially supported |
 | NVIDIA Ada Lovelace (RTX 40 series) | TensorRT | Officially supported |
-| NVIDIA Blackwell (RTX 50 series) | TensorRT | Best-effort |
+| NVIDIA Blackwell (RTX 50 series) | TensorRT | Officially supported |
 | NVIDIA RTX 20 series (Turing) | TensorRT | Experimental — known errors in practice |
 | NVIDIA GTX 10xx / 16xx | CUDA via ONNX Runtime | Experimental |
 | Intel integrated GPU (DirectX 12) | DirectML | Best-effort |
