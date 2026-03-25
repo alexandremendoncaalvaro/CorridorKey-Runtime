@@ -30,6 +30,8 @@ add_executable(test_unit
     test_warmup_policy.cpp
 )
 
+corridorkey_apply_windows_common_compile_defs(test_unit)
+
 target_link_libraries(test_unit
     PRIVATE
         corridorkey_core_static

@@ -4,6 +4,8 @@ add_executable(corridorkey_cli main.cpp)
 # Alias for consistent naming
 set_target_properties(corridorkey_cli PROPERTIES OUTPUT_NAME corridorkey)
 
+corridorkey_apply_windows_common_compile_defs(corridorkey_cli)
+
 # Link against the core library
 target_link_libraries(corridorkey_cli
     PRIVATE

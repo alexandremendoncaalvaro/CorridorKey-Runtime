@@ -143,17 +143,12 @@ class CORRIDORKEY_API Engine {
                                StageTimingCallback on_stage = nullptr);
     /**
      * @brief Process a video file directly using FFmpeg with explicit output options.
-
-     * * @param input_video Path to input video file.
-     * @param hint_video Path to alpha hint
-     * video file.
+     * @param input_video Path to input video file.
+     * @param hint_video Path to alpha hint video file.
      * @param output_video Path where the resulting video will be saved.
-     *
      * @param params Inference and post-processing parameters.
-     * @param output_options Video
-     * output encoding policy and container preferences.
-     * @param on_progress Optional callback
-     * for progress and cancellation.
+     * @param output_options Video output encoding policy and container preferences.
+     * @param on_progress Optional callback for progress and cancellation.
      * @return Success or an error.
      */
     Result<void> process_video(const std::filesystem::path& input_video,

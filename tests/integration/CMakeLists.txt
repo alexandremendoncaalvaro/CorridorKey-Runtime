@@ -21,6 +21,8 @@ add_executable(test_integration
     test_regression_0000_video_decode_bframes.cpp
 )
 
+corridorkey_apply_windows_common_compile_defs(test_integration)
+
 target_link_libraries(test_integration
     PRIVATE
         corridorkey_core_static

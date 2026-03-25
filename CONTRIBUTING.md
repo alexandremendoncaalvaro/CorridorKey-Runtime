@@ -160,6 +160,7 @@ hooks:
 **On commit (< 30s):**
 - clang-format (staged files)
 - File hygiene (trailing whitespace, large files, YAML checks)
+- Documentation consistency (agent-file parity and internal markdown links)
 
 **On push (< 5min):**
 - Full release build
@@ -215,24 +216,28 @@ perf: parallelize frame decode pipeline
 
 ```
 CorridorKey-Runtime/
-  .github/              GitHub Actions, issue/PR templates
+  .github/              Issue and PR templates
   cmake/                CMake modules and helpers
   docs/                 Development specification, architecture, and release rules
   help/                 User-facing OFX guides, tutorials, and troubleshooting
   include/corridorkey/  Public API headers
   src/
+    app/                Application orchestration, diagnostics, OFX service
     cli/                CLI entry point (thin consumer of the library)
     common/             Shared internal utilities (STL-only)
     core/               Inference engine, device detection
     frame_io/           EXR, PNG, video read/write
+    gui/                Tauri desktop UI
+    plugins/ofx/        OFX plugin integration
     post_process/       Color math, despill, despeckle
   tests/
     unit/               Fast, isolated tests
     integration/        Multi-module tests with real files
     e2e/                Full pipeline tests with real model
+    regression/         Bug reproduction tests
     fixtures/           Reference files for tests
-  scripts/              Model export and optimization (Python)
-  vendor/               Vendored header-only libraries
+  scripts/              Build, packaging, validation, and release automation
+  vendor/               Curated third-party SDKs and runtime payloads
 ```
 
 ## Getting Help

@@ -5,6 +5,8 @@ add_executable(test_e2e
     test_cli_flags.cpp
 )
 
+corridorkey_apply_windows_common_compile_defs(test_e2e)
+
 target_link_libraries(test_e2e
     PRIVATE
         corridorkey_core_static

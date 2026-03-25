@@ -46,8 +46,7 @@ target_include_directories(corridorkey_ofx PRIVATE
 )
 
 target_link_libraries(corridorkey_ofx PRIVATE corridorkey_core)
-
-target_compile_definitions(corridorkey_ofx PRIVATE NOMINMAX)
+corridorkey_apply_windows_common_compile_defs(corridorkey_ofx)
 
 if(MSVC)
     target_compile_options(corridorkey_ofx PRIVATE /W4 /WX /permissive-)

@@ -11,6 +11,8 @@ else()
     add_library(corridorkey_core SHARED)
 endif()
 
+corridorkey_apply_windows_common_compile_defs(corridorkey_core)
+
 # Private includes for internal implementation headers
 if(APPLE)
     target_include_directories(corridorkey_core PRIVATE
@@ -107,6 +109,7 @@ add_subdirectory(plugins/ofx)
 # Static library for testing (exposes all symbols without CORRIDORKEY_API)
 if(BUILD_TESTING)
     add_library(corridorkey_core_static STATIC)
+    corridorkey_apply_windows_common_compile_defs(corridorkey_core_static)
 
     # Share the same source files
     get_target_property(_core_sources corridorkey_core SOURCES)

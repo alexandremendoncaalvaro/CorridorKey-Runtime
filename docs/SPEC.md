@@ -5,7 +5,7 @@ runtime architecture of CorridorKey Runtime. It answers what the product is,
 why it exists, and what it explicitly includes and excludes.
 
 **See also:**
-[SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) — explicit support status by platform
+[Support Matrix](../help/SUPPORT_MATRIX.md) — explicit support status by platform
 and hardware |
 [ARCHITECTURE.md](ARCHITECTURE.md) — source structure and dependency rules |
 [GUIDELINES.md](GUIDELINES.md) — code standards and build rules
@@ -37,7 +37,7 @@ between them.
 - Not a generic multi-backend AI serving system.
 - Not a broadly supported cross-platform engine; platform and hardware support
   is curated and explicitly designated. See
-  [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
+  [Support Matrix](../help/SUPPORT_MATRIX.md).
 - Not a replacement for the original CorridorKey project; it is a focused
   native runtime and integration layer for deployment.
 
@@ -67,7 +67,7 @@ designations:
 Vague claims ("works on most hardware", "compatible with") are not used.
 Every hardware path and host version has an explicit designation.
 
-The complete support table is in [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
+The complete support table is in [Support Matrix](../help/SUPPORT_MATRIX.md).
 
 ---
 
@@ -133,7 +133,7 @@ processing begins.
 - CLI surface with stable JSON/NDJSON output contracts.
 - OFX plugin for DaVinci Resolve 20 on Apple Silicon and Windows.
 - Alpha hint ingestion and rough-matte fallback generation.
-- Platform-specific model pack distribution.
+- Platform-specific model artifact packaging.
 - `doctor`, `benchmark`, and `process` commands with structured diagnostics.
 
 ### 4.2 Non-Goals

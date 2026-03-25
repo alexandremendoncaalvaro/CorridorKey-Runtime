@@ -30,7 +30,7 @@ plugin).
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** Apple Silicon (MLX) and Windows TensorRT are
    the two officially supported execution paths. Other paths have explicit
-   support designations. See [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
+   support designations. See [Support Matrix](../help/SUPPORT_MATRIX.md).
 5. **Shared Runtime, Curated Artifacts.** The runtime contract is stable
    across product tracks. Model artifacts and backend adapters may differ by
    platform when required for predictable performance.
@@ -91,6 +91,7 @@ Project-level configuration and documentation only.
 | `CMakePresets.json` | Authoritative build configurations |
 | `README.md` | User-facing overview and installation |
 | `CONTRIBUTING.md` | Developer onboarding and PR process |
+| `AGENTS.md` | Machine-readable rule summary for AI tools |
 | `CLAUDE.md` | Machine-readable rule summary for AI tools |
 
 ### `include/corridorkey/`

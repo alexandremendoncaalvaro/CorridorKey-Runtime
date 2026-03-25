@@ -165,9 +165,9 @@ fragmentation in per-frame code causes OFX instability.
   `link_directories`, `add_definitions`). Use `target_include_directories`,
   `target_compile_definitions`, and `target_compile_options`.
 - **`CMakePresets.json`** is the source of truth for build configurations.
-  It defines `debug`, `release`, and `ci` presets.
-- On Windows, CMake must be run from the x64 Native Tools Command Prompt for
-  VS 2022. A standard PowerShell or CMD window is insufficient.
+  It defines `debug`, `release`, `release-lto`, and the macOS portable variants.
+- On Windows, use `scripts/build.ps1` for normal development builds. If you
+  invoke CMake directly, activate the MSVC developer environment first.
 
 ### 5.2 Dependencies (vcpkg)
 
@@ -191,8 +191,7 @@ fragmentation in per-frame code causes OFX instability.
 |------|---------|--------|
 | clang-format 18+ | Code formatting | `.clang-format` |
 | clang-tidy 18+ | Static analysis and naming enforcement | `.clang-tidy` |
-| cppcheck | Undefined behavior, leaks, portability | CI gate |
-| include-what-you-use | Header minimality | CMake integration |
+| pre-commit | Local file hygiene and documentation consistency | `.pre-commit-config.yaml` |
 
 The authoritative configuration for each tool is its config file at the
 project root. Do not override tool settings in individual files.
@@ -217,15 +216,15 @@ Developer commits
                          - all unit tests
                          - all integration tests
         |
-  CI pipeline            (when configured)
-  (GitHub Actions)       - cross-platform build and test
+  Repository CI          (when configured)
+                         - cross-platform build and test
 ```
 
 ### 7.2 Pre-commit Hook
 
 Managed via [pre-commit](https://pre-commit.com/) with configuration in
 `.pre-commit-config.yaml`. Checks: formatting, trailing whitespace, YAML
-syntax, large file detection.
+syntax, large file detection, and documentation consistency.
 
 ### 7.3 Pre-push Hook
 
@@ -358,6 +357,7 @@ project is, what it does, how it works, and why specific choices were made.
 | `help/OFX_PANEL_GUIDE.md` | Practical OFX control guide for Resolve | Users, operators |
 | `help/OFX_RESOLVE_TUTORIALS.md` | Step-by-step Resolve workflows | Users, operators |
 | `docs/RELEASE_GUIDELINES.md` | Release build and packaging procedure | Release maintainers |
+| `AGENTS.md` | Machine-readable rule summary for AI tools | AI tools |
 | `CLAUDE.md` | Machine-readable rule summary for AI tools | AI tools |
 
 ### 10.5 Code Comments

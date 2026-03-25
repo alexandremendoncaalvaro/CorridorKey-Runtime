@@ -46,10 +46,15 @@ fallback behavior, see [help/TROUBLESHOOTING.md](help/TROUBLESHOOTING.md).
 
 ### CLI
 
-Download the portable `.zip` (Windows) or `.dmg` (macOS) release and place
-`corridorkey` on your `PATH`.
+Download the portable runtime release for your platform.
+
+- On macOS bundles and source builds, use `corridorkey`
+- In the Windows portable runtime bundle, use `ck-engine.exe`
 
 ## CLI Usage
+
+The examples below use the macOS and source-build command name `corridorkey`.
+In the Windows portable runtime bundle, replace it with `ck-engine.exe`.
 
 **Check hardware capability:**
 ```bash
@@ -88,11 +93,13 @@ integration.
 ```bash
 git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
+export VCPKG_ROOT="$HOME/vcpkg"
 cmake --preset release
-cmake --build build/release --parallel
+cmake --build --preset release
 ```
 
-On Windows, run CMake from the x64 Native Tools Command Prompt for VS 2022.
+On Windows, use `.\scripts\build.ps1 -Preset release`. If you invoke CMake
+directly, activate the MSVC developer environment first.
 
 ## Documentation
 

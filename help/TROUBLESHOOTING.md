@@ -7,6 +7,10 @@ plugin in DaVinci Resolve and the CLI.
 For support status by platform, hardware, and Resolve version, see
 [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 
+Command note:
+- Use `corridorkey` in source builds and macOS bundles
+- Use `ck-engine.exe` in the Windows portable runtime bundle
+
 ---
 
 ## Plugin Not Appearing in DaVinci Resolve
@@ -136,27 +140,26 @@ running `corridorkey doctor`.
 
 ---
 
-## Missing Model Pack or Artifact Mismatch
+## Missing Model Artifacts or Artifact Mismatch
 
 **Symptom:** `corridorkey doctor` reports missing model artifacts, or
 processing fails immediately with a model load error.
 
-The model pack is distributed separately from the runtime binary. It is not
-included in the repository.
+The runtime expects curated model artifacts under `models/`. In source checkouts
+those files live in the repository. In packaged releases they are staged next to
+the runtime bundle or inside the plugin bundle.
 
 **Steps:**
 
-1. Download the model pack from the Releases page. Each release specifies
-   which model pack version it requires.
-
-2. Place the model pack in the expected location. Run `corridorkey doctor` to
-   confirm it is detected correctly.
-
-3. If the model pack was updated independently of the runtime, verify that the
-   model pack version matches the runtime version. An incompatible artifact
-   will produce a schema mismatch error at load time.
-
-4. Do not modify or repack model artifacts. The runtime validates artifact
+1. Verify that the expected files are present under `models/` in your source
+   checkout or packaged runtime.
+2. In packaged releases, keep the `models` directory with the runtime payload.
+   Do not move it away from the executable or bundle contents.
+3. Run `corridorkey doctor` or `ck-engine.exe doctor` to confirm the runtime
+   sees the artifacts at the resolved path.
+4. If the artifacts were copied manually, re-stage them from a known-good
+   release bundle instead of mixing files from different builds.
+5. Do not modify or repack model artifacts. The runtime validates artifact
    integrity at load time.
 
 ---

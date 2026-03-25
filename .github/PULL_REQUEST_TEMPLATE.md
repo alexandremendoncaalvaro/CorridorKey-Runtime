@@ -23,7 +23,7 @@
 
 ## Checklist
 
-- [ ] Code follows project [guidelines](docs/GUIDELINES.md)
+- [ ] Code follows project [guidelines](../docs/GUIDELINES.md)
 - [ ] Self-reviewed the diff
 - [ ] Added tests for new behavior
 - [ ] Added regression test (if bug fix)

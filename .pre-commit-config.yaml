@@ -13,3 +13,11 @@ repos:
     hooks:
       - id: clang-format
         types_or: [c++, c, header]
+
+  - repo: local
+    hooks:
+      - id: docs-consistency
+        name: docs-consistency
+        entry: python scripts/check_docs_consistency.py
+        language: system
+        files: '^(README\.md|CONTRIBUTING\.md|AGENTS\.md|CLAUDE\.md|docs/.*\.md|help/.*\.md|\.github/PULL_REQUEST_TEMPLATE\.md)$'
