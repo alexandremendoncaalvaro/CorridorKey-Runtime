@@ -9,6 +9,8 @@ endif()
 if(WIN32)
     add_library(corridorkey_ofx SHARED
         ofx_actions.cpp
+        ofx_frame_cache.cpp
+        ofx_frame_cache.hpp
         ofx_image_utils.cpp
         ofx_instance.cpp
         ofx_logging.cpp
@@ -23,6 +25,8 @@ if(WIN32)
 else()
     add_library(corridorkey_ofx MODULE
         ofx_actions.cpp
+        ofx_frame_cache.cpp
+        ofx_frame_cache.hpp
         ofx_image_utils.cpp
         ofx_instance.cpp
         ofx_logging.cpp
