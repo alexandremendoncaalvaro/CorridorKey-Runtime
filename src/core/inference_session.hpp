@@ -96,7 +96,7 @@ class InferenceSession {
     void configure_session_options(bool use_optimized_model_cache,
                                    const SessionCreateOptions& options,
                                    const std::filesystem::path& model_path);
-    void extract_metadata();
+    void extract_metadata(const std::filesystem::path& model_path);
 
     /**
      * @brief Internal raw inference (no post-processing).

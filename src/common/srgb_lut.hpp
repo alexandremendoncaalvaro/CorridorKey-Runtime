@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 namespace corridorkey {
@@ -23,16 +24,25 @@ class SrgbLut {
     }
 
     inline float to_linear(float s) const {
-        int idx = static_cast<int>(std::clamp(s, 0.0f, 1.0f) * 65535.0f);
-        return m_to_linear[idx];
+        return m_to_linear[unit_interval_index(s)];
     }
 
     inline float to_srgb(float l) const {
-        int idx = static_cast<int>(std::clamp(l, 0.0f, 1.0f) * 65535.0f);
-        return m_to_srgb[idx];
+        return m_to_srgb[unit_interval_index(l)];
     }
 
    private:
+    static std::size_t unit_interval_index(float value) {
+        if (std::isnan(value) || value <= 0.0f) {
+            return 0;
+        }
+        if (!std::isfinite(value)) {
+            return 65535;
+        }
+        const float clamped = std::clamp(value, 0.0f, 1.0f);
+        return static_cast<std::size_t>(clamped * 65535.0f);
+    }
+
     SrgbLut() {
         for (int i = 0; i <= 65535; ++i) {
             float p = i / 65535.0f;

@@ -467,8 +467,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     }
 }
 
-void InferenceSession::extract_metadata() {
-    debug_log("Extracting model metadata [BUILD 2026-03-18-V1]");
+void InferenceSession::extract_metadata(const std::filesystem::path& model_path) {
+    debug_log("Extracting model metadata");
     Ort::AllocatorWithDefaultOptions allocator;
 
     size_t num_input_nodes = m_session.GetInputCount();
@@ -485,6 +485,10 @@ void InferenceSession::extract_metadata() {
         // Capture input element type for FP16 model support
         if (i == 0) {
             m_input_element_type = tensor_info.GetElementType();
+            if (auto inferred_resolution = core::infer_model_resolution(m_input_node_dims.back());
+                inferred_resolution.has_value()) {
+                m_recommended_resolution = *inferred_resolution;
+            }
             debug_log("Input 0 element type: " + std::to_string(m_input_element_type) +
                       " (FLOAT16 is 10, FLOAT is 1)");
         }
@@ -493,14 +497,23 @@ void InferenceSession::extract_metadata() {
         m_input_node_names_ptr.push_back(name.c_str());
     }
 
-    fprintf(stderr, "[InferenceSession] Getting output count\n");
-    size_t num_output_nodes = m_session.GetOutputCount();
-    fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
+    const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
+        model_path, m_device.backend,
+        m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
+    if (use_packaged_output_contract) {
+        debug_log("Using packaged CorridorKey output contract");
+        m_output_node_names.emplace_back(core::k_corridorkey_alpha_output_name);
+        m_output_node_names.emplace_back(core::k_corridorkey_fg_output_name);
+    } else {
+        fprintf(stderr, "[InferenceSession] Getting output count\n");
+        size_t num_output_nodes = m_session.GetOutputCount();
+        fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
 
-    for (size_t i = 0; i < num_output_nodes; i++) {
-        fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
-        auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
-        m_output_node_names.push_back(output_name_ptr.get());
+        for (size_t i = 0; i < num_output_nodes; i++) {
+            fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
+            auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
+            m_output_node_names.push_back(output_name_ptr.get());
+        }
     }
     for (const auto& name : m_output_node_names) {
         m_output_node_names_ptr.push_back(name.c_str());
@@ -591,7 +604,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 #endif
         fprintf(stderr, "[InferenceSession] ONNX Runtime session created successfully\n");
 
-        session_ptr->extract_metadata();
+        session_ptr->extract_metadata(model_path);
         fprintf(stderr, "[InferenceSession] Session created successfully\n");
         return session_ptr;
     } catch (const Ort::Exception& e) {
@@ -621,7 +634,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                     session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(),
                                                           session_ptr->m_session_options);
 #endif
-                    session_ptr->extract_metadata();
+                    session_ptr->extract_metadata(model_path);
                     return session_ptr;
                 } catch (const Ort::Exception&) {
                     remove_cached_model(*optimized_model_path);

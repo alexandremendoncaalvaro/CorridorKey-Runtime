@@ -1,6 +1,8 @@
 #include <catch2/catch_all.hpp>
 #include <cmath>
+#include <limits>
 
+#include "common/srgb_lut.hpp"
 #include "post_process/color_utils.hpp"
 
 using namespace corridorkey;
@@ -23,6 +25,16 @@ TEST_CASE("ColorUtils::srgb_to_linear and linear_to_srgb roundtrip", "[unit][col
         // 12-bit LUT (4096 steps) should be accurate within 0.0005 for roundtrips
         REQUIRE(back == Catch::Approx(val).margin(0.0005));
     }
+}
+
+TEST_CASE("SrgbLut handles non-finite input safely", "[unit][color][regression]") {
+    const auto& lut = SrgbLut::instance();
+
+    REQUIRE(lut.to_linear(std::nanf("")) == Catch::Approx(0.0F));
+    REQUIRE(lut.to_linear(std::numeric_limits<float>::infinity()) == Catch::Approx(1.0F));
+    REQUIRE(lut.to_srgb(std::nanf("")) == Catch::Approx(0.0F));
+    REQUIRE(lut.to_srgb(-std::numeric_limits<float>::infinity()) == Catch::Approx(0.0F));
+    REQUIRE(lut.to_srgb(std::numeric_limits<float>::infinity()) == Catch::Approx(1.0F));
 }
 
 TEST_CASE("ColorUtils::premultiply and unpremultiply", "[unit][color]") {
