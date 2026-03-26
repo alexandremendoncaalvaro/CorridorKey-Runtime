@@ -72,7 +72,6 @@ void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options,
         {kDeviceId, "0"},
         {kMaxWorkspaceSize, workspace_size},
         {kDetailedBuildLog, kEnableValue},
-        {kDumpSubgraphs, kEnableValue},
     };
 
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
