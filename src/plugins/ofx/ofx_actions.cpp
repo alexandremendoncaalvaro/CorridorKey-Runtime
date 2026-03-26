@@ -338,7 +338,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "the keyer treats blue screens like green screens.",
                         "setup_group");
     define_choice_param(
-        param_set, kParamQualityMode, "Quality", kQualityAuto,
+        param_set, kParamQualityMode, "Quality", kQualityPreview,
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
          quality_mode_ui_label(kQualityStandard), quality_mode_ui_label(kQualityHigh),
          quality_mode_ui_label(kQualityUltra), quality_mode_ui_label(kQualityMaximum)},
