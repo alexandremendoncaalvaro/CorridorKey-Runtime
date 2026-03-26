@@ -5,3 +5,4 @@ assets/image_samples/**/*.exr filter=lfs diff=lfs merge=lfs -text
 models/*.pth filter=lfs diff=lfs merge=lfs -text
 models/*.onnx filter=lfs diff=lfs merge=lfs -text
 models/*.safetensors filter=lfs diff=lfs merge=lfs -text
+models/*.mlxfn filter=lfs diff=lfs merge=lfs -text

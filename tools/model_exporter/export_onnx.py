@@ -98,8 +98,11 @@ def export_resolution(args, resolution):
     import torch
     disable_torch_compile_for_export(torch)
 
-    out_path = args.out.replace('.onnx', f'_{resolution}.onnx')
-    print(f"\n[Info] === Exporting Resolution {resolution}x{resolution} ===")
+    static = getattr(args, 'static', False)
+    suffix = f'_static_{resolution}' if static else f'_{resolution}'
+    out_path = args.out.replace('.onnx', f'{suffix}.onnx')
+    mode_label = "STATIC" if static else "DYNAMIC"
+    print(f"\n[Info] === Exporting Resolution {resolution}x{resolution} ({mode_label}) ===")
 
     base_model = load_model_with_pos_embed_interpolation(args.ckpt, resolution)
 
@@ -124,28 +127,35 @@ def export_resolution(args, resolution):
     print(f"[Info] Exporting ONNX model to {out_path}...")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
+    # Static export omits dynamic_axes so all dimensions (including batch_size=1) are baked in.
+    # This is required for TensorRT compatibility at 1536+ resolutions, where dynamic Shape ops
+    # cause TRT to compute impossible intermediate tensor volumes that exceed its 2^31 limit.
+    export_kwargs = dict(
+        export_params=True,
+        opset_version=16,
+        do_constant_folding=True,
+        input_names=['input_rgb_hint'],
+        output_names=['alpha', 'fg'],
+    )
+    if not static:
+        export_kwargs['dynamic_axes'] = {
+            'input_rgb_hint': {0: 'batch_size'},
+            'alpha': {0: 'batch_size'},
+            'fg': {0: 'batch_size'}
+        }
+
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
         warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
         from torch.nn.attention import SDPBackend, sdpa_kernel
 
+        # Force the legacy TorchScript-based exporter (dynamo=False). The Hiera model uses 5D
+        # SDPA tensors [batch, units, tokens, heads, dim] that the dynamo exporter cannot
+        # translate. With SDPBackend.MATH, PyTorch decomposes SDPA into matmul+softmax before
+        # the tracer sees it — matching the PyTorch 2.3.1 behavior that produced existing models.
         with sdpa_kernel(SDPBackend.MATH):
-            torch.onnx.export(
-                model,
-                dummy_x,
-                out_path,
-                export_params=True,
-                opset_version=16,
-                do_constant_folding=True,
-                input_names=['input_rgb_hint'],
-                output_names=['alpha', 'fg'],
-                dynamic_axes={
-                    'input_rgb_hint': {0: 'batch_size'},
-                    'alpha': {0: 'batch_size'},
-                    'fg': {0: 'batch_size'}
-                }
-            )
-    print(f"[Success] Exported ONNX FP32 {resolution}px model to {out_path}")
+            torch.onnx.export(model, dummy_x, out_path, dynamo=False, **export_kwargs)
+    print(f"[Success] Exported ONNX {'static' if static else 'FP32'} {resolution}px model to {out_path}")
 
 
 def main():
@@ -154,6 +164,9 @@ def main():
     parser.add_argument("--out", type=str, required=True, help="Base output ONNX file path")
     parser.add_argument("--resolutions", type=int, nargs="+", default=[512, 768, 1024, 1536, 2048],
                         help="Resolutions to export (default: 512 768 1024 1536 2048)")
+    parser.add_argument("--static", action="store_true",
+                        help="Export with fully static shapes (batch_size=1 baked in). "
+                             "Required for TensorRT at 1536+ resolutions.")
     parser.add_argument("--repo-path", type=str,
                         help="Path to local CorridorKey repo (cloned automatically if omitted)")
     args = parser.parse_args()
@@ -183,3 +196,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

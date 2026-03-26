@@ -39,6 +39,8 @@ constexpr const char* kEpContextEmbedMode = "ep.context_embed_mode";
 #endif
 
 constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
+constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
+constexpr const char* kDumpSubgraphs = "nv_dump_subgraphs";
 
 int extract_model_resolution(const std::filesystem::path& model_path) {
     auto filename = model_path.filename().string();
@@ -54,19 +56,23 @@ void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options,
                                   const std::filesystem::path& model_path) {
     int model_res = extract_model_resolution(model_path);
 
-    constexpr const char* kWorkspace2GB = "2147483648";
-    constexpr const char* kWorkspace4GB = "4294967296";
-    constexpr const char* kWorkspace8GB = "8589934592";
+    // Standalone compiler has full VRAM available (no host app competing), so we can use aggressive
+    // workspace sizing to give TRT the best chance of finding valid tactics for large models.
+    constexpr const char* kWorkspace2GB  = "2147483648";    // 512, 768, 1024
+    constexpr const char* kWorkspace8GB  = "8589934592";    // 1536
+    constexpr const char* kWorkspace16GB = "17179869184";   // 2048
     const char* workspace_size = kWorkspace2GB;
     if (model_res >= 2048) {
-        workspace_size = kWorkspace8GB;
+        workspace_size = kWorkspace16GB;
     } else if (model_res >= 1536) {
-        workspace_size = kWorkspace4GB;
+        workspace_size = kWorkspace8GB;
     }
 
     std::unordered_map<std::string, std::string> provider_options = {
         {kDeviceId, "0"},
         {kMaxWorkspaceSize, workspace_size},
+        {kDetailedBuildLog, kEnableValue},
+        {kDumpSubgraphs, kEnableValue},
     };
 
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
