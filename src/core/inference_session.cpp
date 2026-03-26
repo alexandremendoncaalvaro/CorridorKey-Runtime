@@ -89,6 +89,35 @@ namespace corridorkey {
 
 namespace {
 
+Result<void> validate_output_values(std::span<const float> values, std::string_view label) {
+    const auto validation = core::validate_finite_values(values, label);
+    if (!validation) {
+        debug_log(validation.error().message);
+    }
+    return validation;
+}
+
+Result<void> validate_output_image(Image image, std::string_view label) {
+    const auto validation = core::validate_finite_image(image, label);
+    if (!validation) {
+        debug_log(validation.error().message);
+    }
+    return validation;
+}
+
+void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution,
+                                 std::span<const float> values, std::string_view label) {
+    if (device.backend != Backend::TensorRT || recommended_resolution <= 1024) {
+        return;
+    }
+    debug_log(core::format_numeric_stats(label, core::compute_numeric_stats(values)));
+}
+
+void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, Image image,
+                                 std::string_view label) {
+    log_output_stats_if_enabled(device, recommended_resolution, image.data, label);
+}
+
 constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
 
 #ifdef _WIN32
@@ -1162,6 +1191,16 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
         }
 
+        const size_t total_alpha_elements = batch_size * alpha_image_stride;
+        log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                    std::span<const float>(alpha_ptr, total_alpha_elements),
+                                    "alpha_raw_output");
+        auto alpha_validation = validate_output_values(
+            std::span<const float>(alpha_ptr, total_alpha_elements), "alpha_raw_output");
+        if (!alpha_validation) {
+            return Unexpected(alpha_validation.error());
+        }
+
         float* fg_ptr = nullptr;
         std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
@@ -1185,6 +1224,16 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 fg_ptr = fg_fp32_conv.data();
             } else {
                 fg_ptr = output_tensors[1].GetTensorMutableData<float>();
+            }
+
+            const size_t total_fg_elements = batch_size * fg_image_stride;
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        std::span<const float>(fg_ptr, total_fg_elements),
+                                        "fg_raw_output");
+            auto fg_validation = validate_output_values(
+                std::span<const float>(fg_ptr, total_fg_elements), "fg_raw_output");
+            if (!fg_validation) {
+                return Unexpected(fg_validation.error());
             }
         }
 
@@ -1222,6 +1271,27 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 }
             },
             batch_size);
+
+        for (size_t batch_index = 0; batch_index < batch_results.size(); ++batch_index) {
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        batch_results[batch_index].alpha.view(),
+                                        "alpha_resized_output");
+            auto alpha_resized_validation = validate_output_image(
+                batch_results[batch_index].alpha.view(), "alpha_resized_output");
+            if (!alpha_resized_validation) {
+                return Unexpected(alpha_resized_validation.error());
+            }
+            if (!batch_results[batch_index].foreground.view().empty()) {
+                log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                            batch_results[batch_index].foreground.view(),
+                                            "fg_resized_output");
+                auto fg_validation = validate_output_image(
+                    batch_results[batch_index].foreground.view(), "fg_resized_output");
+                if (!fg_validation) {
+                    return Unexpected(fg_validation.error());
+                }
+            }
+        }
 
         return batch_results;
 
@@ -1360,6 +1430,15 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
         }
 
+        log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                    std::span<const float>(alpha_ptr, alpha_image_stride),
+                                    "alpha_raw_output");
+        auto alpha_validation = validate_output_values(
+            std::span<const float>(alpha_ptr, alpha_image_stride), "alpha_raw_output");
+        if (!alpha_validation) {
+            return Unexpected(alpha_validation.error());
+        }
+
         float* fg_ptr = nullptr;
         std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
@@ -1379,6 +1458,15 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 fg_ptr = fg_fp32_conv.data();
             } else {
                 fg_ptr = output_tensors[1].GetTensorMutableData<float>();
+            }
+
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        std::span<const float>(fg_ptr, fg_image_stride),
+                                        "fg_raw_output");
+            auto fg_validation = validate_output_values(
+                std::span<const float>(fg_ptr, fg_image_stride), "fg_raw_output");
+            if (!fg_validation) {
+                return Unexpected(fg_validation.error());
             }
         }
 
@@ -1418,6 +1506,23 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 }
             },
             1);
+
+        log_output_stats_if_enabled(m_device, m_recommended_resolution, result.alpha.view(),
+                                    "alpha_resized_output");
+        auto alpha_resized_validation =
+            validate_output_image(result.alpha.view(), "alpha_resized_output");
+        if (!alpha_resized_validation) {
+            return Unexpected(alpha_resized_validation.error());
+        }
+        if (!result.foreground.view().empty()) {
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        result.foreground.view(), "fg_resized_output");
+            auto fg_validation =
+                validate_output_image(result.foreground.view(), "fg_resized_output");
+            if (!fg_validation) {
+                return Unexpected(fg_validation.error());
+            }
+        }
 
         return result;
     } catch (const Ort::Exception& e) {
