@@ -8,6 +8,7 @@
 #include <string>
 
 #include "common/srgb_lut.hpp"
+#include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
@@ -173,30 +174,6 @@ bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& r
            lhs.sp_blur_px == rhs.sp_blur_px;
 }
 
-std::uint64_t mix_signature(std::uint64_t hash, float value) {
-    std::uint32_t bits = 0;
-    static_assert(sizeof(float) == sizeof(bits));
-    std::memcpy(&bits, &value, sizeof(bits));
-    hash ^= static_cast<std::uint64_t>(bits);
-    return hash * 1099511628211ULL;
-}
-
-std::uint64_t frame_signature(const Image& rgb, const Image& hint) {
-    constexpr std::uint64_t kOffsetBasis = 1469598103934665603ULL;
-    std::uint64_t hash = kOffsetBasis;
-    for (float value : rgb.data) {
-        hash = mix_signature(hash, value);
-    }
-    if (hint.width == rgb.width && hint.height == rgb.height) {
-        for (float value : hint.data) {
-            hash = mix_signature(hash, value);
-        }
-    }
-    hash = mix_signature(hash, static_cast<float>(rgb.width));
-    hash = mix_signature(hash, static_cast<float>(rgb.height));
-    hash = mix_signature(hash, static_cast<float>(rgb.channels));
-    return hash;
-}
 
 class RenderScope {
    public:
@@ -355,6 +332,128 @@ void bypass_with_source(const void* source_data, void* output_data, int width, i
                         static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(output_row_bytes);
         std::memcpy(dst_row, src_row, static_cast<size_t>(copy_bytes));
     }
+}
+
+enum class InferenceOutcome { kOk, kBypass, kFailed };
+
+struct InferenceResult {
+    ImageBuffer alpha;
+    ImageBuffer foreground;
+    InferenceOutcome outcome = InferenceOutcome::kOk;
+};
+
+InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
+                                          const SharedCacheKey& shared_key,
+                                          const Image& rgb_view, const Image& hint_view,
+                                          const InferenceParams& params, bool swap_screen,
+                                          int width, int height, const SrgbLut& lut,
+                                          void* source_data, void* output_data,
+                                          int source_row_bytes, int output_row_bytes,
+                                          const std::string& source_depth) {
+    ImageBuffer alpha_buf;
+    ImageBuffer fg_linear_buf;
+
+    if (g_frame_cache != nullptr &&
+        g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf)) {
+        log_message("render", "event=cache_hit detail=shared_cache");
+        return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk};
+    }
+
+    const DeviceInfo requested_device = requested_device_for_render(data);
+    const DeviceInfo effective_device_before = effective_device_for_render_log(data);
+    const std::string render_phase = render_phase_label(data->render_count);
+    log_render_event("render_begin", render_phase, requested_device, effective_device_before,
+                     data->model_path, data->requested_resolution, data->active_resolution,
+                     data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                              : data->engine->backend_fallback());
+
+    auto result = data->use_runtime_server
+                      ? data->runtime_client->process_frame(
+                            rgb_view, hint_view, params, data->render_count,
+                            [&](const StageTiming& timing) {
+                                log_render_stage(render_phase, requested_device, data->model_path,
+                                                 data->requested_resolution,
+                                                 data->active_resolution, timing);
+                            })
+                      : data->engine->process_frame(
+                            rgb_view, hint_view, params, [&](const StageTiming& timing) {
+                                log_render_stage(render_phase, requested_device, data->model_path,
+                                                 data->requested_resolution,
+                                                 data->active_resolution, timing);
+                            });
+    ++data->render_count;
+    if (!result) {
+        log_render_event("render_result", render_phase, requested_device,
+                         effective_device_for_render_log(data), data->model_path,
+                         data->requested_resolution, data->active_resolution,
+                         data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                  : data->engine->backend_fallback(),
+                         result.error().message);
+        log_message("render",
+                    std::string("Engine processing failed: ") + result.error().message);
+        set_runtime_error(data, result.error().message, instance);
+        bypass_with_source(source_data, output_data, width, height, source_row_bytes,
+                           output_row_bytes, source_depth);
+        return {{}, {}, InferenceOutcome::kBypass};
+    }
+
+    const DeviceInfo effective_device = data->use_runtime_server
+                                            ? data->runtime_client->current_device()
+                                            : data->engine->current_device();
+    log_render_event("render_result", render_phase, requested_device, effective_device,
+                     data->model_path, data->requested_resolution, data->active_resolution,
+                     data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                              : data->engine->backend_fallback());
+    if (effective_device.backend != data->device.backend ||
+        effective_device.name != data->device.name) {
+        data->device = effective_device;
+        update_runtime_panel(data);
+    }
+    if (requested_device.backend != Backend::Auto &&
+        effective_device.backend != requested_device.backend) {
+        std::string fallback_message =
+            "Render switched away from the requested backend while using " +
+            data->model_path.filename().string() + ".";
+        if (auto fallback = data->use_runtime_server ? data->runtime_client->backend_fallback()
+                                                     : data->engine->backend_fallback();
+            fallback.has_value() && !fallback->reason.empty()) {
+            fallback_message += " Reason: " + fallback->reason;
+        }
+        data->last_error = fallback_message;
+        log_message("render", fallback_message);
+        set_runtime_error(data, fallback_message, instance);
+        return {{}, {}, InferenceOutcome::kFailed};
+    }
+
+    const Image raw_alpha = result->alpha.view();
+    if (raw_alpha.width != width || raw_alpha.height != height) {
+        log_message("render", "Unexpected output size from engine.");
+        set_runtime_error(data, "Unexpected output size from engine.", instance);
+        return {{}, {}, InferenceOutcome::kFailed};
+    }
+
+    const Image fg_srgb_view = result->foreground.view();
+    fg_linear_buf = ImageBuffer(width, height, 3);
+    Image fg_linear_local = fg_linear_buf.view();
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
+            fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
+            fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
+        }
+    }
+
+    if (swap_screen) {
+        swap_green_blue(fg_linear_local);
+    }
+
+    alpha_buf = std::move(result->alpha);
+
+    if (g_frame_cache != nullptr) {
+        g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view());
+    }
+
+    return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk};
 }
 
 }  // namespace
@@ -760,83 +859,26 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     Image fg_linear;
 
     if (cache_hit) {
-        log_message("render", "event=cache_hit detail=output_switch");
+        log_message("render", "event=cache_hit detail=instance_cache");
         alpha_view = data->cached_result.alpha.view();
         fg_linear = data->cached_result.foreground.view();
     } else {
-        const DeviceInfo requested_device = requested_device_for_render(data);
-        const DeviceInfo effective_device_before = effective_device_for_render_log(data);
-        const std::string render_phase = render_phase_label(data->render_count);
-        log_render_event("render_begin", render_phase, requested_device, effective_device_before,
-                         data->model_path, data->requested_resolution, data->active_resolution,
-                         data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                                  : data->engine->backend_fallback());
+        const SharedCacheKey shared_key{signature, inference_params_hash(params),
+                                        path_hash(data->model_path), screen_color};
 
-        auto result = data->use_runtime_server
-                          ? data->runtime_client->process_frame(
-                                rgb_view, hint_view, params, data->render_count,
-                                [&](const StageTiming& timing) {
-                                    log_render_stage(render_phase, requested_device,
-                                                     data->model_path, data->requested_resolution,
-                                                     data->active_resolution, timing);
-                                })
-                          : data->engine->process_frame(
-                                rgb_view, hint_view, params, [&](const StageTiming& timing) {
-                                    log_render_stage(render_phase, requested_device,
-                                                     data->model_path, data->requested_resolution,
-                                                     data->active_resolution, timing);
-                                });
-        ++data->render_count;
-        if (!result) {
-            log_render_event("render_result", render_phase, requested_device,
-                             effective_device_for_render_log(data), data->model_path,
-                             data->requested_resolution, data->active_resolution,
-                             data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                                      : data->engine->backend_fallback(),
-                             result.error().message);
-            log_message("render",
-                        std::string("Engine processing failed: ") + result.error().message);
-            set_runtime_error(data, result.error().message, instance);
-            bypass_with_source(source_data, output_data, width, height, source_row_bytes,
-                               output_row_bytes, source_depth);
+        auto inference = resolve_inference_buffers(
+            data, instance, shared_key, rgb_view, hint_view, params, swap_screen, width, height,
+            lut, source_data, output_data, source_row_bytes, output_row_bytes, source_depth);
+
+        if (inference.outcome == InferenceOutcome::kBypass) {
             return kOfxStatOK;
         }
-
-        DeviceInfo effective_device = data->use_runtime_server
-                                          ? data->runtime_client->current_device()
-                                          : data->engine->current_device();
-        log_render_event("render_result", render_phase, requested_device, effective_device,
-                         data->model_path, data->requested_resolution, data->active_resolution,
-                         data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                                  : data->engine->backend_fallback());
-        if (effective_device.backend != data->device.backend ||
-            effective_device.name != data->device.name) {
-            data->device = effective_device;
-            update_runtime_panel(data);
-        }
-        if (requested_device.backend != Backend::Auto &&
-            effective_device.backend != requested_device.backend) {
-            std::string fallback_message =
-                "Render switched away from the requested backend while using " +
-                data->model_path.filename().string() + ".";
-            if (auto fallback = data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                                         : data->engine->backend_fallback();
-                fallback.has_value() && !fallback->reason.empty()) {
-                fallback_message += " Reason: " + fallback->reason;
-            }
-            data->last_error = fallback_message;
-            log_message("render", fallback_message);
-            set_runtime_error(data, fallback_message, instance);
+        if (inference.outcome == InferenceOutcome::kFailed) {
             return kOfxStatFailed;
         }
 
-        Image alpha_view_local = result->alpha.view();
-        if (alpha_view_local.width != width || alpha_view_local.height != height) {
-            log_message("render", "Unexpected output size from engine.");
-            set_runtime_error(data, "Unexpected output size from engine.", instance);
-            return kOfxStatFailed;
-        }
-
+        // Per-instance alpha edge adjustments (applied to this instance's own copy)
+        Image alpha_view_local = inference.alpha.view();
         if (effective_alpha_erode != 0.0) {
             alpha_erode_dilate(alpha_view_local, static_cast<float>(effective_alpha_erode),
                                data->alpha_edge_state);
@@ -853,21 +895,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             alpha_gamma_correct(alpha_view_local, static_cast<float>(alpha_gamma));
         }
 
-        Image fg_srgb_view = result->foreground.view();
-        ImageBuffer fg_linear_buf(width, height, 3);
-        Image fg_linear_local = fg_linear_buf.view();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
-                fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
-                fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
-            }
-        }
-
-        if (swap_screen) {
-            swap_green_blue(fg_linear_local);
-        }
-
+        // Per-instance temporal smoothing
+        Image fg_linear_local = inference.foreground.view();
         if (temporal_smoothing > 0.0) {
             const float blend = static_cast<float>(std::clamp(temporal_smoothing, 0.0, 1.0));
             const bool size_mismatch = !data->temporal_state_valid ||
@@ -894,15 +923,15 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             } else {
                 for (int y = 0; y < height; ++y) {
                     for (int x = 0; x < width; ++x) {
-                        float a_prev = prev_alpha(y, x);
-                        float a_cur = alpha_view_local(y, x);
-                        float a_out = a_cur * (1.0f - blend) + a_prev * blend;
+                        const float a_prev = prev_alpha(y, x);
+                        const float a_cur = alpha_view_local(y, x);
+                        const float a_out = a_cur * (1.0f - blend) + a_prev * blend;
                         alpha_view_local(y, x) = a_out;
                         prev_alpha(y, x) = a_out;
                         for (int c = 0; c < 3; ++c) {
-                            float fg_prev = prev_foreground(y, x, c);
-                            float fg_cur = fg_linear_local(y, x, c);
-                            float fg_out = fg_cur * (1.0f - blend) + fg_prev * blend;
+                            const float fg_prev = prev_foreground(y, x, c);
+                            const float fg_cur = fg_linear_local(y, x, c);
+                            const float fg_out = fg_cur * (1.0f - blend) + fg_prev * blend;
                             fg_linear_local(y, x, c) = fg_out;
                             prev_foreground(y, x, c) = fg_out;
                         }
@@ -914,8 +943,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             data->temporal_state_valid = false;
         }
 
-        data->cached_result.alpha = std::move(result->alpha);
-        data->cached_result.foreground = std::move(fg_linear_buf);
+        data->cached_result.alpha = std::move(inference.alpha);
+        data->cached_result.foreground = std::move(inference.foreground);
         data->cached_result_valid = true;
         data->cached_time = time;
         data->cached_width = width;
@@ -940,7 +969,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         swap_green_blue(rgb_view);
     }
 
-    bool apply_srgb = should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);
+    const bool apply_srgb =
+        should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);
 
     if (output_mode == kOutputMatteOnly) {
         write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, lut);

@@ -187,8 +187,11 @@ struct InstanceData {
     AlphaEdgeState alpha_edge_state = {};
 };
 
+class SharedFrameCache;
+
 extern OfxHost* g_host;
 extern OfxSuites g_suites;
+extern std::unique_ptr<SharedFrameCache> g_frame_cache;
 
 bool fetch_suites();
 void post_message(const char* message_type, const char* message, OfxImageEffectHandle effect);

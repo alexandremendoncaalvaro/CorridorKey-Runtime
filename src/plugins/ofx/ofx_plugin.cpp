@@ -1,7 +1,8 @@
-#include <cstdio>
 #include <cstring>
 #include <exception>
+#include <memory>
 
+#include "ofx_frame_cache.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
 
@@ -9,6 +10,7 @@ namespace corridorkey::ofx {
 
 OfxHost* g_host = nullptr;
 OfxSuites g_suites = {};
+std::unique_ptr<SharedFrameCache> g_frame_cache = nullptr;
 
 static void set_host(OfxHost* host) {
     g_host = host;
@@ -54,6 +56,7 @@ OfxStatus on_load() {
         log_message("on_load", "Missing required suites.");
         return kOfxStatErrMissingHostFeature;
     }
+    g_frame_cache = std::make_unique<SharedFrameCache>();
     log_message("on_load", "Load successful.");
     return kOfxStatOK;
 }
@@ -110,6 +113,7 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
         }
 
         if (std::strcmp(action, kOfxActionUnload) == 0) {
+            g_frame_cache.reset();
             close_log();
             return kOfxStatOK;
         }
@@ -136,11 +140,9 @@ extern "C" {
 
 CORRIDORKEY_OFX_EXPORT OfxStatus OfxSetHost(const OfxHost* host) {
     try {
-        std::fprintf(stderr, "[OFX] OfxSetHost called\n");
         corridorkey::ofx::log_message("OfxSetHost",
                                       host == nullptr ? "Host pointer is null." : "Host received.");
         corridorkey::ofx::set_host(const_cast<OfxHost*>(host));
-        std::fprintf(stderr, "[OFX] OfxSetHost returning kOfxStatOK\n");
         return kOfxStatOK;
     } catch (...) {
         return kOfxStatFailed;
@@ -149,9 +151,7 @@ CORRIDORKEY_OFX_EXPORT OfxStatus OfxSetHost(const OfxHost* host) {
 
 CORRIDORKEY_OFX_EXPORT int OfxGetNumberOfPlugins(void) {
     try {
-        std::fprintf(stderr, "[OFX] OfxGetNumberOfPlugins called\n");
         corridorkey::ofx::log_message("OfxGetNumberOfPlugins", "Returning 1.");
-        std::fprintf(stderr, "[OFX] OfxGetNumberOfPlugins returning 1\n");
         return 1;
     } catch (...) {
         return 0;
@@ -160,14 +160,11 @@ CORRIDORKEY_OFX_EXPORT int OfxGetNumberOfPlugins(void) {
 
 CORRIDORKEY_OFX_EXPORT OfxPlugin* OfxGetPlugin(int nth) {
     try {
-        std::fprintf(stderr, "[OFX] OfxGetPlugin called with index %d\n", nth);
         corridorkey::ofx::log_message(
             "OfxGetPlugin", nth == 0 ? "Returning plugin 0." : "Requested invalid index.");
         if (nth == 0) {
-            std::fprintf(stderr, "[OFX] OfxGetPlugin returning plugin 0\n");
             return &corridorkey::ofx::g_plugin;
         }
-        std::fprintf(stderr, "[OFX] OfxGetPlugin returning nullptr\n");
         return nullptr;
     } catch (...) {
         return nullptr;
