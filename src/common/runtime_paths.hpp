@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <corridorkey/types.hpp>
 #include <corridorkey/version.hpp>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -19,12 +21,12 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#else
-#include <limits.h>
-#include <unistd.h>
 #endif
 
 namespace corridorkey::common {
+
+// Forward declare Backend to avoid circular dependency if types.hpp is included
+// But actually, we need the enum for the signature. types.hpp has it.
 
 namespace detail {
 
@@ -386,6 +388,53 @@ inline std::optional<std::filesystem::path> existing_tensorrt_rtx_compiled_conte
     }
 
     return std::nullopt;
+}
+
+/**
+ * Resolves the final model path for Windows hardware backends (TensorRT, DirectML).
+ * For 1536 and 2048 resolutions, it prioritizes a static-shape variant (e.g., _static_1536.onnx)
+ * if present, as dynamic shapes frequently cause engine build failures at these scales.
+ */
+inline std::filesystem::path resolve_static_model_path(const std::filesystem::path& model_path,
+                                                      Backend backend) {
+#if defined(_WIN32)
+    if (backend != Backend::TensorRT && backend != Backend::DirectML) {
+        return model_path;
+    }
+
+    std::string stem = model_path.stem().string();
+    // Only apply to high resolutions where dynamic shapes trigger TRT int32 overflow
+    if (stem.find("_1536") == std::string::npos && stem.find("_2048") == std::string::npos) {
+        return model_path;
+    }
+
+    // If it's already a static model path, don't recurse
+    if (stem.find("_static_") != std::string::npos) {
+        return model_path;
+    }
+
+    // Try to find the static equivalent (e.g., corridorkey_fp16_1536.onnx ->
+    // corridorkey_fp16_static_1536.onnx)
+    std::string static_stem = stem;
+    size_t pos_1536 = static_stem.find("_1536");
+    if (pos_1536 != std::string::npos) {
+        static_stem.replace(pos_1536, 5, "_static_1536");
+    } else {
+        size_t pos_2048 = static_stem.find("_2048");
+        if (pos_2048 != std::string::npos) {
+            static_stem.replace(pos_2048, 5, "_static_2048");
+        }
+    }
+
+    auto static_path = model_path.parent_path() / (static_stem + model_path.extension().string());
+    std::error_code error;
+    if (std::filesystem::exists(static_path, error) && !error) {
+        return static_path;
+    }
+#else
+    (void)backend;
+#endif
+    return model_path;
 }
 
 }  // namespace corridorkey::common

@@ -486,6 +486,11 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
     }
 
+    // Resolve static model path for Windows hardware backends (TensorRT, DirectML)
+    // to avoid engine build failures caused by dynamic shapes at high resolutions.
+    const std::filesystem::path resolved_model_path =
+        common::resolve_static_model_path(model_path, device.backend);
+
     DeviceInfo requested_device = device;
 
     try {
@@ -512,7 +517,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 #ifdef _WIN32
         if (session_ptr->m_device.backend == Backend::TensorRT) {
             if (auto compiled_context_path =
-                    common::existing_tensorrt_rtx_compiled_context_model_path(model_path);
+                    common::existing_tensorrt_rtx_compiled_context_model_path(resolved_model_path);
                 compiled_context_path.has_value()) {
                 session_model_path = *compiled_context_path;
             }
@@ -521,7 +526,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 
         if (core::use_optimized_model_cache_for_backend(session_ptr->m_device.backend)) {
             optimized_model_path =
-                common::optimized_model_cache_path(model_path, session_ptr->m_device.backend);
+                common::optimized_model_cache_path(resolved_model_path, session_ptr->m_device.backend);
             if (optimized_model_path.has_value()) {
                 std::error_code error;
                 std::filesystem::create_directories(optimized_model_path->parent_path(), error);
@@ -534,7 +539,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 
         fprintf(stderr, "[InferenceSession] Configuring session options\n");
         session_ptr->configure_session_options(using_optimized_model_cache, options,
-                                               session_model_path);
+                                               resolved_model_path);
         fprintf(stderr, "[InferenceSession] Session options configured\n");
 
         if (!using_optimized_model_cache && optimized_model_path.has_value()) {
@@ -573,7 +578,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
                     session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-                    session_ptr->configure_session_options(false, options, model_path);
+                    session_ptr->configure_session_options(false, options, resolved_model_path);
 #ifdef _WIN32
                     session_ptr->m_session_options.SetOptimizedModelFilePath(
                         optimized_model_path->wstring().c_str());
@@ -583,10 +588,10 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 #endif
 #ifdef _WIN32
                     session_ptr->m_session =
-                        Ort::Session(session_ptr->m_env, model_path.wstring().c_str(),
+                        Ort::Session(session_ptr->m_env, resolved_model_path.wstring().c_str(),
                                      session_ptr->m_session_options);
 #else
-                    session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(),
+                    session_ptr->m_session = Ort::Session(session_ptr->m_env, resolved_model_path.c_str(),
                                                           session_ptr->m_session_options);
 #endif
                     session_ptr->extract_metadata();
