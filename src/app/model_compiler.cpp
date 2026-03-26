@@ -39,9 +39,6 @@ constexpr const char* kEpContextEmbedMode = "ep.context_embed_mode";
 #endif
 
 constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
-constexpr const char* kProfilesMinShapes = "nv_profile_min_shapes";
-constexpr const char* kProfilesMaxShapes = "nv_profile_max_shapes";
-constexpr const char* kProfilesOptShapes = "nv_profile_opt_shapes";
 
 int extract_model_resolution(const std::filesystem::path& model_path) {
     auto filename = model_path.filename().string();
@@ -67,15 +64,9 @@ void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options,
         workspace_size = kWorkspace4GB;
     }
 
-    std::string profile_shape = "input_rgb_hint:1x4x" + std::to_string(model_res) + "x" +
-                                std::to_string(model_res);
-
     std::unordered_map<std::string, std::string> provider_options = {
         {kDeviceId, "0"},
         {kMaxWorkspaceSize, workspace_size},
-        {kProfilesMinShapes, profile_shape},
-        {kProfilesMaxShapes, profile_shape},
-        {kProfilesOptShapes, profile_shape},
     };
 
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
