@@ -13,6 +13,7 @@
 #include "common/stage_profiler.hpp"
 #include "inference_session.hpp"
 #include "mlx_probe.hpp"
+#include "warmup_policy.hpp"
 
 namespace corridorkey {
 
@@ -76,6 +77,14 @@ class Engine::Impl {
 
         int recommended = session != nullptr ? session->recommended_resolution() : 512;
         int desired_resolution = detail::resolve_warmup_resolution(target_resolution, recommended);
+        int warmup_workload_resolution = std::max(desired_resolution, recommended);
+
+        if (session != nullptr &&
+            core::should_skip_warmup(session->device().backend, warmup_workload_resolution)) {
+            last_warmup_resolution = desired_resolution;
+            warmup_error.reset();
+            return {};
+        }
 
         if (!detail::should_run_warmup(desired_resolution, last_warmup_resolution)) {
             if (warmup_error.has_value()) {
