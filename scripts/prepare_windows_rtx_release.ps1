@@ -252,7 +252,8 @@ function Invoke-ExportParityValidation {
         [string]$ToolDir,
         [string]$CheckpointPath,
         [string]$SourceRepo,
-        [string]$ExportDir
+        [string]$ExportDir,
+        [string[]]$Models
     )
 
     $arguments = @(
@@ -261,7 +262,7 @@ function Invoke-ExportParityValidation {
         "--dir", $ExportDir,
         "--repo-path", $SourceRepo,
         "--models"
-    ) + (Get-IntermediateModelList)
+    ) + $Models
 
     Write-Host "[validate-export] Verifying exported ONNX parity against the canonical PyTorch model..."
     Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $ToolDir -Arguments $arguments
@@ -289,9 +290,14 @@ function Invoke-ModelPreparation {
     }
 
     if (-not $needsPreparation) {
-        Write-Host "[1/5] Reusing prepared Windows RTX model pack from $modelsDir"
+        Write-Host "[1/6] Reusing prepared Windows RTX model pack from $modelsDir"
         Remove-IntermediateModelsFromDestination
         Assert-RequiredModels
+        Write-Host "[2/6] Validating prepared runtime artifact parity..."
+        Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
+            -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $modelsDir `
+            -Models (Get-PreparedModelList)
+        Write-Host "[3/6] Verifying ONNX contracts and ORT loadability..."
         Invoke-ModelPackValidation -UvPath $UvPath -ToolDir $toolDir
         return
     }
@@ -310,7 +316,7 @@ function Invoke-ModelPreparation {
     Remove-IntermediateModelsFromDestination
 
     try {
-        Write-Host "[1/5] Exporting CorridorKey ONNX models..."
+        Write-Host "[1/6] Exporting CorridorKey ONNX models..."
         Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
             "run", "python", "export_onnx.py",
             "--ckpt", $CheckpointPath,
@@ -319,24 +325,30 @@ function Invoke-ModelPreparation {
             "--repo-path", $SourceRepo
         )
 
-        Write-Host "[2/5] Validating exported ONNX parity..."
+        Write-Host "[2/6] Validating exported FP32 ONNX parity..."
         Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
-            -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $tempModelsDir
+            -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $tempModelsDir `
+            -Models (Get-IntermediateModelList)
 
-        Write-Host "[3/5] Optimizing FP32 and generating FP16 variants..."
+        Write-Host "[3/6] Optimizing FP32 and generating FP16 variants..."
         Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
             "run", "python", "optimize_model.py",
             "--dir", $tempModelsDir,
             "--target", "windows-rtx"
         )
 
-        Write-Host "[4/5] Quantizing CPU fallback models..."
+        Write-Host "[4/6] Quantizing CPU fallback models..."
         Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
             "run", "python", "quantize_model.py",
             "--dir", $tempModelsDir
         )
 
-        Write-Host "[5/5] Validating prepared runtime models..."
+        Write-Host "[5/6] Validating prepared runtime artifact parity..."
+        Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
+            -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $tempModelsDir `
+            -Models (Get-PreparedModelList)
+
+        Write-Host "[6/6] Validating prepared runtime models..."
         $arguments = @(
             "run", "python", "validate_model_pack.py",
             "--dir", $tempModelsDir,

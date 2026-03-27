@@ -1,10 +1,13 @@
 import argparse
 import os
+import re
 import sys
 
 import numpy as np
 
 from export_onnx import clone_original_repo, disable_torch_compile_for_export, load_model_with_pos_embed_interpolation
+
+MODEL_GROUP_PATTERN = re.compile(r"^corridorkey_(?P<group>[^_]+)_(?P<resolution>\d+)\.onnx$")
 
 
 def parse_resolution_from_filename(filename):
@@ -13,6 +16,22 @@ def parse_resolution_from_filename(filename):
     if not token.isdigit():
         raise ValueError(f"Unable to resolve model resolution from filename: {filename}")
     return int(token)
+
+
+def group_name_for_model(filename):
+    match = MODEL_GROUP_PATTERN.match(os.path.basename(filename))
+    if match is None:
+        raise ValueError(f"Unable to resolve model family from filename: {filename}")
+    return match.group("group")
+
+
+def tolerances_for_model(filename, args):
+    group_name = group_name_for_model(filename)
+    if group_name == "fp16":
+        return args.fp16_atol, args.fp16_rtol
+    if group_name == "int8":
+        return args.int8_atol, args.int8_rtol
+    return args.fp32_atol, args.fp32_rtol
 
 
 def build_test_input(resolution, seed):
@@ -91,8 +110,18 @@ def main():
     parser.add_argument("--models", type=str, nargs="+", required=True, help="Model filenames to validate")
     parser.add_argument("--repo-path", type=str, help="Path to the CorridorKey source repository")
     parser.add_argument("--seed", type=int, default=1234, help="Deterministic seed for parity inputs")
-    parser.add_argument("--atol", type=float, default=1e-3, help="Absolute tolerance for parity checks")
-    parser.add_argument("--rtol", type=float, default=1e-3, help="Relative tolerance for parity checks")
+    parser.add_argument("--fp32-atol", type=float, default=1e-3,
+                        help="Absolute tolerance for FP32 parity checks")
+    parser.add_argument("--fp32-rtol", type=float, default=1e-3,
+                        help="Relative tolerance for FP32 parity checks")
+    parser.add_argument("--fp16-atol", type=float, default=2e-3,
+                        help="Absolute tolerance for FP16 parity checks")
+    parser.add_argument("--fp16-rtol", type=float, default=2e-3,
+                        help="Relative tolerance for FP16 parity checks")
+    parser.add_argument("--int8-atol", type=float, default=5e-2,
+                        help="Absolute tolerance for INT8 parity checks")
+    parser.add_argument("--int8-rtol", type=float, default=5e-2,
+                        help="Relative tolerance for INT8 parity checks")
     args = parser.parse_args()
 
     repo_to_clean = None
@@ -122,14 +151,16 @@ def main():
                 continue
 
             try:
+                atol, rtol = tolerances_for_model(filename, args)
                 model_ok, details = validate_model(
-                    model_path, args.ckpt, repo_path, args.seed, args.atol, args.rtol
+                    model_path, args.ckpt, repo_path, args.seed, atol, rtol
                 )
             except Exception as exception:
                 print(f"[parity] {filename}: failed ({exception})")
                 healthy = False
                 continue
 
+            print(f"[parity] {filename}: tolerances atol={atol} rtol={rtol}")
             for detail in details:
                 print(f"[parity] {filename}: {detail}")
             healthy = healthy and model_ok
