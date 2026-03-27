@@ -509,6 +509,59 @@ bool paths_equivalent(const std::filesystem::path& left, const std::filesystem::
            std::filesystem::equivalent(left, right, error) && !error;
 }
 
+struct BundleLayoutInfo {
+    std::filesystem::path root = {};
+    std::filesystem::path expected_models_dir = {};
+    std::filesystem::path readme_path = {};
+    std::filesystem::path smoke_test_path = {};
+    std::string kind = "development";
+    bool packaged_layout_detected = false;
+};
+
+BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_dir) {
+    BundleLayoutInfo layout;
+#if defined(_WIN32)
+    if (executable_dir.filename() == "Win64" &&
+        executable_dir.parent_path().filename() == "Contents") {
+        auto contents_dir = executable_dir.parent_path();
+        layout.root = contents_dir.parent_path();
+        layout.expected_models_dir = contents_dir / "Resources" / "models";
+        layout.readme_path = layout.root / "README.txt";
+        layout.smoke_test_path = layout.root / "smoke_test.bat";
+
+        std::error_code error;
+        const bool runtime_present = std::filesystem::exists(executable_dir / "corridorkey.exe",
+                                                             error) &&
+                                     !error;
+        const bool plugin_present = std::filesystem::exists(executable_dir / "CorridorKey.ofx",
+                                                            error) &&
+                                    !error;
+        const bool models_present = std::filesystem::exists(layout.expected_models_dir, error) &&
+                                    !error;
+        layout.kind = "windows_ofx";
+        layout.packaged_layout_detected = runtime_present && plugin_present && models_present;
+        return layout;
+    }
+#endif
+
+    layout.root = executable_dir.filename() == "bin" ? executable_dir.parent_path() : executable_dir;
+    layout.expected_models_dir = layout.root / "models";
+    layout.readme_path = layout.root / "README.txt";
+#if defined(_WIN32)
+    layout.smoke_test_path = layout.root / "smoke_test.bat";
+#else
+    layout.smoke_test_path = layout.root / "smoke_test.sh";
+#endif
+
+    std::error_code error;
+    layout.kind = executable_dir.filename() == "bin" ? "standalone_runtime" : "development";
+    layout.packaged_layout_detected =
+        executable_dir.filename() == "bin" && std::filesystem::exists(layout.readme_path, error) &&
+        !error && std::filesystem::exists(layout.smoke_test_path, error) && !error &&
+        std::filesystem::exists(layout.expected_models_dir, error) && !error;
+    return layout;
+}
+
 nlohmann::json inspect_signature(const std::filesystem::path& executable_path) {
     nlohmann::json json;
 #if defined(__APPLE__)
@@ -557,17 +610,12 @@ nlohmann::json inspect_signature(const std::filesystem::path& executable_path) {
 nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                               const std::filesystem::path& executable_path) {
     nlohmann::json json;
-    std::filesystem::path executable_dir = executable_path.parent_path();
-    std::filesystem::path bundle_root =
-        executable_dir.filename() == "bin" ? executable_dir.parent_path() : executable_dir;
-    std::filesystem::path expected_models_dir = bundle_root / "models";
-    std::filesystem::path readme_path = bundle_root / "README.txt";
-    std::filesystem::path smoke_test_path =
-#if defined(_WIN32)
-        bundle_root / "smoke_test.bat";
-#else
-        bundle_root / "smoke_test.sh";
-#endif
+    const std::filesystem::path executable_dir = executable_path.parent_path();
+    const auto layout = detect_bundle_layout(executable_dir);
+    const std::filesystem::path& bundle_root = layout.root;
+    const std::filesystem::path& expected_models_dir = layout.expected_models_dir;
+    const std::filesystem::path& readme_path = layout.readme_path;
+    const std::filesystem::path& smoke_test_path = layout.smoke_test_path;
 
     auto runtime_library = find_runtime_library(executable_dir);
     auto core_library = find_exact_library(executable_dir,
@@ -601,6 +649,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
             return reference.find("libmlx.dylib") != std::string::npos;
         });
     auto mlx_metallib = find_exact_library(executable_dir, "mlx.metallib");
+    auto directml_library = find_exact_library(executable_dir, "DirectML.dll");
     std::vector<std::filesystem::path> tensorrt_provider_libraries;
     if (auto exact_rtx_provider =
             find_exact_library(executable_dir, "onnxruntime_providers_nv_tensorrt_rtx.dll");
@@ -675,11 +724,26 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         }
     }
 
-    bool packaged_layout_detected =
-        executable_dir.filename() == "bin" && std::filesystem::exists(readme_path) &&
-        std::filesystem::exists(smoke_test_path) && std::filesystem::exists(expected_models_dir);
+    const bool packaged_layout_detected = layout.packaged_layout_detected;
+    const bool windows_ofx_layout = layout.kind == "windows_ofx";
+    const bool windows_rtx_bundle =
+        !tensorrt_provider_libraries.empty() || !tensorrt_rtx_core_libraries.empty() ||
+        !tensorrt_rtx_parser_libraries.empty() || !cuda_runtime_libraries.empty();
+    const bool windows_directml_bundle = directml_library.has_value() && !windows_rtx_bundle;
+    bool runtime_backend_bundle_ready = runtime_library.has_value();
+#if defined(_WIN32)
+    if (windows_rtx_bundle) {
+        runtime_backend_bundle_ready = !tensorrt_provider_libraries.empty() &&
+                                       !tensorrt_rtx_core_libraries.empty() &&
+                                       !tensorrt_rtx_parser_libraries.empty() &&
+                                       !cuda_runtime_libraries.empty();
+    } else if (windows_directml_bundle) {
+        runtime_backend_bundle_ready = directml_library.has_value();
+    }
+#endif
 
     json["root"] = bundle_root.string();
+    json["layout_kind"] = layout.kind;
     json["packaged_layout_detected"] = packaged_layout_detected;
     json["readme_present"] = std::filesystem::exists(readme_path);
     json["smoke_test_present"] = std::filesystem::exists(smoke_test_path);
@@ -696,9 +760,14 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["mlx_library_referenced"] = mlx_reference_found;
     json["mlx_metallib_found"] = mlx_metallib.has_value();
     json["mlx_metallib_path"] = mlx_metallib.has_value() ? mlx_metallib->string() : "";
+    json["directml_runtime_found"] = directml_library.has_value();
+    json["directml_runtime_path"] = directml_library.has_value() ? directml_library->string() : "";
     json["mlx_bridge_present"] = mlx_bridge_present;
     json["mlx_bridge_artifacts"] = mlx_bridge_artifacts;
     json["compiled_context_models"] = compiled_context_models;
+    json["bundle_track"] =
+        windows_rtx_bundle ? "rtx" : (windows_directml_bundle ? "directml" : "generic");
+    json["runtime_backend_bundle_ready"] = runtime_backend_bundle_ready;
     json["tensorrt_rtx_provider_libraries"] = nlohmann::json::array();
     for (const auto& path : tensorrt_provider_libraries) {
         json["tensorrt_rtx_provider_libraries"].push_back(path.filename().string());
@@ -725,11 +794,9 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["packaged_models"] = packaged_models;
     json["signature"] = inspect_signature(executable_path);
 #if defined(_WIN32)
-    json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
-                      core_library.has_value() && packaged_models_present &&
-                      !tensorrt_provider_libraries.empty() &&
-                      !tensorrt_rtx_core_libraries.empty() &&
-                      !tensorrt_rtx_parser_libraries.empty() && !cuda_runtime_libraries.empty();
+    json["healthy"] = packaged_layout_detected && packaged_models_present &&
+                      runtime_backend_bundle_ready &&
+                      (windows_ofx_layout || core_library.has_value());
 #else
     json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
                       runtime_reference_found && core_library.has_value() && core_reference_found &&
@@ -1197,6 +1264,11 @@ nlohmann::json latency_summary(const std::vector<double>& samples) {
 }
 
 }  // namespace
+
+nlohmann::json inspect_bundle_for_diagnostics(const std::filesystem::path& models_dir,
+                                              const std::filesystem::path& executable_path) {
+    return inspect_bundle(models_dir, executable_path);
+}
 
 nlohmann::json inspect_operational_health(const std::filesystem::path& models_dir) {
     auto executable_path = current_executable_path();

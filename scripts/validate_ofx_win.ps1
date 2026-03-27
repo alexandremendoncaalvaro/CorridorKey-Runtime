@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($BundlePath)) {
-    $BundlePath = Join-Path $repoRoot "dist\CorridorKey.ofx"
+    $BundlePath = Join-Path $repoRoot "dist\CorridorKey.ofx.bundle"
 }
 
 Write-Host "Validating OFX bundle: $BundlePath" -ForegroundColor Cyan
@@ -205,6 +205,89 @@ foreach ($model in $optionalModels) {
     }
 }
 
+$doctorReportPath = Join-Path $bundleRoot "doctor_report.json"
+$previousModelsDir = if (Test-Path Env:CORRIDORKEY_MODELS_DIR) {
+    $env:CORRIDORKEY_MODELS_DIR
+} else {
+    $null
+}
+
+Write-Host "[DOCTOR] Running packaged runtime doctor..." -ForegroundColor Cyan
+Push-Location $win64Dir
+try {
+    $doctorStdoutPath = Join-Path $env:TEMP ("corridorkey_validate_stdout_" + [System.Guid]::NewGuid().ToString("N") + ".txt")
+    $doctorStderrPath = Join-Path $env:TEMP ("corridorkey_validate_stderr_" + [System.Guid]::NewGuid().ToString("N") + ".txt")
+    try {
+        $doctorCommand = 'set "CORRIDORKEY_MODELS_DIR={0}" && cd /d "{1}" && corridorkey.exe doctor --json > "{2}" 2> "{3}"' -f `
+            $resourcesDir, $win64Dir, $doctorStdoutPath, $doctorStderrPath
+        & $env:ComSpec /v:on /d /c $doctorCommand | Out-Null
+        $doctorExitCode = $LASTEXITCODE
+        $doctorJson = if (Test-Path $doctorStdoutPath) {
+            Get-Content -Path $doctorStdoutPath -Raw -ErrorAction SilentlyContinue
+        } else {
+            ""
+        }
+        $doctorStderr = if (Test-Path $doctorStderrPath) {
+            Get-Content -Path $doctorStderrPath -Raw -ErrorAction SilentlyContinue
+        } else {
+            ""
+        }
+    } finally {
+        Remove-Item $doctorStdoutPath -Force -ErrorAction SilentlyContinue
+        Remove-Item $doctorStderrPath -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($doctorExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($doctorJson)) {
+        if (-not [string]::IsNullOrWhiteSpace($doctorStderr)) {
+            Write-Host "[WARN] Packaged runtime doctor stderr:" -ForegroundColor Yellow
+            Write-Host $doctorStderr -ForegroundColor Yellow
+        }
+        throw "Packaged runtime doctor failed."
+    }
+
+    $doctorJson | Set-Content -Path $doctorReportPath -Encoding UTF8
+    $doctor = $doctorJson | ConvertFrom-Json
+    if ($null -eq $doctor.summary) {
+        throw "Packaged runtime doctor report is missing the summary payload."
+    }
+    if ($null -eq $doctor.model_contracts) {
+        throw "Packaged runtime doctor report is missing the model_contracts payload."
+    }
+
+    Write-Host "[PASS] Wrote doctor report: $doctorReportPath" -ForegroundColor Green
+    Write-Host "[INFO] Doctor summary healthy=$($doctor.summary.healthy) model_contracts_healthy=$($doctor.summary.model_contracts_healthy) windows_universal_healthy=$($doctor.summary.windows_universal_healthy)" -ForegroundColor Cyan
+    $contractGroups = @($doctor.model_contracts.groups)
+    foreach ($group in $contractGroups) {
+        Write-Host "[INFO] Model contract group '$($group.group)': healthy=$($group.healthy) loadable=$($group.all_models_loadable) consistent=$($group.contract_consistent) baseline=$($group.baseline_model)" -ForegroundColor Cyan
+    }
+    $unhealthyContractGroups = @($contractGroups | Where-Object { -not $_.healthy })
+    foreach ($group in $unhealthyContractGroups) {
+        $firstIssue = $group.models | Where-Object {
+            (-not $_.load_ok) -or (-not $_.contract_match_baseline)
+        } | Select-Object -First 1
+        if ($null -ne $firstIssue) {
+            $reason = if ([string]::IsNullOrWhiteSpace($firstIssue.error)) {
+                "Contract mismatch relative to baseline."
+            } else {
+                $firstIssue.error
+            }
+            Write-Host "[WARN] Model contract group '$($group.group)' first issue: $($firstIssue.filename) -> $reason" -ForegroundColor Yellow
+        }
+    }
+    if (-not $doctor.summary.model_contracts_healthy) {
+        throw "Packaged runtime doctor reported unhealthy model contracts. See $doctorReportPath."
+    }
+    if (-not $doctor.summary.healthy) {
+        Write-Host "[WARN] Doctor summary is unhealthy. Review doctor_report.json before sending this build to testers." -ForegroundColor Yellow
+    }
+} finally {
+    if ($null -ne $previousModelsDir) {
+        $env:CORRIDORKEY_MODELS_DIR = $previousModelsDir
+    } else {
+        Remove-Item Env:CORRIDORKEY_MODELS_DIR -ErrorAction SilentlyContinue
+    }
+    Pop-Location
+}
 Write-Host ""
 Write-Host "================================" -ForegroundColor Green
 Write-Host "Bundle validation PASSED" -ForegroundColor Green
