@@ -1,5 +1,6 @@
 param(
-    [string]$Version = "",
+    [Alias("Version")]
+    [string]$OrtVersion = "",
     [string]$OutputDir = ""
 )
 
@@ -12,16 +13,11 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 function Resolve-OrtVersion {
     param([string]$RepoRoot)
 
-    if (-not [string]::IsNullOrWhiteSpace($Version)) {
-        return $Version
+    if (-not [string]::IsNullOrWhiteSpace($OrtVersion)) {
+        return $OrtVersion
     }
 
-    $candidate = Join-Path $RepoRoot "vendor\onnxruntime-windows-rtx\onnxruntime.dll"
-    if (-not (Test-Path $candidate)) {
-        throw "Unable to infer ONNX Runtime version from vendor\onnxruntime-windows-rtx\onnxruntime.dll. Pass -Version explicitly or stage the curated RTX runtime first."
-    }
-
-    return (Get-Item $candidate).VersionInfo.ProductVersion
+    return Get-CorridorKeyWindowsOrtBinaryVersion -RepoRoot $RepoRoot -Track "rtx"
 }
 
 function Download-Package {
