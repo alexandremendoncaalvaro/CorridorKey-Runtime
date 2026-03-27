@@ -239,6 +239,36 @@ TEST_CASE("automatic coarse-to-fine selection chooses a safer coarse artifact",
     REQUIRE(selection->coarse_to_fine);
 }
 
+TEST_CASE("automatic coarse-to-fine selection falls back to lower packaged coarse artifacts",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-quality-coarse-to-fine-lower-packaged");
+    touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
+                                kQuantizationFp16, 10240, QualityFallbackMode::Auto);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 1536);
+    REQUIRE(selection->effective_resolution == 768);
+    REQUIRE(selection->used_fallback);
+    REQUIRE(selection->coarse_to_fine);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_768.onnx");
+}
+
+TEST_CASE("coarse-to-fine override requires the exact requested coarse artifact",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-quality-coarse-to-fine-exact-override");
+    touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
+                                kQuantizationFp16, 10240, QualityFallbackMode::Auto, 1024);
+
+    REQUIRE_FALSE(selection.has_value());
+}
+
 TEST_CASE("coarse-to-fine warning explains the coarse artifact path", "[unit][ofx][regression]") {
     QualityArtifactSelection selection{};
     selection.requested_resolution = 1536;
@@ -247,7 +277,7 @@ TEST_CASE("coarse-to-fine warning explains the coarse artifact path", "[unit][of
     selection.coarse_to_fine = true;
 
     REQUIRE(quality_fallback_warning(kQualityUltra, selection) ==
-            "Ultra (1536) (1536px) will run coarse-to-fine using 1024px coarse inference");
+            "Ultra (1536) (1536px) will run coarse-to-fine using the 1024px packaged artifact");
 }
 
 TEST_CASE("fixed windows tensorRT quality keeps lower packaged fallbacks after the exact model",

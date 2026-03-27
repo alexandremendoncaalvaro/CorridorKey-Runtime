@@ -234,6 +234,21 @@ TEST_CASE("runtime coarse-to-fine policy prefers safer coarse artifacts", "[unit
     REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536,
                                                   QualityFallbackMode::CoarseToFine));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 768) == 768);
+    REQUIRE_FALSE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 1536).has_value());
+}
+
+TEST_CASE("runtime refinement override validation is explicit for current artifacts",
+          "[unit][runtime][regression]") {
+    auto auto_mode =
+        validate_refinement_mode_for_artifact("corridorkey_fp16_1024.onnx", RefinementMode::Auto);
+    REQUIRE(auto_mode.has_value());
+
+    auto tiled_mode =
+        validate_refinement_mode_for_artifact("corridorkey_fp16_1024.onnx", RefinementMode::Tiled);
+    REQUIRE_FALSE(tiled_mode.has_value());
+    REQUIRE(tiled_mode.error().code == ErrorCode::InvalidParameters);
+    REQUIRE(tiled_mode.error().message.find("refinement strategy override") !=
+            std::string::npos);
 }
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {
     auto json = summarize_latency_samples({4.0, 6.0, 8.0, 10.0});
