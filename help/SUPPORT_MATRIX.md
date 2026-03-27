@@ -78,10 +78,12 @@ track. Do not rely on it for production use.
 **AMD:** DirectML integration exists but known errors occur in practice.
 AMD GPUs are not officially supported. Do not rely on them for production use.
 
-**Windows product tracks:** The shipped Windows installers are the `RTX` track
-and the `DirectML` track. Other execution-provider hooks present in the core
-runtime, such as CUDA, WinML, and OpenVINO, are not current product support
-tracks unless they are explicitly packaged and validated.
+**Windows product tracks:** The canonical public Windows release emits the
+official `RTX` installer by default. The `DirectML` installer is experimental
+and should only be published intentionally. Other execution-provider hooks
+present in the core runtime, such as CUDA, WinML, and OpenVINO, are not
+current product support tracks unless they are explicitly packaged and
+validated.
 
 The `corridorkey doctor` command reports the active backend and any fallback
 conditions on your specific hardware before processing begins.

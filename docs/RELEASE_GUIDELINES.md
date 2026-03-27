@@ -72,6 +72,12 @@ The canonical Windows release command is:
 
 - `scripts\windows.ps1 -Task release -Version X.Y.Z`
 
+That canonical command generates the official Windows `RTX` release by
+default. Experimental Windows tracks must be requested explicitly:
+
+- `scripts\windows.ps1 -Task release -Version X.Y.Z -Track dml`
+- `scripts\windows.ps1 -Task release -Version X.Y.Z -Track all`
+
 The wrapper also supports `build`, `prepare-rtx`, `package-ofx`,
 `package-runtime`, and `sync-version` for local workflow needs, but they are
 all part of the same entrypoint. Lower-level scripts are internal delegates
@@ -88,6 +94,11 @@ The supported repo-local runtime locations are only
 2. Run the canonical Windows release flow:
    ```powershell
    .\scripts\windows.ps1 -Task release -Version X.Y.Z
+   ```
+3. Only request experimental Windows tracks intentionally:
+   ```powershell
+   .\scripts\windows.ps1 -Task release -Version X.Y.Z -Track dml
+   .\scripts\windows.ps1 -Task release -Version X.Y.Z -Track all
    ```
 
 Scripts validate the runtime root. If `-OrtRoot` does not map to the expected
@@ -119,9 +130,11 @@ officially supported hardware family.
 
 - The Windows `RTX` artifact is the official Windows track for NVIDIA RTX 30
   series and newer.
+- The canonical public Windows release produces only the `RTX` artifact unless
+  another track is requested explicitly.
 - The Windows `DirectML` artifact is an experimental Windows track. It must
-  not be described as official support for all AMD, Intel, or RTX 20 series
-  hardware.
+  not be published by default or described as official support for all AMD,
+  Intel, or RTX 20 series hardware.
 - Apple Silicon is the official macOS track.
 - Do not turn a backend name into a broad hardware promise. When in doubt,
   point users to `help/SUPPORT_MATRIX.md`.

@@ -37,7 +37,8 @@ see [help/SUPPORT_MATRIX.md](help/SUPPORT_MATRIX.md).
      newer, backed by the ONNX Runtime TensorRT RTX EP.
    - **DirectML package** - experimental Windows track for DirectX 12 GPUs
      outside the official RTX path. This track is not broadly validated across
-     AMD, Intel, or RTX 20 series hardware.
+     AMD, Intel, or RTX 20 series hardware and should only appear in releases
+     when it is published intentionally.
 2. Run the installer as Administrator with DaVinci Resolve closed.
 3. Open DaVinci Resolve 20, go to the Color or Fusion page, and search for
    "CorridorKey" in the OpenFX Library.
@@ -102,10 +103,13 @@ cmake --build --preset release
 ```
 
 On Windows, use `.\scripts\windows.ps1 -Task build -Preset release` for local
-builds and `.\scripts\windows.ps1 -Task release -Version X.Y.Z` for release
-packaging. Lower-level Windows scripts exist only as internal delegates for
-debugging the wrapper itself. If you invoke CMake directly, activate the MSVC
-developer environment first. Windows distribution artifacts include
+builds and `.\scripts\windows.ps1 -Task release -Version X.Y.Z` for official
+Windows release packaging. That canonical release command emits the validated
+`RTX` Windows installer by default. Publish the experimental `DirectML` track
+only when you request it explicitly with `-Track dml` or `-Track all`.
+Lower-level Windows scripts exist only as internal delegates for debugging the
+wrapper itself. If you invoke CMake directly, activate the MSVC developer
+environment first. Windows distribution artifacts include
 `model_inventory.json` and `bundle_validation.json` when packaging succeeds
 with a partial model set, so missing packaged models are explicit and do not
 silently change runtime behavior.
