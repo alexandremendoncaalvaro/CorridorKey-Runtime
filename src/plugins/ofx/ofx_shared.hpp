@@ -71,6 +71,7 @@ constexpr const char* kParamRuntimeDevice = "runtime_device";
 constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality";
 constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
+constexpr const char* kParamRuntimeSession = "runtime_session";
 constexpr const char* kParamRuntimeStatus = "runtime_status";
 constexpr const char* kParamRuntimeTimings = "runtime_timings";
 constexpr const char* kParamRenderTimeout = "render_timeout";
@@ -99,6 +100,8 @@ struct RuntimePanelState {
     int effective_resolution = 0;
     bool cpu_quality_guardrail_active = false;
     std::filesystem::path artifact_path = {};
+    bool session_prepared = false;
+    std::uint64_t session_ref_count = 0;
 };
 
 struct InstanceData {
@@ -135,6 +138,7 @@ struct InstanceData {
     OfxParamHandle runtime_requested_quality_param = nullptr;
     OfxParamHandle runtime_effective_quality_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
+    OfxParamHandle runtime_session_param = nullptr;
     OfxParamHandle runtime_status_param = nullptr;
     OfxParamHandle runtime_timings_param = nullptr;
     OfxParamHandle render_timeout_param = nullptr;
@@ -216,6 +220,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                RefinementMode refinement_mode = RefinementMode::Auto);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
                                             bool cpu_quality_guardrail_active);
+bool sync_runtime_panel_session_state(InstanceData* data);
+std::string runtime_session_runtime_label(const InstanceData& data);
 std::string runtime_status_runtime_label(const InstanceData& data);
 std::string runtime_timings_runtime_label(const InstanceData& data);
 void update_runtime_panel(InstanceData* data);

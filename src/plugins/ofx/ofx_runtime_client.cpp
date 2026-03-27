@@ -318,6 +318,10 @@ bool OfxRuntimeClient::has_session() const {
     return !m_session.session_id.empty();
 }
 
+std::uint64_t OfxRuntimeClient::session_ref_count() const {
+    return m_session.ref_count;
+}
+
 void OfxRuntimeClient::set_request_timeout_ms(int ms) {
     m_options.request_timeout_ms = ms;
 }

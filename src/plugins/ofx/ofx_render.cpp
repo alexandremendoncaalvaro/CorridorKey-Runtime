@@ -404,6 +404,7 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     const DeviceInfo effective_device = data->use_runtime_server
                                             ? data->runtime_client->current_device()
                                             : data->engine->current_device();
+    const bool session_state_changed = sync_runtime_panel_session_state(data);
     log_render_event("render_result", render_phase, requested_device, effective_device,
                      data->model_path, data->requested_resolution, data->active_resolution,
                      data->use_runtime_server ? data->runtime_client->backend_fallback()
@@ -411,6 +412,8 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     if (effective_device.backend != data->device.backend ||
         effective_device.name != data->device.name) {
         data->device = effective_device;
+        update_runtime_panel(data);
+    } else if (session_state_changed) {
         update_runtime_panel(data);
     }
     if (requested_device.backend != Backend::Auto &&

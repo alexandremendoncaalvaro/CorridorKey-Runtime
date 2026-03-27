@@ -298,6 +298,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                 "quality mode.",
                                 "runtime_group");
     define_runtime_status_param(
+        param_set, kParamRuntimeSession, "Runtime Session", "Initializing...",
+        "Shows whether this OFX instance is using a dedicated runtime session or a shared one.",
+        "runtime_group");
+    define_runtime_status_param(
         param_set, kParamRuntimeStatus, "Status", "Initializing...",
         "Shows the current runtime state, warnings, or the most recent error during engine load "
         "or render.",

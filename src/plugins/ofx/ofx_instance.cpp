@@ -179,6 +179,14 @@ void sync_runtime_panel_state_from_active_engine(InstanceData* data) {
     data->runtime_panel_state.effective_resolution = data->active_resolution;
     data->runtime_panel_state.cpu_quality_guardrail_active = data->cpu_quality_guardrail_active;
     data->runtime_panel_state.artifact_path = data->model_path;
+    if (data->use_runtime_server && data->runtime_client != nullptr && data->runtime_client->has_session()) {
+        data->runtime_panel_state.session_prepared = true;
+        data->runtime_panel_state.session_ref_count = data->runtime_client->session_ref_count();
+        return;
+    }
+
+    data->runtime_panel_state.session_prepared = data->engine != nullptr;
+    data->runtime_panel_state.session_ref_count = data->engine != nullptr ? 1 : 0;
 }
 
 void set_runtime_panel_state_for_failed_quality_request(
@@ -193,6 +201,31 @@ void set_runtime_panel_state_for_failed_quality_request(
     data->runtime_panel_state.effective_resolution = 0;
     data->runtime_panel_state.cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     data->runtime_panel_state.artifact_path = artifact_path;
+    data->runtime_panel_state.session_prepared = false;
+    data->runtime_panel_state.session_ref_count = 0;
+}
+
+bool sync_runtime_panel_session_state_impl(InstanceData* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    const bool previous_prepared = data->runtime_panel_state.session_prepared;
+    const std::uint64_t previous_ref_count = data->runtime_panel_state.session_ref_count;
+
+    if (data->use_runtime_server && data->runtime_client != nullptr && data->runtime_client->has_session()) {
+        data->runtime_panel_state.session_prepared = true;
+        data->runtime_panel_state.session_ref_count = data->runtime_client->session_ref_count();
+    } else if (data->engine != nullptr) {
+        data->runtime_panel_state.session_prepared = true;
+        data->runtime_panel_state.session_ref_count = 1;
+    } else {
+        data->runtime_panel_state.session_prepared = false;
+        data->runtime_panel_state.session_ref_count = 0;
+    }
+
+    return data->runtime_panel_state.session_prepared != previous_prepared ||
+           data->runtime_panel_state.session_ref_count != previous_ref_count;
 }
 
 std::uint64_t mix_cache_token(std::uint64_t token, const std::string& value) {
@@ -306,6 +339,23 @@ std::string runtime_status_runtime_label_impl(const InstanceData& data) {
     return data.render_count > 0 ? "Ready" : "Idle";
 }
 
+std::string runtime_session_runtime_label_impl(const InstanceData& data) {
+    if (data.runtime_panel_state.session_prepared) {
+        const std::uint64_t shared_node_count = std::max<std::uint64_t>(
+            data.runtime_panel_state.session_ref_count, 1);
+        if (shared_node_count > 1) {
+            return "Shared (" + std::to_string(shared_node_count) + " nodes)";
+        }
+        return "Dedicated";
+    }
+
+    if (!data.last_error.empty()) {
+        return "Unavailable";
+    }
+
+    return "Loading...";
+}
+
 std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
     if (data.last_frame_ms <= 0.0) {
         return "No frames yet";
@@ -405,6 +455,8 @@ void update_runtime_panel_values(InstanceData* data) {
         return;
     }
 
+    sync_runtime_panel_session_state_impl(data);
+
     bool has_session = false;
     if (data->use_runtime_server) {
         has_session = data->runtime_client != nullptr && data->runtime_client->has_session();
@@ -428,6 +480,8 @@ void update_runtime_panel_values(InstanceData* data) {
     set_string_param_value(data->runtime_artifact_param,
                            is_loading ? "Loading..."
                                       : runtime_artifact_label(data->runtime_panel_state.artifact_path));
+    set_string_param_value(data->runtime_session_param,
+                           runtime_session_runtime_label(*data));
     set_string_param_value(data->runtime_status_param,
                            is_loading ? "Loading..." : runtime_status_runtime_label(*data));
     set_string_param_value(data->runtime_timings_param,
@@ -437,7 +491,8 @@ void update_runtime_panel_values(InstanceData* data) {
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
                               const std::string& device, const std::string& requested_quality,
                               const std::string& effective_quality, const std::string& artifact,
-                              const std::string& status, const std::string& timings) {
+                              const std::string& session, const std::string& status,
+                              const std::string& timings) {
     if (data == nullptr) {
         return;
     }
@@ -447,6 +502,7 @@ void set_runtime_panel_status(InstanceData* data, const std::string& processing,
     set_string_param_value(data->runtime_requested_quality_param, requested_quality);
     set_string_param_value(data->runtime_effective_quality_param, effective_quality);
     set_string_param_value(data->runtime_artifact_param, artifact);
+    set_string_param_value(data->runtime_session_param, session);
     set_string_param_value(data->runtime_status_param, status);
     set_string_param_value(data->runtime_timings_param, timings);
 }
@@ -576,6 +632,14 @@ std::string requested_quality_runtime_label(int quality_mode, int requested_reso
 
 std::string runtime_status_runtime_label(const InstanceData& data) {
     return runtime_status_runtime_label_impl(data);
+}
+
+std::string runtime_session_runtime_label(const InstanceData& data) {
+    return runtime_session_runtime_label_impl(data);
+}
+
+bool sync_runtime_panel_session_state(InstanceData* data) {
+    return sync_runtime_panel_session_state_impl(data);
 }
 
 std::string runtime_timings_runtime_label(const InstanceData& data) {
@@ -719,6 +783,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_effective_quality_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeArtifact,
                                        &data->runtime_artifact_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeSession,
+                                       &data->runtime_session_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeStatus, &data->runtime_status_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeTimings,
@@ -731,7 +797,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     sync_dependent_params(data.get());
 
     set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
-                             "Loading...", "Loading...", "Loading...", "Loading...");
+                             "Loading...", "Loading...", "Loading...", "Loading...",
+                             "Loading...");
 
     int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
     int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;

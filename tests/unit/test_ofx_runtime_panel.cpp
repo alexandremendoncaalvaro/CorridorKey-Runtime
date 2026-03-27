@@ -129,6 +129,27 @@ TEST_CASE("runtime status omits frame timings when a dedicated timings field exi
     REQUIRE(runtime_timings_runtime_label(data) == "Last frame: 12.0 ms | Avg: 10.5 ms");
 }
 
+TEST_CASE("runtime session label exposes dedicated versus shared sessions",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+
+    REQUIRE(runtime_session_runtime_label(data) == "Loading...");
+
+    data.last_error = "Runtime session failed";
+    REQUIRE(runtime_session_runtime_label(data) == "Unavailable");
+
+    data.last_error.clear();
+    data.runtime_panel_state.session_prepared = true;
+    data.runtime_panel_state.session_ref_count = 1;
+    REQUIRE(runtime_session_runtime_label(data) == "Dedicated");
+
+    data.runtime_panel_state.session_ref_count = 2;
+    REQUIRE(runtime_session_runtime_label(data) == "Shared (2 nodes)");
+
+    data.runtime_panel_state.session_ref_count = 3;
+    REQUIRE(runtime_session_runtime_label(data) == "Shared (3 nodes)");
+}
+
 TEST_CASE("runtime status still prioritizes errors and warnings while timings stay separate",
           "[unit][ofx][regression]") {
     InstanceData data{};
