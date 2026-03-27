@@ -6,9 +6,9 @@ runtime with no Python dependency.
 
 The project delivers two user surfaces:
 
-- **CLI** (`corridorkey`) — a single-binary command-line tool for batch and
+- **CLI** (`corridorkey`) - a single-binary command-line tool for batch and
   pipeline use.
-- **OFX Plugin** — an OpenFX plugin for DaVinci Resolve on Windows and macOS.
+- **OFX Plugin** - an OpenFX plugin for DaVinci Resolve on Windows and macOS.
 
 ![CorridorKey OFX Plugin](./assets/ofx_example.gif)
 
@@ -16,12 +16,12 @@ The project delivers two user surfaces:
 
 Pre-packaged releases are available on the
 [Releases](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases)
-page. Download the package that matches your platform and hardware path.
+page. Download the package that matches your platform and product track.
 
 For supported hardware configurations and explicit support status per platform,
 see [help/SUPPORT_MATRIX.md](help/SUPPORT_MATRIX.md).
 
-### OFX Plugin — macOS (Apple Silicon)
+### OFX Plugin - macOS (Apple Silicon)
 
 1. Download the `.pkg` Apple Silicon installer.
 2. Run the installer with DaVinci Resolve closed.
@@ -30,19 +30,22 @@ see [help/SUPPORT_MATRIX.md](help/SUPPORT_MATRIX.md).
 4. Drag the node onto your clip. The plugin uses the MLX-accelerated path
    automatically on M-series chips.
 
-### OFX Plugin — Windows
+### OFX Plugin - Windows
 
 1. Download the `.exe` installer for your hardware path:
-   - **TensorRT package** — for NVIDIA Ampere (RTX 30 series) and newer.
-   - **DirectML package** — for Intel iGPU and other DirectX 12 hardware.
+   - **RTX package** - official Windows path for NVIDIA RTX 30 series and
+     newer, backed by the ONNX Runtime TensorRT RTX EP.
+   - **DirectML package** - experimental Windows track for DirectX 12 GPUs
+     outside the official RTX path. This track is not broadly validated across
+     AMD, Intel, or RTX 20 series hardware.
 2. Run the installer as Administrator with DaVinci Resolve closed.
 3. Open DaVinci Resolve 20, go to the Color or Fusion page, and search for
    "CorridorKey" in the OpenFX Library.
-4. Drag the node onto your clip. TensorRT compilation on the first frame may
-   take 10–30 seconds.
+4. Drag the node onto your clip. TensorRT RTX compilation on the first frame
+   may take 10-30 seconds.
 
 For plugin discovery issues, version mismatches, or unsupported hardware
-fallback behavior, see [help/TROUBLESHOOTING.md](help/TROUBLESHOOTING.md).
+behavior, see [help/TROUBLESHOOTING.md](help/TROUBLESHOOTING.md).
 
 ### CLI
 
@@ -102,7 +105,7 @@ On Windows, use `.\scripts\windows.ps1 -Task build -Preset release` for local
 builds and `.\scripts\windows.ps1 -Task release -Version X.Y.Z` for release
 packaging. Lower-level Windows scripts exist only as internal delegates for
 debugging the wrapper itself. If you invoke CMake directly, activate the MSVC
-developer environment first. Windows distribution artifacts now include
+developer environment first. Windows distribution artifacts include
 `model_inventory.json` and `bundle_validation.json` when packaging succeeds
 with a partial model set, so missing packaged models are explicit and do not
 silently change runtime behavior.
@@ -111,24 +114,24 @@ silently change runtime behavior.
 
 ### User Help
 
-- [OFX Panel Guide](help/OFX_PANEL_GUIDE.md) — practical control-by-control
+- [OFX Panel Guide](help/OFX_PANEL_GUIDE.md) - practical control-by-control
   guide for CorridorKey inside Resolve.
-- [Resolve Tutorials](help/OFX_RESOLVE_TUTORIALS.md) — step-by-step workflows
+- [Resolve Tutorials](help/OFX_RESOLVE_TUTORIALS.md) - step-by-step workflows
   for getting a usable key and diagnosing common issues.
-- [Support Matrix](help/SUPPORT_MATRIX.md) — official support status by
+- [Support Matrix](help/SUPPORT_MATRIX.md) - official support status by
   platform, hardware, and Resolve version.
-- [Troubleshooting](help/TROUBLESHOOTING.md) — practical guide for plugin
-  discovery, hardware fallback, first-run behavior, and bug reporting.
+- [Troubleshooting](help/TROUBLESHOOTING.md) - practical guide for plugin
+  discovery, hardware selection, first-run behavior, and bug reporting.
 
 ### Development Docs
 
-- [Technical Specification](docs/SPEC.md) — product scope and support
+- [Technical Specification](docs/SPEC.md) - product scope and support
   philosophy.
-- [Architecture](docs/ARCHITECTURE.md) — source structure and dependency
+- [Architecture](docs/ARCHITECTURE.md) - source structure and dependency
   rules.
-- [Engineering Guidelines](docs/GUIDELINES.md) — code standards, testing
+- [Engineering Guidelines](docs/GUIDELINES.md) - code standards, testing
   strategy, and build rules.
-- [Release Guidelines](docs/RELEASE_GUIDELINES.md) — release build and
+- [Release Guidelines](docs/RELEASE_GUIDELINES.md) - release build and
   packaging procedure.
 
 ## Contributing

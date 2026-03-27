@@ -174,8 +174,8 @@ fragmentation in per-frame code causes OFX instability.
   environment first.
 - Windows packaging may proceed with a partial model set, but the generated
   artifacts must include explicit inventory and validation reports. Missing
-  models are warnings; invalid packaged models that are present remain release
-  blockers.
+  models are reportable packaging state; invalid packaged models that are
+  present remain release blockers.
 
 ### 5.2 Dependencies (vcpkg)
 
@@ -338,6 +338,10 @@ project is, what it does, how it works, and why specific choices were made.
 - **Definitions.** Concrete terms, types, interfaces, behaviors, constraints.
 - **Current state.** What is built, how it works, how to use it.
 - **Decisions.** Choices that were made and the reasons behind them.
+- **Support claims tied to product tracks.** Compatibility statements must
+  match packaged and validated product tracks in
+  `help/SUPPORT_MATRIX.md`. Backend enums, probes, or core-only provider hooks
+  are not support claims by themselves.
 
 ### 10.3 What Documentation Must Not Contain
 
