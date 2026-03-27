@@ -475,6 +475,26 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 9: Advanced (timeouts) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
+    define_choice_param(
+        param_set, kParamQualityFallbackMode, "Quality Fallback", kQualityFallbackAuto,
+        {quality_fallback_mode_ui_label(kQualityFallbackAuto),
+         quality_fallback_mode_ui_label(kQualityFallbackDirect),
+         quality_fallback_mode_ui_label(kQualityFallbackCoarseToFine)},
+        "Advanced diagnostics override. Auto chooses the safest runtime path. Direct disables "
+        "coarse-to-fine. Coarse to Fine forces the fallback path.",
+        "advanced_group");
+    define_choice_param(param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,
+                        {refinement_mode_ui_label(kRefinementAuto),
+                         refinement_mode_ui_label(kRefinementFullFrame),
+                         refinement_mode_ui_label(kRefinementTiled)},
+                        "Advanced diagnostics override for the local refinement stage.",
+                        "advanced_group");
+    define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
+                        kCoarseResolutionAutomatic,
+                        {"Automatic", "512", "768", "1024", "1536", "2048"},
+                        "Advanced diagnostics override for the coarse artifact resolution.",
+                        "advanced_group");
+
     define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)",
                      common::kDefaultOfxRenderTimeoutSeconds, 10, 300,
                      "Maximum time in seconds to wait for a single frame render. "

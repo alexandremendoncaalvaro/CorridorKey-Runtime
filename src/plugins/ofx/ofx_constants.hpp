@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <corridorkey/types.hpp>
 #include <string_view>
 
 #include "ofxColour.h"
@@ -30,6 +31,82 @@ inline const char* quality_mode_ui_label(int quality_mode) {
             return "Maximum (2048)";
         default:
             return "Auto";
+    }
+}
+
+constexpr int kQualityFallbackAuto = 0;
+constexpr int kQualityFallbackDirect = 1;
+constexpr int kQualityFallbackCoarseToFine = 2;
+
+inline const char* quality_fallback_mode_ui_label(int choice) {
+    switch (choice) {
+        case kQualityFallbackDirect:
+            return "Direct";
+        case kQualityFallbackCoarseToFine:
+            return "Coarse to Fine";
+        default:
+            return "Auto";
+    }
+}
+
+inline QualityFallbackMode quality_fallback_mode_from_choice(int choice) {
+    switch (choice) {
+        case kQualityFallbackDirect:
+            return QualityFallbackMode::Direct;
+        case kQualityFallbackCoarseToFine:
+            return QualityFallbackMode::CoarseToFine;
+        default:
+            return QualityFallbackMode::Auto;
+    }
+}
+
+constexpr int kRefinementAuto = 0;
+constexpr int kRefinementFullFrame = 1;
+constexpr int kRefinementTiled = 2;
+
+inline const char* refinement_mode_ui_label(int choice) {
+    switch (choice) {
+        case kRefinementFullFrame:
+            return "Full Frame";
+        case kRefinementTiled:
+            return "Tiled";
+        default:
+            return "Auto";
+    }
+}
+
+inline RefinementMode refinement_mode_from_choice(int choice) {
+    switch (choice) {
+        case kRefinementFullFrame:
+            return RefinementMode::FullFrame;
+        case kRefinementTiled:
+            return RefinementMode::Tiled;
+        default:
+            return RefinementMode::Auto;
+    }
+}
+
+constexpr int kCoarseResolutionAutomatic = 0;
+constexpr int kCoarseResolution512 = 1;
+constexpr int kCoarseResolution768 = 2;
+constexpr int kCoarseResolution1024 = 3;
+constexpr int kCoarseResolution1536 = 4;
+constexpr int kCoarseResolution2048 = 5;
+
+inline int coarse_resolution_override_from_choice(int choice) {
+    switch (choice) {
+        case kCoarseResolution512:
+            return 512;
+        case kCoarseResolution768:
+            return 768;
+        case kCoarseResolution1024:
+            return 1024;
+        case kCoarseResolution1536:
+            return 1536;
+        case kCoarseResolution2048:
+            return 2048;
+        default:
+            return 0;
     }
 }
 

@@ -25,15 +25,23 @@ namespace corridorkey::core {
     return 1.0F;
 }
 
+[[nodiscard]] inline float edge_aware_tile_weight(int local_x, int local_y, int tile_width,
+                                                  int tile_height, int overlap, bool touches_left,
+                                                  bool touches_right, bool touches_top,
+                                                  bool touches_bottom) {
+    const float wx =
+        tile_blend_axis_weight(local_x, tile_width, overlap, touches_left, touches_right);
+    const float wy =
+        tile_blend_axis_weight(local_y, tile_height, overlap, touches_top, touches_bottom);
+    return std::min(wx, wy);
+}
+
 [[nodiscard]] inline float edge_aware_tile_weight(int local_x, int local_y, int tile_size,
                                                   int overlap, bool touches_left,
                                                   bool touches_right, bool touches_top,
                                                   bool touches_bottom) {
-    const float wx =
-        tile_blend_axis_weight(local_x, tile_size, overlap, touches_left, touches_right);
-    const float wy =
-        tile_blend_axis_weight(local_y, tile_size, overlap, touches_top, touches_bottom);
-    return std::min(wx, wy);
+    return edge_aware_tile_weight(local_x, local_y, tile_size, tile_size, overlap, touches_left,
+                                  touches_right, touches_top, touches_bottom);
 }
 
 }  // namespace corridorkey::core

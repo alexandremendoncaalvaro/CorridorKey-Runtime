@@ -171,7 +171,11 @@ bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& r
            lhs.batch_size == rhs.batch_size && lhs.enable_tiling == rhs.enable_tiling &&
            lhs.tile_padding == rhs.tile_padding && lhs.upscale_method == rhs.upscale_method &&
            lhs.source_passthrough == rhs.source_passthrough && lhs.sp_erode_px == rhs.sp_erode_px &&
-           lhs.sp_blur_px == rhs.sp_blur_px;
+           lhs.sp_blur_px == rhs.sp_blur_px &&
+           lhs.requested_quality_resolution == rhs.requested_quality_resolution &&
+           lhs.quality_fallback_mode == rhs.quality_fallback_mode &&
+           lhs.refinement_mode == rhs.refinement_mode &&
+           lhs.coarse_resolution_override == rhs.coarse_resolution_override;
 }
 
 
@@ -565,7 +569,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     int quality_mode = kQualityAuto;
+    int quality_fallback_mode = kQualityFallbackAuto;
     int output_mode = kOutputProcessed;
+    int refinement_mode = kRefinementAuto;
+    int coarse_resolution_override = kCoarseResolutionAutomatic;
     int input_color_space = kDefaultInputColorSpace;
     int quantization_mode = kDefaultQuantizationMode;
     int screen_color = kDefaultScreenColor;
@@ -589,9 +596,21 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
     }
+    if (data->quality_fallback_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->quality_fallback_mode_param, time,
+                                                &quality_fallback_mode);
+    }
     if (data->input_color_space_param) {
         g_suites.parameter->paramGetValueAtTime(data->input_color_space_param, time,
                                                 &input_color_space);
+    }
+    if (data->refinement_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->refinement_mode_param, time,
+                                                &refinement_mode);
+    }
+    if (data->coarse_resolution_override_param) {
+        g_suites.parameter->paramGetValueAtTime(data->coarse_resolution_override_param, time,
+                                                &coarse_resolution_override);
     }
     if (data->quantization_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quantization_mode_param, time,
@@ -661,7 +680,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (swap_screen) {
         swap_green_blue(rgb_view);
     }
-    if (!ensure_engine_for_quality(data, quality_mode, width, height, quantization_mode)) {
+    if (!ensure_engine_for_quality(
+            data, quality_mode, width, height, quantization_mode,
+            quality_fallback_mode_from_choice(quality_fallback_mode),
+            coarse_resolution_override_from_choice(coarse_resolution_override))) {
         const std::string quality_error =
             data->last_error.empty() ? "Failed to switch quality mode." : data->last_error;
         if (is_fixed_quality_mode(quality_mode)) {
@@ -826,6 +848,11 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     InferenceParams params;
     params.target_resolution = data->active_resolution;
+    params.requested_quality_resolution = resolve_target_resolution(quality_mode, width, height);
+    params.quality_fallback_mode = quality_fallback_mode_from_choice(quality_fallback_mode);
+    params.refinement_mode = refinement_mode_from_choice(refinement_mode);
+    params.coarse_resolution_override =
+        coarse_resolution_override_from_choice(coarse_resolution_override);
     params.despill_strength = static_cast<float>(despill_strength);
     params.spill_method = spill_method;
     params.auto_despeckle = despeckle_enabled != 0;

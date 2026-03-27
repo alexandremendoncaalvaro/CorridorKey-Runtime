@@ -43,7 +43,10 @@ constexpr const char* kClipForegroundOutput = "Foreground Output";
 constexpr const char* kClipCompositeOutput = "Composite Output";
 
 constexpr const char* kParamQualityMode = "quality_mode";
+constexpr const char* kParamQualityFallbackMode = "quality_fallback_mode";
 constexpr const char* kParamOutputMode = "output_mode";
+constexpr const char* kParamRefinementMode = "refinement_mode";
+constexpr const char* kParamCoarseResolutionOverride = "coarse_resolution_override";
 constexpr const char* kParamInputColorSpace = "input_color_space";
 constexpr const char* kParamQuantizationMode = "quantization_mode";
 constexpr const char* kParamScreenColor = "screen_color";
@@ -104,7 +107,10 @@ struct InstanceData {
     OfxImageClipHandle alpha_hint_clip = nullptr;
     OfxImageClipHandle output_clip = nullptr;
     OfxParamHandle quality_mode_param = nullptr;
+    OfxParamHandle quality_fallback_mode_param = nullptr;
     OfxParamHandle output_mode_param = nullptr;
+    OfxParamHandle refinement_mode_param = nullptr;
+    OfxParamHandle coarse_resolution_override_param = nullptr;
     OfxParamHandle input_color_space_param = nullptr;
     OfxParamHandle quantization_mode_param = nullptr;
     OfxParamHandle screen_color_param = nullptr;
@@ -201,9 +207,12 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
 std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
-    int input_width = 0, int input_height = 0, int quantization_mode = kQuantizationFp16);
+    int input_width, int input_height, int quantization_mode, std::int64_t available_memory_mb,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
-                               int input_height = 0, int quantization_mode = kQuantizationFp16);
+                               int input_height = 0, int quantization_mode = kQuantizationFp16,
+                               QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
+                               int coarse_resolution_override = 0);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
                                             bool cpu_quality_guardrail_active);
 std::string runtime_status_runtime_label(const InstanceData& data);

@@ -26,6 +26,7 @@
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 #include "device_selection.hpp"
+#include "execution_defaults.hpp"
 #include "process_paths.hpp"
 
 using namespace corridorkey;
@@ -184,6 +185,61 @@ Result<VideoOutputOptions> resolve_video_output_options(const cxxopts::ParseResu
                                    "Invalid --video-encode value. Use 'lossless' or 'balanced'."}};
 }
 
+Result<QualityFallbackMode> parse_quality_fallback_mode(const std::string& value) {
+    const std::string normalized = normalized_lower(value);
+    if (normalized == "auto") {
+        return QualityFallbackMode::Auto;
+    }
+    if (normalized == "direct") {
+        return QualityFallbackMode::Direct;
+    }
+    if (normalized == "coarse_to_fine") {
+        return QualityFallbackMode::CoarseToFine;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --quality-fallback value. Use 'auto', 'direct', or 'coarse_to_fine'.",
+    }};
+}
+
+Result<RefinementMode> parse_refinement_mode(const std::string& value) {
+    const std::string normalized = normalized_lower(value);
+    if (normalized == "auto") {
+        return RefinementMode::Auto;
+    }
+    if (normalized == "full_frame") {
+        return RefinementMode::FullFrame;
+    }
+    if (normalized == "tiled") {
+        return RefinementMode::Tiled;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --refinement-mode value. Use 'auto', 'full_frame', or 'tiled'.",
+    }};
+}
+
+Result<int> parse_coarse_resolution_override(const std::string& value) {
+    if (value == "0") {
+        return 0;
+    }
+    const int resolution = std::stoi(value);
+    switch (resolution) {
+        case 512:
+        case 768:
+        case 1024:
+        case 1536:
+        case 2048:
+            return resolution;
+        default:
+            break;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --coarse-resolution value. Use 0, 512, 768, 1024, 1536, or 2048.",
+    }};
+}
+
 InferenceParams build_inference_params(const cxxopts::ParseResult& result,
                                        const std::optional<InferenceParams>& base_params, int argc,
                                        char* argv[]) {
@@ -203,6 +259,35 @@ InferenceParams build_inference_params(const cxxopts::ParseResult& result,
     }
     if (option_present(argc, argv, {"--tiled"})) {
         params.enable_tiling = true;
+    }
+
+    if (!base_params.has_value() || option_present(argc, argv, {"--quality-fallback"})) {
+        auto fallback_mode =
+            parse_quality_fallback_mode(result["quality-fallback"].as<std::string>());
+        if (!fallback_mode) {
+            throw std::runtime_error(fallback_mode.error().message);
+        }
+        params.quality_fallback_mode = *fallback_mode;
+    }
+    if (!base_params.has_value() || option_present(argc, argv, {"--refinement-mode"})) {
+        auto refinement_mode =
+            parse_refinement_mode(result["refinement-mode"].as<std::string>());
+        if (!refinement_mode) {
+            throw std::runtime_error(refinement_mode.error().message);
+        }
+        params.refinement_mode = *refinement_mode;
+    }
+    if (!base_params.has_value() || option_present(argc, argv, {"--coarse-resolution"})) {
+        auto coarse_resolution =
+            parse_coarse_resolution_override(result["coarse-resolution"].as<std::string>());
+        if (!coarse_resolution) {
+            throw std::runtime_error(coarse_resolution.error().message);
+        }
+        params.coarse_resolution_override = *coarse_resolution;
+    }
+
+    if (params.target_resolution > 0) {
+        params.requested_quality_resolution = params.target_resolution;
     }
 
     return params;
@@ -278,6 +363,17 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
 
     if (result.count("model")) {
         resolved.params = build_inference_params(result, std::nullopt, argc, argv);
+        auto explicit_model = cli::resolve_explicit_model_quality_fallback(resolved.model_path,
+                                                                           resolved.params, device);
+        if (!explicit_model) {
+            return Unexpected<Error>(explicit_model.error());
+        }
+        resolved.model_path = *explicit_model;
+        if (resolved.params.requested_quality_resolution <= 0) {
+            resolved.params.requested_quality_resolution =
+                cli::packaged_model_resolution(result["model"].as<std::string>()).value_or(
+                    resolved.params.target_resolution);
+        }
     } else {
         resolved.params = build_inference_params(
             result,
@@ -292,6 +388,24 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
         }
 
         resolved.model_path = resolved.models_dir / selected_model->filename;
+        const int requested_resolution =
+            resolved.params.requested_quality_resolution > 0
+                ? resolved.params.requested_quality_resolution
+                : selected_model->resolution;
+        resolved.params.requested_quality_resolution = requested_resolution;
+        if (app::should_use_coarse_to_fine_for_request(device, requested_resolution,
+                                                       resolved.params.quality_fallback_mode,
+                                                       resolved.params.coarse_resolution_override)) {
+            auto coarse_resolution = app::coarse_artifact_resolution_for_request(
+                device, requested_resolution, resolved.params.coarse_resolution_override);
+            if (coarse_resolution.has_value()) {
+                auto coarse_model_path =
+                    cli::sibling_model_path_for_resolution(resolved.model_path, *coarse_resolution);
+                if (!coarse_model_path.empty()) {
+                    resolved.model_path = coarse_model_path;
+                }
+            }
+        }
         if (!std::filesystem::exists(resolved.model_path)) {
             auto cpu_fallback = resolved.models_dir / "corridorkey_int8_512.onnx";
             if (resolved.model_path.filename() != "corridorkey_int8_512.onnx" &&
@@ -401,6 +515,12 @@ int main(int argc, char* argv[]) {
         "quality", "Alias for --preset", cxxopts::value<std::string>())(
         "r,resolution", "Resolution (0=auto, 512, 768, 1024)",
         cxxopts::value<int>()->default_value("0"))(
+        "quality-fallback", "Quality fallback mode (auto, direct, coarse_to_fine)",
+        cxxopts::value<std::string>()->default_value("auto"))(
+        "refinement-mode", "Local refinement mode (auto, full_frame, tiled)",
+        cxxopts::value<std::string>()->default_value("auto"))(
+        "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
+        cxxopts::value<std::string>()->default_value("0"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "endpoint-port", "Local OFX runtime server control port", cxxopts::value<int>())(

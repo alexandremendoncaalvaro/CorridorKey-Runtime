@@ -664,8 +664,14 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
     g_suites.parameter->paramGetHandle(param_set, kParamQualityMode, &data->quality_mode_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamQualityFallbackMode,
+                                       &data->quality_fallback_mode_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamOutputMode, &data->output_mode_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRefinementMode,
+                                       &data->refinement_mode_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamCoarseResolutionOverride,
+                                       &data->coarse_resolution_override_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamInputColorSpace,
                                        &data->input_color_space_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamQuantizationMode,
@@ -974,7 +980,9 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 }
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
-                               int input_height, int quantization_mode) {
+                               int input_height, int quantization_mode,
+                               QualityFallbackMode fallback_mode,
+                               int coarse_resolution_override) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +
@@ -1020,9 +1028,35 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         log_quality_total("unsupported_quantization", data->last_error);
         return false;
     }
+    auto unsupported_quality =
+        fallback_mode == QualityFallbackMode::Direct
+            ? unsupported_quality_message(requested_device, requested_quality_mode,
+                                          requested_resolution)
+            : std::nullopt;
+    if (unsupported_quality.has_value()) {
+        data->last_warning.clear();
+        data->last_error = *unsupported_quality;
+        set_runtime_panel_state_for_failed_quality_request(
+            data, requested_quality_mode, requested_resolution, cpu_quality_guardrail_active,
+            artifact_path_for_backend(data->models_root, requested_device.backend,
+                                      requested_resolution));
+        log_message("ensure_engine_for_quality",
+                    "event=quality_guardrail requested_backend=" +
+                        backend_label(requested_device.backend) + " requested_device=" +
+                        requested_device.name + " available_memory_mb=" +
+                        std::to_string(requested_device.available_memory_mb) +
+                        " requested_resolution=" + std::to_string(requested_resolution) +
+                        " detail=" + *unsupported_quality);
+        log_message("ensure_engine_for_quality", data->last_error);
+        update_runtime_panel(data);
+        log_quality_total("unsupported_quality", data->last_error);
+        return false;
+    }
     auto selections = quality_artifact_candidates(data->models_root, requested_device.backend,
                                                   effective_quality_mode, input_width, input_height,
-                                                  quantization_mode);
+                                                  quantization_mode,
+                                                  requested_device.available_memory_mb,
+                                                  fallback_mode, coarse_resolution_override);
     const auto original_selections = selections;
     data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     if (cpu_quality_guardrail_active) {
@@ -1032,15 +1066,19 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         log_message("ensure_engine_for_quality", data->last_error);
     }
     if (selections.empty()) {
-        if (cpu_quality_guardrail_active) {
-            data->last_error =
-                "CPU backend is limited to Draft (512), but the 512 artifact is missing for " +
-                backend_label(requested_device.backend) + ".";
-        } else {
-            data->last_error =
-                "Requested quality " + std::string(quality_mode_label(requested_quality_mode)) +
-                " requires a " + std::to_string(requested_resolution) + "px artifact for backend " +
-                backend_label(requested_device.backend) + ", but that artifact is missing.";
+        const auto expected_artifacts = expected_quality_artifact_paths(
+            data->models_root, requested_device.backend, effective_quality_mode, input_width,
+            input_height, quantization_mode, requested_device.available_memory_mb, fallback_mode,
+            coarse_resolution_override);
+        data->last_error = missing_quality_artifact_message(
+            data->models_root, requested_device.backend, effective_quality_mode, input_width,
+            input_height, quantization_mode, cpu_quality_guardrail_active,
+            requested_device.available_memory_mb, fallback_mode, coarse_resolution_override);
+        if (auto expected_artifact = primary_expected_artifact_path(expected_artifacts);
+            expected_artifact.has_value()) {
+            set_runtime_panel_state_for_failed_quality_request(
+                data, requested_quality_mode, requested_resolution, cpu_quality_guardrail_active,
+                *expected_artifact);
         }
         log_message("ensure_engine_for_quality", data->last_error);
         update_runtime_panel(data);

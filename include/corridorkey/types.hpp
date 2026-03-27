@@ -353,6 +353,16 @@ class ImageBuffer {
 enum class UpscaleMethod : std::uint8_t { Lanczos4, Bilinear };
 
 /**
+ * @brief Runtime policy for selecting the quality execution path.
+ */
+enum class QualityFallbackMode : std::uint8_t { Auto, Direct, CoarseToFine };
+
+/**
+ * @brief Runtime policy for applying the local refinement stage.
+ */
+enum class RefinementMode : std::uint8_t { Auto, FullFrame, Tiled };
+
+/**
  * @brief Parameters to control the inference and post-processing.
  */
 struct InferenceParams {
@@ -377,6 +387,12 @@ struct InferenceParams {
     bool source_passthrough = true;
     int sp_erode_px = 3;  // Erosion radius for interior mask
     int sp_blur_px = 7;   // Blur radius for transition smoothing
+
+    // Coarse-to-fine fallback
+    int requested_quality_resolution = 0;  // 0 = use target_resolution
+    QualityFallbackMode quality_fallback_mode = QualityFallbackMode::Auto;
+    RefinementMode refinement_mode = RefinementMode::Auto;
+    int coarse_resolution_override = 0;  // 0 = automatic coarse artifact choice
 };
 
 /**

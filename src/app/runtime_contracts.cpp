@@ -501,6 +501,92 @@ nlohmann::json to_json(const Error& error) {
     return json;
 }
 
+std::optional<int> max_supported_resolution_for_device(const DeviceInfo& requested_device) {
+    switch (requested_device.backend) {
+        case Backend::CPU:
+            return 512;
+        case Backend::TensorRT:
+        case Backend::CUDA:
+            return windows_tensorrt_resolution_ceiling(requested_device.available_memory_mb);
+        case Backend::DirectML:
+        case Backend::WindowsML:
+        case Backend::OpenVINO:
+            return windows_universal_resolution_ceiling(requested_device.available_memory_mb);
+        default:
+            return std::nullopt;
+    }
+}
+
+std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, int resolution) {
+    switch (backend) {
+        case Backend::TensorRT:
+        case Backend::CUDA:
+            if (resolution >= 2048) {
+                return 24000;
+            }
+            if (resolution >= 1536) {
+                return 16000;
+            }
+            if (resolution >= 1024) {
+                return 10000;
+            }
+            if (resolution >= 768) {
+                return 8000;
+            }
+            return std::nullopt;
+        case Backend::DirectML:
+        case Backend::WindowsML:
+        case Backend::OpenVINO:
+            if (resolution >= 1024) {
+                return 10000;
+            }
+            if (resolution >= 768) {
+                return 8000;
+            }
+            return std::nullopt;
+        default:
+            return std::nullopt;
+    }
+}
+
+bool should_use_coarse_to_fine_for_request(const DeviceInfo& requested_device,
+                                           int requested_resolution,
+                                           QualityFallbackMode fallback_mode,
+                                           int coarse_resolution_override) {
+    if (fallback_mode == QualityFallbackMode::Direct) {
+        return false;
+    }
+    if (fallback_mode == QualityFallbackMode::CoarseToFine) {
+        return true;
+    }
+    if (coarse_resolution_override > 0 && coarse_resolution_override < requested_resolution) {
+        return true;
+    }
+    auto max_resolution = max_supported_resolution_for_device(requested_device);
+    if (!max_resolution.has_value()) {
+        return false;
+    }
+    return requested_resolution > *max_resolution;
+}
+
+std::optional<int> coarse_artifact_resolution_for_request(const DeviceInfo& requested_device,
+                                                          int requested_resolution,
+                                                          int coarse_resolution_override) {
+    if (coarse_resolution_override > 0) {
+        return std::min(coarse_resolution_override, requested_resolution);
+    }
+
+    auto max_resolution = max_supported_resolution_for_device(requested_device);
+    if (!max_resolution.has_value()) {
+        return std::nullopt;
+    }
+
+    const int safe_resolution = std::min(*max_resolution, 1024);
+    if (safe_resolution <= 0 || safe_resolution >= requested_resolution) {
+        return std::nullopt;
+    }
+    return safe_resolution;
+}
 nlohmann::json to_json(const BackendFallbackInfo& fallback) {
     nlohmann::json json;
     json["requested_backend"] = backend_to_string(fallback.requested_backend);
@@ -611,6 +697,11 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     params["source_passthrough"] = preset.params.source_passthrough;
     params["sp_erode_px"] = preset.params.sp_erode_px;
     params["sp_blur_px"] = preset.params.sp_blur_px;
+    params["requested_quality_resolution"] = preset.params.requested_quality_resolution;
+    params["quality_fallback_mode"] =
+        static_cast<int>(preset.params.quality_fallback_mode);
+    params["refinement_mode"] = static_cast<int>(preset.params.refinement_mode);
+    params["coarse_resolution_override"] = preset.params.coarse_resolution_override;
 
     nlohmann::json json;
     json["id"] = preset.id;
