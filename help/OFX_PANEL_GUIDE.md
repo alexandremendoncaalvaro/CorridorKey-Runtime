@@ -39,21 +39,33 @@ external hint.
 
 The runtime panel at the top is the first place to look after any change.
 
+The always-visible fields are the fast triage view:
+
 - **Processing Backend** tells you which execution path is active.
 - **Processing Device** tells you which device the plugin is using.
-- **Requested Quality** tells you what you asked for. In `Auto`, it shows the
-  source-size-derived target, not a fixed mode default.
 - **Effective Quality** tells you what resolution is actually running.
-- **Safe Quality Ceiling** tells you the highest quality CorridorKey currently
-  considers safe on the active backend and memory tier.
-- **Loaded Artifact** tells you which packaged model file is active.
 - **Guide Source** tells you whether the last render used a connected external
   Alpha Hint or the built-in rough fallback guide.
-- **Runtime Path** tells you whether the last render used the direct path,
-  artifact fallback, or full-model tiling.
+- **Runtime Session** tells you whether this node is using its own runtime
+  session or reusing a shared one.
 - **Status** tells you whether the plugin is loading, rendering, warning, or
   reporting an error, and whether it is using a host-managed versus manual
   color path.
+- **Frame Render** tells you the real render time CorridorKey is currently
+  associating with the visible frame result.
+
+Open **Advanced Runtime Status** only when you need to diagnose why the current
+result looks the way it does. That closed-by-default view contains:
+
+- **Requested Quality** for what you asked for. In `Auto`, it shows the
+  source-size-derived target, not a fixed mode default.
+- **Safe Quality Ceiling** for the highest quality CorridorKey currently
+  considers safe on the active backend and memory tier.
+- **Loaded Artifact** for the actual packaged model file or bridge file in use.
+- **Runtime Path** for whether the last render used the direct path, artifact
+  fallback, or full-model tiling.
+- **Backend Work** for whether the visible result came from real backend work
+  or cache reuse.
 
 Treat the status panel as the source of truth. Two messages matter most:
 
@@ -259,6 +271,23 @@ Recommended order:
   despeckle is enabled.
 - **Temporal Smoothing** blends the current result with the previous frame to
   reduce flicker.
+
+## Advanced Controls
+
+The **Advanced** section is intentionally split by intent so expert controls do
+not feel like one long dump of unrelated settings.
+
+- **Advanced | Interior Detail** contains controls that change how recovered
+  source texture is blended back into opaque regions.
+- **Advanced | Matte Cleanup** contains gamma, despeckle, and temporal cleanup
+  controls for the generated alpha.
+- **Advanced | Processing** contains technical processing-path controls such as
+  spill replacement method, upscale method, and artifact fallback diagnostics.
+- **Advanced | Runtime** contains timeout and stability controls for bootstrap
+  and render waits.
+
+If you are not actively diagnosing a problem, leave these groups closed and
+work in the main creative panels first.
 
 ## Recover Original Details
 
