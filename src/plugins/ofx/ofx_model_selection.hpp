@@ -72,8 +72,8 @@ inline std::string quality_fallback_warning(int quality_mode,
     if (selection.coarse_to_fine) {
         return std::string(quality_mode_label(quality_mode)) + " (" +
                std::to_string(selection.requested_resolution) +
-               "px) will run coarse-to-fine using " +
-               std::to_string(selection.effective_resolution) + "px coarse inference";
+               "px) will run coarse-to-fine using the " +
+               std::to_string(selection.effective_resolution) + "px packaged artifact";
     }
 
     return std::string(quality_mode_label(quality_mode)) + " (" +
@@ -354,7 +354,26 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
         search_resolution = 1536;
     }
 
-    return artifact_paths_for_backend(models_root, backend, search_resolution, quantization_mode);
+    std::vector<std::filesystem::path> expected;
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    const bool coarse_to_fine = app::should_use_coarse_to_fine_for_request(
+        device, effective_requested_resolution, fallback_mode, coarse_resolution_override);
+    const bool require_exact_resolution = is_fixed_quality_mode(effective_quality_mode) &&
+                                          (!coarse_to_fine || coarse_resolution_override > 0);
+
+    for (int resolution : kFallbackResolutions) {
+        if (resolution > search_resolution) {
+            continue;
+        }
+        if (require_exact_resolution && resolution != search_resolution) {
+            continue;
+        }
+        auto artifact_paths =
+            artifact_paths_for_backend(models_root, backend, resolution, quantization_mode);
+        expected.insert(expected.end(), artifact_paths.begin(), artifact_paths.end());
+    }
+
+    return expected;
 }
 
 inline std::string missing_artifact_message(
@@ -430,13 +449,14 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
 
     constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
     bool exact_artifact_available = false;
+    const bool require_exact_resolution =
+        is_fixed_quality_mode(quality_mode) && (!coarse_to_fine || coarse_resolution_override > 0);
+    const int exact_resolution = coarse_to_fine ? search_resolution : requested_resolution;
     for (int resolution : kFallbackResolutions) {
         if (resolution > requested_resolution) {
             continue;
         }
-        const int exact_resolution = coarse_to_fine ? search_resolution : requested_resolution;
-        if ((is_fixed_quality_mode(quality_mode) || coarse_to_fine) && resolution != exact_resolution &&
-            !exact_artifact_available) {
+        if (require_exact_resolution && resolution != exact_resolution && !exact_artifact_available) {
             continue;
         }
 
@@ -454,8 +474,7 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
                                                               coarse_to_fine,
                                                           coarse_to_fine});
         }
-        if ((is_fixed_quality_mode(quality_mode) || coarse_to_fine) &&
-            resolution == exact_resolution) {
+        if (require_exact_resolution && resolution == exact_resolution) {
             if (!found_for_resolution) {
                 return {};
             }

@@ -982,7 +982,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height, int quantization_mode,
                                QualityFallbackMode fallback_mode,
-                               int coarse_resolution_override) {
+                               int coarse_resolution_override,
+                               RefinementMode refinement_mode) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +
@@ -1084,6 +1085,39 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         update_runtime_panel(data);
         log_quality_total("missing_artifact", data->last_error);
         return false;
+    }
+
+    if (refinement_mode != RefinementMode::Auto) {
+        std::vector<QualityArtifactSelection> supported_by_refinement_mode;
+        supported_by_refinement_mode.reserve(selections.size());
+        std::optional<Error> refinement_error = std::nullopt;
+        for (const auto& selection : selections) {
+            auto validation = app::validate_refinement_mode_for_artifact(
+                selection.executable_model_path, refinement_mode);
+            if (validation) {
+                supported_by_refinement_mode.push_back(selection);
+            } else if (!refinement_error.has_value()) {
+                refinement_error = validation.error();
+            }
+        }
+
+        if (supported_by_refinement_mode.empty()) {
+            data->last_error = refinement_error.has_value()
+                                   ? refinement_error->message
+                                   : "No packaged quality artifact supports the requested "
+                                     "refinement strategy override.";
+            if (!selections.empty()) {
+                set_runtime_panel_state_for_failed_quality_request(
+                    data, requested_quality_mode, requested_resolution,
+                    cpu_quality_guardrail_active, selections.front().executable_model_path);
+            }
+            log_message("ensure_engine_for_quality", data->last_error);
+            update_runtime_panel(data);
+            log_quality_total("unsupported_refinement_mode", data->last_error);
+            return false;
+        }
+
+        selections = std::move(supported_by_refinement_mode);
     }
 
     if (should_abort_quality_fallback_after_compile_failure(

@@ -212,7 +212,8 @@ std::optional<QualityArtifactSelection> select_quality_artifact(
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
                                int input_height = 0, int quantization_mode = kQuantizationFp16,
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-                               int coarse_resolution_override = 0);
+                               int coarse_resolution_override = 0,
+                               RefinementMode refinement_mode = RefinementMode::Auto);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
                                             bool cpu_quality_guardrail_active);
 std::string runtime_status_runtime_label(const InstanceData& data);

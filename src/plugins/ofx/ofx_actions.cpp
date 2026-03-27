@@ -487,7 +487,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         {refinement_mode_ui_label(kRefinementAuto),
                          refinement_mode_ui_label(kRefinementFullFrame),
                          refinement_mode_ui_label(kRefinementTiled)},
-                        "Advanced diagnostics override for the local refinement stage.",
+                        "Advanced diagnostics override for validated refinement strategy "
+                        "artifacts. Current packaged ONNX artifacts only support Auto.",
                         "advanced_group");
     define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
                         kCoarseResolutionAutomatic,

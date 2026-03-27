@@ -573,7 +573,10 @@ std::optional<int> coarse_artifact_resolution_for_request(const DeviceInfo& requ
                                                           int requested_resolution,
                                                           int coarse_resolution_override) {
     if (coarse_resolution_override > 0) {
-        return std::min(coarse_resolution_override, requested_resolution);
+        if (coarse_resolution_override < requested_resolution) {
+            return coarse_resolution_override;
+        }
+        return std::nullopt;
     }
 
     auto max_resolution = max_supported_resolution_for_device(requested_device);
@@ -586,6 +589,141 @@ std::optional<int> coarse_artifact_resolution_for_request(const DeviceInfo& requ
         return std::nullopt;
     }
     return safe_resolution;
+}
+std::optional<int> packaged_model_resolution(const std::filesystem::path& model_path) {
+    const std::string stem = model_path.stem().string();
+    const std::size_t separator = stem.find_last_of('_');
+    if (separator == std::string::npos || separator + 1 >= stem.size()) {
+        return std::nullopt;
+    }
+
+    const std::string token = stem.substr(separator + 1);
+    if (token.empty()) {
+        return std::nullopt;
+    }
+    for (char ch : token) {
+        if (ch < '0' || ch > '9') {
+            return std::nullopt;
+        }
+    }
+
+    return std::stoi(token);
+}
+
+bool is_packaged_corridorkey_model(const std::filesystem::path& model_path) {
+    const std::string filename = model_path.filename().string();
+    return filename.rfind("corridorkey_", 0) == 0 && packaged_model_resolution(model_path).has_value();
+}
+
+std::filesystem::path sibling_model_path_for_resolution(const std::filesystem::path& model_path,
+                                                        int resolution) {
+    if (!is_packaged_corridorkey_model(model_path)) {
+        return {};
+    }
+
+    const auto current_resolution = packaged_model_resolution(model_path);
+    if (!current_resolution.has_value()) {
+        return {};
+    }
+
+    std::string filename = model_path.filename().string();
+    const std::string current_token = "_" + std::to_string(*current_resolution);
+    const std::size_t token_pos = filename.rfind(current_token);
+    if (token_pos == std::string::npos) {
+        return {};
+    }
+
+    filename.replace(token_pos + 1, current_token.size() - 1, std::to_string(resolution));
+    return model_path.parent_path() / filename;
+}
+
+Result<void> validate_refinement_mode_for_artifact(const std::filesystem::path& model_path,
+                                                   RefinementMode refinement_mode) {
+    if (refinement_mode == RefinementMode::Auto) {
+        return {};
+    }
+
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "The selected runtime artifact does not advertise a validated refinement strategy "
+        "override. Use refinement mode 'auto' with the current packaged model family: " +
+            model_path.filename().string(),
+    }};
+}
+
+Result<std::filesystem::path> resolve_model_artifact_for_request(
+    const std::filesystem::path& model_path, const InferenceParams& params,
+    const DeviceInfo& requested_device) {
+    const int model_resolution = packaged_model_resolution(model_path).value_or(0);
+    const int requested_resolution =
+        params.requested_quality_resolution > 0
+            ? params.requested_quality_resolution
+            : (params.target_resolution > 0 ? params.target_resolution : model_resolution);
+
+    const bool has_override = params.coarse_resolution_override > 0;
+    const bool coarse_to_fine_requested =
+        params.quality_fallback_mode == QualityFallbackMode::CoarseToFine || has_override;
+    if (coarse_to_fine_requested && has_override &&
+        params.coarse_resolution_override >= requested_resolution) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
+            "quality.",
+        }};
+    }
+
+    const auto validate_resolved_model = [&](const std::filesystem::path& resolved_model_path)
+        -> Result<std::filesystem::path> {
+        auto refinement_validation =
+            validate_refinement_mode_for_artifact(resolved_model_path, params.refinement_mode);
+        if (!refinement_validation) {
+            return Unexpected<Error>(refinement_validation.error());
+        }
+        return resolved_model_path;
+    };
+
+    if (!should_use_coarse_to_fine_for_request(requested_device, requested_resolution,
+                                               params.quality_fallback_mode,
+                                               params.coarse_resolution_override)) {
+        return validate_resolved_model(model_path);
+    }
+
+    if (!is_packaged_corridorkey_model(model_path)) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Explicit --model only supports coarse-to-fine for packaged CorridorKey artifacts. "
+            "Use a packaged model or switch --quality-fallback to direct.",
+        }};
+    }
+
+    auto coarse_resolution = coarse_artifact_resolution_for_request(
+        requested_device, requested_resolution, params.coarse_resolution_override);
+    if (!coarse_resolution.has_value() || *coarse_resolution >= requested_resolution) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Coarse-to-fine requested a smaller coarse artifact, but no valid packaged coarse "
+            "resolution could be resolved for this request.",
+        }};
+    }
+
+    auto coarse_model_path = sibling_model_path_for_resolution(model_path, *coarse_resolution);
+    if (coarse_model_path.empty()) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Coarse-to-fine requested a smaller packaged artifact, but the artifact name "
+            "could not be derived from the selected model.",
+        }};
+    }
+
+    if (!std::filesystem::exists(coarse_model_path)) {
+        return Unexpected<Error>{Error{
+            ErrorCode::ModelLoadFailed,
+            "Coarse-to-fine requested a packaged coarse artifact, but it is missing: " +
+                coarse_model_path.string(),
+        }};
+    }
+
+    return validate_resolved_model(coarse_model_path);
 }
 nlohmann::json to_json(const BackendFallbackInfo& fallback) {
     nlohmann::json json;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <corridorkey/engine.hpp>
+#include <filesystem>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -29,6 +30,16 @@ CORRIDORKEY_API bool should_use_coarse_to_fine_for_request(
 CORRIDORKEY_API std::optional<int> coarse_artifact_resolution_for_request(
     const DeviceInfo& requested_device, int requested_resolution,
     int coarse_resolution_override = 0);
+CORRIDORKEY_API std::optional<int> packaged_model_resolution(
+    const std::filesystem::path& model_path);
+CORRIDORKEY_API bool is_packaged_corridorkey_model(const std::filesystem::path& model_path);
+CORRIDORKEY_API std::filesystem::path sibling_model_path_for_resolution(
+    const std::filesystem::path& model_path, int resolution);
+CORRIDORKEY_API Result<void> validate_refinement_mode_for_artifact(
+    const std::filesystem::path& model_path, RefinementMode refinement_mode);
+CORRIDORKEY_API Result<std::filesystem::path> resolve_model_artifact_for_request(
+    const std::filesystem::path& model_path, const InferenceParams& params,
+    const DeviceInfo& requested_device);
 
 nlohmann::json to_json(const Error& error);
 nlohmann::json to_json(const BackendFallbackInfo& fallback);

@@ -126,17 +126,6 @@ class InferenceSession {
                                                          const InferenceParams& params,
                                                          StageTimingCallback on_stage = nullptr);
 
-    [[nodiscard]] Result<void> apply_local_refinement(FrameResult& result, const Image& rgb,
-                                                      const Image& alpha_hint,
-                                                      const InferenceParams& params,
-                                                      StageTimingCallback on_stage = nullptr);
-
-    [[nodiscard]] Result<void> apply_local_refinement_tiled(FrameResult& result, const Image& rgb,
-                                                            const Image& alpha_hint,
-                                                            const InferenceParams& params,
-                                                            int tile_size, int overlap,
-                                                            StageTimingCallback on_stage = nullptr);
-
     /**
      * @brief Helper for running tiling inference on large images.
      */

@@ -358,7 +358,7 @@ enum class UpscaleMethod : std::uint8_t { Lanczos4, Bilinear };
 enum class QualityFallbackMode : std::uint8_t { Auto, Direct, CoarseToFine };
 
 /**
- * @brief Runtime policy for applying the local refinement stage.
+ * @brief Runtime policy for selecting a validated refinement artifact strategy.
  */
 enum class RefinementMode : std::uint8_t { Auto, FullFrame, Tiled };
 
@@ -388,11 +388,11 @@ struct InferenceParams {
     int sp_erode_px = 3;  // Erosion radius for interior mask
     int sp_blur_px = 7;   // Blur radius for transition smoothing
 
-    // Coarse-to-fine fallback
+    // Quality fallback and validated refinement strategy selection
     int requested_quality_resolution = 0;  // 0 = use target_resolution
     QualityFallbackMode quality_fallback_mode = QualityFallbackMode::Auto;
     RefinementMode refinement_mode = RefinementMode::Auto;
-    int coarse_resolution_override = 0;  // 0 = automatic coarse artifact choice
+    int coarse_resolution_override = 0;  // 0 = automatic smaller artifact choice
 };
 
 /**

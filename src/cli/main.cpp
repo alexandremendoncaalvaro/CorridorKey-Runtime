@@ -26,7 +26,6 @@
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 #include "device_selection.hpp"
-#include "execution_defaults.hpp"
 #include "process_paths.hpp"
 
 using namespace corridorkey;
@@ -363,17 +362,17 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
 
     if (result.count("model")) {
         resolved.params = build_inference_params(result, std::nullopt, argc, argv);
-        auto explicit_model = cli::resolve_explicit_model_quality_fallback(resolved.model_path,
-                                                                           resolved.params, device);
+        if (resolved.params.requested_quality_resolution <= 0) {
+            resolved.params.requested_quality_resolution =
+                app::packaged_model_resolution(result["model"].as<std::string>()).value_or(
+                    resolved.params.target_resolution);
+        }
+        auto explicit_model =
+            app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
         if (!explicit_model) {
             return Unexpected<Error>(explicit_model.error());
         }
         resolved.model_path = *explicit_model;
-        if (resolved.params.requested_quality_resolution <= 0) {
-            resolved.params.requested_quality_resolution =
-                cli::packaged_model_resolution(result["model"].as<std::string>()).value_or(
-                    resolved.params.target_resolution);
-        }
     } else {
         resolved.params = build_inference_params(
             result,
@@ -393,29 +392,16 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
                 ? resolved.params.requested_quality_resolution
                 : selected_model->resolution;
         resolved.params.requested_quality_resolution = requested_resolution;
-        if (app::should_use_coarse_to_fine_for_request(device, requested_resolution,
-                                                       resolved.params.quality_fallback_mode,
-                                                       resolved.params.coarse_resolution_override)) {
-            auto coarse_resolution = app::coarse_artifact_resolution_for_request(
-                device, requested_resolution, resolved.params.coarse_resolution_override);
-            if (coarse_resolution.has_value()) {
-                auto coarse_model_path =
-                    cli::sibling_model_path_for_resolution(resolved.model_path, *coarse_resolution);
-                if (!coarse_model_path.empty()) {
-                    resolved.model_path = coarse_model_path;
-                }
-            }
+        auto effective_model =
+            app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
+        if (!effective_model) {
+            return Unexpected<Error>(effective_model.error());
         }
+        resolved.model_path = *effective_model;
         if (!std::filesystem::exists(resolved.model_path)) {
-            auto cpu_fallback = resolved.models_dir / "corridorkey_int8_512.onnx";
-            if (resolved.model_path.filename() != "corridorkey_int8_512.onnx" &&
-                std::filesystem::exists(cpu_fallback)) {
-                resolved.model_path = cpu_fallback;
-            } else {
-                return Unexpected<Error>{
-                    Error{ErrorCode::ModelLoadFailed,
-                          "Default model pack not found: " + resolved.model_path.string()}};
-            }
+            return Unexpected<Error>{
+                Error{ErrorCode::ModelLoadFailed,
+                      "Default model pack not found: " + resolved.model_path.string()}};
         }
         resolved.default_model_selected = true;
     }
@@ -517,7 +503,7 @@ int main(int argc, char* argv[]) {
         cxxopts::value<int>()->default_value("0"))(
         "quality-fallback", "Quality fallback mode (auto, direct, coarse_to_fine)",
         cxxopts::value<std::string>()->default_value("auto"))(
-        "refinement-mode", "Local refinement mode (auto, full_frame, tiled)",
+        "refinement-mode", "Validated refinement strategy override (auto, full_frame, tiled)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
         cxxopts::value<std::string>()->default_value("0"))(

@@ -332,146 +332,6 @@ void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weig
     }
 }
 
-float clamp_unit(float value) {
-    return std::clamp(value, 0.0F, 1.0F);
-}
-
-float compute_luma(const Image& image, int y_pos, int x_pos) {
-    if (image.empty() || image.width <= 0 || image.height <= 0) {
-        return 0.0F;
-    }
-    if (image.channels <= 1) {
-        return clamp_unit(image(y_pos, x_pos));
-    }
-    return clamp_unit(0.2126F * image(y_pos, x_pos, 0) + 0.7152F * image(y_pos, x_pos, 1) +
-                      0.0722F * image(y_pos, x_pos, 2));
-}
-
-float alpha_average_3x3(const Image& alpha, int y_pos, int x_pos) {
-    float sum = 0.0F;
-    int samples = 0;
-    for (int y = std::max(0, y_pos - 1); y <= std::min(alpha.height - 1, y_pos + 1); ++y) {
-        for (int x = std::max(0, x_pos - 1); x <= std::min(alpha.width - 1, x_pos + 1); ++x) {
-            sum += clamp_unit(alpha(y, x));
-            ++samples;
-        }
-    }
-    if (samples <= 0) {
-        return 0.0F;
-    }
-    return sum / static_cast<float>(samples);
-}
-
-float transition_band_weight(float alpha_value) {
-    return clamp_unit(1.0F - std::abs(alpha_value - 0.5F) * 2.0F);
-}
-
-float detail_weight(const Image& source_rgb, int y_pos, int x_pos) {
-    if (source_rgb.empty()) {
-        return 0.0F;
-    }
-
-    const int left = std::max(0, x_pos - 1);
-    const int right = std::min(source_rgb.width - 1, x_pos + 1);
-    const int top = std::max(0, y_pos - 1);
-    const int bottom = std::min(source_rgb.height - 1, y_pos + 1);
-    const float center = compute_luma(source_rgb, y_pos, x_pos);
-    const float horizontal =
-        std::abs(center - compute_luma(source_rgb, y_pos, left)) +
-        std::abs(center - compute_luma(source_rgb, y_pos, right));
-    const float vertical = std::abs(center - compute_luma(source_rgb, top, x_pos)) +
-                           std::abs(center - compute_luma(source_rgb, bottom, x_pos));
-    return clamp_unit((horizontal + vertical) * 0.5F);
-}
-
-void refine_local_rows(const Image& source_rgb, const Image& coarse_alpha, const Image& coarse_fg,
-                       const Image& alpha_hint, Image refined_alpha, Image refined_fg, int y_begin,
-                       int y_end) {
-    const bool has_hint = !alpha_hint.empty() && alpha_hint.width == coarse_alpha.width &&
-                          alpha_hint.height == coarse_alpha.height;
-    const bool has_source = !source_rgb.empty() && source_rgb.width == coarse_alpha.width &&
-                            source_rgb.height == coarse_alpha.height;
-
-    for (int y = y_begin; y < y_end; ++y) {
-        for (int x = 0; x < coarse_alpha.width; ++x) {
-            const float coarse_alpha_value = clamp_unit(coarse_alpha(y, x));
-            const float alpha_avg = alpha_average_3x3(coarse_alpha, y, x);
-            const float transition_weight = transition_band_weight(coarse_alpha_value);
-            const float detail = detail_weight(source_rgb, y, x);
-            const float edge_delta = coarse_alpha_value - alpha_avg;
-            const float hint_pull =
-                has_hint ? clamp_unit(alpha_hint(y, x)) - coarse_alpha_value : 0.0F;
-            const float refined_alpha_value =
-                clamp_unit(coarse_alpha_value + edge_delta * (0.20F + detail * 0.30F) +
-                           hint_pull * transition_weight * 0.25F);
-            refined_alpha(y, x) = refined_alpha_value;
-
-            const float foreground_blend = transition_weight * (0.15F + detail * 0.35F);
-            for (int channel = 0; channel < 3; ++channel) {
-                const float coarse_fg_value = clamp_unit(coarse_fg(y, x, channel));
-                const float source_value =
-                    has_source ? clamp_unit(source_rgb(y, x, channel)) : coarse_fg_value;
-                refined_fg(y, x, channel) = clamp_unit(
-                    coarse_fg_value * (1.0F - foreground_blend * refined_alpha_value) +
-                    source_value * (foreground_blend * refined_alpha_value));
-            }
-        }
-    }
-}
-
-void extract_local_refinement_tile_rows(const Image& source_rgb, const Image& coarse_alpha,
-                                        const Image& coarse_fg, const Image& alpha_hint,
-                                        Image tile_rgb, Image tile_alpha, Image tile_fg,
-                                        Image tile_hint, int y_start, int x_start, int tile_width,
-                                        int y_begin, int y_end) {
-    const bool has_hint = !alpha_hint.empty() && alpha_hint.width >= x_start + tile_width &&
-                          alpha_hint.height >= y_start + tile_hint.height;
-
-    for (int y = y_begin; y < y_end; ++y) {
-        for (int x = 0; x < tile_width; ++x) {
-            for (int channel = 0; channel < 3; ++channel) {
-                tile_rgb(y, x, channel) = source_rgb(y_start + y, x_start + x, channel);
-                tile_fg(y, x, channel) = coarse_fg(y_start + y, x_start + x, channel);
-            }
-            tile_alpha(y, x) = coarse_alpha(y_start + y, x_start + x);
-            tile_hint(y, x) = has_hint ? alpha_hint(y_start + y, x_start + x) : 0.0F;
-        }
-    }
-}
-
-void accumulate_refined_tile_rows(const Image& refined_alpha, const Image& refined_fg,
-                                  Image acc_alpha, Image acc_fg, Image acc_weight, int y_start,
-                                  int x_start, int image_height, int image_width, int overlap,
-                                  int y_begin, int y_end) {
-    const bool touches_left = x_start == 0;
-    const bool touches_top = y_start == 0;
-    const bool touches_right = x_start + refined_alpha.width >= image_width;
-    const bool touches_bottom = y_start + refined_alpha.height >= image_height;
-
-    for (int y = y_begin; y < y_end; ++y) {
-        const int global_y = y_start + y;
-        if (global_y >= image_height) {
-            break;
-        }
-
-        for (int x = 0; x < refined_alpha.width; ++x) {
-            const int global_x = x_start + x;
-            if (global_x >= image_width) {
-                break;
-            }
-
-            const float weight = core::edge_aware_tile_weight(
-                x, y, refined_alpha.width, refined_alpha.height, overlap, touches_left,
-                touches_right, touches_top, touches_bottom);
-            acc_weight(global_y, global_x) += weight;
-            acc_alpha(global_y, global_x) += refined_alpha(y, x) * weight;
-            for (int channel = 0; channel < 3; ++channel) {
-                acc_fg(global_y, global_x, channel) += refined_fg(y, x, channel) * weight;
-            }
-        }
-    }
-}
-
 }  // namespace
 
 InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {
@@ -1073,167 +933,23 @@ Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& 
     return result;
 }
 
-Result<void> InferenceSession::apply_local_refinement(FrameResult& result, const Image& rgb,
-                                                      const Image& alpha_hint,
-                                                      const InferenceParams& params,
-                                                      StageTimingCallback on_stage) {
-    if (result.alpha.view().empty() || result.foreground.view().empty()) {
-        return {};
-    }
-
-    if (core::should_tile_local_refinement(params, m_recommended_resolution, rgb.width,
-                                           rgb.height)) {
-        const int tile_size = core::local_refinement_tile_size(m_recommended_resolution);
-        const int overlap = std::clamp(std::max(16, params.tile_padding), 0,
-                                       std::max(0, tile_size - 1));
-        return apply_local_refinement_tiled(result, rgb, alpha_hint, params, tile_size, overlap,
-                                            on_stage);
-    }
-
-    ImageBuffer refined_alpha(result.alpha.view().width, result.alpha.view().height, 1);
-    ImageBuffer refined_fg(result.foreground.view().width, result.foreground.view().height, 3);
-    common::measure_stage(
-        on_stage, "coarse_to_fine_refine_local",
-        [&]() {
-            common::parallel_for_rows(result.alpha.view().height, [&](int y_begin, int y_end) {
-                refine_local_rows(rgb, result.alpha.const_view(), result.foreground.const_view(),
-                                  alpha_hint, refined_alpha.view(), refined_fg.view(), y_begin,
-                                  y_end);
-            });
-        },
-        1);
-
-    result.alpha = std::move(refined_alpha);
-    result.foreground = std::move(refined_fg);
-    return {};
-}
-
-Result<void> InferenceSession::apply_local_refinement_tiled(FrameResult& result, const Image& rgb,
-                                                            const Image& alpha_hint,
-                                                            const InferenceParams& params,
-                                                            int tile_size, int overlap,
-                                                            StageTimingCallback on_stage) {
-    (void)params;
-    const int width = result.alpha.view().width;
-    const int height = result.alpha.view().height;
-    if (width <= 0 || height <= 0 || tile_size <= 0) {
-        return {};
-    }
-
-    const int stride = core::tile_stride(tile_size, overlap);
-    const int tiles_x = std::max(1, (width + stride - 1) / stride);
-    const int tiles_y = std::max(1, (height + stride - 1) / stride);
-
-    ImageBuffer acc_alpha(width, height, 1);
-    ImageBuffer acc_fg(width, height, 3);
-    ImageBuffer acc_weight(width, height, 1);
-    std::fill(acc_alpha.view().data.begin(), acc_alpha.view().data.end(), 0.0F);
-    std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0F);
-    std::fill(acc_weight.view().data.begin(), acc_weight.view().data.end(), 0.0F);
-
-    for (int tile_y = 0; tile_y < tiles_y; ++tile_y) {
-        for (int tile_x = 0; tile_x < tiles_x; ++tile_x) {
-            const auto tile_region =
-                core::local_refinement_tile_region(width, height, tile_size, stride, tile_x, tile_y);
-            if (tile_region.width <= 0 || tile_region.height <= 0) {
-                continue;
-            }
-
-            ImageBuffer tile_rgb(tile_region.width, tile_region.height, 3);
-            ImageBuffer tile_alpha(tile_region.width, tile_region.height, 1);
-            ImageBuffer tile_fg(tile_region.width, tile_region.height, 3);
-            ImageBuffer tile_hint(tile_region.width, tile_region.height, 1);
-            ImageBuffer refined_tile_alpha(tile_region.width, tile_region.height, 1);
-            ImageBuffer refined_tile_fg(tile_region.width, tile_region.height, 3);
-
-            common::measure_stage(
-                on_stage, "coarse_to_fine_refine_extract",
-                [&]() {
-                    common::parallel_for_rows(tile_region.height, [&](int y_begin, int y_end) {
-                        extract_local_refinement_tile_rows(
-                            rgb, result.alpha.const_view(), result.foreground.const_view(), alpha_hint,
-                            tile_rgb.view(), tile_alpha.view(), tile_fg.view(), tile_hint.view(),
-                            tile_region.y_start, tile_region.x_start, tile_region.width, y_begin,
-                            y_end);
-                    });
-                },
-                1);
-
-            common::measure_stage(
-                on_stage, "coarse_to_fine_refine_tile",
-                [&]() {
-                    common::parallel_for_rows(tile_region.height, [&](int y_begin, int y_end) {
-                        refine_local_rows(tile_rgb.const_view(), tile_alpha.const_view(),
-                                          tile_fg.const_view(), tile_hint.const_view(),
-                                          refined_tile_alpha.view(), refined_tile_fg.view(), y_begin,
-                                          y_end);
-                    });
-                },
-                1);
-
-            common::measure_stage(
-                on_stage, "coarse_to_fine_refine_accumulate",
-                [&]() {
-                    common::parallel_for_rows(tile_region.height, [&](int y_begin, int y_end) {
-                        accumulate_refined_tile_rows(
-                            refined_tile_alpha.const_view(), refined_tile_fg.const_view(),
-                            acc_alpha.view(), acc_fg.view(), acc_weight.view(), tile_region.y_start,
-                            tile_region.x_start, height, width, overlap, y_begin, y_end);
-                    });
-                },
-                1);
-        }
-    }
-
-    common::measure_stage(
-        on_stage, "coarse_to_fine_refine_normalize",
-        [&]() {
-            common::parallel_for_rows(height, [&](int y_begin, int y_end) {
-                normalize_accumulators(acc_alpha.view(), acc_fg.view(), acc_weight.const_view(),
-                                       y_begin, y_end);
-            });
-        },
-        1);
-
-    result.alpha = std::move(acc_alpha);
-    result.foreground = std::move(acc_fg);
-    return {};
-}
-
 Result<FrameResult> InferenceSession::run_coarse_to_fine(const Image& rgb, const Image& alpha_hint,
                                                          const InferenceParams& params,
                                                          StageTimingCallback on_stage) {
     const int coarse_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
-    InferenceParams coarse_params = params;
-    coarse_params.target_resolution = coarse_resolution;
+    InferenceParams coarse_params = core::coarse_inference_params(params, coarse_resolution);
 
     debug_log("event=quality_path mode=coarse_to_fine requested_resolution=" +
               std::to_string(core::requested_quality_resolution(params, coarse_resolution)) +
-              " coarse_resolution=" + std::to_string(coarse_resolution));
+              " coarse_resolution=" + std::to_string(coarse_resolution) +
+              " strategy=artifact_fallback_only");
 
-    FrameResult coarse_result;
-    if (coarse_params.enable_tiling &&
-        (rgb.width > coarse_resolution || rgb.height > coarse_resolution)) {
-        auto tiled_result = run_tiled(rgb, alpha_hint, coarse_params, coarse_resolution, on_stage);
-        if (!tiled_result) {
-            return Unexpected(tiled_result.error());
-        }
-        coarse_result = std::move(*tiled_result);
-    } else {
-        auto raw_result = infer_raw(rgb, alpha_hint, coarse_params, on_stage);
-        if (!raw_result) {
-            return Unexpected(raw_result.error());
-        }
-        coarse_result = std::move(*raw_result);
+    auto raw_result = infer_raw(rgb, alpha_hint, coarse_params, on_stage);
+    if (!raw_result) {
+        return Unexpected(raw_result.error());
     }
-
-    auto refine_result = apply_local_refinement(coarse_result, rgb, alpha_hint, params, on_stage);
-    if (!refine_result) {
-        return Unexpected(refine_result.error());
-    }
-
-    apply_post_process(coarse_result, params, rgb, on_stage);
-    return coarse_result;
+    apply_post_process(*raw_result, params, rgb, on_stage);
+    return raw_result;
 }
 
 Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<Image>& rgbs,
@@ -1243,16 +959,16 @@ Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<I
     if (rgbs.empty()) return std::vector<FrameResult>{};
 
     if (core::should_use_coarse_to_fine_path(params, m_recommended_resolution)) {
-        std::vector<FrameResult> results;
-        results.reserve(rgbs.size());
-        for (size_t index = 0; index < rgbs.size(); ++index) {
-            auto result = run_coarse_to_fine(rgbs[index], alpha_hints[index], params, on_stage);
-            if (!result) {
-                return Unexpected(result.error());
-            }
-            results.push_back(std::move(*result));
+        const int coarse_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
+        InferenceParams coarse_params = core::coarse_inference_params(params, coarse_resolution);
+        auto results_res = infer_batch_raw(rgbs, alpha_hints, coarse_params, on_stage);
+        if (!results_res) {
+            return Unexpected(results_res.error());
         }
-        return results;
+        for (size_t index = 0; index < results_res->size(); ++index) {
+            apply_post_process((*results_res)[index], params, rgbs[index], on_stage);
+        }
+        return results_res;
     }
 
     // Tiling logic for batch (simplified: if first image needs tiling, we don't batch but run tiled
