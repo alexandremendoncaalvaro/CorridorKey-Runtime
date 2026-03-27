@@ -356,12 +356,27 @@ std::string runtime_session_runtime_label_impl(const InstanceData& data) {
     return "Loading...";
 }
 
+std::string last_render_work_origin_label(LastRenderWorkOrigin work_origin) {
+    switch (work_origin) {
+        case LastRenderWorkOrigin::BackendRender:
+            return "backend render";
+        case LastRenderWorkOrigin::SharedCache:
+            return "shared cache";
+        case LastRenderWorkOrigin::InstanceCache:
+            return "instance cache";
+        case LastRenderWorkOrigin::None:
+        default:
+            return "local render";
+    }
+}
+
 std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
     if (data.last_frame_ms <= 0.0) {
         return "No frames yet";
     }
-    return "Last frame: " + format_duration_ms(data.last_frame_ms) +
-           " | Avg: " + format_duration_ms(data.avg_frame_ms);
+    return "Last render: " + last_render_work_origin_label(data.last_render_work_origin) +
+           " | Local: " + format_duration_ms(data.last_frame_ms) +
+           " | Avg local: " + format_duration_ms(data.avg_frame_ms);
 }
 
 void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
@@ -398,6 +413,7 @@ void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
         data->last_frame_ms = 0.0;
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
     }
 
     data->runtime_panel_dirty = true;
@@ -1014,6 +1030,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         data->last_frame_ms = 0.0;
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
         sync_runtime_panel_state_from_active_engine(data.get());
 
         if (candidate.device.backend != detected_device.backend) {
@@ -1421,6 +1438,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         data->last_frame_ms = 0.0;
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
         data->last_warning = quality_fallback_warning(requested_quality_mode, selection);
         if (!data->last_warning.empty()) {
             log_message("ensure_engine_for_quality", "fallback_note=" + data->last_warning);

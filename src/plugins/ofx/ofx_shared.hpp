@@ -104,6 +104,13 @@ struct RuntimePanelState {
     std::uint64_t session_ref_count = 0;
 };
 
+enum class LastRenderWorkOrigin {
+    None,
+    BackendRender,
+    SharedCache,
+    InstanceCache,
+};
+
 struct InstanceData {
     OfxImageEffectHandle effect = nullptr;
     OfxImageClipHandle source_clip = nullptr;
@@ -166,6 +173,7 @@ struct InstanceData {
     double last_frame_ms = 0.0;
     double avg_frame_ms = 0.0;
     std::uint64_t frame_time_samples = 0;
+    LastRenderWorkOrigin last_render_work_origin = LastRenderWorkOrigin::None;
     bool in_render = false;
     bool runtime_panel_dirty = false;
     bool quantization_error_active = false;

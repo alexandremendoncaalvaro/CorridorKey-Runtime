@@ -124,9 +124,11 @@ TEST_CASE("runtime status omits frame timings when a dedicated timings field exi
     data.render_count = 4;
     data.last_frame_ms = 12.0;
     data.avg_frame_ms = 10.5;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
 
     REQUIRE(runtime_status_runtime_label(data) == "Ready");
-    REQUIRE(runtime_timings_runtime_label(data) == "Last frame: 12.0 ms | Avg: 10.5 ms");
+    REQUIRE(runtime_timings_runtime_label(data) ==
+            "Last render: backend render | Local: 12.0 ms | Avg local: 10.5 ms");
 }
 
 TEST_CASE("runtime session label exposes dedicated versus shared sessions",
@@ -157,10 +159,27 @@ TEST_CASE("runtime status still prioritizes errors and warnings while timings st
     data.last_warning = "Using 1024px fallback";
     data.last_frame_ms = 18.0;
     data.avg_frame_ms = 15.0;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
 
     REQUIRE(runtime_status_runtime_label(data) == "Error: TensorRT compile failed");
-    REQUIRE(runtime_timings_runtime_label(data) == "Last frame: 18.0 ms | Avg: 15.0 ms");
+    REQUIRE(runtime_timings_runtime_label(data) ==
+            "Last render: backend render | Local: 18.0 ms | Avg local: 15.0 ms");
 
     data.last_error.clear();
     REQUIRE(runtime_status_runtime_label(data) == "Note: Using 1024px fallback");
+}
+
+TEST_CASE("runtime timings label exposes cache-backed renders explicitly",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.last_frame_ms = 3.2;
+    data.avg_frame_ms = 4.1;
+
+    data.last_render_work_origin = LastRenderWorkOrigin::SharedCache;
+    REQUIRE(runtime_timings_runtime_label(data) ==
+            "Last render: shared cache | Local: 3.2 ms | Avg local: 4.1 ms");
+
+    data.last_render_work_origin = LastRenderWorkOrigin::InstanceCache;
+    REQUIRE(runtime_timings_runtime_label(data) ==
+            "Last render: instance cache | Local: 3.2 ms | Avg local: 4.1 ms");
 }

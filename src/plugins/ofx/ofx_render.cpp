@@ -123,6 +123,14 @@ void record_frame_timing(InstanceData* data, double elapsed_ms) {
     data->runtime_panel_dirty = true;
 }
 
+void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOrigin work_origin) {
+    if (data == nullptr) {
+        return;
+    }
+    data->last_render_work_origin = work_origin;
+    record_frame_timing(data, elapsed_ms);
+}
+
 void set_runtime_error(InstanceData* data, const std::string& message,
                        OfxImageEffectHandle instance) {
     if (data != nullptr) {
@@ -344,6 +352,7 @@ struct InferenceResult {
     ImageBuffer alpha;
     ImageBuffer foreground;
     InferenceOutcome outcome = InferenceOutcome::kOk;
+    LastRenderWorkOrigin work_origin = LastRenderWorkOrigin::BackendRender;
 };
 
 InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
@@ -360,7 +369,8 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     if (g_frame_cache != nullptr &&
         g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf)) {
         log_message("render", "event=cache_hit detail=shared_cache");
-        return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk};
+        return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
+                LastRenderWorkOrigin::SharedCache};
     }
 
     const DeviceInfo requested_device = requested_device_for_render(data);
@@ -888,11 +898,13 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const SrgbLut& lut = SrgbLut::instance();
     Image alpha_view;
     Image fg_linear;
+    LastRenderWorkOrigin work_origin = LastRenderWorkOrigin::BackendRender;
 
     if (cache_hit) {
         log_message("render", "event=cache_hit detail=instance_cache");
         alpha_view = data->cached_result.alpha.view();
         fg_linear = data->cached_result.foreground.view();
+        work_origin = LastRenderWorkOrigin::InstanceCache;
     } else {
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
                                         path_hash(data->model_path), screen_color};
@@ -907,6 +919,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         if (inference.outcome == InferenceOutcome::kFailed) {
             return kOfxStatFailed;
         }
+
+        work_origin = inference.work_origin;
 
         // Per-instance alpha edge adjustments (applied to this instance's own copy)
         Image alpha_view_local = inference.alpha.view();
@@ -1022,7 +1036,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const double render_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_start)
             .count();
-    record_frame_timing(data, render_ms);
+    record_frame_timing(data, render_ms, work_origin);
     if (data != nullptr) {
         data->last_error.clear();
         data->runtime_panel_dirty = true;
