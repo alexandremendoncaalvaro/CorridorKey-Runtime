@@ -124,6 +124,11 @@ Each product track ships curated model artifacts optimized for that track. The
 runtime contract - API, parameter schema, and output format - is identical
 across tracks. The artifact format and execution provider may differ.
 
+Quality policy is product-defined, not a vendor support claim. The runtime
+uses conservative **safe quality ceilings** by backend and available memory to
+pick a direct artifact, downgrade automatically, or force an explicit error
+when the requested quality is outside the current validated tier.
+
 ### 3.5 Fallback Behavior
 
 Fallback is surface-dependent.
@@ -150,6 +155,8 @@ processing begins.
 - CLI surface with stable JSON and NDJSON output contracts
 - OFX plugin for DaVinci Resolve 20 on Apple Silicon and Windows
 - Alpha hint ingestion and rough-matte fallback generation
+- OFX runtime/status reporting for guide source, safe quality ceiling, and the
+  actual runtime path used for the last render
 - Platform-specific model artifact packaging
 - `doctor`, `benchmark`, and `process` commands with structured diagnostics
 

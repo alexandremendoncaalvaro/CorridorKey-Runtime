@@ -13,20 +13,24 @@ results from a greenscreen plate:
 - a foreground RGB result with spill suppression and recovered detail
 - an alpha result that describes transparency
 
-In the current Resolve OFX path, that prediction is driven by a connected
-**Alpha Hint** matte. The practical workflow is therefore:
+In the current Resolve OFX path, that prediction is guided by either a
+connected **Alpha Hint** matte or a built-in rough fallback guide when no
+readable hint is available. The practical workflow is therefore:
 
-1. give CorridorKey a rough subject guide
+1. give CorridorKey a rough subject guide when you have one
 2. confirm the model is actually running
 3. refine the generated alpha
 4. recover texture or add detail only if the keyed result already basically
    works
 
-If you skip step 1, the current OFX build does not produce a real keyed result.
+If you skip step 1, the current OFX build can still key with a degraded rough
+fallback guide, but you should expect less stable results than with a useful
+external hint.
 
 ## If You Only Remember Three Things
 
-- Connect **Alpha Hint** first. Until then, the node is waiting, not keying.
+- Connect **Alpha Hint** when you have one. If not, check whether **Guide
+  Source** says `Rough Fallback`.
 - Trust **Effective Quality**, not the dropdown alone.
 - Use **Processed** for the normal result, then switch outputs only when you
   are diagnosing a specific problem.
@@ -40,15 +44,23 @@ The runtime panel at the top is the first place to look after any change.
 - **Requested Quality** tells you what you asked for. In `Auto`, it shows the
   source-size-derived target, not a fixed mode default.
 - **Effective Quality** tells you what resolution is actually running.
+- **Safe Quality Ceiling** tells you the highest quality CorridorKey currently
+  considers safe on the active backend and memory tier.
 - **Loaded Artifact** tells you which packaged model file is active.
-- **Status** tells you whether the plugin is waiting, loading, rendering,
-  falling back, or using a host-managed versus manual color path.
+- **Guide Source** tells you whether the last render used a connected external
+  Alpha Hint or the built-in rough fallback guide.
+- **Runtime Path** tells you whether the last render used the direct path,
+  artifact fallback, or full-model tiling.
+- **Status** tells you whether the plugin is loading, rendering, warning, or
+  reporting an error, and whether it is using a host-managed versus manual
+  color path.
 
 Treat the status panel as the source of truth. Two messages matter most:
 
-- `Waiting for Alpha Hint connection.` means CorridorKey is not keying yet.
 - `Note: ... unavailable on this hardware -- using ...` means the plugin
   loaded a lower packaged model than the requested mode.
+- `Guide Source: Rough Fallback` means CorridorKey rendered without a readable
+  external hint and generated a degraded automatic guide instead.
 
 Color-management messages are also actionable:
 
@@ -60,16 +72,15 @@ Color-management messages are also actionable:
 
 ## Current Resolve OFX Workflow
 
-The current Resolve OFX path does not run inference until an **Alpha Hint**
-input is connected.
+The current Resolve OFX path prefers a connected **Alpha Hint**, but it no
+longer blocks the render when no readable hint is available.
 
-- The render path still waits for a connected Alpha Hint before running the
-  model.
-- While waiting, CorridorKey outputs a pass-through image with opaque alpha
-  rather than a keyed result.
+- With a readable Alpha Hint, CorridorKey uses the external guide.
+- Without one, CorridorKey generates a rough fallback guide and continues.
+- The runtime panel tells you which path was used through **Guide Source**.
 
-Practical consequence: do not judge quality, despill, detail recovery, or
-tiling until the runtime panel stops saying it is waiting for Alpha Hint.
+Practical consequence: do not judge final quality from a `Rough Fallback`
+render if you plan to supply a real guide later.
 
 ## Quality
 
@@ -93,8 +104,8 @@ Current `Auto` behavior uses the larger input dimension:
 
 Current backend-specific rules:
 
-- **DirectML** is capped at `1536`, so `Maximum (2048)` will not stay at
-  `2048px` on that path.
+- **DirectML** currently tops out at a `1024px` safe quality ceiling, so
+  `Ultra (1536)` and `Maximum (2048)` will not hold on that path.
 - **CPU** is clamped to **Draft (512)**.
 - Fixed modes can still fall back to a lower packaged artifact if session
   preparation or engine creation fails for the requested one.
@@ -155,8 +166,7 @@ Output rule:
 
 ## Alpha Hint
 
-**Alpha Hint** is the guide-matte input that CorridorKey currently expects in
-the Resolve OFX path.
+**Alpha Hint** is the preferred guide-matte input for the Resolve OFX path.
 
 Why this matters:
 
@@ -166,8 +176,9 @@ Why this matters:
 - the panel's matte controls refine CorridorKey's output, not your incoming
   guide
 
-That makes Alpha Hint the setup step, not an optional polish step, in the
-current OFX workflow.
+That makes Alpha Hint the best setup step for a stable key, not an optional
+polish step. If it is missing, CorridorKey falls back to a rough automatic
+guide instead of stopping.
 
 ### What the plugin reads
 
@@ -296,10 +307,10 @@ These sliders are only active when **Recover Original Details** is enabled.
 
 ## Tiling
 
-**Enable Tiling** runs inference on overlapping tiles when the input frame is
-larger than the active model resolution.
+**Enable Tiling** runs the full packaged model on overlapping tiles when the
+input frame is larger than the active model resolution.
 
-This is the detail-recovery path for shots that are already working but are
+This is a full-model rescue path for shots that are already working but are
 limited by model resolution.
 
 Use it when:
@@ -347,16 +358,16 @@ For advanced users:
 - `Source+Matte` is useful for comparing the generated alpha against the
   original source plate, not for inspecting despill quality.
 
-If the status panel still says `Waiting for Alpha Hint connection.`, these
-outputs are not showing a keyed result yet.
+If **Guide Source** says `Rough Fallback`, treat the result as a degraded guide
+path and avoid over-tuning the matte until a better external hint is connected.
 
 ## Start Here
 
 Use this order when you want the fastest path to a trustworthy result.
 
 1. Add CorridorKey to the clip.
-2. Connect an **Alpha Hint** matte.
-3. Confirm the status panel no longer says `Waiting for Alpha Hint connection.`
+2. Connect an **Alpha Hint** matte when you have one.
+3. Check **Guide Source**. Prefer `External Alpha Hint` over `Rough Fallback`.
 4. Set **Quality** to **High (1024)**.
 5. Use **Processed** as the default output.
 6. Check **Effective Quality** before pushing to `Ultra` or `Maximum`.

@@ -58,13 +58,14 @@ behavior.
 
 ---
 
-## Status Says "Waiting for Alpha Hint connection."
+## Guide Source Shows "Rough Fallback"
 
-**Symptom:** The runtime panel says `Waiting for Alpha Hint connection.` and the
-result looks like a pass-through image instead of a keyed result.
+**Symptom:** The runtime panel shows `Guide Source: Rough Fallback`.
 
-The current Resolve OFX path does not run inference until the **Alpha Hint**
-input is connected.
+The current Resolve OFX path prefers a connected **Alpha Hint** input, but it
+can continue by generating a rough fallback guide when no readable hint is
+available. That keeps the node running, but the result is a degraded guidance
+path rather than the preferred workflow.
 
 **Steps:**
 
@@ -76,8 +77,10 @@ input is connected.
    **Alpha Hint** input.
 4. Prefer a true alpha or single-channel matte. If you feed an RGB image, the
    plugin reads the red channel.
-5. Check the runtime panel again. Do not evaluate quality or matte controls
-   until the waiting message is gone.
+5. Check the runtime panel again. Confirm **Guide Source** switches from
+   `Rough Fallback` to `External Alpha Hint`.
+6. If the plugin still cannot read the connected hint, inspect the source clip
+   format and confirm the matte is actually present in the expected channel.
 
 ---
 
