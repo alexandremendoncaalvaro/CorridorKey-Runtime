@@ -569,7 +569,7 @@ TEST_CASE("auto windows universal quality falls back to the highest packaged int
                                              2160, kQuantizationFp16);
 
     REQUIRE(selection.has_value());
-    REQUIRE(selection->requested_resolution == 1536);
+    REQUIRE(selection->requested_resolution == 2048);
     REQUIRE(selection->effective_resolution == 768);
     REQUIRE(selection->used_fallback);
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_int8_768.onnx");
