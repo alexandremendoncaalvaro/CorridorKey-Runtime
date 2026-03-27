@@ -6,8 +6,8 @@ for structural decisions. Any deviation must be discussed and approved in a
 PR before it happens.
 
 **See also:**
-[SPEC.md](SPEC.md) — product scope and support philosophy |
-[GUIDELINES.md](GUIDELINES.md) — code standards, testing, build rules
+[SPEC.md](SPEC.md) - product scope and support philosophy |
+[GUIDELINES.md](GUIDELINES.md) - code standards, testing, build rules
 
 ---
 
@@ -28,9 +28,12 @@ plugin).
    layer.
 3. **Predictable Operations.** Diagnostics, fallback behavior, and error
    reporting are first-class concerns, not afterthoughts.
-4. **Curated Platform Tracks.** Apple Silicon (MLX) and Windows TensorRT are
-   the two officially supported execution paths. Other paths have explicit
-   support designations. See [Support Matrix](../help/SUPPORT_MATRIX.md).
+4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
+   through MLX and Windows RTX through ONNX Runtime TensorRT RTX EP on NVIDIA
+   RTX 30 series and newer. Windows DirectML is an explicit experimental
+   product track. Other provider hooks present in the core runtime do not
+   become support claims unless they are packaged and validated. See
+   [Support Matrix](../help/SUPPORT_MATRIX.md).
 5. **Shared Runtime, Curated Artifacts.** The runtime contract is stable
    across product tracks. Model artifacts and backend adapters may differ by
    platform when required for predictable performance.
@@ -43,8 +46,10 @@ plugin).
 
 The engine, math, and I/O capabilities.
 
-- **Inference:** Backend adapters and session management for supported
-  execution paths (MLX, TensorRT, DirectML, ONNX CPU).
+- **Inference:** Backend adapters and session management for the official MLX
+  and TensorRT RTX EP product tracks, the experimental DirectML track, and
+  other internal provider hooks used for diagnostics, bring-up, or future
+  packaging work.
 - **Hardware:** Device detection and provider selection.
 - **Video Pipeline:** FFmpeg integration for direct memory processing.
 - **Math:** Color space conversion, despill, despeckle algorithms.
@@ -61,11 +66,13 @@ Rules:
 Orchestration of Core capabilities into coherent jobs and services.
 
 - Job definitions and validation.
-- Preset management and strategy selection (tiling vs. standard inference).
+- Preset management and strategy selection.
 - Progress tracking, stage timing, and benchmark reporting.
 - Structured diagnostics, capability reports, and model catalogs.
 - OFX runtime service: out-of-process session brokering, IPC protocol, and
   session lifecycle management for the OFX plugin.
+- Product-track policy: artifact selection, compatibility rules, and support
+  behavior shared by CLI and OFX.
 
 ### Layer 3: Interfaces (`src/cli`, `src/plugins/ofx`)
 
@@ -98,99 +105,99 @@ Project-level configuration and documentation only.
 
 Public API headers only. These are the headers external consumers include.
 
-```
+```text
 include/corridorkey/
-├── engine.hpp          Engine class — main entry point
-├── types.hpp           Value types: Image, DeviceInfo, InferenceParams
-├── frame_io.hpp        FrameIO interface
-└── version.hpp         Version macros
+|-- engine.hpp          Engine class - main entry point
+|-- types.hpp           Value types: Image, DeviceInfo, InferenceParams
+|-- frame_io.hpp        FrameIO interface
+`-- version.hpp         Version macros
 ```
 
 ### `src/`
 
 All implementation code, organized by domain.
 
-```
+```text
 src/
-├── app/                        Application orchestration layer
-│   ├── job_orchestrator.cpp
-│   ├── model_compiler.cpp
-│   ├── ofx_runtime_protocol.cpp    OFX IPC wire protocol
-│   ├── ofx_runtime_service.cpp     Out-of-process OFX runtime server
-│   ├── ofx_session_broker.cpp      Session pool management for OFX
-│   ├── runtime_contracts.cpp
-│   ├── runtime_diagnostics.cpp
-│   └── hardware_profile.hpp
-│
-├── cli/                        CLI application (thin consumer)
-│   ├── main.cpp
-│   ├── device_selection.hpp
-│   └── process_paths.hpp
-│
-├── common/                     Shared internal utilities (no external deps)
-│   ├── local_ipc.cpp           Local IPC transport abstractions
-│   ├── shared_memory_transport.cpp  Shared-memory frame transport
-│   ├── hardware_telemetry.hpp
-│   ├── parallel_for.hpp
-│   ├── runtime_paths.hpp
-│   ├── srgb_lut.hpp
-│   └── stage_profiler.hpp
-│
-├── core/                       Inference engine and device detection
-│   ├── engine.cpp
-│   ├── inference_session.cpp
-│   ├── device_detection.cpp
-│   ├── mlx_probe.cpp           macOS MLX backend probe
-│   ├── mlx_session.cpp         MLX inference session
-│   ├── windows_rtx_probe.cpp   Windows TensorRT/RTX backend probe
-│   ├── session_cache_policy.hpp
-│   ├── session_policy.hpp
-│   └── tile_blend.hpp
-│
-├── frame_io/                   Image and video read/write
-│   ├── frame_io.cpp
-│   ├── video_io.cpp
-│   ├── exr_io.cpp
-│   └── png_io.cpp
-│
-├── gui/                        Tauri GUI (in-development, not yet released)
-│
-├── plugins/
-│   └── ofx/                    OpenFX plugin
-│       ├── ofx_plugin.cpp      OFX entry point and descriptor
-│       ├── ofx_instance.cpp    Instance lifecycle
-│       ├── ofx_render.cpp      Render callback
-│       ├── ofx_actions.cpp     OFX action handlers
-│       ├── ofx_runtime_client.cpp  IPC client to the App-layer service
-│       ├── ofx_image_utils.cpp
-│       └── ofx_logging.cpp
-│
-└── post_process/               Color math, despill, despeckle
-    ├── color_utils.cpp
-    └── despill.cpp
+|-- app/                        Application orchestration layer
+|   |-- job_orchestrator.cpp
+|   |-- model_compiler.cpp
+|   |-- ofx_runtime_protocol.cpp    OFX IPC wire protocol
+|   |-- ofx_runtime_service.cpp     Out-of-process OFX runtime server
+|   |-- ofx_session_broker.cpp      Session pool management for OFX
+|   |-- runtime_contracts.cpp
+|   |-- runtime_diagnostics.cpp
+|   `-- hardware_profile.hpp
+|
+|-- cli/                        CLI application (thin consumer)
+|   |-- main.cpp
+|   |-- device_selection.hpp
+|   `-- process_paths.hpp
+|
+|-- common/                     Shared internal utilities (no external deps)
+|   |-- local_ipc.cpp           Local IPC transport abstractions
+|   |-- shared_memory_transport.cpp  Shared-memory frame transport
+|   |-- hardware_telemetry.hpp
+|   |-- parallel_for.hpp
+|   |-- runtime_paths.hpp
+|   |-- srgb_lut.hpp
+|   `-- stage_profiler.hpp
+|
+|-- core/                       Inference engine and device detection
+|   |-- engine.cpp
+|   |-- inference_session.cpp
+|   |-- device_detection.cpp
+|   |-- mlx_probe.cpp           macOS MLX backend probe
+|   |-- mlx_session.cpp         MLX inference session
+|   |-- windows_rtx_probe.cpp   Windows TensorRT RTX backend probe
+|   |-- session_cache_policy.hpp
+|   |-- session_policy.hpp
+|   `-- tile_blend.hpp
+|
+|-- frame_io/                   Image and video read/write
+|   |-- frame_io.cpp
+|   |-- video_io.cpp
+|   |-- exr_io.cpp
+|   `-- png_io.cpp
+|
+|-- gui/                        Tauri GUI (in-development, not yet released)
+|
+|-- plugins/
+|   `-- ofx/                    OpenFX plugin
+|       |-- ofx_plugin.cpp      OFX entry point and descriptor
+|       |-- ofx_instance.cpp    Instance lifecycle
+|       |-- ofx_render.cpp      Render callback
+|       |-- ofx_actions.cpp     OFX action handlers
+|       |-- ofx_runtime_client.cpp  IPC client to the App-layer service
+|       |-- ofx_image_utils.cpp
+|       `-- ofx_logging.cpp
+|
+`-- post_process/               Color math, despill, despeckle
+    |-- color_utils.cpp
+    `-- despill.cpp
 ```
 
 ### `tests/`
 
 All test code, organized by level.
 
-```
+```text
 tests/
-├── unit/               Fast, isolated logic tests (Catch2, no GPU, no I/O)
-├── integration/        Multi-module tests (file round-trips, no GPU)
-├── e2e/                Full binary tests with real models and hardware
-├── regression/         Bug reproduction tests
-└── fixtures/           Reference files (< 1 MB total)
+|-- unit/               Fast, isolated logic tests (Catch2, no GPU, no I/O)
+|-- integration/        Multi-module tests (file round-trips, no GPU)
+|-- e2e/                Full binary tests with real models and hardware
+|-- regression/         Bug reproduction tests
+`-- fixtures/           Reference files (< 1 MB total)
 ```
 
 ### `tools/`
 
 Standalone auxiliary tools. Must not leak dependencies into the main build.
 
-```
+```text
 tools/
-├── model_exporter/     Python scripts to export PyTorch models to ONNX
-└── hint_generator/     Reference auto-hint implementation
+|-- model_exporter/     Python scripts to export PyTorch models to ONNX
+`-- hint_generator/     Reference auto-hint implementation
 ```
 
 ---
@@ -201,7 +208,7 @@ The OFX plugin uses an out-of-process architecture to protect the host
 application (DaVinci Resolve) from backend and VRAM failures.
 
 **Crash Containment.** The runtime service (`ofx_runtime_service`) runs in a
-separate process. ONNX session failures, VRAM exhaustion, and TensorRT
+separate process. ONNX session failures, VRAM exhaustion, and TensorRT RTX
 compilation errors are isolated from the host.
 
 **Session Residency.** The session broker (`ofx_session_broker`) pools
@@ -239,50 +246,50 @@ throughout. `std::exit` and `abort` are never called from library code.
 
 ---
 
-## 6. Adding New Code — Decision Tree
+## 6. Adding New Code - Decision Tree
 
-```
+```text
 Is it a public API type or function?
-  YES → include/corridorkey/
-  NO ↓
+  YES -> include/corridorkey/
+  NO  v
 
 Is it inference logic or hardware management?
-  YES → src/core/
-  NO ↓
+  YES -> src/core/
+  NO  v
 
 Is it file I/O (video/image)?
-  YES → src/frame_io/
-  NO ↓
+  YES -> src/frame_io/
+  NO  v
 
 Is it pixel math (color, filters)?
-  YES → src/post_process/
-  NO ↓
+  YES -> src/post_process/
+  NO  v
 
 Is it OFX plugin logic?
-  YES → src/plugins/ofx/
-  NO ↓
+  YES -> src/plugins/ofx/
+  NO  v
 
 Is it application orchestration or OFX service logic?
-  YES → src/app/
-  NO ↓
+  YES -> src/app/
+  NO  v
 
 Is it CLI/command-line logic?
-  YES → src/cli/
-  NO ↓
+  YES -> src/cli/
+  NO  v
 
 Is it a shared internal utility with no external deps?
-  YES → src/common/
-  NO ↓
+  YES -> src/common/
+  NO  v
 
 Is it a Python helper?
-  YES → tools/
-  NO ↓
+  YES -> tools/
+  NO  v
 
 Is it a test?
-  Pure logic   → tests/unit/
-  Pipeline I/O → tests/integration/
-  Full binary  → tests/e2e/
-  NO ↓
+  Pure logic   -> tests/unit/
+  Pipeline I/O -> tests/integration/
+  Full binary  -> tests/e2e/
+  NO           v
 
-→ STOP. Discuss in an issue.
+-> STOP. Discuss in an issue.
 ```
