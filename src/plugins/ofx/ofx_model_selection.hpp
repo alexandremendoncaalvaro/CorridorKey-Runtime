@@ -422,6 +422,61 @@ inline bool has_mlx_bootstrap_artifacts(const std::filesystem::path& models_root
            path_exists(artifact_path_for_backend(models_root, Backend::MLX, 512));
 }
 
+inline std::vector<std::filesystem::path> expected_bootstrap_artifact_paths(
+    const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
+    const std::filesystem::path& models_root) {
+    std::vector<std::filesystem::path> expected;
+    auto append_unique_path = [&](const std::filesystem::path& path) {
+        if (path.empty()) {
+            return;
+        }
+        if (std::find(expected.begin(), expected.end(), path) == expected.end()) {
+            expected.push_back(path);
+        }
+    };
+
+#if defined(__APPLE__)
+    if (capabilities.platform == "macos" && capabilities.apple_silicon &&
+        capabilities.mlx_probe_available && has_mlx_bootstrap_artifacts(models_root)) {
+        append_unique_path(mlx_pack_path(models_root));
+        append_unique_path(artifact_path_for_backend(models_root, Backend::MLX, 512));
+    }
+#else
+    (void)capabilities;
+#endif
+
+    auto preset = app::default_preset_for_capabilities(capabilities);
+    auto append_expected_candidate = [&](const DeviceInfo& device) {
+        auto model_entry = app::default_model_for_request(capabilities, device, preset);
+        if (!model_entry.has_value()) {
+            return;
+        }
+
+        auto requested_model_path = models_root / model_entry->filename;
+        append_unique_path(requested_model_path);
+
+        if (device.backend == Backend::MLX) {
+            append_unique_path(artifact_path_for_backend(models_root, Backend::MLX, 512));
+        }
+    };
+
+    append_expected_candidate(detected_device);
+    if (detected_device.backend != Backend::CPU) {
+        append_expected_candidate(
+            DeviceInfo{"Generic CPU", detected_device.available_memory_mb, Backend::CPU});
+    }
+
+    return expected;
+}
+
+inline std::string missing_bootstrap_artifact_message(
+    const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
+    const std::filesystem::path& models_root) {
+    return missing_artifact_message(
+        "No compatible bootstrap model artifact was found for this device", models_root,
+        expected_bootstrap_artifact_paths(capabilities, detected_device, models_root));
+}
+
 inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,

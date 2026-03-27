@@ -32,6 +32,38 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
     return normalized_lower(selector);
 }
 
+std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_memory_mb) {
+    if (available_memory_mb <= 0) {
+        return std::nullopt;
+    }
+    if (available_memory_mb >= 24000) {
+        return 2048;
+    }
+    if (available_memory_mb >= 16000) {
+        return 1536;
+    }
+    if (available_memory_mb >= 10000) {
+        return 1024;
+    }
+    if (available_memory_mb >= 8000) {
+        return 768;
+    }
+    return 512;
+}
+
+std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_memory_mb) {
+    if (available_memory_mb <= 0) {
+        return std::nullopt;
+    }
+    if (available_memory_mb >= 10000) {
+        return 1024;
+    }
+    if (available_memory_mb >= 8000) {
+        return 768;
+    }
+    return 512;
+}
+
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
     if (selector == "preview") {
