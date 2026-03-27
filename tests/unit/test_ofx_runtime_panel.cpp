@@ -183,3 +183,28 @@ TEST_CASE("runtime timings label exposes cache-backed renders explicitly",
     REQUIRE(runtime_timings_runtime_label(data) ==
             "Last render: instance cache | Local: 3.2 ms | Avg local: 4.1 ms");
 }
+
+TEST_CASE("runtime backend work label summarizes backend renders and cache hits",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+
+    REQUIRE(runtime_backend_work_runtime_label(data) == "No backend work recorded");
+
+    data.last_render_work_origin = LastRenderWorkOrigin::SharedCache;
+    REQUIRE(runtime_backend_work_runtime_label(data) == "No backend work | shared cache hit");
+
+    data.last_render_work_origin = LastRenderWorkOrigin::InstanceCache;
+    REQUIRE(runtime_backend_work_runtime_label(data) == "No backend work | instance cache hit");
+
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    REQUIRE(runtime_backend_work_runtime_label(data) ==
+            "Backend render | stage timings unavailable");
+
+    data.last_render_stage_timings = {
+        corridorkey::StageTiming{"frame_prepare_inputs", 16.5, 1, 1},
+        corridorkey::StageTiming{"ort_run", 84.5, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs", 1853.9, 1, 1},
+    };
+    REQUIRE(runtime_backend_work_runtime_label(data) ==
+            "Backend total: 2.0 s | Hotspot: frame_extract_outputs 1.9 s");
+}

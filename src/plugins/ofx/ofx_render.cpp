@@ -135,6 +135,8 @@ void set_runtime_error(InstanceData* data, const std::string& message,
                        OfxImageEffectHandle instance) {
     if (data != nullptr) {
         data->last_error = message;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
         data->cached_result_valid = false;
         data->runtime_panel_dirty = true;
         update_runtime_panel(data);
@@ -353,6 +355,7 @@ struct InferenceResult {
     ImageBuffer foreground;
     InferenceOutcome outcome = InferenceOutcome::kOk;
     LastRenderWorkOrigin work_origin = LastRenderWorkOrigin::BackendRender;
+    std::vector<StageTiming> stage_timings = {};
 };
 
 InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
@@ -376,6 +379,7 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     const DeviceInfo requested_device = requested_device_for_render(data);
     const DeviceInfo effective_device_before = effective_device_for_render_log(data);
     const std::string render_phase = render_phase_label(data->render_count);
+    std::vector<StageTiming> stage_timings;
     log_render_event("render_begin", render_phase, requested_device, effective_device_before,
                      data->model_path, data->requested_resolution, data->active_resolution,
                      data->use_runtime_server ? data->runtime_client->backend_fallback()
@@ -385,12 +389,14 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                       ? data->runtime_client->process_frame(
                             rgb_view, hint_view, params, data->render_count,
                             [&](const StageTiming& timing) {
+                                stage_timings.push_back(timing);
                                 log_render_stage(render_phase, requested_device, data->model_path,
                                                  data->requested_resolution,
                                                  data->active_resolution, timing);
                             })
                       : data->engine->process_frame(
                             rgb_view, hint_view, params, [&](const StageTiming& timing) {
+                                stage_timings.push_back(timing);
                                 log_render_stage(render_phase, requested_device, data->model_path,
                                                  data->requested_resolution,
                                                  data->active_resolution, timing);
@@ -408,7 +414,7 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         set_runtime_error(data, result.error().message, instance);
         bypass_with_source(source_data, output_data, width, height, source_row_bytes,
                            output_row_bytes, source_depth);
-        return {{}, {}, InferenceOutcome::kBypass};
+        return {{}, {}, InferenceOutcome::kBypass, LastRenderWorkOrigin::BackendRender, {}};
     }
 
     const DeviceInfo effective_device = data->use_runtime_server
@@ -439,14 +445,14 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         data->last_error = fallback_message;
         log_message("render", fallback_message);
         set_runtime_error(data, fallback_message, instance);
-        return {{}, {}, InferenceOutcome::kFailed};
+        return {{}, {}, InferenceOutcome::kFailed, LastRenderWorkOrigin::BackendRender, {}};
     }
 
     const Image raw_alpha = result->alpha.view();
     if (raw_alpha.width != width || raw_alpha.height != height) {
         log_message("render", "Unexpected output size from engine.");
         set_runtime_error(data, "Unexpected output size from engine.", instance);
-        return {{}, {}, InferenceOutcome::kFailed};
+        return {{}, {}, InferenceOutcome::kFailed, LastRenderWorkOrigin::BackendRender, {}};
     }
 
     const Image fg_srgb_view = result->foreground.view();
@@ -470,7 +476,8 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view());
     }
 
-    return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk};
+    return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
+            LastRenderWorkOrigin::BackendRender, std::move(stage_timings)};
 }
 
 }  // namespace
@@ -905,6 +912,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         alpha_view = data->cached_result.alpha.view();
         fg_linear = data->cached_result.foreground.view();
         work_origin = LastRenderWorkOrigin::InstanceCache;
+        data->last_render_stage_timings.clear();
     } else {
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
                                         path_hash(data->model_path), screen_color};
@@ -921,6 +929,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
 
         work_origin = inference.work_origin;
+        data->last_render_stage_timings = inference.stage_timings;
 
         // Per-instance alpha edge adjustments (applied to this instance's own copy)
         Image alpha_view_local = inference.alpha.view();

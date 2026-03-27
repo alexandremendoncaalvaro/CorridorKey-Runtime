@@ -379,6 +379,40 @@ std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
            " | Avg local: " + format_duration_ms(data.avg_frame_ms);
 }
 
+std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
+    switch (data.last_render_work_origin) {
+        case LastRenderWorkOrigin::SharedCache:
+            return "No backend work | shared cache hit";
+        case LastRenderWorkOrigin::InstanceCache:
+            return "No backend work | instance cache hit";
+        case LastRenderWorkOrigin::BackendRender:
+            break;
+        case LastRenderWorkOrigin::None:
+        default:
+            return "No backend work recorded";
+    }
+
+    if (data.last_render_stage_timings.empty()) {
+        return "Backend render | stage timings unavailable";
+    }
+
+    double total_ms = 0.0;
+    const StageTiming* hottest_stage = nullptr;
+    for (const auto& timing : data.last_render_stage_timings) {
+        total_ms += timing.total_ms;
+        if (hottest_stage == nullptr || timing.total_ms > hottest_stage->total_ms) {
+            hottest_stage = &timing;
+        }
+    }
+
+    std::string label = "Backend total: " + format_duration_ms(total_ms);
+    if (hottest_stage != nullptr && hottest_stage->total_ms > 0.0 && !hottest_stage->name.empty()) {
+        label += " | Hotspot: " + truncate_status_message(hottest_stage->name, 36) + " " +
+                 format_duration_ms(hottest_stage->total_ms);
+    }
+    return label;
+}
+
 void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
     if (data == nullptr) {
         return;
@@ -414,6 +448,7 @@ void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
         data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
     }
 
     data->runtime_panel_dirty = true;
@@ -502,13 +537,15 @@ void update_runtime_panel_values(InstanceData* data) {
                            is_loading ? "Loading..." : runtime_status_runtime_label(*data));
     set_string_param_value(data->runtime_timings_param,
                            is_loading ? "Loading..." : runtime_timings_runtime_label(*data));
+    set_string_param_value(data->runtime_backend_work_param,
+                           is_loading ? "Loading..." : runtime_backend_work_runtime_label(*data));
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
                               const std::string& device, const std::string& requested_quality,
                               const std::string& effective_quality, const std::string& artifact,
                               const std::string& session, const std::string& status,
-                              const std::string& timings) {
+                              const std::string& timings, const std::string& backend_work) {
     if (data == nullptr) {
         return;
     }
@@ -521,6 +558,7 @@ void set_runtime_panel_status(InstanceData* data, const std::string& processing,
     set_string_param_value(data->runtime_session_param, session);
     set_string_param_value(data->runtime_status_param, status);
     set_string_param_value(data->runtime_timings_param, timings);
+    set_string_param_value(data->runtime_backend_work_param, backend_work);
 }
 
 bool backend_matches_request(const Engine& engine, const DeviceInfo& requested_device) {
@@ -660,6 +698,10 @@ bool sync_runtime_panel_session_state(InstanceData* data) {
 
 std::string runtime_timings_runtime_label(const InstanceData& data) {
     return runtime_timings_runtime_label_impl(data);
+}
+
+std::string runtime_backend_work_runtime_label(const InstanceData& data) {
+    return runtime_backend_work_runtime_label_impl(data);
 }
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance) {
@@ -805,6 +847,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeTimings,
                                        &data->runtime_timings_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeBackendWork,
+                                       &data->runtime_backend_work_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRenderTimeout, &data->render_timeout_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamPrepareTimeout,
@@ -814,7 +858,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
     set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
                              "Loading...", "Loading...", "Loading...", "Loading...",
-                             "Loading...");
+                             "Loading...", "Loading...");
 
     int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
     int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;
@@ -1031,6 +1075,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
         data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
         sync_runtime_panel_state_from_active_engine(data.get());
 
         if (candidate.device.backend != detected_device.backend) {
@@ -1439,6 +1484,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
         data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
         data->last_warning = quality_fallback_warning(requested_quality_mode, selection);
         if (!data->last_warning.empty()) {
             log_message("ensure_engine_for_quality", "fallback_note=" + data->last_warning);
