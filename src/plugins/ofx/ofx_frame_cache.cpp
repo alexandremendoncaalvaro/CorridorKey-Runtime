@@ -45,6 +45,7 @@ std::uint64_t inference_params_hash(const InferenceParams& params) {
     hash = mix_signature(hash, params.auto_despeckle ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.despeckle_size));
     hash = mix_signature(hash, params.refiner_scale);
+    hash = mix_signature(hash, static_cast<float>(static_cast<std::uint8_t>(params.alpha_hint_policy)));
     hash = mix_signature(hash, params.input_is_linear ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.batch_size));
     hash = mix_signature(hash, params.enable_tiling ? 1.0f : 0.0f);

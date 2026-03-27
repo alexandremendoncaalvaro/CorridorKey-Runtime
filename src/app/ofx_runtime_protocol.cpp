@@ -139,6 +139,21 @@ Result<QualityFallbackMode> quality_fallback_mode_from_string(const std::string&
     return Unexpected<Error>(invalid_protocol_error("Unknown quality fallback mode: " + value));
 }
 
+std::string alpha_hint_policy_to_string(AlphaHintPolicy policy) {
+    switch (policy) {
+        case AlphaHintPolicy::RequireExternalHint:
+            return "require_external_hint";
+        default:
+            return "auto_rough_fallback";
+    }
+}
+
+Result<AlphaHintPolicy> alpha_hint_policy_from_string(const std::string& value) {
+    if (value == "auto_rough_fallback") return AlphaHintPolicy::AutoRoughFallback;
+    if (value == "require_external_hint") return AlphaHintPolicy::RequireExternalHint;
+    return Unexpected<Error>(invalid_protocol_error("Unknown alpha hint policy: " + value));
+}
+
 std::string refinement_mode_to_string(RefinementMode mode) {
     switch (mode) {
         case RefinementMode::FullFrame:
@@ -268,6 +283,7 @@ nlohmann::json to_json(const InferenceParams& params) {
                 {"auto_despeckle", params.auto_despeckle},
                 {"despeckle_size", params.despeckle_size},
                 {"refiner_scale", params.refiner_scale},
+                {"alpha_hint_policy", alpha_hint_policy_to_string(params.alpha_hint_policy)},
                 {"input_is_linear", params.input_is_linear},
                 {"batch_size", params.batch_size},
                 {"enable_tiling", params.enable_tiling},
@@ -325,6 +341,12 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
         return Unexpected<Error>(invalid_protocol_error("Missing numeric field: refiner_scale"));
     }
     params.refiner_scale = json.at("refiner_scale").get<float>();
+    if (json.contains("alpha_hint_policy") && json.at("alpha_hint_policy").is_string()) {
+        auto alpha_hint_policy =
+            alpha_hint_policy_from_string(json.at("alpha_hint_policy").get<std::string>());
+        if (!alpha_hint_policy) return Unexpected<Error>(alpha_hint_policy.error());
+        params.alpha_hint_policy = *alpha_hint_policy;
+    }
     auto input_is_linear = required_bool(json, "input_is_linear");
     if (!input_is_linear) return Unexpected<Error>(input_is_linear.error());
     params.input_is_linear = *input_is_linear;

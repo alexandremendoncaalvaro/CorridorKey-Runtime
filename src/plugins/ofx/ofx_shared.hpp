@@ -70,7 +70,10 @@ constexpr const char* kParamRuntimeProcessing = "runtime_processing";
 constexpr const char* kParamRuntimeDevice = "runtime_device";
 constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality";
 constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
+constexpr const char* kParamRuntimeSafeQualityCeiling = "runtime_safe_quality_ceiling";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
+constexpr const char* kParamRuntimeGuideSource = "runtime_guide_source";
+constexpr const char* kParamRuntimePath = "runtime_path";
 constexpr const char* kParamRuntimeSession = "runtime_session";
 constexpr const char* kParamRuntimeStatus = "runtime_status";
 constexpr const char* kParamRuntimeTimings = "runtime_timings";
@@ -99,10 +102,24 @@ struct RuntimePanelState {
     int requested_quality_mode = kQualityAuto;
     int requested_resolution = 0;
     int effective_resolution = 0;
+    int safe_quality_ceiling_resolution = 0;
     bool cpu_quality_guardrail_active = false;
     std::filesystem::path artifact_path = {};
     bool session_prepared = false;
     std::uint64_t session_ref_count = 0;
+};
+
+enum class GuideSourceKind {
+    Unknown,
+    ExternalAlphaHint,
+    RoughFallback,
+};
+
+enum class RuntimePathKind {
+    Unknown,
+    Direct,
+    ArtifactFallback,
+    FullModelTiling,
 };
 
 enum class LastRenderWorkOrigin {
@@ -145,7 +162,10 @@ struct InstanceData {
     OfxParamHandle runtime_device_param = nullptr;
     OfxParamHandle runtime_requested_quality_param = nullptr;
     OfxParamHandle runtime_effective_quality_param = nullptr;
+    OfxParamHandle runtime_safe_quality_ceiling_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
+    OfxParamHandle runtime_guide_source_param = nullptr;
+    OfxParamHandle runtime_path_param = nullptr;
     OfxParamHandle runtime_session_param = nullptr;
     OfxParamHandle runtime_status_param = nullptr;
     OfxParamHandle runtime_timings_param = nullptr;
@@ -164,6 +184,8 @@ struct InstanceData {
     int active_resolution = 0;
     bool cpu_quality_guardrail_active = false;
     RuntimePanelState runtime_panel_state = {};
+    GuideSourceKind last_guide_source = GuideSourceKind::Unknown;
+    RuntimePathKind last_runtime_path = RuntimePathKind::Unknown;
     QualityCompileFailureCache quality_compile_failure_cache = {};
     bool use_runtime_server = false;
     std::uint64_t render_count = 0;
@@ -236,6 +258,12 @@ std::string runtime_session_runtime_label(const InstanceData& data);
 std::string runtime_status_runtime_label(const InstanceData& data);
 std::string runtime_timings_runtime_label(const InstanceData& data);
 std::string runtime_backend_work_runtime_label(const InstanceData& data);
+std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data);
+std::string runtime_guide_source_runtime_label(const InstanceData& data);
+std::string runtime_path_runtime_label(const InstanceData& data);
+Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
+                                                  bool hint_from_clip,
+                                                  AlphaHintPolicy alpha_hint_policy);
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);

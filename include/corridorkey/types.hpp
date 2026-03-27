@@ -363,6 +363,11 @@ enum class QualityFallbackMode : std::uint8_t { Auto, Direct, CoarseToFine };
 enum class RefinementMode : std::uint8_t { Auto, FullFrame, Tiled };
 
 /**
+ * @brief Runtime policy for obtaining the alpha hint guide when the caller does not provide one.
+ */
+enum class AlphaHintPolicy : std::uint8_t { AutoRoughFallback, RequireExternalHint };
+
+/**
  * @brief Parameters to control the inference and post-processing.
  */
 struct InferenceParams {
@@ -372,6 +377,7 @@ struct InferenceParams {
     bool auto_despeckle = false;
     int despeckle_size = 400;
     float refiner_scale = 1.0F;
+    AlphaHintPolicy alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
     bool input_is_linear = false;
 
     // Batching (GPU efficiency)

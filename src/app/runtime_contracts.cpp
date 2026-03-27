@@ -151,6 +151,23 @@ ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
     return entry;
 }
 
+InferenceParams make_preset_inference_params(int target_resolution, bool auto_despeckle,
+                                             bool enable_tiling, int tile_padding) {
+    InferenceParams params;
+    params.target_resolution = target_resolution;
+    params.despill_strength = 1.0F;
+    params.spill_method = 0;
+    params.auto_despeckle = auto_despeckle;
+    params.despeckle_size = 400;
+    params.refiner_scale = 1.0F;
+    params.alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
+    params.input_is_linear = false;
+    params.batch_size = 1;
+    params.enable_tiling = enable_tiling;
+    params.tile_padding = tile_padding;
+    return params;
+}
+
 }  // namespace
 
 RuntimeCapabilities runtime_capabilities() {
@@ -377,7 +394,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-preview",
             "Mac Preview",
             "Fast validation preset for smoke tests and low-memory systems.",
-            InferenceParams{512, 1.0F, 0, false, 400, 1.0F, false, 1, false, 32},
+            make_preset_inference_params(512, false, false, 32),
             "corridorkey_int8_512.onnx",
             "smoke_preview",
             false,
@@ -391,7 +408,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Mac Balanced",
             "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
             "and no implicit cleanup.",
-            InferenceParams{0, 1.0F, 0, false, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(0, false, true, 64),
             "corridorkey_mlx.safetensors",
             "apple_acceleration_primary",
             true,
@@ -404,7 +421,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-max-quality",
             "Mac Max Quality",
             "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
-            InferenceParams{0, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(0, true, true, 64),
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",
             false,
@@ -417,7 +434,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-cpu-safe",
             "Windows CPU Safe",
             "Compatibility preset that keeps the Windows RTX bundle on the CPU fallback path.",
-            InferenceParams{512, 1.0F, 0, false, 400, 1.0F, false, 1, false, 32},
+            make_preset_inference_params(512, false, false, 32),
             "corridorkey_int8_512.onnx",
             "windows_cpu_fallback",
             false,
@@ -431,7 +448,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Windows RTX Balanced",
             "Default Windows RTX preset with FP16 inference, runtime cache enabled, and tiling "
             "ready for portable bundles.",
-            InferenceParams{768, 1.0F, 0, false, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(768, false, true, 64),
             "corridorkey_fp16_768.onnx",
             "windows_rtx_primary",
             false,
@@ -444,7 +461,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-rtx-max-quality",
             "Windows RTX Max Quality",
             "Higher-quality Windows RTX preset with cleanup enabled for the 10 GB and up tier.",
-            InferenceParams{1024, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(1024, true, true, 64),
             "corridorkey_fp16_1024.onnx",
             "windows_rtx_primary",
             false,
@@ -457,7 +474,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-rtx-ultra-quality",
             "Windows RTX Ultra Quality",
             "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
-            InferenceParams{2048, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(2048, true, true, 64),
             "corridorkey_fp16_2048.onnx",
             "windows_rtx_primary",
             false,
@@ -470,7 +487,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-ultra-quality",
             "Mac Ultra Quality",
             "Extreme quality Apple Silicon preset using 2048px MLX bridge with cleanup enabled.",
-            InferenceParams{2048, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(2048, true, true, 64),
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",
             false,

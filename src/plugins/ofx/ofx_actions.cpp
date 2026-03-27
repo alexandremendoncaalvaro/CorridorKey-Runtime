@@ -91,7 +91,7 @@ void define_bool_param(OfxParamSetHandle param_set, const char* name, const char
 
 void define_choice_param(OfxParamSetHandle param_set, const char* name, const char* label,
                          int default_value, const std::vector<const char*>& options,
-                         const char* hint, const char* parent = nullptr) {
+                         const char* hint, const char* parent = nullptr, bool enabled = true) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeChoice, name, &param_props) !=
         kOfxStatOK) {
@@ -103,6 +103,7 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
     for (int i = 0; i < static_cast<int>(options.size()); ++i) {
         g_suites.property->propSetString(param_props, kOfxParamPropChoiceOption, i, options[i]);
     }
+    g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, enabled ? 1 : 0);
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -292,11 +293,26 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
         "Shows the actual resolution currently used for inference after artifact selection.",
         "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeSafeQualityCeiling, "Safe Quality Ceiling", "Initializing...",
+        "Shows the highest quality CorridorKey currently considers safe on the active backend "
+        "and device memory tier.",
+        "runtime_group");
     define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
                                 "Initializing...",
                                 "Shows the actual model or bridge file loaded for the current "
                                 "quality mode.",
                                 "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeGuideSource, "Guide Source", "Initializing...",
+        "Shows whether CorridorKey used an external Alpha Hint or generated a rough fallback "
+        "guide for the last render.",
+        "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimePath, "Runtime Path", "Initializing...",
+        "Shows whether the last render used the direct path, artifact fallback, or full-model "
+        "tiling.",
+        "runtime_group");
     define_runtime_status_param(
         param_set, kParamRuntimeSession, "Runtime Session", "Initializing...",
         "Shows whether this OFX instance is using a dedicated runtime session or a shared one.",
@@ -350,8 +366,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
          quality_mode_ui_label(kQualityStandard), quality_mode_ui_label(kQualityHigh),
          quality_mode_ui_label(kQualityUltra), quality_mode_ui_label(kQualityMaximum)},
-        "Inference quality. Auto selects based on input size and hardware. "
-        "Higher values produce better detail at the cost of speed. "
+        "Inference quality. Auto selects based on input size and the runtime safe quality "
+        "ceiling for the active hardware tier. Higher values produce better detail at the cost "
+        "of speed. "
         "Resolutions: Draft (512), Standard (768), High (1024), Ultra (1536), "
         "Maximum (2048).",
         "setup_group");
@@ -365,28 +382,17 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                       "sharper texture. This is not an edge-fix tool. The recovered pixels still "
                       "flow through despill after the blend.",
                       "interior_detail_group");
-    define_int_param(param_set, kParamEdgeErode, "Details Edge Shrink", kDefaultEdgeErode, 0,
-                     kMaxEdgeErode,
-                     "Shrink the recovered-details mask before blending source detail. "
-                     "Values scale with the source long edge using a 1920px baseline.",
-                     "interior_detail_group");
-    define_int_param(param_set, kParamEdgeBlur, "Details Edge Feather", kDefaultEdgeBlur, 0,
-                     kMaxEdgeBlur,
-                     "Feather the recovered-details mask for a smoother handoff between source "
-                     "detail and model foreground. Values scale with the source long edge using "
-                     "a 1920px baseline.",
-                     "interior_detail_group");
-
     // --- Group 5: Matte (refine the AI-generated alpha) ---
     define_group_param(param_set, "matte_group", "Matte", true);
 
     define_info_param(
         param_set, "alpha_hint_info", "Alpha Hint Input",
-        "Connect a guide matte here. Current OFX behavior waits for Alpha Hint before keying.",
-        "Current Resolve OFX behavior does not run inference until Alpha Hint is connected. "
+        "External Alpha Hint is preferred. If none is connected, CorridorKey uses a rough "
+        "automatic fallback guide.",
         "Accepted formats: RGBA uses the alpha channel, Alpha uses the single channel directly, "
-        "and RGB uses channel 0 (red). The controls below adjust the output matte generated by "
-        "CorridorKey, not the incoming guide.\n\n"
+        "and RGB uses channel 0 (red). If no readable hint is connected, CorridorKey generates "
+        "a rough fallback guide automatically. The controls below adjust the output matte "
+        "generated by CorridorKey, not the incoming guide.\n\n"
         "Fusion: Connect your matte to the secondary 'Alpha Hint' pin.\n"
         "Color Page: Right-click this node -> 'Add OFX Input', then route a Qualifier or 3D Keyer "
         "output into the new green input.",
@@ -404,32 +410,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Blur the matte edge to soften transitions. The effective pixel radius "
                         "scales with the source long edge using a 1920px baseline.",
                         "matte_group");
-    define_double_param(param_set, kParamAlphaGamma, "Matte Gamma", 1.0, 0.1, 10.0,
-                        "Non-linear matte curve. Values above 1.0 brighten semi-transparent "
-                        "areas. Values below 1.0 darken and tighten them. Default 1.0 is "
-                        "neutral.",
-                        "matte_group");
-    define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
-                      "Clean small matte speckles automatically.", "matte_group");
-    define_int_param(param_set, kParamDespeckleSize, "Min Region Size", 400, 50, 2000,
-                     "Minimum connected component area in pixels to keep. "
-                     "Regions smaller than this are removed.",
-                     "matte_group");
-    define_double_param(
-        param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
-        1.0, "Blend current output with the previous frame for temporal stability.", "matte_group");
-
     // --- Group 6: Edge & Spill (despill and boundary cleanup only) ---
     define_group_param(param_set, "edge_spill_group", "Edge & Spill", true);
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
                         "Strength of screen color spill suppression on foreground edges.",
-                        "edge_spill_group");
-    define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
-                        {"Average", "Double Limit", "Neutral"},
-                        "How removed spill color is replaced. Average redistributes to "
-                        "red and blue. Double Limit uses the stronger neighbor channel. "
-                        "Neutral replaces with gray to avoid color shifts.",
                         "edge_spill_group");
 
     // --- Group 7: Output ---
@@ -446,11 +431,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "FG+Matte: explicit linear foreground+matte alias of Processed for "
                         "manual compositing workflows and backward compatibility.",
                         "output_group");
-    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
-                        {"Lanczos4", "Bilinear"},
-                        "Method used to upscale model output to source resolution. "
-                        "Lanczos4 is sharper; Bilinear is smoother.",
-                        "output_group");
 
     // --- Group 8: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
@@ -462,10 +442,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "INT8 (Compact) selects memory-efficient quantized files for faster inference.",
         "performance_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
-                      "Process at native resolution using overlapping tiles. Use this when lower "
-                      "quality modes lose too much detail or when you want sharper results than "
-                      "the model resolution alone can provide. It is slower and increases memory "
-                      "use.",
+                      "Process the full model output in overlapping tiles at source resolution. "
+                      "Use this when lower quality modes lose too much detail and you accept a "
+                      "slower, heavier full-model tiling path.",
                       "performance_group");
     define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
                      "Pixel overlap between tiles for seam-safe blending. Larger values reduce "
@@ -483,6 +462,44 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 9: Advanced (timeouts) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
+    define_int_param(param_set, kParamEdgeErode, "Details Edge Shrink", kDefaultEdgeErode, 0,
+                     kMaxEdgeErode,
+                     "Shrink the recovered-details mask before blending source detail. "
+                     "Values scale with the source long edge using a 1920px baseline.",
+                     "advanced_group");
+    define_int_param(param_set, kParamEdgeBlur, "Details Edge Feather", kDefaultEdgeBlur, 0,
+                     kMaxEdgeBlur,
+                     "Feather the recovered-details mask for a smoother handoff between source "
+                     "detail and model foreground. Values scale with the source long edge using "
+                     "a 1920px baseline.",
+                     "advanced_group");
+    define_double_param(param_set, kParamAlphaGamma, "Matte Gamma", 1.0, 0.1, 10.0,
+                        "Non-linear matte curve. Values above 1.0 brighten semi-transparent "
+                        "areas. Values below 1.0 darken and tighten them. Default 1.0 is "
+                        "neutral.",
+                        "advanced_group");
+    define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
+                      "Clean small matte speckles automatically.", "advanced_group");
+    define_int_param(param_set, kParamDespeckleSize, "Min Region Size", 400, 50, 2000,
+                     "Minimum connected component area in pixels to keep. "
+                     "Regions smaller than this are removed.",
+                     "advanced_group");
+    define_double_param(
+        param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
+        1.0, "Blend current output with the previous frame for temporal stability.",
+        "advanced_group");
+    define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
+                        {"Average", "Double Limit", "Neutral"},
+                        "How removed spill color is replaced. Average redistributes to "
+                        "red and blue. Double Limit uses the stronger neighbor channel. "
+                        "Neutral replaces with gray to avoid color shifts.",
+                        "advanced_group");
+    define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
+                        {"Lanczos4", "Bilinear"},
+                        "Method used to upscale model output to source resolution. "
+                        "Lanczos4 is sharper; Bilinear is smoother.",
+                        "advanced_group");
+
     define_choice_param(
         param_set, kParamQualityFallbackMode, "Quality Fallback", kQualityFallbackAuto,
         {quality_fallback_mode_ui_label(kQualityFallbackAuto),
@@ -497,7 +514,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                          refinement_mode_ui_label(kRefinementTiled)},
                         "Advanced diagnostics override for validated refinement strategy "
                         "artifacts. Current packaged ONNX artifacts only support Auto.",
-                        "advanced_group");
+                        "advanced_group", false);
     define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
                         kCoarseResolutionAutomatic,
                         {"Automatic", "512", "768", "1024", "1536", "2048"},

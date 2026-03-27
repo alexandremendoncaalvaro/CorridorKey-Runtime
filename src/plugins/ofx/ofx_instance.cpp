@@ -177,6 +177,8 @@ void sync_runtime_panel_state_from_active_engine(InstanceData* data) {
     data->runtime_panel_state.requested_quality_mode = data->active_quality_mode;
     data->runtime_panel_state.requested_resolution = data->requested_resolution;
     data->runtime_panel_state.effective_resolution = data->active_resolution;
+    data->runtime_panel_state.safe_quality_ceiling_resolution =
+        app::max_supported_resolution_for_device(data->device).value_or(0);
     data->runtime_panel_state.cpu_quality_guardrail_active = data->cpu_quality_guardrail_active;
     data->runtime_panel_state.artifact_path = data->model_path;
     if (data->use_runtime_server && data->runtime_client != nullptr && data->runtime_client->has_session()) {
@@ -199,6 +201,8 @@ void set_runtime_panel_state_for_failed_quality_request(
     data->runtime_panel_state.requested_quality_mode = requested_quality_mode;
     data->runtime_panel_state.requested_resolution = requested_resolution;
     data->runtime_panel_state.effective_resolution = 0;
+    data->runtime_panel_state.safe_quality_ceiling_resolution =
+        app::max_supported_resolution_for_device(data->device).value_or(0);
     data->runtime_panel_state.cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     data->runtime_panel_state.artifact_path = artifact_path;
     data->runtime_panel_state.session_prepared = false;
@@ -354,6 +358,61 @@ std::string runtime_session_runtime_label_impl(const InstanceData& data) {
     }
 
     return "Loading...";
+}
+
+std::string runtime_safe_quality_ceiling_runtime_label_impl(const InstanceData& data) {
+    const int resolution = data.runtime_panel_state.safe_quality_ceiling_resolution;
+    if (resolution <= 0) {
+        return "Unknown";
+    }
+
+    switch (quality_mode_for_resolution(resolution)) {
+        case kQualityPreview:
+            return "Draft (" + std::to_string(resolution) + "px)";
+        case kQualityStandard:
+            return "Standard (" + std::to_string(resolution) + "px)";
+        case kQualityHigh:
+            return "High (" + std::to_string(resolution) + "px)";
+        case kQualityUltra:
+            return "Ultra (" + std::to_string(resolution) + "px)";
+        case kQualityMaximum:
+            return "Maximum (" + std::to_string(resolution) + "px)";
+        case kQualityAuto:
+        default:
+            return std::to_string(resolution) + "px";
+    }
+}
+
+std::string runtime_guide_source_runtime_label_impl(const InstanceData& data) {
+    switch (data.last_guide_source) {
+        case GuideSourceKind::ExternalAlphaHint:
+            return "External Alpha Hint";
+        case GuideSourceKind::RoughFallback:
+            return "Rough Fallback";
+        case GuideSourceKind::Unknown:
+        default:
+            if (!data.last_error.empty()) {
+                return "Unavailable";
+            }
+            return "Awaiting render";
+    }
+}
+
+std::string runtime_path_runtime_label_impl(const InstanceData& data) {
+    switch (data.last_runtime_path) {
+        case RuntimePathKind::Direct:
+            return "Direct";
+        case RuntimePathKind::ArtifactFallback:
+            return "Artifact Fallback";
+        case RuntimePathKind::FullModelTiling:
+            return "Full-Model Tiling";
+        case RuntimePathKind::Unknown:
+        default:
+            if (!data.last_error.empty()) {
+                return "Unavailable";
+            }
+            return "Awaiting render";
+    }
 }
 
 std::string last_render_work_origin_label(LastRenderWorkOrigin work_origin) {
@@ -528,9 +587,16 @@ void update_runtime_panel_values(InstanceData* data) {
         data->runtime_effective_quality_param,
         is_loading ? "Loading..."
                    : effective_quality_label(data->runtime_panel_state.effective_resolution));
+    set_string_param_value(data->runtime_safe_quality_ceiling_param,
+                           is_loading ? "Loading..."
+                                      : runtime_safe_quality_ceiling_runtime_label(*data));
     set_string_param_value(data->runtime_artifact_param,
                            is_loading ? "Loading..."
                                       : runtime_artifact_label(data->runtime_panel_state.artifact_path));
+    set_string_param_value(data->runtime_guide_source_param,
+                           is_loading ? "Loading..." : runtime_guide_source_runtime_label(*data));
+    set_string_param_value(data->runtime_path_param,
+                           is_loading ? "Loading..." : runtime_path_runtime_label(*data));
     set_string_param_value(data->runtime_session_param,
                            runtime_session_runtime_label(*data));
     set_string_param_value(data->runtime_status_param,
@@ -692,6 +758,18 @@ std::string runtime_session_runtime_label(const InstanceData& data) {
     return runtime_session_runtime_label_impl(data);
 }
 
+std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data) {
+    return runtime_safe_quality_ceiling_runtime_label_impl(data);
+}
+
+std::string runtime_guide_source_runtime_label(const InstanceData& data) {
+    return runtime_guide_source_runtime_label_impl(data);
+}
+
+std::string runtime_path_runtime_label(const InstanceData& data) {
+    return runtime_path_runtime_label_impl(data);
+}
+
 bool sync_runtime_panel_session_state(InstanceData* data) {
     return sync_runtime_panel_session_state_impl(data);
 }
@@ -839,8 +917,14 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_requested_quality_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeEffectiveQuality,
                                        &data->runtime_effective_quality_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeSafeQualityCeiling,
+                                       &data->runtime_safe_quality_ceiling_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeArtifact,
                                        &data->runtime_artifact_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeGuideSource,
+                                       &data->runtime_guide_source_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimePath,
+                                       &data->runtime_path_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeSession,
                                        &data->runtime_session_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeStatus, &data->runtime_status_param,

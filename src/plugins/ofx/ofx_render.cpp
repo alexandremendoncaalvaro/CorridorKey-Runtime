@@ -177,7 +177,9 @@ bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& r
     return lhs.target_resolution == rhs.target_resolution &&
            lhs.despill_strength == rhs.despill_strength && lhs.spill_method == rhs.spill_method &&
            lhs.auto_despeckle == rhs.auto_despeckle && lhs.despeckle_size == rhs.despeckle_size &&
-           lhs.refiner_scale == rhs.refiner_scale && lhs.input_is_linear == rhs.input_is_linear &&
+           lhs.refiner_scale == rhs.refiner_scale &&
+           lhs.alpha_hint_policy == rhs.alpha_hint_policy &&
+           lhs.input_is_linear == rhs.input_is_linear &&
            lhs.batch_size == rhs.batch_size && lhs.enable_tiling == rhs.enable_tiling &&
            lhs.tile_padding == rhs.tile_padding && lhs.upscale_method == rhs.upscale_method &&
            lhs.source_passthrough == rhs.source_passthrough && lhs.sp_erode_px == rhs.sp_erode_px &&
@@ -186,6 +188,41 @@ bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& r
            lhs.quality_fallback_mode == rhs.quality_fallback_mode &&
            lhs.refinement_mode == rhs.refinement_mode &&
            lhs.coarse_resolution_override == rhs.coarse_resolution_override;
+}
+
+RuntimePathKind classify_runtime_path(const InstanceData* data, const InferenceParams& params,
+                                      int frame_width, int frame_height) {
+    if (data == nullptr) {
+        return RuntimePathKind::Unknown;
+    }
+
+    if (params.enable_tiling && data->active_resolution > 0 &&
+        (frame_width > data->active_resolution || frame_height > data->active_resolution)) {
+        return RuntimePathKind::FullModelTiling;
+    }
+
+    if (params.requested_quality_resolution > 0 && data->active_resolution > 0 &&
+        params.requested_quality_resolution > data->active_resolution) {
+        return RuntimePathKind::ArtifactFallback;
+    }
+
+    return RuntimePathKind::Direct;
+}
+
+Result<GuideSourceKind> resolve_alpha_hint_source_impl(Image rgb_view, Image hint_view,
+                                                       bool hint_from_clip,
+                                                       AlphaHintPolicy alpha_hint_policy) {
+    if (hint_from_clip) {
+        return GuideSourceKind::ExternalAlphaHint;
+    }
+
+    if (alpha_hint_policy == AlphaHintPolicy::RequireExternalHint) {
+        return Unexpected<Error>{
+            Error{ErrorCode::InvalidParameters, "Waiting for Alpha Hint connection."}};
+    }
+
+    ColorUtils::generate_rough_matte(rgb_view, hint_view);
+    return GuideSourceKind::RoughFallback;
 }
 
 
@@ -481,6 +518,13 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
 }
 
 }  // namespace
+
+Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
+                                                  bool hint_from_clip,
+                                                  AlphaHintPolicy alpha_hint_policy) {
+    return resolve_alpha_hint_source_impl(rgb_view, hint_view, hint_from_clip,
+                                          alpha_hint_policy);
+}
 
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle /*out_args*/) {
@@ -804,57 +848,19 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
     }
 
-    if (!hint_from_clip) {
-        const std::string message = "Waiting for Alpha Hint connection.";
+    const AlphaHintPolicy alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
+    auto guide_source = resolve_alpha_hint_source(rgb_view, hint_view, hint_from_clip, alpha_hint_policy);
+    if (!guide_source) {
+        const std::string message = guide_source.error().message;
         log_message("render", message);
-
-        if (data != nullptr) {
-            data->last_error = message;
-            data->cached_result_valid = false;
-            data->runtime_panel_dirty = true;
-            update_runtime_panel(data);
-        }
-
-        ImageBuffer alpha_buf(width, height, 1);
-        ImageBuffer fg_buf(width, height, 3);
-        auto alpha_view = alpha_buf.view();
-        auto fg_linear = fg_buf.view();
-        const SrgbLut& lut = SrgbLut::instance();
-
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                alpha_view(y, x) = 1.0f;
-                if (swap_screen) {
-                    fg_linear(y, x, 0) = lut.to_linear(rgb_view(y, x, 0));
-                    fg_linear(y, x, 1) = lut.to_linear(rgb_view(y, x, 2));
-                    fg_linear(y, x, 2) = lut.to_linear(rgb_view(y, x, 1));
-                } else {
-                    fg_linear(y, x, 0) = lut.to_linear(rgb_view(y, x, 0));
-                    fg_linear(y, x, 1) = lut.to_linear(rgb_view(y, x, 1));
-                    fg_linear(y, x, 2) = lut.to_linear(rgb_view(y, x, 2));
-                }
-            }
-        }
-
-        bool apply_srgb =
-            should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);
-        if (output_mode == kOutputMatteOnly) {
-            write_matte_output(alpha_view, output_data, output_row_bytes, output_depth,
-                               SrgbLut::instance());
-        } else if (output_mode == kOutputForegroundOnly) {
-            write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth,
-                                    apply_srgb, SrgbLut::instance());
-        } else if (output_mode == kOutputSourceMatte) {
-            write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes,
-                                      output_depth, apply_srgb, SrgbLut::instance());
-        } else if (output_mode_uses_linear_premultiplied_rgba(output_mode)) {
-            write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
-                                   output_depth, false, SrgbLut::instance());
-        } else {
-            write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
-                                   output_depth, apply_srgb, SrgbLut::instance());
-        }
+        set_runtime_error(data, message, instance);
+        bypass_with_source(source_data, output_data, width, height, source_row_bytes,
+                           output_row_bytes, source_depth);
         return kOfxStatOK;
+    }
+    if (*guide_source == GuideSourceKind::RoughFallback) {
+        log_message("render",
+                    "No readable Alpha Hint was provided. Using rough matte fallback guide.");
     }
 
     const std::uint64_t signature = frame_signature(rgb_view, hint_view);
@@ -879,6 +885,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
     params.refiner_scale = 1.0f;
+    params.alpha_hint_policy = alpha_hint_policy;
     params.input_is_linear = input_is_linear;
     params.upscale_method =
         upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
@@ -887,6 +894,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.source_passthrough = source_passthrough_enabled != 0;
     params.sp_erode_px = effective_edge_erode;
     params.sp_blur_px = effective_edge_blur;
+
+    data->last_guide_source = *guide_source;
+    data->last_runtime_path = classify_runtime_path(data, params, width, height);
+    data->runtime_panel_dirty = true;
 
     const bool signature_matches =
         data->cached_signature_valid && data->cached_signature == signature;

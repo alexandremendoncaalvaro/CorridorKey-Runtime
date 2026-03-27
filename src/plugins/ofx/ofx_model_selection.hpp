@@ -57,6 +57,73 @@ inline const char* quality_mode_label(int quality_mode) {
     return quality_mode_ui_label(quality_mode);
 }
 
+inline bool is_fixed_quality_mode(int quality_mode) {
+    return quality_mode != kQualityAuto;
+}
+
+inline int quality_mode_for_resolution(int resolution) {
+    switch (resolution) {
+        case 512:
+            return kQualityPreview;
+        case 768:
+            return kQualityStandard;
+        case 1024:
+            return kQualityHigh;
+        case 1536:
+            return kQualityUltra;
+        case 2048:
+            return kQualityMaximum;
+        default:
+            return kQualityAuto;
+    }
+}
+
+inline int quality_search_resolution(const DeviceInfo& device, int quality_mode,
+                                     int requested_resolution) {
+    if (is_fixed_quality_mode(quality_mode)) {
+        return requested_resolution;
+    }
+
+    if (auto max_resolution = app::max_supported_resolution_for_device(device);
+        max_resolution.has_value()) {
+        return std::min(requested_resolution, *max_resolution);
+    }
+
+    return requested_resolution;
+}
+
+inline int rounded_gb_from_mb(std::int64_t memory_mb) {
+    return static_cast<int>((memory_mb + 512) / 1024);
+}
+
+inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& device,
+                                                              int quality_mode,
+                                                              int requested_resolution) {
+    if (!is_fixed_quality_mode(quality_mode)) {
+        return std::nullopt;
+    }
+
+    auto max_supported_resolution = app::max_supported_resolution_for_device(device);
+    if (!max_supported_resolution.has_value() ||
+        requested_resolution <= *max_supported_resolution) {
+        return std::nullopt;
+    }
+
+    auto minimum_memory_mb =
+        app::minimum_supported_memory_mb_for_resolution(device.backend, requested_resolution);
+    if (!minimum_memory_mb.has_value() || device.available_memory_mb <= 0) {
+        return std::nullopt;
+    }
+
+    return std::string(quality_mode_label(quality_mode)) + " requires at least " +
+           std::to_string(rounded_gb_from_mb(*minimum_memory_mb)) +
+           " GB of VRAM for CorridorKey's current safe quality ceiling on " +
+           (device.backend == Backend::TensorRT ? std::string("the Windows RTX path")
+                                                : std::string("the selected backend")) +
+           ". This GPU reports " + std::to_string(rounded_gb_from_mb(device.available_memory_mb)) +
+           " GB, so the safe quality ceiling is " +
+           quality_mode_label(quality_mode_for_resolution(*max_supported_resolution)) + ".";
+}
 inline std::string quality_fallback_warning(int quality_mode,
                                             const QualityArtifactSelection& selection) {
     if (!selection.used_fallback) {
@@ -74,10 +141,6 @@ inline std::string quality_fallback_warning(int quality_mode,
            std::to_string(selection.requested_resolution) +
            "px) unavailable on this hardware -- using " +
            std::to_string(selection.effective_resolution) + "px";
-}
-
-inline bool is_fixed_quality_mode(int quality_mode) {
-    return quality_mode != kQualityAuto;
 }
 
 inline bool use_quality_compile_failure_cache(Backend backend) {
