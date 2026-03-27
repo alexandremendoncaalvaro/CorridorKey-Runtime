@@ -6,6 +6,7 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_image_utils.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_instance.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
     test_alpha_edge.cpp
     test_color_utils.cpp

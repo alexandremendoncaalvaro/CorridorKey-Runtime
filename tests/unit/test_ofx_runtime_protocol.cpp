@@ -79,6 +79,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     params.quality_fallback_mode = QualityFallbackMode::CoarseToFine;
     params.refinement_mode = RefinementMode::Tiled;
     params.coarse_resolution_override = 1024;
+    params.alpha_hint_policy = AlphaHintPolicy::RequireExternalHint;
     params.despill_strength = 0.35F;
     params.auto_despeckle = true;
     params.despeckle_size = 640;
@@ -112,6 +113,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     CHECK(parsed_request->params.quality_fallback_mode == QualityFallbackMode::CoarseToFine);
     CHECK(parsed_request->params.refinement_mode == RefinementMode::Tiled);
     CHECK(parsed_request->params.coarse_resolution_override == 1024);
+    CHECK(parsed_request->params.alpha_hint_policy == AlphaHintPolicy::RequireExternalHint);
     CHECK(parsed_request->render_index == 7);
 
     OfxRuntimeRequestEnvelope envelope;

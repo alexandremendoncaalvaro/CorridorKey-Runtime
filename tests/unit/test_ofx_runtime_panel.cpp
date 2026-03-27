@@ -208,3 +208,77 @@ TEST_CASE("runtime backend work label summarizes backend renders and cache hits"
     REQUIRE(runtime_backend_work_runtime_label(data) ==
             "Backend total: 2.0 s | Hotspot: frame_extract_outputs 1.9 s");
 }
+
+TEST_CASE("runtime panel labels expose safe quality ceiling, guide source, and runtime path",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+
+    REQUIRE(runtime_safe_quality_ceiling_runtime_label(data) == "Unknown");
+    REQUIRE(runtime_guide_source_runtime_label(data) == "Awaiting render");
+    REQUIRE(runtime_path_runtime_label(data) == "Awaiting render");
+
+    data.runtime_panel_state.safe_quality_ceiling_resolution = 1024;
+    REQUIRE(runtime_safe_quality_ceiling_runtime_label(data) == "High (1024px)");
+
+    data.last_guide_source = GuideSourceKind::ExternalAlphaHint;
+    REQUIRE(runtime_guide_source_runtime_label(data) == "External Alpha Hint");
+
+    data.last_guide_source = GuideSourceKind::RoughFallback;
+    REQUIRE(runtime_guide_source_runtime_label(data) == "Rough Fallback");
+
+    data.last_runtime_path = RuntimePathKind::Direct;
+    REQUIRE(runtime_path_runtime_label(data) == "Direct");
+
+    data.last_runtime_path = RuntimePathKind::ArtifactFallback;
+    REQUIRE(runtime_path_runtime_label(data) == "Artifact Fallback");
+
+    data.last_runtime_path = RuntimePathKind::FullModelTiling;
+    REQUIRE(runtime_path_runtime_label(data) == "Full-Model Tiling");
+}
+
+TEST_CASE("alpha hint policy prefers external hints and falls back to rough guides",
+          "[unit][ofx][regression]") {
+    corridorkey::ImageBuffer rgb(2, 1, 3);
+    corridorkey::ImageBuffer hint(2, 1, 1);
+    auto rgb_view = rgb.view();
+    auto hint_view = hint.view();
+
+    rgb_view(0, 0, 0) = 0.1F;
+    rgb_view(0, 0, 1) = 0.9F;
+    rgb_view(0, 0, 2) = 0.1F;
+    rgb_view(0, 1, 0) = 0.9F;
+    rgb_view(0, 1, 1) = 0.2F;
+    rgb_view(0, 1, 2) = 0.1F;
+
+    std::fill(hint_view.data.begin(), hint_view.data.end(), -1.0F);
+
+    SECTION("external hint wins without mutation") {
+        auto result = resolve_alpha_hint_source(rgb_view, hint_view, true,
+                                                corridorkey::AlphaHintPolicy::AutoRoughFallback);
+        REQUIRE(result.has_value());
+        CHECK(static_cast<int>(*result) == static_cast<int>(GuideSourceKind::ExternalAlphaHint));
+        CHECK(hint_view(0, 0) == Catch::Approx(-1.0F));
+        CHECK(hint_view(0, 1) == Catch::Approx(-1.0F));
+    }
+
+    SECTION("missing hint uses rough fallback") {
+        auto result = resolve_alpha_hint_source(rgb_view, hint_view, false,
+                                                corridorkey::AlphaHintPolicy::AutoRoughFallback);
+        REQUIRE(result.has_value());
+        CHECK(static_cast<int>(*result) == static_cast<int>(GuideSourceKind::RoughFallback));
+        CHECK(hint_view(0, 0) >= 0.0F);
+        CHECK(hint_view(0, 0) <= 1.0F);
+        CHECK(hint_view(0, 1) >= 0.0F);
+        CHECK(hint_view(0, 1) <= 1.0F);
+        CHECK(hint_view(0, 0) < hint_view(0, 1));
+    }
+
+    SECTION("require external hint returns an explicit error") {
+        auto result = resolve_alpha_hint_source(rgb_view, hint_view, false,
+                                                corridorkey::AlphaHintPolicy::RequireExternalHint);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error().code == corridorkey::ErrorCode::InvalidParameters);
+        CHECK(result.error().message.find("Waiting for Alpha Hint connection.") !=
+              std::string::npos);
+    }
+}

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "app/hardware_profile.hpp"
 #include "app/runtime_contracts.hpp"
 #include "app/runtime_diagnostics.hpp"
 
@@ -225,6 +226,24 @@ TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit
                 DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) == 2048);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 16000);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
+}
+
+TEST_CASE("hardware profile delegates Windows safe quality ceilings to runtime contracts",
+          "[unit][runtime][regression]") {
+    const auto rtx_strategy =
+        HardwareProfile::get_best_strategy(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
+    CHECK(rtx_strategy.target_resolution == 1024);
+    CHECK(rtx_strategy.recommended_variant == "fp16");
+
+    const auto directml_strategy =
+        HardwareProfile::get_best_strategy(DeviceInfo{"AMD Radeon", 16384, Backend::DirectML});
+    CHECK(directml_strategy.target_resolution == 1024);
+    CHECK(directml_strategy.recommended_variant == "int8");
+
+    const auto cpu_strategy =
+        HardwareProfile::get_best_strategy(DeviceInfo{"Generic CPU", 0, Backend::CPU});
+    CHECK(cpu_strategy.target_resolution == 512);
+    CHECK(cpu_strategy.recommended_variant == "int8");
 }
 
 TEST_CASE("runtime coarse-to-fine policy prefers safer coarse artifacts", "[unit][runtime]") {
