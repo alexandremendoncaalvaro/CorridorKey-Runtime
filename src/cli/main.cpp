@@ -21,6 +21,7 @@
 #include "../app/ofx_runtime_service.hpp"
 #include "../app/runtime_contracts.hpp"
 #include "../common/local_ipc.hpp"
+#include "../common/json_utils.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
@@ -460,8 +461,9 @@ int main(int argc, char* argv[]) {
 
         if (result.count("version")) {
             if (use_json) {
-                std::cout << nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}).dump()
-                          << std::endl;
+                std::cout
+                    << common::safe_json_dump(nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}))
+                    << std::endl;
             } else {
                 std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << std::endl;
             }
@@ -481,7 +483,8 @@ int main(int argc, char* argv[]) {
 
         if (cmd == "info") {
             if (use_json) {
-                std::cout << JobOrchestrator::get_system_info().dump(4) << std::endl;
+                std::cout << common::safe_json_dump(JobOrchestrator::get_system_info(), 4)
+                          << std::endl;
             } else {
                 print_info();
             }
@@ -495,7 +498,7 @@ int main(int argc, char* argv[]) {
             }
             auto report = JobOrchestrator::run_doctor(models_dir);
             if (use_json) {
-                std::cout << report.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(report, 4) << std::endl;
             } else {
                 std::cout << "--- CorridorKey Doctor Report ---\n"
                           << "Version: " << report["system"]["version"].get<std::string>() << "\n"
@@ -513,7 +516,7 @@ int main(int argc, char* argv[]) {
         if (cmd == "models") {
             auto models = JobOrchestrator::list_models();
             if (use_json) {
-                std::cout << models.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(models, 4) << std::endl;
             } else {
                 std::cout << "--- Model Catalog ---\n";
                 for (const auto& model : models) {
@@ -536,7 +539,7 @@ int main(int argc, char* argv[]) {
         if (cmd == "presets") {
             auto presets = JobOrchestrator::list_presets();
             if (use_json) {
-                std::cout << presets.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(presets, 4) << std::endl;
             } else {
                 std::cout << "--- Presets ---\n";
                 for (const auto& preset : presets) {
@@ -580,7 +583,7 @@ int main(int argc, char* argv[]) {
                     failure["command"] = "compile-context";
                     failure["success"] = false;
                     failure["error"] = compile_res.error().message;
-                    std::cout << failure.dump(4) << std::endl;
+                    std::cout << common::safe_json_dump(failure, 4) << std::endl;
                 } else {
                     std::cerr << "Error: " << compile_res.error().message << std::endl;
                 }
@@ -594,7 +597,7 @@ int main(int argc, char* argv[]) {
                 success["input_model"] = model_path.string();
                 success["output_model"] = compile_res->string();
                 success["backend"] = backend_to_string_local(device.backend);
-                std::cout << success.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(success, 4) << std::endl;
             } else {
                 std::cout << "Compiled TensorRT RTX context model: " << compile_res->string()
                           << std::endl;
@@ -669,7 +672,7 @@ int main(int argc, char* argv[]) {
             auto report = JobOrchestrator::run_benchmark(benchmark_request);
             if (report.contains("error")) {
                 if (use_json) {
-                    std::cout << report.dump(4) << std::endl;
+                    std::cout << common::safe_json_dump(report, 4) << std::endl;
                 } else {
                     std::cerr << "Benchmark error: " << report["error"].get<std::string>()
                               << std::endl;
@@ -677,7 +680,7 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             if (use_json) {
-                std::cout << report.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(report, 4) << std::endl;
             } else {
                 std::cout << "--- Benchmark Results ---\n"
                           << "Model: " << benchmark_request.model_path.filename().string() << "\n";
@@ -884,7 +887,7 @@ int main(int argc, char* argv[]) {
             JobEventCallback events = nullptr;
             if (use_json) {
                 events = [](const JobEvent& event) -> bool {
-                    std::cout << event_to_json(event).dump() << std::endl;
+                    std::cout << common::safe_json_dump(event_to_json(event)) << std::endl;
                     return true;
                 };
             } else {
