@@ -245,6 +245,10 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
             response = send_render_request();
         }
         if (!response) {
+            if (response.error().code == ErrorCode::InferenceFailed) {
+                invalidate_session("event=render_frame_invalidated detail=" +
+                                   response.error().message);
+            }
             return Unexpected<Error>(response.error());
         }
 
@@ -528,6 +532,15 @@ Result<void> OfxRuntimeClient::launch_server() {
 #endif
 
     return {};
+}
+
+void OfxRuntimeClient::invalidate_session(const std::string& reason) {
+    if (!m_session.session_id.empty()) {
+        log_message("ofx_runtime_client", reason + " session_id=" + m_session.session_id);
+    } else {
+        log_message("ofx_runtime_client", reason);
+    }
+    m_session = {};
 }
 
 void OfxRuntimeClient::update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot) {

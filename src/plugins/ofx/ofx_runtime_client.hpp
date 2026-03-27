@@ -55,6 +55,7 @@ class OfxRuntimeClient {
     Result<void> launch_server();
     Result<void> recover_runtime_session(StageTimingCallback on_stage);
     Result<void> restart_server(const std::string& reason);
+    void invalidate_session(const std::string& reason);
     void update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot);
     void update_server_health(const app::OfxRuntimeHealthResponse& health);
 

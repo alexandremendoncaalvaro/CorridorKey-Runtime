@@ -100,6 +100,7 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
     auto result = session->second.engine->process_frame(
         transport->rgb_view(), transport->hint_view(), request.params, on_stage);
     if (!result) {
+        m_sessions.erase(session);
         return Unexpected<Error>(result.error());
     }
 
