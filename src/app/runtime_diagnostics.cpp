@@ -17,6 +17,7 @@
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 #include "common/runtime_paths.hpp"
+#include "runtime_contracts.hpp"
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -210,9 +211,21 @@ std::vector<std::string> windows_probe_models_for_backend(Backend backend,
     std::vector<std::string> models;
 
     if (backend == Backend::TensorRT) {
+        const int max_resolution = max_supported_resolution_for_device(device).value_or(512);
         for (const auto* model : {"corridorkey_fp16_2048.onnx", "corridorkey_fp16_1536.onnx",
                                   "corridorkey_fp16_1024.onnx", "corridorkey_fp16_768.onnx",
                                   "corridorkey_fp16_512.onnx"}) {
+            const auto separator = std::string_view(model).find_last_of('_');
+            const auto extension = std::string_view(model).find('.');
+            if (separator == std::string_view::npos || extension == std::string_view::npos ||
+                separator + 1 >= extension) {
+                continue;
+            }
+            const int resolution = std::stoi(std::string(
+                std::string_view(model).substr(separator + 1, extension - separator - 1)));
+            if (resolution > max_resolution) {
+                continue;
+            }
             append_unique_model(models, model);
         }
         return models;
