@@ -2,6 +2,7 @@
 
 add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_actions.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_frame_cache.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_image_utils.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_instance.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
@@ -17,6 +18,7 @@ add_executable(test_unit
     test_local_ipc.cpp
     test_ofx_color_management.cpp
     test_ofx_image_utils.cpp
+    test_ofx_lifecycle.cpp
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
     test_ofx_runtime_client.cpp

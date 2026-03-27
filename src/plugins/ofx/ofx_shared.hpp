@@ -219,6 +219,13 @@ OfxStatus create_instance(OfxImageEffectHandle instance);
 OfxStatus destroy_instance(OfxImageEffectHandle instance);
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle out_args);
+OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
+OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
+OfxStatus purge_caches(OfxImageEffectHandle instance);
+OfxStatus get_regions_of_interest(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
+                                  OfxPropertySetHandle out_args);
+OfxStatus is_identity(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
+                      OfxPropertySetHandle out_args);
 OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHandle out_args);
 OfxStatus get_output_colourspace(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                                  OfxPropertySetHandle out_args);

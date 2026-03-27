@@ -12,6 +12,7 @@
 #include "app/runtime_contracts.hpp"
 #include "common/ofx_runtime_defaults.hpp"
 #include "common/runtime_paths.hpp"
+#include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
@@ -311,6 +312,45 @@ std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
     }
     return "Last frame: " + format_duration_ms(data.last_frame_ms) +
            " | Avg: " + format_duration_ms(data.avg_frame_ms);
+}
+
+void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
+    if (data == nullptr) {
+        return;
+    }
+
+    data->cached_result = {};
+    data->cached_result_valid = false;
+    data->cached_time = 0.0;
+    data->cached_width = 0;
+    data->cached_height = 0;
+    data->cached_signature = 0;
+    data->cached_signature_valid = false;
+    data->cached_params = {};
+    data->cached_model_path.clear();
+    data->cached_screen_color = kDefaultScreenColor;
+    data->cached_alpha_black_point = 0.0;
+    data->cached_alpha_white_point = 1.0;
+    data->cached_alpha_erode = 0.0;
+    data->cached_alpha_softness = 0.0;
+    data->cached_alpha_gamma = 1.0;
+    data->cached_temporal_smoothing = kDefaultTemporalSmoothing;
+
+    data->temporal_alpha = {};
+    data->temporal_foreground = {};
+    data->temporal_state_valid = false;
+    data->temporal_time = 0.0;
+    data->temporal_width = 0;
+    data->temporal_height = 0;
+    data->render_count = 0;
+
+    if (clear_timings) {
+        data->last_frame_ms = 0.0;
+        data->avg_frame_ms = 0.0;
+        data->frame_time_samples = 0;
+    }
+
+    data->runtime_panel_dirty = true;
 }
 
 double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
@@ -1287,6 +1327,72 @@ void flush_runtime_panel(InstanceData* data) {
         data->runtime_panel_dirty = false;
         update_runtime_panel_values(data);
     }
+}
+
+OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle /*in_args*/) {
+    InstanceData* data = get_instance_data(instance);
+    if (data == nullptr) {
+        return kOfxStatReplyDefault;
+    }
+
+    clear_instance_render_caches(data, true);
+    flush_runtime_panel(data);
+    log_message("begin_sequence_render", "Sequence render state reset.");
+    return kOfxStatOK;
+}
+
+OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle /*in_args*/) {
+    InstanceData* data = get_instance_data(instance);
+    if (data == nullptr) {
+        return kOfxStatReplyDefault;
+    }
+
+    clear_instance_render_caches(data, false);
+    flush_runtime_panel(data);
+    log_message("end_sequence_render", "Sequence render caches cleared.");
+    return kOfxStatOK;
+}
+
+OfxStatus purge_caches(OfxImageEffectHandle instance) {
+    if (g_frame_cache != nullptr) {
+        g_frame_cache->clear();
+    }
+
+    if (instance != nullptr) {
+        if (InstanceData* data = get_instance_data(instance); data != nullptr) {
+            clear_instance_render_caches(data, true);
+            flush_runtime_panel(data);
+        }
+    }
+
+    log_message("purge_caches", "Host requested cache purge.");
+    return kOfxStatOK;
+}
+
+OfxStatus get_regions_of_interest(OfxImageEffectHandle /*instance*/, OfxPropertySetHandle in_args,
+                                  OfxPropertySetHandle out_args) {
+    if (in_args == nullptr || out_args == nullptr || g_suites.property == nullptr) {
+        return kOfxStatReplyDefault;
+    }
+
+    double roi[4] = {};
+    if (g_suites.property->propGetDoubleN(in_args, kOfxImageEffectPropRegionOfInterest, 4, roi) !=
+        kOfxStatOK) {
+        return kOfxStatReplyDefault;
+    }
+
+    const std::string source_roi_property =
+        std::string("OfxImageClipPropRoI_") + kOfxImageEffectSimpleSourceClipName;
+    const std::string hint_roi_property = std::string("OfxImageClipPropRoI_") + kClipAlphaHint;
+
+    g_suites.property->propSetDoubleN(out_args, source_roi_property.c_str(), 4, roi);
+    g_suites.property->propSetDoubleN(out_args, hint_roi_property.c_str(), 4, roi);
+    return kOfxStatOK;
+}
+
+OfxStatus is_identity(OfxImageEffectHandle /*instance*/, OfxPropertySetHandle /*in_args*/,
+                      OfxPropertySetHandle /*out_args*/) {
+    return kOfxStatReplyDefault;
 }
 
 void set_param_enabled(OfxParamHandle param, bool enabled) {

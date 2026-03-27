@@ -111,6 +111,26 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
             return render(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
                           in_args, out_args);
         }
+        if (std::strcmp(action, kOfxImageEffectActionBeginSequenceRender) == 0) {
+            return begin_sequence_render(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args);
+        }
+        if (std::strcmp(action, kOfxImageEffectActionEndSequenceRender) == 0) {
+            return end_sequence_render(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args);
+        }
+        if (std::strcmp(action, kOfxImageEffectActionGetRegionsOfInterest) == 0) {
+            return get_regions_of_interest(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args,
+                out_args);
+        }
+        if (std::strcmp(action, kOfxImageEffectActionIsIdentity) == 0) {
+            return is_identity(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
+                               in_args, out_args);
+        }
+        if (std::strcmp(action, kOfxActionPurgeCaches) == 0) {
+            return purge_caches(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
+        }
 
         if (std::strcmp(action, kOfxActionUnload) == 0) {
             g_frame_cache.reset();

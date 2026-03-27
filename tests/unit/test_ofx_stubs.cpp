@@ -1,9 +1,11 @@
 #include "plugins/ofx/ofx_shared.hpp"
+#include "plugins/ofx/ofx_frame_cache.hpp"
 
 namespace corridorkey::ofx {
 
 OfxHost* g_host = nullptr;
 OfxSuites g_suites = {};
+std::unique_ptr<SharedFrameCache> g_frame_cache = nullptr;
 
 void post_message(const char* message_type, const char* message, OfxImageEffectHandle effect) {
     (void)message_type;
