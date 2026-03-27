@@ -305,7 +305,7 @@ $inventoryPayload = [ordered]@{
 Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
 
 if ($modelInventory.missing_count -gt 0) {
-    Write-Host "[WARN] Packaging OFX bundle without model(s): $($modelInventory.missing_models -join ', ')" -ForegroundColor Yellow
+    Write-Host "[INFO] Packaging OFX bundle with partial model coverage: $($modelInventory.missing_models -join ', ')" -ForegroundColor Cyan
     Write-Host "[INFO] Wrote model inventory: $modelInventoryPath" -ForegroundColor Cyan
 } else {
     Write-Host "[PASS] All targeted OFX models were packaged." -ForegroundColor Green

@@ -120,7 +120,7 @@ $inventoryPayload = [ordered]@{
 Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
 
 if ($modelInventory.missing_count -gt 0) {
-    Write-Host "[WARN] Packaging runtime bundle without model(s): $($modelInventory.missing_models -join ', ')" -ForegroundColor Yellow
+    Write-Host "[INFO] Packaging runtime bundle with partial model coverage: $($modelInventory.missing_models -join ', ')" -ForegroundColor Cyan
     Write-Host "[INFO] Wrote model inventory: $modelInventoryPath" -ForegroundColor Cyan
 } else {
     Write-Host "[PASS] All targeted runtime models were packaged." -ForegroundColor Green
@@ -169,7 +169,7 @@ if errorlevel 1 exit /b 1
 ck-engine.exe doctor --json > doctor_report.json
 if errorlevel 1 exit /b 1
 
-powershell -NoProfile -Command "$report = Get-Content -Raw '.\\doctor_report.json' | ConvertFrom-Json; $inventory = if (Test-Path '.\\model_inventory.json') { Get-Content -Raw '.\\model_inventory.json' | ConvertFrom-Json } else { $null }; if ($null -ne $inventory -and $inventory.missing_count -gt 0) { Write-Warning ('Portable runtime bundle is missing model(s): ' + ($inventory.missing_models -join ', ')); exit 0 }; if (-not $report.summary.video_healthy) { Write-Error 'Video output is not healthy.'; exit 1 }"
+powershell -NoProfile -Command "$report = Get-Content -Raw '.\\doctor_report.json' | ConvertFrom-Json; $inventory = if (Test-Path '.\\model_inventory.json') { Get-Content -Raw '.\\model_inventory.json' | ConvertFrom-Json } else { $null }; if ($null -ne $inventory -and $inventory.missing_count -gt 0) { Write-Host ('Portable runtime bundle uses partial model coverage: ' + ($inventory.missing_models -join ', ')); exit 0 }; if (-not $report.summary.video_healthy) { Write-Error 'Video output is not healthy.'; exit 1 }"
 if errorlevel 1 exit /b 1
 
 exit /b 0

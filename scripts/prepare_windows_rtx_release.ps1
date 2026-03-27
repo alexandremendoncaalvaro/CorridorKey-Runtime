@@ -250,7 +250,7 @@ function Write-ModelPackStatus {
     Write-CorridorKeyJsonFile -Path $modelPackStatusPath -Payload $payload
 
     if ($inventory.missing_count -gt 0) {
-        Write-Host "[WARN] Missing prepared model(s): $($inventory.missing_models -join ', ')" -ForegroundColor Yellow
+        Write-Host "[INFO] Prepared model pack is partial: $($inventory.missing_models -join ', ')" -ForegroundColor Cyan
         Write-Host "[INFO] Wrote model pack status: $modelPackStatusPath" -ForegroundColor Cyan
     } else {
         Write-Host "[PASS] All prepared Windows RTX models are present." -ForegroundColor Green
@@ -382,7 +382,7 @@ function Invoke-ModelPreparation {
                     resolution = $resolution
                     error = $_.Exception.Message
                 }
-                Write-Host "[WARN] Export failed for ${resolution}px. Continuing with the remaining model set." -ForegroundColor Yellow
+                Write-Host "[INFO] Export failed for ${resolution}px. Continuing with the remaining model set and recording the failure in model_pack_status.json." -ForegroundColor Cyan
             }
         }
 

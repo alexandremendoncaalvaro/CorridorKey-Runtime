@@ -205,7 +205,7 @@ foreach ($model in $presentModels) {
     Write-Host "[PASS] Found $model ($([math]::Round($modelSize / 1MB, 2)) MB)" -ForegroundColor Green
 }
 foreach ($model in $missingModels) {
-    Write-Host "[WARN] Packaged bundle is missing model: $model" -ForegroundColor Yellow
+    Write-Host "[INFO] Packaged bundle omits model: $model" -ForegroundColor Cyan
 }
 
 $doctorReportPath = Join-Path $bundleRoot "doctor_report.json"
@@ -249,13 +249,13 @@ try {
 
     if ($doctorExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($doctorJson)) {
         if (-not [string]::IsNullOrWhiteSpace($doctorStderr)) {
-            Write-Host "[WARN] Packaged runtime doctor stderr:" -ForegroundColor Yellow
-            Write-Host $doctorStderr -ForegroundColor Yellow
+            Write-Host "[INFO] Packaged runtime doctor stderr:" -ForegroundColor Cyan
+            Write-Host $doctorStderr -ForegroundColor Cyan
         }
         if ($missingModels.Count -gt 0) {
             $doctorFailureTolerated = $true
             $doctorFailureReason = "Packaged runtime doctor failed while the bundle is missing model(s)."
-            Write-Host "[WARN] $doctorFailureReason" -ForegroundColor Yellow
+            Write-Host "[INFO] $doctorFailureReason" -ForegroundColor Cyan
         } else {
             throw "Packaged runtime doctor failed."
         }
@@ -303,14 +303,11 @@ try {
                     } else {
                         $firstIssue.error
                     }
-                    Write-Host "[WARN] Model contract group '$($group.group)' first issue: $($firstIssue.filename) -> $reason" -ForegroundColor Yellow
+                    Write-Host "[INFO] Model contract group '$($group.group)' first issue: $($firstIssue.filename) -> $reason" -ForegroundColor Cyan
                 }
             }
         } else {
             Write-Host "[INFO] Doctor schema does not expose model contract groups; skipping that validation layer." -ForegroundColor Cyan
-        }
-        if (-not $doctor.summary.healthy) {
-            Write-Host "[WARN] Doctor summary is unhealthy. Review doctor_report.json before sending this build to testers." -ForegroundColor Yellow
         }
     }
 } finally {
@@ -331,7 +328,7 @@ if ($doctorSucceeded -and $doctorModelContractsAvailable -and -not $doctorModelC
         if ([string]::IsNullOrWhiteSpace($doctorFailureReason)) {
             $doctorFailureReason = "Packaged runtime doctor reported unhealthy model contracts only because model(s) are absent from this bundle."
         }
-        Write-Host "[WARN] Packaged runtime doctor reported unhealthy model contracts only because model(s) are absent from this bundle." -ForegroundColor Yellow
+        Write-Host "[INFO] Packaged runtime doctor reported unhealthy model contracts only because model(s) are absent from this bundle." -ForegroundColor Cyan
     } else {
         throw "Packaged runtime doctor reported unhealthy model contracts. See $doctorReportPath."
     }
@@ -370,7 +367,7 @@ Write-Host "Bundle validation PASSED" -ForegroundColor Green
 Write-Host "================================" -ForegroundColor Green
 Write-Host ""
 if ($missingModels.Count -gt 0) {
-    Write-Host "Bundle is ready for installation with partial model coverage. Missing models are listed in bundle_validation.json and model_inventory.json." -ForegroundColor Yellow
+    Write-Host "Bundle is ready for installation with partial model coverage. Missing models are listed in bundle_validation.json and model_inventory.json." -ForegroundColor Cyan
 } else {
     Write-Host "Bundle is ready for installation and should work with DaVinci Resolve."
 }

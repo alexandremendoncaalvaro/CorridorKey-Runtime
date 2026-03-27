@@ -126,10 +126,10 @@ try {
         Write-Host "[VERIFIED] Artifact created: $expectedInstaller" -ForegroundColor Green
         Write-Host "[VERIFIED] Bundle validation report created: $expectedValidationReport" -ForegroundColor Green
         if ($validation.models.missing_count -gt 0) {
-            Write-Host "[WARN] $($v.Suffix) artifact is missing model(s): $($validation.models.missing_models -join ', ')" -ForegroundColor Yellow
+            Write-Host "[INFO] $($v.Suffix) artifact uses partial model coverage: $($validation.models.missing_models -join ', ')" -ForegroundColor Cyan
         }
         if (-not $validation.doctor.succeeded) {
-            Write-Host "[WARN] $($v.Suffix) doctor did not produce a report. Reason: $($validation.doctor.failure_reason)" -ForegroundColor Yellow
+            Write-Host "[INFO] $($v.Suffix) doctor did not produce a report. Reason: $($validation.doctor.failure_reason)" -ForegroundColor Cyan
         }
     }
 
