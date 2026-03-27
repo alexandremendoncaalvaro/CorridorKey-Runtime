@@ -67,6 +67,40 @@ function Copy-OrtDllIfPresent {
     return $true
 }
 
+function Resolve-OrtDllByPattern {
+    param([string]$Root, [string]$Pattern)
+
+    $searchRoots = @(
+        $Root,
+        (Join-Path $Root "bin"),
+        (Join-Path $Root "lib")
+    )
+
+    $matches = @()
+    foreach ($searchRoot in $searchRoots) {
+        if (-not (Test-Path $searchRoot)) {
+            continue
+        }
+        $matches += Get-ChildItem -Path $searchRoot -Filter $Pattern -File -ErrorAction SilentlyContinue
+    }
+
+    return $matches |
+        Sort-Object -Property Name -Descending |
+        Select-Object -First 1
+}
+
+function Copy-OrtDllByPattern {
+    param([string]$Root, [string]$Pattern, [string]$DestinationDir)
+
+    $resolved = Resolve-OrtDllByPattern -Root $Root -Pattern $Pattern
+    if ($null -eq $resolved) {
+        throw "Required runtime DLL not found matching pattern '$Pattern' (searched under $Root)"
+    }
+
+    Copy-Item $resolved.FullName $DestinationDir -Force
+    return $resolved.Name
+}
+
 function Get-RuntimeSupportedBackends {
     param([string]$RuntimeDir)
 
@@ -207,9 +241,9 @@ if (-not $tensorrtProvider) {
 $cudaProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_cuda.dll"
 if ($tensorrtProvider) {
     Copy-Item $tensorrtProvider $win64Dir -Force
-    # Copy essential TensorRT-RTX support libs
-    Copy-OrtDll -Root $OrtRoot -Name "tensorrt_onnxparser_rtx_1_3.dll" -DestinationDir $win64Dir
-    Copy-OrtDll -Root $OrtRoot -Name "tensorrt_rtx_1_3.dll" -DestinationDir $win64Dir
+    $onnxParserDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_onnxparser_rtx_*.dll" -DestinationDir $win64Dir
+    $runtimeDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_rtx_*.dll" -DestinationDir $win64Dir
+    Write-Host "Copied TensorRT-RTX support DLLs: $onnxParserDll, $runtimeDll"
 }
 if ($cudaProvider) {
     Copy-Item $cudaProvider $win64Dir -Force
@@ -233,6 +267,21 @@ if ($requiresCudaRuntime) {
     }
 } else {
     Write-Host "Skipping CUDA runtime staging because no CUDA/TensorRT provider was found."
+}
+
+if ($null -ne $tensorrtProvider) {
+    Write-Host "Validating packaged TensorRT backend loadability..." -ForegroundColor Cyan
+    $envPathOld = $env:PATH
+    try {
+        $env:PATH = "$win64Dir;$envPathOld"
+        if (Test-RuntimeBackendSupport -RuntimeDir $win64Dir -RequiredBackend "tensorrt") {
+            Write-Host "[VERIFIED] tensorrt backend is functional in the package." -ForegroundColor Green
+        } else {
+            throw "CRITICAL: TensorRT backend validation failed! 'corridorkey info --json' does not report tensorrt as supported."
+        }
+    } finally {
+        $env:PATH = $envPathOld
+    }
 }
 
 $targetModels = @(
