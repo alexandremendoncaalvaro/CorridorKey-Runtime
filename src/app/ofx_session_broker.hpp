@@ -27,7 +27,7 @@ class OfxSessionBroker {
 
     [[nodiscard]] std::size_t session_count() const;
     [[nodiscard]] std::size_t active_session_count() const;
-    void cleanup_idle_sessions();
+    [[nodiscard]] std::size_t cleanup_idle_sessions();
 
    private:
     struct SessionEntry {

@@ -28,7 +28,7 @@ OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options) : m_options(
 
 Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     const OfxRuntimePrepareSessionRequest& request) {
-    cleanup_idle_sessions();
+    (void)cleanup_idle_sessions();
     auto eviction_result = evict_idle_sessions_if_needed();
     if (!eviction_result) {
         return Unexpected<Error>(eviction_result.error());
@@ -141,15 +141,18 @@ std::size_t OfxSessionBroker::active_session_count() const {
                       [](const auto& pair) { return pair.second.snapshot.ref_count > 0; }));
 }
 
-void OfxSessionBroker::cleanup_idle_sessions() {
+std::size_t OfxSessionBroker::cleanup_idle_sessions() {
     const auto threshold = now() - m_options.idle_session_ttl;
+    std::size_t removed_sessions = 0;
     for (auto it = m_sessions.begin(); it != m_sessions.end();) {
         if (it->second.snapshot.ref_count == 0 && it->second.last_used_at < threshold) {
             it = m_sessions.erase(it);
+            removed_sessions += 1;
             continue;
         }
         ++it;
     }
+    return removed_sessions;
 }
 
 std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest& request) {
