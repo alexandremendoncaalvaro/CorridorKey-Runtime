@@ -27,29 +27,13 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modelsDir = Join-Path $repoRoot "models"
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
-function Get-ProjectVersion {
-    param([string]$RepoRoot)
-
-    $cmakePath = Join-Path $RepoRoot "CMakeLists.txt"
-    if (-not (Test-Path $cmakePath)) {
-        throw "Could not determine project version because CMakeLists.txt was not found at $cmakePath"
-    }
-
-    $versionLine = Select-String -Path $cmakePath -Pattern '^\s*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\s*$'
-    if ($null -ne $versionLine) {
-        return $versionLine.Matches[0].Groups[1].Value
-    }
-
-    throw "Could not determine project version from $cmakePath"
-}
-
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-ProjectVersion -RepoRoot $repoRoot
-}
+$Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot ("build\" + $BuildPreset)
 }
+$modelPackStatusPath = Join-Path $BuildDir "model_pack_status.json"
 if ([string]::IsNullOrWhiteSpace($OrtInstallDir)) {
     $OrtInstallDir = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
 }
@@ -221,26 +205,76 @@ function Invoke-ExternalCommand {
     }
 }
 
-function Assert-RequiredModels {
-    foreach ($model in (Get-PreparedModelList)) {
+function Remove-IntermediateModelsFromDestination {
+    foreach ($model in (Get-CorridorKeyIntermediateModelList)) {
         $modelPath = Join-Path $modelsDir $model
-        if (-not (Test-Path $modelPath)) {
-            throw "Missing required prepared model: $modelPath"
+        if (Test-Path $modelPath) {
+            Remove-Item $modelPath -Force
         }
+    }
+}
+
+function Get-PresentModelsInDirectory {
+    param(
+        [string]$Directory,
+        [string[]]$ExpectedModels
+    )
+
+    return @($ExpectedModels | Where-Object { Test-Path (Join-Path $Directory $_) })
+}
+
+function Write-ModelPackStatus {
+    param(
+        [string]$Stage,
+        [string]$Directory,
+        [string[]]$ExpectedModels,
+        [string[]]$ValidatedModels = @(),
+        [string[]]$ParityModels = @(),
+        [object[]]$GenerationFailures = @()
+    )
+
+    $inventory = Get-CorridorKeyModelInventory -ModelsDir $Directory -ExpectedModels $ExpectedModels
+    $payload = [ordered]@{
+        stage = $Stage
+        models_dir = [System.IO.Path]::GetFullPath($Directory)
+        expected_models = @($inventory.expected_models)
+        present_models = @($inventory.present_models)
+        missing_models = @($inventory.missing_models)
+        present_count = $inventory.present_count
+        missing_count = $inventory.missing_count
+        missing_models_allowed = $true
+        parity_validated_models = @($ParityModels)
+        contract_validated_models = @($ValidatedModels)
+        generation_failures = @($GenerationFailures)
+    }
+    Write-CorridorKeyJsonFile -Path $modelPackStatusPath -Payload $payload
+
+    if ($inventory.missing_count -gt 0) {
+        Write-Host "[WARN] Missing prepared model(s): $($inventory.missing_models -join ', ')" -ForegroundColor Yellow
+        Write-Host "[INFO] Wrote model pack status: $modelPackStatusPath" -ForegroundColor Cyan
+    } else {
+        Write-Host "[PASS] All prepared Windows RTX models are present." -ForegroundColor Green
     }
 }
 
 function Invoke-ModelPackValidation {
     param(
         [string]$UvPath,
-        [string]$ToolDir
+        [string]$ToolDir,
+        [string]$ModelsDirectory,
+        [string[]]$Models
     )
+
+    if ($Models.Count -eq 0) {
+        Write-Host "[validate-models] No prepared runtime models are present. Skipping ONNX contract validation." -ForegroundColor Yellow
+        return
+    }
 
     $arguments = @(
         "run", "python", "validate_model_pack.py",
-        "--dir", $modelsDir,
+        "--dir", $ModelsDirectory,
         "--models"
-    ) + (Get-PreparedModelList)
+    ) + $Models
 
     Write-Host "[validate-models] Verifying ONNX contracts and ORT loadability..."
     Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $ToolDir -Arguments $arguments
@@ -256,6 +290,11 @@ function Invoke-ExportParityValidation {
         [string[]]$Models
     )
 
+    if ($Models.Count -eq 0) {
+        Write-Host "[validate-export] No runtime artifacts are present for parity validation. Skipping." -ForegroundColor Yellow
+        return
+    }
+
     $arguments = @(
         "run", "python", "validate_export_parity.py",
         "--ckpt", $CheckpointPath,
@@ -267,6 +306,7 @@ function Invoke-ExportParityValidation {
     Write-Host "[validate-export] Verifying exported ONNX parity against the canonical PyTorch model..."
     Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $ToolDir -Arguments $arguments
 }
+
 function Invoke-ModelPreparation {
     param(
         [string]$UvPath,
@@ -278,10 +318,12 @@ function Invoke-ModelPreparation {
     $toolDir = Join-Path $repoRoot "tools\model_exporter"
     $tempModelsDir = Join-Path $repoRoot "temp\windows-model-prep"
     $baseModelPath = Join-Path $tempModelsDir "corridorkey_fp32.onnx"
+    $expectedPreparedModels = Get-CorridorKeyPreparedModelList
+    $expectedIntermediateModels = Get-CorridorKeyIntermediateModelList
 
     $needsPreparation = $Force.IsPresent
     if (-not $needsPreparation) {
-        foreach ($expected in (Get-PreparedModelList)) {
+        foreach ($expected in $expectedPreparedModels) {
             if (-not (Test-Path (Join-Path $modelsDir $expected))) {
                 $needsPreparation = $true
                 break
@@ -292,13 +334,17 @@ function Invoke-ModelPreparation {
     if (-not $needsPreparation) {
         Write-Host "[1/6] Reusing prepared Windows RTX model pack from $modelsDir"
         Remove-IntermediateModelsFromDestination
-        Assert-RequiredModels
+        $presentPreparedModels = Get-PresentModelsInDirectory -Directory $modelsDir -ExpectedModels $expectedPreparedModels
         Write-Host "[2/6] Validating prepared runtime artifact parity..."
         Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
             -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $modelsDir `
-            -Models (Get-PreparedModelList)
+            -Models $presentPreparedModels
         Write-Host "[3/6] Verifying ONNX contracts and ORT loadability..."
-        Invoke-ModelPackValidation -UvPath $UvPath -ToolDir $toolDir
+        Invoke-ModelPackValidation -UvPath $UvPath -ToolDir $toolDir `
+            -ModelsDirectory $modelsDir -Models $presentPreparedModels
+        Write-ModelPackStatus -Stage "reuse" -Directory $modelsDir `
+            -ExpectedModels $expectedPreparedModels -ValidatedModels $presentPreparedModels `
+            -ParityModels $presentPreparedModels
         return
     }
 
@@ -307,7 +353,7 @@ function Invoke-ModelPreparation {
     }
     New-Item -ItemType Directory -Path $tempModelsDir | Out-Null
 
-    foreach ($preparedModel in (Get-PreparedModelList)) {
+    foreach ($preparedModel in $expectedPreparedModels) {
         $preparedPath = Join-Path $modelsDir $preparedModel
         if (Test-Path $preparedPath) {
             Remove-Item $preparedPath -Force
@@ -315,20 +361,38 @@ function Invoke-ModelPreparation {
     }
     Remove-IntermediateModelsFromDestination
 
+    $generationFailures = @()
     try {
-        Write-Host "[1/6] Exporting CorridorKey ONNX models..."
-        Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
-            "run", "python", "export_onnx.py",
-            "--ckpt", $CheckpointPath,
-            "--out", $baseModelPath,
-            "--static-resolutions", "1536", "2048",
-            "--repo-path", $SourceRepo
-        )
+        Write-Host "[1/6] Exporting CorridorKey ONNX models..." 
+        $resolutions = @(512, 768, 1024, 1536, 2048)
+        foreach ($resolution in $resolutions) {
+            Write-Host "  -> Exporting $resolution px runtime artifact family..." -ForegroundColor Cyan
+            try {
+                Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
+                    "run", "python", "export_onnx.py",
+                    "--ckpt", $CheckpointPath,
+                    "--out", $baseModelPath,
+                    "--resolutions", "$resolution",
+                    "--static-resolutions", "1536", "2048",
+                    "--repo-path", $SourceRepo
+                )
+            } catch {
+                $generationFailures += [ordered]@{
+                    stage = "export"
+                    resolution = $resolution
+                    error = $_.Exception.Message
+                }
+                Write-Host "[WARN] Export failed for ${resolution}px. Continuing with the remaining model set." -ForegroundColor Yellow
+            }
+        }
+
+        $presentIntermediateModels = Get-PresentModelsInDirectory -Directory $tempModelsDir `
+            -ExpectedModels $expectedIntermediateModels
 
         Write-Host "[2/6] Validating exported FP32 ONNX parity..."
         Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
             -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $tempModelsDir `
-            -Models (Get-IntermediateModelList)
+            -Models $presentIntermediateModels
 
         Write-Host "[3/6] Optimizing FP32 and generating FP16 variants..."
         Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
@@ -344,19 +408,17 @@ function Invoke-ModelPreparation {
         )
 
         Write-Host "[5/6] Validating prepared runtime artifact parity..."
+        $presentPreparedModels = Get-PresentModelsInDirectory -Directory $tempModelsDir `
+            -ExpectedModels $expectedPreparedModels
         Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
             -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $tempModelsDir `
-            -Models (Get-PreparedModelList)
+            -Models $presentPreparedModels
 
         Write-Host "[6/6] Validating prepared runtime models..."
-        $arguments = @(
-            "run", "python", "validate_model_pack.py",
-            "--dir", $tempModelsDir,
-            "--models"
-        ) + (Get-PreparedModelList)
-        Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments $arguments
+        Invoke-ModelPackValidation -UvPath $UvPath -ToolDir $toolDir `
+            -ModelsDirectory $tempModelsDir -Models $presentPreparedModels
 
-        foreach ($preparedModel in (Get-PreparedModelList)) {
+        foreach ($preparedModel in $presentPreparedModels) {
             Copy-Item -Path (Join-Path $tempModelsDir $preparedModel) `
                 -Destination (Join-Path $modelsDir $preparedModel) -Force
         }
@@ -366,7 +428,10 @@ function Invoke-ModelPreparation {
         }
     }
 
-    Assert-RequiredModels
+    $finalPresentModels = Get-PresentModelsInDirectory -Directory $modelsDir -ExpectedModels $expectedPreparedModels
+    Write-ModelPackStatus -Stage "prepared" -Directory $modelsDir -ExpectedModels $expectedPreparedModels `
+        -ValidatedModels $finalPresentModels -ParityModels $finalPresentModels `
+        -GenerationFailures $generationFailures
 }
 
 $uvPath = ""
@@ -385,8 +450,13 @@ if (-not $SkipModelPreparation.IsPresent) {
 } else {
     $uvPath = Resolve-CommandPath -ExplicitPath $Uv -CandidateNames @("uv.exe", "uv") `
         -ErrorMessage "uv was not found. Install uv or pass -Uv."
-    Assert-RequiredModels
-    Invoke-ModelPackValidation -UvPath $uvPath -ToolDir (Join-Path $repoRoot "tools\model_exporter")
+    $presentPreparedModels = Get-PresentModelsInDirectory -Directory $modelsDir `
+        -ExpectedModels (Get-CorridorKeyPreparedModelList)
+    Invoke-ModelPackValidation -UvPath $uvPath -ToolDir (Join-Path $repoRoot "tools\model_exporter") `
+        -ModelsDirectory $modelsDir -Models $presentPreparedModels
+    Write-ModelPackStatus -Stage "skip-model-preparation" -Directory $modelsDir `
+        -ExpectedModels (Get-CorridorKeyPreparedModelList) -ValidatedModels $presentPreparedModels `
+        -ParityModels @()
 }
 
 if (-not $SkipOrtBuild.IsPresent) {
@@ -457,6 +527,7 @@ if (-not $SkipPackage.IsPresent) {
 $summary = [ordered]@{
     version = $Version
     models_dir = [System.IO.Path]::GetFullPath($modelsDir)
+    model_pack_status = [System.IO.Path]::GetFullPath($modelPackStatusPath)
     build_dir = [System.IO.Path]::GetFullPath($buildDir)
     ort_install_dir = [System.IO.Path]::GetFullPath($ortInstallDir)
     packaged_bundle_dir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\CorridorKey_Runtime_v${Version}_Windows"))

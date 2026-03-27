@@ -43,6 +43,8 @@ CorridorKey Resolve OFX v$Version - Windows Release
 Files in this release:
 - CorridorKey.ofx.bundle: the packaged OFX bundle payload
 - install_plugin.bat: manual installer helper for the bundle
+- bundle_validation.json: packaging-time validation and doctor status
+- CorridorKey.ofx.bundle\model_inventory.json: packaged model inventory
 
 Recommended install path:
 1. Run CorridorKey_Resolve_v$Version`_Windows_Installer.exe as Administrator.

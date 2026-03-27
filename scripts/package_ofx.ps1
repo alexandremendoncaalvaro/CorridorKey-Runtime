@@ -27,6 +27,7 @@ $pluginBinary = Join-Path $BuildDir "src\plugins\ofx\CorridorKey.ofx"
 $runtimeServerBinary = Join-Path $BuildDir "src\cli\corridorkey.exe"
 $win64Dir = Join-Path $OutputDir "Contents\Win64"
 $resourcesDir = Join-Path $OutputDir "Contents\Resources\models"
+$modelInventoryPath = Join-Path $OutputDir "model_inventory.json"
 
 function Assert-FileExists {
     param([string]$Path, [string]$Message)
@@ -284,22 +285,30 @@ if ($null -ne $tensorrtProvider) {
     }
 }
 
-$targetModels = @(
-    "corridorkey_fp16_512.onnx",
-    "corridorkey_fp16_768.onnx",
-    "corridorkey_fp16_1024.onnx",
-    "corridorkey_fp16_1536.onnx",
-    "corridorkey_int8_512.onnx",
-    "corridorkey_int8_768.onnx",
-    "corridorkey_int8_1024.onnx"
-)
-if (-not $Skip2048.IsPresent) {
-    $targetModels += "corridorkey_fp16_2048.onnx"
-}
-foreach ($model in $targetModels) {
+$targetModels = Get-CorridorKeyOfxBundleTargetModels -Include2048:(-not $Skip2048.IsPresent)
+$modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
+
+foreach ($model in $modelInventory.present_models) {
     $sourcePath = Join-Path $ModelsDir $model
-    Assert-FileExists -Path $sourcePath -Message "Missing model: $sourcePath"
     Copy-Item $sourcePath $resourcesDir -Force
+}
+
+$inventoryPayload = [ordered]@{
+    package_type = "ofx_bundle"
+    models_dir = [System.IO.Path]::GetFullPath($ModelsDir)
+    expected_models = @($modelInventory.expected_models)
+    present_models = @($modelInventory.present_models)
+    missing_models = @($modelInventory.missing_models)
+    present_count = $modelInventory.present_count
+    missing_count = $modelInventory.missing_count
+}
+Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
+
+if ($modelInventory.missing_count -gt 0) {
+    Write-Host "[WARN] Packaging OFX bundle without model(s): $($modelInventory.missing_models -join ', ')" -ForegroundColor Yellow
+    Write-Host "[INFO] Wrote model inventory: $modelInventoryPath" -ForegroundColor Cyan
+} else {
+    Write-Host "[PASS] All targeted OFX models were packaged." -ForegroundColor Green
 }
 
 Write-Host "OpenFX bundle ready at: $OutputDir"

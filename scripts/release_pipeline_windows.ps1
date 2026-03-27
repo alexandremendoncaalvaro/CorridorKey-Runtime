@@ -18,9 +18,7 @@ function Write-Success([string]$msg) {
 }
 
 try {
-    if ([string]::IsNullOrWhiteSpace($Version)) {
-        $Version = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
-    }
+    $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version -SyncGuiMetadata
 
     $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
     $directMlOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "dml"
@@ -42,12 +40,15 @@ try {
 
     if ($CleanOnly) { exit 0 }
 
-    Write-Step "Synchronizing DirectML Runtimes"
-    & powershell.exe -NoProfile -File "scripts/sync_onnxruntime_directml.ps1"
-    Write-Success "DirectML runtimes synchronized."
     if (-not (Test-Path $rtxOrtRoot)) {
         throw "Curated RTX runtime not found at $rtxOrtRoot. Build it with scripts\prepare_windows_rtx_release.ps1 or scripts\build_ort_windows_rtx.ps1 first."
     }
+    $rtxOrtVersion = Get-CorridorKeyWindowsOrtBinaryVersion -RepoRoot $repoRoot -Track "rtx"
+
+    Write-Step "Synchronizing DirectML Runtimes"
+    & powershell.exe -NoProfile -File "scripts/sync_onnxruntime_directml.ps1" -OrtVersion $rtxOrtVersion
+    if ($LASTEXITCODE -ne 0) { throw "DirectML runtime synchronization failed." }
+    Write-Success "DirectML runtimes synchronized."
     if (-not (Test-Path $directMlOrtRoot)) {
         throw "DirectML runtime not found at $directMlOrtRoot after synchronization."
     }
@@ -87,7 +88,19 @@ try {
         if (-not (Test-Path $expectedInstaller)) {
             throw "CRITICAL: Pipeline claimed success but installer was NOT found at: $expectedInstaller"
         }
+        $expectedValidationReport = Join-Path $repoRoot "dist/CorridorKey_Resolve_v${Version}_Windows_$($v.Suffix)\bundle_validation.json"
+        if (-not (Test-Path $expectedValidationReport)) {
+            throw "CRITICAL: Bundle validation did not produce a validation report at: $expectedValidationReport"
+        }
+        $validation = Get-Content -Path $expectedValidationReport -Raw | ConvertFrom-Json
         Write-Host "[VERIFIED] Artifact created: $expectedInstaller" -ForegroundColor Green
+        Write-Host "[VERIFIED] Bundle validation report created: $expectedValidationReport" -ForegroundColor Green
+        if ($validation.models.missing_count -gt 0) {
+            Write-Host "[WARN] $($v.Suffix) artifact is missing model(s): $($validation.models.missing_models -join ', ')" -ForegroundColor Yellow
+        }
+        if (-not $validation.doctor.succeeded) {
+            Write-Host "[WARN] $($v.Suffix) doctor did not produce a report. Reason: $($validation.doctor.failure_reason)" -ForegroundColor Yellow
+        }
     }
 
     Write-Success "All installers generated, physically verified, and validated."

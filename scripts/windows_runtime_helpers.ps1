@@ -104,3 +104,95 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 
     throw "Windows builds require a curated ONNX Runtime root. Stage vendor\onnxruntime-windows-rtx or vendor\onnxruntime-windows-dml, or set CORRIDORKEY_WINDOWS_ORT_ROOT."
 }
+
+function Get-CorridorKeyPreparedModelList {
+    return @(
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_768.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_fp16_1536.onnx",
+        "corridorkey_fp16_2048.onnx",
+        "corridorkey_int8_512.onnx",
+        "corridorkey_int8_768.onnx",
+        "corridorkey_int8_1024.onnx"
+    )
+}
+
+function Get-CorridorKeyIntermediateModelList {
+    return @(
+        "corridorkey_fp32_512.onnx",
+        "corridorkey_fp32_768.onnx",
+        "corridorkey_fp32_1024.onnx",
+        "corridorkey_fp32_1536.onnx",
+        "corridorkey_fp32_2048.onnx"
+    )
+}
+
+function Get-CorridorKeyOfxBundleTargetModels {
+    param([switch]$Include2048)
+
+    $models = @(
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_768.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_fp16_1536.onnx",
+        "corridorkey_int8_512.onnx",
+        "corridorkey_int8_768.onnx",
+        "corridorkey_int8_1024.onnx"
+    )
+    if ($Include2048.IsPresent) {
+        $models += "corridorkey_fp16_2048.onnx"
+    }
+
+    return $models
+}
+
+function Get-CorridorKeyPortableRuntimeTargetModels {
+    return @(
+        "corridorkey_fp16_768.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_int8_512.onnx"
+    )
+}
+
+function Get-CorridorKeyModelInventory {
+    param(
+        [string]$ModelsDir,
+        [string[]]$ExpectedModels
+    )
+
+    $presentModels = @()
+    $missingModels = @()
+    foreach ($model in $ExpectedModels) {
+        $sourcePath = Join-Path $ModelsDir $model
+        if (Test-Path $sourcePath) {
+            $presentModels += $model
+        } else {
+            $missingModels += $model
+        }
+    }
+
+    return [ordered]@{
+        expected_models = @($ExpectedModels)
+        present_models = @($presentModels)
+        missing_models = @($missingModels)
+        present_count = @($presentModels).Count
+        missing_count = @($missingModels).Count
+    }
+}
+
+function Write-CorridorKeyJsonFile {
+    param(
+        [string]$Path,
+        [object]$Payload
+    )
+
+    $directory = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+
+    $json = $Payload | ConvertTo-Json -Depth 8
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
+}

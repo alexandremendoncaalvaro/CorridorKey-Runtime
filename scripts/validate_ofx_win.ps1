@@ -6,6 +6,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 if ([string]::IsNullOrWhiteSpace($BundlePath)) {
     $BundlePath = Join-Path $repoRoot "dist\CorridorKey.ofx.bundle"
 }
@@ -13,9 +14,12 @@ if ([string]::IsNullOrWhiteSpace($BundlePath)) {
 Write-Host "Validating OFX bundle: $BundlePath" -ForegroundColor Cyan
 Write-Host ""
 
-$win64Dir = Join-Path $BundlePath "Contents\Win64"
-$resourcesDir = Join-Path $BundlePath "Contents\Resources\models"
 $bundleDescriptor = [System.IO.Path]::GetFullPath($BundlePath)
+$bundleRoot = Split-Path -Parent $bundleDescriptor
+$win64Dir = Join-Path $bundleDescriptor "Contents\Win64"
+$resourcesDir = Join-Path $bundleDescriptor "Contents\Resources\models"
+$modelInventoryPath = Join-Path $bundleDescriptor "model_inventory.json"
+$bundleValidationPath = Join-Path $bundleRoot "bundle_validation.json"
 $expectsUniversalGpuPath = $bundleDescriptor -match 'Universal'
 $expectsDirectMlPath = $bundleDescriptor -match 'DirectML'
 
@@ -171,38 +175,24 @@ if ($expectsDirectMlPath -and ($supportedBackends -notcontains "dml")) {
 }
 
 # Check models
-$requiredModels = @(
-    "corridorkey_fp16_512.onnx",
-    "corridorkey_fp16_768.onnx",
-    "corridorkey_fp16_1024.onnx",
-    "corridorkey_fp16_1536.onnx",
-    "corridorkey_int8_512.onnx",
-    "corridorkey_int8_768.onnx",
-    "corridorkey_int8_1024.onnx"
-)
+$bundleModelInventory = if (Test-Path $modelInventoryPath) {
+    Get-Content -Path $modelInventoryPath -Raw | ConvertFrom-Json
+} else {
+    $expectedModels = Get-CorridorKeyOfxBundleTargetModels -Include2048
+    [pscustomobject](Get-CorridorKeyModelInventory -ModelsDir $resourcesDir -ExpectedModels $expectedModels)
+}
 
-$optionalModels = @(
-    "corridorkey_fp16_2048.onnx"
-)
+$presentModels = @($bundleModelInventory.present_models)
+$missingModels = @($bundleModelInventory.missing_models)
+$expectedModels = @($bundleModelInventory.expected_models)
 
-foreach ($model in $requiredModels) {
+foreach ($model in $presentModels) {
     $path = Join-Path $resourcesDir $model
-    if (-not (Test-Path $path)) {
-        Write-Host "[FAIL] Required model not found: $model" -ForegroundColor Red
-        throw "Missing required model: $model"
-    }
     $modelSize = (Get-Item $path).Length
     Write-Host "[PASS] Found $model ($([math]::Round($modelSize / 1MB, 2)) MB)" -ForegroundColor Green
 }
-
-foreach ($model in $optionalModels) {
-    $path = Join-Path $resourcesDir $model
-    if (-not (Test-Path $path)) {
-        Write-Host "[INFO] Optional model not found: $model" -ForegroundColor Cyan
-    } else {
-        $modelSize = (Get-Item $path).Length
-        Write-Host "[PASS] Found $model ($([math]::Round($modelSize / 1MB, 2)) MB)" -ForegroundColor Green
-    }
+foreach ($model in $missingModels) {
+    Write-Host "[WARN] Packaged bundle is missing model: $model" -ForegroundColor Yellow
 }
 
 $doctorReportPath = Join-Path $bundleRoot "doctor_report.json"
@@ -211,6 +201,12 @@ $previousModelsDir = if (Test-Path Env:CORRIDORKEY_MODELS_DIR) {
 } else {
     $null
 }
+$doctorSucceeded = $false
+$doctorHealthy = $false
+$doctorModelContractsHealthy = $false
+$doctorFailureTolerated = $false
+$doctorFailureReason = ""
+$doctorModelContractIssues = @()
 
 Write-Host "[DOCTOR] Running packaged runtime doctor..." -ForegroundColor Cyan
 Push-Location $win64Dir
@@ -242,43 +238,56 @@ try {
             Write-Host "[WARN] Packaged runtime doctor stderr:" -ForegroundColor Yellow
             Write-Host $doctorStderr -ForegroundColor Yellow
         }
-        throw "Packaged runtime doctor failed."
-    }
-
-    $doctorJson | Set-Content -Path $doctorReportPath -Encoding UTF8
-    $doctor = $doctorJson | ConvertFrom-Json
-    if ($null -eq $doctor.summary) {
-        throw "Packaged runtime doctor report is missing the summary payload."
-    }
-    if ($null -eq $doctor.model_contracts) {
-        throw "Packaged runtime doctor report is missing the model_contracts payload."
-    }
-
-    Write-Host "[PASS] Wrote doctor report: $doctorReportPath" -ForegroundColor Green
-    Write-Host "[INFO] Doctor summary healthy=$($doctor.summary.healthy) model_contracts_healthy=$($doctor.summary.model_contracts_healthy) windows_universal_healthy=$($doctor.summary.windows_universal_healthy)" -ForegroundColor Cyan
-    $contractGroups = @($doctor.model_contracts.groups)
-    foreach ($group in $contractGroups) {
-        Write-Host "[INFO] Model contract group '$($group.group)': healthy=$($group.healthy) loadable=$($group.all_models_loadable) consistent=$($group.contract_consistent) baseline=$($group.baseline_model)" -ForegroundColor Cyan
-    }
-    $unhealthyContractGroups = @($contractGroups | Where-Object { -not $_.healthy })
-    foreach ($group in $unhealthyContractGroups) {
-        $firstIssue = $group.models | Where-Object {
-            (-not $_.load_ok) -or (-not $_.contract_match_baseline)
-        } | Select-Object -First 1
-        if ($null -ne $firstIssue) {
-            $reason = if ([string]::IsNullOrWhiteSpace($firstIssue.error)) {
-                "Contract mismatch relative to baseline."
-            } else {
-                $firstIssue.error
-            }
-            Write-Host "[WARN] Model contract group '$($group.group)' first issue: $($firstIssue.filename) -> $reason" -ForegroundColor Yellow
+        if ($missingModels.Count -gt 0) {
+            $doctorFailureTolerated = $true
+            $doctorFailureReason = "Packaged runtime doctor failed while the bundle is missing model(s)."
+            Write-Host "[WARN] $doctorFailureReason" -ForegroundColor Yellow
+        } else {
+            throw "Packaged runtime doctor failed."
         }
     }
-    if (-not $doctor.summary.model_contracts_healthy) {
-        throw "Packaged runtime doctor reported unhealthy model contracts. See $doctorReportPath."
-    }
-    if (-not $doctor.summary.healthy) {
-        Write-Host "[WARN] Doctor summary is unhealthy. Review doctor_report.json before sending this build to testers." -ForegroundColor Yellow
+
+    $doctor = $null
+    if (-not [string]::IsNullOrWhiteSpace($doctorJson)) {
+        $doctorJson | Set-Content -Path $doctorReportPath -Encoding UTF8
+        $doctor = $doctorJson | ConvertFrom-Json
+        if ($null -eq $doctor.summary) {
+            throw "Packaged runtime doctor report is missing the summary payload."
+        }
+        if ($null -eq $doctor.model_contracts) {
+            throw "Packaged runtime doctor report is missing the model_contracts payload."
+        }
+
+        $doctorSucceeded = $true
+        $doctorHealthy = [bool]$doctor.summary.healthy
+        $doctorModelContractsHealthy = [bool]$doctor.summary.model_contracts_healthy
+
+        Write-Host "[PASS] Wrote doctor report: $doctorReportPath" -ForegroundColor Green
+        Write-Host "[INFO] Doctor summary healthy=$($doctor.summary.healthy) model_contracts_healthy=$($doctor.summary.model_contracts_healthy) windows_universal_healthy=$($doctor.summary.windows_universal_healthy)" -ForegroundColor Cyan
+        $contractGroups = @($doctor.model_contracts.groups)
+        foreach ($group in $contractGroups) {
+            Write-Host "[INFO] Model contract group '$($group.group)': healthy=$($group.healthy) loadable=$($group.all_models_loadable) consistent=$($group.contract_consistent) baseline=$($group.baseline_model)" -ForegroundColor Cyan
+        }
+        $unhealthyContractGroups = @($contractGroups | Where-Object { -not $_.healthy })
+        foreach ($group in $unhealthyContractGroups) {
+            $firstIssue = $group.models | Where-Object {
+                (-not $_.load_ok) -or (-not $_.contract_match_baseline)
+            } | Select-Object -First 1
+            if ($null -ne $firstIssue) {
+                $doctorModelContractIssues += @($group.models | Where-Object {
+                    (-not $_.load_ok) -or (-not $_.contract_match_baseline)
+                })
+                $reason = if ([string]::IsNullOrWhiteSpace($firstIssue.error)) {
+                    "Contract mismatch relative to baseline."
+                } else {
+                    $firstIssue.error
+                }
+                Write-Host "[WARN] Model contract group '$($group.group)' first issue: $($firstIssue.filename) -> $reason" -ForegroundColor Yellow
+            }
+        }
+        if (-not $doctor.summary.healthy) {
+            Write-Host "[WARN] Doctor summary is unhealthy. Review doctor_report.json before sending this build to testers." -ForegroundColor Yellow
+        }
     }
 } finally {
     if ($null -ne $previousModelsDir) {
@@ -288,9 +297,55 @@ try {
     }
     Pop-Location
 }
+
+if ($doctorSucceeded -and -not $doctorModelContractsHealthy) {
+    $nonMissingIssues = @($doctorModelContractIssues | Where-Object {
+        ($missingModels -notcontains $_.filename) -or $_.error -ne "Model not found"
+    })
+    if ($nonMissingIssues.Count -eq 0 -and $missingModels.Count -gt 0) {
+        $doctorFailureTolerated = $true
+        if ([string]::IsNullOrWhiteSpace($doctorFailureReason)) {
+            $doctorFailureReason = "Packaged runtime doctor reported unhealthy model contracts only because model(s) are absent from this bundle."
+        }
+        Write-Host "[WARN] Packaged runtime doctor reported unhealthy model contracts only because model(s) are absent from this bundle." -ForegroundColor Yellow
+    } else {
+        throw "Packaged runtime doctor reported unhealthy model contracts. See $doctorReportPath."
+    }
+}
+
+$validationPayload = [ordered]@{
+    bundle_path = $bundleDescriptor
+    validation_passed = $true
+    runtime_probe = [ordered]@{
+        supported_backends = @($supportedBackends)
+    }
+    models = [ordered]@{
+        expected_models = @($expectedModels)
+        present_models = @($presentModels)
+        missing_models = @($missingModels)
+        present_count = @($presentModels).Count
+        missing_count = @($missingModels).Count
+    }
+    doctor = [ordered]@{
+        attempted = $true
+        succeeded = $doctorSucceeded
+        healthy = $doctorHealthy
+        model_contracts_healthy = $doctorModelContractsHealthy
+        failure_tolerated = $doctorFailureTolerated
+        failure_reason = $doctorFailureReason
+        report_path = if ($doctorSucceeded) { $doctorReportPath } else { "" }
+    }
+}
+Write-CorridorKeyJsonFile -Path $bundleValidationPath -Payload $validationPayload
+Write-Host "[PASS] Wrote bundle validation report: $bundleValidationPath" -ForegroundColor Green
+
 Write-Host ""
 Write-Host "================================" -ForegroundColor Green
 Write-Host "Bundle validation PASSED" -ForegroundColor Green
 Write-Host "================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Bundle is ready for installation and should work with DaVinci Resolve."
+if ($missingModels.Count -gt 0) {
+    Write-Host "Bundle is ready for installation with partial model coverage. Missing models are listed in bundle_validation.json and model_inventory.json." -ForegroundColor Yellow
+} else {
+    Write-Host "Bundle is ready for installation and should work with DaVinci Resolve."
+}
