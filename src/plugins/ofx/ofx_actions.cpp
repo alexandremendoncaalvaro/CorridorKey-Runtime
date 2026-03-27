@@ -323,12 +323,14 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "or render.",
         "runtime_group");
     define_runtime_status_param(
-        param_set, kParamRuntimeTimings, "Frame Times", "Initializing...",
-        "Shows the most recent local render time and rolling average for this OFX instance.",
+        param_set, kParamRuntimeTimings, "Frame Render", "Initializing...",
+        "Shows the real backend render time for the last frame result, including cached reuse "
+        "when that timing metadata is available.",
         "runtime_group");
     define_runtime_status_param(
         param_set, kParamRuntimeBackendWork, "Backend Work", "Initializing...",
-        "Shows whether the last render did backend work or reused shared or instance cache data.",
+        "Shows whether the last frame result came from a backend render, shared cache, or "
+        "instance cache.",
         "runtime_group");
 
     // --- Group 2: Help & Docs (actionable links only) ---

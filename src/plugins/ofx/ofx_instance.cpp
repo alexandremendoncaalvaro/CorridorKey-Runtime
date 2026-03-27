@@ -415,44 +415,23 @@ std::string runtime_path_runtime_label_impl(const InstanceData& data) {
     }
 }
 
-std::string last_render_work_origin_label(LastRenderWorkOrigin work_origin) {
-    switch (work_origin) {
-        case LastRenderWorkOrigin::BackendRender:
-            return "backend render";
-        case LastRenderWorkOrigin::SharedCache:
-            return "shared cache";
-        case LastRenderWorkOrigin::InstanceCache:
-            return "instance cache";
-        case LastRenderWorkOrigin::None:
-        default:
-            return "local render";
-    }
-}
-
 std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
-    if (data.last_frame_ms <= 0.0) {
-        return "No frames yet";
-    }
-    return "Last render: " + last_render_work_origin_label(data.last_render_work_origin) +
-           " | Local: " + format_duration_ms(data.last_frame_ms) +
-           " | Avg local: " + format_duration_ms(data.avg_frame_ms);
-}
-
-std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
-    switch (data.last_render_work_origin) {
-        case LastRenderWorkOrigin::SharedCache:
-            return "No backend work | shared cache hit";
-        case LastRenderWorkOrigin::InstanceCache:
-            return "No backend work | instance cache hit";
-        case LastRenderWorkOrigin::BackendRender:
-            break;
-        case LastRenderWorkOrigin::None:
-        default:
-            return "No backend work recorded";
+    if (data.last_render_work_origin == LastRenderWorkOrigin::None) {
+        return "No frame render recorded";
     }
 
     if (data.last_render_stage_timings.empty()) {
-        return "Backend render | stage timings unavailable";
+        switch (data.last_render_work_origin) {
+            case LastRenderWorkOrigin::SharedCache:
+                return "Frame render unavailable | Shared cache";
+            case LastRenderWorkOrigin::InstanceCache:
+                return "Frame render unavailable | Instance cache";
+            case LastRenderWorkOrigin::BackendRender:
+                return "Frame render unavailable";
+            case LastRenderWorkOrigin::None:
+            default:
+                return "No frame render recorded";
+        }
     }
 
     double total_ms = 0.0;
@@ -464,12 +443,38 @@ std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
         }
     }
 
-    std::string label = "Backend total: " + format_duration_ms(total_ms);
+    std::string label = "Frame render: " + format_duration_ms(total_ms);
+    switch (data.last_render_work_origin) {
+        case LastRenderWorkOrigin::SharedCache:
+            label += " | Shared cache";
+            break;
+        case LastRenderWorkOrigin::InstanceCache:
+            label += " | Instance cache";
+            break;
+        case LastRenderWorkOrigin::BackendRender:
+        case LastRenderWorkOrigin::None:
+        default:
+            break;
+    }
     if (hottest_stage != nullptr && hottest_stage->total_ms > 0.0 && !hottest_stage->name.empty()) {
         label += " | Hotspot: " + truncate_status_message(hottest_stage->name, 36) + " " +
                  format_duration_ms(hottest_stage->total_ms);
     }
     return label;
+}
+
+std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
+    switch (data.last_render_work_origin) {
+        case LastRenderWorkOrigin::SharedCache:
+            return "Shared cache hit";
+        case LastRenderWorkOrigin::InstanceCache:
+            return "Instance cache hit";
+        case LastRenderWorkOrigin::BackendRender:
+            return "Backend render";
+        case LastRenderWorkOrigin::None:
+        default:
+            return "No backend work recorded";
+    }
 }
 
 void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
@@ -486,6 +491,7 @@ void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
     data->cached_signature_valid = false;
     data->cached_params = {};
     data->cached_model_path.clear();
+    data->cached_render_stage_timings.clear();
     data->cached_screen_color = kDefaultScreenColor;
     data->cached_alpha_black_point = 0.0;
     data->cached_alpha_white_point = 1.0;

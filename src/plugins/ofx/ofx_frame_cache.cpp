@@ -33,6 +33,7 @@ std::optional<ImageBuffer> deep_copy_buffer(const Image& src) {
 struct RetrievedEntry {
     Image alpha;
     Image foreground;
+    std::vector<StageTiming> stage_timings;
 };
 
 }  // namespace
@@ -89,7 +90,8 @@ std::uint64_t frame_signature(const Image& rgb, const Image& hint) {
 }
 
 bool SharedFrameCache::try_retrieve(const SharedCacheKey& key, ImageBuffer& out_alpha,
-                                    ImageBuffer& out_foreground) const {
+                                    ImageBuffer& out_foreground,
+                                    std::vector<StageTiming>* out_stage_timings) const {
     std::optional<RetrievedEntry> snapshot;
 
     {
@@ -103,7 +105,7 @@ bool SharedFrameCache::try_retrieve(const SharedCacheKey& key, ImageBuffer& out_
             if (a.data.empty() || f.data.empty()) {
                 continue;
             }
-            snapshot = RetrievedEntry{a, f};
+            snapshot = RetrievedEntry{a, f, entry.stage_timings};
             break;
         }
     }
@@ -119,11 +121,14 @@ bool SharedFrameCache::try_retrieve(const SharedCacheKey& key, ImageBuffer& out_
     }
     out_alpha = std::move(*alpha);
     out_foreground = std::move(*foreground);
+    if (out_stage_timings != nullptr) {
+        *out_stage_timings = std::move(snapshot->stage_timings);
+    }
     return true;
 }
 
 void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha,
-                             const Image& foreground) {
+                             const Image& foreground, std::vector<StageTiming> stage_timings) {
     auto alpha_copy = deep_copy_buffer(alpha);
     auto fg_copy = deep_copy_buffer(foreground);
     if (!alpha_copy.has_value() || !fg_copy.has_value()) {
@@ -136,6 +141,7 @@ void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha,
         if (entry.occupied && entry.key == key) {
             entry.alpha = std::move(*alpha_copy);
             entry.foreground = std::move(*fg_copy);
+            entry.stage_timings = std::move(stage_timings);
             return;
         }
     }
@@ -144,6 +150,7 @@ void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha,
     slot.key = key;
     slot.alpha = std::move(*alpha_copy);
     slot.foreground = std::move(*fg_copy);
+    slot.stage_timings = std::move(stage_timings);
     slot.occupied = true;
     m_next_slot = (m_next_slot + 1) % kMaxEntries;
 }
@@ -154,6 +161,7 @@ void SharedFrameCache::clear() {
         entry.key = {};
         entry.alpha = {};
         entry.foreground = {};
+        entry.stage_timings.clear();
         entry.occupied = false;
     }
     m_next_slot = 0;

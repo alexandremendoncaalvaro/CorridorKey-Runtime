@@ -189,11 +189,19 @@ TEST_CASE("purge caches clears shared and instance caches", "[unit][ofx][regress
     SharedCacheKey key{1, 2, 3, 0};
     auto alpha = filled_alpha();
     auto foreground = filled_foreground();
-    g_frame_cache->store(key, alpha.view(), foreground.view());
+    std::vector<StageTiming> stage_timings = {
+        StageTiming{"ort_run", 1400.0, 1, 1},
+    };
+    g_frame_cache->store(key, alpha.view(), foreground.view(), stage_timings);
 
     ImageBuffer retrieved_alpha;
     ImageBuffer retrieved_foreground;
-    REQUIRE(g_frame_cache->try_retrieve(key, retrieved_alpha, retrieved_foreground));
+    std::vector<StageTiming> retrieved_stage_timings;
+    REQUIRE(g_frame_cache->try_retrieve(key, retrieved_alpha, retrieved_foreground,
+                                        &retrieved_stage_timings));
+    REQUIRE(retrieved_stage_timings.size() == 1);
+    CHECK(retrieved_stage_timings.front().name == "ort_run");
+    CHECK(retrieved_stage_timings.front().total_ms == Catch::Approx(1400.0));
 
     REQUIRE(purge_caches(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
     CHECK_FALSE(data.cached_result_valid);
@@ -202,7 +210,8 @@ TEST_CASE("purge caches clears shared and instance caches", "[unit][ofx][regress
     CHECK(data.last_frame_ms == 0.0);
     CHECK(data.avg_frame_ms == 0.0);
     CHECK(data.frame_time_samples == 0);
-    CHECK_FALSE(g_frame_cache->try_retrieve(key, retrieved_alpha, retrieved_foreground));
+    CHECK_FALSE(g_frame_cache->try_retrieve(key, retrieved_alpha, retrieved_foreground,
+                                            &retrieved_stage_timings));
 
     g_frame_cache = std::move(previous_cache);
     g_suites.property = previous_property_suite;

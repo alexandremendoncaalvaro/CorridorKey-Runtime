@@ -30,9 +30,11 @@ class SharedFrameCache {
     SharedFrameCache& operator=(const SharedFrameCache&) = delete;
 
     bool try_retrieve(const SharedCacheKey& key, ImageBuffer& out_alpha,
-                      ImageBuffer& out_foreground) const;
+                      ImageBuffer& out_foreground,
+                      std::vector<StageTiming>* out_stage_timings = nullptr) const;
 
-    void store(const SharedCacheKey& key, const Image& alpha, const Image& foreground);
+    void store(const SharedCacheKey& key, const Image& alpha, const Image& foreground,
+               std::vector<StageTiming> stage_timings = {});
 
     void clear();
 
@@ -41,6 +43,7 @@ class SharedFrameCache {
         SharedCacheKey key = {};
         ImageBuffer alpha = {};
         ImageBuffer foreground = {};
+        std::vector<StageTiming> stage_timings = {};
         bool occupied = false;
     };
 

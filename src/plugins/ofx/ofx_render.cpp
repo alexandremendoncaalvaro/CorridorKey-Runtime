@@ -405,18 +405,18 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                                           const std::string& source_depth) {
     ImageBuffer alpha_buf;
     ImageBuffer fg_linear_buf;
+    std::vector<StageTiming> stage_timings;
 
     if (g_frame_cache != nullptr &&
-        g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf)) {
+        g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf, &stage_timings)) {
         log_message("render", "event=cache_hit detail=shared_cache");
         return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
-                LastRenderWorkOrigin::SharedCache};
+                LastRenderWorkOrigin::SharedCache, std::move(stage_timings)};
     }
 
     const DeviceInfo requested_device = requested_device_for_render(data);
     const DeviceInfo effective_device_before = effective_device_for_render_log(data);
     const std::string render_phase = render_phase_label(data->render_count);
-    std::vector<StageTiming> stage_timings;
     log_render_event("render_begin", render_phase, requested_device, effective_device_before,
                      data->model_path, data->requested_resolution, data->active_resolution,
                      data->use_runtime_server ? data->runtime_client->backend_fallback()
@@ -510,7 +510,8 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     alpha_buf = std::move(result->alpha);
 
     if (g_frame_cache != nullptr) {
-        g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view());
+        g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view(),
+                             std::vector<StageTiming>(stage_timings.begin(), stage_timings.end()));
     }
 
     return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
@@ -923,7 +924,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         alpha_view = data->cached_result.alpha.view();
         fg_linear = data->cached_result.foreground.view();
         work_origin = LastRenderWorkOrigin::InstanceCache;
-        data->last_render_stage_timings.clear();
+        data->last_render_stage_timings = data->cached_render_stage_timings;
     } else {
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
                                         path_hash(data->model_path), screen_color};
@@ -1016,6 +1017,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         data->cached_height = height;
         data->cached_params = params;
         data->cached_model_path = data->model_path;
+        data->cached_render_stage_timings = inference.stage_timings;
         data->cached_screen_color = screen_color;
         data->cached_alpha_black_point = alpha_black_point;
         data->cached_alpha_white_point = alpha_white_point;

@@ -212,6 +212,7 @@ struct InstanceData {
     bool cached_signature_valid = false;
     InferenceParams cached_params = {};
     std::filesystem::path cached_model_path = {};
+    std::vector<StageTiming> cached_render_stage_timings = {};
     int cached_screen_color = kDefaultScreenColor;
     double cached_alpha_black_point = 0.0;
     double cached_alpha_white_point = 1.0;
