@@ -12,6 +12,7 @@
 #include "app/runtime_contracts.hpp"
 #include "common/ofx_runtime_defaults.hpp"
 #include "common/runtime_paths.hpp"
+#include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
@@ -176,8 +177,18 @@ void sync_runtime_panel_state_from_active_engine(InstanceData* data) {
     data->runtime_panel_state.requested_quality_mode = data->active_quality_mode;
     data->runtime_panel_state.requested_resolution = data->requested_resolution;
     data->runtime_panel_state.effective_resolution = data->active_resolution;
+    data->runtime_panel_state.safe_quality_ceiling_resolution =
+        app::max_supported_resolution_for_device(data->device).value_or(0);
     data->runtime_panel_state.cpu_quality_guardrail_active = data->cpu_quality_guardrail_active;
     data->runtime_panel_state.artifact_path = data->model_path;
+    if (data->use_runtime_server && data->runtime_client != nullptr && data->runtime_client->has_session()) {
+        data->runtime_panel_state.session_prepared = true;
+        data->runtime_panel_state.session_ref_count = data->runtime_client->session_ref_count();
+        return;
+    }
+
+    data->runtime_panel_state.session_prepared = data->engine != nullptr;
+    data->runtime_panel_state.session_ref_count = data->engine != nullptr ? 1 : 0;
 }
 
 void set_runtime_panel_state_for_failed_quality_request(
@@ -190,8 +201,35 @@ void set_runtime_panel_state_for_failed_quality_request(
     data->runtime_panel_state.requested_quality_mode = requested_quality_mode;
     data->runtime_panel_state.requested_resolution = requested_resolution;
     data->runtime_panel_state.effective_resolution = 0;
+    data->runtime_panel_state.safe_quality_ceiling_resolution =
+        app::max_supported_resolution_for_device(data->device).value_or(0);
     data->runtime_panel_state.cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     data->runtime_panel_state.artifact_path = artifact_path;
+    data->runtime_panel_state.session_prepared = false;
+    data->runtime_panel_state.session_ref_count = 0;
+}
+
+bool sync_runtime_panel_session_state_impl(InstanceData* data) {
+    if (data == nullptr) {
+        return false;
+    }
+
+    const bool previous_prepared = data->runtime_panel_state.session_prepared;
+    const std::uint64_t previous_ref_count = data->runtime_panel_state.session_ref_count;
+
+    if (data->use_runtime_server && data->runtime_client != nullptr && data->runtime_client->has_session()) {
+        data->runtime_panel_state.session_prepared = true;
+        data->runtime_panel_state.session_ref_count = data->runtime_client->session_ref_count();
+    } else if (data->engine != nullptr) {
+        data->runtime_panel_state.session_prepared = true;
+        data->runtime_panel_state.session_ref_count = 1;
+    } else {
+        data->runtime_panel_state.session_prepared = false;
+        data->runtime_panel_state.session_ref_count = 0;
+    }
+
+    return data->runtime_panel_state.session_prepared != previous_prepared ||
+           data->runtime_panel_state.session_ref_count != previous_ref_count;
 }
 
 std::uint64_t mix_cache_token(std::uint64_t token, const std::string& value) {
@@ -305,12 +343,180 @@ std::string runtime_status_runtime_label_impl(const InstanceData& data) {
     return data.render_count > 0 ? "Ready" : "Idle";
 }
 
-std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
-    if (data.last_frame_ms <= 0.0) {
-        return "No frames yet";
+std::string runtime_session_runtime_label_impl(const InstanceData& data) {
+    if (data.runtime_panel_state.session_prepared) {
+        const std::uint64_t shared_node_count = std::max<std::uint64_t>(
+            data.runtime_panel_state.session_ref_count, 1);
+        if (shared_node_count > 1) {
+            return "Shared (" + std::to_string(shared_node_count) + " nodes)";
+        }
+        return "Dedicated";
     }
-    return "Last frame: " + format_duration_ms(data.last_frame_ms) +
-           " | Avg: " + format_duration_ms(data.avg_frame_ms);
+
+    if (!data.last_error.empty()) {
+        return "Unavailable";
+    }
+
+    return "Loading...";
+}
+
+std::string runtime_safe_quality_ceiling_runtime_label_impl(const InstanceData& data) {
+    const int resolution = data.runtime_panel_state.safe_quality_ceiling_resolution;
+    if (resolution <= 0) {
+        return "Unknown";
+    }
+
+    switch (quality_mode_for_resolution(resolution)) {
+        case kQualityPreview:
+            return "Draft (" + std::to_string(resolution) + "px)";
+        case kQualityStandard:
+            return "Standard (" + std::to_string(resolution) + "px)";
+        case kQualityHigh:
+            return "High (" + std::to_string(resolution) + "px)";
+        case kQualityUltra:
+            return "Ultra (" + std::to_string(resolution) + "px)";
+        case kQualityMaximum:
+            return "Maximum (" + std::to_string(resolution) + "px)";
+        case kQualityAuto:
+        default:
+            return std::to_string(resolution) + "px";
+    }
+}
+
+std::string runtime_guide_source_runtime_label_impl(const InstanceData& data) {
+    switch (data.last_guide_source) {
+        case GuideSourceKind::ExternalAlphaHint:
+            return "External Alpha Hint";
+        case GuideSourceKind::RoughFallback:
+            return "Rough Fallback";
+        case GuideSourceKind::Unknown:
+        default:
+            if (!data.last_error.empty()) {
+                return "Unavailable";
+            }
+            return "Awaiting render";
+    }
+}
+
+std::string runtime_path_runtime_label_impl(const InstanceData& data) {
+    switch (data.last_runtime_path) {
+        case RuntimePathKind::Direct:
+            return "Direct";
+        case RuntimePathKind::ArtifactFallback:
+            return "Artifact Fallback";
+        case RuntimePathKind::FullModelTiling:
+            return "Full-Model Tiling";
+        case RuntimePathKind::Unknown:
+        default:
+            if (!data.last_error.empty()) {
+                return "Unavailable";
+            }
+            return "Awaiting render";
+    }
+}
+
+std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
+    if (data.last_render_work_origin == LastRenderWorkOrigin::None) {
+        return "No frame render recorded";
+    }
+
+    if (data.last_render_stage_timings.empty()) {
+        switch (data.last_render_work_origin) {
+            case LastRenderWorkOrigin::SharedCache:
+                return "Frame render unavailable | Shared cache";
+            case LastRenderWorkOrigin::InstanceCache:
+                return "Frame render unavailable | Instance cache";
+            case LastRenderWorkOrigin::BackendRender:
+                return "Frame render unavailable";
+            case LastRenderWorkOrigin::None:
+            default:
+                return "No frame render recorded";
+        }
+    }
+
+    double total_ms = 0.0;
+    const StageTiming* hottest_stage = nullptr;
+    for (const auto& timing : data.last_render_stage_timings) {
+        total_ms += timing.total_ms;
+        if (hottest_stage == nullptr || timing.total_ms > hottest_stage->total_ms) {
+            hottest_stage = &timing;
+        }
+    }
+
+    std::string label = "Frame render: " + format_duration_ms(total_ms);
+    switch (data.last_render_work_origin) {
+        case LastRenderWorkOrigin::SharedCache:
+            label += " | Shared cache";
+            break;
+        case LastRenderWorkOrigin::InstanceCache:
+            label += " | Instance cache";
+            break;
+        case LastRenderWorkOrigin::BackendRender:
+        case LastRenderWorkOrigin::None:
+        default:
+            break;
+    }
+    if (hottest_stage != nullptr && hottest_stage->total_ms > 0.0 && !hottest_stage->name.empty()) {
+        label += " | Hotspot: " + truncate_status_message(hottest_stage->name, 36) + " " +
+                 format_duration_ms(hottest_stage->total_ms);
+    }
+    return label;
+}
+
+std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
+    switch (data.last_render_work_origin) {
+        case LastRenderWorkOrigin::SharedCache:
+            return "Shared cache hit";
+        case LastRenderWorkOrigin::InstanceCache:
+            return "Instance cache hit";
+        case LastRenderWorkOrigin::BackendRender:
+            return "Backend render";
+        case LastRenderWorkOrigin::None:
+        default:
+            return "No backend work recorded";
+    }
+}
+
+void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
+    if (data == nullptr) {
+        return;
+    }
+
+    data->cached_result = {};
+    data->cached_result_valid = false;
+    data->cached_time = 0.0;
+    data->cached_width = 0;
+    data->cached_height = 0;
+    data->cached_signature = 0;
+    data->cached_signature_valid = false;
+    data->cached_params = {};
+    data->cached_model_path.clear();
+    data->cached_render_stage_timings.clear();
+    data->cached_screen_color = kDefaultScreenColor;
+    data->cached_alpha_black_point = 0.0;
+    data->cached_alpha_white_point = 1.0;
+    data->cached_alpha_erode = 0.0;
+    data->cached_alpha_softness = 0.0;
+    data->cached_alpha_gamma = 1.0;
+    data->cached_temporal_smoothing = kDefaultTemporalSmoothing;
+
+    data->temporal_alpha = {};
+    data->temporal_foreground = {};
+    data->temporal_state_valid = false;
+    data->temporal_time = 0.0;
+    data->temporal_width = 0;
+    data->temporal_height = 0;
+    data->render_count = 0;
+
+    if (clear_timings) {
+        data->last_frame_ms = 0.0;
+        data->avg_frame_ms = 0.0;
+        data->frame_time_samples = 0;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
+    }
+
+    data->runtime_panel_dirty = true;
 }
 
 double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
@@ -365,6 +571,8 @@ void update_runtime_panel_values(InstanceData* data) {
         return;
     }
 
+    sync_runtime_panel_session_state_impl(data);
+
     bool has_session = false;
     if (data->use_runtime_server) {
         has_session = data->runtime_client != nullptr && data->runtime_client->has_session();
@@ -385,19 +593,31 @@ void update_runtime_panel_values(InstanceData* data) {
         data->runtime_effective_quality_param,
         is_loading ? "Loading..."
                    : effective_quality_label(data->runtime_panel_state.effective_resolution));
+    set_string_param_value(data->runtime_safe_quality_ceiling_param,
+                           is_loading ? "Loading..."
+                                      : runtime_safe_quality_ceiling_runtime_label(*data));
     set_string_param_value(data->runtime_artifact_param,
                            is_loading ? "Loading..."
                                       : runtime_artifact_label(data->runtime_panel_state.artifact_path));
+    set_string_param_value(data->runtime_guide_source_param,
+                           is_loading ? "Loading..." : runtime_guide_source_runtime_label(*data));
+    set_string_param_value(data->runtime_path_param,
+                           is_loading ? "Loading..." : runtime_path_runtime_label(*data));
+    set_string_param_value(data->runtime_session_param,
+                           runtime_session_runtime_label(*data));
     set_string_param_value(data->runtime_status_param,
                            is_loading ? "Loading..." : runtime_status_runtime_label(*data));
     set_string_param_value(data->runtime_timings_param,
                            is_loading ? "Loading..." : runtime_timings_runtime_label(*data));
+    set_string_param_value(data->runtime_backend_work_param,
+                           is_loading ? "Loading..." : runtime_backend_work_runtime_label(*data));
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
                               const std::string& device, const std::string& requested_quality,
                               const std::string& effective_quality, const std::string& artifact,
-                              const std::string& status, const std::string& timings) {
+                              const std::string& session, const std::string& status,
+                              const std::string& timings, const std::string& backend_work) {
     if (data == nullptr) {
         return;
     }
@@ -407,8 +627,10 @@ void set_runtime_panel_status(InstanceData* data, const std::string& processing,
     set_string_param_value(data->runtime_requested_quality_param, requested_quality);
     set_string_param_value(data->runtime_effective_quality_param, effective_quality);
     set_string_param_value(data->runtime_artifact_param, artifact);
+    set_string_param_value(data->runtime_session_param, session);
     set_string_param_value(data->runtime_status_param, status);
     set_string_param_value(data->runtime_timings_param, timings);
+    set_string_param_value(data->runtime_backend_work_param, backend_work);
 }
 
 bool backend_matches_request(const Engine& engine, const DeviceInfo& requested_device) {
@@ -538,8 +760,32 @@ std::string runtime_status_runtime_label(const InstanceData& data) {
     return runtime_status_runtime_label_impl(data);
 }
 
+std::string runtime_session_runtime_label(const InstanceData& data) {
+    return runtime_session_runtime_label_impl(data);
+}
+
+std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data) {
+    return runtime_safe_quality_ceiling_runtime_label_impl(data);
+}
+
+std::string runtime_guide_source_runtime_label(const InstanceData& data) {
+    return runtime_guide_source_runtime_label_impl(data);
+}
+
+std::string runtime_path_runtime_label(const InstanceData& data) {
+    return runtime_path_runtime_label_impl(data);
+}
+
+bool sync_runtime_panel_session_state(InstanceData* data) {
+    return sync_runtime_panel_session_state_impl(data);
+}
+
 std::string runtime_timings_runtime_label(const InstanceData& data) {
     return runtime_timings_runtime_label_impl(data);
+}
+
+std::string runtime_backend_work_runtime_label(const InstanceData& data) {
+    return runtime_backend_work_runtime_label_impl(data);
 }
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance) {
@@ -624,8 +870,14 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
     g_suites.parameter->paramGetHandle(param_set, kParamQualityMode, &data->quality_mode_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamQualityFallbackMode,
+                                       &data->quality_fallback_mode_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamOutputMode, &data->output_mode_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRefinementMode,
+                                       &data->refinement_mode_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamCoarseResolutionOverride,
+                                       &data->coarse_resolution_override_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamInputColorSpace,
                                        &data->input_color_space_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamQuantizationMode,
@@ -671,12 +923,22 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_requested_quality_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeEffectiveQuality,
                                        &data->runtime_effective_quality_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeSafeQualityCeiling,
+                                       &data->runtime_safe_quality_ceiling_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeArtifact,
                                        &data->runtime_artifact_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeGuideSource,
+                                       &data->runtime_guide_source_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimePath,
+                                       &data->runtime_path_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeSession,
+                                       &data->runtime_session_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeStatus, &data->runtime_status_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeTimings,
                                        &data->runtime_timings_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeBackendWork,
+                                       &data->runtime_backend_work_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRenderTimeout, &data->render_timeout_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamPrepareTimeout,
@@ -685,7 +947,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     sync_dependent_params(data.get());
 
     set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
-                             "Loading...", "Loading...", "Loading...", "Loading...");
+                             "Loading...", "Loading...", "Loading...", "Loading...",
+                             "Loading...", "Loading...");
 
     int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
     int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;
@@ -901,6 +1164,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         data->last_frame_ms = 0.0;
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
         sync_runtime_panel_state_from_active_engine(data.get());
 
         if (candidate.device.backend != detected_device.backend) {
@@ -934,7 +1199,10 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 }
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
-                               int input_height, int quantization_mode) {
+                               int input_height, int quantization_mode,
+                               QualityFallbackMode fallback_mode,
+                               int coarse_resolution_override,
+                               RefinementMode refinement_mode) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +
@@ -980,9 +1248,35 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         log_quality_total("unsupported_quantization", data->last_error);
         return false;
     }
+    auto unsupported_quality =
+        fallback_mode == QualityFallbackMode::Direct
+            ? unsupported_quality_message(requested_device, requested_quality_mode,
+                                          requested_resolution)
+            : std::nullopt;
+    if (unsupported_quality.has_value()) {
+        data->last_warning.clear();
+        data->last_error = *unsupported_quality;
+        set_runtime_panel_state_for_failed_quality_request(
+            data, requested_quality_mode, requested_resolution, cpu_quality_guardrail_active,
+            artifact_path_for_backend(data->models_root, requested_device.backend,
+                                      requested_resolution));
+        log_message("ensure_engine_for_quality",
+                    "event=quality_guardrail requested_backend=" +
+                        backend_label(requested_device.backend) + " requested_device=" +
+                        requested_device.name + " available_memory_mb=" +
+                        std::to_string(requested_device.available_memory_mb) +
+                        " requested_resolution=" + std::to_string(requested_resolution) +
+                        " detail=" + *unsupported_quality);
+        log_message("ensure_engine_for_quality", data->last_error);
+        update_runtime_panel(data);
+        log_quality_total("unsupported_quality", data->last_error);
+        return false;
+    }
     auto selections = quality_artifact_candidates(data->models_root, requested_device.backend,
                                                   effective_quality_mode, input_width, input_height,
-                                                  quantization_mode);
+                                                  quantization_mode,
+                                                  requested_device.available_memory_mb,
+                                                  fallback_mode, coarse_resolution_override);
     const auto original_selections = selections;
     data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     if (cpu_quality_guardrail_active) {
@@ -992,20 +1286,57 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         log_message("ensure_engine_for_quality", data->last_error);
     }
     if (selections.empty()) {
-        if (cpu_quality_guardrail_active) {
-            data->last_error =
-                "CPU backend is limited to Draft (512), but the 512 artifact is missing for " +
-                backend_label(requested_device.backend) + ".";
-        } else {
-            data->last_error =
-                "Requested quality " + std::string(quality_mode_label(requested_quality_mode)) +
-                " requires a " + std::to_string(requested_resolution) + "px artifact for backend " +
-                backend_label(requested_device.backend) + ", but that artifact is missing.";
+        const auto expected_artifacts = expected_quality_artifact_paths(
+            data->models_root, requested_device.backend, effective_quality_mode, input_width,
+            input_height, quantization_mode, requested_device.available_memory_mb, fallback_mode,
+            coarse_resolution_override);
+        data->last_error = missing_quality_artifact_message(
+            data->models_root, requested_device.backend, effective_quality_mode, input_width,
+            input_height, quantization_mode, cpu_quality_guardrail_active,
+            requested_device.available_memory_mb, fallback_mode, coarse_resolution_override);
+        if (auto expected_artifact = primary_expected_artifact_path(expected_artifacts);
+            expected_artifact.has_value()) {
+            set_runtime_panel_state_for_failed_quality_request(
+                data, requested_quality_mode, requested_resolution, cpu_quality_guardrail_active,
+                *expected_artifact);
         }
         log_message("ensure_engine_for_quality", data->last_error);
         update_runtime_panel(data);
         log_quality_total("missing_artifact", data->last_error);
         return false;
+    }
+
+    if (refinement_mode != RefinementMode::Auto) {
+        std::vector<QualityArtifactSelection> supported_by_refinement_mode;
+        supported_by_refinement_mode.reserve(selections.size());
+        std::optional<Error> refinement_error = std::nullopt;
+        for (const auto& selection : selections) {
+            auto validation = app::validate_refinement_mode_for_artifact(
+                selection.executable_model_path, refinement_mode);
+            if (validation) {
+                supported_by_refinement_mode.push_back(selection);
+            } else if (!refinement_error.has_value()) {
+                refinement_error = validation.error();
+            }
+        }
+
+        if (supported_by_refinement_mode.empty()) {
+            data->last_error = refinement_error.has_value()
+                                   ? refinement_error->message
+                                   : "No packaged quality artifact supports the requested "
+                                     "refinement strategy override.";
+            if (!selections.empty()) {
+                set_runtime_panel_state_for_failed_quality_request(
+                    data, requested_quality_mode, requested_resolution,
+                    cpu_quality_guardrail_active, selections.front().executable_model_path);
+            }
+            log_message("ensure_engine_for_quality", data->last_error);
+            update_runtime_panel(data);
+            log_quality_total("unsupported_refinement_mode", data->last_error);
+            return false;
+        }
+
+        selections = std::move(supported_by_refinement_mode);
     }
 
     if (should_abort_quality_fallback_after_compile_failure(
@@ -1242,6 +1573,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         data->last_frame_ms = 0.0;
         data->avg_frame_ms = 0.0;
         data->frame_time_samples = 0;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
         data->last_warning = quality_fallback_warning(requested_quality_mode, selection);
         if (!data->last_warning.empty()) {
             log_message("ensure_engine_for_quality", "fallback_note=" + data->last_warning);
@@ -1287,6 +1620,72 @@ void flush_runtime_panel(InstanceData* data) {
         data->runtime_panel_dirty = false;
         update_runtime_panel_values(data);
     }
+}
+
+OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle /*in_args*/) {
+    InstanceData* data = get_instance_data(instance);
+    if (data == nullptr) {
+        return kOfxStatReplyDefault;
+    }
+
+    clear_instance_render_caches(data, true);
+    flush_runtime_panel(data);
+    log_message("begin_sequence_render", "Sequence render state reset.");
+    return kOfxStatOK;
+}
+
+OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle /*in_args*/) {
+    InstanceData* data = get_instance_data(instance);
+    if (data == nullptr) {
+        return kOfxStatReplyDefault;
+    }
+
+    clear_instance_render_caches(data, false);
+    flush_runtime_panel(data);
+    log_message("end_sequence_render", "Sequence render caches cleared.");
+    return kOfxStatOK;
+}
+
+OfxStatus purge_caches(OfxImageEffectHandle instance) {
+    if (g_frame_cache != nullptr) {
+        g_frame_cache->clear();
+    }
+
+    if (instance != nullptr) {
+        if (InstanceData* data = get_instance_data(instance); data != nullptr) {
+            clear_instance_render_caches(data, true);
+            flush_runtime_panel(data);
+        }
+    }
+
+    log_message("purge_caches", "Host requested cache purge.");
+    return kOfxStatOK;
+}
+
+OfxStatus get_regions_of_interest(OfxImageEffectHandle /*instance*/, OfxPropertySetHandle in_args,
+                                  OfxPropertySetHandle out_args) {
+    if (in_args == nullptr || out_args == nullptr || g_suites.property == nullptr) {
+        return kOfxStatReplyDefault;
+    }
+
+    double roi[4] = {};
+    if (g_suites.property->propGetDoubleN(in_args, kOfxImageEffectPropRegionOfInterest, 4, roi) !=
+        kOfxStatOK) {
+        return kOfxStatReplyDefault;
+    }
+
+    const std::string source_roi_property =
+        std::string("OfxImageClipPropRoI_") + kOfxImageEffectSimpleSourceClipName;
+    const std::string hint_roi_property = std::string("OfxImageClipPropRoI_") + kClipAlphaHint;
+
+    g_suites.property->propSetDoubleN(out_args, source_roi_property.c_str(), 4, roi);
+    g_suites.property->propSetDoubleN(out_args, hint_roi_property.c_str(), 4, roi);
+    return kOfxStatOK;
+}
+
+OfxStatus is_identity(OfxImageEffectHandle /*instance*/, OfxPropertySetHandle /*in_args*/,
+                      OfxPropertySetHandle /*out_args*/) {
+    return kOfxStatReplyDefault;
 }
 
 void set_param_enabled(OfxParamHandle param, bool enabled) {

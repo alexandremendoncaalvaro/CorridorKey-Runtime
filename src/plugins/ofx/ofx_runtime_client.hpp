@@ -38,6 +38,7 @@ class OfxRuntimeClient {
     [[nodiscard]] DeviceInfo current_device() const;
     [[nodiscard]] std::optional<BackendFallbackInfo> backend_fallback() const;
     [[nodiscard]] bool has_session() const;
+    [[nodiscard]] std::uint64_t session_ref_count() const;
     void set_request_timeout_ms(int ms);
     void set_prepare_timeout_ms(int ms);
 
@@ -55,6 +56,7 @@ class OfxRuntimeClient {
     Result<void> launch_server();
     Result<void> recover_runtime_session(StageTimingCallback on_stage);
     Result<void> restart_server(const std::string& reason);
+    void invalidate_session(const std::string& reason);
     void update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot);
     void update_server_health(const app::OfxRuntimeHealthResponse& health);
 

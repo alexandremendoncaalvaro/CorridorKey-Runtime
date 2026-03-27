@@ -29,6 +29,9 @@
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
+#include "coarse_to_fine_policy.hpp"
+#include "inference_output_validation.hpp"
+#include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
@@ -85,6 +88,35 @@ void debug_log(const std::string& message) {
 namespace corridorkey {
 
 namespace {
+
+Result<void> validate_output_values(std::span<const float> values, std::string_view label) {
+    const auto validation = core::validate_finite_values(values, label);
+    if (!validation) {
+        debug_log(validation.error().message);
+    }
+    return validation;
+}
+
+Result<void> validate_output_image(Image image, std::string_view label) {
+    const auto validation = core::validate_finite_image(image, label);
+    if (!validation) {
+        debug_log(validation.error().message);
+    }
+    return validation;
+}
+
+void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution,
+                                 std::span<const float> values, std::string_view label) {
+    if (device.backend != Backend::TensorRT || recommended_resolution <= 1024) {
+        return;
+    }
+    debug_log(core::format_numeric_stats(label, core::compute_numeric_stats(values)));
+}
+
+void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, Image image,
+                                 std::string_view label) {
+    log_output_stats_if_enabled(device, recommended_resolution, image.data, label);
+}
 
 constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
 
@@ -435,8 +467,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     }
 }
 
-void InferenceSession::extract_metadata() {
-    debug_log("Extracting model metadata [BUILD 2026-03-18-V1]");
+void InferenceSession::extract_metadata(const std::filesystem::path& model_path) {
+    debug_log("Extracting model metadata");
     Ort::AllocatorWithDefaultOptions allocator;
 
     size_t num_input_nodes = m_session.GetInputCount();
@@ -453,6 +485,10 @@ void InferenceSession::extract_metadata() {
         // Capture input element type for FP16 model support
         if (i == 0) {
             m_input_element_type = tensor_info.GetElementType();
+            if (auto inferred_resolution = core::infer_model_resolution(m_input_node_dims.back());
+                inferred_resolution.has_value()) {
+                m_recommended_resolution = *inferred_resolution;
+            }
             debug_log("Input 0 element type: " + std::to_string(m_input_element_type) +
                       " (FLOAT16 is 10, FLOAT is 1)");
         }
@@ -461,14 +497,23 @@ void InferenceSession::extract_metadata() {
         m_input_node_names_ptr.push_back(name.c_str());
     }
 
-    fprintf(stderr, "[InferenceSession] Getting output count\n");
-    size_t num_output_nodes = m_session.GetOutputCount();
-    fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
+    const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
+        model_path, m_device.backend,
+        m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
+    if (use_packaged_output_contract) {
+        debug_log("Using packaged CorridorKey output contract");
+        m_output_node_names.emplace_back(core::k_corridorkey_alpha_output_name);
+        m_output_node_names.emplace_back(core::k_corridorkey_fg_output_name);
+    } else {
+        fprintf(stderr, "[InferenceSession] Getting output count\n");
+        size_t num_output_nodes = m_session.GetOutputCount();
+        fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
 
-    for (size_t i = 0; i < num_output_nodes; i++) {
-        fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
-        auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
-        m_output_node_names.push_back(output_name_ptr.get());
+        for (size_t i = 0; i < num_output_nodes; i++) {
+            fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
+            auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
+            m_output_node_names.push_back(output_name_ptr.get());
+        }
     }
     for (const auto& name : m_output_node_names) {
         m_output_node_names_ptr.push_back(name.c_str());
@@ -559,7 +604,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 #endif
         fprintf(stderr, "[InferenceSession] ONNX Runtime session created successfully\n");
 
-        session_ptr->extract_metadata();
+        session_ptr->extract_metadata(model_path);
         fprintf(stderr, "[InferenceSession] Session created successfully\n");
         return session_ptr;
     } catch (const Ort::Exception& e) {
@@ -589,7 +634,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                     session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(),
                                                           session_ptr->m_session_options);
 #endif
-                    session_ptr->extract_metadata();
+                    session_ptr->extract_metadata(model_path);
                     return session_ptr;
                 } catch (const Ort::Exception&) {
                     remove_cached_model(*optimized_model_path);
@@ -821,11 +866,6 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
         FrameResult result;
         result.alpha = std::move(acc_alpha);
         result.foreground = std::move(acc_fg);
-
-        common::measure_stage(
-            on_stage, "tile_post_process",
-            [&]() { apply_post_process(result, params, rgb, on_stage); }, 1);
-
         return result;
     } catch (const std::bad_alloc&) {
         return Unexpected(
@@ -913,22 +953,77 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
         1);
 }
 
+Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& alpha_hint,
+                                                 const InferenceParams& params,
+                                                 StageTimingCallback on_stage) {
+    const int model_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
+
+    if (params.enable_tiling && (rgb.width > model_resolution || rgb.height > model_resolution)) {
+        auto tiled_result = run_tiled(rgb, alpha_hint, params, model_resolution, on_stage);
+        if (!tiled_result) {
+            return Unexpected(tiled_result.error());
+        }
+        apply_post_process(*tiled_result, params, rgb, on_stage);
+        return tiled_result;
+    }
+
+    auto result = infer_raw(rgb, alpha_hint, params, on_stage);
+    if (!result) {
+        return Unexpected(result.error());
+    }
+    apply_post_process(*result, params, rgb, on_stage);
+    return result;
+}
+
+Result<FrameResult> InferenceSession::run_coarse_to_fine(const Image& rgb, const Image& alpha_hint,
+                                                         const InferenceParams& params,
+                                                         StageTimingCallback on_stage) {
+    const int coarse_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
+    InferenceParams coarse_params = core::coarse_inference_params(params, coarse_resolution);
+
+    debug_log("event=quality_path mode=coarse_to_fine requested_resolution=" +
+              std::to_string(core::requested_quality_resolution(params, coarse_resolution)) +
+              " coarse_resolution=" + std::to_string(coarse_resolution) +
+              " strategy=artifact_fallback_only");
+
+    auto raw_result = infer_raw(rgb, alpha_hint, coarse_params, on_stage);
+    if (!raw_result) {
+        return Unexpected(raw_result.error());
+    }
+    apply_post_process(*raw_result, params, rgb, on_stage);
+    return raw_result;
+}
+
 Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<Image>& rgbs,
                                                              const std::vector<Image>& alpha_hints,
                                                              const InferenceParams& params,
                                                              StageTimingCallback on_stage) {
     if (rgbs.empty()) return std::vector<FrameResult>{};
 
+    if (core::should_use_coarse_to_fine_path(params, m_recommended_resolution)) {
+        const int coarse_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
+        InferenceParams coarse_params = core::coarse_inference_params(params, coarse_resolution);
+        auto results_res = infer_batch_raw(rgbs, alpha_hints, coarse_params, on_stage);
+        if (!results_res) {
+            return Unexpected(results_res.error());
+        }
+        for (size_t index = 0; index < results_res->size(); ++index) {
+            apply_post_process((*results_res)[index], params, rgbs[index], on_stage);
+        }
+        return results_res;
+    }
+
     // Tiling logic for batch (simplified: if first image needs tiling, we don't batch but run tiled
     // one by one) Actually, tiling should be handled at a higher level if we want to batch tiles.
     // For now, let's keep it simple: tiling disables batching.
-    int target_res =
-        params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-    if (params.enable_tiling && (rgbs[0].width > target_res || rgbs[0].height > target_res)) {
+    const int model_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
+    if (params.enable_tiling &&
+        (rgbs[0].width > model_resolution || rgbs[0].height > model_resolution)) {
         std::vector<FrameResult> results;
         for (size_t i = 0; i < rgbs.size(); ++i) {
-            auto res = run_tiled(rgbs[i], alpha_hints[i], params, target_res, on_stage);
+            auto res = run_tiled(rgbs[i], alpha_hints[i], params, model_resolution, on_stage);
             if (!res) return Unexpected(res.error());
+            apply_post_process(*res, params, rgbs[i], on_stage);
             results.push_back(std::move(*res));
         }
         return results;
@@ -1109,6 +1204,16 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
         }
 
+        const size_t total_alpha_elements = batch_size * alpha_image_stride;
+        log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                    std::span<const float>(alpha_ptr, total_alpha_elements),
+                                    "alpha_raw_output");
+        auto alpha_validation = validate_output_values(
+            std::span<const float>(alpha_ptr, total_alpha_elements), "alpha_raw_output");
+        if (!alpha_validation) {
+            return Unexpected(alpha_validation.error());
+        }
+
         float* fg_ptr = nullptr;
         std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
@@ -1132,6 +1237,16 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 fg_ptr = fg_fp32_conv.data();
             } else {
                 fg_ptr = output_tensors[1].GetTensorMutableData<float>();
+            }
+
+            const size_t total_fg_elements = batch_size * fg_image_stride;
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        std::span<const float>(fg_ptr, total_fg_elements),
+                                        "fg_raw_output");
+            auto fg_validation = validate_output_values(
+                std::span<const float>(fg_ptr, total_fg_elements), "fg_raw_output");
+            if (!fg_validation) {
+                return Unexpected(fg_validation.error());
             }
         }
 
@@ -1169,6 +1284,27 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 }
             },
             batch_size);
+
+        for (size_t batch_index = 0; batch_index < batch_results.size(); ++batch_index) {
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        batch_results[batch_index].alpha.view(),
+                                        "alpha_resized_output");
+            auto alpha_resized_validation = validate_output_image(
+                batch_results[batch_index].alpha.view(), "alpha_resized_output");
+            if (!alpha_resized_validation) {
+                return Unexpected(alpha_resized_validation.error());
+            }
+            if (!batch_results[batch_index].foreground.view().empty()) {
+                log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                            batch_results[batch_index].foreground.view(),
+                                            "fg_resized_output");
+                auto fg_validation = validate_output_image(
+                    batch_results[batch_index].foreground.view(), "fg_resized_output");
+                if (!fg_validation) {
+                    return Unexpected(fg_validation.error());
+                }
+            }
+        }
 
         return batch_results;
 
@@ -1307,6 +1443,15 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
         }
 
+        log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                    std::span<const float>(alpha_ptr, alpha_image_stride),
+                                    "alpha_raw_output");
+        auto alpha_validation = validate_output_values(
+            std::span<const float>(alpha_ptr, alpha_image_stride), "alpha_raw_output");
+        if (!alpha_validation) {
+            return Unexpected(alpha_validation.error());
+        }
+
         float* fg_ptr = nullptr;
         std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
@@ -1326,6 +1471,15 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 fg_ptr = fg_fp32_conv.data();
             } else {
                 fg_ptr = output_tensors[1].GetTensorMutableData<float>();
+            }
+
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        std::span<const float>(fg_ptr, fg_image_stride),
+                                        "fg_raw_output");
+            auto fg_validation = validate_output_values(
+                std::span<const float>(fg_ptr, fg_image_stride), "fg_raw_output");
+            if (!fg_validation) {
+                return Unexpected(fg_validation.error());
             }
         }
 
@@ -1366,6 +1520,23 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             },
             1);
 
+        log_output_stats_if_enabled(m_device, m_recommended_resolution, result.alpha.view(),
+                                    "alpha_resized_output");
+        auto alpha_resized_validation =
+            validate_output_image(result.alpha.view(), "alpha_resized_output");
+        if (!alpha_resized_validation) {
+            return Unexpected(alpha_resized_validation.error());
+        }
+        if (!result.foreground.view().empty()) {
+            log_output_stats_if_enabled(m_device, m_recommended_resolution,
+                                        result.foreground.view(), "fg_resized_output");
+            auto fg_validation =
+                validate_output_image(result.foreground.view(), "fg_resized_output");
+            if (!fg_validation) {
+                return Unexpected(fg_validation.error());
+            }
+        }
+
         return result;
     } catch (const Ort::Exception& e) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -1376,20 +1547,11 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
 Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,
                                           const InferenceParams& params,
                                           StageTimingCallback on_stage) {
-    // Check for tiling request
-    int target_res =
-        params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-
-    // Only tile if requested and input is significantly larger than model
-    if (params.enable_tiling && (rgb.width > target_res || rgb.height > target_res)) {
-        return run_tiled(rgb, alpha_hint, params, target_res, on_stage);
+    if (core::should_use_coarse_to_fine_path(params, m_recommended_resolution)) {
+        return run_coarse_to_fine(rgb, alpha_hint, params, on_stage);
     }
 
-    auto result_res = infer_raw(rgb, alpha_hint, params, on_stage);
-    if (!result_res) return result_res;
-
-    apply_post_process(*result_res, params, rgb, on_stage);
-    return result_res;
+    return run_direct(rgb, alpha_hint, params, on_stage);
 }
 
 }  // namespace corridorkey

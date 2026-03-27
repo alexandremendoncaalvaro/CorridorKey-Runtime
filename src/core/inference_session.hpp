@@ -30,6 +30,7 @@
 
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
+#include "post_process/alpha_edge.hpp"
 
 #ifdef __APPLE__
 #if __has_include(<onnxruntime/coreml_provider_factory.h>)
@@ -95,7 +96,7 @@ class InferenceSession {
     void configure_session_options(bool use_optimized_model_cache,
                                    const SessionCreateOptions& options,
                                    const std::filesystem::path& model_path);
-    void extract_metadata();
+    void extract_metadata(const std::filesystem::path& model_path);
 
     /**
      * @brief Internal raw inference (no post-processing).
@@ -116,6 +117,14 @@ class InferenceSession {
      */
     void apply_post_process(FrameResult& result, const InferenceParams& params, Image source_rgb,
                             StageTimingCallback on_stage = nullptr);
+
+    [[nodiscard]] Result<FrameResult> run_direct(const Image& rgb, const Image& alpha_hint,
+                                                 const InferenceParams& params,
+                                                 StageTimingCallback on_stage = nullptr);
+
+    [[nodiscard]] Result<FrameResult> run_coarse_to_fine(const Image& rgb, const Image& alpha_hint,
+                                                         const InferenceParams& params,
+                                                         StageTimingCallback on_stage = nullptr);
 
     /**
      * @brief Helper for running tiling inference on large images.
@@ -154,6 +163,7 @@ class InferenceSession {
 
     DespeckleState m_despeckle_state = {};
     ColorUtils::State m_color_utils_state = {};
+    AlphaEdgeState m_alpha_edge_state = {};
 };
 
 }  // namespace corridorkey

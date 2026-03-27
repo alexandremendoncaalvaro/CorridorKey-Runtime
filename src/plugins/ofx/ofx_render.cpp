@@ -123,10 +123,20 @@ void record_frame_timing(InstanceData* data, double elapsed_ms) {
     data->runtime_panel_dirty = true;
 }
 
+void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOrigin work_origin) {
+    if (data == nullptr) {
+        return;
+    }
+    data->last_render_work_origin = work_origin;
+    record_frame_timing(data, elapsed_ms);
+}
+
 void set_runtime_error(InstanceData* data, const std::string& message,
                        OfxImageEffectHandle instance) {
     if (data != nullptr) {
         data->last_error = message;
+        data->last_render_work_origin = LastRenderWorkOrigin::None;
+        data->last_render_stage_timings.clear();
         data->cached_result_valid = false;
         data->runtime_panel_dirty = true;
         update_runtime_panel(data);
@@ -167,11 +177,52 @@ bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& r
     return lhs.target_resolution == rhs.target_resolution &&
            lhs.despill_strength == rhs.despill_strength && lhs.spill_method == rhs.spill_method &&
            lhs.auto_despeckle == rhs.auto_despeckle && lhs.despeckle_size == rhs.despeckle_size &&
-           lhs.refiner_scale == rhs.refiner_scale && lhs.input_is_linear == rhs.input_is_linear &&
+           lhs.refiner_scale == rhs.refiner_scale &&
+           lhs.alpha_hint_policy == rhs.alpha_hint_policy &&
+           lhs.input_is_linear == rhs.input_is_linear &&
            lhs.batch_size == rhs.batch_size && lhs.enable_tiling == rhs.enable_tiling &&
            lhs.tile_padding == rhs.tile_padding && lhs.upscale_method == rhs.upscale_method &&
            lhs.source_passthrough == rhs.source_passthrough && lhs.sp_erode_px == rhs.sp_erode_px &&
-           lhs.sp_blur_px == rhs.sp_blur_px;
+           lhs.sp_blur_px == rhs.sp_blur_px &&
+           lhs.requested_quality_resolution == rhs.requested_quality_resolution &&
+           lhs.quality_fallback_mode == rhs.quality_fallback_mode &&
+           lhs.refinement_mode == rhs.refinement_mode &&
+           lhs.coarse_resolution_override == rhs.coarse_resolution_override;
+}
+
+RuntimePathKind classify_runtime_path(const InstanceData* data, const InferenceParams& params,
+                                      int frame_width, int frame_height) {
+    if (data == nullptr) {
+        return RuntimePathKind::Unknown;
+    }
+
+    if (params.enable_tiling && data->active_resolution > 0 &&
+        (frame_width > data->active_resolution || frame_height > data->active_resolution)) {
+        return RuntimePathKind::FullModelTiling;
+    }
+
+    if (params.requested_quality_resolution > 0 && data->active_resolution > 0 &&
+        params.requested_quality_resolution > data->active_resolution) {
+        return RuntimePathKind::ArtifactFallback;
+    }
+
+    return RuntimePathKind::Direct;
+}
+
+Result<GuideSourceKind> resolve_alpha_hint_source_impl(Image rgb_view, Image hint_view,
+                                                       bool hint_from_clip,
+                                                       AlphaHintPolicy alpha_hint_policy) {
+    if (hint_from_clip) {
+        return GuideSourceKind::ExternalAlphaHint;
+    }
+
+    if (alpha_hint_policy == AlphaHintPolicy::RequireExternalHint) {
+        return Unexpected<Error>{
+            Error{ErrorCode::InvalidParameters, "Waiting for Alpha Hint connection."}};
+    }
+
+    ColorUtils::generate_rough_matte(rgb_view, hint_view);
+    return GuideSourceKind::RoughFallback;
 }
 
 
@@ -340,6 +391,8 @@ struct InferenceResult {
     ImageBuffer alpha;
     ImageBuffer foreground;
     InferenceOutcome outcome = InferenceOutcome::kOk;
+    LastRenderWorkOrigin work_origin = LastRenderWorkOrigin::BackendRender;
+    std::vector<StageTiming> stage_timings = {};
 };
 
 InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
@@ -352,11 +405,13 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                                           const std::string& source_depth) {
     ImageBuffer alpha_buf;
     ImageBuffer fg_linear_buf;
+    std::vector<StageTiming> stage_timings;
 
     if (g_frame_cache != nullptr &&
-        g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf)) {
+        g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf, &stage_timings)) {
         log_message("render", "event=cache_hit detail=shared_cache");
-        return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk};
+        return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
+                LastRenderWorkOrigin::SharedCache, std::move(stage_timings)};
     }
 
     const DeviceInfo requested_device = requested_device_for_render(data);
@@ -371,12 +426,14 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                       ? data->runtime_client->process_frame(
                             rgb_view, hint_view, params, data->render_count,
                             [&](const StageTiming& timing) {
+                                stage_timings.push_back(timing);
                                 log_render_stage(render_phase, requested_device, data->model_path,
                                                  data->requested_resolution,
                                                  data->active_resolution, timing);
                             })
                       : data->engine->process_frame(
                             rgb_view, hint_view, params, [&](const StageTiming& timing) {
+                                stage_timings.push_back(timing);
                                 log_render_stage(render_phase, requested_device, data->model_path,
                                                  data->requested_resolution,
                                                  data->active_resolution, timing);
@@ -394,12 +451,13 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         set_runtime_error(data, result.error().message, instance);
         bypass_with_source(source_data, output_data, width, height, source_row_bytes,
                            output_row_bytes, source_depth);
-        return {{}, {}, InferenceOutcome::kBypass};
+        return {{}, {}, InferenceOutcome::kBypass, LastRenderWorkOrigin::BackendRender, {}};
     }
 
     const DeviceInfo effective_device = data->use_runtime_server
                                             ? data->runtime_client->current_device()
                                             : data->engine->current_device();
+    const bool session_state_changed = sync_runtime_panel_session_state(data);
     log_render_event("render_result", render_phase, requested_device, effective_device,
                      data->model_path, data->requested_resolution, data->active_resolution,
                      data->use_runtime_server ? data->runtime_client->backend_fallback()
@@ -407,6 +465,8 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     if (effective_device.backend != data->device.backend ||
         effective_device.name != data->device.name) {
         data->device = effective_device;
+        update_runtime_panel(data);
+    } else if (session_state_changed) {
         update_runtime_panel(data);
     }
     if (requested_device.backend != Backend::Auto &&
@@ -422,14 +482,14 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         data->last_error = fallback_message;
         log_message("render", fallback_message);
         set_runtime_error(data, fallback_message, instance);
-        return {{}, {}, InferenceOutcome::kFailed};
+        return {{}, {}, InferenceOutcome::kFailed, LastRenderWorkOrigin::BackendRender, {}};
     }
 
     const Image raw_alpha = result->alpha.view();
     if (raw_alpha.width != width || raw_alpha.height != height) {
         log_message("render", "Unexpected output size from engine.");
         set_runtime_error(data, "Unexpected output size from engine.", instance);
-        return {{}, {}, InferenceOutcome::kFailed};
+        return {{}, {}, InferenceOutcome::kFailed, LastRenderWorkOrigin::BackendRender, {}};
     }
 
     const Image fg_srgb_view = result->foreground.view();
@@ -450,13 +510,22 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     alpha_buf = std::move(result->alpha);
 
     if (g_frame_cache != nullptr) {
-        g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view());
+        g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view(),
+                             std::vector<StageTiming>(stage_timings.begin(), stage_timings.end()));
     }
 
-    return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk};
+    return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
+            LastRenderWorkOrigin::BackendRender, std::move(stage_timings)};
 }
 
 }  // namespace
+
+Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
+                                                  bool hint_from_clip,
+                                                  AlphaHintPolicy alpha_hint_policy) {
+    return resolve_alpha_hint_source_impl(rgb_view, hint_view, hint_from_clip,
+                                          alpha_hint_policy);
+}
 
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle /*out_args*/) {
@@ -565,7 +634,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     int quality_mode = kQualityAuto;
+    int quality_fallback_mode = kQualityFallbackAuto;
     int output_mode = kOutputProcessed;
+    int refinement_mode = kRefinementAuto;
+    int coarse_resolution_override = kCoarseResolutionAutomatic;
     int input_color_space = kDefaultInputColorSpace;
     int quantization_mode = kDefaultQuantizationMode;
     int screen_color = kDefaultScreenColor;
@@ -589,9 +661,21 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->quality_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quality_mode_param, time, &quality_mode);
     }
+    if (data->quality_fallback_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->quality_fallback_mode_param, time,
+                                                &quality_fallback_mode);
+    }
     if (data->input_color_space_param) {
         g_suites.parameter->paramGetValueAtTime(data->input_color_space_param, time,
                                                 &input_color_space);
+    }
+    if (data->refinement_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->refinement_mode_param, time,
+                                                &refinement_mode);
+    }
+    if (data->coarse_resolution_override_param) {
+        g_suites.parameter->paramGetValueAtTime(data->coarse_resolution_override_param, time,
+                                                &coarse_resolution_override);
     }
     if (data->quantization_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->quantization_mode_param, time,
@@ -661,7 +745,11 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (swap_screen) {
         swap_green_blue(rgb_view);
     }
-    if (!ensure_engine_for_quality(data, quality_mode, width, height, quantization_mode)) {
+    if (!ensure_engine_for_quality(
+            data, quality_mode, width, height, quantization_mode,
+            quality_fallback_mode_from_choice(quality_fallback_mode),
+            coarse_resolution_override_from_choice(coarse_resolution_override),
+            refinement_mode_from_choice(refinement_mode))) {
         const std::string quality_error =
             data->last_error.empty() ? "Failed to switch quality mode." : data->last_error;
         if (is_fixed_quality_mode(quality_mode)) {
@@ -761,57 +849,19 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
     }
 
-    if (!hint_from_clip) {
-        const std::string message = "Waiting for Alpha Hint connection.";
+    const AlphaHintPolicy alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
+    auto guide_source = resolve_alpha_hint_source(rgb_view, hint_view, hint_from_clip, alpha_hint_policy);
+    if (!guide_source) {
+        const std::string message = guide_source.error().message;
         log_message("render", message);
-
-        if (data != nullptr) {
-            data->last_error = message;
-            data->cached_result_valid = false;
-            data->runtime_panel_dirty = true;
-            update_runtime_panel(data);
-        }
-
-        ImageBuffer alpha_buf(width, height, 1);
-        ImageBuffer fg_buf(width, height, 3);
-        auto alpha_view = alpha_buf.view();
-        auto fg_linear = fg_buf.view();
-        const SrgbLut& lut = SrgbLut::instance();
-
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                alpha_view(y, x) = 1.0f;
-                if (swap_screen) {
-                    fg_linear(y, x, 0) = lut.to_linear(rgb_view(y, x, 0));
-                    fg_linear(y, x, 1) = lut.to_linear(rgb_view(y, x, 2));
-                    fg_linear(y, x, 2) = lut.to_linear(rgb_view(y, x, 1));
-                } else {
-                    fg_linear(y, x, 0) = lut.to_linear(rgb_view(y, x, 0));
-                    fg_linear(y, x, 1) = lut.to_linear(rgb_view(y, x, 1));
-                    fg_linear(y, x, 2) = lut.to_linear(rgb_view(y, x, 2));
-                }
-            }
-        }
-
-        bool apply_srgb =
-            should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);
-        if (output_mode == kOutputMatteOnly) {
-            write_matte_output(alpha_view, output_data, output_row_bytes, output_depth,
-                               SrgbLut::instance());
-        } else if (output_mode == kOutputForegroundOnly) {
-            write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth,
-                                    apply_srgb, SrgbLut::instance());
-        } else if (output_mode == kOutputSourceMatte) {
-            write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes,
-                                      output_depth, apply_srgb, SrgbLut::instance());
-        } else if (output_mode_uses_linear_premultiplied_rgba(output_mode)) {
-            write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
-                                   output_depth, false, SrgbLut::instance());
-        } else {
-            write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
-                                   output_depth, apply_srgb, SrgbLut::instance());
-        }
+        set_runtime_error(data, message, instance);
+        bypass_with_source(source_data, output_data, width, height, source_row_bytes,
+                           output_row_bytes, source_depth);
         return kOfxStatOK;
+    }
+    if (*guide_source == GuideSourceKind::RoughFallback) {
+        log_message("render",
+                    "No readable Alpha Hint was provided. Using rough matte fallback guide.");
     }
 
     const std::uint64_t signature = frame_signature(rgb_view, hint_view);
@@ -826,11 +876,17 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     InferenceParams params;
     params.target_resolution = data->active_resolution;
+    params.requested_quality_resolution = resolve_target_resolution(quality_mode, width, height);
+    params.quality_fallback_mode = quality_fallback_mode_from_choice(quality_fallback_mode);
+    params.refinement_mode = refinement_mode_from_choice(refinement_mode);
+    params.coarse_resolution_override =
+        coarse_resolution_override_from_choice(coarse_resolution_override);
     params.despill_strength = static_cast<float>(despill_strength);
     params.spill_method = spill_method;
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
     params.refiner_scale = 1.0f;
+    params.alpha_hint_policy = alpha_hint_policy;
     params.input_is_linear = input_is_linear;
     params.upscale_method =
         upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
@@ -839,6 +895,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.source_passthrough = source_passthrough_enabled != 0;
     params.sp_erode_px = effective_edge_erode;
     params.sp_blur_px = effective_edge_blur;
+
+    data->last_guide_source = *guide_source;
+    data->last_runtime_path = classify_runtime_path(data, params, width, height);
+    data->runtime_panel_dirty = true;
 
     const bool signature_matches =
         data->cached_signature_valid && data->cached_signature == signature;
@@ -857,11 +917,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const SrgbLut& lut = SrgbLut::instance();
     Image alpha_view;
     Image fg_linear;
+    LastRenderWorkOrigin work_origin = LastRenderWorkOrigin::BackendRender;
 
     if (cache_hit) {
         log_message("render", "event=cache_hit detail=instance_cache");
         alpha_view = data->cached_result.alpha.view();
         fg_linear = data->cached_result.foreground.view();
+        work_origin = LastRenderWorkOrigin::InstanceCache;
+        data->last_render_stage_timings = data->cached_render_stage_timings;
     } else {
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
                                         path_hash(data->model_path), screen_color};
@@ -876,6 +939,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         if (inference.outcome == InferenceOutcome::kFailed) {
             return kOfxStatFailed;
         }
+
+        work_origin = inference.work_origin;
+        data->last_render_stage_timings = inference.stage_timings;
 
         // Per-instance alpha edge adjustments (applied to this instance's own copy)
         Image alpha_view_local = inference.alpha.view();
@@ -951,6 +1017,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         data->cached_height = height;
         data->cached_params = params;
         data->cached_model_path = data->model_path;
+        data->cached_render_stage_timings = inference.stage_timings;
         data->cached_screen_color = screen_color;
         data->cached_alpha_black_point = alpha_black_point;
         data->cached_alpha_white_point = alpha_white_point;
@@ -991,7 +1058,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const double render_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_start)
             .count();
-    record_frame_timing(data, render_ms);
+    record_frame_timing(data, render_ms, work_origin);
     if (data != nullptr) {
         data->last_error.clear();
         data->runtime_panel_dirty = true;

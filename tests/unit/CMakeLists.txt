@@ -2,25 +2,32 @@
 
 add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_actions.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_frame_cache.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_image_utils.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_instance.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
     test_alpha_edge.cpp
     test_color_utils.cpp
+    test_coarse_to_fine_policy.cpp
     test_despill.cpp
     test_despeckle.cpp
     test_device_selection.cpp
+    test_execution_defaults.cpp
     test_device_detection.cpp
     test_inference_session.cpp
+    test_json_utils.cpp
     test_local_ipc.cpp
     test_ofx_color_management.cpp
     test_ofx_image_utils.cpp
+    test_ofx_lifecycle.cpp
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
     test_ofx_runtime_client.cpp
     test_ofx_runtime_panel.cpp
     test_ofx_runtime_protocol.cpp
+    test_ofx_session_policy.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
     test_runtime_diagnostics.cpp

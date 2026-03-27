@@ -353,6 +353,21 @@ class ImageBuffer {
 enum class UpscaleMethod : std::uint8_t { Lanczos4, Bilinear };
 
 /**
+ * @brief Runtime policy for selecting the quality execution path.
+ */
+enum class QualityFallbackMode : std::uint8_t { Auto, Direct, CoarseToFine };
+
+/**
+ * @brief Runtime policy for selecting a validated refinement artifact strategy.
+ */
+enum class RefinementMode : std::uint8_t { Auto, FullFrame, Tiled };
+
+/**
+ * @brief Runtime policy for obtaining the alpha hint guide when the caller does not provide one.
+ */
+enum class AlphaHintPolicy : std::uint8_t { AutoRoughFallback, RequireExternalHint };
+
+/**
  * @brief Parameters to control the inference and post-processing.
  */
 struct InferenceParams {
@@ -362,6 +377,7 @@ struct InferenceParams {
     bool auto_despeckle = false;
     int despeckle_size = 400;
     float refiner_scale = 1.0F;
+    AlphaHintPolicy alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
     bool input_is_linear = false;
 
     // Batching (GPU efficiency)
@@ -377,6 +393,12 @@ struct InferenceParams {
     bool source_passthrough = true;
     int sp_erode_px = 3;  // Erosion radius for interior mask
     int sp_blur_px = 7;   // Blur radius for transition smoothing
+
+    // Quality fallback and validated refinement strategy selection
+    int requested_quality_resolution = 0;  // 0 = use target_resolution
+    QualityFallbackMode quality_fallback_mode = QualityFallbackMode::Auto;
+    RefinementMode refinement_mode = RefinementMode::Auto;
+    int coarse_resolution_override = 0;  // 0 = automatic smaller artifact choice
 };
 
 /**

@@ -166,8 +166,16 @@ fragmentation in per-frame code causes OFX instability.
   `target_compile_definitions`, and `target_compile_options`.
 - **`CMakePresets.json`** is the source of truth for build configurations.
   It defines `debug`, `release`, `release-lto`, and the macOS portable variants.
-- On Windows, use `scripts/build.ps1` for normal development builds. If you
-  invoke CMake directly, activate the MSVC developer environment first.
+- On Windows, use `scripts/windows.ps1` as the canonical build and release
+  entrypoint. The canonical release command is
+  `scripts/windows.ps1 -Task release -Version X.Y.Z`. Lower-level Windows
+  scripts are internal delegates for debugging the wrapper, not alternate
+  release flows. If you invoke CMake directly, activate the MSVC developer
+  environment first.
+- Windows packaging may proceed with a partial model set, but the generated
+  artifacts must include explicit inventory and validation reports. Missing
+  models are reportable packaging state; invalid packaged models that are
+  present remain release blockers.
 
 ### 5.2 Dependencies (vcpkg)
 
@@ -330,6 +338,10 @@ project is, what it does, how it works, and why specific choices were made.
 - **Definitions.** Concrete terms, types, interfaces, behaviors, constraints.
 - **Current state.** What is built, how it works, how to use it.
 - **Decisions.** Choices that were made and the reasons behind them.
+- **Support claims tied to product tracks.** Compatibility statements must
+  match packaged and validated product tracks in
+  `help/SUPPORT_MATRIX.md`. Backend enums, probes, or core-only provider hooks
+  are not support claims by themselves.
 
 ### 10.3 What Documentation Must Not Contain
 

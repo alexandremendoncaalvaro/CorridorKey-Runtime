@@ -11,7 +11,8 @@ Original Details, and Tiling.
 Three concepts make the rest of the guide easier:
 
 - CorridorKey's current Resolve OFX path expects a connected **Alpha Hint**
-  matte before it will run inference.
+  matte when you want the best result, but it can fall back to a rough
+  automatic guide when none is readable.
 - **Quality** selects the model resolution target. The runtime panel tells you
   whether that target actually held.
 - **Processed** is the normal compositing result. The other outputs are mainly
@@ -47,8 +48,8 @@ Use this when you want the fastest path to a working key inside the Color page.
 2. Build a rough matte with a Qualifier, 3D Keyer, or another matte tool.
 3. Right-click the CorridorKey node and choose **Add OFX Input**.
 4. Route the rough matte into the new green input.
-5. Check the runtime panel. Do not continue until the status stops saying
-   `Waiting for Alpha Hint connection.`
+5. Check the runtime panel. Prefer `Guide Source: External Alpha Hint` over
+   `Guide Source: Rough Fallback`.
 6. Set **Quality** to **High (1024)**.
 7. Leave **Input Color Space** on **Auto (Host Managed)** unless you are
    deliberately overriding it.
@@ -60,7 +61,8 @@ instead of forcing a higher one that the machine is not keeping active.
 
 Why this works for beginners:
 
-- the rough matte gets CorridorKey out of the waiting state
+- the rough matte gives CorridorKey a strong guide instead of relying on the
+  degraded fallback path
 - `High (1024)` is a practical middle ground between load cost and detail
 - `Processed` lets you judge the actual keyed result without overcomplicating
   the first pass
@@ -188,8 +190,9 @@ Use this when you need to isolate the problem before adding more adjustments.
    generated alpha.
 5. Read the runtime panel after every quality or backend-related change.
 
-If the panel still says `Waiting for Alpha Hint connection.`, stop there first.
-That status means you are not evaluating a keyed result yet.
+If the panel still says `Guide Source: Rough Fallback`, stop there first if you
+intend to use a proper external guide. That status means you are evaluating the
+degraded automatic fallback path, not the preferred guided workflow.
 
 That single check saves the most time because it prevents tuning the wrong
 stage of the pipeline.

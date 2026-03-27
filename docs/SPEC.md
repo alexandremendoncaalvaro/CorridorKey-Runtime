@@ -1,14 +1,14 @@
-# CorridorKey Runtime — Technical Specification
+# CorridorKey Runtime - Technical Specification
 
 This document defines the current product scope, support philosophy, and
 runtime architecture of CorridorKey Runtime. It answers what the product is,
 why it exists, and what it explicitly includes and excludes.
 
 **See also:**
-[Support Matrix](../help/SUPPORT_MATRIX.md) — explicit support status by platform
-and hardware |
-[ARCHITECTURE.md](ARCHITECTURE.md) — source structure and dependency rules |
-[GUIDELINES.md](GUIDELINES.md) — code standards and build rules
+[Support Matrix](../help/SUPPORT_MATRIX.md) - explicit support status by
+platform and hardware |
+[ARCHITECTURE.md](ARCHITECTURE.md) - source structure and dependency rules |
+[GUIDELINES.md](GUIDELINES.md) - code standards and build rules
 
 ---
 
@@ -64,8 +64,13 @@ designations:
 | **Experimental** | Partially integrated. Known errors exist in practice. Not recommended for production use. Bug reports are accepted for tracking purposes only. |
 | **Unsupported** | Not integrated or known to be broken. No bug reports accepted. |
 
-Vague claims ("works on most hardware", "compatible with") are not used.
-Every hardware path and host version has an explicit designation.
+Vague claims such as "works on most hardware" or "compatible with" are not
+used. Every hardware path and host version has an explicit designation.
+
+Support is defined by packaged and validated product tracks. A backend present
+in the core runtime for probing, diagnostics, or future integration does not
+become a support claim unless it is distributed and validated as a product
+track.
 
 The complete support table is in [Support Matrix](../help/SUPPORT_MATRIX.md).
 
@@ -75,51 +80,65 @@ The complete support table is in [Support Matrix](../help/SUPPORT_MATRIX.md).
 
 ### 3.1 Layer Overview
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  Interface Layer                                          │
-│  CLI (corridorkey)          OFX Plugin (DaVinci Resolve) │
-├──────────────────────────────────────────────────────────┤
-│  Application Layer                                        │
-│  Job Orchestrator  |  OFX Runtime Service  |  Diagnostics│
-├──────────────────────────────────────────────────────────┤
-│  Core Layer                                               │
-│  Inference Engine  |  Device Detection  |  FrameIO       │
-│  PostProcess       |  Session Cache     |  IPC Transport  │
-├──────────────────────────────────────────────────────────┤
-│  Execution Backends                                       │
-│  MLX (Apple Silicon) | TensorRT (NVIDIA Ampere+)         │
-│  DirectML (Intel/DX12) | ONNX CPU (fallback)             │
-└──────────────────────────────────────────────────────────┘
-```
+- **Interface layer:** CLI and OFX plugin
+- **Application layer:** job orchestration, OFX runtime service, diagnostics
+- **Core layer:** inference session management, device detection, frame I/O,
+  post-process, and session policies
 
-### 3.2 OFX Out-of-Process Runtime
+### 3.2 Execution Tracks
+
+The runtime contains multiple backend hooks, but product support is defined by
+curated execution tracks.
+
+The current official product tracks are:
+
+- Apple Silicon via MLX model pack and bridge exports
+- Windows RTX via ONNX Runtime TensorRT RTX EP on NVIDIA RTX 30 series and
+  newer
+
+The current experimental product track is:
+
+- Windows DirectML
+
+Additional provider hooks may exist in the core runtime for diagnostics,
+bring-up, or future tracks. Those hooks are not support claims by themselves.
+
+### 3.3 OFX Out-of-Process Runtime
 
 The OFX plugin runs the inference backend in a separate process managed by the
 App-layer OFX runtime service. The plugin is a thin IPC client; it does not
 load ONNX sessions or GPU backends directly.
 
-This design isolates backend failures, TensorRT compilation errors, and VRAM
-exhaustion from the DaVinci Resolve host process. The session broker in the
-service layer pools initialized sessions across multiple OFX node instances to
-avoid redundant GPU warmups.
+This design isolates backend failures, TensorRT RTX compilation errors, and
+VRAM exhaustion from the DaVinci Resolve host process. The session broker in
+the service layer pools initialized sessions across multiple OFX node
+instances to avoid redundant GPU warmups.
 
 Frame data moves between plugin and service over shared memory. The IPC
 protocol is versioned to ensure the plugin and service remain compatible
 across incremental updates.
 
-### 3.3 Model Artifacts
+### 3.4 Model Artifacts
 
-Each officially supported platform track ships a curated model artifact
-optimized for that backend. The runtime contract (API, parameter schema,
-output format) is identical across all tracks. Only the artifact format and
-the execution provider differ.
+Each product track ships curated model artifacts optimized for that track. The
+runtime contract - API, parameter schema, and output format - is identical
+across tracks. The artifact format and execution provider may differ.
 
-### 3.4 Fallback Behavior
+Quality policy is product-defined, not a vendor support claim. The runtime
+uses conservative **safe quality ceilings** by backend and available memory to
+pick a direct artifact, downgrade automatically, or force an explicit error
+when the requested quality is outside the current validated tier.
 
-When the preferred backend fails or is unavailable, the runtime falls back to
-ONNX CPU execution. Fallback is logged explicitly. The `corridorkey doctor`
-command reports the active execution path and any fallback conditions before
+### 3.5 Fallback Behavior
+
+Fallback is surface-dependent.
+
+- CLI and tolerant automation workflows may fall back to ONNX CPU execution.
+- The OFX plugin favors explicit failure over silent CPU fallback on
+  unsupported interactive GPU requests.
+
+Fallback or failure is logged explicitly. The `corridorkey doctor` command
+reports the active execution path and any fallback conditions before
 processing begins.
 
 ---
@@ -128,21 +147,26 @@ processing begins.
 
 ### 4.1 Current Scope
 
-- Native inference execution: MLX (Apple Silicon), TensorRT (NVIDIA Ampere+),
-  DirectML (Intel), ONNX CPU.
-- CLI surface with stable JSON/NDJSON output contracts.
-- OFX plugin for DaVinci Resolve 20 on Apple Silicon and Windows.
-- Alpha hint ingestion and rough-matte fallback generation.
-- Platform-specific model artifact packaging.
-- `doctor`, `benchmark`, and `process` commands with structured diagnostics.
+- Native inference execution:
+  - MLX for the official Apple Silicon track
+  - TensorRT RTX EP for the official Windows RTX track
+  - DirectML for the experimental Windows DirectML track
+  - ONNX CPU fallback for tolerant workflows
+- CLI surface with stable JSON and NDJSON output contracts
+- OFX plugin for DaVinci Resolve 20 on Apple Silicon and Windows
+- Alpha hint ingestion and rough-matte fallback generation
+- OFX runtime/status reporting for guide source, safe quality ceiling, and the
+  actual runtime path used for the last render
+- Platform-specific model artifact packaging
+- `doctor`, `benchmark`, and `process` commands with structured diagnostics
 
 ### 4.2 Non-Goals
 
-- Training, fine-tuning, or exporting new model architectures.
-- A generic plugin framework or SDK for third-party extension.
-- Support for editing hosts other than DaVinci Resolve.
-- Browser, cloud, or server-side deployment.
-- Real-time preview at full resolution without hardware acceleration.
+- Training, fine-tuning, or exporting new model architectures
+- A generic plugin framework or SDK for third-party extension
+- Support for editing hosts other than DaVinci Resolve
+- Browser, cloud, or server-side deployment
+- Real-time preview at full resolution without hardware acceleration
 
 ---
 
@@ -158,11 +182,10 @@ releases and is the integration surface for pipeline automation.
 
 `corridorkey doctor` reports:
 
-- Detected hardware and selected backend.
-- Fallback conditions, if any.
-- Model artifact presence and validity.
-- Platform-specific constraints (e.g., Resolve version discovered via
-  environment).
+- detected hardware and selected backend
+- fallback conditions, if any
+- model artifact presence and validity
+- platform-specific constraints relevant to the current runtime
 
 ### 5.3 Exit Codes
 
@@ -173,9 +196,9 @@ correspond to specific failure categories documented in the `--help` output.
 
 ## 6. Performance Constraints
 
-- No Python in any execution path.
-- No heap allocation in per-frame or per-pixel loops.
-- All image buffers are 64-byte aligned for SIMD compatibility.
-- Zero-copy frame passing via `std::span` between processing stages.
-- TensorRT first-run compilation is expected and takes 10–30 seconds. This is
-  a one-time cost per model/resolution combination.
+- No Python in any execution path
+- No heap allocation in per-frame or per-pixel loops
+- All image buffers are 64-byte aligned for SIMD compatibility
+- Zero-copy frame passing via `std::span` between processing stages
+- TensorRT RTX first-run compilation is expected and takes 10-30 seconds for a
+  new GPU and model combination

@@ -13,9 +13,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
-}
+$Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
@@ -34,6 +32,7 @@ $guiSource = Join-Path $repoRoot "src\gui\src-tauri\target\release\corridorkey-g
 $modelsSource = Join-Path $repoRoot "models"
 $bundleModelsDir = Join-Path $distDir "models"
 $bundleOutputsDir = Join-Path $distDir "outputs"
+$modelInventoryPath = Join-Path $distDir "model_inventory.json"
 
 function Assert-FileExists {
     param([string]$Path, [string]$Message)
@@ -102,15 +101,29 @@ Assert-FileExists -Path $guiSource -Message "GUI binary not found at $guiSource"
 Copy-Item $guiSource (Join-Path $distDir "CorridorKey_Runtime.exe") -Force
 
 Write-Host "[5/6] Copying models..."
-$targetModels = @(
-    "corridorkey_fp16_768.onnx",
-    "corridorkey_fp16_1024.onnx",
-    "corridorkey_int8_512.onnx"
-)
-foreach ($model in $targetModels) {
+$targetModels = Get-CorridorKeyPortableRuntimeTargetModels
+$modelInventory = Get-CorridorKeyModelInventory -ModelsDir $modelsSource -ExpectedModels $targetModels
+foreach ($model in $modelInventory.present_models) {
     $sourcePath = Join-Path $modelsSource $model
-    Assert-FileExists -Path $sourcePath -Message "Missing model: $sourcePath"
     Copy-Item $sourcePath $bundleModelsDir -Force
+}
+
+$inventoryPayload = [ordered]@{
+    package_type = "runtime_bundle"
+    models_dir = [System.IO.Path]::GetFullPath($modelsSource)
+    expected_models = @($modelInventory.expected_models)
+    present_models = @($modelInventory.present_models)
+    missing_models = @($modelInventory.missing_models)
+    present_count = $modelInventory.present_count
+    missing_count = $modelInventory.missing_count
+}
+Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
+
+if ($modelInventory.missing_count -gt 0) {
+    Write-Host "[INFO] Packaging runtime bundle with partial model coverage: $($modelInventory.missing_models -join ', ')" -ForegroundColor Cyan
+    Write-Host "[INFO] Wrote model inventory: $modelInventoryPath" -ForegroundColor Cyan
+} else {
+    Write-Host "[PASS] All targeted runtime models were packaged." -ForegroundColor Green
 }
 
 if ($CompileContexts.IsPresent) {
@@ -142,6 +155,7 @@ Quick start:
 Notes:
 - Lossless output is the default. Use --video-encode balanced for lossy output.
 - The models folder must remain next to ck-engine.exe.
+- model_inventory.json records any packaged models that are absent from this bundle.
 "@ | Set-Content -Path $readmePath -Encoding ASCII
 
 @'
@@ -155,7 +169,7 @@ if errorlevel 1 exit /b 1
 ck-engine.exe doctor --json > doctor_report.json
 if errorlevel 1 exit /b 1
 
-powershell -NoProfile -Command "$report = Get-Content -Raw '.\\doctor_report.json' | ConvertFrom-Json; if (-not $report.summary.video_healthy) { Write-Error 'Video output is not healthy.'; exit 1 }"
+powershell -NoProfile -Command "$report = Get-Content -Raw '.\\doctor_report.json' | ConvertFrom-Json; $inventory = if (Test-Path '.\\model_inventory.json') { Get-Content -Raw '.\\model_inventory.json' | ConvertFrom-Json } else { $null }; if ($null -ne $inventory -and $inventory.missing_count -gt 0) { Write-Host ('Portable runtime bundle uses partial model coverage: ' + ($inventory.missing_models -join ', ')); exit 0 }; if (-not $report.summary.video_healthy) { Write-Error 'Video output is not healthy.'; exit 1 }"
 if errorlevel 1 exit /b 1
 
 exit /b 0

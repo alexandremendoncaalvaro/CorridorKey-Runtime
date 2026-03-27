@@ -21,6 +21,7 @@
 #include "../app/ofx_runtime_service.hpp"
 #include "../app/runtime_contracts.hpp"
 #include "../common/local_ipc.hpp"
+#include "../common/json_utils.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
@@ -183,6 +184,61 @@ Result<VideoOutputOptions> resolve_video_output_options(const cxxopts::ParseResu
                                    "Invalid --video-encode value. Use 'lossless' or 'balanced'."}};
 }
 
+Result<QualityFallbackMode> parse_quality_fallback_mode(const std::string& value) {
+    const std::string normalized = normalized_lower(value);
+    if (normalized == "auto") {
+        return QualityFallbackMode::Auto;
+    }
+    if (normalized == "direct") {
+        return QualityFallbackMode::Direct;
+    }
+    if (normalized == "coarse_to_fine") {
+        return QualityFallbackMode::CoarseToFine;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --quality-fallback value. Use 'auto', 'direct', or 'coarse_to_fine'.",
+    }};
+}
+
+Result<RefinementMode> parse_refinement_mode(const std::string& value) {
+    const std::string normalized = normalized_lower(value);
+    if (normalized == "auto") {
+        return RefinementMode::Auto;
+    }
+    if (normalized == "full_frame") {
+        return RefinementMode::FullFrame;
+    }
+    if (normalized == "tiled") {
+        return RefinementMode::Tiled;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --refinement-mode value. Use 'auto', 'full_frame', or 'tiled'.",
+    }};
+}
+
+Result<int> parse_coarse_resolution_override(const std::string& value) {
+    if (value == "0") {
+        return 0;
+    }
+    const int resolution = std::stoi(value);
+    switch (resolution) {
+        case 512:
+        case 768:
+        case 1024:
+        case 1536:
+        case 2048:
+            return resolution;
+        default:
+            break;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --coarse-resolution value. Use 0, 512, 768, 1024, 1536, or 2048.",
+    }};
+}
+
 InferenceParams build_inference_params(const cxxopts::ParseResult& result,
                                        const std::optional<InferenceParams>& base_params, int argc,
                                        char* argv[]) {
@@ -202,6 +258,35 @@ InferenceParams build_inference_params(const cxxopts::ParseResult& result,
     }
     if (option_present(argc, argv, {"--tiled"})) {
         params.enable_tiling = true;
+    }
+
+    if (!base_params.has_value() || option_present(argc, argv, {"--quality-fallback"})) {
+        auto fallback_mode =
+            parse_quality_fallback_mode(result["quality-fallback"].as<std::string>());
+        if (!fallback_mode) {
+            throw std::runtime_error(fallback_mode.error().message);
+        }
+        params.quality_fallback_mode = *fallback_mode;
+    }
+    if (!base_params.has_value() || option_present(argc, argv, {"--refinement-mode"})) {
+        auto refinement_mode =
+            parse_refinement_mode(result["refinement-mode"].as<std::string>());
+        if (!refinement_mode) {
+            throw std::runtime_error(refinement_mode.error().message);
+        }
+        params.refinement_mode = *refinement_mode;
+    }
+    if (!base_params.has_value() || option_present(argc, argv, {"--coarse-resolution"})) {
+        auto coarse_resolution =
+            parse_coarse_resolution_override(result["coarse-resolution"].as<std::string>());
+        if (!coarse_resolution) {
+            throw std::runtime_error(coarse_resolution.error().message);
+        }
+        params.coarse_resolution_override = *coarse_resolution;
+    }
+
+    if (params.target_resolution > 0) {
+        params.requested_quality_resolution = params.target_resolution;
     }
 
     return params;
@@ -277,6 +362,17 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
 
     if (result.count("model")) {
         resolved.params = build_inference_params(result, std::nullopt, argc, argv);
+        if (resolved.params.requested_quality_resolution <= 0) {
+            resolved.params.requested_quality_resolution =
+                app::packaged_model_resolution(result["model"].as<std::string>()).value_or(
+                    resolved.params.target_resolution);
+        }
+        auto explicit_model =
+            app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
+        if (!explicit_model) {
+            return Unexpected<Error>(explicit_model.error());
+        }
+        resolved.model_path = *explicit_model;
     } else {
         resolved.params = build_inference_params(
             result,
@@ -291,16 +387,21 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
         }
 
         resolved.model_path = resolved.models_dir / selected_model->filename;
+        const int requested_resolution =
+            resolved.params.requested_quality_resolution > 0
+                ? resolved.params.requested_quality_resolution
+                : selected_model->resolution;
+        resolved.params.requested_quality_resolution = requested_resolution;
+        auto effective_model =
+            app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
+        if (!effective_model) {
+            return Unexpected<Error>(effective_model.error());
+        }
+        resolved.model_path = *effective_model;
         if (!std::filesystem::exists(resolved.model_path)) {
-            auto cpu_fallback = resolved.models_dir / "corridorkey_int8_512.onnx";
-            if (resolved.model_path.filename() != "corridorkey_int8_512.onnx" &&
-                std::filesystem::exists(cpu_fallback)) {
-                resolved.model_path = cpu_fallback;
-            } else {
-                return Unexpected<Error>{
-                    Error{ErrorCode::ModelLoadFailed,
-                          "Default model pack not found: " + resolved.model_path.string()}};
-            }
+            return Unexpected<Error>{
+                Error{ErrorCode::ModelLoadFailed,
+                      "Default model pack not found: " + resolved.model_path.string()}};
         }
         resolved.default_model_selected = true;
     }
@@ -400,6 +501,12 @@ int main(int argc, char* argv[]) {
         "quality", "Alias for --preset", cxxopts::value<std::string>())(
         "r,resolution", "Resolution (0=auto, 512, 768, 1024)",
         cxxopts::value<int>()->default_value("0"))(
+        "quality-fallback", "Quality fallback mode (auto, direct, coarse_to_fine)",
+        cxxopts::value<std::string>()->default_value("auto"))(
+        "refinement-mode", "Validated refinement strategy override (auto, full_frame, tiled)",
+        cxxopts::value<std::string>()->default_value("auto"))(
+        "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
+        cxxopts::value<std::string>()->default_value("0"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "endpoint-port", "Local OFX runtime server control port", cxxopts::value<int>())(
@@ -460,8 +567,9 @@ int main(int argc, char* argv[]) {
 
         if (result.count("version")) {
             if (use_json) {
-                std::cout << nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}).dump()
-                          << std::endl;
+                std::cout
+                    << common::safe_json_dump(nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}))
+                    << std::endl;
             } else {
                 std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << std::endl;
             }
@@ -481,7 +589,8 @@ int main(int argc, char* argv[]) {
 
         if (cmd == "info") {
             if (use_json) {
-                std::cout << JobOrchestrator::get_system_info().dump(4) << std::endl;
+                std::cout << common::safe_json_dump(JobOrchestrator::get_system_info(), 4)
+                          << std::endl;
             } else {
                 print_info();
             }
@@ -495,7 +604,7 @@ int main(int argc, char* argv[]) {
             }
             auto report = JobOrchestrator::run_doctor(models_dir);
             if (use_json) {
-                std::cout << report.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(report, 4) << std::endl;
             } else {
                 std::cout << "--- CorridorKey Doctor Report ---\n"
                           << "Version: " << report["system"]["version"].get<std::string>() << "\n"
@@ -513,7 +622,7 @@ int main(int argc, char* argv[]) {
         if (cmd == "models") {
             auto models = JobOrchestrator::list_models();
             if (use_json) {
-                std::cout << models.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(models, 4) << std::endl;
             } else {
                 std::cout << "--- Model Catalog ---\n";
                 for (const auto& model : models) {
@@ -536,7 +645,7 @@ int main(int argc, char* argv[]) {
         if (cmd == "presets") {
             auto presets = JobOrchestrator::list_presets();
             if (use_json) {
-                std::cout << presets.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(presets, 4) << std::endl;
             } else {
                 std::cout << "--- Presets ---\n";
                 for (const auto& preset : presets) {
@@ -580,7 +689,7 @@ int main(int argc, char* argv[]) {
                     failure["command"] = "compile-context";
                     failure["success"] = false;
                     failure["error"] = compile_res.error().message;
-                    std::cout << failure.dump(4) << std::endl;
+                    std::cout << common::safe_json_dump(failure, 4) << std::endl;
                 } else {
                     std::cerr << "Error: " << compile_res.error().message << std::endl;
                 }
@@ -594,7 +703,7 @@ int main(int argc, char* argv[]) {
                 success["input_model"] = model_path.string();
                 success["output_model"] = compile_res->string();
                 success["backend"] = backend_to_string_local(device.backend);
-                std::cout << success.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(success, 4) << std::endl;
             } else {
                 std::cout << "Compiled TensorRT RTX context model: " << compile_res->string()
                           << std::endl;
@@ -669,7 +778,7 @@ int main(int argc, char* argv[]) {
             auto report = JobOrchestrator::run_benchmark(benchmark_request);
             if (report.contains("error")) {
                 if (use_json) {
-                    std::cout << report.dump(4) << std::endl;
+                    std::cout << common::safe_json_dump(report, 4) << std::endl;
                 } else {
                     std::cerr << "Benchmark error: " << report["error"].get<std::string>()
                               << std::endl;
@@ -677,7 +786,7 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             if (use_json) {
-                std::cout << report.dump(4) << std::endl;
+                std::cout << common::safe_json_dump(report, 4) << std::endl;
             } else {
                 std::cout << "--- Benchmark Results ---\n"
                           << "Model: " << benchmark_request.model_path.filename().string() << "\n";
@@ -884,7 +993,7 @@ int main(int argc, char* argv[]) {
             JobEventCallback events = nullptr;
             if (use_json) {
                 events = [](const JobEvent& event) -> bool {
-                    std::cout << event_to_json(event).dump() << std::endl;
+                    std::cout << common::safe_json_dump(event_to_json(event)) << std::endl;
                     return true;
                 };
             } else {

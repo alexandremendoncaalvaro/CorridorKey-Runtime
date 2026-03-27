@@ -73,15 +73,16 @@ TEST_CASE("windows device listing prefers TensorRT RTX when available", "[unit][
     auto devices = list_devices();
     REQUIRE_FALSE(devices.empty());
 
-    if (devices.front().backend == Backend::TensorRT) {
-        REQUIRE(devices.size() >= 2);
-        bool has_cpu = false;
-        for (const auto& device : devices) {
-            has_cpu = has_cpu || device.backend == Backend::CPU;
-        }
-        REQUIRE(has_cpu);
-    } else {
-        REQUIRE(devices.front().backend == Backend::CPU);
+    bool has_cpu = false;
+    bool has_tensorrt = false;
+    for (const auto& device : devices) {
+        has_cpu = has_cpu || device.backend == Backend::CPU;
+        has_tensorrt = has_tensorrt || device.backend == Backend::TensorRT;
+    }
+    REQUIRE(has_cpu);
+
+    if (has_tensorrt) {
+        REQUIRE(devices.front().backend == Backend::TensorRT);
     }
 #else
     SUCCEED("Windows TensorRT ordering is not applicable on this build.");

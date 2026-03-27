@@ -2,6 +2,8 @@
 
 #include <corridorkey/types.hpp>
 
+#include "runtime_contracts.hpp"
+
 namespace corridorkey::app {
 
 /**
@@ -24,32 +26,19 @@ class HardwareProfile {
             return {512, "mlx"};
         }
 
-        if (device.backend == Backend::CoreML || device.backend == Backend::DirectML) {
-            // Unified or generic GPU
-            if (device.available_memory_mb >= 32000) {
-                return {1536, "int8"};
-            }
-            if (device.available_memory_mb >= 16000) {
-                return {1024, "int8"};
-            }
-            return {512, "int8"};
+        if (auto safe_ceiling = max_supported_resolution_for_device(device);
+            safe_ceiling.has_value()) {
+            const std::string variant =
+                (device.backend == Backend::TensorRT || device.backend == Backend::CUDA) ? "fp16"
+                                                                                          : "int8";
+            return {*safe_ceiling, variant};
         }
 
-        // Dedicated GPUs (CUDA, TensorRT)
-        if (device.available_memory_mb >= 24000) {
-            return {2048, "fp16"};  // Ultra-high tier (RTX 3090, 4090, etc.)
-        }
-        if (device.available_memory_mb >= 16000) {
-            return {1536, "fp16"};  // High tier
-        }
-        if (device.available_memory_mb >= 10000) {
-            return {1024, "fp16"};  // Medium-high tier
-        }
-        if (device.available_memory_mb >= 8000) {
-            return {768, "fp16"};  // Medium tier
+        if (device.backend == Backend::CoreML) {
+            return {1024, "int8"};
         }
 
-        return {512, "int8"};  // Low tier
+        return {512, "int8"};
     }
 };
 

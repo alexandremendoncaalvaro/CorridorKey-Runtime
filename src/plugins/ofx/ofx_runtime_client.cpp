@@ -24,6 +24,38 @@ namespace corridorkey::ofx {
 
 namespace {
 
+bool same_device_info(const DeviceInfo& lhs, const DeviceInfo& rhs) {
+    return lhs.name == rhs.name && lhs.available_memory_mb == rhs.available_memory_mb &&
+           lhs.backend == rhs.backend && lhs.device_index == rhs.device_index;
+}
+
+bool same_engine_options(const EngineCreateOptions& lhs, const EngineCreateOptions& rhs) {
+    return lhs.allow_cpu_fallback == rhs.allow_cpu_fallback &&
+           lhs.disable_cpu_ep_fallback == rhs.disable_cpu_ep_fallback;
+}
+
+bool same_prepare_request(const app::OfxRuntimePrepareSessionRequest& lhs,
+                          const app::OfxRuntimePrepareSessionRequest& rhs) {
+    return lhs.client_instance_id == rhs.client_instance_id && lhs.model_path == rhs.model_path &&
+           lhs.artifact_name == rhs.artifact_name &&
+           same_device_info(lhs.requested_device, rhs.requested_device) &&
+           same_engine_options(lhs.engine_options, rhs.engine_options) &&
+           lhs.requested_quality_mode == rhs.requested_quality_mode &&
+           lhs.requested_resolution == rhs.requested_resolution &&
+           lhs.effective_resolution == rhs.effective_resolution;
+}
+
+app::OfxRuntimeSessionSnapshot with_prepare_request_metadata(
+    app::OfxRuntimeSessionSnapshot snapshot, const app::OfxRuntimePrepareSessionRequest& request) {
+    snapshot.model_path = request.model_path;
+    snapshot.artifact_name = request.artifact_name;
+    snapshot.requested_device = request.requested_device;
+    snapshot.requested_quality_mode = request.requested_quality_mode;
+    snapshot.requested_resolution = request.requested_resolution;
+    snapshot.effective_resolution = request.effective_resolution;
+    return snapshot;
+}
+
 Result<nlohmann::json> unwrap_response(const nlohmann::json& json) {
     auto envelope = app::ofx_runtime_response_from_json(json);
     if (!envelope) {
@@ -150,10 +182,10 @@ Result<app::OfxRuntimeHealthResponse> OfxRuntimeClient::health() {
 
 Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
     const app::OfxRuntimePrepareSessionRequest& request, StageTimingCallback on_stage) {
-    if (m_session.model_path == request.model_path &&
-        m_session.requested_device.backend == request.requested_device.backend &&
-        m_session.artifact_name == request.artifact_name && !m_session.session_id.empty()) {
-        return app::OfxRuntimePrepareSessionResponse{m_session, {}};
+    if (!m_session.session_id.empty() && m_last_prepare_request.has_value() &&
+        same_prepare_request(*m_last_prepare_request, request)) {
+        return app::OfxRuntimePrepareSessionResponse{
+            with_prepare_request_metadata(m_session, request), {}};
     }
 
     if (!m_session.session_id.empty()) {
@@ -179,6 +211,7 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
         return Unexpected<Error>(parsed.error());
     }
 
+    parsed->session = with_prepare_request_metadata(parsed->session, request);
     update_session_snapshot(parsed->session);
     m_last_prepare_request = request;
     replay_stage_timings(parsed->timings, on_stage);
@@ -245,6 +278,10 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
             response = send_render_request();
         }
         if (!response) {
+            if (response.error().code == ErrorCode::InferenceFailed) {
+                invalidate_session("event=render_frame_invalidated detail=" +
+                                   response.error().message);
+            }
             return Unexpected<Error>(response.error());
         }
 
@@ -312,6 +349,10 @@ std::optional<BackendFallbackInfo> OfxRuntimeClient::backend_fallback() const {
 
 bool OfxRuntimeClient::has_session() const {
     return !m_session.session_id.empty();
+}
+
+std::uint64_t OfxRuntimeClient::session_ref_count() const {
+    return m_session.ref_count;
 }
 
 void OfxRuntimeClient::set_request_timeout_ms(int ms) {
@@ -528,6 +569,15 @@ Result<void> OfxRuntimeClient::launch_server() {
 #endif
 
     return {};
+}
+
+void OfxRuntimeClient::invalidate_session(const std::string& reason) {
+    if (!m_session.session_id.empty()) {
+        log_message("ofx_runtime_client", reason + " session_id=" + m_session.session_id);
+    } else {
+        log_message("ofx_runtime_client", reason);
+    }
+    m_session = {};
 }
 
 void OfxRuntimeClient::update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot) {

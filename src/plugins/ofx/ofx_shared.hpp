@@ -43,7 +43,10 @@ constexpr const char* kClipForegroundOutput = "Foreground Output";
 constexpr const char* kClipCompositeOutput = "Composite Output";
 
 constexpr const char* kParamQualityMode = "quality_mode";
+constexpr const char* kParamQualityFallbackMode = "quality_fallback_mode";
 constexpr const char* kParamOutputMode = "output_mode";
+constexpr const char* kParamRefinementMode = "refinement_mode";
+constexpr const char* kParamCoarseResolutionOverride = "coarse_resolution_override";
 constexpr const char* kParamInputColorSpace = "input_color_space";
 constexpr const char* kParamQuantizationMode = "quantization_mode";
 constexpr const char* kParamScreenColor = "screen_color";
@@ -67,9 +70,14 @@ constexpr const char* kParamRuntimeProcessing = "runtime_processing";
 constexpr const char* kParamRuntimeDevice = "runtime_device";
 constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality";
 constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
+constexpr const char* kParamRuntimeSafeQualityCeiling = "runtime_safe_quality_ceiling";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
+constexpr const char* kParamRuntimeGuideSource = "runtime_guide_source";
+constexpr const char* kParamRuntimePath = "runtime_path";
+constexpr const char* kParamRuntimeSession = "runtime_session";
 constexpr const char* kParamRuntimeStatus = "runtime_status";
 constexpr const char* kParamRuntimeTimings = "runtime_timings";
+constexpr const char* kParamRuntimeBackendWork = "runtime_backend_work";
 constexpr const char* kParamRenderTimeout = "render_timeout";
 constexpr const char* kParamPrepareTimeout = "prepare_timeout";
 constexpr const char* kParamOpenStartHereGuide = "open_start_here_guide";
@@ -94,8 +102,31 @@ struct RuntimePanelState {
     int requested_quality_mode = kQualityAuto;
     int requested_resolution = 0;
     int effective_resolution = 0;
+    int safe_quality_ceiling_resolution = 0;
     bool cpu_quality_guardrail_active = false;
     std::filesystem::path artifact_path = {};
+    bool session_prepared = false;
+    std::uint64_t session_ref_count = 0;
+};
+
+enum class GuideSourceKind {
+    Unknown,
+    ExternalAlphaHint,
+    RoughFallback,
+};
+
+enum class RuntimePathKind {
+    Unknown,
+    Direct,
+    ArtifactFallback,
+    FullModelTiling,
+};
+
+enum class LastRenderWorkOrigin {
+    None,
+    BackendRender,
+    SharedCache,
+    InstanceCache,
 };
 
 struct InstanceData {
@@ -104,7 +135,10 @@ struct InstanceData {
     OfxImageClipHandle alpha_hint_clip = nullptr;
     OfxImageClipHandle output_clip = nullptr;
     OfxParamHandle quality_mode_param = nullptr;
+    OfxParamHandle quality_fallback_mode_param = nullptr;
     OfxParamHandle output_mode_param = nullptr;
+    OfxParamHandle refinement_mode_param = nullptr;
+    OfxParamHandle coarse_resolution_override_param = nullptr;
     OfxParamHandle input_color_space_param = nullptr;
     OfxParamHandle quantization_mode_param = nullptr;
     OfxParamHandle screen_color_param = nullptr;
@@ -128,9 +162,14 @@ struct InstanceData {
     OfxParamHandle runtime_device_param = nullptr;
     OfxParamHandle runtime_requested_quality_param = nullptr;
     OfxParamHandle runtime_effective_quality_param = nullptr;
+    OfxParamHandle runtime_safe_quality_ceiling_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
+    OfxParamHandle runtime_guide_source_param = nullptr;
+    OfxParamHandle runtime_path_param = nullptr;
+    OfxParamHandle runtime_session_param = nullptr;
     OfxParamHandle runtime_status_param = nullptr;
     OfxParamHandle runtime_timings_param = nullptr;
+    OfxParamHandle runtime_backend_work_param = nullptr;
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
     std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
@@ -145,6 +184,8 @@ struct InstanceData {
     int active_resolution = 0;
     bool cpu_quality_guardrail_active = false;
     RuntimePanelState runtime_panel_state = {};
+    GuideSourceKind last_guide_source = GuideSourceKind::Unknown;
+    RuntimePathKind last_runtime_path = RuntimePathKind::Unknown;
     QualityCompileFailureCache quality_compile_failure_cache = {};
     bool use_runtime_server = false;
     std::uint64_t render_count = 0;
@@ -156,6 +197,8 @@ struct InstanceData {
     double last_frame_ms = 0.0;
     double avg_frame_ms = 0.0;
     std::uint64_t frame_time_samples = 0;
+    LastRenderWorkOrigin last_render_work_origin = LastRenderWorkOrigin::None;
+    std::vector<StageTiming> last_render_stage_timings = {};
     bool in_render = false;
     bool runtime_panel_dirty = false;
     bool quantization_error_active = false;
@@ -169,6 +212,7 @@ struct InstanceData {
     bool cached_signature_valid = false;
     InferenceParams cached_params = {};
     std::filesystem::path cached_model_path = {};
+    std::vector<StageTiming> cached_render_stage_timings = {};
     int cached_screen_color = kDefaultScreenColor;
     double cached_alpha_black_point = 0.0;
     double cached_alpha_white_point = 1.0;
@@ -201,13 +245,26 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
 std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
-    int input_width = 0, int input_height = 0, int quantization_mode = kQuantizationFp16);
+    int input_width, int input_height, int quantization_mode, std::int64_t available_memory_mb,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
-                               int input_height = 0, int quantization_mode = kQuantizationFp16);
+                               int input_height = 0, int quantization_mode = kQuantizationFp16,
+                               QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
+                               int coarse_resolution_override = 0,
+                               RefinementMode refinement_mode = RefinementMode::Auto);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
                                             bool cpu_quality_guardrail_active);
+bool sync_runtime_panel_session_state(InstanceData* data);
+std::string runtime_session_runtime_label(const InstanceData& data);
 std::string runtime_status_runtime_label(const InstanceData& data);
 std::string runtime_timings_runtime_label(const InstanceData& data);
+std::string runtime_backend_work_runtime_label(const InstanceData& data);
+std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data);
+std::string runtime_guide_source_runtime_label(const InstanceData& data);
+std::string runtime_path_runtime_label(const InstanceData& data);
+Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
+                                                  bool hint_from_clip,
+                                                  AlphaHintPolicy alpha_hint_policy);
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
@@ -219,6 +276,13 @@ OfxStatus create_instance(OfxImageEffectHandle instance);
 OfxStatus destroy_instance(OfxImageEffectHandle instance);
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle out_args);
+OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
+OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
+OfxStatus purge_caches(OfxImageEffectHandle instance);
+OfxStatus get_regions_of_interest(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
+                                  OfxPropertySetHandle out_args);
+OfxStatus is_identity(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
+                      OfxPropertySetHandle out_args);
 OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHandle out_args);
 OfxStatus get_output_colourspace(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                                  OfxPropertySetHandle out_args);

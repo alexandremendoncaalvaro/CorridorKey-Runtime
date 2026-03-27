@@ -280,6 +280,366 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
     REQUIRE_FALSE(server_error.has_value());
 }
 
+TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the same model",
+          "[integration][ofx][runtime][regression]") {
+    const auto port = reserve_local_port();
+    const LocalJsonEndpoint endpoint{"127.0.0.1", port};
+
+    std::atomic<int> prepare_count = 0;
+    std::atomic<int> release_count = 0;
+    std::optional<Error> server_error;
+    std::atomic<bool> stop_server = false;
+
+    std::thread server_thread([&]() {
+        auto server = LocalJsonServer::listen(endpoint);
+        if (!server) {
+            server_error = server.error();
+            return;
+        }
+
+        while (!stop_server.load()) {
+            auto client = server->accept_one(500);
+            if (!client) {
+                server_error = client.error();
+                return;
+            }
+            if (!client->has_value()) {
+                continue;
+            }
+
+            auto request_json = (*client)->read_json(2000);
+            if (!request_json) {
+                server_error = request_json.error();
+                return;
+            }
+
+            auto request = ofx_runtime_request_from_json(*request_json);
+            if (!request) {
+                server_error = request.error();
+                return;
+            }
+
+            switch (request->command) {
+                case OfxRuntimeCommand::Health: {
+                    OfxRuntimeHealthResponse health;
+                    health.server_pid = 4242;
+                    health.session_count = 1;
+                    health.active_session_count = 1;
+                    (*client)->write_json(to_json(ok_response(to_json(health))));
+                    break;
+                }
+                case OfxRuntimeCommand::PrepareSession: {
+                    auto parsed = prepare_session_request_from_json(request->payload);
+                    if (!parsed) {
+                        server_error = parsed.error();
+                        return;
+                    }
+
+                    const int current_prepare = ++prepare_count;
+                    OfxRuntimeSessionSnapshot snapshot;
+                    snapshot.session_id = "session-" + std::to_string(current_prepare);
+                    snapshot.model_path = parsed->model_path;
+                    snapshot.artifact_name = parsed->artifact_name;
+                    snapshot.requested_device = parsed->requested_device;
+                    snapshot.effective_device = parsed->requested_device;
+                    snapshot.requested_quality_mode = parsed->requested_quality_mode;
+                    snapshot.requested_resolution = parsed->requested_resolution;
+                    snapshot.effective_resolution = parsed->effective_resolution;
+                    snapshot.recommended_resolution = parsed->effective_resolution;
+                    snapshot.ref_count = 1;
+
+                    OfxRuntimePrepareSessionResponse response;
+                    response.session = snapshot;
+                    (*client)->write_json(to_json(ok_response(to_json(response))));
+                    break;
+                }
+                case OfxRuntimeCommand::ReleaseSession: {
+                    ++release_count;
+                    (*client)->write_json(to_json(ok_response(nlohmann::json::object())));
+                    break;
+                }
+                case OfxRuntimeCommand::Shutdown: {
+                    stop_server = true;
+                    (*client)->write_json(to_json(ok_response(nlohmann::json::object())));
+                    break;
+                }
+                case OfxRuntimeCommand::RenderFrame: {
+                    server_error = Error{
+                        ErrorCode::InvalidParameters,
+                        "RenderFrame is not expected in the prepare-session cache regression test."};
+                    return;
+                }
+            }
+        }
+    });
+
+    bool ready = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        auto probe = send_json_request(
+            endpoint,
+            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+                                              .payload = nlohmann::json::object()}),
+            500);
+        if (probe) {
+            ready = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    REQUIRE(ready);
+
+    OfxRuntimeClientOptions options;
+    options.endpoint = endpoint;
+    options.request_timeout_ms = 2000;
+    auto client = OfxRuntimeClient::create(options);
+    REQUIRE(client.has_value());
+
+    OfxRuntimePrepareSessionRequest first_request;
+    first_request.client_instance_id = "client-a";
+    first_request.model_path = "models/corridorkey_fp16_1024.onnx";
+    first_request.artifact_name = "corridorkey_fp16_1024.onnx";
+    first_request.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
+    first_request.requested_quality_mode = 2;
+    first_request.requested_resolution = 1024;
+    first_request.effective_resolution = 1024;
+    first_request.engine_options.allow_cpu_fallback = false;
+    first_request.engine_options.disable_cpu_ep_fallback = true;
+
+    auto first_prepare = (*client)->prepare_session(first_request);
+    REQUIRE(first_prepare.has_value());
+    CHECK(prepare_count.load() == 1);
+    CHECK(release_count.load() == 0);
+
+    auto second_request = first_request;
+    second_request.requested_quality_mode = 3;
+    second_request.requested_resolution = 1536;
+    second_request.effective_resolution = 1024;
+
+    auto second_prepare = (*client)->prepare_session(second_request);
+    REQUIRE(second_prepare.has_value());
+    CHECK(prepare_count.load() == 2);
+    CHECK(release_count.load() == 1);
+    CHECK(second_prepare->session.session_id == "session-2");
+    CHECK(second_prepare->session.requested_quality_mode == second_request.requested_quality_mode);
+    CHECK(second_prepare->session.requested_resolution == second_request.requested_resolution);
+    CHECK(second_prepare->session.effective_resolution == second_request.effective_resolution);
+
+    auto released = (*client)->release_session();
+    REQUIRE(released.has_value());
+    CHECK(release_count.load() == 2);
+
+    auto shutdown_response = send_json_request(
+        endpoint,
+        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
+                                          .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
+        2000);
+    REQUIRE(shutdown_response.has_value());
+    stop_server = true;
+    server_thread.join();
+    REQUIRE_FALSE(server_error.has_value());
+}
+
+TEST_CASE("ofx runtime client invalidates structural render failures until re-prepare",
+          "[integration][ofx][runtime][regression]") {
+    const auto port = reserve_local_port();
+    const LocalJsonEndpoint endpoint{"127.0.0.1", port};
+
+    std::atomic<int> prepare_count = 0;
+    std::atomic<int> render_count = 0;
+    std::optional<Error> server_error;
+    std::atomic<bool> stop_server = false;
+
+    std::thread server_thread([&]() {
+        auto server = LocalJsonServer::listen(endpoint);
+        if (!server) {
+            server_error = server.error();
+            return;
+        }
+
+        while (!stop_server.load()) {
+            auto client = server->accept_one(500);
+            if (!client) {
+                server_error = client.error();
+                return;
+            }
+            if (!client->has_value()) {
+                continue;
+            }
+
+            auto request_json = (*client)->read_json(2000);
+            if (!request_json) {
+                server_error = request_json.error();
+                return;
+            }
+
+            auto request = ofx_runtime_request_from_json(*request_json);
+            if (!request) {
+                server_error = request.error();
+                return;
+            }
+
+            switch (request->command) {
+                case OfxRuntimeCommand::Health: {
+                    OfxRuntimeHealthResponse health;
+                    health.server_pid = 5252;
+                    health.session_count = 1;
+                    health.active_session_count = 1;
+                    (*client)->write_json(to_json(ok_response(to_json(health))));
+                    break;
+                }
+                case OfxRuntimeCommand::PrepareSession: {
+                    auto parsed = prepare_session_request_from_json(request->payload);
+                    if (!parsed) {
+                        server_error = parsed.error();
+                        return;
+                    }
+
+                    const int current_prepare = ++prepare_count;
+                    OfxRuntimeSessionSnapshot snapshot;
+                    snapshot.session_id = "session-" + std::to_string(current_prepare);
+                    snapshot.model_path = parsed->model_path;
+                    snapshot.artifact_name = parsed->artifact_name;
+                    snapshot.requested_device = parsed->requested_device;
+                    snapshot.effective_device = parsed->requested_device;
+                    snapshot.requested_quality_mode = parsed->requested_quality_mode;
+                    snapshot.requested_resolution = parsed->requested_resolution;
+                    snapshot.effective_resolution = parsed->effective_resolution;
+                    snapshot.recommended_resolution = parsed->effective_resolution;
+                    snapshot.ref_count = 1;
+
+                    OfxRuntimePrepareSessionResponse response;
+                    response.session = snapshot;
+                    (*client)->write_json(to_json(ok_response(to_json(response))));
+                    break;
+                }
+                case OfxRuntimeCommand::RenderFrame: {
+                    auto parsed = render_frame_request_from_json(request->payload);
+                    if (!parsed) {
+                        server_error = parsed.error();
+                        return;
+                    }
+
+                    ++render_count;
+                    if (prepare_count.load() == 1) {
+                        (*client)->write_json(to_json(
+                            error_response("Model output contains non-finite values.")));
+                        break;
+                    }
+
+                    auto transport = SharedFrameTransport::open(parsed->shared_frame_path);
+                    if (!transport) {
+                        server_error = transport.error();
+                        return;
+                    }
+                    fill_transport_result(*transport, 0.5F, 0.9F);
+
+                    OfxRuntimeSessionSnapshot snapshot;
+                    snapshot.session_id = "session-2";
+                    snapshot.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
+                    snapshot.effective_device = snapshot.requested_device;
+                    snapshot.requested_resolution = parsed->params.target_resolution;
+                    snapshot.effective_resolution = parsed->params.target_resolution;
+                    snapshot.recommended_resolution = parsed->params.target_resolution;
+                    snapshot.ref_count = 1;
+
+                    OfxRuntimeRenderFrameResponse response;
+                    response.session = snapshot;
+                    (*client)->write_json(to_json(ok_response(to_json(response))));
+                    break;
+                }
+                case OfxRuntimeCommand::ReleaseSession: {
+                    (*client)->write_json(to_json(ok_response(nlohmann::json::object())));
+                    break;
+                }
+                case OfxRuntimeCommand::Shutdown: {
+                    stop_server = true;
+                    (*client)->write_json(to_json(ok_response(nlohmann::json::object())));
+                    break;
+                }
+            }
+        }
+    });
+
+    bool ready = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        auto probe = send_json_request(
+            endpoint,
+            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+                                              .payload = nlohmann::json::object()}),
+            500);
+        if (probe) {
+            ready = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    REQUIRE(ready);
+
+    OfxRuntimeClientOptions options;
+    options.endpoint = endpoint;
+    options.request_timeout_ms = 2000;
+    auto client = OfxRuntimeClient::create(options);
+    REQUIRE(client.has_value());
+
+    OfxRuntimePrepareSessionRequest prepare_request;
+    prepare_request.client_instance_id = "client-a";
+    prepare_request.model_path = "models/corridorkey_fp16_1024.onnx";
+    prepare_request.artifact_name = "corridorkey_fp16_1024.onnx";
+    prepare_request.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
+    prepare_request.requested_quality_mode = 2;
+    prepare_request.requested_resolution = 1024;
+    prepare_request.effective_resolution = 1024;
+    prepare_request.engine_options.allow_cpu_fallback = false;
+    prepare_request.engine_options.disable_cpu_ep_fallback = true;
+
+    auto first_prepare = (*client)->prepare_session(prepare_request);
+    REQUIRE(first_prepare.has_value());
+    CHECK((*client)->has_session());
+
+    ImageBuffer rgb_buffer(4, 2, 3);
+    ImageBuffer hint_buffer(4, 2, 1);
+    std::fill(rgb_buffer.view().data.begin(), rgb_buffer.view().data.end(), 0.5F);
+    std::fill(hint_buffer.view().data.begin(), hint_buffer.view().data.end(), 1.0F);
+
+    InferenceParams params;
+    params.target_resolution = 1024;
+    params.batch_size = 1;
+
+    auto failed_frame = (*client)->process_frame(rgb_buffer.view(), hint_buffer.view(), params, 0);
+    REQUIRE_FALSE(failed_frame.has_value());
+    CHECK(failed_frame.error().message.find("non-finite") != std::string::npos);
+    CHECK_FALSE((*client)->has_session());
+    CHECK(render_count.load() == 1);
+
+    auto blocked_frame = (*client)->process_frame(rgb_buffer.view(), hint_buffer.view(), params, 1);
+    REQUIRE_FALSE(blocked_frame.has_value());
+    CHECK(blocked_frame.error().message.find("not prepared") != std::string::npos);
+    CHECK(render_count.load() == 1);
+
+    auto recovered_prepare = (*client)->prepare_session(prepare_request);
+    REQUIRE(recovered_prepare.has_value());
+    CHECK(prepare_count.load() == 2);
+    CHECK((*client)->has_session());
+
+    auto recovered_frame =
+        (*client)->process_frame(rgb_buffer.view(), hint_buffer.view(), params, 2);
+    REQUIRE(recovered_frame.has_value());
+    CHECK(render_count.load() == 2);
+    CHECK(recovered_frame->alpha.const_view().data.front() == Catch::Approx(0.5F));
+    CHECK(recovered_frame->foreground.const_view().data.front() == Catch::Approx(0.9F));
+
+    auto shutdown_response = send_json_request(
+        endpoint,
+        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
+                                          .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
+        2000);
+    REQUIRE(shutdown_response.has_value());
+    stop_server = true;
+    server_thread.join();
+    REQUIRE_FALSE(server_error.has_value());
+}
 TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime server",
           "[integration][ofx][runtime][regression]") {
     const auto port = reserve_local_port();

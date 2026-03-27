@@ -3,12 +3,26 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "ofx_session_policy.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../common/shared_memory_transport.hpp"
 
 namespace corridorkey::app {
 
 namespace {
+
+void refresh_engine_snapshot(OfxRuntimeSessionSnapshot& snapshot, const Engine& engine) {
+    snapshot.effective_device = engine.current_device();
+    snapshot.backend_fallback = engine.backend_fallback();
+    snapshot.recommended_resolution = engine.recommended_resolution();
+}
+
+OfxRuntimeSessionSnapshot response_snapshot(const OfxRuntimeSessionSnapshot& snapshot,
+                                           bool reused_existing_session) {
+    auto response = snapshot;
+    response.reused_existing_session = reused_existing_session;
+    return response;
+}
 
 std::chrono::steady_clock::time_point now() {
     return std::chrono::steady_clock::now();
@@ -28,7 +42,7 @@ OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options) : m_options(
 
 Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     const OfxRuntimePrepareSessionRequest& request) {
-    cleanup_idle_sessions();
+    (void)cleanup_idle_sessions();
     auto eviction_result = evict_idle_sessions_if_needed();
     if (!eviction_result) {
         return Unexpected<Error>(eviction_result.error());
@@ -36,10 +50,11 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
 
     const std::string key = session_key(request);
     if (auto existing = m_sessions.find(key); existing != m_sessions.end()) {
-        existing->second.snapshot.reused_existing_session = true;
+        refresh_engine_snapshot(existing->second.snapshot, *existing->second.engine);
         existing->second.snapshot.ref_count += 1;
         existing->second.last_used_at = now();
-        return OfxRuntimePrepareSessionResponse{existing->second.snapshot, {}};
+        return OfxRuntimePrepareSessionResponse{
+            response_snapshot(existing->second.snapshot, true), {}};
     }
 
     std::vector<StageTiming> timings;
@@ -58,18 +73,17 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.last_used_at = now();
     entry.snapshot.session_id = key;
     entry.snapshot.model_path = request.model_path;
-    entry.snapshot.artifact_name = request.artifact_name;
+    entry.snapshot.artifact_name = detail::canonical_ofx_artifact_name(request.model_path);
     entry.snapshot.requested_device = request.requested_device;
-    entry.snapshot.effective_device = entry.engine->current_device();
-    entry.snapshot.backend_fallback = entry.engine->backend_fallback();
     entry.snapshot.requested_quality_mode = request.requested_quality_mode;
     entry.snapshot.requested_resolution = request.requested_resolution;
     entry.snapshot.effective_resolution = request.effective_resolution;
-    entry.snapshot.recommended_resolution = entry.engine->recommended_resolution();
     entry.snapshot.ref_count = 1;
     entry.snapshot.reused_existing_session = false;
+    refresh_engine_snapshot(entry.snapshot, *entry.engine);
 
-    auto response = OfxRuntimePrepareSessionResponse{entry.snapshot, timings};
+    auto response =
+        OfxRuntimePrepareSessionResponse{response_snapshot(entry.snapshot, false), timings};
     m_sessions.emplace(key, std::move(entry));
     return response;
 }
@@ -100,6 +114,7 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
     auto result = session->second.engine->process_frame(
         transport->rgb_view(), transport->hint_view(), request.params, on_stage);
     if (!result) {
+        m_sessions.erase(session);
         return Unexpected<Error>(result.error());
     }
 
@@ -111,10 +126,10 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
     std::copy(result_foreground.data.begin(), result_foreground.data.end(),
               foreground.data.begin());
 
-    session->second.snapshot.effective_device = session->second.engine->current_device();
-    session->second.snapshot.backend_fallback = session->second.engine->backend_fallback();
+    refresh_engine_snapshot(session->second.snapshot, *session->second.engine);
     session->second.last_used_at = now();
-    return OfxRuntimeRenderFrameResponse{session->second.snapshot, timings};
+    return OfxRuntimeRenderFrameResponse{response_snapshot(session->second.snapshot, false),
+                                         timings};
 }
 
 Result<void> OfxSessionBroker::release_session(const OfxRuntimeReleaseSessionRequest& request) {
@@ -125,6 +140,11 @@ Result<void> OfxSessionBroker::release_session(const OfxRuntimeReleaseSessionReq
 
     if (session->second.snapshot.ref_count > 0) {
         session->second.snapshot.ref_count -= 1;
+    }
+    if (session->second.snapshot.ref_count == 0 &&
+        detail::should_destroy_zero_ref_session(session->second.snapshot.effective_device.backend)) {
+        m_sessions.erase(session);
+        return {};
     }
     session->second.last_used_at = now();
     return {};
@@ -140,15 +160,18 @@ std::size_t OfxSessionBroker::active_session_count() const {
                       [](const auto& pair) { return pair.second.snapshot.ref_count > 0; }));
 }
 
-void OfxSessionBroker::cleanup_idle_sessions() {
+std::size_t OfxSessionBroker::cleanup_idle_sessions() {
     const auto threshold = now() - m_options.idle_session_ttl;
+    std::size_t removed_sessions = 0;
     for (auto it = m_sessions.begin(); it != m_sessions.end();) {
         if (it->second.snapshot.ref_count == 0 && it->second.last_used_at < threshold) {
             it = m_sessions.erase(it);
+            removed_sessions += 1;
             continue;
         }
         ++it;
     }
+    return removed_sessions;
 }
 
 std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest& request) {
@@ -158,7 +181,7 @@ std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest&
         canonical_model_path = request.model_path;
     }
     return std::to_string(common::detail::fnv1a_64(
-        canonical_model_path.string() + "|" + request.artifact_name + "|" +
+        canonical_model_path.string() + "|" +
         std::to_string(static_cast<int>(request.requested_device.backend)) + "|" +
         std::to_string(request.engine_options.allow_cpu_fallback) + "|" +
         std::to_string(request.engine_options.disable_cpu_ep_fallback)));

@@ -1,6 +1,9 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
+#include <filesystem>
+#include <fstream>
 
+#include "app/hardware_profile.hpp"
 #include "app/runtime_contracts.hpp"
 #include "app/runtime_diagnostics.hpp"
 
@@ -214,6 +217,94 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_universal_model->filename == "corridorkey_int8_1024.onnx");
 }
 
+TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) == 1536);
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) == 2048);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 16000);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
+}
+
+TEST_CASE("hardware profile delegates Windows safe quality ceilings to runtime contracts",
+          "[unit][runtime][regression]") {
+    const auto rtx_strategy =
+        HardwareProfile::get_best_strategy(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
+    CHECK(rtx_strategy.target_resolution == 1024);
+    CHECK(rtx_strategy.recommended_variant == "fp16");
+
+    const auto directml_strategy =
+        HardwareProfile::get_best_strategy(DeviceInfo{"AMD Radeon", 16384, Backend::DirectML});
+    CHECK(directml_strategy.target_resolution == 1024);
+    CHECK(directml_strategy.recommended_variant == "int8");
+
+    const auto cpu_strategy =
+        HardwareProfile::get_best_strategy(DeviceInfo{"Generic CPU", 0, Backend::CPU});
+    CHECK(cpu_strategy.target_resolution == 512);
+    CHECK(cpu_strategy.recommended_variant == "int8");
+}
+
+TEST_CASE("runtime coarse-to-fine policy prefers safer coarse artifacts", "[unit][runtime]") {
+    const DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
+    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto));
+    REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536) == 1024);
+    REQUIRE_FALSE(
+        should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Direct));
+    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536,
+                                                  QualityFallbackMode::CoarseToFine));
+    REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 768) == 768);
+    REQUIRE_FALSE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 1536).has_value());
+}
+
+TEST_CASE("runtime refinement override validation is explicit for current artifacts",
+          "[unit][runtime][regression]") {
+    auto auto_mode =
+        validate_refinement_mode_for_artifact("corridorkey_fp16_1024.onnx", RefinementMode::Auto);
+    REQUIRE(auto_mode.has_value());
+
+    auto tiled_mode =
+        validate_refinement_mode_for_artifact("corridorkey_fp16_1024.onnx", RefinementMode::Tiled);
+    REQUIRE_FALSE(tiled_mode.has_value());
+    REQUIRE(tiled_mode.error().code == ErrorCode::InvalidParameters);
+    REQUIRE(tiled_mode.error().message.find("refinement strategy override") !=
+            std::string::npos);
+}
+
+TEST_CASE("runtime artifact selection prefers lower packaged candidates automatically",
+          "[unit][runtime][regression]") {
+    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-runtime-artifact-select";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+    std::ofstream(temp_dir / "corridorkey_fp16_768.onnx") << "stub";
+    std::ofstream(temp_dir / "corridorkey_fp16_512.onnx") << "stub";
+
+    auto selections = quality_artifact_candidates_for_request(
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 1536,
+        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+    REQUIRE(selections.has_value());
+    REQUIRE_FALSE(selections->empty());
+    CHECK(selections->front().effective_resolution == 768);
+    CHECK(selections->front().coarse_to_fine);
+
+    auto expected = expected_artifact_paths_for_request(
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 1536,
+        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+    REQUIRE(expected.has_value());
+    REQUIRE(expected->size() == 3);
+    CHECK(expected->front().filename() == "corridorkey_fp16_1024.onnx");
+    CHECK((*expected)[1].filename() == "corridorkey_fp16_768.onnx");
+    CHECK((*expected)[2].filename() == "corridorkey_fp16_512.onnx");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("packaged model resolution uses catalog entries for non-onnx artifacts",
+          "[unit][runtime][regression]") {
+    REQUIRE(packaged_model_resolution("corridorkey_mlx.safetensors") == 2048);
+    REQUIRE(is_packaged_corridorkey_model("corridorkey_mlx.safetensors"));
+}
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {
     auto json = summarize_latency_samples({4.0, 6.0, 8.0, 10.0});
 

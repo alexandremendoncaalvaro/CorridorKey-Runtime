@@ -11,6 +11,7 @@ add_executable(test_integration
     test_exr_roundtrip.cpp
     test_ofx_runtime_client.cpp
     test_ofx_runtime_service.cpp
+    test_ofx_session_broker.cpp
     test_ofx_plugin_exceptions.cpp
     test_job_orchestrator.cpp
     test_png_roundtrip.cpp

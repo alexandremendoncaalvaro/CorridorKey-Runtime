@@ -41,6 +41,7 @@ struct FakeParamValue {
 
 struct FakeParamSet {
     std::unordered_map<std::string, std::unique_ptr<FakeParamValue>> params;
+    std::vector<std::string> define_order;
 };
 
 struct FakeEffect {
@@ -293,6 +294,7 @@ OfxStatus fake_param_define(OfxParamSetHandle handle, const char* param_type, co
     }
     auto param = std::make_unique<FakeParamValue>(param_kind_for_type(param_type));
     auto* raw = param.get();
+    param_set->define_order.emplace_back(name);
     param_set->params[name] = std::move(param);
     *props = reinterpret_cast<OfxPropertySetHandle>(&raw->props);
     return kOfxStatOK;
@@ -478,17 +480,97 @@ TEST_CASE("describe_in_context places recover original details in interior detai
     const auto& edge_erode_props = descriptor.param_set.params.at(kParamEdgeErode)->props;
     const auto& despill_props = descriptor.param_set.params.at(kParamDespillStrength)->props;
     const auto& gamma_props = descriptor.param_set.params.at(kParamAlphaGamma)->props;
+    const auto& spill_method_props = descriptor.param_set.params.at(kParamSpillMethod)->props;
+    const auto& render_timeout_props = descriptor.param_set.params.at(kParamRenderTimeout)->props;
     const auto& input_color_props = descriptor.param_set.params.at(kParamInputColorSpace)->props;
 
     CHECK(prop_strings(recover_props, kOfxParamPropParent).front() == "interior_detail_group");
-    CHECK(prop_strings(edge_erode_props, kOfxParamPropParent).front() == "interior_detail_group");
+    CHECK(prop_strings(edge_erode_props, kOfxParamPropParent).front() ==
+          "advanced_interior_detail_group");
     CHECK(prop_strings(despill_props, kOfxParamPropParent).front() == "edge_spill_group");
+    CHECK(prop_strings(gamma_props, kOfxParamPropParent).front() == "advanced_matte_group");
+    CHECK(prop_strings(spill_method_props, kOfxParamPropParent).front() ==
+          "advanced_processing_group");
+    CHECK(prop_strings(render_timeout_props, kOfxParamPropParent).front() ==
+          "advanced_runtime_group");
     CHECK(prop_strings(gamma_props, kOfxParamPropHint).front().find("Values above 1.0 brighten") !=
           std::string::npos);
     CHECK(prop_strings(input_color_props, kOfxParamPropChoiceOption).size() == 3);
     CHECK(prop_strings(input_color_props, kOfxParamPropChoiceOption).at(2) ==
           "Auto (Host Managed)");
     CHECK(prop_ints(input_color_props, kOfxParamPropDefault).front() == kDefaultInputColorSpace);
+}
+
+TEST_CASE("describe_in_context keeps runtime first and help second with advanced diagnostics gated",
+          "[unit][ofx][regression]") {
+    SuiteScope suites;
+    FakeEffect descriptor;
+
+    REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                                kOfxImageEffectContextFilter) == kOfxStatOK);
+
+    REQUIRE(descriptor.param_set.define_order.size() >= 2);
+    std::vector<std::string> group_order;
+    for (const auto& name : descriptor.param_set.define_order) {
+        auto it = descriptor.param_set.params.find(name);
+        REQUIRE(it != descriptor.param_set.params.end());
+        if (it->second->kind == FakeParamValue::Kind::Group) {
+            group_order.push_back(name);
+        }
+    }
+    REQUIRE(group_order.size() >= 2);
+    CHECK(group_order.front() == "runtime_group");
+    CHECK(group_order.at(1) == kParamHelpGroup);
+
+    const auto& runtime_group_props = descriptor.param_set.params.at("runtime_group")->props;
+    const auto& help_group_props = descriptor.param_set.params.at(kParamHelpGroup)->props;
+    const auto& runtime_details_group_props =
+        descriptor.param_set.params.at("runtime_details_group")->props;
+    const auto& guide_source_props = descriptor.param_set.params.at(kParamRuntimeGuideSource)->props;
+    const auto& requested_quality_props =
+        descriptor.param_set.params.at(kParamRuntimeRequestedQuality)->props;
+    const auto& ceiling_props =
+        descriptor.param_set.params.at(kParamRuntimeSafeQualityCeiling)->props;
+    const auto& runtime_path_props = descriptor.param_set.params.at(kParamRuntimePath)->props;
+    const auto& backend_work_props = descriptor.param_set.params.at(kParamRuntimeBackendWork)->props;
+    const auto& refinement_props = descriptor.param_set.params.at(kParamRefinementMode)->props;
+    const auto& advanced_group_props = descriptor.param_set.params.at("advanced_group")->props;
+    const auto& advanced_detail_group_props =
+        descriptor.param_set.params.at("advanced_interior_detail_group")->props;
+    const auto& advanced_matte_group_props =
+        descriptor.param_set.params.at("advanced_matte_group")->props;
+    const auto& advanced_processing_group_props =
+        descriptor.param_set.params.at("advanced_processing_group")->props;
+    const auto& advanced_runtime_group_props =
+        descriptor.param_set.params.at("advanced_runtime_group")->props;
+
+    CHECK(prop_ints(runtime_group_props, kOfxParamPropGroupOpen).front() == 1);
+    CHECK(prop_ints(help_group_props, kOfxParamPropGroupOpen).front() == 0);
+    CHECK(prop_strings(runtime_details_group_props, kOfxParamPropParent).front() == "runtime_group");
+    CHECK(prop_ints(runtime_details_group_props, kOfxParamPropGroupOpen).front() == 0);
+    CHECK(prop_strings(guide_source_props, kOfxParamPropParent).front() == "runtime_group");
+    CHECK(prop_strings(requested_quality_props, kOfxParamPropParent).front() ==
+          "runtime_details_group");
+    CHECK(prop_strings(ceiling_props, kOfxParamPropParent).front() == "runtime_details_group");
+    CHECK(prop_strings(runtime_path_props, kOfxParamPropParent).front() == "runtime_details_group");
+    CHECK(prop_strings(backend_work_props, kOfxParamPropParent).front() ==
+          "runtime_details_group");
+    CHECK(prop_ints(advanced_group_props, kOfxParamPropGroupOpen).front() == 0);
+    CHECK(prop_strings(advanced_detail_group_props, kOfxParamPropParent).front() ==
+          "advanced_group");
+    CHECK(prop_strings(advanced_matte_group_props, kOfxParamPropParent).front() ==
+          "advanced_group");
+    CHECK(prop_strings(advanced_processing_group_props, kOfxParamPropParent).front() ==
+          "advanced_group");
+    CHECK(prop_strings(advanced_runtime_group_props, kOfxParamPropParent).front() ==
+          "advanced_group");
+    CHECK(prop_ints(advanced_detail_group_props, kOfxParamPropGroupOpen).front() == 0);
+    CHECK(prop_ints(advanced_matte_group_props, kOfxParamPropGroupOpen).front() == 0);
+    CHECK(prop_ints(advanced_processing_group_props, kOfxParamPropGroupOpen).front() == 0);
+    CHECK(prop_ints(advanced_runtime_group_props, kOfxParamPropGroupOpen).front() == 0);
+    CHECK(prop_strings(refinement_props, kOfxParamPropParent).front() ==
+          "advanced_processing_group");
+    CHECK(prop_ints(refinement_props, kOfxParamPropEnabled).front() == 0);
 }
 
 TEST_CASE("clip preferences request host-managed source colourspaces and raw alpha hint",

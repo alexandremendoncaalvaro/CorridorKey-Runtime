@@ -121,6 +121,57 @@ std::string backend_to_string(Backend backend) {
     }
 }
 
+std::string quality_fallback_mode_to_string(QualityFallbackMode mode) {
+    switch (mode) {
+        case QualityFallbackMode::Direct:
+            return "direct";
+        case QualityFallbackMode::CoarseToFine:
+            return "coarse_to_fine";
+        default:
+            return "auto";
+    }
+}
+
+Result<QualityFallbackMode> quality_fallback_mode_from_string(const std::string& value) {
+    if (value == "auto") return QualityFallbackMode::Auto;
+    if (value == "direct") return QualityFallbackMode::Direct;
+    if (value == "coarse_to_fine") return QualityFallbackMode::CoarseToFine;
+    return Unexpected<Error>(invalid_protocol_error("Unknown quality fallback mode: " + value));
+}
+
+std::string alpha_hint_policy_to_string(AlphaHintPolicy policy) {
+    switch (policy) {
+        case AlphaHintPolicy::RequireExternalHint:
+            return "require_external_hint";
+        default:
+            return "auto_rough_fallback";
+    }
+}
+
+Result<AlphaHintPolicy> alpha_hint_policy_from_string(const std::string& value) {
+    if (value == "auto_rough_fallback") return AlphaHintPolicy::AutoRoughFallback;
+    if (value == "require_external_hint") return AlphaHintPolicy::RequireExternalHint;
+    return Unexpected<Error>(invalid_protocol_error("Unknown alpha hint policy: " + value));
+}
+
+std::string refinement_mode_to_string(RefinementMode mode) {
+    switch (mode) {
+        case RefinementMode::FullFrame:
+            return "full_frame";
+        case RefinementMode::Tiled:
+            return "tiled";
+        default:
+            return "auto";
+    }
+}
+
+Result<RefinementMode> refinement_mode_from_string(const std::string& value) {
+    if (value == "auto") return RefinementMode::Auto;
+    if (value == "full_frame") return RefinementMode::FullFrame;
+    if (value == "tiled") return RefinementMode::Tiled;
+    return Unexpected<Error>(invalid_protocol_error("Unknown refinement mode: " + value));
+}
+
 Json backend_fallback_json(const BackendFallbackInfo& fallback) {
     return Json{{"requested_backend", backend_to_string(fallback.requested_backend)},
                 {"selected_backend", backend_to_string(fallback.selected_backend)},
@@ -222,11 +273,17 @@ Result<EngineCreateOptions> engine_create_options_from_json(const nlohmann::json
 
 nlohmann::json to_json(const InferenceParams& params) {
     return Json{{"target_resolution", params.target_resolution},
+                {"requested_quality_resolution", params.requested_quality_resolution},
+                {"quality_fallback_mode",
+                 quality_fallback_mode_to_string(params.quality_fallback_mode)},
+                {"refinement_mode", refinement_mode_to_string(params.refinement_mode)},
+                {"coarse_resolution_override", params.coarse_resolution_override},
                 {"despill_strength", params.despill_strength},
                 {"spill_method", params.spill_method},
                 {"auto_despeckle", params.auto_despeckle},
                 {"despeckle_size", params.despeckle_size},
                 {"refiner_scale", params.refiner_scale},
+                {"alpha_hint_policy", alpha_hint_policy_to_string(params.alpha_hint_policy)},
                 {"input_is_linear", params.input_is_linear},
                 {"batch_size", params.batch_size},
                 {"enable_tiling", params.enable_tiling},
@@ -243,6 +300,27 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
     auto target_resolution = required_int(json, "target_resolution");
     if (!target_resolution) return Unexpected<Error>(target_resolution.error());
     params.target_resolution = *target_resolution;
+    if (json.contains("requested_quality_resolution") &&
+        json.at("requested_quality_resolution").is_number_integer()) {
+        params.requested_quality_resolution =
+            json.at("requested_quality_resolution").get<int>();
+    }
+    if (json.contains("quality_fallback_mode") && json.at("quality_fallback_mode").is_string()) {
+        auto fallback_mode =
+            quality_fallback_mode_from_string(json.at("quality_fallback_mode").get<std::string>());
+        if (!fallback_mode) return Unexpected<Error>(fallback_mode.error());
+        params.quality_fallback_mode = *fallback_mode;
+    }
+    if (json.contains("refinement_mode") && json.at("refinement_mode").is_string()) {
+        auto refinement_mode =
+            refinement_mode_from_string(json.at("refinement_mode").get<std::string>());
+        if (!refinement_mode) return Unexpected<Error>(refinement_mode.error());
+        params.refinement_mode = *refinement_mode;
+    }
+    if (json.contains("coarse_resolution_override") &&
+        json.at("coarse_resolution_override").is_number_integer()) {
+        params.coarse_resolution_override = json.at("coarse_resolution_override").get<int>();
+    }
     if (!json.contains("despill_strength") || !json.at("despill_strength").is_number()) {
         return Unexpected<Error>(invalid_protocol_error("Missing numeric field: despill_strength"));
     }
@@ -263,6 +341,12 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
         return Unexpected<Error>(invalid_protocol_error("Missing numeric field: refiner_scale"));
     }
     params.refiner_scale = json.at("refiner_scale").get<float>();
+    if (json.contains("alpha_hint_policy") && json.at("alpha_hint_policy").is_string()) {
+        auto alpha_hint_policy =
+            alpha_hint_policy_from_string(json.at("alpha_hint_policy").get<std::string>());
+        if (!alpha_hint_policy) return Unexpected<Error>(alpha_hint_policy.error());
+        params.alpha_hint_policy = *alpha_hint_policy;
+    }
     auto input_is_linear = required_bool(json, "input_is_linear");
     if (!input_is_linear) return Unexpected<Error>(input_is_linear.error());
     params.input_is_linear = *input_is_linear;

@@ -32,6 +32,38 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
     return normalized_lower(selector);
 }
 
+std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_memory_mb) {
+    if (available_memory_mb <= 0) {
+        return std::nullopt;
+    }
+    if (available_memory_mb >= 24000) {
+        return 2048;
+    }
+    if (available_memory_mb >= 16000) {
+        return 1536;
+    }
+    if (available_memory_mb >= 10000) {
+        return 1024;
+    }
+    if (available_memory_mb >= 8000) {
+        return 768;
+    }
+    return 512;
+}
+
+std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_memory_mb) {
+    if (available_memory_mb <= 0) {
+        return std::nullopt;
+    }
+    if (available_memory_mb >= 10000) {
+        return 1024;
+    }
+    if (available_memory_mb >= 8000) {
+        return 768;
+    }
+    return 512;
+}
+
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
     if (selector == "preview") {
@@ -61,6 +93,69 @@ std::string resolve_platform_preset_alias(const std::string& selector,
     return selector;
 }
 
+std::optional<ModelCatalogEntry> model_catalog_entry_for_path(const std::filesystem::path& model_path) {
+    return app::find_model_by_filename(model_path.filename().string());
+}
+
+std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
+    const std::filesystem::path& models_root, Backend backend, int resolution,
+    app::ArtifactVariantPreference variant_preference) {
+    if (backend == Backend::MLX) {
+        return {models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn")};
+    }
+
+    const std::filesystem::path fp16_path =
+        models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
+    const std::filesystem::path int8_path =
+        models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
+
+    if (backend == Backend::TensorRT || backend == Backend::CUDA) {
+        if (backend == Backend::TensorRT) {
+            return {fp16_path};
+        }
+        switch (variant_preference) {
+            case app::ArtifactVariantPreference::Int8:
+                return {int8_path, fp16_path};
+            case app::ArtifactVariantPreference::Auto:
+            case app::ArtifactVariantPreference::FP16:
+            default:
+                return {fp16_path, int8_path};
+        }
+    }
+
+    switch (variant_preference) {
+        case app::ArtifactVariantPreference::FP16:
+            return {fp16_path, int8_path};
+        case app::ArtifactVariantPreference::Int8:
+        case app::ArtifactVariantPreference::Auto:
+        default:
+            return {int8_path, fp16_path};
+    }
+}
+
+Result<std::pair<int, bool>> search_resolution_for_request(const DeviceInfo& requested_device,
+                                                           int requested_resolution,
+                                                           QualityFallbackMode fallback_mode,
+                                                           int coarse_resolution_override) {
+    const bool coarse_to_fine = app::should_use_coarse_to_fine_for_request(
+        requested_device, requested_resolution, fallback_mode, coarse_resolution_override);
+    if (!coarse_to_fine) {
+        return std::pair<int, bool>{requested_resolution, false};
+    }
+
+    auto coarse_resolution = app::coarse_artifact_resolution_for_request(
+        requested_device, requested_resolution, coarse_resolution_override);
+    if (!coarse_resolution.has_value() || *coarse_resolution >= requested_resolution) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Coarse-to-fine requested a smaller coarse artifact, but no valid packaged coarse "
+            "resolution could be resolved for this request.",
+        }};
+    }
+
+    return std::pair<int, bool>{*coarse_resolution, true};
+}
+
 ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
                                    const std::string& filename, const std::string& artifact_family,
                                    const std::string& recommended_backend,
@@ -86,6 +181,23 @@ ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
     entry.intended_platforms = std::move(intended_platforms);
     entry.validated_hardware_tiers = std::move(validated_hardware_tiers);
     return entry;
+}
+
+InferenceParams make_preset_inference_params(int target_resolution, bool auto_despeckle,
+                                             bool enable_tiling, int tile_padding) {
+    InferenceParams params;
+    params.target_resolution = target_resolution;
+    params.despill_strength = 1.0F;
+    params.spill_method = 0;
+    params.auto_despeckle = auto_despeckle;
+    params.despeckle_size = 400;
+    params.refiner_scale = 1.0F;
+    params.alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
+    params.input_is_linear = false;
+    params.batch_size = 1;
+    params.enable_tiling = enable_tiling;
+    params.tile_padding = tile_padding;
+    return params;
 }
 
 }  // namespace
@@ -314,7 +426,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-preview",
             "Mac Preview",
             "Fast validation preset for smoke tests and low-memory systems.",
-            InferenceParams{512, 1.0F, 0, false, 400, 1.0F, false, 1, false, 32},
+            make_preset_inference_params(512, false, false, 32),
             "corridorkey_int8_512.onnx",
             "smoke_preview",
             false,
@@ -328,7 +440,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Mac Balanced",
             "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
             "and no implicit cleanup.",
-            InferenceParams{0, 1.0F, 0, false, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(0, false, true, 64),
             "corridorkey_mlx.safetensors",
             "apple_acceleration_primary",
             true,
@@ -341,7 +453,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-max-quality",
             "Mac Max Quality",
             "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
-            InferenceParams{0, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(0, true, true, 64),
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",
             false,
@@ -354,7 +466,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-cpu-safe",
             "Windows CPU Safe",
             "Compatibility preset that keeps the Windows RTX bundle on the CPU fallback path.",
-            InferenceParams{512, 1.0F, 0, false, 400, 1.0F, false, 1, false, 32},
+            make_preset_inference_params(512, false, false, 32),
             "corridorkey_int8_512.onnx",
             "windows_cpu_fallback",
             false,
@@ -368,7 +480,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Windows RTX Balanced",
             "Default Windows RTX preset with FP16 inference, runtime cache enabled, and tiling "
             "ready for portable bundles.",
-            InferenceParams{768, 1.0F, 0, false, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(768, false, true, 64),
             "corridorkey_fp16_768.onnx",
             "windows_rtx_primary",
             false,
@@ -381,7 +493,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-rtx-max-quality",
             "Windows RTX Max Quality",
             "Higher-quality Windows RTX preset with cleanup enabled for the 10 GB and up tier.",
-            InferenceParams{1024, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(1024, true, true, 64),
             "corridorkey_fp16_1024.onnx",
             "windows_rtx_primary",
             false,
@@ -394,7 +506,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-rtx-ultra-quality",
             "Windows RTX Ultra Quality",
             "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
-            InferenceParams{2048, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(2048, true, true, 64),
             "corridorkey_fp16_2048.onnx",
             "windows_rtx_primary",
             false,
@@ -407,7 +519,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-ultra-quality",
             "Mac Ultra Quality",
             "Extreme quality Apple Silicon preset using 2048px MLX bridge with cleanup enabled.",
-            InferenceParams{2048, 1.0F, 0, true, 400, 1.0F, false, 1, true, 64},
+            make_preset_inference_params(2048, true, true, 64),
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",
             false,
@@ -501,6 +613,347 @@ nlohmann::json to_json(const Error& error) {
     return json;
 }
 
+std::optional<int> max_supported_resolution_for_device(const DeviceInfo& requested_device) {
+    switch (requested_device.backend) {
+        case Backend::CPU:
+            return 512;
+        case Backend::TensorRT:
+        case Backend::CUDA:
+            return windows_tensorrt_resolution_ceiling(requested_device.available_memory_mb);
+        case Backend::DirectML:
+        case Backend::WindowsML:
+        case Backend::OpenVINO:
+            return windows_universal_resolution_ceiling(requested_device.available_memory_mb);
+        default:
+            return std::nullopt;
+    }
+}
+
+std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, int resolution) {
+    switch (backend) {
+        case Backend::TensorRT:
+        case Backend::CUDA:
+            if (resolution >= 2048) {
+                return 24000;
+            }
+            if (resolution >= 1536) {
+                return 16000;
+            }
+            if (resolution >= 1024) {
+                return 10000;
+            }
+            if (resolution >= 768) {
+                return 8000;
+            }
+            return std::nullopt;
+        case Backend::DirectML:
+        case Backend::WindowsML:
+        case Backend::OpenVINO:
+            if (resolution >= 1024) {
+                return 10000;
+            }
+            if (resolution >= 768) {
+                return 8000;
+            }
+            return std::nullopt;
+        default:
+            return std::nullopt;
+    }
+}
+
+bool should_use_coarse_to_fine_for_request(const DeviceInfo& requested_device,
+                                           int requested_resolution,
+                                           QualityFallbackMode fallback_mode,
+                                           int coarse_resolution_override) {
+    if (fallback_mode == QualityFallbackMode::Direct) {
+        return false;
+    }
+    if (fallback_mode == QualityFallbackMode::CoarseToFine) {
+        return true;
+    }
+    if (coarse_resolution_override > 0 && coarse_resolution_override < requested_resolution) {
+        return true;
+    }
+    auto max_resolution = max_supported_resolution_for_device(requested_device);
+    if (!max_resolution.has_value()) {
+        return false;
+    }
+    return requested_resolution > *max_resolution;
+}
+
+std::optional<int> coarse_artifact_resolution_for_request(const DeviceInfo& requested_device,
+                                                          int requested_resolution,
+                                                          int coarse_resolution_override) {
+    if (coarse_resolution_override > 0) {
+        if (coarse_resolution_override < requested_resolution) {
+            return coarse_resolution_override;
+        }
+        return std::nullopt;
+    }
+
+    auto max_resolution = max_supported_resolution_for_device(requested_device);
+    if (!max_resolution.has_value()) {
+        return std::nullopt;
+    }
+
+    const int safe_resolution = std::min(*max_resolution, 1024);
+    if (safe_resolution <= 0 || safe_resolution >= requested_resolution) {
+        return std::nullopt;
+    }
+    return safe_resolution;
+}
+std::optional<int> packaged_model_resolution(const std::filesystem::path& model_path) {
+    if (auto catalog_entry = model_catalog_entry_for_path(model_path); catalog_entry.has_value()) {
+        return catalog_entry->resolution;
+    }
+
+    const std::string stem = model_path.stem().string();
+    const std::size_t separator = stem.find_last_of('_');
+    if (separator == std::string::npos || separator + 1 >= stem.size()) {
+        return std::nullopt;
+    }
+
+    const std::string token = stem.substr(separator + 1);
+    if (token.empty()) {
+        return std::nullopt;
+    }
+    for (char ch : token) {
+        if (ch < '0' || ch > '9') {
+            return std::nullopt;
+        }
+    }
+
+    return std::stoi(token);
+}
+
+bool is_packaged_corridorkey_model(const std::filesystem::path& model_path) {
+    if (auto catalog_entry = model_catalog_entry_for_path(model_path); catalog_entry.has_value()) {
+        return true;
+    }
+
+    const std::string filename = model_path.filename().string();
+    return filename.rfind("corridorkey_", 0) == 0 &&
+           packaged_model_resolution(model_path).has_value();
+}
+
+std::filesystem::path sibling_model_path_for_resolution(const std::filesystem::path& model_path,
+                                                        int resolution) {
+    if (!is_packaged_corridorkey_model(model_path)) {
+        return {};
+    }
+
+    const auto current_resolution = packaged_model_resolution(model_path);
+    if (!current_resolution.has_value()) {
+        return {};
+    }
+
+    std::string filename = model_path.filename().string();
+    const std::string current_token = "_" + std::to_string(*current_resolution);
+    const std::size_t token_pos = filename.rfind(current_token);
+    if (token_pos == std::string::npos) {
+        return {};
+    }
+
+    filename.replace(token_pos + 1, current_token.size() - 1, std::to_string(resolution));
+    return model_path.parent_path() / filename;
+}
+
+Result<void> validate_refinement_mode_for_artifact(const std::filesystem::path& model_path,
+                                                   RefinementMode refinement_mode) {
+    if (refinement_mode == RefinementMode::Auto) {
+        return {};
+    }
+
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "The selected runtime artifact does not advertise a validated refinement strategy "
+        "override. Use refinement mode 'auto' with the current packaged model family: " +
+            model_path.filename().string(),
+    }};
+}
+
+Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
+    const std::filesystem::path& models_root, const DeviceInfo& requested_device,
+    int requested_resolution, ArtifactVariantPreference variant_preference,
+    bool allow_lower_resolution_fallback,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override) {
+    if (requested_resolution <= 0) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Requested quality resolution must be greater than zero.",
+        }};
+    }
+    if (coarse_resolution_override > 0 && coarse_resolution_override >= requested_resolution) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
+            "quality.",
+        }};
+    }
+
+    auto resolution_search = search_resolution_for_request(
+        requested_device, requested_resolution, fallback_mode, coarse_resolution_override);
+    if (!resolution_search) {
+        return Unexpected<Error>(resolution_search.error());
+    }
+
+    const int search_resolution = resolution_search->first;
+    const bool coarse_to_fine = resolution_search->second;
+    const bool require_exact_resolution =
+        !allow_lower_resolution_fallback && (!coarse_to_fine || coarse_resolution_override > 0);
+
+    std::vector<std::filesystem::path> expected;
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    for (int resolution : kFallbackResolutions) {
+        if (resolution > search_resolution) {
+            continue;
+        }
+        if (require_exact_resolution && resolution != search_resolution) {
+            continue;
+        }
+
+        auto artifact_paths = candidate_artifact_paths_for_request(models_root, requested_device.backend,
+                                                                  resolution, variant_preference);
+        expected.insert(expected.end(), artifact_paths.begin(), artifact_paths.end());
+    }
+
+    return expected;
+}
+
+Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
+    const std::filesystem::path& models_root, const DeviceInfo& requested_device,
+    int requested_resolution, ArtifactVariantPreference variant_preference,
+    bool allow_lower_resolution_fallback,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override) {
+    auto expected_paths = expected_artifact_paths_for_request(
+        models_root, requested_device, requested_resolution, variant_preference,
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+    if (!expected_paths) {
+        return Unexpected<Error>(expected_paths.error());
+    }
+
+    auto resolution_search = search_resolution_for_request(
+        requested_device, requested_resolution, fallback_mode, coarse_resolution_override);
+    if (!resolution_search) {
+        return Unexpected<Error>(resolution_search.error());
+    }
+
+    const int search_resolution = resolution_search->first;
+    const bool coarse_to_fine = resolution_search->second;
+    const bool require_exact_resolution =
+        !allow_lower_resolution_fallback && (!coarse_to_fine || coarse_resolution_override > 0);
+
+    std::vector<ArtifactSelection> selections;
+    bool exact_artifact_available = false;
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    for (int resolution : kFallbackResolutions) {
+        if (resolution > search_resolution) {
+            continue;
+        }
+        if (require_exact_resolution && resolution != search_resolution && !exact_artifact_available) {
+            continue;
+        }
+
+        auto artifact_paths = candidate_artifact_paths_for_request(models_root, requested_device.backend,
+                                                                  resolution, variant_preference);
+        bool found_for_resolution = false;
+        for (const auto& artifact_path : artifact_paths) {
+            if (!std::filesystem::exists(artifact_path)) {
+                continue;
+            }
+            found_for_resolution = true;
+            selections.push_back(ArtifactSelection{
+                artifact_path,
+                requested_resolution,
+                resolution,
+                resolution != requested_resolution || coarse_to_fine,
+                coarse_to_fine,
+            });
+        }
+
+        if (require_exact_resolution && resolution == search_resolution) {
+            if (!found_for_resolution) {
+                return std::vector<ArtifactSelection>{};
+            }
+            exact_artifact_available = true;
+        }
+    }
+
+    return selections;
+}
+
+Result<std::filesystem::path> resolve_model_artifact_for_request(
+    const std::filesystem::path& model_path, const InferenceParams& params,
+    const DeviceInfo& requested_device) {
+    const int model_resolution = packaged_model_resolution(model_path).value_or(0);
+    const int requested_resolution =
+        params.requested_quality_resolution > 0
+            ? params.requested_quality_resolution
+            : (params.target_resolution > 0 ? params.target_resolution : model_resolution);
+
+    const bool has_override = params.coarse_resolution_override > 0;
+    const bool coarse_to_fine_requested =
+        params.quality_fallback_mode == QualityFallbackMode::CoarseToFine || has_override;
+    if (coarse_to_fine_requested && has_override &&
+        params.coarse_resolution_override >= requested_resolution) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
+            "quality.",
+        }};
+    }
+
+    const auto validate_resolved_model = [&](const std::filesystem::path& resolved_model_path)
+        -> Result<std::filesystem::path> {
+        auto refinement_validation =
+            validate_refinement_mode_for_artifact(resolved_model_path, params.refinement_mode);
+        if (!refinement_validation) {
+            return Unexpected<Error>(refinement_validation.error());
+        }
+        return resolved_model_path;
+    };
+
+    if (!should_use_coarse_to_fine_for_request(requested_device, requested_resolution,
+                                               params.quality_fallback_mode,
+                                               params.coarse_resolution_override)) {
+        return validate_resolved_model(model_path);
+    }
+
+    if (!is_packaged_corridorkey_model(model_path)) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Explicit --model only supports coarse-to-fine for packaged CorridorKey artifacts. "
+            "Use a packaged model or switch --quality-fallback to direct.",
+        }};
+    }
+
+    auto coarse_resolution_search = search_resolution_for_request(
+        requested_device, requested_resolution, params.quality_fallback_mode,
+        params.coarse_resolution_override);
+    if (!coarse_resolution_search) {
+        return Unexpected<Error>(coarse_resolution_search.error());
+    }
+    const int coarse_resolution = coarse_resolution_search->first;
+
+    auto coarse_model_path = sibling_model_path_for_resolution(model_path, coarse_resolution);
+    if (coarse_model_path.empty()) {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Coarse-to-fine requested a smaller packaged artifact, but the artifact name "
+            "could not be derived from the selected model.",
+        }};
+    }
+
+    if (!std::filesystem::exists(coarse_model_path)) {
+        return Unexpected<Error>{Error{
+            ErrorCode::ModelLoadFailed,
+            "Coarse-to-fine requested a packaged coarse artifact, but it is missing: " +
+                coarse_model_path.string(),
+        }};
+    }
+
+    return validate_resolved_model(coarse_model_path);
+}
 nlohmann::json to_json(const BackendFallbackInfo& fallback) {
     nlohmann::json json;
     json["requested_backend"] = backend_to_string(fallback.requested_backend);
@@ -611,6 +1064,11 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     params["source_passthrough"] = preset.params.source_passthrough;
     params["sp_erode_px"] = preset.params.sp_erode_px;
     params["sp_blur_px"] = preset.params.sp_blur_px;
+    params["requested_quality_resolution"] = preset.params.requested_quality_resolution;
+    params["quality_fallback_mode"] =
+        static_cast<int>(preset.params.quality_fallback_mode);
+    params["refinement_mode"] = static_cast<int>(preset.params.refinement_mode);
+    params["coarse_resolution_override"] = preset.params.coarse_resolution_override;
 
     nlohmann::json json;
     json["id"] = preset.id;
