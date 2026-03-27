@@ -222,13 +222,7 @@ function Invoke-ExternalCommand {
 }
 
 function Assert-RequiredModels {
-    $requiredModels = @(
-        "corridorkey_fp16_768.onnx",
-        "corridorkey_fp16_1024.onnx",
-        "corridorkey_int8_512.onnx"
-    )
-
-    foreach ($model in $requiredModels) {
+    foreach ($model in (Get-PreparedModelList)) {
         $modelPath = Join-Path $modelsDir $model
         if (-not (Test-Path $modelPath)) {
             throw "Missing required prepared model: $modelPath"
@@ -236,6 +230,42 @@ function Assert-RequiredModels {
     }
 }
 
+function Invoke-ModelPackValidation {
+    param(
+        [string]$UvPath,
+        [string]$ToolDir
+    )
+
+    $arguments = @(
+        "run", "python", "validate_model_pack.py",
+        "--dir", $modelsDir,
+        "--models"
+    ) + (Get-PreparedModelList)
+
+    Write-Host "[validate-models] Verifying ONNX contracts and ORT loadability..."
+    Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $ToolDir -Arguments $arguments
+}
+
+function Invoke-ExportParityValidation {
+    param(
+        [string]$UvPath,
+        [string]$ToolDir,
+        [string]$CheckpointPath,
+        [string]$SourceRepo,
+        [string]$ExportDir
+    )
+
+    $arguments = @(
+        "run", "python", "validate_export_parity.py",
+        "--ckpt", $CheckpointPath,
+        "--dir", $ExportDir,
+        "--repo-path", $SourceRepo,
+        "--models"
+    ) + (Get-IntermediateModelList)
+
+    Write-Host "[validate-export] Verifying exported ONNX parity against the canonical PyTorch model..."
+    Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $ToolDir -Arguments $arguments
+}
 function Invoke-ModelPreparation {
     param(
         [string]$UvPath,
@@ -245,11 +275,12 @@ function Invoke-ModelPreparation {
     )
 
     $toolDir = Join-Path $repoRoot "tools\model_exporter"
-    $baseModelPath = Join-Path $modelsDir "corridorkey_fp32.onnx"
+    $tempModelsDir = Join-Path $repoRoot "temp\windows-model-prep"
+    $baseModelPath = Join-Path $tempModelsDir "corridorkey_fp32.onnx"
 
     $needsPreparation = $Force.IsPresent
     if (-not $needsPreparation) {
-        foreach ($expected in @("corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_int8_512.onnx")) {
+        foreach ($expected in (Get-PreparedModelList)) {
             if (-not (Test-Path (Join-Path $modelsDir $expected))) {
                 $needsPreparation = $true
                 break
@@ -259,29 +290,69 @@ function Invoke-ModelPreparation {
 
     if (-not $needsPreparation) {
         Write-Host "[1/5] Reusing prepared Windows RTX model pack from $modelsDir"
+        Remove-IntermediateModelsFromDestination
+        Assert-RequiredModels
+        Invoke-ModelPackValidation -UvPath $UvPath -ToolDir $toolDir
         return
     }
 
-    Write-Host "[1/5] Exporting CorridorKey ONNX models..."
-    Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
-        "run", "python", "export_onnx.py",
-        "--ckpt", $CheckpointPath,
-        "--out", $baseModelPath,
-        "--repo-path", $SourceRepo
-    )
+    if (Test-Path $tempModelsDir) {
+        Remove-Item $tempModelsDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $tempModelsDir | Out-Null
 
-    Write-Host "[2/5] Optimizing FP32 and generating FP16 variants..."
-    Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
-        "run", "python", "optimize_model.py",
-        "--dir", $modelsDir,
-        "--target", "windows-rtx"
-    )
+    foreach ($preparedModel in (Get-PreparedModelList)) {
+        $preparedPath = Join-Path $modelsDir $preparedModel
+        if (Test-Path $preparedPath) {
+            Remove-Item $preparedPath -Force
+        }
+    }
+    Remove-IntermediateModelsFromDestination
 
-    Write-Host "[3/5] Quantizing CPU fallback models..."
-    Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
-        "run", "python", "quantize_model.py",
-        "--dir", $modelsDir
-    )
+    try {
+        Write-Host "[1/5] Exporting CorridorKey ONNX models..."
+        Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
+            "run", "python", "export_onnx.py",
+            "--ckpt", $CheckpointPath,
+            "--out", $baseModelPath,
+            "--static-resolutions", "1536", "2048",
+            "--repo-path", $SourceRepo
+        )
+
+        Write-Host "[2/5] Validating exported ONNX parity..."
+        Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
+            -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $tempModelsDir
+
+        Write-Host "[3/5] Optimizing FP32 and generating FP16 variants..."
+        Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
+            "run", "python", "optimize_model.py",
+            "--dir", $tempModelsDir,
+            "--target", "windows-rtx"
+        )
+
+        Write-Host "[4/5] Quantizing CPU fallback models..."
+        Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
+            "run", "python", "quantize_model.py",
+            "--dir", $tempModelsDir
+        )
+
+        Write-Host "[5/5] Validating prepared runtime models..."
+        $arguments = @(
+            "run", "python", "validate_model_pack.py",
+            "--dir", $tempModelsDir,
+            "--models"
+        ) + (Get-PreparedModelList)
+        Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments $arguments
+
+        foreach ($preparedModel in (Get-PreparedModelList)) {
+            Copy-Item -Path (Join-Path $tempModelsDir $preparedModel) `
+                -Destination (Join-Path $modelsDir $preparedModel) -Force
+        }
+    } finally {
+        if (Test-Path $tempModelsDir) {
+            Remove-Item $tempModelsDir -Recurse -Force
+        }
+    }
 
     Assert-RequiredModels
 }
@@ -300,7 +371,10 @@ if (-not $SkipModelPreparation.IsPresent) {
     Invoke-ModelPreparation -UvPath $uvPath -SourceRepo $sourceRepo `
         -CheckpointPath $checkpointPath -Force:$ForceModelPreparation.IsPresent
 } else {
+    $uvPath = Resolve-CommandPath -ExplicitPath $Uv -CandidateNames @("uv.exe", "uv") `
+        -ErrorMessage "uv was not found. Install uv or pass -Uv."
     Assert-RequiredModels
+    Invoke-ModelPackValidation -UvPath $uvPath -ToolDir (Join-Path $repoRoot "tools\model_exporter")
 }
 
 if (-not $SkipOrtBuild.IsPresent) {
