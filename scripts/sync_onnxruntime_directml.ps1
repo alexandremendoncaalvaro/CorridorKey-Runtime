@@ -28,10 +28,54 @@ function Download-Package {
     param([string]$Url, [string]$Path)
 
     Write-Host "Downloading $Url" -ForegroundColor Cyan
-    curl.exe -L $Url -o $Path
+    curl.exe -f -L $Url -o $Path
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to download package from $Url"
     }
+}
+
+function Get-NuGetPackageVersions {
+    param([string]$PackageId)
+
+    $packageIdLower = $PackageId.ToLowerInvariant()
+    $indexUrl = "https://api.nuget.org/v3-flatcontainer/$packageIdLower/index.json"
+    $payload = Invoke-RestMethod -Uri $indexUrl
+    return @($payload.versions)
+}
+
+function Resolve-BestAvailablePackageVersion {
+    param(
+        [string]$PackageId,
+        [string]$RequestedVersion
+    )
+
+    $versions = @(
+        Get-NuGetPackageVersions -PackageId $PackageId |
+            Where-Object { $_ -match '^\d+\.\d+\.\d+$' }
+    )
+    if ($versions.Count -eq 0) {
+        throw "No versions found on nuget.org for package $PackageId"
+    }
+
+    if ($versions -contains $RequestedVersion) {
+        return $RequestedVersion
+    }
+
+    $requested = [System.Version]$RequestedVersion
+    $sameMinor = @(
+        $versions |
+            Where-Object {
+                $candidate = [System.Version]$_
+                $candidate.Major -eq $requested.Major -and $candidate.Minor -eq $requested.Minor
+            } |
+            Sort-Object { [System.Version]$_ } -Descending
+    )
+    if ($sameMinor.Count -gt 0) {
+        return $sameMinor[0]
+    }
+
+    $sorted = @($versions | Sort-Object { [System.Version]$_ } -Descending)
+    return $sorted[0]
 }
 
 function Extract-Package {
@@ -40,14 +84,47 @@ function Extract-Package {
     if (Test-Path $Destination) {
         Remove-Item $Destination -Recurse -Force
     }
+
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-    tar.exe -xf $ArchivePath -C $Destination
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to extract package: $ArchivePath"
+
+    $errors = New-Object System.Collections.Generic.List[string]
+    $tar = Get-Command "tar.exe" -ErrorAction SilentlyContinue
+    if ($tar) {
+        & $tar.Source -xf $ArchivePath -C $Destination
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+
+        $errors.Add("tar.exe exited with code $LASTEXITCODE")
     }
+
+    if (Test-Path $Destination) {
+        Remove-Item $Destination -Recurse -Force
+    }
+
+    $zipArchivePath = [System.IO.Path]::ChangeExtension($ArchivePath, ".zip")
+    Copy-Item $ArchivePath $zipArchivePath -Force
+    try {
+        Expand-Archive -Path $zipArchivePath -DestinationPath $Destination -Force
+        return
+    } catch {
+        $errors.Add($_.Exception.Message)
+    } finally {
+        if (Test-Path $zipArchivePath) {
+            Remove-Item $zipArchivePath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    throw "Failed to extract package: $ArchivePath. " + ($errors -join " | ")
 }
 
 $resolvedVersion = Resolve-OrtVersion -RepoRoot $repoRoot
+$resolvedDirectMlOrtVersion = Resolve-BestAvailablePackageVersion `
+    -PackageId "Microsoft.ML.OnnxRuntime.DirectML" `
+    -RequestedVersion $resolvedVersion
+if ($resolvedDirectMlOrtVersion -ne $resolvedVersion) {
+    Write-Host "Requested DirectML package version $resolvedVersion is unavailable; using $resolvedDirectMlOrtVersion." -ForegroundColor Yellow
+}
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "dml"
 }
@@ -61,8 +138,12 @@ $directmlExtractDir = Join-Path $tempRoot "directml"
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
 try {
-    Download-Package -Url "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/$resolvedVersion" -Path $ortPackage
-    Download-Package -Url "https://www.nuget.org/api/v2/package/Microsoft.AI.DirectML/1.15.4" -Path $directmlPackage
+    Download-Package `
+        -Url "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/$($resolvedDirectMlOrtVersion.ToLowerInvariant())/microsoft.ml.onnxruntime.directml.$($resolvedDirectMlOrtVersion.ToLowerInvariant()).nupkg" `
+        -Path $ortPackage
+    Download-Package `
+        -Url "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg" `
+        -Path $directmlPackage
 
     Extract-Package -ArchivePath $ortPackage -Destination $ortExtractDir
     Extract-Package -ArchivePath $directmlPackage -Destination $directmlExtractDir
@@ -94,7 +175,7 @@ try {
     Copy-Item (Join-Path $ortExtractDir "README.md") (Join-Path $OutputDir "README.onnxruntime-directml.md") -Force
 
     Write-Host "Official DirectML runtime staged at: $OutputDir" -ForegroundColor Green
-    Write-Host "ONNX Runtime version: $resolvedVersion" -ForegroundColor Green
+    Write-Host "ONNX Runtime DirectML package version: $resolvedDirectMlOrtVersion" -ForegroundColor Green
 } finally {
     if (Test-Path $tempRoot) {
         Remove-Item $tempRoot -Recurse -Force
