@@ -34,7 +34,11 @@ function Resolve-NsisCompiler {
 }
 
 function Write-ReleaseReadme {
-    param([string]$Path, [string]$Version)
+    param(
+        [string]$Path,
+        [string]$Version,
+        [string]$ReleaseBasename
+    )
 
 @"
 CorridorKey Resolve OFX v$Version - Windows Release
@@ -47,7 +51,7 @@ Files in this release:
 - CorridorKey.ofx.bundle\model_inventory.json: packaged model inventory
 
 Recommended install path:
-1. Run CorridorKey_Resolve_v$Version`_Windows_Installer.exe as Administrator.
+1. Run $ReleaseBasename`_Installer.exe as Administrator.
 2. Start DaVinci Resolve after the installer finishes.
 
 Manual fallback path:
@@ -117,7 +121,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "[4/5] Assembling release folder..." -ForegroundColor Cyan
 Copy-Item (Join-Path $repoRoot "scripts\install_plugin.bat") $installScriptPath -Force
-Write-ReleaseReadme -Path $readmePath -Version $Version
+Write-ReleaseReadme -Path $readmePath -Version $Version -ReleaseBasename $releaseBasename
 Compress-Archive -Path $releaseDir -DestinationPath $zipPath -CompressionLevel Optimal
 
 $escapedBundlePath = $bundlePath.Replace('\', '\\')

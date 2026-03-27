@@ -1,5 +1,7 @@
 param(
     [string]$Version = "",
+    [ValidateSet("rtx", "dml", "all")]
+    [string]$Track = "rtx",
     [switch]$SkipTests,
     [switch]$CleanOnly
 )
@@ -20,8 +22,12 @@ function Write-Success([string]$msg) {
 try {
     $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version -SyncGuiMetadata
 
-    $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
-    $directMlOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "dml"
+    $needsRtxTrack = $Track -in @("rtx", "all")
+    $needsDirectMlTrack = $Track -in @("dml", "all")
+    $buildTrack = if ($Track -eq "dml") { "dml" } else { "rtx" }
+    $buildOrtRoot = $null
+    $rtxOrtRoot = $null
+    $directMlOrtRoot = $null
 
     Write-Step "Sanitizing Environment"
     $dirsToClean = @("build/release", "dist", "temp")
@@ -40,40 +46,64 @@ try {
 
     if ($CleanOnly) { exit 0 }
 
-    if (-not (Test-Path $rtxOrtRoot)) {
-        throw "Curated RTX runtime not found at $rtxOrtRoot. Build it with scripts\prepare_windows_rtx_release.ps1 or scripts\build_ort_windows_rtx.ps1 first."
+    if ($needsRtxTrack) {
+        $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
+        if (-not (Test-Path $rtxOrtRoot)) {
+            throw "Curated RTX runtime not found at $rtxOrtRoot. Build it with scripts\prepare_windows_rtx_release.ps1 or scripts\build_ort_windows_rtx.ps1 first."
+        }
     }
-    $rtxOrtVersion = Get-CorridorKeyWindowsOrtBinaryVersion -RepoRoot $repoRoot -Track "rtx"
+    if ($needsDirectMlTrack) {
+        $directMlOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "dml"
+    }
 
-    Write-Step "Synchronizing DirectML Runtimes"
-    & powershell.exe -NoProfile -File "scripts/sync_onnxruntime_directml.ps1" -OrtVersion $rtxOrtVersion
-    if ($LASTEXITCODE -ne 0) { throw "DirectML runtime synchronization failed." }
-    Write-Success "DirectML runtimes synchronized."
-    if (-not (Test-Path $directMlOrtRoot)) {
-        throw "DirectML runtime not found at $directMlOrtRoot after synchronization."
+    if ($buildTrack -eq "rtx") {
+        $buildOrtRoot = $rtxOrtRoot
+    } elseif ($needsDirectMlTrack) {
+        if (-not (Test-Path $directMlOrtRoot)) {
+            throw "Curated DirectML runtime not found at $directMlOrtRoot. Run scripts\\sync_onnxruntime_directml.ps1 first or package the RTX track."
+        }
+        $buildOrtRoot = $directMlOrtRoot
+    }
+
+    if ($needsDirectMlTrack) {
+        if ($null -eq $rtxOrtRoot -or -not (Test-Path $rtxOrtRoot)) {
+            throw "DirectML release packaging requires the curated RTX runtime to infer the aligned ONNX Runtime package version."
+        }
+        $rtxOrtVersion = Get-CorridorKeyWindowsOrtBinaryVersion -RepoRoot $repoRoot -Track "rtx"
+
+        Write-Step "Synchronizing DirectML Runtimes"
+        & powershell.exe -NoProfile -File "scripts/sync_onnxruntime_directml.ps1" -OrtVersion $rtxOrtVersion
+        if ($LASTEXITCODE -ne 0) { throw "DirectML runtime synchronization failed." }
+        Write-Success "DirectML runtimes synchronized."
+        if (-not (Test-Path $directMlOrtRoot)) {
+            throw "DirectML runtime not found at $directMlOrtRoot after synchronization."
+        }
     }
 
     Write-Step "Building Project (Release Mode)"
     $vcvars = Get-ChildItem -Path "C:\Program Files\Microsoft Visual Studio" -Filter vcvars64.bat -Recurse | Select-Object -First 1 -ExpandProperty FullName
     if (-not $vcvars) { throw "vcvars64.bat not found. MSVC environment required." }
 
-    & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$rtxOrtRoot`" && cmake --preset release -DCORRIDORKEY_WINDOWS_ORT_ROOT=`"$rtxOrtRoot`" && cmake --build --preset release -j 8"
+    & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --preset release -DCORRIDORKEY_WINDOWS_ORT_ROOT=`"$buildOrtRoot`" && cmake --build --preset release -j 8"
     if ($LASTEXITCODE -ne 0) { throw "Build failed." }
     Write-Success "Build completed successfully."
 
     if (-not $SkipTests) {
         Write-Step "Quality Gate: Running Automated Tests"
-        & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$rtxOrtRoot`" && cmake --build --preset release --target test_unit test_regression && cd build/release && ctest --output-on-failure"
+        & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --build --preset release --target test_unit test_regression && cd build/release && ctest --output-on-failure"
         if ($LASTEXITCODE -ne 0) { throw "Tests failed." }
         Write-Success "All tests passed."
     }
 
     Write-Step "Quality Gate: Packaging and Backend Validation"
 
-    $variants = @(
-        @{ Suffix = "DirectML"; Root = $directMlOrtRoot },
-        @{ Suffix = "RTX";      Root = $rtxOrtRoot }
-    )
+    $variants = @()
+    if ($needsDirectMlTrack) {
+        $variants += @{ Suffix = "DirectML"; Root = $directMlOrtRoot }
+    }
+    if ($needsRtxTrack) {
+        $variants += @{ Suffix = "RTX"; Root = $rtxOrtRoot }
+    }
 
     foreach ($v in $variants) {
         Write-Host "--- Packaging Variant: $($v.Suffix) ---" -ForegroundColor Yellow
@@ -103,7 +133,7 @@ try {
         }
     }
 
-    Write-Success "All installers generated, physically verified, and validated."
+    Write-Success "Selected installers generated, physically verified, and validated."
 
     Write-Step "Release v$Version is READY"
     Get-ChildItem "dist/*.exe" | Select-Object Name, @{Name="Size(MB)"; Expression={"{0:N2}" -f ($_.Length / 1MB)}} | Format-Table -AutoSize

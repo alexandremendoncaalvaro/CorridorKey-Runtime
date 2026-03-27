@@ -50,6 +50,11 @@ function Get-CorridorKeyReleaseSuffixes {
     }
 }
 
+$resolvedTrack = $Track
+if ($Task -eq "release" -and -not $PSBoundParameters.ContainsKey("Track")) {
+    $resolvedTrack = "rtx"
+}
+
 $syncGuiMetadata = $Task -in @("package-runtime", "release", "sync-version")
 $additionalArguments = @($ForwardArguments)
 $resolvedVersion = Initialize-CorridorKeyVersion `
@@ -67,6 +72,9 @@ if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
 
 Write-Host "[windows] Task: $Task" -ForegroundColor Cyan
 Write-Host "[windows] Version: $resolvedVersion" -ForegroundColor Cyan
+if ($Task -in @("package-ofx", "package-runtime", "release")) {
+    Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
+}
 
 switch ($Task) {
     "sync-version" {
@@ -97,25 +105,21 @@ switch ($Task) {
         break
     }
     "package-ofx" {
-        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $Track) {
+        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $resolvedTrack) {
             $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_ofx_installer_windows.ps1" -Arguments $arguments
         }
         break
     }
     "package-runtime" {
-        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $Track) {
+        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $resolvedTrack) {
             $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_runtime_installer_windows.ps1" -Arguments $arguments
         }
         break
     }
     "release" {
-        if ($Track -ne "all") {
-            throw "Task 'release' always packages both Windows tracks. Do not pass -Track."
-        }
-
-        $arguments = @("-Version", $resolvedVersion) + $additionalArguments
+        $arguments = @("-Version", $resolvedVersion, "-Track", $resolvedTrack) + $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments
         break
     }
