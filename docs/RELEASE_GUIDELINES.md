@@ -70,6 +70,24 @@ The supported repo-local runtime locations are only `vendor\onnxruntime-windows-
 
 *Note: Scripts are configured to validate paths. If `-OrtRoot` does not map to the exact expected curated runtime root, packaging aborts.*
 
+### Windows Model Availability Policy
+
+Windows build and release artifacts may be packaged with a partial model set
+when some packaged artifacts are intentionally absent or temporarily
+unavailable.
+
+- Missing packaged models do not block bundle or installer generation by
+  themselves.
+- Packaging must emit explicit inventory and validation reports for every
+  generated Windows distribution artifact.
+- OFX bundles must include `model_inventory.json`.
+- Windows OFX release folders must include `bundle_validation.json`.
+- Missing packaged models must remain explicit warnings in packaging output and
+  must surface as normal runtime/plugin errors when the missing quality is
+  requested.
+- Invalid packaged models that are present still fail validation. Partial model
+  coverage is allowed; silently shipping broken artifacts is not.
+
 ## 4. GitHub Release Publishing
 
 The GitHub release metadata requires a standardized title to maintain consistency across the page. Follow these patterns based on the build type and platform:

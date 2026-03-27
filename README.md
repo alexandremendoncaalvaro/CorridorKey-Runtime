@@ -98,8 +98,14 @@ cmake --preset release
 cmake --build --preset release
 ```
 
-On Windows, use `.\scripts\build.ps1 -Preset release`. If you invoke CMake
-directly, activate the MSVC developer environment first.
+On Windows, use `.\scripts\windows.ps1 -Task build -Preset release` for local
+builds and `.\scripts\windows.ps1 -Task release -Version X.Y.Z` for release
+packaging. Lower-level Windows scripts exist only as internal delegates for
+debugging the wrapper itself. If you invoke CMake directly, activate the MSVC
+developer environment first. Windows distribution artifacts now include
+`model_inventory.json` and `bundle_validation.json` when packaging succeeds
+with a partial model set, so missing packaged models are explicit and do not
+silently change runtime behavior.
 
 ## Documentation
 

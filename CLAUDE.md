@@ -78,6 +78,10 @@ each session. It contains the non-negotiable rules for this repository.
   as a Windows build or release dependency
 - When a canonical repo script exists for build, packaging, or release, use it
   instead of recreating the flow manually
+- Windows packaging may proceed with a partial model set, but missing packaged
+  models must be surfaced in generated inventory and validation reports. Missing
+  models are warnings; invalid packaged models that are present still block the
+  release flow.
 - Keep `AGENTS.md` and `CLAUDE.md` identical. If one changes, change the other
   in the same diff
 
