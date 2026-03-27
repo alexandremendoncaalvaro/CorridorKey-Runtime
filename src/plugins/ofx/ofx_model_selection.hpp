@@ -24,13 +24,7 @@ struct BootstrapEngineCandidate {
     int effective_resolution = 0;
 };
 
-struct QualityArtifactSelection {
-    std::filesystem::path executable_model_path = {};
-    int requested_resolution = 0;
-    int effective_resolution = 0;
-    bool used_fallback = false;
-    bool coarse_to_fine = false;
-};
+using QualityArtifactSelection = app::ArtifactSelection;
 
 struct QualityCompileFailureCacheContext {
     std::filesystem::path models_root = {};
@@ -247,22 +241,6 @@ inline std::filesystem::path mlx_pack_path(const std::filesystem::path& models_r
     return models_root / "corridorkey_mlx.safetensors";
 }
 
-inline std::optional<int> resolution_from_model_path(const std::filesystem::path& path) {
-    std::string stem = path.stem().string();
-    std::size_t last_separator = stem.find_last_of('_');
-    if (last_separator == std::string::npos || last_separator + 1 >= stem.size()) {
-        return std::nullopt;
-    }
-
-    std::string token = stem.substr(last_separator + 1);
-    if (token.empty() || !std::all_of(token.begin(), token.end(),
-                                      [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
-        return std::nullopt;
-    }
-
-    return std::stoi(token);
-}
-
 inline std::filesystem::path artifact_path_for_backend(const std::filesystem::path& models_root,
                                                        Backend backend, int resolution) {
     if (backend == Backend::MLX) {
@@ -274,38 +252,14 @@ inline std::filesystem::path artifact_path_for_backend(const std::filesystem::pa
     return models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
 }
 
-inline std::vector<std::filesystem::path> artifact_paths_for_backend(
-    const std::filesystem::path& models_root, Backend backend, int resolution,
-    int quantization_mode) {
-    if (backend == Backend::MLX) {
-        return {artifact_path_for_backend(models_root, backend, resolution)};
-    }
-    std::filesystem::path fp16_path =
-        models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
-    std::filesystem::path int8_path =
-        models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
-
-    if (backend == Backend::TensorRT) {
-        return {fp16_path};
-    }
-    if (backend == Backend::CUDA) {
-        switch (quantization_mode) {
-            case kQuantizationFp16:
-                return {fp16_path, int8_path};
-            case kQuantizationInt8:
-                return {int8_path, fp16_path};
-            default:  // kQuantizationAuto
-                return {int8_path, fp16_path};
-        }
-    }
-
+inline app::ArtifactVariantPreference artifact_variant_preference(int quantization_mode) {
     switch (quantization_mode) {
         case kQuantizationFp16:
-            return {fp16_path, int8_path};
+            return app::ArtifactVariantPreference::FP16;
         case kQuantizationInt8:
-            return {int8_path, fp16_path};
+            return app::ArtifactVariantPreference::Int8;
         default:
-            return {int8_path, fp16_path};
+            return app::ArtifactVariantPreference::Auto;
     }
 }
 
@@ -335,45 +289,19 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
-    const int effective_requested_resolution =
+    const int requested_resolution =
         resolve_target_resolution(effective_quality_mode, input_width, input_height);
+    const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(effective_quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
-    int search_resolution = quality_search_resolution(device, effective_quality_mode,
-                                                      effective_requested_resolution);
 
-    if (app::should_use_coarse_to_fine_for_request(device, effective_requested_resolution,
-                                                   fallback_mode, coarse_resolution_override)) {
-        if (auto coarse_resolution = app::coarse_artifact_resolution_for_request(
-                device, effective_requested_resolution, coarse_resolution_override);
-            coarse_resolution.has_value()) {
-            search_resolution = *coarse_resolution;
-        }
+    auto expected = app::expected_artifact_paths_for_request(
+        models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+    if (!expected) {
+        return {};
     }
 
-    if (backend == Backend::DirectML && search_resolution > 1536) {
-        search_resolution = 1536;
-    }
-
-    std::vector<std::filesystem::path> expected;
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
-    const bool coarse_to_fine = app::should_use_coarse_to_fine_for_request(
-        device, effective_requested_resolution, fallback_mode, coarse_resolution_override);
-    const bool require_exact_resolution = is_fixed_quality_mode(effective_quality_mode) &&
-                                          (!coarse_to_fine || coarse_resolution_override > 0);
-
-    for (int resolution : kFallbackResolutions) {
-        if (resolution > search_resolution) {
-            continue;
-        }
-        if (require_exact_resolution && resolution != search_resolution) {
-            continue;
-        }
-        auto artifact_paths =
-            artifact_paths_for_backend(models_root, backend, resolution, quantization_mode);
-        expected.insert(expected.end(), artifact_paths.begin(), artifact_paths.end());
-    }
-
-    return expected;
+    return *expected;
 }
 
 inline std::string missing_artifact_message(
@@ -397,10 +325,19 @@ inline std::string missing_quality_artifact_message(
     std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0) {
-    const auto expected_artifacts =
-        expected_quality_artifact_paths(models_root, backend, quality_mode, input_width,
-                                        input_height, quantization_mode, available_memory_mb,
-                                        fallback_mode, coarse_resolution_override);
+    const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
+    const int requested_resolution =
+        resolve_target_resolution(effective_quality_mode, input_width, input_height);
+    const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(effective_quality_mode);
+    DeviceInfo device{"", available_memory_mb, backend};
+    auto expected = app::expected_artifact_paths_for_request(
+        models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+    if (!expected) {
+        return expected.error().message;
+    }
+
+    const auto& expected_artifacts = *expected;
     if (cpu_quality_guardrail_active) {
         return missing_artifact_message(
             "CPU backend is limited to Draft (512), but the required model artifact is missing",
@@ -427,62 +364,17 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0) {
-    std::vector<QualityArtifactSelection> candidates;
-    int requested_resolution = resolve_target_resolution(quality_mode, input_width, input_height);
+    const int requested_resolution =
+        resolve_target_resolution(quality_mode, input_width, input_height);
+    const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
-    int search_resolution = quality_search_resolution(device, quality_mode, requested_resolution);
-    bool coarse_to_fine = false;
-
-    if (app::should_use_coarse_to_fine_for_request(device, requested_resolution, fallback_mode,
-                                                   coarse_resolution_override)) {
-        if (auto coarse_resolution = app::coarse_artifact_resolution_for_request(
-                device, requested_resolution, coarse_resolution_override);
-            coarse_resolution.has_value()) {
-            search_resolution = *coarse_resolution;
-            coarse_to_fine = true;
-        }
+    auto candidates = app::quality_artifact_candidates_for_request(
+        models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+    if (!candidates) {
+        return {};
     }
-
-    if (backend == Backend::DirectML && requested_resolution > 1536) {
-        requested_resolution = 1536;
-    }
-
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
-    bool exact_artifact_available = false;
-    const bool require_exact_resolution =
-        is_fixed_quality_mode(quality_mode) && (!coarse_to_fine || coarse_resolution_override > 0);
-    const int exact_resolution = coarse_to_fine ? search_resolution : requested_resolution;
-    for (int resolution : kFallbackResolutions) {
-        if (resolution > requested_resolution) {
-            continue;
-        }
-        if (require_exact_resolution && resolution != exact_resolution && !exact_artifact_available) {
-            continue;
-        }
-
-        auto artifact_paths =
-            artifact_paths_for_backend(models_root, backend, resolution, quantization_mode);
-        bool found_for_resolution = false;
-        for (const auto& artifact_path : artifact_paths) {
-            if (!path_exists(artifact_path)) {
-                continue;
-            }
-            found_for_resolution = true;
-            candidates.push_back(QualityArtifactSelection{artifact_path, requested_resolution,
-                                                          resolution,
-                                                          resolution != requested_resolution ||
-                                                              coarse_to_fine,
-                                                          coarse_to_fine});
-        }
-        if (require_exact_resolution && resolution == exact_resolution) {
-            if (!found_for_resolution) {
-                return {};
-            }
-            exact_artifact_available = true;
-        }
-    }
-
-    return candidates;
+    return *candidates;
 }
 
 inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
@@ -536,9 +428,9 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
             }
         }
 
-        int effective_resolution = resolution_from_model_path(executable_model_path).value_or(512);
+        int effective_resolution = app::packaged_model_resolution(executable_model_path).value_or(512);
         int requested_resolution =
-            resolution_from_model_path(requested_model_path).value_or(effective_resolution);
+            app::packaged_model_resolution(requested_model_path).value_or(effective_resolution);
         append_unique({device, requested_model_path, executable_model_path, requested_resolution,
                        effective_resolution});
     };

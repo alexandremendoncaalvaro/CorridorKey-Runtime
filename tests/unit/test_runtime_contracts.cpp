@@ -1,5 +1,7 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
+#include <filesystem>
+#include <fstream>
 
 #include "app/runtime_contracts.hpp"
 #include "app/runtime_diagnostics.hpp"
@@ -249,6 +251,40 @@ TEST_CASE("runtime refinement override validation is explicit for current artifa
     REQUIRE(tiled_mode.error().code == ErrorCode::InvalidParameters);
     REQUIRE(tiled_mode.error().message.find("refinement strategy override") !=
             std::string::npos);
+}
+
+TEST_CASE("runtime artifact selection prefers lower packaged candidates automatically",
+          "[unit][runtime][regression]") {
+    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-runtime-artifact-select";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+    std::ofstream(temp_dir / "corridorkey_fp16_768.onnx") << "stub";
+    std::ofstream(temp_dir / "corridorkey_fp16_512.onnx") << "stub";
+
+    auto selections = quality_artifact_candidates_for_request(
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 1536,
+        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+    REQUIRE(selections.has_value());
+    REQUIRE_FALSE(selections->empty());
+    CHECK(selections->front().effective_resolution == 768);
+    CHECK(selections->front().coarse_to_fine);
+
+    auto expected = expected_artifact_paths_for_request(
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 1536,
+        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+    REQUIRE(expected.has_value());
+    REQUIRE(expected->size() == 3);
+    CHECK(expected->front().filename() == "corridorkey_fp16_1024.onnx");
+    CHECK((*expected)[1].filename() == "corridorkey_fp16_768.onnx");
+    CHECK((*expected)[2].filename() == "corridorkey_fp16_512.onnx");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("packaged model resolution uses catalog entries for non-onnx artifacts",
+          "[unit][runtime][regression]") {
+    REQUIRE(packaged_model_resolution("corridorkey_mlx.safetensors") == 2048);
+    REQUIRE(is_packaged_corridorkey_model("corridorkey_mlx.safetensors"));
 }
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {
     auto json = summarize_latency_samples({4.0, 6.0, 8.0, 10.0});

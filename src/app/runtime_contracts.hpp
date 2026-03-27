@@ -1,12 +1,24 @@
 #pragma once
 
 #include <corridorkey/engine.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace corridorkey::app {
+
+enum class ArtifactVariantPreference : std::uint8_t { Auto, FP16, Int8 };
+
+struct ArtifactSelection {
+    std::filesystem::path executable_model_path = {};
+    int requested_resolution = 0;
+    int effective_resolution = 0;
+    bool used_fallback = false;
+    bool coarse_to_fine = false;
+};
 
 std::string backend_to_string(Backend backend);
 std::string job_event_type_to_string(JobEventType type);
@@ -37,6 +49,18 @@ CORRIDORKEY_API std::filesystem::path sibling_model_path_for_resolution(
     const std::filesystem::path& model_path, int resolution);
 CORRIDORKEY_API Result<void> validate_refinement_mode_for_artifact(
     const std::filesystem::path& model_path, RefinementMode refinement_mode);
+CORRIDORKEY_API Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
+    const std::filesystem::path& models_root, const DeviceInfo& requested_device,
+    int requested_resolution, ArtifactVariantPreference variant_preference,
+    bool allow_lower_resolution_fallback = false,
+    QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
+    int coarse_resolution_override = 0);
+CORRIDORKEY_API Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
+    const std::filesystem::path& models_root, const DeviceInfo& requested_device,
+    int requested_resolution, ArtifactVariantPreference variant_preference,
+    bool allow_lower_resolution_fallback = false,
+    QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
+    int coarse_resolution_override = 0);
 CORRIDORKEY_API Result<std::filesystem::path> resolve_model_artifact_for_request(
     const std::filesystem::path& model_path, const InferenceParams& params,
     const DeviceInfo& requested_device);
