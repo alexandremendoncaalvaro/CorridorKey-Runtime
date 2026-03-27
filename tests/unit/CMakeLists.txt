@@ -27,6 +27,7 @@ add_executable(test_unit
     test_ofx_runtime_client.cpp
     test_ofx_runtime_panel.cpp
     test_ofx_runtime_protocol.cpp
+    test_ofx_session_policy.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
     test_runtime_diagnostics.cpp
