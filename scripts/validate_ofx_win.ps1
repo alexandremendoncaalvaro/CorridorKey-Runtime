@@ -11,6 +11,19 @@ if ([string]::IsNullOrWhiteSpace($BundlePath)) {
     $BundlePath = Join-Path $repoRoot "dist\CorridorKey.ofx.bundle"
 }
 
+function Test-CorridorKeyJsonProperty {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $false
+    }
+
+    return $Object.PSObject.Properties.Match($Name).Count -gt 0
+}
+
 Write-Host "Validating OFX bundle: $BundlePath" -ForegroundColor Cyan
 Write-Host ""
 
@@ -203,7 +216,8 @@ $previousModelsDir = if (Test-Path Env:CORRIDORKEY_MODELS_DIR) {
 }
 $doctorSucceeded = $false
 $doctorHealthy = $false
-$doctorModelContractsHealthy = $false
+$doctorModelContractsAvailable = $false
+$doctorModelContractsHealthy = $null
 $doctorFailureTolerated = $false
 $doctorFailureReason = ""
 $doctorModelContractIssues = @()
@@ -251,39 +265,49 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($doctorJson)) {
         $doctorJson | Set-Content -Path $doctorReportPath -Encoding UTF8
         $doctor = $doctorJson | ConvertFrom-Json
-        if ($null -eq $doctor.summary) {
+        if (-not (Test-CorridorKeyJsonProperty -Object $doctor -Name "summary") -or $null -eq $doctor.summary) {
             throw "Packaged runtime doctor report is missing the summary payload."
-        }
-        if ($null -eq $doctor.model_contracts) {
-            throw "Packaged runtime doctor report is missing the model_contracts payload."
         }
 
         $doctorSucceeded = $true
         $doctorHealthy = [bool]$doctor.summary.healthy
-        $doctorModelContractsHealthy = [bool]$doctor.summary.model_contracts_healthy
+        $doctorModelContractsAvailable = Test-CorridorKeyJsonProperty -Object $doctor -Name "model_contracts"
+        if (Test-CorridorKeyJsonProperty -Object $doctor.summary -Name "model_contracts_healthy") {
+            $doctorModelContractsHealthy = [bool]$doctor.summary.model_contracts_healthy
+            $doctorModelContractsAvailable = $true
+        }
 
         Write-Host "[PASS] Wrote doctor report: $doctorReportPath" -ForegroundColor Green
-        Write-Host "[INFO] Doctor summary healthy=$($doctor.summary.healthy) model_contracts_healthy=$($doctor.summary.model_contracts_healthy) windows_universal_healthy=$($doctor.summary.windows_universal_healthy)" -ForegroundColor Cyan
-        $contractGroups = @($doctor.model_contracts.groups)
-        foreach ($group in $contractGroups) {
-            Write-Host "[INFO] Model contract group '$($group.group)': healthy=$($group.healthy) loadable=$($group.all_models_loadable) consistent=$($group.contract_consistent) baseline=$($group.baseline_model)" -ForegroundColor Cyan
+        $summaryModelContractsHealthy = if ($doctorModelContractsAvailable -and $null -ne $doctorModelContractsHealthy) {
+            $doctorModelContractsHealthy
+        } else {
+            "n/a"
         }
-        $unhealthyContractGroups = @($contractGroups | Where-Object { -not $_.healthy })
-        foreach ($group in $unhealthyContractGroups) {
-            $firstIssue = $group.models | Where-Object {
-                (-not $_.load_ok) -or (-not $_.contract_match_baseline)
-            } | Select-Object -First 1
-            if ($null -ne $firstIssue) {
-                $doctorModelContractIssues += @($group.models | Where-Object {
-                    (-not $_.load_ok) -or (-not $_.contract_match_baseline)
-                })
-                $reason = if ([string]::IsNullOrWhiteSpace($firstIssue.error)) {
-                    "Contract mismatch relative to baseline."
-                } else {
-                    $firstIssue.error
-                }
-                Write-Host "[WARN] Model contract group '$($group.group)' first issue: $($firstIssue.filename) -> $reason" -ForegroundColor Yellow
+        Write-Host "[INFO] Doctor summary healthy=$($doctor.summary.healthy) model_contracts_healthy=$summaryModelContractsHealthy windows_universal_healthy=$($doctor.summary.windows_universal_healthy)" -ForegroundColor Cyan
+        if ($doctorModelContractsAvailable -and $null -ne $doctor.model_contracts) {
+            $contractGroups = @($doctor.model_contracts.groups)
+            foreach ($group in $contractGroups) {
+                Write-Host "[INFO] Model contract group '$($group.group)': healthy=$($group.healthy) loadable=$($group.all_models_loadable) consistent=$($group.contract_consistent) baseline=$($group.baseline_model)" -ForegroundColor Cyan
             }
+            $unhealthyContractGroups = @($contractGroups | Where-Object { -not $_.healthy })
+            foreach ($group in $unhealthyContractGroups) {
+                $firstIssue = $group.models | Where-Object {
+                    (-not $_.load_ok) -or (-not $_.contract_match_baseline)
+                } | Select-Object -First 1
+                if ($null -ne $firstIssue) {
+                    $doctorModelContractIssues += @($group.models | Where-Object {
+                        (-not $_.load_ok) -or (-not $_.contract_match_baseline)
+                    })
+                    $reason = if ([string]::IsNullOrWhiteSpace($firstIssue.error)) {
+                        "Contract mismatch relative to baseline."
+                    } else {
+                        $firstIssue.error
+                    }
+                    Write-Host "[WARN] Model contract group '$($group.group)' first issue: $($firstIssue.filename) -> $reason" -ForegroundColor Yellow
+                }
+            }
+        } else {
+            Write-Host "[INFO] Doctor schema does not expose model contract groups; skipping that validation layer." -ForegroundColor Cyan
         }
         if (-not $doctor.summary.healthy) {
             Write-Host "[WARN] Doctor summary is unhealthy. Review doctor_report.json before sending this build to testers." -ForegroundColor Yellow
@@ -298,7 +322,7 @@ try {
     Pop-Location
 }
 
-if ($doctorSucceeded -and -not $doctorModelContractsHealthy) {
+if ($doctorSucceeded -and $doctorModelContractsAvailable -and -not $doctorModelContractsHealthy) {
     $nonMissingIssues = @($doctorModelContractIssues | Where-Object {
         ($missingModels -notcontains $_.filename) -or $_.error -ne "Model not found"
     })
@@ -330,6 +354,7 @@ $validationPayload = [ordered]@{
         attempted = $true
         succeeded = $doctorSucceeded
         healthy = $doctorHealthy
+        model_contracts_available = $doctorModelContractsAvailable
         model_contracts_healthy = $doctorModelContractsHealthy
         failure_tolerated = $doctorFailureTolerated
         failure_reason = $doctorFailureReason
