@@ -75,6 +75,10 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
 TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runtime]") {
     InferenceParams params;
     params.target_resolution = 1024;
+    params.requested_quality_resolution = 1536;
+    params.quality_fallback_mode = QualityFallbackMode::CoarseToFine;
+    params.refinement_mode = RefinementMode::Tiled;
+    params.coarse_resolution_override = 1024;
     params.despill_strength = 0.35F;
     params.auto_despeckle = true;
     params.despeckle_size = 640;
@@ -104,6 +108,10 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     CHECK(parsed_request->height == 1080);
     CHECK(parsed_request->params.enable_tiling);
     CHECK(parsed_request->params.tile_padding == 64);
+    CHECK(parsed_request->params.requested_quality_resolution == 1536);
+    CHECK(parsed_request->params.quality_fallback_mode == QualityFallbackMode::CoarseToFine);
+    CHECK(parsed_request->params.refinement_mode == RefinementMode::Tiled);
+    CHECK(parsed_request->params.coarse_resolution_override == 1024);
     CHECK(parsed_request->render_index == 7);
 
     OfxRuntimeRequestEnvelope envelope;

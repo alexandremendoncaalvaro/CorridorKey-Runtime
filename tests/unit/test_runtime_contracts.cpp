@@ -214,6 +214,27 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_universal_model->filename == "corridorkey_int8_1024.onnx");
 }
 
+TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) == 1536);
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) == 2048);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 16000);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
+}
+
+TEST_CASE("runtime coarse-to-fine policy prefers safer coarse artifacts", "[unit][runtime]") {
+    const DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
+    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto));
+    REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536) == 1024);
+    REQUIRE_FALSE(
+        should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Direct));
+    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536,
+                                                  QualityFallbackMode::CoarseToFine));
+    REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 768) == 768);
+}
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {
     auto json = summarize_latency_samples({4.0, 6.0, 8.0, 10.0});
 

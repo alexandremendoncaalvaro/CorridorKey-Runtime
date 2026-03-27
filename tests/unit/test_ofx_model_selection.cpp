@@ -223,6 +223,33 @@ TEST_CASE("quality fallback warning clears when selection matches the requested 
             "Ultra (1536) (1536px) unavailable on this hardware -- using 1024px");
 }
 
+TEST_CASE("automatic coarse-to-fine selection chooses a safer coarse artifact",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-quality-coarse-to-fine");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
+                                kQuantizationFp16, 10240, QualityFallbackMode::Auto);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 1536);
+    REQUIRE(selection->effective_resolution == 1024);
+    REQUIRE(selection->used_fallback);
+    REQUIRE(selection->coarse_to_fine);
+}
+
+TEST_CASE("coarse-to-fine warning explains the coarse artifact path", "[unit][ofx][regression]") {
+    QualityArtifactSelection selection{};
+    selection.requested_resolution = 1536;
+    selection.effective_resolution = 1024;
+    selection.used_fallback = true;
+    selection.coarse_to_fine = true;
+
+    REQUIRE(quality_fallback_warning(kQualityUltra, selection) ==
+            "Ultra (1536) (1536px) will run coarse-to-fine using 1024px coarse inference");
+}
+
 TEST_CASE("fixed windows tensorRT quality keeps lower packaged fallbacks after the exact model",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-fixed-fallbacks");
@@ -384,6 +411,90 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
 }
 
+TEST_CASE("auto windows tensorRT quality respects the device VRAM ceiling",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-vram-guardrail");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160,
+                                kQuantizationFp16, 10240);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 2048);
+    REQUIRE(selection->effective_resolution == 1024);
+    REQUIRE(selection->used_fallback);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
+}
+
+TEST_CASE("auto windows tensorRT quality keeps direct 2048 only for fully supported tiers",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-strong-gpu");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
+
+    auto selection_16gb =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 3200, 1800,
+                                kQuantizationFp16, 16384);
+    REQUIRE(selection_16gb.has_value());
+    REQUIRE(selection_16gb->requested_resolution == 2048);
+    REQUIRE(selection_16gb->effective_resolution == 1024);
+    REQUIRE(selection_16gb->used_fallback);
+    REQUIRE(selection_16gb->coarse_to_fine);
+    REQUIRE(selection_16gb->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
+
+    auto selection_24gb =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160,
+                                kQuantizationFp16, 24576);
+    REQUIRE(selection_24gb.has_value());
+    REQUIRE(selection_24gb->requested_resolution == 2048);
+    REQUIRE(selection_24gb->effective_resolution == 2048);
+    REQUIRE_FALSE(selection_24gb->used_fallback);
+    REQUIRE_FALSE(selection_24gb->coarse_to_fine);
+    REQUIRE(selection_24gb->executable_model_path.filename() == "corridorkey_fp16_2048.onnx");
+}
+
+TEST_CASE("fixed windows tensorRT quality reports unsupported tiers before engine creation",
+          "[unit][ofx][regression]") {
+    auto message =
+        unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+                                    kQualityUltra, 1536);
+
+    REQUIRE(message.has_value());
+    REQUIRE(message->find("16 GB") != std::string::npos);
+    REQUIRE(message->find("High (1024)") != std::string::npos);
+    REQUIRE_FALSE(unsupported_quality_message(
+                      DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}, kQualityMaximum, 2048)
+                      .has_value());
+}
+
+TEST_CASE("missing quality artifact message names the expected model and folder",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-missing-quality-message");
+
+    auto message = missing_quality_artifact_message(temp_dir.path(), Backend::TensorRT,
+                                                    kQualityUltra, 2560, 1440, kQuantizationFp16,
+                                                    false, 16384);
+
+    REQUIRE(message.find("Ultra (1536)") != std::string::npos);
+    REQUIRE(message.find("corridorkey_fp16_1536.onnx") != std::string::npos);
+    REQUIRE(message.find(temp_dir.path().string()) != std::string::npos);
+}
+
+TEST_CASE("missing bootstrap artifact message lists the expected bootstrap files",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-missing-bootstrap-message");
+
+    auto message = missing_bootstrap_artifact_message(
+        windows_capabilities(), DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, temp_dir.path());
+
+    REQUIRE(message.find("corridorkey_fp16_768.onnx") != std::string::npos);
+    REQUIRE(message.find("corridorkey_int8_512.onnx") != std::string::npos);
+    REQUIRE(message.find(temp_dir.path().string()) != std::string::npos);
+}
 TEST_CASE("auto windows tensorRT prefers fp16 when both fp16 and int8 artifacts exist",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-prefers-fp16");

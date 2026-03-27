@@ -9,9 +9,11 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
     test_alpha_edge.cpp
     test_color_utils.cpp
+    test_coarse_to_fine_policy.cpp
     test_despill.cpp
     test_despeckle.cpp
     test_device_selection.cpp
+    test_execution_defaults.cpp
     test_device_detection.cpp
     test_inference_session.cpp
     test_json_utils.cpp
