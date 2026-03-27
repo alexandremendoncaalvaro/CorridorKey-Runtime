@@ -13,9 +13,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
-}
+$Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }

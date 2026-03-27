@@ -20,6 +20,148 @@ function Get-CorridorKeyProjectVersion {
     throw "Could not determine project version from $cmakePath"
 }
 
+function Assert-CorridorKeySemVer {
+    param([string]$Version)
+
+    if ([string]::IsNullOrWhiteSpace($Version) -or
+        $Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        throw "Version must use SemVer MAJOR.MINOR.PATCH. Received: $Version"
+    }
+}
+
+function Set-CorridorKeyProjectVersion {
+    param(
+        [string]$RepoRoot,
+        [string]$Version
+    )
+
+    Assert-CorridorKeySemVer -Version $Version
+
+    $cmakePath = Join-Path $RepoRoot "CMakeLists.txt"
+    if (-not (Test-Path $cmakePath)) {
+        throw "Could not update project version because CMakeLists.txt was not found at $cmakePath"
+    }
+
+    $pattern = '^(?<prefix>\s*VERSION\s+)(?<version>[0-9]+\.[0-9]+\.[0-9]+)(?<suffix>\s*)$'
+    $regex = [System.Text.RegularExpressions.Regex]::new(
+        $pattern,
+        [System.Text.RegularExpressions.RegexOptions]::Multiline
+    )
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $content = [System.IO.File]::ReadAllText($cmakePath, $utf8NoBom)
+    $updated = $regex.Replace(
+        $content,
+        [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            return $match.Groups["prefix"].Value + $Version + $match.Groups["suffix"].Value
+        },
+        1
+    )
+
+    if ($content -eq $updated) {
+        $currentVersion = Get-CorridorKeyProjectVersion -RepoRoot $RepoRoot
+        if ($currentVersion -eq $Version) {
+            return $Version
+        }
+        throw "Could not update VERSION in $cmakePath"
+    }
+
+    [System.IO.File]::WriteAllText($cmakePath, $updated, $utf8NoBom)
+    return $Version
+}
+
+function Set-CorridorKeyTextVersionField {
+    param(
+        [string]$Path,
+        [string]$Pattern,
+        [string]$Version,
+        [string]$Description
+    )
+
+    if (-not (Test-Path $Path)) {
+        throw "Could not update $Description because the file was not found at $Path"
+    }
+
+    $regex = [System.Text.RegularExpressions.Regex]::new(
+        $Pattern,
+        [System.Text.RegularExpressions.RegexOptions]::Multiline
+    )
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $content = [System.IO.File]::ReadAllText($Path, $utf8NoBom)
+    $updated = $regex.Replace(
+        $content,
+        [System.Text.RegularExpressions.MatchEvaluator]{
+            param($match)
+            return $match.Groups["prefix"].Value + $Version + $match.Groups["suffix"].Value
+        },
+        1
+    )
+
+    if ($content -eq $updated) {
+        $match = $regex.Match($content)
+        if ($match.Success -and $match.Groups["version"].Value -eq $Version) {
+            return
+        }
+        throw "Could not update $Description in $Path"
+    }
+
+    [System.IO.File]::WriteAllText($Path, $updated, $utf8NoBom)
+}
+
+function Sync-CorridorKeyGuiVersionMetadata {
+    param(
+        [string]$RepoRoot,
+        [string]$Version
+    )
+
+    Assert-CorridorKeySemVer -Version $Version
+
+    $guiRoot = Join-Path $RepoRoot "src\gui"
+    Set-CorridorKeyTextVersionField `
+        -Path (Join-Path $guiRoot "package.json") `
+        -Pattern '^(?<prefix>\s*"version"\s*:\s*")(?<version>[0-9]+\.[0-9]+\.[0-9]+)(?<suffix>".*)$' `
+        -Version $Version `
+        -Description "GUI package version"
+
+    Set-CorridorKeyTextVersionField `
+        -Path (Join-Path $guiRoot "src-tauri\tauri.conf.json") `
+        -Pattern '^(?<prefix>\s*"version"\s*:\s*")(?<version>[0-9]+\.[0-9]+\.[0-9]+)(?<suffix>".*)$' `
+        -Version $Version `
+        -Description "Tauri app version"
+
+    Set-CorridorKeyTextVersionField `
+        -Path (Join-Path $guiRoot "src-tauri\Cargo.toml") `
+        -Pattern '^(?<prefix>version\s*=\s*")(?<version>[0-9]+\.[0-9]+\.[0-9]+)(?<suffix>"\s*)$' `
+        -Version $Version `
+        -Description "Tauri Cargo package version"
+
+    return $Version
+}
+
+function Initialize-CorridorKeyVersion {
+    param(
+        [string]$RepoRoot,
+        [string]$Version = "",
+        [switch]$SyncGuiMetadata
+    )
+
+    $resolvedVersion = $Version
+    $shouldSyncGuiMetadata = $SyncGuiMetadata.IsPresent -or
+        (-not [string]::IsNullOrWhiteSpace($Version))
+
+    if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
+        $resolvedVersion = Get-CorridorKeyProjectVersion -RepoRoot $RepoRoot
+    } else {
+        $resolvedVersion = Set-CorridorKeyProjectVersion -RepoRoot $RepoRoot -Version $resolvedVersion
+    }
+
+    if ($shouldSyncGuiMetadata) {
+        Sync-CorridorKeyGuiVersionMetadata -RepoRoot $RepoRoot -Version $resolvedVersion | Out-Null
+    }
+
+    return $resolvedVersion
+}
+
 function Get-CorridorKeyWindowsOrtRootPath {
     param(
         [string]$RepoRoot,
@@ -34,6 +176,31 @@ function Get-CorridorKeyWindowsOrtRootPath {
     }
 
     return [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ("vendor\" + $directoryName)))
+}
+
+function Get-CorridorKeyWindowsOrtBinaryVersion {
+    param(
+        [string]$RepoRoot,
+        [ValidateSet("rtx", "dml")]
+        [string]$Track
+    )
+
+    $ortRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $RepoRoot -Track $Track
+    $candidates = @(
+        (Join-Path $ortRoot "bin\onnxruntime.dll"),
+        (Join-Path $ortRoot "onnxruntime.dll")
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            $productVersion = (Get-Item $candidate).VersionInfo.ProductVersion
+            if (-not [string]::IsNullOrWhiteSpace($productVersion)) {
+                return $productVersion
+            }
+        }
+    }
+
+    throw "Unable to determine the curated ONNX Runtime version for the '$Track' track from $ortRoot. Stage the curated runtime first or pass -OrtVersion explicitly."
 }
 
 function Get-CorridorKeyWindowsTrackFromReleaseSuffix {

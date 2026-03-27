@@ -10,26 +10,8 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $tauriRuntimeDir = Join-Path $repoRoot "src\gui\src-tauri\resources\runtime"
-
-function Get-ProjectVersion {
-    param([string]$RepoRoot)
-
-    $cmakePath = Join-Path $RepoRoot "CMakeLists.txt"
-    if (-not (Test-Path $cmakePath)) {
-        throw "Could not determine project version because CMakeLists.txt was not found at $cmakePath"
-    }
-
-    $versionLine = Select-String -Path $cmakePath -Pattern '^\s*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\s*$'
-    if ($null -ne $versionLine) {
-        return $versionLine.Matches[0].Groups[1].Value
-    }
-
-    throw "Could not determine project version from $cmakePath"
-}
-
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-ProjectVersion -RepoRoot $repoRoot
-}
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+$Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
 
 $portableArgs = @{}
 if (-not [string]::IsNullOrWhiteSpace($Version)) {

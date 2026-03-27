@@ -56,9 +56,7 @@ Manual fallback path:
 "@ | Set-Content -Path $Path -Encoding ASCII
 }
 
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
-}
+$Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }

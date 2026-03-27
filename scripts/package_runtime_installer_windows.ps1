@@ -81,9 +81,7 @@ function Clear-StagedRuntimePayload {
         Remove-Item -Recurse -Force
 }
 
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
-}
+$Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version -SyncGuiMetadata
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
