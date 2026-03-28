@@ -17,6 +17,7 @@ add_executable(test_unit
     test_execution_defaults.cpp
     test_device_detection.cpp
     test_inference_session.cpp
+    test_job_orchestrator.cpp
     test_json_utils.cpp
     test_local_ipc.cpp
     test_ofx_color_management.cpp

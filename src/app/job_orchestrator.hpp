@@ -7,6 +7,8 @@
 
 namespace corridorkey::app {
 
+CORRIDORKEY_API nlohmann::json summarize_doctor_report(const nlohmann::json& report);
+
 /**
  * @brief Structured result of a job.
  */
