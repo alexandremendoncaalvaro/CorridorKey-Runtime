@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "package-ofx", "package-runtime", "release", "sync-version")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -121,6 +121,18 @@ switch ($Task) {
     "release" {
         $arguments = @("-Version", $resolvedVersion, "-Track", $resolvedTrack) + $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments
+        break
+    }
+    "regen-rtx-release" {
+        $arguments = @("-Version", $resolvedVersion, "-BuildPreset", $Preset)
+        if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
+            $arguments += @("-Checkpoint", $Checkpoint)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
+            $arguments += @("-CorridorKeyRepo", $CorridorKeyRepo)
+        }
+        $arguments += $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "regen_windows_rtx_release.ps1" -Arguments $arguments
         break
     }
 }

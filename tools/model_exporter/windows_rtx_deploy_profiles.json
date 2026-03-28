@@ -1,0 +1,180 @@
+{
+  "pipeline": "windows_rtx_mmdeploy_style",
+  "version": 1,
+  "backend": "tensorrt_rtx",
+  "profiles": [
+    {
+      "name": "trt_static_512",
+      "resolution": 512,
+      "onnx_config": {
+        "input_shape": [512, 512],
+        "input_name": "input_rgb_hint",
+        "output_names": ["alpha", "fg"],
+        "batch_size": 1,
+        "shape_policy": "static",
+        "dtype_policy": "fp32_export"
+      },
+      "backend_config": {
+        "type": "tensorrt_rtx",
+        "common_config": {
+          "fp16_mode": false,
+          "max_workspace_size": 2147483648
+        },
+        "model_inputs": [
+          {
+            "input_shapes": {
+              "input_rgb_hint": {
+                "min_shape": [1, 4, 512, 512],
+                "opt_shape": [1, 4, 512, 512],
+                "max_shape": [1, 4, 512, 512]
+              }
+            }
+          }
+        ]
+      },
+      "artifacts": {
+        "raw_onnx": "corridorkey_fp32_512.onnx",
+        "runtime_onnx": "corridorkey_fp16_512.onnx",
+        "cpu_fallback_int8": "corridorkey_int8_512.onnx"
+      }
+    },
+    {
+      "name": "trt_static_768",
+      "resolution": 768,
+      "onnx_config": {
+        "input_shape": [768, 768],
+        "input_name": "input_rgb_hint",
+        "output_names": ["alpha", "fg"],
+        "batch_size": 1,
+        "shape_policy": "static",
+        "dtype_policy": "fp32_export"
+      },
+      "backend_config": {
+        "type": "tensorrt_rtx",
+        "common_config": {
+          "fp16_mode": false,
+          "max_workspace_size": 2147483648
+        },
+        "model_inputs": [
+          {
+            "input_shapes": {
+              "input_rgb_hint": {
+                "min_shape": [1, 4, 768, 768],
+                "opt_shape": [1, 4, 768, 768],
+                "max_shape": [1, 4, 768, 768]
+              }
+            }
+          }
+        ]
+      },
+      "artifacts": {
+        "raw_onnx": "corridorkey_fp32_768.onnx",
+        "runtime_onnx": "corridorkey_fp16_768.onnx",
+        "cpu_fallback_int8": "corridorkey_int8_768.onnx"
+      }
+    },
+    {
+      "name": "trt_static_1024",
+      "resolution": 1024,
+      "onnx_config": {
+        "input_shape": [1024, 1024],
+        "input_name": "input_rgb_hint",
+        "output_names": ["alpha", "fg"],
+        "batch_size": 1,
+        "shape_policy": "static",
+        "dtype_policy": "fp32_export"
+      },
+      "backend_config": {
+        "type": "tensorrt_rtx",
+        "common_config": {
+          "fp16_mode": false,
+          "max_workspace_size": 2147483648
+        },
+        "model_inputs": [
+          {
+            "input_shapes": {
+              "input_rgb_hint": {
+                "min_shape": [1, 4, 1024, 1024],
+                "opt_shape": [1, 4, 1024, 1024],
+                "max_shape": [1, 4, 1024, 1024]
+              }
+            }
+          }
+        ]
+      },
+      "artifacts": {
+        "raw_onnx": "corridorkey_fp32_1024.onnx",
+        "runtime_onnx": "corridorkey_fp16_1024.onnx",
+        "cpu_fallback_int8": "corridorkey_int8_1024.onnx"
+      }
+    },
+    {
+      "name": "trt_static_1536",
+      "resolution": 1536,
+      "onnx_config": {
+        "input_shape": [1536, 1536],
+        "input_name": "input_rgb_hint",
+        "output_names": ["alpha", "fg"],
+        "batch_size": 1,
+        "shape_policy": "static",
+        "dtype_policy": "fp32_export"
+      },
+      "backend_config": {
+        "type": "tensorrt_rtx",
+        "common_config": {
+          "fp16_mode": false,
+          "max_workspace_size": 4294967296
+        },
+        "model_inputs": [
+          {
+            "input_shapes": {
+              "input_rgb_hint": {
+                "min_shape": [1, 4, 1536, 1536],
+                "opt_shape": [1, 4, 1536, 1536],
+                "max_shape": [1, 4, 1536, 1536]
+              }
+            }
+          }
+        ]
+      },
+      "artifacts": {
+        "raw_onnx": "corridorkey_fp32_1536.onnx",
+        "runtime_onnx": "corridorkey_fp16_1536.onnx"
+      }
+    },
+    {
+      "name": "trt_static_2048",
+      "resolution": 2048,
+      "onnx_config": {
+        "input_shape": [2048, 2048],
+        "input_name": "input_rgb_hint",
+        "output_names": ["alpha", "fg"],
+        "batch_size": 1,
+        "shape_policy": "static",
+        "dtype_policy": "fp32_export"
+      },
+      "backend_config": {
+        "type": "tensorrt_rtx",
+        "common_config": {
+          "fp16_mode": false,
+          "max_workspace_size": 8589934592
+        },
+        "model_inputs": [
+          {
+            "input_shapes": {
+              "input_rgb_hint": {
+                "min_shape": [1, 4, 2048, 2048],
+                "opt_shape": [1, 4, 2048, 2048],
+                "max_shape": [1, 4, 2048, 2048]
+              }
+            }
+          }
+        ]
+      },
+      "artifacts": {
+        "raw_onnx": "corridorkey_fp32_2048.onnx",
+        "runtime_onnx": "corridorkey_fp16_2048.onnx"
+      }
+    }
+  ]
+}
