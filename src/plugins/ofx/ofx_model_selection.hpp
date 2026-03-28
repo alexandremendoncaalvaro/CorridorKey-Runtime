@@ -93,7 +93,7 @@ inline int quality_search_resolution(const DeviceInfo& device, int quality_mode,
 }
 
 inline int rounded_gb_from_mb(std::int64_t memory_mb) {
-    return static_cast<int>((memory_mb + 512) / 1024);
+    return static_cast<int>((memory_mb + 1023) / 1024);
 }
 
 inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& device,

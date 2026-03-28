@@ -4,20 +4,20 @@
   "backend": "tensorrt_rtx",
   "profiles": [
     {
-      "name": "trt_static_512",
+      "name": "trt_dynamic_512",
       "resolution": 512,
       "onnx_config": {
         "input_shape": [512, 512],
         "input_name": "input_rgb_hint",
         "output_names": ["alpha", "fg"],
         "batch_size": 1,
-        "shape_policy": "static",
+        "shape_policy": "dynamic",
         "dtype_policy": "fp32_export"
       },
       "backend_config": {
         "type": "tensorrt_rtx",
         "common_config": {
-          "fp16_mode": false,
+          "fp16_mode": true,
           "max_workspace_size": 2147483648
         },
         "model_inputs": [
@@ -39,20 +39,20 @@
       }
     },
     {
-      "name": "trt_static_768",
+      "name": "trt_dynamic_768",
       "resolution": 768,
       "onnx_config": {
         "input_shape": [768, 768],
         "input_name": "input_rgb_hint",
         "output_names": ["alpha", "fg"],
         "batch_size": 1,
-        "shape_policy": "static",
+        "shape_policy": "dynamic",
         "dtype_policy": "fp32_export"
       },
       "backend_config": {
         "type": "tensorrt_rtx",
         "common_config": {
-          "fp16_mode": false,
+          "fp16_mode": true,
           "max_workspace_size": 2147483648
         },
         "model_inputs": [
@@ -74,20 +74,20 @@
       }
     },
     {
-      "name": "trt_static_1024",
+      "name": "trt_dynamic_1024",
       "resolution": 1024,
       "onnx_config": {
         "input_shape": [1024, 1024],
         "input_name": "input_rgb_hint",
         "output_names": ["alpha", "fg"],
         "batch_size": 1,
-        "shape_policy": "static",
+        "shape_policy": "dynamic",
         "dtype_policy": "fp32_export"
       },
       "backend_config": {
         "type": "tensorrt_rtx",
         "common_config": {
-          "fp16_mode": false,
+          "fp16_mode": true,
           "max_workspace_size": 2147483648
         },
         "model_inputs": [
@@ -109,20 +109,20 @@
       }
     },
     {
-      "name": "trt_static_1536",
+      "name": "trt_dynamic_1536",
       "resolution": 1536,
       "onnx_config": {
         "input_shape": [1536, 1536],
         "input_name": "input_rgb_hint",
         "output_names": ["alpha", "fg"],
         "batch_size": 1,
-        "shape_policy": "static",
+        "shape_policy": "dynamic",
         "dtype_policy": "fp32_export"
       },
       "backend_config": {
         "type": "tensorrt_rtx",
         "common_config": {
-          "fp16_mode": false,
+          "fp16_mode": true,
           "max_workspace_size": 4294967296
         },
         "model_inputs": [
@@ -143,20 +143,20 @@
       }
     },
     {
-      "name": "trt_static_2048",
+      "name": "trt_dynamic_2048",
       "resolution": 2048,
       "onnx_config": {
         "input_shape": [2048, 2048],
         "input_name": "input_rgb_hint",
         "output_names": ["alpha", "fg"],
         "batch_size": 1,
-        "shape_policy": "static",
+        "shape_policy": "dynamic",
         "dtype_policy": "fp32_export"
       },
       "backend_config": {
         "type": "tensorrt_rtx",
         "common_config": {
-          "fp16_mode": false,
+          "fp16_mode": true,
           "max_workspace_size": 8589934592
         },
         "model_inputs": [

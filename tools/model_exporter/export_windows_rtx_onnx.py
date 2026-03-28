@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -85,6 +86,45 @@ def load_profiles(path):
     return profiles
 
 
+def build_export_kwargs(onnx_config):
+    shape_policy = onnx_config["shape_policy"]
+    if shape_policy not in ("static", "dynamic"):
+        raise ValueError(f"Unsupported shape policy: {shape_policy}")
+
+    export_kwargs = dict(
+        export_params=True,
+        opset_version=16,
+        do_constant_folding=True,
+        input_names=[onnx_config["input_name"]],
+        output_names=onnx_config["output_names"],
+    )
+
+    if shape_policy == "dynamic":
+        input_name = onnx_config["input_name"]
+        output_names = onnx_config["output_names"]
+        export_kwargs["dynamic_axes"] = {
+            input_name: {0: "batch_size"},
+            output_names[0]: {0: "batch_size"},
+            output_names[1]: {0: "batch_size"},
+        }
+
+    return export_kwargs
+
+
+def finalize_export_kwargs(export_kwargs, export_callable):
+    finalized = dict(export_kwargs)
+
+    try:
+        parameters = inspect.signature(export_callable).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+
+    if "dynamo" in parameters:
+        finalized["dynamo"] = False
+
+    return finalized
+
+
 def export_profile(profile, checkpoint_path, output_dir):
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -120,19 +160,14 @@ def export_profile(profile, checkpoint_path, output_dir):
         dtype=torch.float32,
     )
 
-    export_kwargs = dict(
-        export_params=True,
-        opset_version=16,
-        do_constant_folding=True,
-        input_names=[onnx_config["input_name"]],
-        output_names=onnx_config["output_names"],
-    )
+    export_fn = torch.onnx.export
+    export_kwargs = finalize_export_kwargs(build_export_kwargs(onnx_config), export_fn)
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
         warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
         with sdpa_kernel(SDPBackend.MATH):
-            torch.onnx.export(model, dummy_input, str(output_path), **export_kwargs)
+            export_fn(model, dummy_input, str(output_path), **export_kwargs)
 
     print(f"[export] {profile['name']} -> {output_path}")
     return str(output_path)

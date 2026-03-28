@@ -229,11 +229,11 @@ TEST_CASE("automatic coarse-to-fine selection chooses a safer coarse artifact",
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
 
     auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160,
                                 kQuantizationFp16, 10240, QualityFallbackMode::Auto);
 
     REQUIRE(selection.has_value());
-    REQUIRE(selection->requested_resolution == 1536);
+    REQUIRE(selection->requested_resolution == 2048);
     REQUIRE(selection->effective_resolution == 1024);
     REQUIRE(selection->used_fallback);
     REQUIRE(selection->coarse_to_fine);
@@ -246,15 +246,32 @@ TEST_CASE("automatic coarse-to-fine selection falls back to lower packaged coars
     touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
 
     auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160,
+                                kQuantizationFp16, 10240, QualityFallbackMode::Auto);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 2048);
+    REQUIRE(selection->effective_resolution == 768);
+    REQUIRE(selection->used_fallback);
+    REQUIRE(selection->coarse_to_fine);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_768.onnx");
+}
+
+TEST_CASE("fixed windows tensorRT ultra accepts 1536 on a 10 GB RTX tier",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-quality-ultra-10gb-direct");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+
+    auto selection =
         select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
                                 kQuantizationFp16, 10240, QualityFallbackMode::Auto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 1536);
-    REQUIRE(selection->effective_resolution == 768);
-    REQUIRE(selection->used_fallback);
-    REQUIRE(selection->coarse_to_fine);
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_768.onnx");
+    REQUIRE(selection->effective_resolution == 1536);
+    REQUIRE_FALSE(selection->used_fallback);
+    REQUIRE_FALSE(selection->coarse_to_fine);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
 }
 
 TEST_CASE("coarse-to-fine override requires the exact requested coarse artifact",
@@ -491,11 +508,14 @@ TEST_CASE("fixed windows tensorRT quality reports unsupported tiers before engin
           "[unit][ofx][regression]") {
     auto message =
         unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
-                                    kQualityUltra, 1536);
+                                    kQualityMaximum, 2048);
 
     REQUIRE(message.has_value());
-    REQUIRE(message->find("16 GB") != std::string::npos);
-    REQUIRE(message->find("High (1024)") != std::string::npos);
+    REQUIRE(message->find("24 GB") != std::string::npos);
+    REQUIRE(message->find("Ultra (1536)") != std::string::npos);
+    REQUIRE_FALSE(unsupported_quality_message(
+                      DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, kQualityUltra, 1536)
+                      .has_value());
     REQUIRE_FALSE(unsupported_quality_message(
                       DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}, kQualityMaximum, 2048)
                       .has_value());

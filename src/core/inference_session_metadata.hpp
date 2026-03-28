@@ -13,19 +13,29 @@ namespace corridorkey::core {
 inline constexpr std::string_view k_corridorkey_alpha_output_name = "alpha";
 inline constexpr std::string_view k_corridorkey_fg_output_name = "fg";
 
-inline std::optional<int> packaged_corridorkey_fp16_resolution(
+inline std::optional<int> infer_model_resolution_from_path(
     const std::filesystem::path& model_path) {
     const std::string filename = model_path.filename().string();
-    if (!filename.starts_with("corridorkey_fp16_") || !filename.ends_with(".onnx")) {
-        return std::nullopt;
-    }
-    for (const int resolution : {2048, 1536}) {
+    for (const int resolution : {2048, 1536, 1024, 768, 512}) {
         const std::string marker = "_" + std::to_string(resolution);
         if (filename.find(marker) != std::string::npos) {
             return resolution;
         }
     }
     return std::nullopt;
+}
+
+inline std::optional<int> packaged_corridorkey_fp16_resolution(
+    const std::filesystem::path& model_path) {
+    const std::string filename = model_path.filename().string();
+    if (!filename.starts_with("corridorkey_fp16_") || !filename.ends_with(".onnx")) {
+        return std::nullopt;
+    }
+    const auto resolution = infer_model_resolution_from_path(model_path);
+    if (!resolution.has_value() || *resolution < 1536) {
+        return std::nullopt;
+    }
+    return resolution;
 }
 
 inline bool should_use_packaged_corridorkey_output_contract(
