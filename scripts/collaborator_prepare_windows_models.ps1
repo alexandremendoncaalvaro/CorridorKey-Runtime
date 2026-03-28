@@ -164,14 +164,22 @@ Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $prepareArguments
 if ($CreateCommit.IsPresent) {
     Ensure-GitIdentity -PreferredName $GitUserName -PreferredEmail $GitUserEmail
 
-    Write-Host "[collaborator] Step 4/5: Committing generated models" -ForegroundColor Cyan
-    Invoke-RepoCommand -FilePath "git" -Arguments @("add", "models")
+    $commitPaths = @(
+        "models",
+        "CMakeLists.txt",
+        "src/gui/package.json",
+        "src/gui/src-tauri/Cargo.toml",
+        "src/gui/src-tauri/tauri.conf.json"
+    )
 
-    & git diff --cached --quiet -- models
+    Write-Host "[collaborator] Step 4/5: Committing generated models and release version metadata" -ForegroundColor Cyan
+    Invoke-RepoCommand -FilePath "git" -Arguments (@("add", "--") + $commitPaths)
+
+    & git diff --cached --quiet -- @commitPaths
     if ($LASTEXITCODE -ne 0) {
         Invoke-RepoCommand -FilePath "git" -Arguments @("commit", "-m", $CommitMessage)
     } else {
-        Write-Host "[collaborator] No regenerated model artifacts were staged; skipping commit." -ForegroundColor Yellow
+        Write-Host "[collaborator] No regenerated model artifacts or version metadata were staged; skipping commit." -ForegroundColor Yellow
     }
 
     if ($Push.IsPresent) {
