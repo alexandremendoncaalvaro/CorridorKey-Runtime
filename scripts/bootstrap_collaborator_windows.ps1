@@ -1,9 +1,9 @@
 param(
-    [string]$Version = "0.5.2",
-    [string]$RuntimeBranch = "codex/windows-proofed-validation",
+    [string]$Version = "0.5.4",
+    [string]$RuntimeBranch = "codex/windows-rtx-054-regeneration",
     [string]$RuntimeRepoUrl = "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git",
     [string]$RuntimeRepoName = "CorridorKey-Runtime",
-    [string]$SourceRepoName = "CorridorKey",
+    [string]$SourceRepoName = "CorridorKey-Engine",
     [string]$CommitBranch = "",
     [switch]$SkipReleaseTests
 )
@@ -66,7 +66,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 if (-not (Test-Path (Join-Path $sourceRepoRoot "CorridorKeyModule"))) {
-    throw "Expected sibling source repo at $sourceRepoRoot. Run this from the parent folder that contains CorridorKey."
+    throw "Expected sibling source repo at $sourceRepoRoot. Run this from the parent folder that contains CorridorKey-Engine."
 }
 
 if (-not (Test-Path $runtimeRepoRoot)) {
