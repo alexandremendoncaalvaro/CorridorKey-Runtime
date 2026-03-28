@@ -236,8 +236,8 @@ function Get-CorridorKeyOfxModelProfileFromReleaseSuffix {
         return "windows-universal"
     }
 
-    if ($ReleaseSuffix -match "RTX[_-]?Stable") {
-        return "rtx-stable"
+    if ($ReleaseSuffix -match "RTX[_-]?Lite" -or $ReleaseSuffix -match "RTX[_-]?Stable") {
+        return "rtx-lite"
     }
 
     if ($ReleaseSuffix -match "RTX[_-]?Full") {
@@ -256,7 +256,8 @@ function Get-CorridorKeyWindowsReleaseLabelFromSuffix {
 
     $modelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix
     switch ($modelProfile) {
-        "rtx-stable" { return "Windows RTX Stable" }
+        "rtx-lite" { return "Windows RTX Lite" }
+        "rtx-stable" { return "Windows RTX Lite" }
         "rtx-full" { return "Windows RTX Full" }
         "windows-universal" { return "Windows DirectML" }
         default { return "Windows RTX Full" }
@@ -335,7 +336,7 @@ function Get-CorridorKeyIntermediateModelList {
 
 function Get-CorridorKeyOfxBundleTargetModels {
     param(
-        [ValidateSet("rtx-stable", "rtx-full", "windows-universal")]
+        [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
         [string]$ModelProfile = "rtx-full"
     )
 
@@ -349,6 +350,9 @@ function Get-CorridorKeyOfxBundleTargetModels {
     )
 
     switch ($ModelProfile) {
+        "rtx-lite" {
+            return $baseModels
+        }
         "rtx-stable" {
             return $baseModels
         }
@@ -371,10 +375,10 @@ function Get-CorridorKeyWindowsOfxReleaseVariants {
 
     if ($Track -in @("rtx", "all")) {
         $variants += [pscustomobject]@{
-            Label = "RTX Stable"
-            Suffix = "RTX_Stable"
+            Label = "RTX Lite"
+            Suffix = "RTX_Lite"
             Track = "rtx"
-            ModelProfile = "rtx-stable"
+            ModelProfile = "rtx-lite"
         }
         $variants += [pscustomobject]@{
             Label = "RTX Full"

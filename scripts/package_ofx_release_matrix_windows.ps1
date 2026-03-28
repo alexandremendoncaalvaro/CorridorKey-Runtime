@@ -81,7 +81,7 @@ if ($SyncDirectML.IsPresent -or -not (Test-Path $DirectMlOrtRoot)) {
     }
 }
 
-Invoke-PackageVariant -Label "RTX Stable" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX_Stable" -ModelProfile "rtx-stable"
+Invoke-PackageVariant -Label "RTX Lite" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX_Lite" -ModelProfile "rtx-lite"
 Invoke-PackageVariant -Label "RTX Full" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX_Full" -ModelProfile "rtx-full"
 Invoke-PackageVariant -Label "DirectML" -OrtRoot $DirectMlOrtRoot -ReleaseSuffix "DirectML" -ModelProfile "windows-universal"
 

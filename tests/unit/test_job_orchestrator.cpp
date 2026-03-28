@@ -4,7 +4,7 @@
 
 using namespace corridorkey::app;
 
-TEST_CASE("doctor summary honors packaged bundle inventory for RTX stable",
+TEST_CASE("doctor summary honors packaged bundle inventory for RTX lite",
           "[unit][doctor][regression]") {
     nlohmann::json report;
     report["system"]["capabilities"]["platform"] = "windows";

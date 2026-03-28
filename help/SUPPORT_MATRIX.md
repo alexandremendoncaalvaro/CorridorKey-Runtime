@@ -79,20 +79,20 @@ track. Do not rely on it for production use.
 AMD GPUs are not officially supported. Do not rely on them for production use.
 
 **Windows product tracks:** The canonical public Windows release emits the
-supported `RTX Stable` and `RTX Full` installers by default. The `DirectML`
+supported `RTX Lite` and `RTX Full` installers by default. The `DirectML`
 installer is experimental and should only be published intentionally. Other
 execution-provider hooks present in the core runtime, such as CUDA, WinML, and
 OpenVINO, are not current product support tracks unless they are explicitly
 packaged and validated.
 
 **Windows RTX installer policy:**
-- `RTX Stable` is the conservative Windows RTX installer. It packages the
+- `RTX Lite` is the conservative Windows RTX installer. It packages the
   validated FP16 and INT8 ladder through `1024px`.
 - `RTX Full` packages the complete FP16 ladder through `2048px`.
 - `RTX Full` does not clamp a user-selected quality by VRAM policy. It attempts
   the requested packaged quality and then follows the established runtime
   failure path if that quality cannot execute.
-- `RTX Stable` and `RTX Full` install to the same OFX bundle location.
+- `RTX Lite` and `RTX Full` install to the same OFX bundle location.
   Installing one replaces the other.
 
 The `corridorkey doctor` command reports the active backend and any fallback

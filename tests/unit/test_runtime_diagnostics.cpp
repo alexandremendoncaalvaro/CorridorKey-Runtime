@@ -173,9 +173,9 @@ TEST_CASE("doctor bundle inspection reports packaged TensorRT context models",
     std::filesystem::remove_all(temp_dir);
 }
 
-TEST_CASE("doctor bundle inspection honors packaged model inventory for RTX stable bundles",
+TEST_CASE("doctor bundle inspection honors packaged model inventory for RTX lite bundles",
           "[unit][doctor][regression]") {
-    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-rtx-stable";
+    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-rtx-lite";
     std::filesystem::remove_all(temp_dir);
 
     const auto bundle_dir = temp_dir / "CorridorKey.ofx.bundle";
@@ -197,7 +197,7 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for RTX stab
 
     const nlohmann::json inventory = {
         {"package_type", "ofx_bundle"},
-        {"model_profile", "rtx-stable"},
+        {"model_profile", "rtx-lite"},
         {"expected_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx",
           "corridorkey_fp16_1024.onnx", "corridorkey_int8_512.onnx",
@@ -213,7 +213,7 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for RTX stab
     const auto report = inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
 
     REQUIRE(report["bundle_track"] == "rtx");
-    REQUIRE(report["model_profile"] == "rtx-stable");
+    REQUIRE(report["model_profile"] == "rtx-lite");
     REQUIRE(report["healthy"].get<bool>());
 
     const auto packaged_models = report["packaged_models"];

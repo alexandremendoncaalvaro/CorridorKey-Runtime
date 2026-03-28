@@ -282,9 +282,9 @@ TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit
 
 TEST_CASE("windows RTX bundle profile controls the safe quality ceiling",
           "[unit][runtime][regression]") {
-    const auto stable_models_dir = write_models_inventory_fixture("rtx-stable");
+    const auto lite_models_dir = write_models_inventory_fixture("rtx-lite");
     {
-        ScopedModelsDirOverride stable_override(stable_models_dir);
+        ScopedModelsDirOverride lite_override(lite_models_dir);
         REQUIRE(max_supported_resolution_for_device(
                     DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
     }
@@ -296,7 +296,7 @@ TEST_CASE("windows RTX bundle profile controls the safe quality ceiling",
                     DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 2048);
     }
 
-    std::filesystem::remove_all(stable_models_dir.parent_path());
+    std::filesystem::remove_all(lite_models_dir.parent_path());
     std::filesystem::remove_all(full_models_dir.parent_path());
 }
 

@@ -80,7 +80,7 @@ std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_me
         if (*model_profile == "rtx-full") {
             return 2048;
         }
-        if (*model_profile == "rtx-stable") {
+        if (*model_profile == "rtx-lite" || *model_profile == "rtx-stable") {
             return 1024;
         }
     }

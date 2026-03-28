@@ -387,11 +387,11 @@ $summary = [ordered]@{
     promoted_models_dir = [System.IO.Path]::GetFullPath($promotedModelsDir)
     validation_report = [System.IO.Path]::GetFullPath($validationReportPath)
     installers = [ordered]@{
-        rtx_stable = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Stable_Installer.exe"))
+        rtx_lite = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Lite_Installer.exe"))
         rtx_full = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Full_Installer.exe"))
     }
     bundle_validation = [ordered]@{
-        rtx_stable = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Stable\\bundle_validation.json"))
+        rtx_lite = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Lite\\bundle_validation.json"))
         rtx_full = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Full\\bundle_validation.json"))
     }
 }
