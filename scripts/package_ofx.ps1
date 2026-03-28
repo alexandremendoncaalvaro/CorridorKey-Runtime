@@ -287,10 +287,18 @@ if ($null -ne $tensorrtProvider) {
 
 $targetModels = Get-CorridorKeyOfxBundleTargetModels -Include2048:(-not $Skip2048.IsPresent)
 $modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
+$compiledContextModels = @()
 
 foreach ($model in $modelInventory.present_models) {
     $sourcePath = Join-Path $ModelsDir $model
     Copy-Item $sourcePath $resourcesDir -Force
+
+    $compiledContextName = ([System.IO.Path]::GetFileNameWithoutExtension($model)) + "_ctx.onnx"
+    $compiledContextPath = Join-Path $ModelsDir $compiledContextName
+    if (Test-Path $compiledContextPath) {
+        Copy-Item $compiledContextPath $resourcesDir -Force
+        $compiledContextModels += $compiledContextName
+    }
 }
 
 $inventoryPayload = [ordered]@{
@@ -301,6 +309,7 @@ $inventoryPayload = [ordered]@{
     missing_models = @($modelInventory.missing_models)
     present_count = $modelInventory.present_count
     missing_count = $modelInventory.missing_count
+    compiled_context_models = @($compiledContextModels)
 }
 Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
 
