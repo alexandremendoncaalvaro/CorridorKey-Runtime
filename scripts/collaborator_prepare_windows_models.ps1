@@ -4,6 +4,8 @@ param(
     [string]$CorridorKeyRepo = "",
     [string]$CommitBranch = "",
     [string]$CommitMessage = "chore: regenerate windows rtx model pack",
+    [string]$GitUserName = "",
+    [string]$GitUserEmail = "",
     [switch]$CreateCommit,
     [switch]$Push,
     [switch]$BuildRelease,
@@ -44,6 +46,79 @@ function New-OrSwitchArgument {
         return @($Value)
     }
     return @()
+}
+
+function Get-GitConfigValue {
+    param(
+        [string[]]$Arguments
+    )
+
+    $value = & git @Arguments 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return ""
+    }
+    return ($value | Out-String).Trim()
+}
+
+function Read-RequiredValue {
+    param(
+        [string]$Prompt
+    )
+
+    while ($true) {
+        $value = (Read-Host -Prompt $Prompt).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+        Write-Host "[collaborator] A value is required to continue." -ForegroundColor Yellow
+    }
+}
+
+function Ensure-GitIdentity {
+    param(
+        [string]$PreferredName,
+        [string]$PreferredEmail
+    )
+
+    $localName = Get-GitConfigValue -Arguments @("config", "--local", "--get", "user.name")
+    $localEmail = Get-GitConfigValue -Arguments @("config", "--local", "--get", "user.email")
+    $globalName = Get-GitConfigValue -Arguments @("config", "--global", "--get", "user.name")
+    $globalEmail = Get-GitConfigValue -Arguments @("config", "--global", "--get", "user.email")
+
+    $resolvedName = $PreferredName
+    if ([string]::IsNullOrWhiteSpace($resolvedName)) {
+        $resolvedName = $localName
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedName)) {
+        $resolvedName = $globalName
+    }
+
+    $resolvedEmail = $PreferredEmail
+    if ([string]::IsNullOrWhiteSpace($resolvedEmail)) {
+        $resolvedEmail = $localEmail
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedEmail)) {
+        $resolvedEmail = $globalEmail
+    }
+
+    if ([string]::IsNullOrWhiteSpace($resolvedName)) {
+        Write-Host "[collaborator] Git user.name is not configured. This script will set it for this CorridorKey-Runtime clone only." -ForegroundColor Yellow
+        $resolvedName = Read-RequiredValue -Prompt "Enter your Git name"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($resolvedEmail)) {
+        Write-Host "[collaborator] Git user.email is not configured. This script will set it for this CorridorKey-Runtime clone only." -ForegroundColor Yellow
+        $resolvedEmail = Read-RequiredValue -Prompt "Enter your Git email"
+    }
+
+    if ($localName -ne $resolvedName) {
+        Invoke-RepoCommand -FilePath "git" -Arguments @("config", "--local", "user.name", $resolvedName)
+    }
+    if ($localEmail -ne $resolvedEmail) {
+        Invoke-RepoCommand -FilePath "git" -Arguments @("config", "--local", "user.email", $resolvedEmail)
+    }
+
+    Write-Host "[collaborator] Git identity ready for local commit: $resolvedName <$resolvedEmail>" -ForegroundColor Cyan
 }
 
 Assert-InGitRepository
@@ -87,6 +162,8 @@ Write-Host "[collaborator] Step 3/5: Regenerating and certifying the Windows RTX
 Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $prepareArguments
 
 if ($CreateCommit.IsPresent) {
+    Ensure-GitIdentity -PreferredName $GitUserName -PreferredEmail $GitUserEmail
+
     Write-Host "[collaborator] Step 4/5: Committing generated models" -ForegroundColor Cyan
     Invoke-RepoCommand -FilePath "git" -Arguments @("add", "models")
 

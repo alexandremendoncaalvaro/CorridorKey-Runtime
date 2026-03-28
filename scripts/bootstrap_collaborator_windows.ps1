@@ -5,6 +5,8 @@ param(
     [string]$RuntimeRepoName = "CorridorKey-Runtime",
     [string]$SourceRepoName = "CorridorKey-Engine",
     [string]$CommitBranch = "",
+    [string]$GitUserName = "",
+    [string]$GitUserEmail = "",
     [switch]$SkipReleaseTests
 )
 
@@ -102,6 +104,14 @@ $arguments = @(
     "-BuildRelease",
     "-CommitBranch", $commitBranchName
 )
+
+if (-not [string]::IsNullOrWhiteSpace($GitUserName)) {
+    $arguments += @("-GitUserName", $GitUserName)
+}
+
+if (-not [string]::IsNullOrWhiteSpace($GitUserEmail)) {
+    $arguments += @("-GitUserEmail", $GitUserEmail)
+}
 
 if ($SkipReleaseTests.IsPresent) {
     $arguments += "-SkipReleaseTests"
