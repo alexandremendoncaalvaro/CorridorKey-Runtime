@@ -1,4 +1,5 @@
 import argparse
+import gc
 import inspect
 import json
 import os
@@ -23,21 +24,31 @@ def disable_torch_compile_for_export(torch_module):
     torch_module.compile = passthrough_compile
 
 
-def load_model_with_pos_embed_interpolation(checkpoint_path, img_size):
+def normalize_device_name(device_name):
+    normalized = device_name.strip().lower()
+    if normalized in ("cuda", "gpu"):
+        return "cuda"
+    if normalized == "cpu":
+        return "cpu"
+    raise ValueError(f"Unsupported export device: {device_name}")
+
+
+def load_model_with_pos_embed_interpolation(checkpoint_path, img_size, device_name):
     import math
     import torch
     import torch.nn.functional as f
     from CorridorKeyModule.core.model_transformer import GreenFormer
 
+    device = torch.device(device_name)
     model = GreenFormer(
         encoder_name="hiera_base_plus_224.mae_in1k_ft_in1k",
         img_size=img_size,
         use_refiner=True,
     )
-    model = model.to("cpu")
+    model = model.to(device)
     model.eval()
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     state_dict = checkpoint.get("state_dict", checkpoint)
 
     new_state_dict = {}
@@ -125,11 +136,39 @@ def finalize_export_kwargs(export_kwargs, export_callable):
     return finalized
 
 
-def export_profile(profile, checkpoint_path, output_dir):
+def select_profiles(profiles, selected_profile_names):
+    if not selected_profile_names:
+        return profiles
+
+    selected_names = {name.strip() for name in selected_profile_names if name.strip()}
+    filtered = [profile for profile in profiles if profile["name"] in selected_names]
+    if len(filtered) != len(selected_names):
+        known = {profile["name"] for profile in profiles}
+        missing = sorted(selected_names - known)
+        raise ValueError(f"Unknown deploy profiles: {', '.join(missing)}")
+
+    return filtered
+
+
+def cleanup_export_device(torch_module, device_name):
+    if device_name != "cuda":
+        return
+
+    if hasattr(torch_module.cuda, "synchronize"):
+        torch_module.cuda.synchronize()
+    if hasattr(torch_module.cuda, "empty_cache"):
+        torch_module.cuda.empty_cache()
+    gc.collect()
+
+
+def export_profile(profile, checkpoint_path, output_dir, device_name):
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
 
     disable_torch_compile_for_export(torch)
+    device_name = normalize_device_name(device_name)
+    if device_name == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA export was requested, but CUDA is not available.")
 
     resolution = int(profile["resolution"])
     onnx_config = profile["onnx_config"]
@@ -140,7 +179,7 @@ def export_profile(profile, checkpoint_path, output_dir):
     output_path = output_dir / profile["artifacts"]["raw_onnx"]
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    base_model = load_model_with_pos_embed_interpolation(checkpoint_path, resolution)
+    base_model = load_model_with_pos_embed_interpolation(checkpoint_path, resolution, device_name)
 
     class OnnxWrapper(torch.nn.Module):
         def __init__(self, model):
@@ -157,6 +196,7 @@ def export_profile(profile, checkpoint_path, output_dir):
         4,
         resolution,
         resolution,
+        device=device_name,
         dtype=torch.float32,
     )
 
@@ -170,6 +210,7 @@ def export_profile(profile, checkpoint_path, output_dir):
             export_fn(model, dummy_input, str(output_path), **export_kwargs)
 
     print(f"[export] {profile['name']} -> {output_path}")
+    cleanup_export_device(torch, device_name)
     return str(output_path)
 
 
@@ -191,6 +232,18 @@ def main():
         required=True,
         help="Path to the CorridorKey Engine/source repository",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="Export device to use: cpu or cuda",
+    )
+    parser.add_argument(
+        "--profile-name",
+        action="append",
+        default=[],
+        help="Explicit deploy profile name to export. Repeat to export multiple profiles.",
+    )
     args = parser.parse_args()
 
     repo_path = Path(args.repo_path).resolve()
@@ -198,7 +251,7 @@ def main():
         raise SystemExit(f"Invalid CorridorKey source repository: {repo_path}")
 
     sys.path.insert(0, str(repo_path))
-    profiles = load_profiles(args.profiles)
+    profiles = select_profiles(load_profiles(args.profiles), args.profile_name)
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -208,7 +261,7 @@ def main():
             {
                 "name": profile["name"],
                 "resolution": profile["resolution"],
-                "raw_onnx": export_profile(profile, args.ckpt, output_dir),
+                "raw_onnx": export_profile(profile, args.ckpt, output_dir, args.device),
             }
         )
 
