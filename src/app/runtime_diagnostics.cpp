@@ -531,6 +531,91 @@ struct BundleLayoutInfo {
     bool packaged_layout_detected = false;
 };
 
+struct PackagedModelInventory {
+    std::vector<std::string> expected_models = {};
+    std::string model_profile = "";
+};
+
+std::vector<std::filesystem::path> packaged_model_inventory_candidates(
+    const std::filesystem::path& models_dir) {
+    std::vector<std::filesystem::path> candidates;
+
+    if (models_dir.filename() != "models") {
+        return candidates;
+    }
+
+    candidates.push_back(models_dir.parent_path() / "model_inventory.json");
+
+    const auto parent = models_dir.parent_path();
+    if (parent.filename() == "Resources" && parent.parent_path().filename() == "Contents") {
+        candidates.push_back(parent.parent_path().parent_path() / "model_inventory.json");
+    }
+
+    return candidates;
+}
+
+std::optional<PackagedModelInventory> load_packaged_model_inventory(
+    const std::filesystem::path& models_dir) {
+    for (const auto& candidate : packaged_model_inventory_candidates(models_dir)) {
+        std::error_code error;
+        if (!std::filesystem::exists(candidate, error) || error) {
+            continue;
+        }
+
+        try {
+            std::ifstream stream(candidate);
+            if (!stream.is_open()) {
+                continue;
+            }
+
+            nlohmann::json parsed = nlohmann::json::parse(stream, nullptr, true, true);
+            if (!parsed.contains("expected_models") || !parsed["expected_models"].is_array()) {
+                continue;
+            }
+
+            PackagedModelInventory inventory;
+            inventory.expected_models = parsed["expected_models"].get<std::vector<std::string>>();
+            if (parsed.contains("model_profile") && parsed["model_profile"].is_string()) {
+                inventory.model_profile = parsed["model_profile"].get<std::string>();
+            }
+            return inventory;
+        } catch (...) {
+            continue;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ModelCatalogEntry> find_model_catalog_entry(const std::string& filename) {
+    auto catalog = model_catalog();
+    auto it = std::find_if(catalog.begin(), catalog.end(), [&](const ModelCatalogEntry& entry) {
+        return entry.filename == filename;
+    });
+    if (it == catalog.end()) {
+        return std::nullopt;
+    }
+    return *it;
+}
+
+std::vector<std::string> expected_packaged_models_for_platform(const std::filesystem::path& models_dir,
+                                                               bool windows_platform) {
+    if (auto inventory = load_packaged_model_inventory(models_dir); inventory.has_value()) {
+        return inventory->expected_models;
+    }
+
+    std::vector<std::string> expected_models;
+    for (const auto& model : model_catalog()) {
+        const bool packaged_for_current_platform =
+            windows_platform ? model.packaged_for_windows : model.packaged_for_macos;
+        if (!packaged_for_current_platform) {
+            continue;
+        }
+        expected_models.push_back(model.filename);
+    }
+    return expected_models;
+}
+
 BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_dir) {
     BundleLayoutInfo layout;
 #if defined(_WIN32)
@@ -688,28 +773,33 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         find_libraries_with_prefixes(executable_dir, {"cudart64_", "cudart"});
     auto compiled_context_models = nlohmann::json::array();
 
-    nlohmann::json packaged_models = nlohmann::json::array();
-    bool packaged_models_present = true;
-    for (const auto& model : model_catalog()) {
-        bool packaged_for_current_platform =
+    const auto packaged_inventory = load_packaged_model_inventory(models_dir);
+    const auto expected_packaged_models =
+        expected_packaged_models_for_platform(models_dir,
 #if defined(_WIN32)
-            model.packaged_for_windows;
+                                              true
 #else
-            model.packaged_for_macos;
+                                              false
 #endif
-        if (!packaged_for_current_platform) {
-            continue;
-        }
+        );
 
-        std::filesystem::path model_path = models_dir / model.filename;
+    nlohmann::json packaged_models = nlohmann::json::array();
+    bool packaged_models_present = !expected_packaged_models.empty();
+    for (const auto& filename : expected_packaged_models) {
+        std::filesystem::path model_path = models_dir / filename;
         bool found = std::filesystem::exists(model_path);
         packaged_models_present = packaged_models_present && found;
 
         nlohmann::json entry;
-        entry["filename"] = model.filename;
+        entry["filename"] = filename;
         entry["found"] = found;
-        entry["validated_platforms"] = model.validated_platforms;
-        entry["validated_hardware_tiers"] = model.validated_hardware_tiers;
+        if (auto model = find_model_catalog_entry(filename); model.has_value()) {
+            entry["validated_platforms"] = model->validated_platforms;
+            entry["validated_hardware_tiers"] = model->validated_hardware_tiers;
+        } else {
+            entry["validated_platforms"] = nlohmann::json::array();
+            entry["validated_hardware_tiers"] = nlohmann::json::array();
+        }
         packaged_models.push_back(entry);
     }
 
@@ -778,6 +868,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["mlx_bridge_present"] = mlx_bridge_present;
     json["mlx_bridge_artifacts"] = mlx_bridge_artifacts;
     json["compiled_context_models"] = compiled_context_models;
+    json["model_profile"] = packaged_inventory.has_value() ? packaged_inventory->model_profile : "";
     json["bundle_track"] =
         windows_rtx_bundle ? "rtx" : (windows_directml_bundle ? "directml" : "generic");
     json["runtime_backend_bundle_ready"] = runtime_backend_bundle_ready;
@@ -1164,7 +1255,9 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["runtime_cache_dir"] = "";
     json["runtime_cache_ready"] = true;
 
-    bool packaged_models_ready = true;
+    const auto packaged_inventory = load_packaged_model_inventory(models_dir);
+    const auto expected_windows_models = expected_packaged_models_for_platform(models_dir, true);
+    bool packaged_models_ready = !expected_windows_models.empty();
     bool any_packaged_model_found = false;
     std::error_code error;
     if (std::filesystem::exists(models_dir, error)) {
@@ -1179,23 +1272,25 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         }
     }
 
-    for (const auto& model : model_catalog()) {
-        if (!model.packaged_for_windows) {
-            continue;
-        }
-
-        std::filesystem::path model_path = models_dir / model.filename;
+    for (const auto& filename : expected_windows_models) {
+        std::filesystem::path model_path = models_dir / filename;
         bool found = std::filesystem::exists(model_path);
         any_packaged_model_found = any_packaged_model_found || found;
         packaged_models_ready = packaged_models_ready && found;
 
         nlohmann::json entry;
-        entry["filename"] = model.filename;
+        entry["filename"] = filename;
         entry["found"] = found;
-        entry["recommended_backend"] = model.recommended_backend;
-        entry["validated_platforms"] = model.validated_platforms;
-        entry["intended_platforms"] = model.intended_platforms;
-        if (model.recommended_backend == "tensorrt") {
+        if (auto model = find_model_catalog_entry(filename); model.has_value()) {
+            entry["recommended_backend"] = model->recommended_backend;
+            entry["validated_platforms"] = model->validated_platforms;
+            entry["intended_platforms"] = model->intended_platforms;
+        } else {
+            entry["recommended_backend"] = "cpu";
+            entry["validated_platforms"] = nlohmann::json::array();
+            entry["intended_platforms"] = nlohmann::json::array();
+        }
+        if (entry["recommended_backend"] == "tensorrt") {
             auto compiled_context_path =
                 common::existing_tensorrt_rtx_compiled_context_model_path(model_path);
             entry["compiled_context_path"] =
@@ -1205,6 +1300,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         json["packaged_models"].push_back(entry);
     }
 
+    json["model_profile"] = packaged_inventory.has_value() ? packaged_inventory->model_profile : "";
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
 
     auto preferred_probe = preferred_windows_probe(probes);

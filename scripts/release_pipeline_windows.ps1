@@ -98,18 +98,22 @@ try {
     Write-Step "Quality Gate: Packaging and Backend Validation"
 
     $variants = @()
-    if ($needsDirectMlTrack) {
-        $variants += @{ Suffix = "DirectML"; Root = $directMlOrtRoot }
-    }
-    if ($needsRtxTrack) {
-        $variants += @{ Suffix = "RTX"; Root = $rtxOrtRoot }
+    foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
+        $variantOrtRoot = if ($variant.Track -eq "dml") { $directMlOrtRoot } else { $rtxOrtRoot }
+        $variants += @{
+            Label = $variant.Label
+            Suffix = $variant.Suffix
+            Root = $variantOrtRoot
+            ModelProfile = $variant.ModelProfile
+        }
     }
 
     foreach ($v in $variants) {
-        Write-Host "--- Packaging Variant: $($v.Suffix) ---" -ForegroundColor Yellow
+        Write-Host "--- Packaging Variant: $($v.Label) ---" -ForegroundColor Yellow
         & powershell.exe -NoProfile -File "scripts/package_ofx_installer_windows.ps1" `
             -Version $Version `
             -ReleaseSuffix $v.Suffix `
+            -ModelProfile $v.ModelProfile `
             -OrtRoot $v.Root
 
         if ($LASTEXITCODE -ne 0) { throw "Packaging failed for variant: $($v.Suffix)" }
@@ -125,6 +129,9 @@ try {
         $validation = Get-Content -Path $expectedValidationReport -Raw | ConvertFrom-Json
         Write-Host "[VERIFIED] Artifact created: $expectedInstaller" -ForegroundColor Green
         Write-Host "[VERIFIED] Bundle validation report created: $expectedValidationReport" -ForegroundColor Green
+        if (-not $validation.doctor.healthy) {
+            throw "Doctor reported unhealthy status for variant $($v.Suffix). See $expectedValidationReport"
+        }
         if ($validation.models.missing_count -gt 0) {
             Write-Host "[INFO] $($v.Suffix) artifact uses partial model coverage: $($validation.models.missing_models -join ', ')" -ForegroundColor Cyan
         }

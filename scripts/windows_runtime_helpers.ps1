@@ -225,6 +225,44 @@ function Get-CorridorKeyWindowsTrackFromReleaseSuffix {
     return $DefaultTrack
 }
 
+function Get-CorridorKeyOfxModelProfileFromReleaseSuffix {
+    param([string]$ReleaseSuffix)
+
+    if ([string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
+        return "rtx-full"
+    }
+
+    if ($ReleaseSuffix -match "DirectML" -or $ReleaseSuffix -match "DML") {
+        return "windows-universal"
+    }
+
+    if ($ReleaseSuffix -match "RTX[_-]?Stable") {
+        return "rtx-stable"
+    }
+
+    if ($ReleaseSuffix -match "RTX[_-]?Full") {
+        return "rtx-full"
+    }
+
+    if ($ReleaseSuffix -match "RTX") {
+        return "rtx-full"
+    }
+
+    return "rtx-full"
+}
+
+function Get-CorridorKeyWindowsReleaseLabelFromSuffix {
+    param([string]$ReleaseSuffix)
+
+    $modelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix
+    switch ($modelProfile) {
+        "rtx-stable" { return "Windows RTX Stable" }
+        "rtx-full" { return "Windows RTX Full" }
+        "windows-universal" { return "Windows DirectML" }
+        default { return "Windows RTX Full" }
+    }
+}
+
 function Resolve-CorridorKeyWindowsOrtRoot {
     param(
         [string]$RepoRoot,
@@ -296,22 +334,66 @@ function Get-CorridorKeyIntermediateModelList {
 }
 
 function Get-CorridorKeyOfxBundleTargetModels {
-    param([switch]$Include2048)
+    param(
+        [ValidateSet("rtx-stable", "rtx-full", "windows-universal")]
+        [string]$ModelProfile = "rtx-full"
+    )
 
-    $models = @(
+    $baseModels = @(
         "corridorkey_fp16_512.onnx",
         "corridorkey_fp16_768.onnx",
         "corridorkey_fp16_1024.onnx",
-        "corridorkey_fp16_1536.onnx",
         "corridorkey_int8_512.onnx",
         "corridorkey_int8_768.onnx",
         "corridorkey_int8_1024.onnx"
     )
-    if ($Include2048.IsPresent) {
-        $models += "corridorkey_fp16_2048.onnx"
+
+    switch ($ModelProfile) {
+        "rtx-stable" {
+            return $baseModels
+        }
+        "windows-universal" {
+            return @($baseModels + @("corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"))
+        }
+        default {
+            return @($baseModels + @("corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"))
+        }
+    }
+}
+
+function Get-CorridorKeyWindowsOfxReleaseVariants {
+    param(
+        [ValidateSet("rtx", "dml", "all")]
+        [string]$Track = "all"
+    )
+
+    $variants = @()
+
+    if ($Track -in @("rtx", "all")) {
+        $variants += [pscustomobject]@{
+            Label = "RTX Stable"
+            Suffix = "RTX_Stable"
+            Track = "rtx"
+            ModelProfile = "rtx-stable"
+        }
+        $variants += [pscustomobject]@{
+            Label = "RTX Full"
+            Suffix = "RTX_Full"
+            Track = "rtx"
+            ModelProfile = "rtx-full"
+        }
     }
 
-    return $models
+    if ($Track -in @("dml", "all")) {
+        $variants += [pscustomobject]@{
+            Label = "DirectML"
+            Suffix = "DirectML"
+            Track = "dml"
+            ModelProfile = "windows-universal"
+        }
+    }
+
+    return $variants
 }
 
 function Get-CorridorKeyPortableRuntimeTargetModels {

@@ -33,6 +33,7 @@ $win64Dir = Join-Path $bundleDescriptor "Contents\Win64"
 $resourcesDir = Join-Path $bundleDescriptor "Contents\Resources\models"
 $modelInventoryPath = Join-Path $bundleDescriptor "model_inventory.json"
 $bundleValidationPath = Join-Path $bundleRoot "bundle_validation.json"
+$defaultModelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix (Split-Path $bundleRoot -Leaf)
 $expectsUniversalGpuPath = $bundleDescriptor -match 'Universal'
 $expectsDirectMlPath = $bundleDescriptor -match 'DirectML'
 
@@ -191,13 +192,23 @@ if ($expectsDirectMlPath -and ($supportedBackends -notcontains "dml")) {
 $bundleModelInventory = if (Test-Path $modelInventoryPath) {
     Get-Content -Path $modelInventoryPath -Raw | ConvertFrom-Json
 } else {
-    $expectedModels = Get-CorridorKeyOfxBundleTargetModels -Include2048
-    [pscustomobject](Get-CorridorKeyModelInventory -ModelsDir $resourcesDir -ExpectedModels $expectedModels)
+    $expectedModels = Get-CorridorKeyOfxBundleTargetModels -ModelProfile $defaultModelProfile
+    $fallbackInventory = [ordered]@{}
+    foreach ($property in (Get-CorridorKeyModelInventory -ModelsDir $resourcesDir -ExpectedModels $expectedModels).GetEnumerator()) {
+        $fallbackInventory[$property.Key] = $property.Value
+    }
+    $fallbackInventory["model_profile"] = $defaultModelProfile
+    [pscustomobject]$fallbackInventory
 }
 
 $presentModels = @($bundleModelInventory.present_models)
 $missingModels = @($bundleModelInventory.missing_models)
 $expectedModels = @($bundleModelInventory.expected_models)
+$modelProfile = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "model_profile") {
+    $bundleModelInventory.model_profile
+} else {
+    $defaultModelProfile
+}
 
 foreach ($model in $presentModels) {
     $path = Join-Path $resourcesDir $model
@@ -341,6 +352,7 @@ $validationPayload = [ordered]@{
         supported_backends = @($supportedBackends)
     }
     models = [ordered]@{
+        model_profile = $modelProfile
         expected_models = @($expectedModels)
         present_models = @($presentModels)
         missing_models = @($missingModels)

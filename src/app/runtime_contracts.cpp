@@ -4,8 +4,10 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <utility>
 
+#include "../common/runtime_paths.hpp"
 #include "../core/mlx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 
@@ -33,17 +35,64 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
 }
 
 std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_memory_mb) {
+    auto active_windows_rtx_model_profile = []() -> std::optional<std::string> {
+        const auto models_root = common::default_models_root();
+        if (models_root.empty()) {
+            return std::nullopt;
+        }
+
+        std::vector<std::filesystem::path> inventory_candidates;
+        if (models_root.filename() == "models") {
+            inventory_candidates.push_back(models_root.parent_path() / "model_inventory.json");
+            const auto parent = models_root.parent_path();
+            if (parent.filename() == "Resources" &&
+                parent.parent_path().filename() == "Contents") {
+                inventory_candidates.push_back(parent.parent_path().parent_path() /
+                                               "model_inventory.json");
+            }
+        }
+
+        for (const auto& inventory_path : inventory_candidates) {
+            std::error_code error;
+            if (!std::filesystem::exists(inventory_path, error) || error) {
+                continue;
+            }
+
+            try {
+                std::ifstream stream(inventory_path);
+                if (!stream.is_open()) {
+                    continue;
+                }
+
+                nlohmann::json parsed = nlohmann::json::parse(stream, nullptr, true, true);
+                if (parsed.contains("model_profile") && parsed["model_profile"].is_string()) {
+                    return parsed["model_profile"].get<std::string>();
+                }
+            } catch (...) {
+                continue;
+            }
+        }
+
+        return std::nullopt;
+    };
+
+    if (auto model_profile = active_windows_rtx_model_profile(); model_profile.has_value()) {
+        if (*model_profile == "rtx-full") {
+            return 2048;
+        }
+        if (*model_profile == "rtx-stable") {
+            return 1024;
+        }
+    }
+
     if (available_memory_mb <= 0) {
         return std::nullopt;
     }
     if (available_memory_mb >= 24000) {
         return 2048;
     }
-    if (available_memory_mb >= 16000) {
-        return 1536;
-    }
     if (available_memory_mb >= 10000) {
-        return 1024;
+        return 1536;
     }
     if (available_memory_mb >= 8000) {
         return 768;
@@ -637,7 +686,7 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
                 return 24000;
             }
             if (resolution >= 1536) {
-                return 16000;
+                return 10000;
             }
             if (resolution >= 1024) {
                 return 10000;

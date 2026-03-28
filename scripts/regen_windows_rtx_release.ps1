@@ -355,14 +355,27 @@ foreach ($preparedModel in $preparedModelNames) {
     }
 }
 
-Write-Host "[9/9] Packaging the RTX-only OFX release..." -ForegroundColor Cyan
-Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\\package_ofx_installer_windows.ps1") `
-    -Arguments @(
-        "-Version", $Version,
-        "-ReleaseSuffix", "RTX",
-        "-OrtRoot", $ortRoot,
-        "-ModelsDir", $promotedModelsDir
-    )
+Write-Host "[9/9] Packaging the RTX OFX release tracks..." -ForegroundColor Cyan
+foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
+    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\\package_ofx_installer_windows.ps1") `
+        -Arguments @(
+            "-Version", $Version,
+            "-ReleaseSuffix", $variant.Suffix,
+            "-ModelProfile", $variant.ModelProfile,
+            "-OrtRoot", $ortRoot,
+            "-ModelsDir", $promotedModelsDir
+        )
+
+    $bundleValidationPath = Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_$($variant.Suffix)\\bundle_validation.json"
+    if (-not (Test-Path $bundleValidationPath)) {
+        throw "Bundle validation report missing after packaging $($variant.Suffix): $bundleValidationPath"
+    }
+
+    $bundleValidation = Get-Content -Path $bundleValidationPath -Raw | ConvertFrom-Json
+    if (-not $bundleValidation.doctor.healthy) {
+        throw "Doctor reported unhealthy status for packaged track $($variant.Suffix). See $bundleValidationPath"
+    }
+}
 
 $summary = [ordered]@{
     version = $Version
@@ -373,8 +386,14 @@ $summary = [ordered]@{
     backend_artifacts_dir = [System.IO.Path]::GetFullPath($backendArtifactsDir)
     promoted_models_dir = [System.IO.Path]::GetFullPath($promotedModelsDir)
     validation_report = [System.IO.Path]::GetFullPath($validationReportPath)
-    installer = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Installer.exe"))
-    bundle_validation = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX\\bundle_validation.json"))
+    installers = [ordered]@{
+        rtx_stable = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Stable_Installer.exe"))
+        rtx_full = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Full_Installer.exe"))
+    }
+    bundle_validation = [ordered]@{
+        rtx_stable = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Stable\\bundle_validation.json"))
+        rtx_full = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Full\\bundle_validation.json"))
+    }
 }
 
 $summary | ConvertTo-Json -Depth 5

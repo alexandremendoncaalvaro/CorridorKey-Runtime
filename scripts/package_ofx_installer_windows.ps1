@@ -4,6 +4,8 @@ param(
     [string]$OrtRoot = "",
     [string]$ModelsDir = "",
     [string]$ReleaseSuffix = "",
+    [ValidateSet("rtx-stable", "rtx-full", "windows-universal")]
+    [string]$ModelProfile = "",
     [switch]$Skip2048
 )
 
@@ -37,12 +39,23 @@ function Write-ReleaseReadme {
     param(
         [string]$Path,
         [string]$Version,
-        [string]$ReleaseBasename
+        [string]$ReleaseBasename,
+        [string]$ReleaseLabel,
+        [string]$ModelProfile
     )
 
+    $modelCoverageText = switch ($ModelProfile) {
+        "rtx-stable" { "This Windows RTX Stable package includes the validated FP16 and INT8 models through 1024px." }
+        "rtx-full" { "This Windows RTX Full package includes the complete FP16 ladder through 2048px plus the portable INT8 models." }
+        "windows-universal" { "This Windows DirectML package includes the Windows universal GPU and CPU model set." }
+        default { "This package includes the packaged model set recorded in CorridorKey.ofx.bundle\\model_inventory.json." }
+    }
+
 @"
-CorridorKey Resolve OFX v$Version - Windows Release
-===================================================
+CorridorKey Resolve OFX v$Version - $ReleaseLabel
+===============================================
+
+$modelCoverageText
 
 Files in this release:
 - CorridorKey.ofx.bundle: the packaged OFX bundle payload
@@ -53,6 +66,9 @@ Files in this release:
 Recommended install path:
 1. Run $ReleaseBasename`_Installer.exe as Administrator.
 2. Start DaVinci Resolve after the installer finishes.
+
+Installer behavior:
+- This installer replaces any existing CorridorKey Windows OFX installation before copying the new bundle.
 
 Manual fallback path:
 1. Run install_plugin.bat as Administrator from this folder.
@@ -69,6 +85,10 @@ $OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
+if ([string]::IsNullOrWhiteSpace($ModelProfile)) {
+    $ModelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix
+}
+$releaseLabel = Get-CorridorKeyWindowsReleaseLabelFromSuffix -ReleaseSuffix $ReleaseSuffix
 
 $normalizedSuffix = ""
 if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
@@ -102,6 +122,7 @@ $bundleArgs = @{
     OrtRoot = $OrtRoot
     ModelsDir = $ModelsDir
     OutputDir = $bundlePath
+    ModelProfile = $ModelProfile
 }
 if ($Skip2048.IsPresent) {
     $bundleArgs["Skip2048"] = $true
@@ -121,7 +142,11 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "[4/5] Assembling release folder..." -ForegroundColor Cyan
 Copy-Item (Join-Path $repoRoot "scripts\install_plugin.bat") $installScriptPath -Force
-Write-ReleaseReadme -Path $readmePath -Version $Version -ReleaseBasename $releaseBasename
+Write-ReleaseReadme -Path $readmePath `
+    -Version $Version `
+    -ReleaseBasename $releaseBasename `
+    -ReleaseLabel $releaseLabel `
+    -ModelProfile $ModelProfile
 Compress-Archive -Path $releaseDir -DestinationPath $zipPath -CompressionLevel Optimal
 
 $escapedBundlePath = $bundlePath.Replace('\', '\\')
@@ -130,14 +155,14 @@ $nsiScript = @"
 Unicode True
 RequestExecutionLevel admin
 SetCompressor /SOLID zlib
-Name "CorridorKey Resolve OFX $Version"
+Name "CorridorKey Resolve OFX $Version ($releaseLabel)"
 OutFile "$escapedInstallerPath"
 InstallDir "`$PROGRAMFILES64\CorridorKey Resolve OFX"
-BrandingText "CorridorKey Resolve OFX"
+BrandingText "$releaseLabel"
 ShowInstDetails show
 ShowUninstDetails show
 
-!define PRODUCT_NAME "CorridorKey Resolve OFX"
+!define PRODUCT_NAME "CorridorKey Resolve OFX ($releaseLabel)"
 !define PRODUCT_VERSION "$Version"
 !define PLUGIN_SOURCE "$escapedBundlePath"
 !define PLUGIN_DEST "`$COMMONFILES64\OFX\Plugins\CorridorKey.ofx.bundle"

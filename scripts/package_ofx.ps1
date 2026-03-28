@@ -3,6 +3,8 @@ param(
     [string]$OrtRoot = "",
     [string]$ModelsDir = "",
     [string]$OutputDir = "",
+    [ValidateSet("rtx-stable", "rtx-full", "windows-universal")]
+    [string]$ModelProfile = "rtx-full",
     [switch]$Skip2048
 )
 
@@ -285,7 +287,10 @@ if ($null -ne $tensorrtProvider) {
     }
 }
 
-$targetModels = Get-CorridorKeyOfxBundleTargetModels -Include2048:(-not $Skip2048.IsPresent)
+$targetModels = Get-CorridorKeyOfxBundleTargetModels -ModelProfile $ModelProfile
+if ($Skip2048.IsPresent) {
+    $targetModels = @($targetModels | Where-Object { $_ -ne "corridorkey_fp16_2048.onnx" })
+}
 $modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
 $compiledContextModels = @()
 
@@ -303,6 +308,7 @@ foreach ($model in $modelInventory.present_models) {
 
 $inventoryPayload = [ordered]@{
     package_type = "ofx_bundle"
+    model_profile = $ModelProfile
     models_dir = [System.IO.Path]::GetFullPath($ModelsDir)
     expected_models = @($modelInventory.expected_models)
     present_models = @($modelInventory.present_models)

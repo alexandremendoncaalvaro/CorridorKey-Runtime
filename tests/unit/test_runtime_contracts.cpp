@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -9,6 +10,57 @@
 
 using namespace corridorkey;
 using namespace corridorkey::app;
+
+namespace {
+
+struct ScopedModelsDirOverride {
+    std::optional<std::string> previous = std::nullopt;
+
+    explicit ScopedModelsDirOverride(const std::filesystem::path& models_dir) {
+#if defined(_WIN32)
+        char* raw = nullptr;
+        size_t length = 0;
+        if (_dupenv_s(&raw, &length, "CORRIDORKEY_MODELS_DIR") == 0 && raw != nullptr) {
+            previous = std::string(raw, length > 0 ? length - 1 : 0);
+            std::free(raw);
+        }
+        _putenv_s("CORRIDORKEY_MODELS_DIR", models_dir.string().c_str());
+#else
+        if (const char* value = std::getenv("CORRIDORKEY_MODELS_DIR"); value != nullptr) {
+            previous = std::string(value);
+        }
+        setenv("CORRIDORKEY_MODELS_DIR", models_dir.string().c_str(), 1);
+#endif
+    }
+
+    ~ScopedModelsDirOverride() {
+#if defined(_WIN32)
+        if (previous.has_value()) {
+            _putenv_s("CORRIDORKEY_MODELS_DIR", previous->c_str());
+        } else {
+            _putenv_s("CORRIDORKEY_MODELS_DIR", "");
+        }
+#else
+        if (previous.has_value()) {
+            setenv("CORRIDORKEY_MODELS_DIR", previous->c_str(), 1);
+        } else {
+            unsetenv("CORRIDORKEY_MODELS_DIR");
+        }
+#endif
+    }
+};
+
+std::filesystem::path write_models_inventory_fixture(const std::string& model_profile) {
+    const auto temp_dir =
+        std::filesystem::temp_directory_path() / ("corridorkey-model-profile-" + model_profile);
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir / "models");
+    std::ofstream(temp_dir / "model_inventory.json")
+        << nlohmann::json{{"model_profile", model_profile}}.dump(2);
+    return temp_dir / "models";
+}
+
+}  // namespace
 
 TEST_CASE("runtime capabilities expose stable diagnostics", "[unit][runtime]") {
     auto capabilities = runtime_capabilities();
@@ -219,20 +271,40 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
 
 TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
     REQUIRE(max_supported_resolution_for_device(
-                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
+                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1536);
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) == 1536);
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) == 2048);
-    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 16000);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 10000);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
+}
+
+TEST_CASE("windows RTX bundle profile controls the safe quality ceiling",
+          "[unit][runtime][regression]") {
+    const auto stable_models_dir = write_models_inventory_fixture("rtx-stable");
+    {
+        ScopedModelsDirOverride stable_override(stable_models_dir);
+        REQUIRE(max_supported_resolution_for_device(
+                    DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
+    }
+
+    const auto full_models_dir = write_models_inventory_fixture("rtx-full");
+    {
+        ScopedModelsDirOverride full_override(full_models_dir);
+        REQUIRE(max_supported_resolution_for_device(
+                    DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 2048);
+    }
+
+    std::filesystem::remove_all(stable_models_dir.parent_path());
+    std::filesystem::remove_all(full_models_dir.parent_path());
 }
 
 TEST_CASE("hardware profile delegates Windows safe quality ceilings to runtime contracts",
           "[unit][runtime][regression]") {
     const auto rtx_strategy =
         HardwareProfile::get_best_strategy(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
-    CHECK(rtx_strategy.target_resolution == 1024);
+    CHECK(rtx_strategy.target_resolution == 1536);
     CHECK(rtx_strategy.recommended_variant == "fp16");
 
     const auto directml_strategy =
@@ -247,15 +319,24 @@ TEST_CASE("hardware profile delegates Windows safe quality ceilings to runtime c
 }
 
 TEST_CASE("runtime coarse-to-fine policy prefers safer coarse artifacts", "[unit][runtime]") {
+    const auto legacy_models_dir = write_models_inventory_fixture("legacy");
+    std::filesystem::remove(legacy_models_dir.parent_path() / "model_inventory.json");
+    ScopedModelsDirOverride legacy_override(legacy_models_dir);
+
     const DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
-    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto));
+    REQUIRE_FALSE(
+        should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536) == 1024);
+    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 2048, QualityFallbackMode::Auto));
+    REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 2048) == 1024);
     REQUIRE_FALSE(
         should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Direct));
     REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536,
                                                   QualityFallbackMode::CoarseToFine));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 768) == 768);
     REQUIRE_FALSE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 1536).has_value());
+
+    std::filesystem::remove_all(legacy_models_dir.parent_path());
 }
 
 TEST_CASE("runtime refinement override validation is explicit for current artifacts",
@@ -281,7 +362,7 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     std::ofstream(temp_dir / "corridorkey_fp16_512.onnx") << "stub";
 
     auto selections = quality_artifact_candidates_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 1536,
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
         ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
     REQUIRE(selections.has_value());
     REQUIRE_FALSE(selections->empty());
@@ -289,7 +370,7 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     CHECK(selections->front().coarse_to_fine);
 
     auto expected = expected_artifact_paths_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 1536,
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
         ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
     REQUIRE(expected.has_value());
     REQUIRE(expected->size() == 3);

@@ -17,6 +17,23 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
+function Assert-CorridorKeyVariantDoctorHealthy {
+    param(
+        [string]$Version,
+        [string]$ReleaseSuffix
+    )
+
+    $bundleValidationPath = Join-Path $repoRoot ("dist\\CorridorKey_Resolve_v${Version}_Windows_${ReleaseSuffix}\\bundle_validation.json")
+    if (-not (Test-Path $bundleValidationPath)) {
+        throw "Bundle validation report not found: $bundleValidationPath"
+    }
+
+    $validation = Get-Content -Path $bundleValidationPath -Raw | ConvertFrom-Json
+    if (-not $validation.doctor.healthy) {
+        throw "Packaged doctor reported unhealthy status for $ReleaseSuffix. See $bundleValidationPath"
+    }
+}
+
 function Invoke-CorridorKeyScript {
     param(
         [string]$ScriptName,
@@ -37,16 +54,6 @@ function Invoke-CorridorKeyScript {
     & powershell.exe @command
     if ($LASTEXITCODE -ne 0) {
         throw "Script failed: $scriptPath"
-    }
-}
-
-function Get-CorridorKeyReleaseSuffixes {
-    param([string]$Track)
-
-    switch ($Track) {
-        "rtx" { return @("RTX") }
-        "dml" { return @("DirectML") }
-        default { return @("DirectML", "RTX") }
     }
 }
 
@@ -105,14 +112,24 @@ switch ($Task) {
         break
     }
     "package-ofx" {
-        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $resolvedTrack) {
-            $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
+        foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $resolvedTrack) {
+            $arguments = @(
+                "-Version", $resolvedVersion,
+                "-ReleaseSuffix", $variant.Suffix,
+                "-ModelProfile", $variant.ModelProfile
+            ) + $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_ofx_installer_windows.ps1" -Arguments $arguments
+            Assert-CorridorKeyVariantDoctorHealthy -Version $resolvedVersion -ReleaseSuffix $variant.Suffix
         }
         break
     }
     "package-runtime" {
-        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $resolvedTrack) {
+        $runtimeSuffixes = switch ($resolvedTrack) {
+            "rtx" { @("RTX") }
+            "dml" { @("DirectML") }
+            default { @("DirectML", "RTX") }
+        }
+        foreach ($suffix in $runtimeSuffixes) {
             $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_runtime_installer_windows.ps1" -Arguments $arguments
         }
