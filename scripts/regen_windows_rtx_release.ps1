@@ -117,12 +117,20 @@ function Invoke-ExternalCommand {
     $display = @($FilePath) + $Arguments
     Write-Host ("  > " + ($display -join " ")) -ForegroundColor DarkGray
 
+    $invoke = {
+        if ([System.StringComparer]::OrdinalIgnoreCase.Equals([System.IO.Path]::GetExtension($FilePath), ".ps1")) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments
+        } else {
+            & $FilePath @Arguments
+        }
+    }
+
     if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-        & $FilePath @Arguments
+        & $invoke
     } else {
         Push-Location $WorkingDirectory
         try {
-            & $FilePath @Arguments
+            & $invoke
         } finally {
             Pop-Location
         }
