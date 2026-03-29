@@ -122,6 +122,31 @@ function Ensure-GitIdentity {
     Write-Host "[collaborator] Git identity ready for local commit: $resolvedName <$resolvedEmail>" -ForegroundColor Cyan
 }
 
+function Invoke-CollaboratorWorkingCommand {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$WorkingDirectory = ""
+    )
+
+    Write-Host ("  > " + ((@($FilePath) + $Arguments) -join " ")) -ForegroundColor DarkGray
+
+    if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        & $FilePath @Arguments
+    } else {
+        Push-Location $WorkingDirectory
+        try {
+            & $FilePath @Arguments
+        } finally {
+            Pop-Location
+        }
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed: $FilePath"
+    }
+}
+
 function Test-CorridorKeyUsableCheckpointFile {
     param([string]$Path)
 
@@ -263,6 +288,28 @@ function Test-CollaboratorVsToolchain {
     return Test-Path $vswhere
 }
 
+function Extract-CollaboratorArchive {
+    param(
+        [string]$ArchivePath,
+        [string]$DestinationDir
+    )
+
+    if (Test-Path $DestinationDir) {
+        Remove-Item $DestinationDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+
+    $tar = Get-Command "tar.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $tar) {
+        & $tar.Source -xf $ArchivePath -C $DestinationDir
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+    }
+
+    Expand-Archive -Path $ArchivePath -DestinationPath $DestinationDir -Force
+}
+
 function Test-CollaboratorNsis {
     $command = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
     if ($null -ne $command) {
@@ -271,6 +318,131 @@ function Test-CollaboratorNsis {
 
     return (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") -or
            (Test-Path "C:\Program Files (x86)\NSIS\Bin\makensis.exe")
+}
+
+function Ensure-CollaboratorVcpkgRoot {
+    $candidateRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:VCPKG_ROOT)) {
+        $candidateRoots += $env:VCPKG_ROOT
+    }
+    $candidateRoots += @(
+        "C:\tools\vcpkg",
+        (Join-Path (Split-Path -Parent $repoRoot) "vcpkg")
+    )
+
+    foreach ($candidateRoot in ($candidateRoots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (Test-Path (Join-Path $candidateRoot "bootstrap-vcpkg.bat")) {
+            $env:VCPKG_ROOT = [System.IO.Path]::GetFullPath($candidateRoot)
+            [Environment]::SetEnvironmentVariable("VCPKG_ROOT", $env:VCPKG_ROOT, "User")
+            Write-Host "[collaborator] Using vcpkg at $($env:VCPKG_ROOT)" -ForegroundColor Cyan
+            return
+        }
+    }
+
+    $targetRoot = Join-Path (Split-Path -Parent $repoRoot) "vcpkg"
+    if (-not (Test-Path $targetRoot)) {
+        Write-Host "[collaborator] Bootstrapping vcpkg into $targetRoot" -ForegroundColor Cyan
+        Invoke-CollaboratorWorkingCommand -FilePath "git" -WorkingDirectory (Split-Path -Parent $repoRoot) -Arguments @(
+            "clone",
+            "--depth", "1",
+            "https://github.com/microsoft/vcpkg.git",
+            $targetRoot
+        )
+    }
+
+    Invoke-CollaboratorWorkingCommand -FilePath (Join-Path $targetRoot "bootstrap-vcpkg.bat") -Arguments @("-disableMetrics")
+    $env:VCPKG_ROOT = [System.IO.Path]::GetFullPath($targetRoot)
+    [Environment]::SetEnvironmentVariable("VCPKG_ROOT", $env:VCPKG_ROOT, "User")
+    Write-Host "[collaborator] VCPKG_ROOT set to $($env:VCPKG_ROOT)" -ForegroundColor Green
+}
+
+function Ensure-CollaboratorNsis {
+    if (Test-CollaboratorNsis) {
+        return
+    }
+
+    $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
+    if ($null -eq $winget) {
+        throw "NSIS is missing and winget is unavailable to install it automatically."
+    }
+
+    Write-Host "[collaborator] Installing NSIS with winget..." -ForegroundColor Cyan
+    Invoke-CollaboratorWorkingCommand -FilePath $winget.Source -Arguments @(
+        "install",
+        "--id", "NSIS.NSIS",
+        "-e",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        "--silent"
+    )
+
+    if (-not (Test-CollaboratorNsis)) {
+        throw "NSIS installation did not expose makensis.exe."
+    }
+}
+
+function Ensure-CollaboratorTensorRtRtxSdk {
+    $existingRoot = Resolve-CollaboratorTensorRtRtxRoot
+    if (-not [string]::IsNullOrWhiteSpace($existingRoot)) {
+        $env:TENSORRT_RTX_HOME = $existingRoot
+        return
+    }
+
+    $downloadUrl = "https://developer.nvidia.com/downloads/trt/rtx_sdk/secure/1.2/tensorrt-rtx-1.2.0.54-win10-amd64-cuda-12.9-release-external.zip"
+    $vendorRoot = Join-Path $repoRoot "vendor"
+    $sdkRoot = Join-Path $vendorRoot "TensorRT-RTX-1.2.0.54"
+    $tempRoot = Join-Path $repoRoot "temp\collaborator-downloads"
+    $archivePath = Join-Path $tempRoot "tensorrt-rtx-1.2.0.54-win10-amd64-cuda-12.9-release-external.zip"
+    $extractRoot = Join-Path $tempRoot "tensorrt-rtx-sdk"
+
+    if (Test-CollaboratorTensorRtRtxRoot -CandidatePath $sdkRoot) {
+        $env:TENSORRT_RTX_HOME = $sdkRoot
+        return
+    }
+
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    Write-Host "[collaborator] Downloading TensorRT RTX SDK 1.2 for CUDA 12.9..." -ForegroundColor Cyan
+    Invoke-CollaboratorWorkingCommand -FilePath "curl.exe" -Arguments @(
+        "-L",
+        $downloadUrl,
+        "-o",
+        $archivePath
+    )
+
+    Write-Host "[collaborator] Extracting TensorRT RTX SDK..." -ForegroundColor Cyan
+    Extract-CollaboratorArchive -ArchivePath $archivePath -DestinationDir $extractRoot
+
+    $extractedSdkRoot = Join-Path $extractRoot "TensorRT-RTX-1.2.0.54"
+    if (-not (Test-CollaboratorTensorRtRtxRoot -CandidatePath $extractedSdkRoot)) {
+        throw "Downloaded TensorRT RTX SDK layout is invalid: $extractedSdkRoot"
+    }
+
+    if (Test-Path $sdkRoot) {
+        Remove-Item $sdkRoot -Recurse -Force
+    }
+    Move-Item -Path $extractedSdkRoot -Destination $sdkRoot
+    $env:TENSORRT_RTX_HOME = $sdkRoot
+    Write-Host "[collaborator] TensorRT RTX SDK ready at $sdkRoot" -ForegroundColor Green
+}
+
+function Ensure-CollaboratorEnvironment {
+    $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
+
+    Ensure-CollaboratorVcpkgRoot
+    Ensure-CollaboratorNsis
+
+    if (-not (Test-Path $rtxOrtRoot)) {
+        if (-not (Test-CollaboratorPython312)) {
+            throw "Python 3.12 is required before staging the curated Windows RTX runtime."
+        }
+        if (-not (Test-CollaboratorVsToolchain)) {
+            throw "Visual Studio C++ toolchain is required before staging the curated Windows RTX runtime."
+        }
+        if ([string]::IsNullOrWhiteSpace((Resolve-CollaboratorCudaRoot))) {
+            throw "CUDA toolkit is required before staging the curated Windows RTX runtime."
+        }
+        Ensure-CollaboratorTensorRtRtxSdk
+    }
 }
 
 function Assert-CollaboratorPrerequisites {
@@ -332,6 +504,7 @@ Assert-InGitRepository
 Set-Location $repoRoot
 
 Write-Host "[collaborator] Repository: $repoRoot" -ForegroundColor Cyan
+Ensure-CollaboratorEnvironment
 Assert-CollaboratorPrerequisites -SourceRepo $CorridorKeyRepo -ExplicitCheckpoint $Checkpoint
 Write-Host "[collaborator] Step 1/5: Installing Git LFS hooks" -ForegroundColor Cyan
 Invoke-RepoCommand -FilePath "git" -Arguments @("lfs", "install", "--local")
