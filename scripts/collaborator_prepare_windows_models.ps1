@@ -524,7 +524,7 @@ if (-not [string]::IsNullOrWhiteSpace($CommitBranch)) {
 }
 
 $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
-if (-not (Test-Path $rtxOrtRoot)) {
+if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
     $stageRuntimeArguments = @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
@@ -548,7 +548,7 @@ if (-not (Test-Path $rtxOrtRoot)) {
 
     Write-Host "[collaborator] Step 3/5: Staging the curated Windows RTX runtime" -ForegroundColor Cyan
     Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $stageRuntimeArguments
-    if (-not (Test-Path $rtxOrtRoot)) {
+    if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
         throw "Curated Windows RTX runtime staging did not produce $rtxOrtRoot"
     }
 }

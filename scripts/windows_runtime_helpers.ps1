@@ -178,6 +178,25 @@ function Get-CorridorKeyWindowsOrtRootPath {
     return [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ("vendor\" + $directoryName)))
 }
 
+function Test-CorridorKeyWindowsOrtRoot {
+    param([string]$OrtRoot)
+
+    if ([string]::IsNullOrWhiteSpace($OrtRoot) -or -not (Test-Path $OrtRoot)) {
+        return $false
+    }
+
+    $includeDir = Join-Path $OrtRoot "include\onnxruntime"
+    $binDir = Join-Path $OrtRoot "bin"
+    $libDir = Join-Path $OrtRoot "lib"
+
+    $hasRuntimeDlls = (Get-ChildItem -Path $binDir -Filter "onnxruntime*.dll" -File -ErrorAction SilentlyContinue |
+        Measure-Object).Count -gt 0
+    $hasImportLibs = (Get-ChildItem -Path $libDir -Filter "onnxruntime*.lib" -File -ErrorAction SilentlyContinue |
+        Measure-Object).Count -gt 0
+
+    return (Test-Path $includeDir) -and $hasRuntimeDlls -and $hasImportLibs
+}
+
 function Get-CorridorKeyWindowsOrtBinaryVersion {
     param(
         [string]$RepoRoot,
@@ -274,15 +293,15 @@ function Resolve-CorridorKeyWindowsOrtRoot {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($ExplicitRoot)) {
-        if (-not (Test-Path $ExplicitRoot)) {
-            throw "Configured ONNX Runtime root does not exist: $ExplicitRoot"
+        if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $ExplicitRoot)) {
+            throw "Configured ONNX Runtime root is missing curated runtime files: $ExplicitRoot"
         }
         return [System.IO.Path]::GetFullPath($ExplicitRoot)
     }
 
     if ($AllowEnvironmentOverride.IsPresent -and -not [string]::IsNullOrWhiteSpace($env:CORRIDORKEY_WINDOWS_ORT_ROOT)) {
-        if (-not (Test-Path $env:CORRIDORKEY_WINDOWS_ORT_ROOT)) {
-            throw "CORRIDORKEY_WINDOWS_ORT_ROOT does not exist: $env:CORRIDORKEY_WINDOWS_ORT_ROOT"
+        if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $env:CORRIDORKEY_WINDOWS_ORT_ROOT)) {
+            throw "CORRIDORKEY_WINDOWS_ORT_ROOT is missing curated runtime files: $env:CORRIDORKEY_WINDOWS_ORT_ROOT"
         }
         return [System.IO.Path]::GetFullPath($env:CORRIDORKEY_WINDOWS_ORT_ROOT)
     }
@@ -295,7 +314,7 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 
     foreach ($track in $tracksToCheck) {
         $candidate = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $RepoRoot -Track $track
-        if (Test-Path $candidate) {
+        if (Test-CorridorKeyWindowsOrtRoot -OrtRoot $candidate) {
             return $candidate
         }
     }
