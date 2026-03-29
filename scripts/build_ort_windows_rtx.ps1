@@ -12,6 +12,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$cmakeGenerator = "Visual Studio 17 2022"
+$buildDirName = "windows-rtx-vs2022"
 
 function Resolve-VsDevCmd {
     param([string]$ExplicitPath)
@@ -468,6 +470,24 @@ function Copy-RuntimeClosure {
     return $copied.Values
 }
 
+function Get-OrtBuildLogHints {
+    param(
+        [string]$BuildDir,
+        [string]$BuildConfig
+    )
+
+    $candidates = @(
+        (Join-Path $BuildDir "CMakeFiles\CMakeError.log"),
+        (Join-Path $BuildDir "CMakeFiles\CMakeOutput.log"),
+        (Join-Path $BuildDir (Join-Path $BuildConfig "CMakeFiles\CMakeError.log")),
+        (Join-Path $BuildDir (Join-Path $BuildConfig "CMakeFiles\CMakeOutput.log")),
+        (Join-Path $BuildDir (Join-Path $BuildConfig (Join-Path $BuildConfig "CMakeFiles\CMakeError.log"))),
+        (Join-Path $BuildDir (Join-Path $BuildConfig (Join-Path $BuildConfig "CMakeFiles\CMakeOutput.log")))
+    )
+
+    return @($candidates | Where-Object { Test-Path $_ } | Select-Object -Unique)
+}
+
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $InstallDir = Join-Path (Split-Path -Parent $PSScriptRoot) "vendor\onnxruntime-windows-rtx"
 }
@@ -497,7 +517,7 @@ if (-not (Test-Path $VsDevCmd)) {
     throw "VsDevCmd.bat not found: $VsDevCmd"
 }
 
-$buildDir = Join-Path $OrtSourceDir "build\windows-rtx-ninja"
+$buildDir = Join-Path $OrtSourceDir ("build\" + $buildDirName)
 $dumpbinPath = Resolve-DumpbinPath
 $pythonDir = Split-Path -Parent $PythonExe
 $cudaBinDir = Join-Path $CudaHome "bin"
@@ -510,13 +530,21 @@ $command = @(
     "set `"CUDAToolkit_ROOT=$CudaHome`"",
     "call `"$VsDevCmd`" -arch=x64",
     "cd /d `"$OrtSourceDir`"",
-    "`"$PythonExe`" `"$buildPy`" --config $BuildConfig --build_dir `"$buildDir`" --parallel --use_nv_tensorrt_rtx --tensorrt_rtx_home `"$TensorRtRtxHome`" --cuda_home `"$CudaHome`" --cmake_generator `"Ninja`" --build_shared_lib --skip_tests --build --update --use_vcpkg --cmake_extra_defines CUDAToolkit_ROOT=`"$CudaHome`" CMAKE_CUDA_COMPILER=`"$cudaCompiler`""
+    "`"$PythonExe`" `"$buildPy`" --config $BuildConfig --build_dir `"$buildDir`" --parallel --use_nv_tensorrt_rtx --tensorrt_rtx_home `"$TensorRtRtxHome`" --cuda_home `"$CudaHome`" --cmake_generator `"$cmakeGenerator`" --build_shared_lib --skip_tests --build --update --use_vcpkg --cmake_extra_defines CUDAToolkit_ROOT=`"$CudaHome`" CMAKE_CUDA_COMPILER=`"$cudaCompiler`""
 ) -join " && "
 
 Write-Host "[1/3] Building ONNX Runtime with TensorRT RTX support..."
 Write-Host "Using Python: $PythonExe"
+Write-Host "Using generator: $cmakeGenerator"
 cmd.exe /c $command
 if ($LASTEXITCODE -ne 0) {
+    $logHints = Get-OrtBuildLogHints -BuildDir $buildDir -BuildConfig $BuildConfig
+    if ($logHints.Count -gt 0) {
+        Write-Host "[build-ort] Likely CMake logs:" -ForegroundColor Yellow
+        foreach ($logHint in $logHints) {
+            Write-Host " - $logHint" -ForegroundColor Yellow
+        }
+    }
     throw "ONNX Runtime build failed."
 }
 
@@ -527,7 +555,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "include") | Ou
 
 Copy-Item -Recurse -Force (Join-Path $OrtSourceDir "include\onnxruntime") (Join-Path $InstallDir "include")
 
-$runtimeBinDir = Join-Path $buildDir $BuildConfig
+$runtimeBinDir = Join-Path $buildDir (Join-Path $BuildConfig $BuildConfig)
 if (-not (Test-Path $runtimeBinDir)) {
     throw "ONNX Runtime build output directory not found: $runtimeBinDir"
 }
