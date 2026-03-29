@@ -465,14 +465,24 @@ if (-not $SkipOrtBuild.IsPresent) {
         -Bootstrap:$BootstrapOrtSource.IsPresent -GitPath $gitPath -OrtRef $OrtSourceRef
 
     Write-Host "[4/5] Building curated ONNX Runtime for Windows RTX..."
-    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\build_ort_windows_rtx.ps1") -Arguments @(
+    $buildOrtArguments = @(
         "-OrtSourceDir", $resolvedOrtSourceDir,
-        "-InstallDir", $ortInstallDir,
-        "-CudaHome", $CudaHome,
-        "-TensorRtRtxHome", $TensorRtRtxHome,
-        "-VsDevCmd", $VsDevCmd,
-        "-PythonExe", $PythonExe
+        "-InstallDir", $ortInstallDir
     )
+    if (-not [string]::IsNullOrWhiteSpace($CudaHome)) {
+        $buildOrtArguments += @("-CudaHome", $CudaHome)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($TensorRtRtxHome)) {
+        $buildOrtArguments += @("-TensorRtRtxHome", $TensorRtRtxHome)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($VsDevCmd)) {
+        $buildOrtArguments += @("-VsDevCmd", $VsDevCmd)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PythonExe)) {
+        $buildOrtArguments += @("-PythonExe", $PythonExe)
+    }
+
+    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\build_ort_windows_rtx.ps1") -Arguments $buildOrtArguments
 }
 
 if (-not $SkipRuntimeBuild.IsPresent) {
