@@ -16,6 +16,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $repoRoot "scripts\windows_runtime_helpers.ps1")
 
 function Invoke-RepoCommand {
     param(
@@ -142,6 +143,36 @@ if (-not [string]::IsNullOrWhiteSpace($CommitBranch)) {
     }
 }
 
+$rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
+if (-not (Test-Path $rtxOrtRoot)) {
+    $stageRuntimeArguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", (Join-Path $repoRoot "scripts\prepare_windows_rtx_release.ps1")
+    )
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
+        $stageRuntimeArguments += @("-Version", $Version)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
+        $stageRuntimeArguments += @("-Checkpoint", $Checkpoint)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
+        $stageRuntimeArguments += @("-CorridorKeyRepo", $CorridorKeyRepo)
+    }
+    $stageRuntimeArguments += @(
+        "-BootstrapOrtSource",
+        "-SkipModelPreparation",
+        "-SkipRuntimeBuild",
+        "-SkipPackage"
+    )
+
+    Write-Host "[collaborator] Step 3/5: Staging the curated Windows RTX runtime" -ForegroundColor Cyan
+    Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $stageRuntimeArguments
+    if (-not (Test-Path $rtxOrtRoot)) {
+        throw "Curated Windows RTX runtime staging did not produce $rtxOrtRoot"
+    }
+}
+
 $prepareArguments = @(
     "-NoProfile",
     "-ExecutionPolicy", "Bypass",
@@ -158,7 +189,7 @@ if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
     $prepareArguments += @("-CorridorKeyRepo", $CorridorKeyRepo)
 }
 
-Write-Host "[collaborator] Step 3/5: Regenerating and certifying the Windows RTX release" -ForegroundColor Cyan
+Write-Host "[collaborator] Step 4/5: Regenerating and certifying the Windows RTX release" -ForegroundColor Cyan
 Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $prepareArguments
 
 if ($CreateCommit.IsPresent) {
@@ -172,7 +203,7 @@ if ($CreateCommit.IsPresent) {
         "src/gui/src-tauri/tauri.conf.json"
     )
 
-    Write-Host "[collaborator] Step 4/5: Committing generated models and release version metadata" -ForegroundColor Cyan
+    Write-Host "[collaborator] Step 5/5: Committing generated models and release version metadata" -ForegroundColor Cyan
     Invoke-RepoCommand -FilePath "git" -Arguments (@("add", "--") + $commitPaths)
 
     & git diff --cached --quiet -- @commitPaths
