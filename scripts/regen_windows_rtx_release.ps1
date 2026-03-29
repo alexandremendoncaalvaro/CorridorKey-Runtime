@@ -60,6 +60,24 @@ function Resolve-CorridorKeyRepo {
     throw "CorridorKey source repository not found. Pass -CorridorKeyRepo or set CORRIDORKEY_SOURCE_REPO."
 }
 
+function Test-CorridorKeyUsableCheckpointFile {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return $false
+    }
+
+    $fileInfo = Get-Item -Path $Path -ErrorAction Stop
+    if ($fileInfo.Length -le 512) {
+        $pointerHead = Get-Content -Path $Path -TotalCount 3 -ErrorAction SilentlyContinue
+        if ($pointerHead -and (($pointerHead | Out-String) -match "https://git-lfs.github.com/spec/v1")) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Resolve-CheckpointPath {
     param(
         [string]$ExplicitPath,
@@ -67,26 +85,26 @@ function Resolve-CheckpointPath {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
-        if (-not (Test-Path $ExplicitPath)) {
+        if (-not (Test-CorridorKeyUsableCheckpointFile -Path $ExplicitPath)) {
             throw "Checkpoint not found: $ExplicitPath"
         }
         return [System.IO.Path]::GetFullPath($ExplicitPath)
     }
 
     $candidates = @(
-        (Join-Path $repoRoot "models\\CorridorKey.pth"),
-        (Join-Path $repoRoot "models\\CorridorKey_v1.0.pth"),
         (Join-Path $SourceRepo "CorridorKeyModule\\checkpoints\\CorridorKey.pth"),
-        (Join-Path $SourceRepo "CorridorKeyModule\\checkpoints\\CorridorKey_v1.0.pth")
+        (Join-Path $SourceRepo "CorridorKeyModule\\checkpoints\\CorridorKey_v1.0.pth"),
+        (Join-Path $repoRoot "models\\CorridorKey.pth"),
+        (Join-Path $repoRoot "models\\CorridorKey_v1.0.pth")
     )
 
     foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
+        if (Test-CorridorKeyUsableCheckpointFile -Path $candidate) {
             return [System.IO.Path]::GetFullPath($candidate)
         }
     }
 
-    throw "No CorridorKey checkpoint was found. Pass -Checkpoint explicitly."
+    throw "No usable CorridorKey checkpoint was found. Provide a real .pth via -Checkpoint, keep an existing CorridorKey-Runtime clone with a populated models\\CorridorKey.pth, or place CorridorKey.pth under CorridorKey\\CorridorKeyModule\\checkpoints."
 }
 
 function Invoke-ExternalCommand {

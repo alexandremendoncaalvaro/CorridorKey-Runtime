@@ -38,6 +38,26 @@ function Invoke-BootstrapCommand {
     }
 }
 
+function Invoke-BootstrapCommandWithLfsSkipSmudge {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = ""
+    )
+
+    $previousSkipSmudge = $env:GIT_LFS_SKIP_SMUDGE
+    try {
+        $env:GIT_LFS_SKIP_SMUDGE = "1"
+        Invoke-BootstrapCommand -FilePath $FilePath -Arguments $Arguments -WorkingDirectory $WorkingDirectory
+    } finally {
+        if ($null -eq $previousSkipSmudge) {
+            Remove-Item Env:GIT_LFS_SKIP_SMUDGE -ErrorAction SilentlyContinue
+        } else {
+            $env:GIT_LFS_SKIP_SMUDGE = $previousSkipSmudge
+        }
+    }
+}
+
 function Get-SafeBranchSuffix {
     param([string]$Value)
 
@@ -104,7 +124,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 
 if (-not (Test-Path $runtimeRepoRoot)) {
     Write-Host "[bootstrap] Cloning CorridorKey-Runtime into $runtimeRepoRoot" -ForegroundColor Cyan
-    Invoke-BootstrapCommand -FilePath "git" -Arguments @(
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -Arguments @(
         "clone",
         "--branch", $RuntimeBranch,
         $RuntimeRepoUrl,
@@ -114,9 +134,9 @@ if (-not (Test-Path $runtimeRepoRoot)) {
     throw "Existing path is not a git repository: $runtimeRepoRoot"
 } else {
     Write-Host "[bootstrap] Reusing existing CorridorKey-Runtime clone at $runtimeRepoRoot" -ForegroundColor Cyan
-    Invoke-BootstrapCommand -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("fetch", "origin", $RuntimeBranch)
-    Invoke-BootstrapCommand -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("checkout", $RuntimeBranch)
-    Invoke-BootstrapCommand -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("pull", "--ff-only", "origin", $RuntimeBranch)
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("fetch", "origin", $RuntimeBranch)
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("checkout", $RuntimeBranch)
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("pull", "--ff-only", "origin", $RuntimeBranch)
 }
 
 $collaboratorScript = Join-Path $runtimeRepoRoot "scripts\collaborator_prepare_windows_models.ps1"

@@ -126,10 +126,10 @@ Set-Location $repoRoot
 
 Write-Host "[collaborator] Repository: $repoRoot" -ForegroundColor Cyan
 Write-Host "[collaborator] Step 1/5: Installing Git LFS hooks" -ForegroundColor Cyan
-Invoke-RepoCommand -FilePath "git" -Arguments @("lfs", "install")
+Invoke-RepoCommand -FilePath "git" -Arguments @("lfs", "install", "--local")
 
-Write-Host "[collaborator] Step 2/5: Pulling Git LFS objects" -ForegroundColor Cyan
-Invoke-RepoCommand -FilePath "git" -Arguments @("lfs", "pull")
+Write-Host "[collaborator] Step 2/5: Skipping repo LFS object pull for collaborator regeneration" -ForegroundColor Cyan
+Write-Host "[collaborator] This workflow reuses a local checkpoint when available and regenerates the promoted model pack from source." -ForegroundColor DarkGray
 
 if (-not [string]::IsNullOrWhiteSpace($CommitBranch)) {
     $currentBranch = (& git branch --show-current).Trim()
