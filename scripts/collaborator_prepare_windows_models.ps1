@@ -122,10 +122,217 @@ function Ensure-GitIdentity {
     Write-Host "[collaborator] Git identity ready for local commit: $resolvedName <$resolvedEmail>" -ForegroundColor Cyan
 }
 
+function Test-CorridorKeyUsableCheckpointFile {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
+        return $false
+    }
+
+    $fileInfo = Get-Item -Path $Path -ErrorAction Stop
+    if ($fileInfo.Length -le 512) {
+        $pointerHead = Get-Content -Path $Path -TotalCount 3 -ErrorAction SilentlyContinue
+        if ($pointerHead -and (($pointerHead | Out-String) -match "https://git-lfs.github.com/spec/v1")) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Resolve-CollaboratorCheckpointPath {
+    param(
+        [string]$ExplicitPath,
+        [string]$SourceRepo
+    )
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        $candidates += $ExplicitPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SourceRepo)) {
+        $candidates += @(
+            (Join-Path $SourceRepo "CorridorKeyModule\checkpoints\CorridorKey.pth"),
+            (Join-Path $SourceRepo "CorridorKeyModule\checkpoints\CorridorKey_v1.0.pth")
+        )
+    }
+    $candidates += @(
+        (Join-Path $repoRoot "models\CorridorKey.pth"),
+        (Join-Path $repoRoot "models\CorridorKey_v1.0.pth")
+    )
+
+    foreach ($candidate in ($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (Test-CorridorKeyUsableCheckpointFile -Path $candidate) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    return ""
+}
+
+function Test-CollaboratorCudaRoot {
+    param([string]$CandidatePath)
+
+    return (Test-Path (Join-Path $CandidatePath "bin\nvcc.exe")) -and
+           (Test-Path (Join-Path $CandidatePath "include\cuda_runtime.h"))
+}
+
+function Resolve-CollaboratorCudaRoot {
+    if (-not [string]::IsNullOrWhiteSpace($env:CUDA_PATH) -and (Test-CollaboratorCudaRoot -CandidatePath $env:CUDA_PATH)) {
+        return [System.IO.Path]::GetFullPath($env:CUDA_PATH)
+    }
+
+    $cudaRoot = Join-Path ${env:ProgramFiles} "NVIDIA GPU Computing Toolkit\CUDA"
+    if (Test-Path $cudaRoot) {
+        $candidate = Get-ChildItem -Path $cudaRoot -Directory -Filter "v*" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+        if ($null -ne $candidate -and (Test-CollaboratorCudaRoot -CandidatePath $candidate.FullName)) {
+            return $candidate.FullName
+        }
+    }
+
+    $vendorRoot = Join-Path $repoRoot "vendor"
+    if (Test-Path $vendorRoot) {
+        $candidate = Get-ChildItem -Path $vendorRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^(cuda-|CUDA-)' } |
+            Sort-Object Name -Descending | Select-Object -First 1
+        if ($null -ne $candidate -and (Test-CollaboratorCudaRoot -CandidatePath $candidate.FullName)) {
+            return $candidate.FullName
+        }
+    }
+
+    return ""
+}
+
+function Test-CollaboratorTensorRtRtxRoot {
+    param([string]$CandidatePath)
+
+    return (Test-Path (Join-Path $CandidatePath "include\NvInfer.h")) -and
+           ((Get-ChildItem -Path (Join-Path $CandidatePath "bin") -Filter "tensorrt_rtx*.dll" -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+}
+
+function Resolve-CollaboratorTensorRtRtxRoot {
+    if (-not [string]::IsNullOrWhiteSpace($env:TENSORRT_RTX_HOME) -and
+        (Test-CollaboratorTensorRtRtxRoot -CandidatePath $env:TENSORRT_RTX_HOME)) {
+        return [System.IO.Path]::GetFullPath($env:TENSORRT_RTX_HOME)
+    }
+
+    $vendorRoot = Join-Path $repoRoot "vendor"
+    if (Test-Path $vendorRoot) {
+        foreach ($candidate in (Get-ChildItem -Path $vendorRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^(TensorRT-RTX|tensorrt-rtx)' } |
+                Sort-Object Name -Descending)) {
+            if (Test-CollaboratorTensorRtRtxRoot -CandidatePath $candidate.FullName) {
+                return $candidate.FullName
+            }
+        }
+    }
+
+    return ""
+}
+
+function Test-CollaboratorPython312 {
+    $pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $pyLauncher) {
+        & $pyLauncher.Source -3.12 -c "import sys" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+    }
+
+    $python = Get-Command "python.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $python) {
+        $version = & $python.Source -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        if ($LASTEXITCODE -eq 0 -and ($version | Out-String).Trim() -eq "3.12") {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-CollaboratorVsToolchain {
+    if (-not [string]::IsNullOrWhiteSpace($env:VSINSTALLDIR)) {
+        $candidate = Join-Path $env:VSINSTALLDIR "Common7\Tools\VsDevCmd.bat"
+        if (Test-Path $candidate) {
+            return $true
+        }
+    }
+
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    return Test-Path $vswhere
+}
+
+function Test-CollaboratorNsis {
+    $command = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $command) {
+        return $true
+    }
+
+    return (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") -or
+           (Test-Path "C:\Program Files (x86)\NSIS\Bin\makensis.exe")
+}
+
+function Assert-CollaboratorPrerequisites {
+    param(
+        [string]$SourceRepo,
+        [string]$ExplicitCheckpoint
+    )
+
+    $missing = [System.Collections.Generic.List[string]]::new()
+
+    if ($null -eq (Get-Command "uv.exe" -ErrorAction SilentlyContinue) -and
+        $null -eq (Get-Command "uv" -ErrorAction SilentlyContinue)) {
+        [void]$missing.Add("uv")
+    }
+
+    if ($null -eq (Get-Command "cmake.exe" -ErrorAction SilentlyContinue) -and
+        $null -eq (Get-Command "cmake" -ErrorAction SilentlyContinue)) {
+        [void]$missing.Add("cmake")
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:VCPKG_ROOT) -or -not (Test-Path $env:VCPKG_ROOT)) {
+        [void]$missing.Add("VCPKG_ROOT")
+    }
+
+    if (-not (Test-CollaboratorNsis)) {
+        [void]$missing.Add("NSIS (makensis.exe)")
+    }
+
+    $checkpointPath = Resolve-CollaboratorCheckpointPath -ExplicitPath $ExplicitCheckpoint -SourceRepo $SourceRepo
+    if ([string]::IsNullOrWhiteSpace($checkpointPath)) {
+        [void]$missing.Add("CorridorKey checkpoint (.pth)")
+    }
+
+    $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
+    if (-not (Test-Path $rtxOrtRoot)) {
+        if (-not (Test-CollaboratorPython312)) {
+            [void]$missing.Add("Python 3.12 for ONNX Runtime RTX build")
+        }
+        if (-not (Test-CollaboratorVsToolchain)) {
+            [void]$missing.Add("Visual Studio C++ toolchain")
+        }
+        if ([string]::IsNullOrWhiteSpace((Resolve-CollaboratorCudaRoot))) {
+            [void]$missing.Add("CUDA toolkit")
+        }
+        if ([string]::IsNullOrWhiteSpace((Resolve-CollaboratorTensorRtRtxRoot))) {
+            [void]$missing.Add("TensorRT RTX SDK")
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        throw ("Collaborator preflight failed. Missing: " + ($missing -join ", "))
+    }
+
+    Write-Host "[collaborator] Preflight OK." -ForegroundColor Green
+    Write-Host "[collaborator] Checkpoint: $checkpointPath" -ForegroundColor Cyan
+}
+
 Assert-InGitRepository
 Set-Location $repoRoot
 
 Write-Host "[collaborator] Repository: $repoRoot" -ForegroundColor Cyan
+Assert-CollaboratorPrerequisites -SourceRepo $CorridorKeyRepo -ExplicitCheckpoint $Checkpoint
 Write-Host "[collaborator] Step 1/5: Installing Git LFS hooks" -ForegroundColor Cyan
 Invoke-RepoCommand -FilePath "git" -Arguments @("lfs", "install", "--local")
 
