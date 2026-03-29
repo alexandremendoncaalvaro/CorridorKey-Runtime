@@ -181,14 +181,39 @@ function Resolve-UvPath {
 }
 
 function Resolve-CmakePath {
-    $command = Get-Command "cmake.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $command.Source
+    foreach ($candidateName in @("cmake.exe", "cmake")) {
+        $command = Get-Command $candidateName -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
     }
 
-    $command = Get-Command "cmake" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $command.Source
+    foreach ($candidatePath in @(
+            "C:\Program Files\CMake\bin\cmake.exe",
+            "C:\Program Files (x86)\CMake\bin\cmake.exe"
+        )) {
+        if (Test-Path $candidatePath) {
+            return $candidatePath
+        }
+    }
+
+    return ""
+}
+
+function Resolve-CmakeVersion {
+    param([string]$CmakePath)
+
+    if ([string]::IsNullOrWhiteSpace($CmakePath)) {
+        return ""
+    }
+
+    $firstLine = & $CmakePath --version 2>$null | Select-Object -First 1
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($firstLine)) {
+        return ""
+    }
+
+    if (($firstLine | Out-String).Trim() -match 'cmake version ([0-9]+\.[0-9]+\.[0-9]+)') {
+        return $Matches[1]
     }
 
     return ""
@@ -337,6 +362,7 @@ $checkpointPath = Resolve-CheckpointPath -SourceRepoRoot $sourceRepoRoot -Runtim
 $gitPath = Resolve-GitPath
 $uvPath = Resolve-UvPath
 $cmakePath = Resolve-CmakePath
+$cmakeVersion = Resolve-CmakeVersion -CmakePath $cmakePath
 $nsisPath = Resolve-MakeNsisPath
 $python312Path = Resolve-Python312
 $vsDevCmd = Resolve-VsDevCmd
@@ -366,7 +392,6 @@ if (-not [string]::IsNullOrWhiteSpace($checkpointPath)) {
 foreach ($commandCheck in @(
         @{ name = "git"; path = $gitPath },
         @{ name = "uv"; path = $uvPath },
-        @{ name = "cmake"; path = $cmakePath },
         @{ name = "nsis"; path = $nsisPath }
     )) {
     if (-not [string]::IsNullOrWhiteSpace($commandCheck.path)) {
@@ -374,6 +399,18 @@ foreach ($commandCheck in @(
     } else {
         Add-CheckResult -Results $results -Name $commandCheck.name -Status "FAIL" -Detail "Not found."
     }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($cmakePath) -and -not [string]::IsNullOrWhiteSpace($cmakeVersion)) {
+    if ([version]$cmakeVersion -ge [version]"3.28.0") {
+        Add-CheckResult -Results $results -Name "cmake" -Status "PASS" -Detail "$cmakePath ($cmakeVersion)"
+    } else {
+        Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "$cmakePath ($cmakeVersion). CMake 3.28+ is required."
+    }
+} elseif (-not [string]::IsNullOrWhiteSpace($cmakePath)) {
+    Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "$cmakePath (version unavailable). CMake 3.28+ is required."
+} else {
+    Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "Not found."
 }
 
 if (-not [string]::IsNullOrWhiteSpace($env:VCPKG_ROOT) -and (Test-Path $env:VCPKG_ROOT)) {

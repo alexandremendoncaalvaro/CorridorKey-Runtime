@@ -256,6 +256,55 @@ function Resolve-CollaboratorTensorRtRtxRoot {
     return ""
 }
 
+function Resolve-CollaboratorCmakePath {
+    foreach ($candidateName in @("cmake.exe", "cmake")) {
+        $command = Get-Command $candidateName -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+    }
+
+    foreach ($candidatePath in @(
+            "C:\Program Files\CMake\bin\cmake.exe",
+            "C:\Program Files (x86)\CMake\bin\cmake.exe"
+        )) {
+        if (Test-Path $candidatePath) {
+            return $candidatePath
+        }
+    }
+
+    return ""
+}
+
+function Get-CollaboratorCmakeVersion {
+    $cmakePath = Resolve-CollaboratorCmakePath
+    if ([string]::IsNullOrWhiteSpace($cmakePath)) {
+        return ""
+    }
+
+    $firstLine = & $cmakePath --version 2>$null | Select-Object -First 1
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($firstLine)) {
+        return ""
+    }
+
+    if (($firstLine | Out-String).Trim() -match 'cmake version ([0-9]+\.[0-9]+\.[0-9]+)') {
+        return $Matches[1]
+    }
+
+    return ""
+}
+
+function Test-CollaboratorCmakeRequirement {
+    param([string]$MinimumVersion = "3.28.0")
+
+    $cmakeVersion = Get-CollaboratorCmakeVersion
+    if ([string]::IsNullOrWhiteSpace($cmakeVersion)) {
+        return $false
+    }
+
+    return ([version]$cmakeVersion -ge [version]$MinimumVersion)
+}
+
 function Test-CollaboratorPython312 {
     $pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
     if ($null -ne $pyLauncher) {
@@ -381,6 +430,49 @@ function Ensure-CollaboratorNsis {
     }
 }
 
+function Ensure-CollaboratorCmake {
+    $minimumVersion = [version]"3.28.0"
+    $currentVersion = Get-CollaboratorCmakeVersion
+    if (-not [string]::IsNullOrWhiteSpace($currentVersion) -and ([version]$currentVersion -ge $minimumVersion)) {
+        return
+    }
+
+    $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
+    if ($null -eq $winget) {
+        if ([string]::IsNullOrWhiteSpace($currentVersion)) {
+            throw "CMake 3.28+ is required and winget is unavailable to install it automatically."
+        }
+        throw "CMake 3.28+ is required. Found $currentVersion and winget is unavailable to upgrade it automatically."
+    }
+
+    $commonArguments = @(
+        "--id", "Kitware.CMake",
+        "-e",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        "--silent"
+    )
+
+    $mode = if ([string]::IsNullOrWhiteSpace($currentVersion)) { "install" } else { "upgrade" }
+    Write-Host "[collaborator] Ensuring CMake 3.28+ with winget..." -ForegroundColor Cyan
+    & $winget.Source $mode @commonArguments
+    $wingetExitCode = $LASTEXITCODE
+    if ($wingetExitCode -ne 0 -and $mode -eq "upgrade") {
+        Write-Host "[collaborator] winget upgrade did not complete; retrying with install..." -ForegroundColor Yellow
+        & $winget.Source "install" @commonArguments
+        $wingetExitCode = $LASTEXITCODE
+    }
+    if ($wingetExitCode -ne 0) {
+        throw "Failed to install or upgrade CMake via winget."
+    }
+
+    $updatedVersion = Get-CollaboratorCmakeVersion
+    if ([string]::IsNullOrWhiteSpace($updatedVersion) -or ([version]$updatedVersion -lt $minimumVersion)) {
+        $resolvedVersion = if ([string]::IsNullOrWhiteSpace($updatedVersion)) { "not found" } else { $updatedVersion }
+        throw "CMake 3.28+ is required for ONNX Runtime RTX builds. Resolved: $resolvedVersion"
+    }
+}
+
 function Ensure-CollaboratorTensorRtRtxSdk {
     $existingRoot = Resolve-CollaboratorTensorRtRtxRoot
     if (-not [string]::IsNullOrWhiteSpace($existingRoot)) {
@@ -429,6 +521,7 @@ function Ensure-CollaboratorEnvironment {
     $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
 
     Ensure-CollaboratorVcpkgRoot
+    Ensure-CollaboratorCmake
     Ensure-CollaboratorNsis
 
     if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
@@ -458,9 +551,13 @@ function Assert-CollaboratorPrerequisites {
         [void]$missing.Add("uv")
     }
 
-    if ($null -eq (Get-Command "cmake.exe" -ErrorAction SilentlyContinue) -and
-        $null -eq (Get-Command "cmake" -ErrorAction SilentlyContinue)) {
-        [void]$missing.Add("cmake")
+    if (-not (Test-CollaboratorCmakeRequirement)) {
+        $resolvedCmakeVersion = Get-CollaboratorCmakeVersion
+        if ([string]::IsNullOrWhiteSpace($resolvedCmakeVersion)) {
+            [void]$missing.Add("CMake 3.28+")
+        } else {
+            [void]$missing.Add("CMake 3.28+ (found $resolvedCmakeVersion)")
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace($env:VCPKG_ROOT) -or -not (Test-Path $env:VCPKG_ROOT)) {
