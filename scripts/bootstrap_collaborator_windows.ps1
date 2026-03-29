@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.5.4",
+    [string]$Version = "0.6.0",
     [string]$RuntimeBranch = "codex/windows-rtx-054-regeneration",
     [string]$RuntimeRepoUrl = "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git",
     [string]$RuntimeRepoName = "CorridorKey-Runtime",

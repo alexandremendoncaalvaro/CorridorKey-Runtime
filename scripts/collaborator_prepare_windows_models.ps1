@@ -431,7 +431,7 @@ function Ensure-CollaboratorEnvironment {
     Ensure-CollaboratorVcpkgRoot
     Ensure-CollaboratorNsis
 
-    if (-not (Test-Path $rtxOrtRoot)) {
+    if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
         if (-not (Test-CollaboratorPython312)) {
             throw "Python 3.12 is required before staging the curated Windows RTX runtime."
         }
@@ -477,7 +477,7 @@ function Assert-CollaboratorPrerequisites {
     }
 
     $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
-    if (-not (Test-Path $rtxOrtRoot)) {
+    if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
         if (-not (Test-CollaboratorPython312)) {
             [void]$missing.Add("Python 3.12 for ONNX Runtime RTX build")
         }

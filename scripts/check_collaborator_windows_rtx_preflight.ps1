@@ -280,7 +280,13 @@ function Resolve-RtxRuntimeRoot {
     }
 
     $candidate = Join-Path $RuntimeRepoRoot "vendor\onnxruntime-windows-rtx"
-    if (Test-Path $candidate) {
+    $includeDir = Join-Path $candidate "include\onnxruntime"
+    $hasRuntimeDlls = (Get-ChildItem -Path (Join-Path $candidate "bin") -Filter "onnxruntime*.dll" -File -ErrorAction SilentlyContinue |
+        Measure-Object).Count -gt 0
+    $hasImportLibs = (Get-ChildItem -Path (Join-Path $candidate "lib") -Filter "onnxruntime*.lib" -File -ErrorAction SilentlyContinue |
+        Measure-Object).Count -gt 0
+
+    if ((Test-Path $includeDir) -and $hasRuntimeDlls -and $hasImportLibs) {
         return [System.IO.Path]::GetFullPath($candidate)
     }
 
