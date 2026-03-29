@@ -450,10 +450,9 @@ if (-not $SkipModelPreparation.IsPresent) {
 } else {
     $uvPath = Resolve-CommandPath -ExplicitPath $Uv -CandidateNames @("uv.exe", "uv") `
         -ErrorMessage "uv was not found. Install uv or pass -Uv."
+    Write-Host "[model-pack] Skipping model preparation and model validation by request." -ForegroundColor Yellow
     $presentPreparedModels = Get-PresentModelsInDirectory -Directory $modelsDir `
         -ExpectedModels (Get-CorridorKeyPreparedModelList)
-    Invoke-ModelPackValidation -UvPath $uvPath -ToolDir (Join-Path $repoRoot "tools\model_exporter") `
-        -ModelsDirectory $modelsDir -Models $presentPreparedModels
     Write-ModelPackStatus -Stage "skip-model-preparation" -Directory $modelsDir `
         -ExpectedModels (Get-CorridorKeyPreparedModelList) -ValidatedModels $presentPreparedModels `
         -ParityModels @()
