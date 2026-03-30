@@ -2,9 +2,8 @@ import { DEFAULT_TARGET_RESOLUTION } from "./constants";
 
 export type ResolutionPresetId =
   | "auto"
-  | "fast_512"
-  | "balanced_768"
-  | "detail_1024";
+  | "draft_512"
+  | "high_1024";
 
 export interface ProcessingResolutionPreset {
   id: ResolutionPresetId;
@@ -19,25 +18,19 @@ export const PROCESSING_RESOLUTION_PRESETS: readonly ProcessingResolutionPreset[
   {
     id: "auto",
     label: "Auto",
-    description: "Match the active browser model resolution.",
+    description: "Follow the active browser model resolution.",
     resolution: null,
   },
   {
-    id: "fast_512",
-    label: "Fast 512",
-    description: "Safest browser preset for quick iteration.",
+    id: "draft_512",
+    label: "Draft (512)",
+    description: "Fastest browser preset for quick review passes.",
     resolution: 512,
   },
   {
-    id: "balanced_768",
-    label: "Balanced 768",
-    description: "Higher detail with moderate browser memory pressure.",
-    resolution: 768,
-  },
-  {
-    id: "detail_1024",
-    label: "Detail 1024",
-    description: "Highest fixed browser preset in this sandbox.",
+    id: "high_1024",
+    label: "High (1024)",
+    description: "Highest fixed browser preset exposed in the main flow.",
     resolution: 1024,
   },
 ];

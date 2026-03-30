@@ -16,29 +16,19 @@ export const BROWSER_MODEL_CATALOG: readonly BrowserModelDefinition[] = [
   {
     id: "corridorkey_int8_512",
     filename: "corridorkey_int8_512.onnx",
-    label: "Default browser-safe",
+    label: "Draft",
     description:
-      "INT8 512. Smallest bundled ONNX variant and the safest default for browser startup.",
+      "INT8 512. Fastest bundled browser model and the default for quick local iteration.",
     resolution: 512,
     size_label: "76 MB",
     url: build_browser_model_url("corridorkey_int8_512.onnx"),
   },
   {
-    id: "corridorkey_int8_768",
-    filename: "corridorkey_int8_768.onnx",
-    label: "Balanced detail",
-    description:
-      "INT8 768. Higher detail than 512 while staying in the conservative browser-compatible track.",
-    resolution: 768,
-    size_label: "84 MB",
-    url: build_browser_model_url("corridorkey_int8_768.onnx"),
-  },
-  {
     id: "corridorkey_int8_1024",
     filename: "corridorkey_int8_1024.onnx",
-    label: "Heavy detail",
+    label: "High",
     description:
-      "INT8 1024. Largest fixed browser model in this sandbox. Expect longer load and higher memory pressure.",
+      "INT8 1024. Highest bundled browser model for desktop-class testing.",
     resolution: 1024,
     size_label: "97 MB",
     url: build_browser_model_url("corridorkey_int8_1024.onnx"),

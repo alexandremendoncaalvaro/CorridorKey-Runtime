@@ -2,6 +2,7 @@ export type AppErrorCode =
   | "dom_unavailable"
   | "missing_input"
   | "invalid_state"
+  | "unsupported_capability"
   | "source_load_failed"
   | "source_permission_denied"
   | "model_load_failed"

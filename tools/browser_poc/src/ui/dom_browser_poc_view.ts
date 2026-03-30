@@ -2,8 +2,6 @@ import {
   CHECKER_DARK,
   CHECKER_LIGHT,
   CHECKER_TILE_SIZE,
-  DEFAULT_DOWNLOAD_FILENAME,
-  DEFAULT_TARGET_RESOLUTION,
 } from "../common/constants";
 import { app_error, type AppError } from "../common/errors";
 import {
@@ -25,7 +23,7 @@ export interface ViewMetrics {
   mode: string;
   backend: string;
   frame_time_ms: number | null;
-  recording: string;
+  export_state: string;
 }
 
 export interface ViewModelState {
@@ -48,16 +46,13 @@ export interface ViewHintSequenceState {
 }
 
 export interface ViewButtonsState {
-  can_load_selected_model: boolean;
-  can_process_frame: boolean;
+  can_change_source: boolean;
+  can_change_hint: boolean;
+  can_change_model: boolean;
+  can_change_resolution: boolean;
   can_process_full_media: boolean;
-  can_start_preview: boolean;
-  can_stop_preview: boolean;
-  can_start_recording: boolean;
-  can_stop_recording: boolean;
-  can_start_webcam: boolean;
-  can_stop_webcam: boolean;
-  can_load_hint: boolean;
+  can_scrub_source_sequence: boolean;
+  can_scrub_hint_sequence: boolean;
 }
 
 export interface ViewProcessingState {
@@ -67,22 +62,36 @@ export interface ViewProcessingState {
   progress_ratio: number | null;
 }
 
+export interface ViewDownloadArtifacts {
+  preview:
+    | {
+        url: string;
+        filename: string;
+        label: string;
+      }
+    | null;
+  alpha:
+    | {
+        url: string;
+        filename: string;
+        label: string;
+      }
+    | null;
+}
+
 export interface ViewHandlers {
-  on_source_files_selected: () => void;
+  on_source_video_selected: () => void;
+  on_source_stills_selected: () => void;
   on_hint_files_selected: () => void;
+  on_hint_video_ready: () => void;
   on_model_selection_changed: () => void;
-  on_selected_model_load_requested: () => void;
-  on_process_frame_requested: () => void;
-  on_process_full_media_requested: () => void;
-  on_preview_start_requested: () => void;
-  on_preview_stop_requested: () => void;
-  on_recording_start_requested: () => void;
-  on_recording_stop_requested: () => void;
   on_resolution_changed: () => void;
+  on_process_full_media_requested: () => void;
   on_video_metadata_loaded: () => void;
+  on_video_played: () => void;
+  on_video_paused: () => void;
+  on_video_seeked: () => void;
   on_video_ended: () => void;
-  on_webcam_start_requested: () => void;
-  on_webcam_stop_requested: () => void;
   on_sequence_index_changed: () => void;
   on_hint_sequence_index_changed: () => void;
 }
@@ -92,6 +101,7 @@ function require_element<T extends HTMLElement>(id: string): T {
   if (!(element instanceof HTMLElement)) {
     throw new Error(`Missing required element: ${id}`);
   }
+
   return element as T;
 }
 
@@ -100,7 +110,6 @@ function require_context(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
     alpha: true,
     willReadFrequently: true,
   });
-
   if (context === null) {
     throw new Error("Failed to acquire a 2D canvas context.");
   }
@@ -153,8 +162,7 @@ function fill_checkerboard(
   for (let y = 0; y < normalized_height; y += CHECKER_TILE_SIZE) {
     for (let x = 0; x < normalized_width; x += CHECKER_TILE_SIZE) {
       const checker =
-        (Math.floor(y / CHECKER_TILE_SIZE) + Math.floor(x / CHECKER_TILE_SIZE)) %
-          2 ===
+        (Math.floor(y / CHECKER_TILE_SIZE) + Math.floor(x / CHECKER_TILE_SIZE)) % 2 ===
         0
           ? CHECKER_DARK
           : CHECKER_LIGHT;
@@ -165,38 +173,34 @@ function fill_checkerboard(
 }
 
 export class DomBrowserPocView {
-  private readonly source_files_input =
-    require_element<HTMLInputElement>("source-files");
+  private readonly source_video_input =
+    require_element<HTMLInputElement>("source-video-files");
+  private readonly source_stills_input =
+    require_element<HTMLInputElement>("source-stills-files");
+  private readonly hint_files_input =
+    require_element<HTMLInputElement>("hint-files");
   private readonly model_select =
     require_element<HTMLSelectElement>("model-select");
   private readonly resolution_input =
     require_element<HTMLSelectElement>("target-resolution");
   private readonly resolution_detail =
     require_element<HTMLElement>("target-resolution-detail");
-  private readonly hint_files_input =
-    require_element<HTMLInputElement>("hint-files");
-  private readonly start_webcam_button =
-    require_element<HTMLButtonElement>("start-webcam");
-  private readonly stop_webcam_button =
-    require_element<HTMLButtonElement>("stop-webcam");
-  private readonly load_selected_model_button =
-    require_element<HTMLButtonElement>("load-selected-model");
-  private readonly process_frame_button =
-    require_element<HTMLButtonElement>("process-frame");
   private readonly process_full_media_button =
     require_element<HTMLButtonElement>("process-full-media");
-  private readonly start_preview_button =
-    require_element<HTMLButtonElement>("start-preview");
-  private readonly stop_preview_button =
-    require_element<HTMLButtonElement>("stop-preview");
-  private readonly start_recording_button =
-    require_element<HTMLButtonElement>("start-recording");
-  private readonly stop_recording_button =
-    require_element<HTMLButtonElement>("stop-recording");
-  private readonly download_link =
-    require_element<HTMLAnchorElement>("download-link");
+  private readonly preview_download =
+    require_element<HTMLAnchorElement>("download-preview");
+  private readonly alpha_download =
+    require_element<HTMLAnchorElement>("download-alpha");
+  private readonly preview_download_default_label =
+    require_element<HTMLAnchorElement>("download-preview").textContent ??
+    "Download Preview Video";
+  private readonly alpha_download_default_label =
+    require_element<HTMLAnchorElement>("download-alpha").textContent ??
+    "Download Alpha ZIP";
   private readonly source_video =
     require_element<HTMLVideoElement>("source-video");
+  private readonly hint_video =
+    require_element<HTMLVideoElement>("hint-video");
   private readonly active_model_value =
     require_element<HTMLElement>("active-model-value");
   private readonly model_state_value =
@@ -219,24 +223,24 @@ export class DomBrowserPocView {
     require_element<HTMLInputElement>("sequence-index");
   private readonly sequence_frame_value =
     require_element<HTMLElement>("sequence-frame-value");
-  private readonly source_canvas =
-    require_element<HTMLCanvasElement>("source-canvas");
-  private readonly output_canvas =
-    require_element<HTMLCanvasElement>("output-canvas");
-  private readonly hint_video = require_element<HTMLVideoElement>("hint-video");
   private readonly hint_sequence_panel =
     require_element<HTMLDivElement>("hint-sequence-panel");
   private readonly hint_sequence_index =
     require_element<HTMLInputElement>("hint-sequence-index");
   private readonly hint_sequence_frame_value =
     require_element<HTMLElement>("hint-sequence-frame-value");
+  private readonly capability_note =
+    require_element<HTMLElement>("export-capability");
   private readonly status_log = require_element<HTMLDivElement>("status-log");
   private readonly mode_value = require_element<HTMLElement>("mode-value");
   private readonly backend_value = require_element<HTMLElement>("backend-value");
   private readonly frame_time_value =
     require_element<HTMLElement>("frame-time-value");
-  private readonly recording_value =
-    require_element<HTMLElement>("recording-value");
+  private readonly export_value = require_element<HTMLElement>("export-value");
+  private readonly source_canvas =
+    require_element<HTMLCanvasElement>("source-canvas");
+  private readonly output_canvas =
+    require_element<HTMLCanvasElement>("output-canvas");
   private readonly source_ctx = require_context(this.source_canvas);
   private readonly output_ctx = require_context(this.output_canvas);
   private readonly working_canvas = document.createElement("canvas");
@@ -245,62 +249,45 @@ export class DomBrowserPocView {
   private readonly output_frame_ctx = require_context(this.output_frame_canvas);
   private readonly hint_canvas = document.createElement("canvas");
   private readonly hint_ctx = require_context(this.hint_canvas);
-  private m_auto_target_resolution = DEFAULT_TARGET_RESOLUTION;
-  private m_stage_target_resolution = DEFAULT_TARGET_RESOLUTION;
+  private m_auto_target_resolution = 512;
+  private m_stage_target_resolution = 512;
   private m_stage_display_width = 1;
   private m_stage_display_height = 1;
   private m_stage_canvas_lock: StageCanvasDimensions | null = null;
   private m_locked_stage_aspect_ratio: string | null = null;
 
   bind_handlers(handlers: ViewHandlers): void {
-    this.source_files_input.addEventListener(
+    this.source_video_input.addEventListener(
       "change",
-      handlers.on_source_files_selected,
+      handlers.on_source_video_selected,
+    );
+    this.source_stills_input.addEventListener(
+      "change",
+      handlers.on_source_stills_selected,
     );
     this.hint_files_input.addEventListener(
       "change",
       handlers.on_hint_files_selected,
     );
+    this.hint_video.addEventListener("loadeddata", handlers.on_hint_video_ready);
+    this.hint_video.addEventListener("seeked", handlers.on_hint_video_ready);
     this.model_select.addEventListener(
       "change",
       handlers.on_model_selection_changed,
     );
-    this.load_selected_model_button.addEventListener(
-      "click",
-      handlers.on_selected_model_load_requested,
-    );
-    this.process_frame_button.addEventListener(
-      "click",
-      handlers.on_process_frame_requested,
-    );
+    this.resolution_input.addEventListener("change", handlers.on_resolution_changed);
     this.process_full_media_button.addEventListener(
       "click",
       handlers.on_process_full_media_requested,
     );
-    this.start_preview_button.addEventListener(
-      "click",
-      handlers.on_preview_start_requested,
+    this.source_video.addEventListener(
+      "loadedmetadata",
+      handlers.on_video_metadata_loaded,
     );
-    this.stop_preview_button.addEventListener(
-      "click",
-      handlers.on_preview_stop_requested,
-    );
-    this.start_recording_button.addEventListener(
-      "click",
-      handlers.on_recording_start_requested,
-    );
-    this.stop_recording_button.addEventListener(
-      "click",
-      handlers.on_recording_stop_requested,
-    );
-    this.start_webcam_button.addEventListener(
-      "click",
-      handlers.on_webcam_start_requested,
-    );
-    this.stop_webcam_button.addEventListener(
-      "click",
-      handlers.on_webcam_stop_requested,
-    );
+    this.source_video.addEventListener("play", handlers.on_video_played);
+    this.source_video.addEventListener("pause", handlers.on_video_paused);
+    this.source_video.addEventListener("seeked", handlers.on_video_seeked);
+    this.source_video.addEventListener("ended", handlers.on_video_ended);
     this.sequence_index.addEventListener(
       "input",
       handlers.on_sequence_index_changed,
@@ -309,19 +296,14 @@ export class DomBrowserPocView {
       "input",
       handlers.on_hint_sequence_index_changed,
     );
-    this.resolution_input.addEventListener(
-      "change",
-      handlers.on_resolution_changed,
-    );
-    this.source_video.addEventListener(
-      "loadedmetadata",
-      handlers.on_video_metadata_loaded,
-    );
-    this.source_video.addEventListener("ended", handlers.on_video_ended);
   }
 
-  selected_source_files(): File[] {
-    return Array.from(this.source_files_input.files ?? []);
+  selected_source_video_files(): File[] {
+    return Array.from(this.source_video_input.files ?? []);
+  }
+
+  selected_source_still_files(): File[] {
+    return Array.from(this.source_stills_input.files ?? []);
   }
 
   selected_hint_files(): File[] {
@@ -330,20 +312,12 @@ export class DomBrowserPocView {
 
   selected_sequence_index(): number {
     const parsed = Number.parseInt(this.sequence_index.value, 10);
-    if (!Number.isFinite(parsed)) {
-      return 0;
-    }
-
-    return Math.max(0, parsed - 1);
+    return Number.isFinite(parsed) ? Math.max(0, parsed - 1) : 0;
   }
 
   selected_hint_sequence_index(): number {
     const parsed = Number.parseInt(this.hint_sequence_index.value, 10);
-    if (!Number.isFinite(parsed)) {
-      return 0;
-    }
-
-    return Math.max(0, parsed - 1);
+    return Number.isFinite(parsed) ? Math.max(0, parsed - 1) : 0;
   }
 
   selected_model_id(): string {
@@ -363,7 +337,7 @@ export class DomBrowserPocView {
     for (const model of models) {
       const option = document.createElement("option");
       option.value = model.id;
-      option.textContent = `${model.label} | ${model.size_label}`;
+      option.textContent = `${model.label} | ${model.resolution}px | ${model.size_label}`;
       option.title = model.description;
       option.selected = model.id === selected_model_id;
       this.model_select.append(option);
@@ -392,6 +366,18 @@ export class DomBrowserPocView {
 
   set_resolution_detail(detail: string): void {
     this.resolution_detail.textContent = detail;
+  }
+
+  set_export_capability(message: string | null): void {
+    if (message === null) {
+      this.capability_note.textContent =
+        "Full export is ready for Chromium-class desktop browsers.";
+      this.capability_note.classList.remove("warning");
+      return;
+    }
+
+    this.capability_note.textContent = message;
+    this.capability_note.classList.add("warning");
   }
 
   set_sequence_state(state: ViewSequenceState): void {
@@ -480,57 +466,10 @@ export class DomBrowserPocView {
     this.sync_stage_resolution(this.m_stage_target_resolution);
   }
 
-  lock_stage_canvas_to_display_dimensions(width: number, height: number): void {
-    this.m_stage_canvas_lock = resolve_stage_canvas_dimensions(
-      this.m_stage_target_resolution,
-      width,
-      height,
-    );
-    this.m_locked_stage_aspect_ratio = resolve_stage_aspect_ratio(width, height);
-    this.sync_stage_aspect_styles(
-      this.m_locked_stage_aspect_ratio,
-      resolve_stage_aspect_ratio(width, height, DEFAULT_STAGE_VIDEO_ASPECT_RATIO),
-    );
-    this.sync_stage_resolution(this.m_stage_target_resolution);
-  }
-
-  unlock_stage_canvas_dimensions(): void {
-    if (
-      this.m_stage_canvas_lock === null &&
-      this.m_locked_stage_aspect_ratio === null
-    ) {
-      return;
-    }
-
-    this.m_stage_canvas_lock = null;
-    this.m_locked_stage_aspect_ratio = null;
-    this.sync_stage_aspect_styles(
-      resolve_stage_aspect_ratio(
-        this.m_stage_display_width,
-        this.m_stage_display_height,
-      ),
-      resolve_stage_aspect_ratio(
-        this.m_stage_display_width,
-        this.m_stage_display_height,
-        DEFAULT_STAGE_VIDEO_ASPECT_RATIO,
-      ),
-    );
-    this.sync_stage_resolution(this.m_stage_target_resolution);
-  }
-
-  set_source_visual_mode(mode: "video" | "still"): void {
-    this.source_video.classList.toggle("hidden", mode !== "video");
-  }
-
   load_video_source(video_url: string): void {
     this.source_video.srcObject = null;
     this.source_video.src = video_url;
     this.source_video.load();
-  }
-
-  attach_camera_stream(stream: MediaStream): void {
-    this.source_video.src = "";
-    this.source_video.srcObject = stream;
   }
 
   clear_video_source(): void {
@@ -540,17 +479,9 @@ export class DomBrowserPocView {
     this.source_video.load();
   }
 
-  set_hint_visual_mode(mode: "video" | "still"): void {
-    this.hint_video.classList.toggle("hidden", mode !== "video");
-  }
-
   load_hint_video_source(video_url: string): void {
     this.hint_video.src = video_url;
     this.hint_video.load();
-  }
-
-  hint_video_ready(): boolean {
-    return this.hint_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
   }
 
   clear_hint_video_source(): void {
@@ -567,6 +498,14 @@ export class DomBrowserPocView {
     return this.source_video.readyState >= HTMLMediaElement.HAVE_METADATA;
   }
 
+  hint_video_ready(): boolean {
+    return this.hint_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+  }
+
+  hint_video_has_metadata(): boolean {
+    return this.hint_video.readyState >= HTMLMediaElement.HAVE_METADATA;
+  }
+
   video_dimensions(): { width: number; height: number } {
     return {
       width: this.source_video.videoWidth,
@@ -579,9 +518,7 @@ export class DomBrowserPocView {
   }
 
   video_duration(): number {
-    return Number.isFinite(this.source_video.duration)
-      ? this.source_video.duration
-      : 0;
+    return Number.isFinite(this.source_video.duration) ? this.source_video.duration : 0;
   }
 
   video_current_time(): number {
@@ -592,10 +529,6 @@ export class DomBrowserPocView {
     return this.source_video.ended;
   }
 
-  async seek_video(time_seconds: number): Promise<Result<void, AppError>> {
-    return this.seek_media_element(this.source_video, time_seconds);
-  }
-
   async play_video(): Promise<Result<void, AppError>> {
     try {
       await this.source_video.play();
@@ -604,7 +537,7 @@ export class DomBrowserPocView {
       return err(
         app_error(
           "invalid_state",
-          "The browser refused to start video playback.",
+          "The browser refused to start source video playback.",
           cause,
         ),
       );
@@ -615,31 +548,12 @@ export class DomBrowserPocView {
     this.source_video.pause();
   }
 
-  hint_video_has_metadata(): boolean {
-    return this.hint_video.readyState >= HTMLMediaElement.HAVE_METADATA;
+  async seek_video(time_seconds: number): Promise<Result<void, AppError>> {
+    return this.seek_media_element(this.source_video, time_seconds);
   }
 
   async seek_hint_video(time_seconds: number): Promise<Result<void, AppError>> {
     return this.seek_media_element(this.hint_video, time_seconds);
-  }
-
-  async play_hint_video(): Promise<Result<void, AppError>> {
-    try {
-      await this.hint_video.play();
-      return ok(undefined);
-    } catch (cause) {
-      return err(
-        app_error(
-          "invalid_state",
-          "The browser refused to start hint video playback.",
-          cause,
-        ),
-      );
-    }
-  }
-
-  pause_hint_video(): void {
-    this.hint_video.pause();
   }
 
   private draw_canvas_image_source(source: CanvasImageSource): RgbaFrame {
@@ -674,7 +588,7 @@ export class DomBrowserPocView {
     };
   }
 
-  draw_video_frame(): Result<RgbaFrame, AppError> {
+  draw_source_video_frame(): Result<RgbaFrame, AppError> {
     if (!this.video_ready()) {
       return err(
         app_error(
@@ -687,7 +601,7 @@ export class DomBrowserPocView {
     return ok(this.draw_canvas_image_source(this.source_video));
   }
 
-  draw_bitmap_frame(source: ImageBitmap): Result<RgbaFrame, AppError> {
+  draw_canvas_frame(source: CanvasImageSource): Result<RgbaFrame, AppError> {
     return ok(this.draw_canvas_image_source(source));
   }
 
@@ -725,8 +639,8 @@ export class DomBrowserPocView {
     return ok(this.capture_hint_canvas(this.hint_video));
   }
 
-  draw_hint_bitmap_frame(bitmap: ImageBitmap): Float32Array {
-    return this.capture_hint_canvas(bitmap);
+  draw_hint_canvas(source: CanvasImageSource): Float32Array {
+    return this.capture_hint_canvas(source);
   }
 
   render_output(frame: RgbaFrame): void {
@@ -754,30 +668,6 @@ export class DomBrowserPocView {
     );
   }
 
-  capture_output_stream(fps: number): MediaStream {
-    return this.output_canvas.captureStream(fps);
-  }
-
-  async output_png_blob(): Promise<Result<Blob, AppError>> {
-    return new Promise<Result<Blob, AppError>>((resolve) => {
-      this.output_canvas.toBlob((blob) => {
-        if (blob === null) {
-          resolve(
-            err(
-              app_error(
-                "recording_failed",
-                "Failed to encode the output canvas as a PNG.",
-              ),
-            ),
-          );
-          return;
-        }
-
-        resolve(ok(blob));
-      }, "image/png");
-    });
-  }
-
   set_status(message: string): void {
     this.status_log.textContent = message;
   }
@@ -786,10 +676,8 @@ export class DomBrowserPocView {
     this.mode_value.textContent = metrics.mode;
     this.backend_value.textContent = metrics.backend;
     this.frame_time_value.textContent =
-      metrics.frame_time_ms === null
-        ? "-"
-        : `${metrics.frame_time_ms.toFixed(1)} ms`;
-    this.recording_value.textContent = metrics.recording;
+      metrics.frame_time_ms === null ? "-" : `${metrics.frame_time_ms.toFixed(1)} ms`;
+    this.export_value.textContent = metrics.export_state;
   }
 
   set_model_state(state: ViewModelState): void {
@@ -815,48 +703,50 @@ export class DomBrowserPocView {
       return;
     }
 
-    this.process_progress.value = Math.max(
-      0,
-      Math.min(1, state.progress_ratio),
-    );
+    this.process_progress.value = Math.max(0, Math.min(1, state.progress_ratio));
   }
 
   set_button_state(state: ViewButtonsState): void {
-    this.load_selected_model_button.disabled = !state.can_load_selected_model;
-    this.process_frame_button.disabled = !state.can_process_frame;
+    this.source_video_input.disabled = !state.can_change_source;
+    this.source_stills_input.disabled = !state.can_change_source;
+    this.hint_files_input.disabled = !state.can_change_hint;
+    this.model_select.disabled = !state.can_change_model;
+    this.resolution_input.disabled = !state.can_change_resolution;
     this.process_full_media_button.disabled = !state.can_process_full_media;
-    this.start_preview_button.disabled = !state.can_start_preview;
-    this.stop_preview_button.disabled = !state.can_stop_preview;
-    this.start_recording_button.disabled = !state.can_start_recording;
-    this.stop_recording_button.disabled = !state.can_stop_recording;
-    this.start_webcam_button.disabled = !state.can_start_webcam;
-    this.stop_webcam_button.disabled = !state.can_stop_webcam;
-    this.hint_files_input.disabled = !state.can_load_hint;
+    this.sequence_index.disabled = !state.can_scrub_source_sequence;
+    this.hint_sequence_index.disabled = !state.can_scrub_hint_sequence;
   }
 
-  set_download_link(url: string | null): void {
-    if (url === null) {
-      this.download_link.removeAttribute("href");
-      this.download_link.classList.add("disabled");
-      return;
-    }
-
-    this.download_link.href = url;
-    this.download_link.download = DEFAULT_DOWNLOAD_FILENAME;
-    this.download_link.classList.remove("disabled");
+  set_download_artifacts(artifacts: ViewDownloadArtifacts): void {
+    this.set_download_link(this.preview_download, artifacts.preview);
+    this.set_download_link(this.alpha_download, artifacts.alpha);
   }
 
-  set_download_artifact(
-    artifact: { url: string; filename: string } | null,
+  private set_download_link(
+    link: HTMLAnchorElement,
+    artifact:
+      | {
+          url: string;
+          filename: string;
+          label: string;
+        }
+      | null,
   ): void {
     if (artifact === null) {
-      this.set_download_link(null);
+      link.removeAttribute("href");
+      link.removeAttribute("download");
+      link.textContent =
+        link === this.preview_download
+          ? this.preview_download_default_label
+          : this.alpha_download_default_label;
+      link.classList.add("disabled");
       return;
     }
 
-    this.download_link.href = artifact.url;
-    this.download_link.download = artifact.filename;
-    this.download_link.classList.remove("disabled");
+    link.href = artifact.url;
+    link.download = artifact.filename;
+    link.textContent = artifact.label;
+    link.classList.remove("disabled");
   }
 
   private async seek_media_element(
@@ -874,7 +764,6 @@ export class DomBrowserPocView {
 
     const duration = Number.isFinite(element.duration) ? element.duration : 0;
     const clamped_time = Math.max(0, Math.min(time_seconds, duration || time_seconds));
-
     if (Math.abs(element.currentTime - clamped_time) < 0.001) {
       return ok(undefined);
     }
