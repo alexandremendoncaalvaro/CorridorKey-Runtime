@@ -33,8 +33,13 @@ see [help/SUPPORT_MATRIX.md](help/SUPPORT_MATRIX.md).
 ### OFX Plugin - Windows
 
 1. Download the `.exe` installer for your hardware path:
-   - **RTX package** - official Windows path for NVIDIA RTX 30 series and
-     newer, backed by the ONNX Runtime TensorRT RTX EP.
+   - **RTX Lite** - conservative official Windows RTX installer for NVIDIA RTX
+     30 series and newer. This track keeps the public quality ladder validated
+     through **High (1024)**.
+   - **RTX Full** - full official Windows RTX installer for NVIDIA RTX 30
+     series and newer. This track exposes the full public quality ladder:
+     **Draft (512)**, **High (1024)**, **Ultra (1536)**, and
+     **Maximum (2048)**.
    - **DirectML package** - experimental Windows track for DirectX 12 GPUs
      outside the official RTX path. This track is not broadly validated across
      AMD, Intel, or RTX 20 series hardware and should only appear in releases
@@ -105,8 +110,9 @@ cmake --build --preset release
 On Windows, use `.\scripts\windows.ps1 -Task build -Preset release` for local
 builds and `.\scripts\windows.ps1 -Task release -Version X.Y.Z` for official
 Windows release packaging. That canonical release command emits the validated
-`RTX` Windows installer by default. Publish the experimental `DirectML` track
-only when you request it explicitly with `-Track dml` or `-Track all`.
+`RTX Lite` and `RTX Full` Windows installers by default. Publish the
+experimental `DirectML` track only when you request it explicitly with
+`-Track dml` or `-Track all`.
 Lower-level Windows scripts exist only as internal delegates for debugging the
 wrapper itself. If you invoke CMake directly, activate the MSVC developer
 environment first. Windows distribution artifacts include
@@ -120,13 +126,15 @@ levels of operation:
 - `.\scripts\windows.ps1 -Task build -Preset release`
   - build only
 - `.\scripts\windows.ps1 -Task package-ofx -Version X.Y.Z -Track rtx`
-  - package installers from an already certified model set
+  - package the `RTX Lite` and `RTX Full` installers from an already
+    certified Windows RTX model set
 - `.\scripts\windows.ps1 -Task certify-rtx-artifacts -Version X.Y.Z`
   - certify an already existing Windows RTX model set and write the artifact
     manifest without regenerating the `.onnx` files from the checkpoint
 - `.\scripts\windows.ps1 -Task regen-rtx-release -Version X.Y.Z`
   - regenerate ONNX artifacts from the checkpoint, certify the RTX ladder,
-    write the artifact manifest, and then package the RTX installers
+    write the artifact manifest, and then package the `RTX Lite` and
+    `RTX Full` installers
 
 `package-ofx` for Windows RTX is intentionally strict. It no longer accepts a
 raw `models\` folder by itself. The command requires a certified

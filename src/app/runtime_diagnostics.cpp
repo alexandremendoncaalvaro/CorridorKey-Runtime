@@ -232,8 +232,6 @@ std::vector<std::string> windows_probe_models_for_backend(Backend backend,
 
     if (device.available_memory_mb >= 10000) {
         append_unique_model(models, "corridorkey_fp16_1024.onnx");
-    } else if (device.available_memory_mb >= 8000) {
-        append_unique_model(models, "corridorkey_fp16_768.onnx");
     } else {
         append_unique_model(models, "corridorkey_fp16_512.onnx");
     }

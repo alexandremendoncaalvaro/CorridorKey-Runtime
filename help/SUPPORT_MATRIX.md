@@ -94,6 +94,10 @@ packaged and validated.
   failure path if that quality cannot execute.
 - `RTX Lite` and `RTX Full` install to the same OFX bundle location.
   Installing one replaces the other.
+- The current public Windows RTX quality ladder in the OFX plugin is
+  `Draft (512)`, `High (1024)`, `Ultra (1536)`, and `Maximum (2048)`.
+  The historical `768px` rung remains reference-only and is not part of the
+  public OFX quality UI.
 
 The `corridorkey doctor` command reports the active backend and any fallback
 conditions on your specific hardware before processing begins.

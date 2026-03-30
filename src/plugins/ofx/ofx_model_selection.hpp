@@ -65,8 +65,6 @@ inline int quality_mode_for_resolution(int resolution) {
     switch (resolution) {
         case 512:
             return kQualityPreview;
-        case 768:
-            return kQualityStandard;
         case 1024:
             return kQualityHigh;
         case 1536:
@@ -103,10 +101,11 @@ inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& 
         return std::nullopt;
     }
 
-    if ((device.backend == Backend::TensorRT || device.backend == Backend::CUDA) &&
+    if ((device.backend == Backend::TensorRT || device.backend == Backend::CUDA ||
+         device.backend == Backend::DirectML || device.backend == Backend::WindowsML ||
+         device.backend == Backend::OpenVINO) &&
         requested_resolution == 768) {
-        return std::string(quality_mode_label(quality_mode)) +
-               " is not part of CorridorKey's current official Windows RTX ladder. "
+        return "768px is not part of CorridorKey's current public Windows quality ladder. "
                "Please use Draft (512) or High (1024).";
     }
 
@@ -288,7 +287,6 @@ inline bool should_prepare_bootstrap_during_instance_create(bool use_runtime_ser
 
 inline int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
     if (quality_mode == kQualityPreview) return 512;
-    if (quality_mode == kQualityStandard) return 768;
     if (quality_mode == kQualityHigh) return 1024;
     if (quality_mode == kQualityUltra) return 1536;
     if (quality_mode == kQualityMaximum) return 2048;
@@ -297,17 +295,13 @@ inline int resolve_target_resolution(int quality_mode, int input_width, int inpu
     if (max_dim > 3000) return 2048;
     if (max_dim > 2000) return 1536;
     if (max_dim > 1000) return 1024;
-    return 768;
+    return 512;
 }
 
 inline int normalize_target_resolution_for_backend(Backend backend, int quality_mode,
                                                    int requested_resolution) {
-    if (!is_fixed_quality_mode(quality_mode) &&
-        (backend == Backend::TensorRT || backend == Backend::CUDA) &&
-        requested_resolution == 768) {
-        return 1024;
-    }
-
+    (void)backend;
+    (void)quality_mode;
     return requested_resolution;
 }
 

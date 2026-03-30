@@ -329,9 +329,14 @@ TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit
                 DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) == 1536);
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) == 2048);
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"AMD Radeon", 8192, Backend::DirectML}) == 512);
+    REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"AMD Radeon", 16384, Backend::DirectML}) == 1024);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 10000);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
     REQUIRE_FALSE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 768).has_value());
+    REQUIRE_FALSE(minimum_supported_memory_mb_for_resolution(Backend::DirectML, 768).has_value());
 }
 
 TEST_CASE("windows RTX bundle profile controls the safe quality ceiling",

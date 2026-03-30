@@ -369,8 +369,6 @@ std::string runtime_safe_quality_ceiling_runtime_label_impl(const InstanceData& 
     switch (quality_mode_for_resolution(resolution)) {
         case kQualityPreview:
             return "Draft (" + std::to_string(resolution) + "px)";
-        case kQualityStandard:
-            return "Standard (" + std::to_string(resolution) + "px)";
         case kQualityHigh:
             return "High (" + std::to_string(resolution) + "px)";
         case kQualityUltra:

@@ -102,20 +102,24 @@ and typically cost more VRAM, preparation time, and render time.
 Current fixed modes:
 
 - **Draft (512)**
-- **Standard (768)**
 - **High (1024)**
 - **Ultra (1536)**
 - **Maximum (2048)**
 
 Current `Auto` behavior uses the larger input dimension:
 
-- up to `1000` -> **Standard (768)**
+- up to `1000` -> **Draft (512)**
 - `1001` to `2000` -> **High (1024)**
 - `2001` to `3000` -> **Ultra (1536)**
 - above `3000` -> **Maximum (2048)**
 
 Current backend-specific rules:
 
+- **Windows RTX** uses the current public quality ladder:
+  `512 / 1024 / 1536 / 2048`. The old `768` rung is not part of the current
+  public OFX quality UI.
+- **RTX Lite** is validated through **High (1024)**.
+- **RTX Full** exposes **Ultra (1536)** and **Maximum (2048)** as well.
 - **DirectML** currently tops out at a `1024px` safe quality ceiling, so
   `Ultra (1536)` and `Maximum (2048)` will not hold on that path.
 - **CPU** is clamped to **Draft (512)**.

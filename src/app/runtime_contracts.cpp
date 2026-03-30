@@ -159,9 +159,6 @@ std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_m
     if (available_memory_mb >= 10000) {
         return 1024;
     }
-    if (available_memory_mb >= 8000) {
-        return 768;
-    }
     return 512;
 }
 
@@ -918,9 +915,6 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
             if (resolution >= 1024) {
                 return 10000;
             }
-            if (resolution >= 768) {
-                return 8000;
-            }
             return std::nullopt;
         default:
             return std::nullopt;
@@ -1069,7 +1063,7 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
         !allow_lower_resolution_fallback && (!coarse_to_fine || coarse_resolution_override > 0);
 
     std::vector<std::filesystem::path> expected;
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 512};
     for (int resolution : kFallbackResolutions) {
         if (resolution > search_resolution) {
             continue;
@@ -1111,7 +1105,7 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
 
     std::vector<ArtifactSelection> selections;
     bool exact_artifact_available = false;
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 512};
     for (int resolution : kFallbackResolutions) {
         if (resolution > search_resolution) {
             continue;

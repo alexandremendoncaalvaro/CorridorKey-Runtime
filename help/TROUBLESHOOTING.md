@@ -25,13 +25,17 @@ installation.
    scan cache. Close Resolve, run the installer, then reopen Resolve.
 2. Confirm the correct installer for your platform was used. The macOS `.pkg`
    installer and the Windows `.exe` installer are not interchangeable.
-3. On Windows, confirm the installer was run as Administrator. The OFX plugin
+3. On Windows, confirm you chose the right Windows track:
+   - `RTX Lite` for the conservative official RTX ladder through `1024`
+   - `RTX Full` when you want the full RTX ladder through `2048`
+   - `DirectML` only for the experimental non-RTX Windows track
+4. On Windows, confirm the installer was run as Administrator. The OFX plugin
    directory (`C:\Program Files\Common Files\OFX\Plugins`) requires elevated
    permissions to write.
-4. Open DaVinci Resolve preferences and navigate to the OpenFX plug-ins section
+5. Open DaVinci Resolve preferences and navigate to the OpenFX plug-ins section
    to verify that the standard OFX scan path is enabled.
-5. Restart DaVinci Resolve to trigger a fresh OFX scan.
-6. Check the Resolve log for OFX load errors:
+6. Restart DaVinci Resolve to trigger a fresh OFX scan.
+7. Check the Resolve log for OFX load errors:
    - macOS: `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/logs/`
    - Windows: `%AppData%\Blackmagic Design\DaVinci Resolve\logs\`
 
@@ -95,8 +99,8 @@ backend failure, or a different backend than expected.
    and any fallback or failure conditions.
 2. Confirm the correct package was installed for your hardware:
    - Apple Silicon: the `.pkg` installer uses the MLX path automatically.
-   - NVIDIA RTX 30 series or newer: the Windows `RTX` installer is the
-     official path.
+   - NVIDIA RTX 30 series or newer: the Windows `RTX Lite` and `RTX Full`
+     installers are the official paths.
    - Other Windows GPUs: the Windows `DirectML` installer is the only shipped
      experimental Windows fallback track.
 3. On Windows, confirm that the required DirectX 12 runtime is present. Run
@@ -118,8 +122,10 @@ different backend than anticipated.
 
 Each packaged track has a different support level:
 
-- The `RTX` package is the official Windows path for NVIDIA RTX 30 series and
-  newer through ONNX Runtime TensorRT RTX EP.
+- `RTX Lite` is the conservative official Windows RTX package for NVIDIA RTX 30
+  series and newer through ONNX Runtime TensorRT RTX EP.
+- `RTX Full` is the unrestricted official Windows RTX package for NVIDIA RTX 30
+  series and newer through ONNX Runtime TensorRT RTX EP.
 - The `DirectML` package is an experimental Windows track. It must not be
   treated as proof of official support across AMD, Intel, or RTX 20 series
   hardware.

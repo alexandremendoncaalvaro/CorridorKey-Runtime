@@ -9,14 +9,14 @@ using namespace corridorkey::app;
 TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runtime]") {
     OfxRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "instance-a";
-    prepare_request.model_path = "models/corridorkey_fp16_768.onnx";
-    prepare_request.artifact_name = "corridorkey_fp16_768.onnx";
+    prepare_request.model_path = "models/corridorkey_fp16_1024.onnx";
+    prepare_request.artifact_name = "corridorkey_fp16_1024.onnx";
     prepare_request.requested_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
     prepare_request.engine_options.allow_cpu_fallback = false;
     prepare_request.engine_options.disable_cpu_ep_fallback = true;
     prepare_request.requested_quality_mode = 2;
-    prepare_request.requested_resolution = 768;
-    prepare_request.effective_resolution = 768;
+    prepare_request.requested_resolution = 1024;
+    prepare_request.effective_resolution = 1024;
 
     auto prepare_json = to_json(prepare_request);
     auto parsed_prepare = prepare_session_request_from_json(prepare_json);

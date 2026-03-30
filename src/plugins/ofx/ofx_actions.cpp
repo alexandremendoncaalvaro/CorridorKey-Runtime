@@ -380,15 +380,14 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "the keyer treats blue screens like green screens.",
                         "setup_group");
     define_choice_param(
-        param_set, kParamQualityMode, "Quality", kQualityPreview,
+        param_set, kParamQualityMode, "Quality", kQualityAuto,
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
-         quality_mode_ui_label(kQualityStandard), quality_mode_ui_label(kQualityHigh),
-         quality_mode_ui_label(kQualityUltra), quality_mode_ui_label(kQualityMaximum)},
-        "Inference quality. Auto selects based on input size and the runtime safe quality "
-        "ceiling for the active hardware tier. Higher values produce better detail at the cost "
-        "of speed. "
-        "Resolutions: Draft (512), Standard (768), High (1024), Ultra (1536), "
-        "Maximum (2048).",
+         quality_mode_ui_label(kQualityHigh), quality_mode_ui_label(kQualityUltra),
+         quality_mode_ui_label(kQualityMaximum)},
+        "Inference quality. Auto is the default and selects from the current public ladder "
+        "based on input size and the runtime safe quality ceiling for the active hardware tier. "
+        "Higher values produce better detail at the cost of speed. "
+        "Resolutions: Draft (512), High (1024), Ultra (1536), Maximum (2048).",
         "setup_group");
 
     // --- Group 4: Interior Detail (recover opaque source texture, not edge fixes) ---
@@ -544,7 +543,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_processing_group", false);
     define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
                         kCoarseResolutionAutomatic,
-                        {"Automatic", "512", "768", "1024", "1536", "2048"},
+                        {"Automatic", "512", "1024", "1536", "2048"},
                         "Advanced diagnostics override for the coarse artifact resolution.",
                         "advanced_processing_group");
 

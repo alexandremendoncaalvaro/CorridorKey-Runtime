@@ -37,7 +37,7 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     second_request.client_instance_id = "quality_switch";
     second_request.artifact_name = model_path.filename().string();
     second_request.requested_quality_mode = 2;
-    second_request.requested_resolution = 768;
+    second_request.requested_resolution = 1024;
     second_request.effective_resolution = 512;
 
     auto second_prepare = broker.prepare_session(second_request);
