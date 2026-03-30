@@ -114,6 +114,23 @@ environment first. Windows distribution artifacts include
 with a partial model set, so missing packaged models are explicit and do not
 silently change runtime behavior.
 
+For local Windows workflow, the canonical wrapper exposes three different
+levels of operation:
+
+- `.\scripts\windows.ps1 -Task build -Preset release`
+  - build only
+- `.\scripts\windows.ps1 -Task package-ofx -Version X.Y.Z -Track rtx`
+  - package installers from an already certified model set
+- `.\scripts\windows.ps1 -Task regen-rtx-release -Version X.Y.Z`
+  - regenerate ONNX artifacts from the checkpoint, certify the RTX ladder,
+    write the artifact manifest, and then package the RTX installers
+
+`package-ofx` for Windows RTX is intentionally strict. It no longer accepts a
+raw `models\` folder by itself. The command requires a certified
+`artifact_manifest.json` that matches the packaged RTX model and `*_ctx.onnx`
+files exactly. If you only have stale or manually copied models, use
+`regen-rtx-release` first.
+
 ## Documentation
 
 ### User Help

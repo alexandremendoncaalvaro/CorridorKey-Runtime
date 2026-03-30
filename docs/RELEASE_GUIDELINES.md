@@ -87,6 +87,20 @@ all part of the same entrypoint. Lower-level scripts are internal delegates
 for debugging the wrapper and should not be treated as alternate release
 procedures.
 
+The Windows wrapper tasks are intentionally different:
+
+- `build`
+  - compile the binaries only
+- `package-ofx`
+  - package Windows installers from an already certified model set
+- `release`
+  - package the official Windows release tracks from the currently staged,
+    validated inputs
+- `regen-rtx-release`
+  - regenerate the Windows RTX artifacts from the checkpoint, certify them on
+    the active RTX host, write the certified artifact manifest, and then
+    package the RTX installers
+
 The supported repo-local runtime locations are only
 `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
 
@@ -106,6 +120,32 @@ The supported repo-local runtime locations are only
 
 Scripts validate the runtime root. If `-OrtRoot` does not map to the expected
 curated runtime track, packaging aborts.
+
+For Windows RTX, `package-ofx` is not a model regeneration command. It is a
+strict packaging command that expects a certified artifact set. The RTX
+packaging flow now requires:
+
+- the packaged `corridorkey_fp16_*.onnx` and `*_ctx.onnx` files
+- a matching `artifact_manifest.json` written from the certification report
+
+If that manifest is absent or does not match the packaged RTX artifacts,
+packaging fails intentionally. This prevents the project from generating a new
+installer from stale or manually copied RTX models.
+
+Use the following commands according to the state you have:
+
+1. You only need to build binaries:
+   ```powershell
+   .\scripts\windows.ps1 -Task build -Preset release
+   ```
+2. You already have a certified RTX artifact set and only want the installers:
+   ```powershell
+   .\scripts\windows.ps1 -Task package-ofx -Version X.Y.Z -Track rtx
+   ```
+3. You need to regenerate and certify the RTX ladder from the checkpoint:
+   ```powershell
+   .\scripts\windows.ps1 -Task regen-rtx-release -Version X.Y.Z
+   ```
 
 ### Windows Model Availability Policy
 
