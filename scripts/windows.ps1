@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "certify-rtx-artifacts", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -104,6 +104,14 @@ switch ($Task) {
             "-ForceModelPreparation"
         ) + $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "prepare_windows_rtx_release.ps1" -Arguments $arguments
+        break
+    }
+    "certify-rtx-artifacts" {
+        $arguments = @(
+            "-Version", $resolvedVersion,
+            "-BuildPreset", $Preset
+        ) + $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "certify_windows_rtx_artifacts.ps1" -Arguments $arguments
         break
     }
     "package-ofx" {

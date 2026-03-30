@@ -91,6 +91,10 @@ The Windows wrapper tasks are intentionally different:
 
 - `build`
   - compile the binaries only
+- `certify-rtx-artifacts`
+  - certify an already existing Windows RTX model set and write the certified
+    artifact manifest without regenerating the `.onnx` files from the
+    checkpoint
 - `package-ofx`
   - package Windows installers from an already certified model set
 - `release`
@@ -142,7 +146,12 @@ Use the following commands according to the state you have:
    ```powershell
    .\scripts\windows.ps1 -Task package-ofx -Version X.Y.Z -Track rtx
    ```
-3. You need to regenerate and certify the RTX ladder from the checkpoint:
+3. You already have a local Windows RTX model set and need to certify it
+   before packaging:
+   ```powershell
+   .\scripts\windows.ps1 -Task certify-rtx-artifacts -Version X.Y.Z
+   ```
+4. You need to regenerate and certify the RTX ladder from the checkpoint:
    ```powershell
    .\scripts\windows.ps1 -Task regen-rtx-release -Version X.Y.Z
    ```

@@ -121,6 +121,9 @@ levels of operation:
   - build only
 - `.\scripts\windows.ps1 -Task package-ofx -Version X.Y.Z -Track rtx`
   - package installers from an already certified model set
+- `.\scripts\windows.ps1 -Task certify-rtx-artifacts -Version X.Y.Z`
+  - certify an already existing Windows RTX model set and write the artifact
+    manifest without regenerating the `.onnx` files from the checkpoint
 - `.\scripts\windows.ps1 -Task regen-rtx-release -Version X.Y.Z`
   - regenerate ONNX artifacts from the checkpoint, certify the RTX ladder,
     write the artifact manifest, and then package the RTX installers
@@ -129,7 +132,7 @@ levels of operation:
 raw `models\` folder by itself. The command requires a certified
 `artifact_manifest.json` that matches the packaged RTX model and `*_ctx.onnx`
 files exactly. If you only have stale or manually copied models, use
-`regen-rtx-release` first.
+`certify-rtx-artifacts` or `regen-rtx-release` first.
 
 ## Documentation
 

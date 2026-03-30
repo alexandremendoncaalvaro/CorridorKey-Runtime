@@ -1370,7 +1370,7 @@ function Read-CorridorKeyWindowsRtxArtifactManifest {
     }
 
     if (-not (Test-Path $ArtifactManifestPath)) {
-        throw "RTX artifact manifest not found: $ArtifactManifestPath. Windows RTX packaging now requires certified artifacts, not only raw models. Run scripts\\windows.ps1 -Task regen-rtx-release -Version X.Y.Z to regenerate and certify the RTX ladder first, or pass -ArtifactManifestPath with a certified artifact manifest."
+        throw "RTX artifact manifest not found: $ArtifactManifestPath. Windows RTX packaging now requires certified artifacts, not only raw models. Run scripts\\windows.ps1 -Task certify-rtx-artifacts -Version X.Y.Z for an existing local model set, or scripts\\windows.ps1 -Task regen-rtx-release -Version X.Y.Z to regenerate and certify the RTX ladder from the checkpoint."
     }
 
     $rawJson = Get-Content -Path $ArtifactManifestPath -Raw -ErrorAction Stop
