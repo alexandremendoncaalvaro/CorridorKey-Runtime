@@ -126,12 +126,11 @@ try {
         if (-not (Test-Path $expectedValidationReport)) {
             throw "CRITICAL: Bundle validation did not produce a validation report at: $expectedValidationReport"
         }
-        $validation = Get-Content -Path $expectedValidationReport -Raw | ConvertFrom-Json
+        $validation = Assert-CorridorKeyBundleValidationHealthy `
+            -ValidationReportPath $expectedValidationReport `
+            -Label "Variant $($v.Suffix)"
         Write-Host "[VERIFIED] Artifact created: $expectedInstaller" -ForegroundColor Green
         Write-Host "[VERIFIED] Bundle validation report created: $expectedValidationReport" -ForegroundColor Green
-        if (-not $validation.doctor.healthy) {
-            throw "Doctor reported unhealthy status for variant $($v.Suffix). See $expectedValidationReport"
-        }
         if ($validation.models.missing_count -gt 0) {
             Write-Host "[INFO] $($v.Suffix) artifact uses partial model coverage: $($validation.models.missing_models -join ', ')" -ForegroundColor Cyan
         }

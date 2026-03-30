@@ -82,6 +82,52 @@ TEST_CASE("runtime capabilities expose stable diagnostics", "[unit][runtime]") {
     REQUIRE(json.contains("lossless_video_available"));
 }
 
+TEST_CASE("preferred runtime device and optimization profile stay product-aligned",
+          "[unit][runtime][regression]") {
+    RuntimeCapabilities windows_capabilities;
+    windows_capabilities.platform = "windows";
+    windows_capabilities.supported_backends = {Backend::CPU, Backend::TensorRT};
+
+    std::vector<DeviceInfo> windows_devices = {
+        DeviceInfo{"Generic CPU", 0, Backend::CPU},
+        DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+    };
+
+    auto preferred_windows =
+        preferred_runtime_device(windows_capabilities, windows_devices);
+    REQUIRE(preferred_windows.has_value());
+    REQUIRE(preferred_windows->backend == Backend::TensorRT);
+
+    const auto lite_models_dir = write_models_inventory_fixture("rtx-lite");
+    {
+        ScopedModelsDirOverride lite_override(lite_models_dir);
+        auto profile =
+            runtime_optimization_profile_for_device(windows_capabilities, *preferred_windows);
+        REQUIRE(profile.id == "windows-rtx-lite");
+        REQUIRE(profile.certification_tier == "validated_ladder_through_1024");
+        REQUIRE_FALSE(profile.unrestricted_quality_attempt);
+    }
+    std::filesystem::remove_all(lite_models_dir.parent_path());
+
+    RuntimeCapabilities mac_capabilities;
+    mac_capabilities.platform = "macos";
+    mac_capabilities.apple_silicon = true;
+    mac_capabilities.supported_backends = {Backend::CPU, Backend::MLX};
+
+    std::vector<DeviceInfo> mac_devices = {
+        DeviceInfo{"Generic CPU", 0, Backend::CPU},
+        DeviceInfo{"Apple Silicon MLX", 16384, Backend::MLX},
+    };
+
+    auto preferred_mac = preferred_runtime_device(mac_capabilities, mac_devices);
+    REQUIRE(preferred_mac.has_value());
+    REQUIRE(preferred_mac->backend == Backend::MLX);
+
+    auto apple_profile = runtime_optimization_profile_for_device(mac_capabilities, *preferred_mac);
+    REQUIRE(apple_profile.id == "apple-silicon-mlx");
+    REQUIRE(apple_profile.backend_intent == "mlx");
+}
+
 TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     auto models = model_catalog();
 
@@ -132,6 +178,11 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     auto fp16_512 = find_model("corridorkey_fp16_512.onnx");
     REQUIRE(fp16_512 != models.end());
     REQUIRE(fp16_512->packaged_for_windows);
+
+    auto fp16_768 = find_model("corridorkey_fp16_768.onnx");
+    REQUIRE(fp16_768 != models.end());
+    REQUIRE_FALSE(fp16_768->packaged_for_windows);
+    REQUIRE(fp16_768->intended_use == "reference_validation");
 }
 
 TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
@@ -251,7 +302,7 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
         windows_capabilities, DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
         windows_default);
     REQUIRE(windows_rtx_model.has_value());
-    REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_768.onnx");
+    REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_1024.onnx");
 
     auto windows_cpu_model = default_model_for_request(
         windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default);
@@ -271,6 +322,8 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
 
 TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
     REQUIRE(max_supported_resolution_for_device(
+                DeviceInfo{"RTX 3070", 8192, Backend::TensorRT}) == 512);
+    REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1536);
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) == 1536);
@@ -278,6 +331,7 @@ TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit
                 DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) == 2048);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 10000);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
+    REQUIRE_FALSE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 768).has_value());
 }
 
 TEST_CASE("windows RTX bundle profile controls the safe quality ceiling",
@@ -366,17 +420,16 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
         ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
     REQUIRE(selections.has_value());
     REQUIRE_FALSE(selections->empty());
-    CHECK(selections->front().effective_resolution == 768);
+    CHECK(selections->front().effective_resolution == 512);
     CHECK(selections->front().coarse_to_fine);
 
     auto expected = expected_artifact_paths_for_request(
         temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
         ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
     REQUIRE(expected.has_value());
-    REQUIRE(expected->size() == 3);
+    REQUIRE(expected->size() == 2);
     CHECK(expected->front().filename() == "corridorkey_fp16_1024.onnx");
-    CHECK((*expected)[1].filename() == "corridorkey_fp16_768.onnx");
-    CHECK((*expected)[2].filename() == "corridorkey_fp16_512.onnx");
+    CHECK((*expected)[1].filename() == "corridorkey_fp16_512.onnx");
 
     std::filesystem::remove_all(temp_dir);
 }
@@ -386,6 +439,66 @@ TEST_CASE("packaged model resolution uses catalog entries for non-onnx artifacts
     REQUIRE(packaged_model_resolution("corridorkey_mlx.safetensors") == 2048);
     REQUIRE(is_packaged_corridorkey_model("corridorkey_mlx.safetensors"));
 }
+
+TEST_CASE("artifact runtime state separates packaged, certified, and recommended",
+          "[unit][runtime][regression]") {
+    RuntimeCapabilities windows_capabilities;
+    windows_capabilities.platform = "windows";
+    windows_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
+    DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
+
+    const auto lite_models_dir = write_models_inventory_fixture("rtx-lite");
+    ScopedModelsDirOverride lite_override(lite_models_dir);
+
+    auto fp16_1024 = find_model_by_filename("corridorkey_fp16_1024.onnx");
+    REQUIRE(fp16_1024.has_value());
+    auto recommended_state =
+        artifact_runtime_state_for_device(*fp16_1024, windows_capabilities, rtx_3080, true);
+    REQUIRE(recommended_state.packaged_for_active_track);
+    REQUIRE(recommended_state.present);
+    REQUIRE(recommended_state.certified_for_active_track);
+    REQUIRE(recommended_state.certified_for_active_device);
+    REQUIRE(recommended_state.recommended_for_active_device);
+    REQUIRE(recommended_state.state == "recommended");
+
+    auto fp16_1536 = find_model_by_filename("corridorkey_fp16_1536.onnx");
+    REQUIRE(fp16_1536.has_value());
+    auto certified_state =
+        artifact_runtime_state_for_device(*fp16_1536, windows_capabilities, rtx_3080, true);
+    REQUIRE(certified_state.packaged_for_active_track);
+    REQUIRE(certified_state.present);
+    REQUIRE(certified_state.certified_for_active_track);
+    REQUIRE_FALSE(certified_state.certified_for_active_device);
+    REQUIRE_FALSE(certified_state.recommended_for_active_device);
+    REQUIRE(certified_state.state == "packaged");
+
+    auto int8_1024 = find_model_by_filename("corridorkey_int8_1024.onnx");
+    REQUIRE(int8_1024.has_value());
+    auto packaged_only_state =
+        artifact_runtime_state_for_device(*int8_1024, windows_capabilities, rtx_3080, true);
+    REQUIRE(packaged_only_state.packaged_for_active_track);
+    REQUIRE(packaged_only_state.present);
+    REQUIRE_FALSE(packaged_only_state.certified_for_active_track);
+    REQUIRE_FALSE(packaged_only_state.recommended_for_active_device);
+    REQUIRE(packaged_only_state.state == "packaged");
+
+    auto fp16_768 = find_model_by_filename("corridorkey_fp16_768.onnx");
+    REQUIRE(fp16_768.has_value());
+    auto reference_only_state =
+        artifact_runtime_state_for_device(*fp16_768, windows_capabilities, rtx_3080, true);
+    REQUIRE_FALSE(reference_only_state.packaged_for_active_track);
+    REQUIRE(reference_only_state.present);
+    REQUIRE(reference_only_state.state == "reference_only");
+
+    auto missing_state =
+        artifact_runtime_state_for_device(*fp16_1536, windows_capabilities, rtx_3080, false);
+    REQUIRE(missing_state.packaged_for_active_track);
+    REQUIRE_FALSE(missing_state.present);
+    REQUIRE(missing_state.state == "missing");
+
+    std::filesystem::remove_all(lite_models_dir.parent_path());
+}
+
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {
     auto json = summarize_latency_samples({4.0, 6.0, 8.0, 10.0});
 

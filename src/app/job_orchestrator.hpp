@@ -8,6 +8,7 @@
 namespace corridorkey::app {
 
 CORRIDORKEY_API nlohmann::json summarize_doctor_report(const nlohmann::json& report);
+CORRIDORKEY_API nlohmann::json summarize_stage_groups(const std::vector<StageTiming>& timings);
 
 /**
  * @brief Structured result of a job.

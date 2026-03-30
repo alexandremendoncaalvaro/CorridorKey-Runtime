@@ -20,9 +20,37 @@ struct ArtifactSelection {
     bool coarse_to_fine = false;
 };
 
+struct RuntimeOptimizationProfile {
+    std::string id = "";
+    std::string label = "";
+    std::string intended_track = "";
+    std::string backend_intent = "";
+    std::string fallback_policy = "";
+    std::string warmup_policy = "";
+    std::string certification_tier = "";
+    bool unrestricted_quality_attempt = false;
+};
+
+struct ArtifactRuntimeState {
+    bool packaged_for_active_track = false;
+    bool present = false;
+    bool certified_for_active_track = false;
+    bool certified_for_active_device = false;
+    bool recommended_for_active_device = false;
+    std::string state = "";
+};
+
 std::string backend_to_string(Backend backend);
 std::string job_event_type_to_string(JobEventType type);
 
+CORRIDORKEY_API std::optional<std::string> active_packaged_model_profile();
+CORRIDORKEY_API std::optional<DeviceInfo> preferred_runtime_device(
+    const RuntimeCapabilities& capabilities, const std::vector<DeviceInfo>& devices);
+CORRIDORKEY_API RuntimeOptimizationProfile runtime_optimization_profile_for_device(
+    const RuntimeCapabilities& capabilities, const DeviceInfo& device);
+CORRIDORKEY_API ArtifactRuntimeState artifact_runtime_state_for_device(
+    const ModelCatalogEntry& model, const RuntimeCapabilities& capabilities,
+    const DeviceInfo& device, bool present);
 CORRIDORKEY_API std::optional<ModelCatalogEntry> find_model_by_filename(
     const std::string& filename);
 CORRIDORKEY_API std::optional<PresetDefinition> find_preset_by_selector(
@@ -72,5 +100,7 @@ nlohmann::json to_json(const StageTiming& timing);
 nlohmann::json to_json(const JobEvent& event);
 nlohmann::json to_json(const ModelCatalogEntry& model);
 nlohmann::json to_json(const PresetDefinition& preset);
+nlohmann::json to_json(const RuntimeOptimizationProfile& profile);
+nlohmann::json to_json(const ArtifactRuntimeState& state);
 
 }  // namespace corridorkey::app

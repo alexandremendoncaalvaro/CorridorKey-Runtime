@@ -283,6 +283,8 @@ foreach ($profile in $deployProfiles) {
         resolution = [int]$profile.resolution
         runtime_artifact = [System.IO.Path]::GetFullPath($runtimeArtifactPath)
         compiled_context_model = [System.IO.Path]::GetFullPath($compiledContextPath)
+        runtime_artifact_sha256 = ""
+        compiled_context_sha256 = ""
         session_create_ok = $false
         frame_execute_ok = $false
         repeated_execute_ok = $false
@@ -326,6 +328,10 @@ foreach ($profile in $deployProfiles) {
         $result.frame_execute_ok = $true
         $result.repeated_execute_ok = $true
         $result.certified = $true
+        $result.runtime_artifact_sha256 = Get-CorridorKeyFileSha256 -Path $runtimeArtifactPath
+        if (Test-Path $compiledContextPath) {
+            $result.compiled_context_sha256 = Get-CorridorKeyFileSha256 -Path $compiledContextPath
+        }
     } catch {
         $certificationFailed = $true
         $result.error = $_.Exception.Message
@@ -381,6 +387,13 @@ foreach ($preparedModel in $preparedModelNames) {
     }
 }
 
+$promotedManifestPath = Write-CorridorKeyWindowsRtxArtifactManifest `
+    -ModelsDir $promotedModelsDir `
+    -ValidationReportPath $validationReportPath
+Write-CorridorKeyWindowsRtxArtifactManifest `
+    -ModelsDir (Join-Path $repoRoot "models") `
+    -ValidationReportPath $validationReportPath | Out-Null
+
 Write-Host "[9/9] Packaging the RTX OFX release tracks..." -ForegroundColor Cyan
 foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
     Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\\package_ofx_installer_windows.ps1") `
@@ -389,18 +402,14 @@ foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
             "-ReleaseSuffix", $variant.Suffix,
             "-ModelProfile", $variant.ModelProfile,
             "-OrtRoot", $ortRoot,
-            "-ModelsDir", $promotedModelsDir
+            "-ModelsDir", $promotedModelsDir,
+            "-ArtifactManifestPath", $promotedManifestPath
         )
 
     $bundleValidationPath = Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_$($variant.Suffix)\\bundle_validation.json"
-    if (-not (Test-Path $bundleValidationPath)) {
-        throw "Bundle validation report missing after packaging $($variant.Suffix): $bundleValidationPath"
-    }
-
-    $bundleValidation = Get-Content -Path $bundleValidationPath -Raw | ConvertFrom-Json
-    if (-not $bundleValidation.doctor.healthy) {
-        throw "Doctor reported unhealthy status for packaged track $($variant.Suffix). See $bundleValidationPath"
-    }
+    Assert-CorridorKeyBundleValidationHealthy `
+        -ValidationReportPath $bundleValidationPath `
+        -Label "Packaged track $($variant.Suffix)" | Out-Null
 }
 
 $summary = [ordered]@{
@@ -411,6 +420,7 @@ $summary = [ordered]@{
     raw_onnx_dir = [System.IO.Path]::GetFullPath($rawOnnxDir)
     backend_artifacts_dir = [System.IO.Path]::GetFullPath($backendArtifactsDir)
     promoted_models_dir = [System.IO.Path]::GetFullPath($promotedModelsDir)
+    promoted_artifact_manifest = $promotedManifestPath
     validation_report = [System.IO.Path]::GetFullPath($validationReportPath)
     installers = [ordered]@{
         rtx_lite = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Lite_Installer.exe"))

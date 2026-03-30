@@ -24,14 +24,9 @@ function Assert-CorridorKeyVariantDoctorHealthy {
     )
 
     $bundleValidationPath = Join-Path $repoRoot ("dist\\CorridorKey_Resolve_v${Version}_Windows_${ReleaseSuffix}\\bundle_validation.json")
-    if (-not (Test-Path $bundleValidationPath)) {
-        throw "Bundle validation report not found: $bundleValidationPath"
-    }
-
-    $validation = Get-Content -Path $bundleValidationPath -Raw | ConvertFrom-Json
-    if (-not $validation.doctor.healthy) {
-        throw "Packaged doctor reported unhealthy status for $ReleaseSuffix. See $bundleValidationPath"
-    }
+    Assert-CorridorKeyBundleValidationHealthy `
+        -ValidationReportPath $bundleValidationPath `
+        -Label "Variant $ReleaseSuffix" | Out-Null
 }
 
 function Invoke-CorridorKeyScript {

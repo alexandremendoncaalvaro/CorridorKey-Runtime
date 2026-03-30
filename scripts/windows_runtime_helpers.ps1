@@ -683,16 +683,48 @@ function Test-CorridorKeyWindowsOrtRoot {
         return $false
     }
 
-    $includeDir = Join-Path $OrtRoot "include\onnxruntime"
     $binDir = Join-Path $OrtRoot "bin"
     $libDir = Join-Path $OrtRoot "lib"
+    $headerCandidates = @(
+        (Join-Path $OrtRoot "include\onnxruntime\onnxruntime_c_api.h"),
+        (Join-Path $OrtRoot "include\onnxruntime_c_api.h")
+    )
+    $runtimeDllSearchRoots = @($OrtRoot, $binDir)
+    $importLibSearchRoots = @($OrtRoot, $libDir)
 
-    $hasRuntimeDlls = (Get-ChildItem -Path $binDir -Filter "onnxruntime*.dll" -File -ErrorAction SilentlyContinue |
-        Measure-Object).Count -gt 0
-    $hasImportLibs = (Get-ChildItem -Path $libDir -Filter "onnxruntime*.lib" -File -ErrorAction SilentlyContinue |
-        Measure-Object).Count -gt 0
+    $hasHeaders = $false
+    foreach ($headerCandidate in $headerCandidates) {
+        if (Test-Path $headerCandidate) {
+            $hasHeaders = $true
+            break
+        }
+    }
 
-    return (Test-Path $includeDir) -and $hasRuntimeDlls -and $hasImportLibs
+    $hasRuntimeDlls = $false
+    foreach ($searchRoot in $runtimeDllSearchRoots) {
+        if (-not (Test-Path $searchRoot)) {
+            continue
+        }
+        if ((Get-ChildItem -Path $searchRoot -Filter "onnxruntime*.dll" -File -ErrorAction SilentlyContinue |
+                Measure-Object).Count -gt 0) {
+            $hasRuntimeDlls = $true
+            break
+        }
+    }
+
+    $hasImportLibs = $false
+    foreach ($searchRoot in $importLibSearchRoots) {
+        if (-not (Test-Path $searchRoot)) {
+            continue
+        }
+        if ((Get-ChildItem -Path $searchRoot -Filter "onnxruntime*.lib" -File -ErrorAction SilentlyContinue |
+                Measure-Object).Count -gt 0) {
+            $hasImportLibs = $true
+            break
+        }
+    }
+
+    return $hasHeaders -and $hasRuntimeDlls -and $hasImportLibs
 }
 
 function Get-CorridorKeyWindowsOrtBinaryVersion {
@@ -841,6 +873,18 @@ function Get-CorridorKeyPreparedModelList {
     )
 }
 
+function Get-CorridorKeyWindowsRtxPromotedModelList {
+    return @(
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_fp16_1536.onnx",
+        "corridorkey_fp16_2048.onnx",
+        "corridorkey_int8_512.onnx",
+        "corridorkey_int8_768.onnx",
+        "corridorkey_int8_1024.onnx"
+    )
+}
+
 function Get-CorridorKeyIntermediateModelList {
     return @(
         "corridorkey_fp32_512.onnx",
@@ -857,29 +901,119 @@ function Get-CorridorKeyOfxBundleTargetModels {
         [string]$ModelProfile = "rtx-full"
     )
 
-    $baseModels = @(
-        "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_768.onnx",
-        "corridorkey_fp16_1024.onnx",
-        "corridorkey_int8_512.onnx",
-        "corridorkey_int8_768.onnx",
-        "corridorkey_int8_1024.onnx"
+    switch ($ModelProfile) {
+        "rtx-lite" {
+            return @(
+                (Get-CorridorKeyWindowsRtxPromotedModelList | Where-Object {
+                    $_ -in @(
+                        "corridorkey_fp16_512.onnx",
+                        "corridorkey_fp16_1024.onnx",
+                        "corridorkey_int8_512.onnx",
+                        "corridorkey_int8_768.onnx",
+                        "corridorkey_int8_1024.onnx"
+                    )
+                })
+            )
+        }
+        "rtx-stable" {
+            return @(Get-CorridorKeyOfxBundleTargetModels -ModelProfile "rtx-lite")
+        }
+        "windows-universal" {
+            return @(
+                "corridorkey_fp16_512.onnx",
+                "corridorkey_fp16_768.onnx",
+                "corridorkey_fp16_1024.onnx",
+                "corridorkey_fp16_1536.onnx",
+                "corridorkey_fp16_2048.onnx",
+                "corridorkey_int8_512.onnx",
+                "corridorkey_int8_768.onnx",
+                "corridorkey_int8_1024.onnx"
+            )
+        }
+        default {
+            return @(Get-CorridorKeyWindowsRtxPromotedModelList)
+        }
+    }
+}
+
+function Get-CorridorKeyModelProfileContract {
+    param(
+        [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
+        [string]$ModelProfile = "rtx-full"
     )
 
     switch ($ModelProfile) {
         "rtx-lite" {
-            return $baseModels
+            return [pscustomobject]@{
+                model_profile = "rtx-lite"
+                package_type = "ofx_bundle"
+                bundle_track = "rtx"
+                release_label = "Windows RTX Lite"
+                optimization_profile_id = "windows-rtx-lite"
+                optimization_profile_label = "Windows RTX Lite"
+                backend_intent = "tensorrt"
+                fallback_policy = "conservative_safe_quality_ceiling"
+                warmup_policy = "precompiled_context_or_first_run_compile"
+                certification_tier = "validated_ladder_through_1024"
+                unrestricted_quality_attempt = $false
+                expects_compiled_context_models = $true
+            }
         }
         "rtx-stable" {
-            return $baseModels
+            return Get-CorridorKeyModelProfileContract -ModelProfile "rtx-lite"
         }
         "windows-universal" {
-            return @($baseModels + @("corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"))
+            return [pscustomobject]@{
+                model_profile = "windows-universal"
+                package_type = "ofx_bundle"
+                bundle_track = "dml"
+                release_label = "Windows DirectML"
+                optimization_profile_id = "windows-directml"
+                optimization_profile_label = "Windows DirectML"
+                backend_intent = "dml"
+                fallback_policy = "experimental_gpu_then_cpu_tolerant_workflows"
+                warmup_policy = "provider_specific_session_warmup"
+                certification_tier = "experimental"
+                unrestricted_quality_attempt = $false
+                expects_compiled_context_models = $false
+            }
         }
         default {
-            return @($baseModels + @("corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"))
+            return [pscustomobject]@{
+                model_profile = "rtx-full"
+                package_type = "ofx_bundle"
+                bundle_track = "rtx"
+                release_label = "Windows RTX Full"
+                optimization_profile_id = "windows-rtx-full"
+                optimization_profile_label = "Windows RTX Full"
+                backend_intent = "tensorrt"
+                fallback_policy = "attempt_packaged_quality_then_runtime_failure"
+                warmup_policy = "precompiled_context_or_first_run_compile"
+                certification_tier = "packaged_fp16_ladder_through_2048"
+                unrestricted_quality_attempt = $true
+                expects_compiled_context_models = $true
+            }
         }
     }
+}
+
+function Get-CorridorKeyExpectedCompiledContextModels {
+    param(
+        [string[]]$PresentModels,
+        [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
+        [string]$ModelProfile = "rtx-full"
+    )
+
+    $contract = Get-CorridorKeyModelProfileContract -ModelProfile $ModelProfile
+    if (-not $contract.expects_compiled_context_models) {
+        return @()
+    }
+
+    return @(
+        $PresentModels |
+            Where-Object { $_ -match '^corridorkey_fp16_[0-9]+\.onnx$' } |
+            ForEach-Object { ([System.IO.Path]::GetFileNameWithoutExtension($_)) + "_ctx.onnx" }
+    )
 }
 
 function Get-CorridorKeyWindowsOfxReleaseVariants {
@@ -965,4 +1099,416 @@ function Write-CorridorKeyJsonFile {
     $json = $Payload | ConvertTo-Json -Depth 8
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
+}
+
+function Test-CorridorKeyPsProperty {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $false
+    }
+
+    return $Object.PSObject.Properties.Match($Name).Count -gt 0
+}
+
+function Read-CorridorKeyBundleValidationReport {
+    param([string]$ValidationReportPath)
+
+    if (-not (Test-Path $ValidationReportPath)) {
+        throw "Bundle validation report not found: $ValidationReportPath"
+    }
+
+    $rawJson = Get-Content -Path $ValidationReportPath -Raw -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($rawJson)) {
+        throw "Bundle validation report is empty: $ValidationReportPath"
+    }
+
+    return $rawJson | ConvertFrom-Json
+}
+
+function Get-CorridorKeyBundleValidationIssues {
+    param(
+        [object]$Validation
+    )
+
+    $issues = @()
+    if ($null -eq $Validation) {
+        return @("Bundle validation payload is empty.")
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Validation -Name "validation_passed") -or
+        -not [bool]$Validation.validation_passed) {
+        $issues += "Bundle validation did not pass."
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Validation -Name "models") -or
+        $null -eq $Validation.models) {
+        $issues += "Bundle validation is missing the models payload."
+        return @($issues)
+    }
+
+    $modelsPayload = $Validation.models
+    $missingModelCount = if (Test-CorridorKeyPsProperty -Object $modelsPayload -Name "missing_count") {
+        [int]$modelsPayload.missing_count
+    } else {
+        0
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $modelsPayload -Name "inventory_contract") -or
+        $null -eq $modelsPayload.inventory_contract) {
+        $issues += "Bundle validation is missing the inventory contract payload."
+    } else {
+        $inventoryContract = $modelsPayload.inventory_contract
+        if (-not (Test-CorridorKeyPsProperty -Object $inventoryContract -Name "complete") -or
+            -not [bool]$inventoryContract.complete) {
+            $issues += "Bundle inventory contract is incomplete."
+        }
+
+        $expectedContract = if (Test-CorridorKeyPsProperty -Object $inventoryContract -Name "expected_contract") {
+            $inventoryContract.expected_contract
+        } else {
+            $null
+        }
+        $expectsCompiledContexts = $false
+        if ($null -ne $expectedContract -and
+            (Test-CorridorKeyPsProperty -Object $expectedContract -Name "bundle_track") -and
+            [string]$expectedContract.bundle_track -eq "rtx") {
+            $expectsCompiledContexts = $true
+        }
+
+        if ($expectsCompiledContexts -and
+            ((-not (Test-CorridorKeyPsProperty -Object $inventoryContract -Name "compiled_context_complete")) -or
+             (-not [bool]$inventoryContract.compiled_context_complete))) {
+            $issues += "Bundle inventory contract requires complete compiled TensorRT context models."
+        }
+
+        if ($expectsCompiledContexts) {
+            if ((-not (Test-CorridorKeyPsProperty -Object $modelsPayload -Name "certification_contract")) -or
+                $null -eq $modelsPayload.certification_contract) {
+                $issues += "Bundle validation is missing the RTX certification contract payload."
+            } elseif ((-not (Test-CorridorKeyPsProperty -Object $modelsPayload.certification_contract -Name "complete")) -or
+                     (-not [bool]$modelsPayload.certification_contract.complete)) {
+                $issues += "Bundle RTX certification contract is incomplete."
+            }
+        }
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Validation -Name "doctor") -or
+        $null -eq $Validation.doctor) {
+        $issues += "Bundle validation is missing the doctor payload."
+        return @($issues)
+    }
+
+    $doctorPayload = $Validation.doctor
+    $doctorSucceeded = (Test-CorridorKeyPsProperty -Object $doctorPayload -Name "succeeded") -and
+        [bool]$doctorPayload.succeeded
+    $doctorHealthy = (Test-CorridorKeyPsProperty -Object $doctorPayload -Name "healthy") -and
+        [bool]$doctorPayload.healthy
+    $doctorFailureTolerated = (Test-CorridorKeyPsProperty -Object $doctorPayload -Name "failure_tolerated") -and
+        [bool]$doctorPayload.failure_tolerated
+
+    if (-not $doctorFailureTolerated) {
+        if (-not $doctorSucceeded) {
+            $issues += "Packaged runtime doctor did not succeed."
+        }
+        if (-not $doctorHealthy) {
+            $issues += "Packaged runtime doctor reported unhealthy status."
+        }
+    } else {
+        if ($missingModelCount -le 0) {
+            $issues += "Doctor failure was tolerated even though the bundle is not a partial model package."
+        }
+        if ((-not (Test-CorridorKeyPsProperty -Object $doctorPayload -Name "failure_reason")) -or
+            [string]::IsNullOrWhiteSpace([string]$doctorPayload.failure_reason)) {
+            $issues += "Doctor failure was tolerated without a recorded failure reason."
+        }
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $doctorPayload -Name "model_contracts_healthy") -and
+        (-not [bool]$doctorPayload.model_contracts_healthy) -and
+        (-not $doctorFailureTolerated)) {
+        $issues += "Packaged runtime doctor reported unhealthy model contracts."
+    }
+
+    return @($issues)
+}
+
+function Assert-CorridorKeyBundleValidationHealthy {
+    param(
+        [string]$ValidationReportPath,
+        [string]$Label = "packaged bundle"
+    )
+
+    $validation = Read-CorridorKeyBundleValidationReport -ValidationReportPath $ValidationReportPath
+    $issues = Get-CorridorKeyBundleValidationIssues -Validation $validation
+    if (@($issues).Count -gt 0) {
+        throw "$Label validation is not acceptable. Issues: $($issues -join ' | ')"
+    }
+
+    return $validation
+}
+
+function Get-CorridorKeyFileSha256 {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        throw "Cannot hash a missing file: $Path"
+    }
+
+    return ([string](Get-FileHash -Path $Path -Algorithm SHA256).Hash).ToUpperInvariant()
+}
+
+function Get-CorridorKeyWindowsRtxArtifactManifestPath {
+    param([string]$ModelsDir)
+
+    return Join-Path $ModelsDir "artifact_manifest.json"
+}
+
+function Write-CorridorKeyWindowsRtxArtifactManifest {
+    param(
+        [string]$ModelsDir,
+        [string]$ValidationReportPath,
+        [string]$OutputPath = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+        $OutputPath = Get-CorridorKeyWindowsRtxArtifactManifestPath -ModelsDir $ModelsDir
+    }
+
+    if (-not (Test-Path $ModelsDir)) {
+        throw "Cannot write RTX artifact manifest because the models directory does not exist: $ModelsDir"
+    }
+
+    if (-not (Test-Path $ValidationReportPath)) {
+        throw "Cannot write RTX artifact manifest because the certification report does not exist: $ValidationReportPath"
+    }
+
+    $validation = Get-Content -Path $ValidationReportPath -Raw -ErrorAction Stop | ConvertFrom-Json
+    if (-not (Test-CorridorKeyPsProperty -Object $validation -Name "all_profiles_certified") -or
+        -not [bool]$validation.all_profiles_certified) {
+        throw "RTX artifact manifest requires a certification report with all_profiles_certified=true."
+    }
+
+    $certifiedModels = @($validation.certified_models)
+    $artifactFiles = Get-ChildItem -Path $ModelsDir -Filter "corridorkey*.onnx" -File -ErrorAction Stop |
+        Sort-Object -Property Name
+
+    $artifacts = foreach ($artifactFile in $artifactFiles) {
+        $filename = $artifactFile.Name
+        $isCompiledContext = $filename -like "*_ctx.onnx"
+        $isFp16Runtime = $filename -match '^corridorkey_fp16_[0-9]+\.onnx$'
+        $baseModel = if ($isCompiledContext) {
+            $filename -replace '_ctx\.onnx$', '.onnx'
+        } else {
+            $filename
+        }
+
+        $artifactKind = if ($isCompiledContext) {
+            "compiled_context"
+        } elseif ($isFp16Runtime) {
+            "runtime_model"
+        } else {
+            "supporting_model"
+        }
+
+        $certified = if ($isCompiledContext) {
+            $certifiedModels -contains $baseModel
+        } elseif ($isFp16Runtime) {
+            $certifiedModels -contains $filename
+        } else {
+            $false
+        }
+
+        $resolution = $null
+        if ($baseModel -match '_(\d+)\.onnx$') {
+            $resolution = [int]$Matches[1]
+        }
+
+        [ordered]@{
+            filename = $filename
+            sha256 = Get-CorridorKeyFileSha256 -Path $artifactFile.FullName
+            artifact_kind = $artifactKind
+            base_model = $baseModel
+            certified = $certified
+            resolution = $resolution
+        }
+    }
+
+    $payload = [ordered]@{
+        manifest_type = "windows_rtx_artifact_manifest"
+        bundle_track = "rtx"
+        certification_report = [System.IO.Path]::GetFullPath($ValidationReportPath)
+        all_profiles_certified = [bool]$validation.all_profiles_certified
+        certified_models = @($certifiedModels)
+        expected_promoted_models = @(Get-CorridorKeyWindowsRtxPromotedModelList)
+        artifacts = @($artifacts)
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $validation -Name "certification_device") -and
+        $null -ne $validation.certification_device) {
+        $payload.certification_device = $validation.certification_device
+    }
+
+    Write-CorridorKeyJsonFile -Path $OutputPath -Payload $payload
+    return [System.IO.Path]::GetFullPath($OutputPath)
+}
+
+function Read-CorridorKeyWindowsRtxArtifactManifest {
+    param(
+        [string]$ModelsDir = "",
+        [string]$ArtifactManifestPath = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ArtifactManifestPath)) {
+        if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
+            throw "Read-CorridorKeyWindowsRtxArtifactManifest requires -ModelsDir or -ArtifactManifestPath."
+        }
+        $ArtifactManifestPath = Get-CorridorKeyWindowsRtxArtifactManifestPath -ModelsDir $ModelsDir
+    }
+
+    if (-not (Test-Path $ArtifactManifestPath)) {
+        throw "RTX artifact manifest not found: $ArtifactManifestPath"
+    }
+
+    $rawJson = Get-Content -Path $ArtifactManifestPath -Raw -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($rawJson)) {
+        throw "RTX artifact manifest is empty: $ArtifactManifestPath"
+    }
+
+    return $rawJson | ConvertFrom-Json
+}
+
+function Get-CorridorKeyWindowsRtxArtifactManifestIssues {
+    param(
+        [object]$Manifest,
+        [string]$ArtifactsDir,
+        [string[]]$ExpectedModels,
+        [string[]]$ExpectedCompiledContextModels
+    )
+
+    $issues = @()
+    if ($null -eq $Manifest) {
+        return @("RTX artifact manifest payload is empty.")
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Manifest -Name "manifest_type") -or
+        [string]$Manifest.manifest_type -ne "windows_rtx_artifact_manifest") {
+        $issues += "RTX artifact manifest type is missing or invalid."
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Manifest -Name "bundle_track") -or
+        [string]$Manifest.bundle_track -ne "rtx") {
+        $issues += "RTX artifact manifest bundle_track must be 'rtx'."
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Manifest -Name "all_profiles_certified") -or
+        -not [bool]$Manifest.all_profiles_certified) {
+        $issues += "RTX artifact manifest requires all_profiles_certified=true."
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Manifest -Name "artifacts") -or
+        $null -eq $Manifest.artifacts -or
+        $Manifest.artifacts -isnot [System.Array]) {
+        $issues += "RTX artifact manifest must include an artifacts array."
+        return @($issues)
+    }
+
+    $artifactIndex = @{}
+    foreach ($artifact in @($Manifest.artifacts)) {
+        if ($null -eq $artifact -or -not (Test-CorridorKeyPsProperty -Object $artifact -Name "filename")) {
+            $issues += "RTX artifact manifest contains an invalid artifact entry."
+            continue
+        }
+
+        $filename = [string]$artifact.filename
+        if ([string]::IsNullOrWhiteSpace($filename)) {
+            $issues += "RTX artifact manifest contains an artifact with an empty filename."
+            continue
+        }
+
+        $artifactIndex[$filename] = $artifact
+    }
+
+    foreach ($expectedModel in @($ExpectedModels)) {
+        if (-not $artifactIndex.ContainsKey($expectedModel)) {
+            $issues += "RTX artifact manifest is missing packaged model '$expectedModel'."
+            continue
+        }
+
+        $artifact = $artifactIndex[$expectedModel]
+        $artifactPath = Join-Path $ArtifactsDir $expectedModel
+        if (-not (Test-Path $artifactPath)) {
+            $issues += "Packaged model '$expectedModel' is missing from $ArtifactsDir."
+            continue
+        }
+
+        $actualHash = Get-CorridorKeyFileSha256 -Path $artifactPath
+        if (-not (Test-CorridorKeyPsProperty -Object $artifact -Name "sha256") -or
+            [string]::IsNullOrWhiteSpace([string]$artifact.sha256)) {
+            $issues += "RTX artifact manifest is missing sha256 for '$expectedModel'."
+        } elseif ([string]$artifact.sha256 -ne $actualHash) {
+            $issues += "RTX artifact manifest hash mismatch for '$expectedModel'."
+        }
+
+        if ($expectedModel -match '^corridorkey_fp16_[0-9]+\.onnx$') {
+            if ((-not (Test-CorridorKeyPsProperty -Object $artifact -Name "certified")) -or
+                (-not [bool]$artifact.certified)) {
+                $issues += "RTX artifact manifest does not certify '$expectedModel'."
+            }
+        }
+    }
+
+    foreach ($expectedContext in @($ExpectedCompiledContextModels)) {
+        if (-not $artifactIndex.ContainsKey($expectedContext)) {
+            $issues += "RTX artifact manifest is missing compiled context '$expectedContext'."
+            continue
+        }
+
+        $artifact = $artifactIndex[$expectedContext]
+        $artifactPath = Join-Path $ArtifactsDir $expectedContext
+        if (-not (Test-Path $artifactPath)) {
+            $issues += "Compiled context '$expectedContext' is missing from $ArtifactsDir."
+            continue
+        }
+
+        $actualHash = Get-CorridorKeyFileSha256 -Path $artifactPath
+        if (-not (Test-CorridorKeyPsProperty -Object $artifact -Name "sha256") -or
+            [string]::IsNullOrWhiteSpace([string]$artifact.sha256)) {
+            $issues += "RTX artifact manifest is missing sha256 for '$expectedContext'."
+        } elseif ([string]$artifact.sha256 -ne $actualHash) {
+            $issues += "RTX artifact manifest hash mismatch for '$expectedContext'."
+        }
+
+        if ((-not (Test-CorridorKeyPsProperty -Object $artifact -Name "certified")) -or
+            (-not [bool]$artifact.certified)) {
+            $issues += "RTX artifact manifest does not certify '$expectedContext'."
+        }
+    }
+
+    return @($issues)
+}
+
+function Assert-CorridorKeyWindowsRtxArtifactManifestHealthy {
+    param(
+        [string]$ArtifactsDir,
+        [string[]]$ExpectedModels,
+        [string[]]$ExpectedCompiledContextModels,
+        [string]$ArtifactManifestPath = "",
+        [string]$Label = "Windows RTX artifact set"
+    )
+
+    $manifest = Read-CorridorKeyWindowsRtxArtifactManifest -ModelsDir $ArtifactsDir -ArtifactManifestPath $ArtifactManifestPath
+    $issues = Get-CorridorKeyWindowsRtxArtifactManifestIssues `
+        -Manifest $manifest `
+        -ArtifactsDir $ArtifactsDir `
+        -ExpectedModels $ExpectedModels `
+        -ExpectedCompiledContextModels $ExpectedCompiledContextModels
+    if (@($issues).Count -gt 0) {
+        throw "$Label does not match a certified RTX artifact manifest. Issues: $($issues -join ' | ')"
+    }
+
+    return $manifest
 }

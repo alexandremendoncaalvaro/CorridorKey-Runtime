@@ -103,6 +103,13 @@ inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& 
         return std::nullopt;
     }
 
+    if ((device.backend == Backend::TensorRT || device.backend == Backend::CUDA) &&
+        requested_resolution == 768) {
+        return std::string(quality_mode_label(quality_mode)) +
+               " is not part of CorridorKey's current official Windows RTX ladder. "
+               "Please use Draft (512) or High (1024).";
+    }
+
     auto max_supported_resolution = app::max_supported_resolution_for_device(device);
     if (!max_supported_resolution.has_value() ||
         requested_resolution <= *max_supported_resolution) {
@@ -293,6 +300,17 @@ inline int resolve_target_resolution(int quality_mode, int input_width, int inpu
     return 768;
 }
 
+inline int normalize_target_resolution_for_backend(Backend backend, int quality_mode,
+                                                   int requested_resolution) {
+    if (!is_fixed_quality_mode(quality_mode) &&
+        (backend == Backend::TensorRT || backend == Backend::CUDA) &&
+        requested_resolution == 768) {
+        return 1024;
+    }
+
+    return requested_resolution;
+}
+
 inline int initial_requested_resolution_for_quality_mode(int quality_mode) {
     if (!is_fixed_quality_mode(quality_mode)) {
         return 0;
@@ -389,8 +407,9 @@ inline std::string missing_quality_artifact_message(
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
-    const int requested_resolution =
-        resolve_target_resolution(effective_quality_mode, input_width, input_height);
+    const int requested_resolution = normalize_target_resolution_for_backend(
+        backend, effective_quality_mode,
+        resolve_target_resolution(effective_quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(effective_quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto expected = app::expected_artifact_paths_for_request(
@@ -482,8 +501,8 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0) {
-    const int requested_resolution =
-        resolve_target_resolution(quality_mode, input_width, input_height);
+    const int requested_resolution = normalize_target_resolution_for_backend(
+        backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto candidates = app::quality_artifact_candidates_for_request(

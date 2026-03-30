@@ -251,10 +251,10 @@ TEST_CASE("automatic coarse-to-fine selection falls back to lower packaged coars
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
-    REQUIRE(selection->effective_resolution == 768);
+    REQUIRE(selection->effective_resolution == 512);
     REQUIRE(selection->used_fallback);
     REQUIRE(selection->coarse_to_fine);
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_768.onnx");
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
 TEST_CASE("fixed windows tensorRT ultra accepts 1536 on a 10 GB RTX tier",
@@ -445,8 +445,8 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
         windows_capabilities(), DeviceInfo{"RTX", 24576, Backend::TensorRT}, temp_dir.path());
     REQUIRE_FALSE(candidates.empty());
     REQUIRE(candidates.front().device.backend == Backend::TensorRT);
-    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_768.onnx");
-    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_768.onnx");
+    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_1024.onnx");
+    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096,
                                              2160, kQuantizationFp16);
@@ -456,6 +456,22 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     REQUIRE(selection->effective_resolution == 1536);
     REQUIRE(selection->used_fallback);
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
+}
+
+TEST_CASE("auto windows tensorRT avoids the deprecated 768 rung for small inputs",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-small-input");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
+
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 960,
+                                             540, kQuantizationFp16, 10240);
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->requested_resolution == 1024);
+    REQUIRE(selection->effective_resolution == 1024);
+    REQUIRE_FALSE(selection->used_fallback);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
 }
 
 TEST_CASE("auto windows tensorRT quality respects the device VRAM ceiling",
@@ -506,6 +522,13 @@ TEST_CASE("auto windows tensorRT quality keeps direct 2048 only for fully suppor
 
 TEST_CASE("fixed windows tensorRT quality reports unsupported tiers before engine creation",
           "[unit][ofx][regression]") {
+    auto standard_message =
+        unsupported_quality_message(DeviceInfo{"RTX 4090", 24576, Backend::TensorRT},
+                                    kQualityStandard, 768);
+    REQUIRE(standard_message.has_value());
+    REQUIRE(standard_message->find("Standard (768)") != std::string::npos);
+    REQUIRE(standard_message->find("High (1024)") != std::string::npos);
+
     auto message =
         unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
                                     kQualityMaximum, 2048);
@@ -541,11 +564,11 @@ TEST_CASE("missing bootstrap artifact message lists the expected bootstrap files
     auto message = missing_bootstrap_artifact_message(
         windows_capabilities(), DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, temp_dir.path());
 
-    REQUIRE(message.find("corridorkey_fp16_768.onnx") != std::string::npos);
+    REQUIRE(message.find("corridorkey_fp16_1024.onnx") != std::string::npos);
     REQUIRE(message.find("corridorkey_int8_512.onnx") != std::string::npos);
     REQUIRE(message.find(temp_dir.path().string()) != std::string::npos);
 }
-TEST_CASE("auto windows tensorRT prefers fp16 when both fp16 and int8 artifacts exist",
+TEST_CASE("auto windows tensorRT ignores the deprecated 768 fp16 artifact",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-prefers-fp16");
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
@@ -554,10 +577,7 @@ TEST_CASE("auto windows tensorRT prefers fp16 when both fp16 and int8 artifacts 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 1920,
                                              1080, kQuantizationFp16);
 
-    REQUIRE(selection.has_value());
-    REQUIRE(selection->requested_resolution == 1024);
-    REQUIRE(selection->effective_resolution == 768);
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_768.onnx");
+    REQUIRE_FALSE(selection.has_value());
 }
 
 TEST_CASE("windows universal bootstrap aligns int8 artifact selection with device memory",

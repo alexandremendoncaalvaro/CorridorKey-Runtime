@@ -3,6 +3,7 @@ param(
     [string]$BuildDir = "",
     [string]$OrtRoot = "",
     [string]$ModelsDir = "",
+    [string]$ArtifactManifestPath = "",
     [string]$ReleaseSuffix = "",
     [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
     [string]$ModelProfile = "",
@@ -125,6 +126,9 @@ $bundleArgs = @{
     OutputDir = $bundlePath
     ModelProfile = $ModelProfile
 }
+if (-not [string]::IsNullOrWhiteSpace($ArtifactManifestPath)) {
+    $bundleArgs["ArtifactManifestPath"] = $ArtifactManifestPath
+}
 if ($Skip2048.IsPresent) {
     $bundleArgs["Skip2048"] = $true
 }
@@ -140,6 +144,11 @@ Write-Host "[3/5] Validating the OFX bundle..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) {
     throw "Windows OFX bundle validation failed."
 }
+
+$bundleValidationPath = Join-Path $releaseDir "bundle_validation.json"
+Assert-CorridorKeyBundleValidationHealthy `
+    -ValidationReportPath $bundleValidationPath `
+    -Label "$releaseLabel bundle" | Out-Null
 
 Write-Host "[4/5] Assembling release folder..." -ForegroundColor Cyan
 Copy-Item (Join-Path $repoRoot "scripts\install_plugin.bat") $installScriptPath -Force
