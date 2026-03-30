@@ -33,6 +33,38 @@ function Invoke-RepoCommand {
     }
 }
 
+function Invoke-RepoCommandCapture {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$WorkingDirectory = ""
+    )
+
+    Write-Host ("  > " + ((@($FilePath) + $Arguments) -join " ")) -ForegroundColor DarkGray
+
+    $output = @()
+    if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $output = & $FilePath @Arguments 2>&1
+    } else {
+        Push-Location $WorkingDirectory
+        try {
+            $output = & $FilePath @Arguments 2>&1
+        } finally {
+            Pop-Location
+        }
+    }
+
+    $exitCode = $LASTEXITCODE
+    foreach ($line in @($output)) {
+        Write-Host ($line | Out-String).TrimEnd()
+    }
+
+    return [pscustomobject]@{
+        exit_code = $exitCode
+        output = ($output | Out-String).Trim()
+    }
+}
+
 function Assert-InGitRepository {
     if ([string]::IsNullOrWhiteSpace($gitExecutable)) {
         throw "git was not found."
@@ -151,6 +183,26 @@ function Invoke-CollaboratorWorkingCommand {
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed: $FilePath"
     }
+}
+
+function New-CollaboratorArtifactArchive {
+    param([string]$ResolvedVersion)
+
+    $archiveScript = Join-Path $repoRoot "scripts\package_collaborator_artifacts_windows.ps1"
+    if (-not (Test-Path $archiveScript)) {
+        throw "Collaborator artifact packaging script not found: $archiveScript"
+    }
+
+    $archivePath = Join-Path $repoRoot ("dist\CorridorKey_Collaborator_v" + $ResolvedVersion + "_Windows_RTX.zip")
+    $archiveArguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $archiveScript,
+        "-Version", $ResolvedVersion,
+        "-OutputZip", $archivePath
+    )
+    Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $archiveArguments
+    return $archivePath
 }
 
 function Resolve-CollaboratorCheckpointPath {
@@ -515,6 +567,10 @@ function Assert-CollaboratorPrerequisites {
 Assert-InGitRepository
 Set-Location $repoRoot
 
+$resolvedVersion = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
+$artifactArchivePath = ""
+$pushFailed = $false
+
 Write-Host "[collaborator] Repository: $repoRoot" -ForegroundColor Cyan
 Ensure-CollaboratorEnvironment
 Assert-CollaboratorPrerequisites -SourceRepo $CorridorKeyRepo -ExplicitCheckpoint $Checkpoint
@@ -584,6 +640,10 @@ if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
 Write-Host "[collaborator] Step 4/5: Regenerating and certifying the Windows RTX release" -ForegroundColor Cyan
 Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $prepareArguments
 
+Write-Host "[collaborator] Step 5/6: Packaging collaborator artifact fallback" -ForegroundColor Cyan
+$artifactArchivePath = New-CollaboratorArtifactArchive -ResolvedVersion $resolvedVersion
+Write-Host "[collaborator] Manual artifact archive: $artifactArchivePath" -ForegroundColor Green
+
 if ($CreateCommit.IsPresent) {
     Ensure-GitIdentity -PreferredName $GitUserName -PreferredEmail $GitUserEmail
 
@@ -595,7 +655,7 @@ if ($CreateCommit.IsPresent) {
         "src/gui/src-tauri/tauri.conf.json"
     )
 
-    Write-Host "[collaborator] Step 5/5: Committing generated models and release version metadata" -ForegroundColor Cyan
+    Write-Host "[collaborator] Step 6/6: Committing generated models and release version metadata" -ForegroundColor Cyan
     Invoke-RepoCommand -FilePath $gitExecutable -Arguments (@("add", "--") + $commitPaths)
 
     & $gitExecutable diff --cached --quiet -- @commitPaths
@@ -606,8 +666,22 @@ if ($CreateCommit.IsPresent) {
     }
 
     if ($Push.IsPresent) {
-        Write-Host "[collaborator] Step 5/5: Pushing branch" -ForegroundColor Cyan
-        Invoke-RepoCommand -FilePath $gitExecutable -Arguments @("push", "-u", "origin", "HEAD")
+        Write-Host "[collaborator] Step 6/6: Pushing branch" -ForegroundColor Cyan
+        $pushResult = Invoke-RepoCommandCapture -FilePath $gitExecutable -Arguments @("push", "-u", "origin", "HEAD")
+        if ($pushResult.exit_code -ne 0) {
+            $pushFailed = $true
+            Write-Host "[collaborator] Push failed after local generation completed." -ForegroundColor Yellow
+            if ($pushResult.output -match "LFS budget" -or
+                $pushResult.output -match "Git LFS" -or
+                $pushResult.output -match "quota") {
+                Write-Host "[collaborator] Remote Git LFS rejected the upload. The local artifact archive is ready for manual handoff." -ForegroundColor Yellow
+            } else {
+                Write-Host "[collaborator] The local artifact archive is ready even though the branch push failed." -ForegroundColor Yellow
+            }
+            if (-not [string]::IsNullOrWhiteSpace($artifactArchivePath)) {
+                Write-Host "[collaborator] Share this archive manually if needed: $artifactArchivePath" -ForegroundColor Yellow
+            }
+        }
     }
 }
 
@@ -616,4 +690,12 @@ if ($BuildRelease.IsPresent) {
         Write-Host "[collaborator] SkipReleaseTests is ignored for the certified Windows RTX regeneration flow." -ForegroundColor Yellow
     }
     Write-Host "[collaborator] Release artifacts are available under dist\\" -ForegroundColor Green
+}
+
+if (-not [string]::IsNullOrWhiteSpace($artifactArchivePath)) {
+    Write-Host "[collaborator] Fallback archive ready: $artifactArchivePath" -ForegroundColor Green
+}
+
+if ($pushFailed) {
+    Write-Host "[collaborator] Local generation succeeded, but remote push did not complete. Manual artifact transfer is available." -ForegroundColor Yellow
 }
