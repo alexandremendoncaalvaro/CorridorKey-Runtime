@@ -1,12 +1,13 @@
 {
     "manifest_type":  "windows_rtx_artifact_manifest",
     "bundle_track":  "rtx",
-    "certification_report":  "C:\\Dev\\CorridorKey-Runtime\\build\\release\\windows_rtx_certified\\local1536ctx\\windows_rtx_validation_report.json",
+    "certification_report":  "C:\\Dev\\CorridorKey-Runtime\\build\\release\\windows_rtx_certified\\rtx-full\\windows_rtx_validation_report.json",
     "all_profiles_certified":  true,
     "certified_models":  [
                              "corridorkey_fp16_512.onnx",
                              "corridorkey_fp16_1024.onnx",
-                             "corridorkey_fp16_1536.onnx"
+                             "corridorkey_fp16_1536.onnx",
+                             "corridorkey_fp16_2048.onnx"
                          ],
     "expected_promoted_models":  [
                                      "corridorkey_fp16_512.onnx",
@@ -28,7 +29,7 @@
                       },
                       {
                           "filename":  "corridorkey_fp16_1024_ctx.onnx",
-                          "sha256":  "6FDD7B405E2C80EB4A544B0DB812383B70D9130BF0B110958F75A6B7ED88ECDE",
+                          "sha256":  "674FB14D50DD8320D1737A579B0490B840EFE6EE409071B6B5F3965F22A910E7",
                           "artifact_kind":  "compiled_context",
                           "base_model":  "corridorkey_fp16_1024.onnx",
                           "certified":  true,
@@ -44,11 +45,27 @@
                       },
                       {
                           "filename":  "corridorkey_fp16_1536_ctx.onnx",
-                          "sha256":  "BB53DF880CAD6996685DEF21F5687B47AEFE48B186FD1408DDE1B87E03F19CF6",
+                          "sha256":  "BC8C095324080BECB73F06AB84DE1804BB641990A783E801015609E57C161043",
                           "artifact_kind":  "compiled_context",
                           "base_model":  "corridorkey_fp16_1536.onnx",
                           "certified":  true,
                           "resolution":  1536
+                      },
+                      {
+                          "filename":  "corridorkey_fp16_2048.onnx",
+                          "sha256":  "A26031B5732DC663FCF5C451C9CFB315F59B0ACB5361D7CEAB5428F9E70A0C62",
+                          "artifact_kind":  "runtime_model",
+                          "base_model":  "corridorkey_fp16_2048.onnx",
+                          "certified":  true,
+                          "resolution":  2048
+                      },
+                      {
+                          "filename":  "corridorkey_fp16_2048_ctx.onnx",
+                          "sha256":  "2A610AFDEAA7DBAD3EDD467203C5A1D7720E29DDAFA3BA943DE56AE830C5C624",
+                          "artifact_kind":  "compiled_context",
+                          "base_model":  "corridorkey_fp16_2048.onnx",
+                          "certified":  true,
+                          "resolution":  2048
                       },
                       {
                           "filename":  "corridorkey_fp16_512.onnx",
@@ -60,7 +77,7 @@
                       },
                       {
                           "filename":  "corridorkey_fp16_512_ctx.onnx",
-                          "sha256":  "91B9304732F357D5DA6DAF2C111144B1269DDB999DC6619ED56803120667BE19",
+                          "sha256":  "7ADB45DFC35F1CF50C3E4CE59C50DF601C9197A3D7076C3AD352B0B9ECF523F7",
                           "artifact_kind":  "compiled_context",
                           "base_model":  "corridorkey_fp16_512.onnx",
                           "certified":  true,
