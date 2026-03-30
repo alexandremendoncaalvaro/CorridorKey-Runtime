@@ -1,0 +1,11 @@
+export const DEFAULT_TARGET_RESOLUTION = 512;
+export const MAX_WASM_THREADS = 4;
+export const PREVIEW_RECORDING_FPS = 30;
+export const SEQUENCE_PREVIEW_FPS = 12;
+export const CHECKER_TILE_SIZE = 16;
+export const CHECKER_DARK = 42;
+export const CHECKER_LIGHT = 138;
+export const DEFAULT_DESPILL_STRENGTH = 0.5;
+export const ROUGH_MATTE_LABEL = "rough matte";
+export const MODEL_LABEL = "model";
+export const DEFAULT_DOWNLOAD_FILENAME = "corridorkey-browser-poc.webm";

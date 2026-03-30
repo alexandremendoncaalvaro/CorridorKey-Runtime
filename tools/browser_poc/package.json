@@ -1,0 +1,25 @@
+{
+  "name": "corridorkey-browser-poc",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4175",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy:cloudflare": "pnpm build && wrangler deploy",
+    "deploy:cloudflare:dry": "pnpm build && wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.22.0"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "vite": "7.0.4",
+    "vitest": "3.2.4",
+    "wrangler": "4.77.0"
+  }
+}

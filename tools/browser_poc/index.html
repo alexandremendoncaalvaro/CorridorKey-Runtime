@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>CorridorKey Browser POC</title>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <p class="eyebrow">Proof of Concept</p>
+        <h1>CorridorKey Browser</h1>
+        <p class="lede">
+          Local video in, browser-side key preview out.
+        </p>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls-panel">
+          <div class="panel-header">
+            <h2>Inputs</h2>
+            <p>Load one video, one image, an image sequence, or switch to a live webcam feed while the default browser model boots automatically.</p>
+          </div>
+
+          <div class="control-grid">
+            <label class="field">
+              <span>Source Asset</span>
+              <input id="source-files" type="file" accept="video/*,image/*" multiple />
+            </label>
+
+            <label class="field">
+              <span>Bundled Browser Model</span>
+              <select id="model-select"></select>
+            </label>
+
+            <label class="field compact">
+              <span>Processing Resolution</span>
+              <select id="target-resolution"></select>
+            </label>
+          </div>
+
+          <p id="target-resolution-detail" class="resolution-detail">
+            Auto currently follows the active browser model at 512.
+          </p>
+
+          <div class="field">
+            <span>Alpha Hint Asset</span>
+            <input id="hint-files" type="file" accept="video/*,image/*" multiple />
+          </div>
+
+          <div class="model-panel">
+            <div class="model-panel-header">
+              <div>
+                <span class="status-label">Active Model</span>
+                <strong id="active-model-value">bootstrapping</strong>
+              </div>
+              <div>
+                <span class="status-label">Model State</span>
+                <strong id="model-state-value">loading</strong>
+              </div>
+            </div>
+
+            <progress id="model-load-progress" max="1" value="0"></progress>
+            <p id="model-progress-detail" class="model-progress-detail">Preparing the default browser-safe model.</p>
+          </div>
+
+          <div id="process-panel" class="process-panel hidden">
+            <div class="process-panel-header">
+              <div>
+                <span class="status-label">Processing Stage</span>
+                <strong id="process-stage-value">idle</strong>
+              </div>
+            </div>
+
+            <progress id="process-progress" max="1" value="0"></progress>
+            <p id="process-progress-detail" class="model-progress-detail">Waiting for a manual processing pass.</p>
+          </div>
+
+          <div class="button-row">
+            <button id="start-webcam">Use Webcam</button>
+            <button id="stop-webcam">Stop Webcam</button>
+            <button id="load-selected-model" class="primary">Load Selected Model</button>
+            <button id="process-frame">Process Current Frame</button>
+            <button id="process-full-media">Process Full Media</button>
+            <button id="start-preview">Start Preview Loop</button>
+            <button id="stop-preview">Stop Preview Loop</button>
+          </div>
+
+          <div id="sequence-panel" class="sequence-panel hidden">
+            <div class="sequence-panel-header">
+              <span class="status-label">Sequence Frame</span>
+              <strong id="sequence-frame-value">Frame 1 / 1</strong>
+            </div>
+            <input id="sequence-index" type="range" min="1" max="1" step="1" value="1" />
+          </div>
+
+          <div id="hint-sequence-panel" class="sequence-panel hidden">
+            <div class="sequence-panel-header">
+              <span class="status-label">Hint Frame</span>
+              <strong id="hint-sequence-frame-value">Frame 1 / 1</strong>
+            </div>
+            <input id="hint-sequence-index" type="range" min="1" max="1" step="1" value="1" />
+          </div>
+
+          <div class="button-row">
+            <button id="start-recording">Start Recording</button>
+            <button id="stop-recording">Stop Recording</button>
+            <a id="download-link" class="download disabled" download="corridorkey-browser-poc.webm">Download Output</a>
+          </div>
+
+          <div class="status-grid">
+            <div class="status-card">
+              <span class="status-label">Mode</span>
+              <strong id="mode-value">rough matte</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">Backend</span>
+              <strong id="backend-value">none</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">Frame Time</span>
+              <strong id="frame-time-value">-</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">Recording</span>
+              <strong id="recording-value">idle</strong>
+            </div>
+          </div>
+
+          <div id="status-log" class="log">Waiting for input.</div>
+        </section>
+
+        <section class="panel stage-panel">
+          <div class="panel-header">
+            <h2>Stage</h2>
+            <p>Video and webcam sources stay live in the browser player. Images and sequences render through the source canvas and the same processing path.</p>
+          </div>
+
+          <video id="source-video" class="source-video" controls muted playsinline preload="metadata"></video>
+          <video id="hint-video" class="hidden" muted playsinline preload="metadata"></video>
+
+          <div class="canvas-grid">
+            <figure class="canvas-card">
+              <figcaption>Source Canvas</figcaption>
+              <canvas id="source-canvas"></canvas>
+            </figure>
+
+            <figure class="canvas-card">
+              <figcaption>Output Canvas</figcaption>
+              <canvas id="output-canvas"></canvas>
+            </figure>
+          </div>
+        </section>
+
+        <section class="panel notes-panel">
+          <div class="panel-header">
+            <h2>Current Notes</h2>
+            <p>This sandbox favors isolation and clarity over product polish.</p>
+          </div>
+
+          <ul class="notes-list">
+            <li>The site boots with a fixed default model and exposes only a conservative bundled catalog of INT8 ONNX variants that fit the browser track.</li>
+            <li>If the selected model fails, the sandbox keeps the previous active model when possible and otherwise falls back to the same rough matte heuristic as the native fallback.</li>
+            <li>The source input accepts one video, one still image, or a naturally sorted image sequence. Webcam capture stays local through <code>getUserMedia</code>.</li>
+            <li>The stage preview now respects the loaded media aspect ratio while processing still uses discrete browser-safe resolution presets internally.</li>
+            <li><code>Process Full Media</code> exports a browser-side result for still images, image sequences, or videos. Video export remains a WebM preview path in this sandbox, not a frame-exact mastering pipeline.</li>
+            <li>Recording captures the output canvas through <code>MediaRecorder</code> and saves a WebM preview.</li>
+            <li>For heavier exports, the next upgrade is replacing the canvas loop with WebCodecs decode and encode.</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
