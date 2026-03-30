@@ -4,6 +4,504 @@ function Test-CorridorKeyWindowsHost {
     return [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
 }
 
+function Get-CorridorKeyWindowsRtxBuildContract {
+    return [pscustomobject]@{
+        ort_source_ref = "v1.23.0"
+        minimum_cmake_version = "3.28.0"
+        required_python_version = "3.12"
+        required_cuda_version = "12.9"
+        tensorrt_rtx_version = "1.2.0.54"
+        tensorrt_rtx_download_url = "https://developer.nvidia.com/downloads/trt/rtx_sdk/secure/1.2/tensorrt-rtx-1.2.0.54-win10-amd64-cuda-12.9-release-external.zip"
+        cmake_generator = "Visual Studio 17 2022"
+    }
+}
+
+function Test-CorridorKeyUsableCheckpointFile {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
+        return $false
+    }
+
+    $fileInfo = Get-Item -Path $Path -ErrorAction Stop
+    if ($fileInfo.Length -le 512) {
+        $pointerHead = Get-Content -Path $Path -TotalCount 3 -ErrorAction SilentlyContinue
+        if ($pointerHead -and (($pointerHead | Out-String) -match "https://git-lfs.github.com/spec/v1")) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Get-CorridorKeyRegistryValue {
+    param(
+        [string]$KeyPath,
+        [string]$ValueName = ""
+    )
+
+    try {
+        $key = Get-Item -Path $KeyPath -ErrorAction Stop
+        $resolvedValueName = if ([string]::IsNullOrWhiteSpace($ValueName)) { "" } else { $ValueName }
+        $value = $key.GetValue($resolvedValueName, $null, "DoNotExpandEnvironmentNames")
+        if ($null -eq $value) {
+            return ""
+        }
+
+        return ($value | Out-String).Trim()
+    } catch {
+        return ""
+    }
+}
+
+function Get-CorridorKeyUniquePathList {
+    param(
+        [string[]]$Paths,
+        [switch]$ExistingOnly
+    )
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $results = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($candidate in @($Paths)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+
+        try {
+            $normalizedCandidate = [System.IO.Path]::GetFullPath($candidate)
+        } catch {
+            continue
+        }
+
+        if ($ExistingOnly.IsPresent -and -not (Test-Path $normalizedCandidate)) {
+            continue
+        }
+
+        if ($seen.Add($normalizedCandidate)) {
+            [void]$results.Add($normalizedCandidate)
+        }
+    }
+
+    return $results.ToArray()
+}
+
+function Get-CorridorKeyResolvedCommandSources {
+    param([string[]]$CandidateNames)
+
+    $paths = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidateName in @($CandidateNames)) {
+        if ([string]::IsNullOrWhiteSpace($candidateName)) {
+            continue
+        }
+
+        $command = Get-Command $candidateName -ErrorAction SilentlyContinue
+        if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+            [void]$paths.Add($command.Source)
+        }
+    }
+
+    return @(Get-CorridorKeyUniquePathList -Paths $paths.ToArray() -ExistingOnly)
+}
+
+function Get-CorridorKeyCmakeVersion {
+    param([string]$CmakePath)
+
+    if ([string]::IsNullOrWhiteSpace($CmakePath) -or -not (Test-Path $CmakePath)) {
+        return ""
+    }
+
+    $firstLine = & $CmakePath --version 2>$null | Select-Object -First 1
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($firstLine)) {
+        return ""
+    }
+
+    if (($firstLine | Out-String).Trim() -match 'cmake version ([0-9]+\.[0-9]+\.[0-9]+)') {
+        return $Matches[1]
+    }
+
+    return ""
+}
+
+function Select-CorridorKeyBestVersionedPath {
+    param(
+        [object[]]$Candidates,
+        [string]$MinimumVersion = ""
+    )
+
+    $candidateList = @($Candidates | Where-Object {
+            $null -ne $_ -and
+            -not [string]::IsNullOrWhiteSpace($_.path) -and
+            -not [string]::IsNullOrWhiteSpace($_.version)
+        })
+
+    if ($candidateList.Count -eq 0) {
+        return [pscustomobject]@{
+            path = ""
+            version = ""
+            meets_minimum = $false
+            candidate_count = 0
+        }
+    }
+
+    $ordered = @($candidateList | Sort-Object @{
+                Expression = { [version]$_.version }
+                Descending = $true
+            }, @{
+                Expression = { $_.path }
+                Descending = $false
+            })
+
+    if (-not [string]::IsNullOrWhiteSpace($MinimumVersion)) {
+        $minimum = [version]$MinimumVersion
+        $matching = @($ordered | Where-Object { [version]$_.version -ge $minimum })
+        if ($matching.Count -gt 0) {
+            return [pscustomobject]@{
+                path = $matching[0].path
+                version = $matching[0].version
+                meets_minimum = $true
+                candidate_count = $candidateList.Count
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        path = $ordered[0].path
+        version = $ordered[0].version
+        meets_minimum = $false
+        candidate_count = $candidateList.Count
+    }
+}
+
+function Get-CorridorKeyWindowsCmakeCandidatePaths {
+    param(
+        [string[]]$AdditionalCandidatePaths = @(),
+        [switch]$PreferCandidatePathsOnly
+    )
+
+    $candidatePaths = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in @($AdditionalCandidatePaths)) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            [void]$candidatePaths.Add($candidate)
+        }
+    }
+
+    if ($PreferCandidatePathsOnly.IsPresent) {
+        return @(Get-CorridorKeyUniquePathList -Paths $candidatePaths.ToArray() -ExistingOnly)
+    }
+
+    foreach ($registryPath in @(
+            "HKLM:\SOFTWARE\Kitware\CMake",
+            "HKCU:\SOFTWARE\Kitware\CMake"
+        )) {
+        $installDir = Get-CorridorKeyRegistryValue -KeyPath $registryPath -ValueName "InstallDir"
+        if (-not [string]::IsNullOrWhiteSpace($installDir)) {
+            [void]$candidatePaths.Add((Join-Path $installDir "bin\cmake.exe"))
+        }
+    }
+
+    foreach ($appPathKey in @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\cmake.exe",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\cmake.exe"
+        )) {
+        $appPath = Get-CorridorKeyRegistryValue -KeyPath $appPathKey
+        if (-not [string]::IsNullOrWhiteSpace($appPath)) {
+            [void]$candidatePaths.Add($appPath)
+        }
+    }
+
+    $commonCmakeCandidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidatePath in @(
+            "C:\Program Files\CMake\bin\cmake.exe",
+            "C:\Program Files (x86)\CMake\bin\cmake.exe"
+        )) {
+        [void]$commonCmakeCandidates.Add($candidatePath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        [void]$commonCmakeCandidates.Add((Join-Path $env:LOCALAPPDATA "Programs\CMake\bin\cmake.exe"))
+    }
+
+    foreach ($candidatePath in $commonCmakeCandidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidatePath)) {
+            [void]$candidatePaths.Add($candidatePath)
+        }
+    }
+
+    foreach ($resolvedCommandPath in Get-CorridorKeyResolvedCommandSources -CandidateNames @("cmake.exe", "cmake")) {
+        [void]$candidatePaths.Add($resolvedCommandPath)
+    }
+
+    return @(Get-CorridorKeyUniquePathList -Paths $candidatePaths.ToArray() -ExistingOnly)
+}
+
+function Resolve-CorridorKeyWindowsCmake {
+    param(
+        [string[]]$AdditionalCandidatePaths = @(),
+        [string]$MinimumVersion = "",
+        [switch]$PreferCandidatePathsOnly
+    )
+
+    $requirements = Get-CorridorKeyWindowsRtxBuildContract
+    $resolvedMinimumVersion = if ([string]::IsNullOrWhiteSpace($MinimumVersion)) {
+        $requirements.minimum_cmake_version
+    } else {
+        $MinimumVersion
+    }
+
+    $candidateInfos = [System.Collections.Generic.List[object]]::new()
+    foreach ($candidatePath in Get-CorridorKeyWindowsCmakeCandidatePaths `
+            -AdditionalCandidatePaths $AdditionalCandidatePaths `
+            -PreferCandidatePathsOnly:$PreferCandidatePathsOnly.IsPresent) {
+        $candidateVersion = Get-CorridorKeyCmakeVersion -CmakePath $candidatePath
+        if (-not [string]::IsNullOrWhiteSpace($candidateVersion)) {
+            [void]$candidateInfos.Add([pscustomobject]@{
+                    path = $candidatePath
+                    version = $candidateVersion
+                })
+        }
+    }
+
+    return Select-CorridorKeyBestVersionedPath -Candidates $candidateInfos.ToArray() -MinimumVersion $resolvedMinimumVersion
+}
+
+function Resolve-CorridorKeyGitPath {
+    $candidatePaths = @(
+        "C:\Program Files\Git\cmd\git.exe",
+        "C:\Program Files\Git\bin\git.exe"
+    ) + (Get-CorridorKeyResolvedCommandSources -CandidateNames @("git.exe", "git"))
+
+    $resolved = @(Get-CorridorKeyUniquePathList -Paths @($candidatePaths) -ExistingOnly)
+    if ($resolved.Count -gt 0) {
+        return $resolved[0]
+    }
+
+    return ""
+}
+
+function Resolve-CorridorKeyUvPath {
+    $candidatePaths = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        $candidatePaths += Join-Path $env:USERPROFILE ".local\bin\uv.exe"
+    }
+    $candidatePaths += Get-CorridorKeyResolvedCommandSources -CandidateNames @("uv.exe", "uv")
+
+    $resolved = @(Get-CorridorKeyUniquePathList -Paths @($candidatePaths) -ExistingOnly)
+    if ($resolved.Count -gt 0) {
+        return $resolved[0]
+    }
+
+    return ""
+}
+
+function Resolve-CorridorKeyMakeNsisPath {
+    $candidatePaths = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($candidate in @(
+            "C:\Program Files (x86)\NSIS\makensis.exe",
+            "C:\Program Files (x86)\NSIS\Bin\makensis.exe",
+            "C:\Program Files\NSIS\makensis.exe",
+            "C:\Program Files\NSIS\Bin\makensis.exe"
+        )) {
+        [void]$candidatePaths.Add($candidate)
+    }
+
+    foreach ($registryPath in @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Nullsoft Install System",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Nullsoft Install System",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Nullsoft Install System"
+        )) {
+        $installLocation = Get-CorridorKeyRegistryValue -KeyPath $registryPath -ValueName "InstallLocation"
+        if (-not [string]::IsNullOrWhiteSpace($installLocation)) {
+            [void]$candidatePaths.Add((Join-Path $installLocation "makensis.exe"))
+            [void]$candidatePaths.Add((Join-Path $installLocation "Bin\makensis.exe"))
+        }
+    }
+
+    foreach ($resolvedCommandPath in Get-CorridorKeyResolvedCommandSources -CandidateNames @("makensis.exe")) {
+        [void]$candidatePaths.Add($resolvedCommandPath)
+    }
+
+    $resolved = @(Get-CorridorKeyUniquePathList -Paths $candidatePaths.ToArray() -ExistingOnly)
+    if ($resolved.Count -gt 0) {
+        return $resolved[0]
+    }
+
+    return ""
+}
+
+function Get-CorridorKeyPythonVersion {
+    param([string]$ExecutablePath)
+
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath) -or -not (Test-Path $ExecutablePath)) {
+        return ""
+    }
+
+    $version = & $ExecutablePath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return ""
+    }
+
+    return ($version | Out-String).Trim()
+}
+
+function Resolve-CorridorKeyPython312Path {
+    param([string]$ExplicitPath = "")
+
+    $requirements = Get-CorridorKeyWindowsRtxBuildContract
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        $resolvedVersion = Get-CorridorKeyPythonVersion -ExecutablePath $ExplicitPath
+        if ($resolvedVersion -eq $requirements.required_python_version) {
+            return [System.IO.Path]::GetFullPath($ExplicitPath)
+        }
+        return ""
+    }
+
+    $pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $pyLauncher) {
+        $resolved = & $pyLauncher.Source -3.12 -c "import sys; print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($resolved)) {
+            return ($resolved | Out-String).Trim()
+        }
+    }
+
+    $candidatePaths = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $candidatePaths += Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+    }
+    if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles})) {
+        $candidatePaths += Join-Path ${env:ProgramFiles} "Python312\python.exe"
+    }
+    if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+        $candidatePaths += Join-Path ${env:ProgramFiles(x86)} "Python312-32\python.exe"
+    }
+    $candidatePaths += Get-CorridorKeyResolvedCommandSources -CandidateNames @("python.exe")
+
+    foreach ($candidatePath in @(Get-CorridorKeyUniquePathList -Paths @($candidatePaths) -ExistingOnly)) {
+        if ((Get-CorridorKeyPythonVersion -ExecutablePath $candidatePath) -eq $requirements.required_python_version) {
+            return $candidatePath
+        }
+    }
+
+    return ""
+}
+
+function Resolve-CorridorKeyVsDevCmdPath {
+    param([string]$ExplicitPath = "")
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        if (Test-Path $ExplicitPath) {
+            return [System.IO.Path]::GetFullPath($ExplicitPath)
+        }
+        return ""
+    }
+
+    $candidatePaths = [System.Collections.Generic.List[string]]::new()
+
+    if (-not [string]::IsNullOrWhiteSpace($env:VSINSTALLDIR)) {
+        [void]$candidatePaths.Add((Join-Path $env:VSINSTALLDIR "Common7\Tools\VsDevCmd.bat"))
+    }
+
+    $vswhereCandidates = Get-CorridorKeyUniquePathList -Paths @(
+        (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"),
+        (Get-CorridorKeyResolvedCommandSources -CandidateNames @("vswhere.exe"))
+    ) -ExistingOnly
+
+    foreach ($vswherePath in $vswhereCandidates) {
+        $installationPath = & $vswherePath -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($installationPath)) {
+            [void]$candidatePaths.Add((Join-Path ($installationPath | Out-String).Trim() "Common7\Tools\VsDevCmd.bat"))
+        }
+    }
+
+    foreach ($installationRoot in @(
+            "C:\Program Files\Microsoft Visual Studio\2022\Community",
+            "C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+            "C:\Program Files\Microsoft Visual Studio\2022\Professional",
+            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+        )) {
+        [void]$candidatePaths.Add((Join-Path $installationRoot "Common7\Tools\VsDevCmd.bat"))
+    }
+
+    $resolved = @(Get-CorridorKeyUniquePathList -Paths $candidatePaths.ToArray() -ExistingOnly)
+    if ($resolved.Count -gt 0) {
+        return $resolved[0]
+    }
+
+    return ""
+}
+
+function Test-CorridorKeyCudaToolkitRoot {
+    param([string]$CandidatePath)
+
+    return (Test-Path (Join-Path $CandidatePath "bin\nvcc.exe")) -and
+           (Test-Path (Join-Path $CandidatePath "include\cuda_runtime.h"))
+}
+
+function Resolve-CorridorKeyCudaToolkitRoot {
+    param([string]$RepoRoot = "")
+
+    if (-not [string]::IsNullOrWhiteSpace($env:CUDA_PATH) -and
+        (Test-CorridorKeyCudaToolkitRoot -CandidatePath $env:CUDA_PATH)) {
+        return [System.IO.Path]::GetFullPath($env:CUDA_PATH)
+    }
+
+    $cudaRoot = Join-Path ${env:ProgramFiles} "NVIDIA GPU Computing Toolkit\CUDA"
+    if (Test-Path $cudaRoot) {
+        $candidate = Get-ChildItem -Path $cudaRoot -Directory -Filter "v*" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+        if ($null -ne $candidate -and (Test-CorridorKeyCudaToolkitRoot -CandidatePath $candidate.FullName)) {
+            return $candidate.FullName
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $vendorRoot = Join-Path $RepoRoot "vendor"
+        if (Test-Path $vendorRoot) {
+            $candidate = Get-ChildItem -Path $vendorRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^(cuda-|CUDA-)' } |
+                Sort-Object Name -Descending | Select-Object -First 1
+            if ($null -ne $candidate -and (Test-CorridorKeyCudaToolkitRoot -CandidatePath $candidate.FullName)) {
+                return $candidate.FullName
+            }
+        }
+    }
+
+    return ""
+}
+
+function Test-CorridorKeyTensorRtRtxRoot {
+    param([string]$CandidatePath)
+
+    return (Test-Path (Join-Path $CandidatePath "include\NvInfer.h")) -and
+           ((Get-ChildItem -Path (Join-Path $CandidatePath "bin") -Filter "tensorrt_rtx*.dll" -File -ErrorAction SilentlyContinue |
+               Measure-Object).Count -gt 0)
+}
+
+function Resolve-CorridorKeyTensorRtRtxHome {
+    param([string]$RepoRoot = "")
+
+    if (-not [string]::IsNullOrWhiteSpace($env:TENSORRT_RTX_HOME) -and
+        (Test-CorridorKeyTensorRtRtxRoot -CandidatePath $env:TENSORRT_RTX_HOME)) {
+        return [System.IO.Path]::GetFullPath($env:TENSORRT_RTX_HOME)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
+        $vendorRoot = Join-Path $RepoRoot "vendor"
+        if (Test-Path $vendorRoot) {
+            foreach ($candidate in (Get-ChildItem -Path $vendorRoot -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -match '^(TensorRT-RTX|tensorrt-rtx)' } |
+                    Sort-Object Name -Descending)) {
+                if (Test-CorridorKeyTensorRtRtxRoot -CandidatePath $candidate.FullName) {
+                    return $candidate.FullName
+                }
+            }
+        }
+    }
+
+    return ""
+}
+
 function Get-CorridorKeyProjectVersion {
     param([string]$RepoRoot)
 

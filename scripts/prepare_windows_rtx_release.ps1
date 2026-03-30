@@ -5,7 +5,7 @@ param(
     [string]$CorridorKeyRepo = "",
     [string]$Checkpoint = "",
     [string]$OrtSourceDir = "",
-    [string]$OrtSourceRef = "v1.23.0",
+    [string]$OrtSourceRef = "",
     [string]$CudaHome = "",
     [string]$TensorRtRtxHome = "",
     [string]$VsDevCmd = "",
@@ -28,8 +28,12 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modelsDir = Join-Path $repoRoot "models"
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+$rtxBuildContract = Get-CorridorKeyWindowsRtxBuildContract
 
 $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
+if ([string]::IsNullOrWhiteSpace($OrtSourceRef)) {
+    $OrtSourceRef = $rtxBuildContract.ort_source_ref
+}
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot ("build\" + $BuildPreset)
 }

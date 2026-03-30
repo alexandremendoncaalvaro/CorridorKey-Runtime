@@ -17,6 +17,8 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $repoRoot "scripts\windows_runtime_helpers.ps1")
+$rtxBuildContract = Get-CorridorKeyWindowsRtxBuildContract
+$gitExecutable = Resolve-CorridorKeyGitPath
 
 function Invoke-RepoCommand {
     param(
@@ -32,6 +34,10 @@ function Invoke-RepoCommand {
 }
 
 function Assert-InGitRepository {
+    if ([string]::IsNullOrWhiteSpace($gitExecutable)) {
+        throw "git was not found."
+    }
+
     if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
         throw "This script must be run from a CorridorKey-Runtime git clone."
     }
@@ -54,7 +60,7 @@ function Get-GitConfigValue {
         [string[]]$Arguments
     )
 
-    $value = & git @Arguments 2>$null
+    $value = & $gitExecutable @Arguments 2>$null
     if ($LASTEXITCODE -ne 0) {
         return ""
     }
@@ -113,10 +119,10 @@ function Ensure-GitIdentity {
     }
 
     if ($localName -ne $resolvedName) {
-        Invoke-RepoCommand -FilePath "git" -Arguments @("config", "--local", "user.name", $resolvedName)
+        Invoke-RepoCommand -FilePath $gitExecutable -Arguments @("config", "--local", "user.name", $resolvedName)
     }
     if ($localEmail -ne $resolvedEmail) {
-        Invoke-RepoCommand -FilePath "git" -Arguments @("config", "--local", "user.email", $resolvedEmail)
+        Invoke-RepoCommand -FilePath $gitExecutable -Arguments @("config", "--local", "user.email", $resolvedEmail)
     }
 
     Write-Host "[collaborator] Git identity ready for local commit: $resolvedName <$resolvedEmail>" -ForegroundColor Cyan
@@ -145,24 +151,6 @@ function Invoke-CollaboratorWorkingCommand {
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed: $FilePath"
     }
-}
-
-function Test-CorridorKeyUsableCheckpointFile {
-    param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
-        return $false
-    }
-
-    $fileInfo = Get-Item -Path $Path -ErrorAction Stop
-    if ($fileInfo.Length -le 512) {
-        $pointerHead = Get-Content -Path $Path -TotalCount 3 -ErrorAction SilentlyContinue
-        if ($pointerHead -and (($pointerHead | Out-String) -match "https://git-lfs.github.com/spec/v1")) {
-            return $false
-        }
-    }
-
-    return $true
 }
 
 function Resolve-CollaboratorCheckpointPath {
@@ -198,143 +186,52 @@ function Resolve-CollaboratorCheckpointPath {
 function Test-CollaboratorCudaRoot {
     param([string]$CandidatePath)
 
-    return (Test-Path (Join-Path $CandidatePath "bin\nvcc.exe")) -and
-           (Test-Path (Join-Path $CandidatePath "include\cuda_runtime.h"))
+    return Test-CorridorKeyCudaToolkitRoot -CandidatePath $CandidatePath
 }
 
 function Resolve-CollaboratorCudaRoot {
-    if (-not [string]::IsNullOrWhiteSpace($env:CUDA_PATH) -and (Test-CollaboratorCudaRoot -CandidatePath $env:CUDA_PATH)) {
-        return [System.IO.Path]::GetFullPath($env:CUDA_PATH)
-    }
-
-    $cudaRoot = Join-Path ${env:ProgramFiles} "NVIDIA GPU Computing Toolkit\CUDA"
-    if (Test-Path $cudaRoot) {
-        $candidate = Get-ChildItem -Path $cudaRoot -Directory -Filter "v*" -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-        if ($null -ne $candidate -and (Test-CollaboratorCudaRoot -CandidatePath $candidate.FullName)) {
-            return $candidate.FullName
-        }
-    }
-
-    $vendorRoot = Join-Path $repoRoot "vendor"
-    if (Test-Path $vendorRoot) {
-        $candidate = Get-ChildItem -Path $vendorRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match '^(cuda-|CUDA-)' } |
-            Sort-Object Name -Descending | Select-Object -First 1
-        if ($null -ne $candidate -and (Test-CollaboratorCudaRoot -CandidatePath $candidate.FullName)) {
-            return $candidate.FullName
-        }
-    }
-
-    return ""
+    return Resolve-CorridorKeyCudaToolkitRoot -RepoRoot $repoRoot
 }
 
 function Test-CollaboratorTensorRtRtxRoot {
     param([string]$CandidatePath)
 
-    return (Test-Path (Join-Path $CandidatePath "include\NvInfer.h")) -and
-           ((Get-ChildItem -Path (Join-Path $CandidatePath "bin") -Filter "tensorrt_rtx*.dll" -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+    return Test-CorridorKeyTensorRtRtxRoot -CandidatePath $CandidatePath
 }
 
 function Resolve-CollaboratorTensorRtRtxRoot {
-    if (-not [string]::IsNullOrWhiteSpace($env:TENSORRT_RTX_HOME) -and
-        (Test-CollaboratorTensorRtRtxRoot -CandidatePath $env:TENSORRT_RTX_HOME)) {
-        return [System.IO.Path]::GetFullPath($env:TENSORRT_RTX_HOME)
-    }
-
-    $vendorRoot = Join-Path $repoRoot "vendor"
-    if (Test-Path $vendorRoot) {
-        foreach ($candidate in (Get-ChildItem -Path $vendorRoot -Directory -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match '^(TensorRT-RTX|tensorrt-rtx)' } |
-                Sort-Object Name -Descending)) {
-            if (Test-CollaboratorTensorRtRtxRoot -CandidatePath $candidate.FullName) {
-                return $candidate.FullName
-            }
-        }
-    }
-
-    return ""
+    return Resolve-CorridorKeyTensorRtRtxHome -RepoRoot $repoRoot
 }
 
 function Resolve-CollaboratorCmakePath {
-    foreach ($candidateName in @("cmake.exe", "cmake")) {
-        $command = Get-Command $candidateName -ErrorAction SilentlyContinue
-        if ($null -ne $command) {
-            return $command.Source
-        }
-    }
-
-    foreach ($candidatePath in @(
-            "C:\Program Files\CMake\bin\cmake.exe",
-            "C:\Program Files (x86)\CMake\bin\cmake.exe"
-        )) {
-        if (Test-Path $candidatePath) {
-            return $candidatePath
-        }
-    }
-
-    return ""
+    $resolved = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
+    return $resolved.path
 }
 
 function Get-CollaboratorCmakeVersion {
-    $cmakePath = Resolve-CollaboratorCmakePath
-    if ([string]::IsNullOrWhiteSpace($cmakePath)) {
-        return ""
-    }
-
-    $firstLine = & $cmakePath --version 2>$null | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($firstLine)) {
-        return ""
-    }
-
-    if (($firstLine | Out-String).Trim() -match 'cmake version ([0-9]+\.[0-9]+\.[0-9]+)') {
-        return $Matches[1]
-    }
-
-    return ""
+    $resolved = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
+    return $resolved.version
 }
 
 function Test-CollaboratorCmakeRequirement {
-    param([string]$MinimumVersion = "3.28.0")
+    param([string]$MinimumVersion = "")
 
-    $cmakeVersion = Get-CollaboratorCmakeVersion
-    if ([string]::IsNullOrWhiteSpace($cmakeVersion)) {
-        return $false
+    $resolvedMinimumVersion = if ([string]::IsNullOrWhiteSpace($MinimumVersion)) {
+        $rtxBuildContract.minimum_cmake_version
+    } else {
+        $MinimumVersion
     }
 
-    return ([version]$cmakeVersion -ge [version]$MinimumVersion)
+    $resolved = Resolve-CorridorKeyWindowsCmake -MinimumVersion $resolvedMinimumVersion
+    return $resolved.meets_minimum
 }
 
 function Test-CollaboratorPython312 {
-    $pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $pyLauncher) {
-        & $pyLauncher.Source -3.12 -c "import sys" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return $true
-        }
-    }
-
-    $python = Get-Command "python.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $python) {
-        $version = & $python.Source -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-        if ($LASTEXITCODE -eq 0 -and ($version | Out-String).Trim() -eq "3.12") {
-            return $true
-        }
-    }
-
-    return $false
+    return -not [string]::IsNullOrWhiteSpace((Resolve-CorridorKeyPython312Path))
 }
 
 function Test-CollaboratorVsToolchain {
-    if (-not [string]::IsNullOrWhiteSpace($env:VSINSTALLDIR)) {
-        $candidate = Join-Path $env:VSINSTALLDIR "Common7\Tools\VsDevCmd.bat"
-        if (Test-Path $candidate) {
-            return $true
-        }
-    }
-
-    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    return Test-Path $vswhere
+    return -not [string]::IsNullOrWhiteSpace((Resolve-CorridorKeyVsDevCmdPath))
 }
 
 function Extract-CollaboratorArchive {
@@ -360,13 +257,7 @@ function Extract-CollaboratorArchive {
 }
 
 function Test-CollaboratorNsis {
-    $command = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $true
-    }
-
-    return (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") -or
-           (Test-Path "C:\Program Files (x86)\NSIS\Bin\makensis.exe")
+    return -not [string]::IsNullOrWhiteSpace((Resolve-CorridorKeyMakeNsisPath))
 }
 
 function Ensure-CollaboratorVcpkgRoot {
@@ -391,7 +282,7 @@ function Ensure-CollaboratorVcpkgRoot {
     $targetRoot = Join-Path (Split-Path -Parent $repoRoot) "vcpkg"
     if (-not (Test-Path $targetRoot)) {
         Write-Host "[collaborator] Bootstrapping vcpkg into $targetRoot" -ForegroundColor Cyan
-        Invoke-CollaboratorWorkingCommand -FilePath "git" -WorkingDirectory (Split-Path -Parent $repoRoot) -Arguments @(
+        Invoke-CollaboratorWorkingCommand -FilePath $gitExecutable -WorkingDirectory (Split-Path -Parent $repoRoot) -Arguments @(
             "clone",
             "--depth", "1",
             "https://github.com/microsoft/vcpkg.git",
@@ -431,7 +322,7 @@ function Ensure-CollaboratorNsis {
 }
 
 function Ensure-CollaboratorCmake {
-    $minimumVersion = [version]"3.28.0"
+    $minimumVersion = [version]$rtxBuildContract.minimum_cmake_version
     $currentVersion = Get-CollaboratorCmakeVersion
     if (-not [string]::IsNullOrWhiteSpace($currentVersion) -and ([version]$currentVersion -ge $minimumVersion)) {
         return
@@ -440,9 +331,9 @@ function Ensure-CollaboratorCmake {
     $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
     if ($null -eq $winget) {
         if ([string]::IsNullOrWhiteSpace($currentVersion)) {
-            throw "CMake 3.28+ is required and winget is unavailable to install it automatically."
+            throw "CMake $($rtxBuildContract.minimum_cmake_version)+ is required and winget is unavailable to install it automatically."
         }
-        throw "CMake 3.28+ is required. Found $currentVersion and winget is unavailable to upgrade it automatically."
+        throw "CMake $($rtxBuildContract.minimum_cmake_version)+ is required. Found $currentVersion and winget is unavailable to upgrade it automatically."
     }
 
     $commonArguments = @(
@@ -466,10 +357,10 @@ function Ensure-CollaboratorCmake {
         throw "Failed to install or upgrade CMake via winget."
     }
 
-    $updatedVersion = Get-CollaboratorCmakeVersion
-    if ([string]::IsNullOrWhiteSpace($updatedVersion) -or ([version]$updatedVersion -lt $minimumVersion)) {
-        $resolvedVersion = if ([string]::IsNullOrWhiteSpace($updatedVersion)) { "not found" } else { $updatedVersion }
-        throw "CMake 3.28+ is required for ONNX Runtime RTX builds. Resolved: $resolvedVersion"
+    $resolvedCmake = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
+    if (-not $resolvedCmake.meets_minimum) {
+        $resolvedVersion = if ([string]::IsNullOrWhiteSpace($resolvedCmake.version)) { "not found" } else { $resolvedCmake.version }
+        throw "CMake $($rtxBuildContract.minimum_cmake_version)+ is required for ONNX Runtime RTX builds. Resolved: $resolvedVersion"
     }
 }
 
@@ -480,11 +371,11 @@ function Ensure-CollaboratorTensorRtRtxSdk {
         return
     }
 
-    $downloadUrl = "https://developer.nvidia.com/downloads/trt/rtx_sdk/secure/1.2/tensorrt-rtx-1.2.0.54-win10-amd64-cuda-12.9-release-external.zip"
+    $downloadUrl = $rtxBuildContract.tensorrt_rtx_download_url
     $vendorRoot = Join-Path $repoRoot "vendor"
-    $sdkRoot = Join-Path $vendorRoot "TensorRT-RTX-1.2.0.54"
+    $sdkRoot = Join-Path $vendorRoot ("TensorRT-RTX-" + $rtxBuildContract.tensorrt_rtx_version)
     $tempRoot = Join-Path $repoRoot "temp\collaborator-downloads"
-    $archivePath = Join-Path $tempRoot "tensorrt-rtx-1.2.0.54-win10-amd64-cuda-12.9-release-external.zip"
+    $archivePath = Join-Path $tempRoot ([System.IO.Path]::GetFileName($downloadUrl))
     $extractRoot = Join-Path $tempRoot "tensorrt-rtx-sdk"
 
     if (Test-CollaboratorTensorRtRtxRoot -CandidatePath $sdkRoot) {
@@ -493,7 +384,7 @@ function Ensure-CollaboratorTensorRtRtxSdk {
     }
 
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    Write-Host "[collaborator] Downloading TensorRT RTX SDK 1.2 for CUDA 12.9..." -ForegroundColor Cyan
+    Write-Host "[collaborator] Downloading TensorRT RTX SDK $($rtxBuildContract.tensorrt_rtx_version) for CUDA $($rtxBuildContract.required_cuda_version)..." -ForegroundColor Cyan
     Invoke-CollaboratorWorkingCommand -FilePath "curl.exe" -Arguments @(
         "-L",
         $downloadUrl,
@@ -504,7 +395,7 @@ function Ensure-CollaboratorTensorRtRtxSdk {
     Write-Host "[collaborator] Extracting TensorRT RTX SDK..." -ForegroundColor Cyan
     Extract-CollaboratorArchive -ArchivePath $archivePath -DestinationDir $extractRoot
 
-    $extractedSdkRoot = Join-Path $extractRoot "TensorRT-RTX-1.2.0.54"
+    $extractedSdkRoot = Join-Path $extractRoot ("TensorRT-RTX-" + $rtxBuildContract.tensorrt_rtx_version)
     if (-not (Test-CollaboratorTensorRtRtxRoot -CandidatePath $extractedSdkRoot)) {
         throw "Downloaded TensorRT RTX SDK layout is invalid: $extractedSdkRoot"
     }
@@ -526,7 +417,7 @@ function Ensure-CollaboratorEnvironment {
 
     if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
         if (-not (Test-CollaboratorPython312)) {
-            throw "Python 3.12 is required before staging the curated Windows RTX runtime."
+            throw "Python $($rtxBuildContract.required_python_version) is required before staging the curated Windows RTX runtime."
         }
         if (-not (Test-CollaboratorVsToolchain)) {
             throw "Visual Studio C++ toolchain is required before staging the curated Windows RTX runtime."
@@ -538,6 +429,31 @@ function Ensure-CollaboratorEnvironment {
     }
 }
 
+function Get-CollaboratorPreflightState {
+    param(
+        [string]$SourceRepo,
+        [string]$ExplicitCheckpoint
+    )
+
+    $resolvedCmake = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
+    $resolvedCheckpointPath = Resolve-CollaboratorCheckpointPath -ExplicitPath $ExplicitCheckpoint -SourceRepo $SourceRepo
+    $resolvedRtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
+
+    return [pscustomobject]@{
+        uv_path = Resolve-CorridorKeyUvPath
+        cmake = $resolvedCmake
+        vcpkg_root = $env:VCPKG_ROOT
+        nsis_path = Resolve-CorridorKeyMakeNsisPath
+        checkpoint_path = $resolvedCheckpointPath
+        rtx_ort_root = $resolvedRtxOrtRoot
+        rtx_ort_ready = (Test-CorridorKeyWindowsOrtRoot -OrtRoot $resolvedRtxOrtRoot)
+        python312_path = Resolve-CorridorKeyPython312Path
+        vsdevcmd_path = Resolve-CorridorKeyVsDevCmdPath
+        cuda_root = Resolve-CollaboratorCudaRoot
+        tensorrt_rtx_root = Resolve-CollaboratorTensorRtRtxRoot
+    }
+}
+
 function Assert-CollaboratorPrerequisites {
     param(
         [string]$SourceRepo,
@@ -546,45 +462,43 @@ function Assert-CollaboratorPrerequisites {
 
     $missing = [System.Collections.Generic.List[string]]::new()
 
-    if ($null -eq (Get-Command "uv.exe" -ErrorAction SilentlyContinue) -and
-        $null -eq (Get-Command "uv" -ErrorAction SilentlyContinue)) {
+    $state = Get-CollaboratorPreflightState -SourceRepo $SourceRepo -ExplicitCheckpoint $ExplicitCheckpoint
+
+    if ([string]::IsNullOrWhiteSpace($state.uv_path)) {
         [void]$missing.Add("uv")
     }
 
-    if (-not (Test-CollaboratorCmakeRequirement)) {
-        $resolvedCmakeVersion = Get-CollaboratorCmakeVersion
-        if ([string]::IsNullOrWhiteSpace($resolvedCmakeVersion)) {
-            [void]$missing.Add("CMake 3.28+")
+    if (-not $state.cmake.meets_minimum) {
+        if ([string]::IsNullOrWhiteSpace($state.cmake.version)) {
+            [void]$missing.Add("CMake $($rtxBuildContract.minimum_cmake_version)+")
         } else {
-            [void]$missing.Add("CMake 3.28+ (found $resolvedCmakeVersion)")
+            [void]$missing.Add("CMake $($rtxBuildContract.minimum_cmake_version)+ (found $($state.cmake.version))")
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($env:VCPKG_ROOT) -or -not (Test-Path $env:VCPKG_ROOT)) {
+    if ([string]::IsNullOrWhiteSpace($state.vcpkg_root) -or -not (Test-Path $state.vcpkg_root)) {
         [void]$missing.Add("VCPKG_ROOT")
     }
 
-    if (-not (Test-CollaboratorNsis)) {
+    if ([string]::IsNullOrWhiteSpace($state.nsis_path)) {
         [void]$missing.Add("NSIS (makensis.exe)")
     }
 
-    $checkpointPath = Resolve-CollaboratorCheckpointPath -ExplicitPath $ExplicitCheckpoint -SourceRepo $SourceRepo
-    if ([string]::IsNullOrWhiteSpace($checkpointPath)) {
+    if ([string]::IsNullOrWhiteSpace($state.checkpoint_path)) {
         [void]$missing.Add("CorridorKey checkpoint (.pth)")
     }
 
-    $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
-    if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
-        if (-not (Test-CollaboratorPython312)) {
-            [void]$missing.Add("Python 3.12 for ONNX Runtime RTX build")
+    if (-not $state.rtx_ort_ready) {
+        if ([string]::IsNullOrWhiteSpace($state.python312_path)) {
+            [void]$missing.Add("Python $($rtxBuildContract.required_python_version) for ONNX Runtime RTX build")
         }
-        if (-not (Test-CollaboratorVsToolchain)) {
+        if ([string]::IsNullOrWhiteSpace($state.vsdevcmd_path)) {
             [void]$missing.Add("Visual Studio C++ toolchain")
         }
-        if ([string]::IsNullOrWhiteSpace((Resolve-CollaboratorCudaRoot))) {
+        if ([string]::IsNullOrWhiteSpace($state.cuda_root)) {
             [void]$missing.Add("CUDA toolkit")
         }
-        if ([string]::IsNullOrWhiteSpace((Resolve-CollaboratorTensorRtRtxRoot))) {
+        if ([string]::IsNullOrWhiteSpace($state.tensorrt_rtx_root)) {
             [void]$missing.Add("TensorRT RTX SDK")
         }
     }
@@ -594,7 +508,8 @@ function Assert-CollaboratorPrerequisites {
     }
 
     Write-Host "[collaborator] Preflight OK." -ForegroundColor Green
-    Write-Host "[collaborator] Checkpoint: $checkpointPath" -ForegroundColor Cyan
+    Write-Host "[collaborator] Checkpoint: $($state.checkpoint_path)" -ForegroundColor Cyan
+    Write-Host "[collaborator] CMake: $($state.cmake.path) ($($state.cmake.version))" -ForegroundColor Cyan
 }
 
 Assert-InGitRepository
@@ -604,19 +519,19 @@ Write-Host "[collaborator] Repository: $repoRoot" -ForegroundColor Cyan
 Ensure-CollaboratorEnvironment
 Assert-CollaboratorPrerequisites -SourceRepo $CorridorKeyRepo -ExplicitCheckpoint $Checkpoint
 Write-Host "[collaborator] Step 1/5: Installing Git LFS hooks" -ForegroundColor Cyan
-Invoke-RepoCommand -FilePath "git" -Arguments @("lfs", "install", "--local")
+Invoke-RepoCommand -FilePath $gitExecutable -Arguments @("lfs", "install", "--local")
 
 Write-Host "[collaborator] Step 2/5: Skipping repo LFS object pull for collaborator regeneration" -ForegroundColor Cyan
 Write-Host "[collaborator] This workflow reuses a local checkpoint when available and regenerates the promoted model pack from source." -ForegroundColor DarkGray
 
 if (-not [string]::IsNullOrWhiteSpace($CommitBranch)) {
-    $currentBranch = (& git branch --show-current).Trim()
+    $currentBranch = (& $gitExecutable branch --show-current).Trim()
     if ([string]::IsNullOrWhiteSpace($currentBranch)) {
         throw "Could not determine the current branch."
     }
     if ($currentBranch -ne $CommitBranch) {
         Write-Host "[collaborator] Switching to branch: $CommitBranch" -ForegroundColor Cyan
-        Invoke-RepoCommand -FilePath "git" -Arguments @("checkout", "-B", $CommitBranch)
+        Invoke-RepoCommand -FilePath $gitExecutable -Arguments @("checkout", "-B", $CommitBranch)
     }
 }
 
@@ -681,18 +596,18 @@ if ($CreateCommit.IsPresent) {
     )
 
     Write-Host "[collaborator] Step 5/5: Committing generated models and release version metadata" -ForegroundColor Cyan
-    Invoke-RepoCommand -FilePath "git" -Arguments (@("add", "--") + $commitPaths)
+    Invoke-RepoCommand -FilePath $gitExecutable -Arguments (@("add", "--") + $commitPaths)
 
-    & git diff --cached --quiet -- @commitPaths
+    & $gitExecutable diff --cached --quiet -- @commitPaths
     if ($LASTEXITCODE -ne 0) {
-        Invoke-RepoCommand -FilePath "git" -Arguments @("commit", "-m", $CommitMessage)
+        Invoke-RepoCommand -FilePath $gitExecutable -Arguments @("commit", "-m", $CommitMessage)
     } else {
         Write-Host "[collaborator] No regenerated model artifacts or version metadata were staged; skipping commit." -ForegroundColor Yellow
     }
 
     if ($Push.IsPresent) {
         Write-Host "[collaborator] Step 5/5: Pushing branch" -ForegroundColor Cyan
-        Invoke-RepoCommand -FilePath "git" -Arguments @("push", "-u", "origin", "HEAD")
+        Invoke-RepoCommand -FilePath $gitExecutable -Arguments @("push", "-u", "origin", "HEAD")
     }
 }
 

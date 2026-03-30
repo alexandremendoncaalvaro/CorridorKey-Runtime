@@ -7,6 +7,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $repoRoot "scripts\windows_runtime_helpers.ps1")
+$rtxBuildContract = Get-CorridorKeyWindowsRtxBuildContract
+
 function Add-CheckResult {
     param(
         [System.Collections.Generic.List[object]]$Results,
@@ -24,20 +28,7 @@ function Add-CheckResult {
 
 function Test-UsableCheckpointFile {
     param([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
-        return $false
-    }
-
-    $fileInfo = Get-Item -Path $Path -ErrorAction Stop
-    if ($fileInfo.Length -le 512) {
-        $pointerHead = Get-Content -Path $Path -TotalCount 3 -ErrorAction SilentlyContinue
-        if ($pointerHead -and (($pointerHead | Out-String) -match "https://git-lfs.github.com/spec/v1")) {
-            return $false
-        }
-    }
-
-    return $true
+    return Test-CorridorKeyUsableCheckpointFile -Path $Path
 }
 
 function Test-SourceRepoPath {
@@ -115,186 +106,54 @@ function Resolve-CheckpointPath {
 function Test-CudaToolkitRoot {
     param([string]$CandidatePath)
 
-    return (Test-Path (Join-Path $CandidatePath "bin\nvcc.exe")) -and
-           (Test-Path (Join-Path $CandidatePath "include\cuda_runtime.h"))
+    return Test-CorridorKeyCudaToolkitRoot -CandidatePath $CandidatePath
 }
 
 function Resolve-CudaRoot {
-    if (-not [string]::IsNullOrWhiteSpace($env:CUDA_PATH) -and
-        (Test-CudaToolkitRoot -CandidatePath $env:CUDA_PATH)) {
-        return [System.IO.Path]::GetFullPath($env:CUDA_PATH)
-    }
-
-    $cudaRoot = Join-Path ${env:ProgramFiles} "NVIDIA GPU Computing Toolkit\CUDA"
-    if (Test-Path $cudaRoot) {
-        $candidate = Get-ChildItem -Path $cudaRoot -Directory -Filter "v*" -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-        if ($null -ne $candidate -and (Test-CudaToolkitRoot -CandidatePath $candidate.FullName)) {
-            return $candidate.FullName
-        }
-    }
-
-    return ""
+    return Resolve-CorridorKeyCudaToolkitRoot
 }
 
 function Test-TensorRtRtxRoot {
     param([string]$CandidatePath)
 
-    return (Test-Path (Join-Path $CandidatePath "include\NvInfer.h")) -and
-           ((Get-ChildItem -Path (Join-Path $CandidatePath "bin") -Filter "tensorrt_rtx*.dll" -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+    return Test-CorridorKeyTensorRtRtxRoot -CandidatePath $CandidatePath
 }
 
 function Resolve-TensorRtRtxRoot {
     param([string]$ParentRoot)
 
-    if (-not [string]::IsNullOrWhiteSpace($env:TENSORRT_RTX_HOME) -and
-        (Test-TensorRtRtxRoot -CandidatePath $env:TENSORRT_RTX_HOME)) {
-        return [System.IO.Path]::GetFullPath($env:TENSORRT_RTX_HOME)
-    }
-
-    $vendorRoot = Join-Path $ParentRoot "CorridorKey-Runtime\vendor"
-    if (Test-Path $vendorRoot) {
-        foreach ($candidate in (Get-ChildItem -Path $vendorRoot -Directory -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match '^(TensorRT-RTX|tensorrt-rtx)' } |
-                Sort-Object Name -Descending)) {
-            if (Test-TensorRtRtxRoot -CandidatePath $candidate.FullName) {
-                return $candidate.FullName
-            }
-        }
-    }
-
-    return ""
+    $runtimeRepoRoot = Join-Path $ParentRoot "CorridorKey-Runtime"
+    return Resolve-CorridorKeyTensorRtRtxHome -RepoRoot $runtimeRepoRoot
 }
 
 function Resolve-UvPath {
-    $command = Get-Command "uv.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $command.Source
-    }
-
-    $command = Get-Command "uv" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $command.Source
-    }
-
-    return ""
+    return Resolve-CorridorKeyUvPath
 }
 
 function Resolve-CmakePath {
-    foreach ($candidateName in @("cmake.exe", "cmake")) {
-        $command = Get-Command $candidateName -ErrorAction SilentlyContinue
-        if ($null -ne $command) {
-            return $command.Source
-        }
-    }
-
-    foreach ($candidatePath in @(
-            "C:\Program Files\CMake\bin\cmake.exe",
-            "C:\Program Files (x86)\CMake\bin\cmake.exe"
-        )) {
-        if (Test-Path $candidatePath) {
-            return $candidatePath
-        }
-    }
-
-    return ""
+    $resolved = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
+    return $resolved.path
 }
 
 function Resolve-CmakeVersion {
     param([string]$CmakePath)
-
-    if ([string]::IsNullOrWhiteSpace($CmakePath)) {
-        return ""
-    }
-
-    $firstLine = & $CmakePath --version 2>$null | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($firstLine)) {
-        return ""
-    }
-
-    if (($firstLine | Out-String).Trim() -match 'cmake version ([0-9]+\.[0-9]+\.[0-9]+)') {
-        return $Matches[1]
-    }
-
-    return ""
+    return Get-CorridorKeyCmakeVersion -CmakePath $CmakePath
 }
 
 function Resolve-GitPath {
-    $command = Get-Command "git.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $command.Source
-    }
-
-    $command = Get-Command "git" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $command.Source
-    }
-
-    return ""
+    return Resolve-CorridorKeyGitPath
 }
 
 function Resolve-MakeNsisPath {
-    $command = Get-Command "makensis.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $command) {
-        return $command.Source
-    }
-
-    foreach ($candidate in @(
-            "C:\Program Files (x86)\NSIS\makensis.exe",
-            "C:\Program Files (x86)\NSIS\Bin\makensis.exe"
-        )) {
-        if (Test-Path $candidate) {
-            return $candidate
-        }
-    }
-
-    return ""
+    return Resolve-CorridorKeyMakeNsisPath
 }
 
 function Resolve-Python312 {
-    $pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $pyLauncher) {
-        $resolved = & $pyLauncher.Source -3.12 -c "import sys; print(sys.executable)" 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($resolved)) {
-            return ($resolved | Out-String).Trim()
-        }
-    }
-
-    $python = Get-Command "python.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $python) {
-        $version = & $python.Source -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-        if ($LASTEXITCODE -eq 0 -and ($version | Out-String).Trim() -eq "3.12") {
-            return $python.Source
-        }
-    }
-
-    return ""
+    return Resolve-CorridorKeyPython312Path
 }
 
 function Resolve-VsDevCmd {
-    if (-not [string]::IsNullOrWhiteSpace($env:VSINSTALLDIR)) {
-        $candidate = Join-Path $env:VSINSTALLDIR "Common7\Tools\VsDevCmd.bat"
-        if (Test-Path $candidate) {
-            return $candidate
-        }
-    }
-
-    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    if (-not (Test-Path $vswhere)) {
-        return ""
-    }
-
-    $installationPath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($installationPath)) {
-        return ""
-    }
-
-    $candidate = Join-Path $installationPath.Trim() "Common7\Tools\VsDevCmd.bat"
-    if (Test-Path $candidate) {
-        return $candidate
-    }
-
-    return ""
+    return Resolve-CorridorKeyVsDevCmdPath
 }
 
 function Resolve-RtxRuntimeRoot {
@@ -361,8 +220,9 @@ $runtimeRepoRoot = Resolve-RuntimeRepoRoot -ParentRoot $parentRoot -RepoName $Ru
 $checkpointPath = Resolve-CheckpointPath -SourceRepoRoot $sourceRepoRoot -RuntimeRepoRoot $runtimeRepoRoot
 $gitPath = Resolve-GitPath
 $uvPath = Resolve-UvPath
-$cmakePath = Resolve-CmakePath
-$cmakeVersion = Resolve-CmakeVersion -CmakePath $cmakePath
+$resolvedCmake = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
+$cmakePath = $resolvedCmake.path
+$cmakeVersion = $resolvedCmake.version
 $nsisPath = Resolve-MakeNsisPath
 $python312Path = Resolve-Python312
 $vsDevCmd = Resolve-VsDevCmd
@@ -370,6 +230,16 @@ $cudaRoot = Resolve-CudaRoot
 $tensorRtRtxRoot = Resolve-TensorRtRtxRoot -ParentRoot $parentRoot
 $rtxRuntimeRoot = Resolve-RtxRuntimeRoot -RuntimeRepoRoot $runtimeRepoRoot
 $gpuSummary = @(Get-GpuSummary)
+
+Add-CheckResult -Results $results -Name "rtx_build_contract" -Status "INFO" -Detail (
+    "ORT {0}; CMake {1}+; Python {2}; CUDA {3}; TensorRT RTX {4}; Generator {5}" -f
+    $rtxBuildContract.ort_source_ref,
+    $rtxBuildContract.minimum_cmake_version,
+    $rtxBuildContract.required_python_version,
+    $rtxBuildContract.required_cuda_version,
+    $rtxBuildContract.tensorrt_rtx_version,
+    $rtxBuildContract.cmake_generator
+)
 
 if (-not [string]::IsNullOrWhiteSpace($sourceRepoRoot)) {
     Add-CheckResult -Results $results -Name "source_repo" -Status "PASS" -Detail $sourceRepoRoot
@@ -402,13 +272,13 @@ foreach ($commandCheck in @(
 }
 
 if (-not [string]::IsNullOrWhiteSpace($cmakePath) -and -not [string]::IsNullOrWhiteSpace($cmakeVersion)) {
-    if ([version]$cmakeVersion -ge [version]"3.28.0") {
+    if ([version]$cmakeVersion -ge [version]$rtxBuildContract.minimum_cmake_version) {
         Add-CheckResult -Results $results -Name "cmake" -Status "PASS" -Detail "$cmakePath ($cmakeVersion)"
     } else {
-        Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "$cmakePath ($cmakeVersion). CMake 3.28+ is required."
+        Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "$cmakePath ($cmakeVersion). CMake $($rtxBuildContract.minimum_cmake_version)+ is required."
     }
 } elseif (-not [string]::IsNullOrWhiteSpace($cmakePath)) {
-    Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "$cmakePath (version unavailable). CMake 3.28+ is required."
+    Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "$cmakePath (version unavailable). CMake $($rtxBuildContract.minimum_cmake_version)+ is required."
 } else {
     Add-CheckResult -Results $results -Name "cmake" -Status "FAIL" -Detail "Not found."
 }
