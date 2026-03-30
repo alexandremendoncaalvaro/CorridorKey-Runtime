@@ -458,7 +458,18 @@ if ($doctorSucceeded -and $doctorModelContractsAvailable -and -not $doctorModelC
 }
 
 if ($doctorSucceeded -and -not $doctorHealthy -and -not $doctorFailureTolerated) {
-    throw "Packaged runtime doctor reported unhealthy status. See $doctorReportPath."
+    $missingModelProbeFailuresOnly = Test-CorridorKeyDoctorMissingModelProbeFailuresOnly `
+        -Doctor $doctor `
+        -MissingModels $missingModels
+    if ($missingModelProbeFailuresOnly) {
+        $doctorFailureTolerated = $true
+        if ([string]::IsNullOrWhiteSpace($doctorFailureReason)) {
+            $doctorFailureReason = "Packaged runtime doctor reported unhealthy execution probes only because model(s) are absent from this bundle."
+        }
+        Write-Host "[INFO] Packaged runtime doctor reported unhealthy execution probes only because model(s) are absent from this bundle." -ForegroundColor Cyan
+    } else {
+        throw "Packaged runtime doctor reported unhealthy status. See $doctorReportPath."
+    }
 }
 
 $validationPayload = [ordered]@{

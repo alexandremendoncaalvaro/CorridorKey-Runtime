@@ -1114,6 +1114,68 @@ function Test-CorridorKeyPsProperty {
     return $Object.PSObject.Properties.Match($Name).Count -gt 0
 }
 
+function Test-CorridorKeyDoctorMissingModelProbeFailuresOnly {
+    param(
+        [object]$Doctor,
+        [string[]]$MissingModels
+    )
+
+    if ($null -eq $Doctor -or @($MissingModels).Count -eq 0) {
+        return $false
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Doctor -Name "windows_universal")) {
+        return $false
+    }
+
+    $windowsUniversal = $Doctor.windows_universal
+    if ($null -eq $windowsUniversal -or
+        -not (Test-CorridorKeyPsProperty -Object $windowsUniversal -Name "execution_probes")) {
+        return $false
+    }
+
+    $failedProbes = @(
+        @($windowsUniversal.execution_probes) |
+            Where-Object {
+                (-not [bool]$_.session_create_ok) -or (-not [bool]$_.frame_execute_ok)
+            }
+    )
+    if ($failedProbes.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($probe in $failedProbes) {
+        if ($null -eq $probe -or -not (Test-CorridorKeyPsProperty -Object $probe -Name "model")) {
+            return $false
+        }
+
+        $model = [string]$probe.model
+        if ([string]::IsNullOrWhiteSpace($model) -or @($MissingModels) -notcontains $model) {
+            return $false
+        }
+
+        $modelFound = $true
+        if (Test-CorridorKeyPsProperty -Object $probe -Name "model_found") {
+            $modelFound = [bool]$probe.model_found
+        }
+        if ($modelFound) {
+            return $false
+        }
+
+        $error = ""
+        if (Test-CorridorKeyPsProperty -Object $probe -Name "error") {
+            $error = [string]$probe.error
+        }
+
+        $expectedError = "Model not found: $model"
+        if ($error -ne "Model not found" -and $error -ne $expectedError) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Read-CorridorKeyBundleValidationReport {
     param([string]$ValidationReportPath)
 
