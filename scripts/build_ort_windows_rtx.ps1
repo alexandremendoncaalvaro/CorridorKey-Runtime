@@ -12,40 +12,16 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+$rtxBuildContract = Get-CorridorKeyWindowsRtxBuildContract
+$cmakeGenerator = $rtxBuildContract.cmake_generator
+$buildDirName = "windows-rtx-vs2022"
 
 function Resolve-VsDevCmd {
     param([string]$ExplicitPath)
-
-    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
-        return $ExplicitPath
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($env:VSINSTALLDIR)) {
-        $candidate = Join-Path $env:VSINSTALLDIR "Common7\Tools\VsDevCmd.bat"
-        if (Test-Path $candidate) {
-            return $candidate
-        }
-    }
-
-    $vswhereCandidates = @()
-    $vswhereCommand = Get-Command "vswhere.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $vswhereCommand) {
-        $vswhereCandidates += $vswhereCommand.Source
-    }
-
-    $installerVswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $installerVswhere) {
-        $vswhereCandidates += $installerVswhere
-    }
-
-    foreach ($vswhere in ($vswhereCandidates | Select-Object -Unique)) {
-        $installationPath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($installationPath)) {
-            $candidate = Join-Path $installationPath.Trim() "Common7\Tools\VsDevCmd.bat"
-            if (Test-Path $candidate) {
-                return $candidate
-            }
-        }
+    $resolvedPath = Resolve-CorridorKeyVsDevCmdPath -ExplicitPath $ExplicitPath
+    if (-not [string]::IsNullOrWhiteSpace($resolvedPath)) {
+        return $resolvedPath
     }
 
     throw "Unable to locate VsDevCmd.bat. Pass -VsDevCmd or run from a Visual Studio developer shell."
@@ -54,27 +30,50 @@ function Resolve-VsDevCmd {
 function Resolve-PythonExe {
     param([string]$ExplicitPath)
 
-    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
-        if (-not (Test-Path $ExplicitPath)) {
-            throw "Python executable not found: $ExplicitPath"
-        }
-        return $ExplicitPath
+    $resolvedPath = Resolve-CorridorKeyPython312Path -ExplicitPath $ExplicitPath
+    if (-not [string]::IsNullOrWhiteSpace($resolvedPath)) {
+        return $resolvedPath
     }
 
-    $pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $pyLauncher) {
-        $resolved = & $pyLauncher.Source -3.12 -c "import sys; print(sys.executable)" 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($resolved)) {
-            return $resolved.Trim()
-        }
+    throw "Python $($rtxBuildContract.required_python_version) was not found. Install Python $($rtxBuildContract.required_python_version) or pass -PythonExe."
+}
+
+function Resolve-CmakePath {
+    $resolved = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
+    if ($resolved.meets_minimum) {
+        return $resolved.path
     }
 
-    $pythonCommand = Get-Command "python.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $pythonCommand) {
-        return $pythonCommand.Source
+    throw "CMake $($rtxBuildContract.minimum_cmake_version)+ was not found. Install CMake $($rtxBuildContract.minimum_cmake_version) or newer."
+}
+
+function Resolve-CmakeVersion {
+    param([string]$CmakePath)
+
+    $resolvedVersion = Get-CorridorKeyCmakeVersion -CmakePath $CmakePath
+    if (-not [string]::IsNullOrWhiteSpace($resolvedVersion)) {
+        return $resolvedVersion
     }
 
-    throw "Python 3.12 was not found. Install Python 3.12 or pass -PythonExe."
+    throw "Could not parse CMake version from $CmakePath"
+}
+
+function Assert-CmakeVersion {
+    param(
+        [string]$CmakePath,
+        [string]$MinimumVersion = ""
+    )
+
+    $resolvedMinimumVersion = if ([string]::IsNullOrWhiteSpace($MinimumVersion)) {
+        $rtxBuildContract.minimum_cmake_version
+    } else {
+        $MinimumVersion
+    }
+
+    $resolvedVersion = Resolve-CmakeVersion -CmakePath $CmakePath
+    if ([version]$resolvedVersion -lt [version]$resolvedMinimumVersion) {
+        throw "ONNX Runtime RTX builds require CMake $resolvedMinimumVersion or newer. Resolved: $CmakePath ($resolvedVersion)"
+    }
 }
 
 function Assert-PythonVersion {
@@ -85,8 +84,8 @@ function Assert-PythonVersion {
         throw "Failed to query Python version from $ExecutablePath"
     }
 
-    if ($version.Trim() -ne "3.12") {
-        throw "TensorRT RTX ONNX Runtime builds require Python 3.12. Resolved: $ExecutablePath ($($version.Trim()))."
+    if ($version.Trim() -ne $rtxBuildContract.required_python_version) {
+        throw "TensorRT RTX ONNX Runtime builds require Python $($rtxBuildContract.required_python_version). Resolved: $ExecutablePath ($($version.Trim()))."
     }
 }
 
@@ -468,6 +467,24 @@ function Copy-RuntimeClosure {
     return $copied.Values
 }
 
+function Get-OrtBuildLogHints {
+    param(
+        [string]$BuildDir,
+        [string]$BuildConfig
+    )
+
+    $candidates = @(
+        (Join-Path $BuildDir "CMakeFiles\CMakeError.log"),
+        (Join-Path $BuildDir "CMakeFiles\CMakeOutput.log"),
+        (Join-Path $BuildDir (Join-Path $BuildConfig "CMakeFiles\CMakeError.log")),
+        (Join-Path $BuildDir (Join-Path $BuildConfig "CMakeFiles\CMakeOutput.log")),
+        (Join-Path $BuildDir (Join-Path $BuildConfig (Join-Path $BuildConfig "CMakeFiles\CMakeError.log"))),
+        (Join-Path $BuildDir (Join-Path $BuildConfig (Join-Path $BuildConfig "CMakeFiles\CMakeOutput.log")))
+    )
+
+    return @($candidates | Where-Object { Test-Path $_ } | Select-Object -Unique)
+}
+
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $InstallDir = Join-Path (Split-Path -Parent $PSScriptRoot) "vendor\onnxruntime-windows-rtx"
 }
@@ -479,7 +496,9 @@ $CudaHome = Resolve-CudaHome -ExplicitPath $CudaHome -RepoRoot $repoRoot
 $TensorRtRtxHome = Resolve-TensorRtRtxHome -ExplicitPath $TensorRtRtxHome -RepoRoot $repoRoot
 $VsDevCmd = Resolve-VsDevCmd -ExplicitPath $VsDevCmd
 $PythonExe = Resolve-PythonExe -ExplicitPath $PythonExe
+$CmakePath = Resolve-CmakePath
 Assert-PythonVersion -ExecutablePath $PythonExe
+Assert-CmakeVersion -CmakePath $CmakePath
 
 if (-not (Test-Path $OrtSourceDir)) {
     throw "ONNX Runtime source directory not found: $OrtSourceDir"
@@ -497,26 +516,38 @@ if (-not (Test-Path $VsDevCmd)) {
     throw "VsDevCmd.bat not found: $VsDevCmd"
 }
 
-$buildDir = Join-Path $OrtSourceDir "build\windows-rtx-ninja"
+$buildDir = Join-Path $OrtSourceDir ("build\" + $buildDirName)
 $dumpbinPath = Resolve-DumpbinPath
+$cmakeDir = Split-Path -Parent $CmakePath
 $pythonDir = Split-Path -Parent $PythonExe
 $cudaBinDir = Join-Path $CudaHome "bin"
 $cudaCompiler = Join-Path $cudaBinDir "nvcc.exe"
 $buildPy = Join-Path $OrtSourceDir "tools\ci_build\build.py"
+$cmakeVersion = Resolve-CmakeVersion -CmakePath $CmakePath
 $command = @(
+    "set `"PATH=$cmakeDir;%PATH%`"",
     "set `"PATH=$pythonDir;%PATH%`"",
     "set `"PATH=$cudaBinDir;%PATH%`"",
     "set `"CUDA_PATH=$CudaHome`"",
     "set `"CUDAToolkit_ROOT=$CudaHome`"",
     "call `"$VsDevCmd`" -arch=x64",
     "cd /d `"$OrtSourceDir`"",
-    "`"$PythonExe`" `"$buildPy`" --config $BuildConfig --build_dir `"$buildDir`" --parallel --use_nv_tensorrt_rtx --tensorrt_rtx_home `"$TensorRtRtxHome`" --cuda_home `"$CudaHome`" --cmake_generator `"Ninja`" --build_shared_lib --skip_tests --build --update --use_vcpkg --cmake_extra_defines CUDAToolkit_ROOT=`"$CudaHome`" CMAKE_CUDA_COMPILER=`"$cudaCompiler`""
+    "`"$PythonExe`" `"$buildPy`" --config $BuildConfig --build_dir `"$buildDir`" --parallel --use_nv_tensorrt_rtx --tensorrt_rtx_home `"$TensorRtRtxHome`" --cuda_home `"$CudaHome`" --cmake_path `"$CmakePath`" --cmake_generator `"$cmakeGenerator`" --build_shared_lib --skip_tests --build --update --use_vcpkg --cmake_extra_defines CUDAToolkit_ROOT=`"$CudaHome`" CMAKE_CUDA_COMPILER=`"$cudaCompiler`""
 ) -join " && "
 
 Write-Host "[1/3] Building ONNX Runtime with TensorRT RTX support..."
 Write-Host "Using Python: $PythonExe"
+Write-Host "Using CMake: $CmakePath ($cmakeVersion)"
+Write-Host "Using generator: $cmakeGenerator"
 cmd.exe /c $command
 if ($LASTEXITCODE -ne 0) {
+    $logHints = @(Get-OrtBuildLogHints -BuildDir $buildDir -BuildConfig $BuildConfig)
+    if ($logHints.Count -gt 0) {
+        Write-Host "[build-ort] Likely CMake logs:" -ForegroundColor Yellow
+        foreach ($logHint in $logHints) {
+            Write-Host " - $logHint" -ForegroundColor Yellow
+        }
+    }
     throw "ONNX Runtime build failed."
 }
 
@@ -527,7 +558,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "include") | Ou
 
 Copy-Item -Recurse -Force (Join-Path $OrtSourceDir "include\onnxruntime") (Join-Path $InstallDir "include")
 
-$runtimeBinDir = Join-Path $buildDir $BuildConfig
+$runtimeBinDir = Join-Path $buildDir (Join-Path $BuildConfig $BuildConfig)
 if (-not (Test-Path $runtimeBinDir)) {
     throw "ONNX Runtime build output directory not found: $runtimeBinDir"
 }

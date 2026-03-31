@@ -218,13 +218,7 @@ void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
 
 #ifdef _WIN32
 int extract_model_resolution(const std::filesystem::path& model_path) {
-    auto filename = model_path.filename().string();
-    for (int res : {2048, 1536, 1024, 768, 512}) {
-        if (filename.find("_" + std::to_string(res)) != std::string::npos) {
-            return res;
-        }
-    }
-    return 1024;
+    return core::infer_model_resolution_from_path(model_path).value_or(1024);
 }
 
 void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options,
@@ -240,6 +234,9 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
     constexpr const char* kWorkspace2GB = "2147483648";   // 512, 768, 1024
     constexpr const char* kWorkspace4GB = "4294967296";   // 1536
     constexpr const char* kWorkspace8GB = "8589934592";   // 2048
+    constexpr const char* kProfileMinShapes = "nv_profile_min_shapes";
+    constexpr const char* kProfileOptShapes = "nv_profile_opt_shapes";
+    constexpr const char* kProfileMaxShapes = "nv_profile_max_shapes";
     const char* workspace_size = kWorkspace2GB;
     if (model_res >= 2048) {
         workspace_size = kWorkspace8GB;
@@ -251,6 +248,13 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
         {tensorrt_rtx_option_names::kDeviceId, "0"},
         {tensorrt_rtx_option_names::kMaxWorkspaceSize, workspace_size},
     };
+
+    const std::string profile_shapes =
+        "input_rgb_hint:1x4x" + std::to_string(model_res) + "x" + std::to_string(model_res);
+    provider_options.emplace(kProfileMinShapes, profile_shapes);
+    provider_options.emplace(kProfileOptShapes, profile_shapes);
+    provider_options.emplace(kProfileMaxShapes, profile_shapes);
+    debug_log("TensorRT RTX profile shapes: " + profile_shapes);
 
     debug_log("Setting up runtime cache");
     if (auto runtime_cache_dir = common::tensorrt_rtx_runtime_cache_path(model_path);
@@ -488,6 +492,14 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
             if (auto inferred_resolution = core::infer_model_resolution(m_input_node_dims.back());
                 inferred_resolution.has_value()) {
                 m_recommended_resolution = *inferred_resolution;
+                debug_log("Inferred model resolution from input shape: " +
+                          std::to_string(*inferred_resolution));
+            } else if (auto filename_resolution =
+                           core::infer_model_resolution_from_path(model_path);
+                       filename_resolution.has_value()) {
+                m_recommended_resolution = *filename_resolution;
+                debug_log("Falling back to model filename resolution: " +
+                          std::to_string(*filename_resolution));
             }
             debug_log("Input 0 element type: " + std::to_string(m_input_element_type) +
                       " (FLOAT16 is 10, FLOAT is 1)");

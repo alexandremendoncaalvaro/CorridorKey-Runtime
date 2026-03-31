@@ -213,8 +213,7 @@ std::vector<std::string> windows_probe_models_for_backend(Backend backend,
     if (backend == Backend::TensorRT) {
         const int max_resolution = max_supported_resolution_for_device(device).value_or(512);
         for (const auto* model : {"corridorkey_fp16_2048.onnx", "corridorkey_fp16_1536.onnx",
-                                  "corridorkey_fp16_1024.onnx", "corridorkey_fp16_768.onnx",
-                                  "corridorkey_fp16_512.onnx"}) {
+                                  "corridorkey_fp16_1024.onnx", "corridorkey_fp16_512.onnx"}) {
             const auto separator = std::string_view(model).find_last_of('_');
             const auto extension = std::string_view(model).find('.');
             if (separator == std::string_view::npos || extension == std::string_view::npos ||
@@ -233,8 +232,6 @@ std::vector<std::string> windows_probe_models_for_backend(Backend backend,
 
     if (device.available_memory_mb >= 10000) {
         append_unique_model(models, "corridorkey_fp16_1024.onnx");
-    } else if (device.available_memory_mb >= 8000) {
-        append_unique_model(models, "corridorkey_fp16_768.onnx");
     } else {
         append_unique_model(models, "corridorkey_fp16_512.onnx");
     }
@@ -531,6 +528,187 @@ struct BundleLayoutInfo {
     bool packaged_layout_detected = false;
 };
 
+struct PackagedModelInventory {
+    std::vector<std::string> expected_models = {};
+    std::string package_type = "";
+    std::string model_profile = "";
+    std::string bundle_track = "";
+    std::string release_label = "";
+    std::string optimization_profile_id = "";
+    std::string optimization_profile_label = "";
+    std::string backend_intent = "";
+    std::string fallback_policy = "";
+    std::string warmup_policy = "";
+    std::string certification_tier = "";
+    bool unrestricted_quality_attempt = false;
+    bool unrestricted_quality_attempt_set = false;
+    std::vector<std::string> compiled_context_models = {};
+    std::vector<std::string> expected_compiled_context_models = {};
+    std::vector<std::string> missing_compiled_context_models = {};
+    bool compiled_context_complete = false;
+    bool compiled_context_complete_set = false;
+};
+
+std::optional<std::string> optional_inventory_string(const nlohmann::json& parsed,
+                                                     std::string_view field_name) {
+    const auto key = std::string(field_name);
+    if (!parsed.contains(key) || !parsed[key].is_string()) {
+        return std::nullopt;
+    }
+    return parsed[key].get<std::string>();
+}
+
+std::vector<std::string> optional_inventory_string_array(const nlohmann::json& parsed,
+                                                         std::string_view field_name) {
+    const auto key = std::string(field_name);
+    if (!parsed.contains(key) || !parsed[key].is_array()) {
+        return {};
+    }
+    return parsed[key].get<std::vector<std::string>>();
+}
+
+std::optional<bool> optional_inventory_bool(const nlohmann::json& parsed,
+                                            std::string_view field_name) {
+    const auto key = std::string(field_name);
+    if (!parsed.contains(key) || !parsed[key].is_boolean()) {
+        return std::nullopt;
+    }
+    return parsed[key].get<bool>();
+}
+
+bool packaged_inventory_contract_complete(const PackagedModelInventory& inventory) {
+    return !inventory.package_type.empty() && !inventory.model_profile.empty() &&
+           !inventory.bundle_track.empty() && !inventory.release_label.empty() &&
+           !inventory.optimization_profile_id.empty() &&
+           !inventory.optimization_profile_label.empty() && !inventory.backend_intent.empty() &&
+           !inventory.fallback_policy.empty() && !inventory.warmup_policy.empty() &&
+           !inventory.certification_tier.empty() && inventory.unrestricted_quality_attempt_set &&
+           inventory.compiled_context_complete_set;
+}
+
+bool packaged_inventory_requires_compiled_contexts(const PackagedModelInventory& inventory) {
+    return inventory.bundle_track == "rtx";
+}
+
+bool packaged_inventory_compiled_contexts_ready(const std::optional<PackagedModelInventory>& inventory) {
+    if (!inventory.has_value()) {
+        return false;
+    }
+    if (!packaged_inventory_requires_compiled_contexts(*inventory)) {
+        return true;
+    }
+    return inventory->compiled_context_complete_set && inventory->compiled_context_complete;
+}
+
+std::vector<std::filesystem::path> packaged_model_inventory_candidates(
+    const std::filesystem::path& models_dir) {
+    std::vector<std::filesystem::path> candidates;
+
+    if (models_dir.filename() != "models") {
+        return candidates;
+    }
+
+    candidates.push_back(models_dir.parent_path() / "model_inventory.json");
+
+    const auto parent = models_dir.parent_path();
+    if (parent.filename() == "Resources" && parent.parent_path().filename() == "Contents") {
+        candidates.push_back(parent.parent_path().parent_path() / "model_inventory.json");
+    }
+
+    return candidates;
+}
+
+std::optional<PackagedModelInventory> load_packaged_model_inventory(
+    const std::filesystem::path& models_dir) {
+    for (const auto& candidate : packaged_model_inventory_candidates(models_dir)) {
+        std::error_code error;
+        if (!std::filesystem::exists(candidate, error) || error) {
+            continue;
+        }
+
+        try {
+            std::ifstream stream(candidate);
+            if (!stream.is_open()) {
+                continue;
+            }
+
+            nlohmann::json parsed = nlohmann::json::parse(stream, nullptr, true, true);
+            if (!parsed.contains("expected_models") || !parsed["expected_models"].is_array()) {
+                continue;
+            }
+
+            PackagedModelInventory inventory;
+            inventory.expected_models = parsed["expected_models"].get<std::vector<std::string>>();
+            inventory.package_type = optional_inventory_string(parsed, "package_type").value_or("");
+            inventory.model_profile = optional_inventory_string(parsed, "model_profile").value_or("");
+            inventory.bundle_track = optional_inventory_string(parsed, "bundle_track").value_or("");
+            inventory.release_label = optional_inventory_string(parsed, "release_label").value_or("");
+            inventory.optimization_profile_id =
+                optional_inventory_string(parsed, "optimization_profile_id").value_or("");
+            inventory.optimization_profile_label =
+                optional_inventory_string(parsed, "optimization_profile_label").value_or("");
+            inventory.backend_intent =
+                optional_inventory_string(parsed, "backend_intent").value_or("");
+            inventory.fallback_policy =
+                optional_inventory_string(parsed, "fallback_policy").value_or("");
+            inventory.warmup_policy =
+                optional_inventory_string(parsed, "warmup_policy").value_or("");
+            inventory.certification_tier =
+                optional_inventory_string(parsed, "certification_tier").value_or("");
+            inventory.compiled_context_models =
+                optional_inventory_string_array(parsed, "compiled_context_models");
+            inventory.expected_compiled_context_models =
+                optional_inventory_string_array(parsed, "expected_compiled_context_models");
+            inventory.missing_compiled_context_models =
+                optional_inventory_string_array(parsed, "missing_compiled_context_models");
+            if (auto value = optional_inventory_bool(parsed, "unrestricted_quality_attempt");
+                value.has_value()) {
+                inventory.unrestricted_quality_attempt = *value;
+                inventory.unrestricted_quality_attempt_set = true;
+            }
+            if (auto value = optional_inventory_bool(parsed, "compiled_context_complete");
+                value.has_value()) {
+                inventory.compiled_context_complete = *value;
+                inventory.compiled_context_complete_set = true;
+            }
+            return inventory;
+        } catch (...) {
+            continue;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ModelCatalogEntry> find_model_catalog_entry(const std::string& filename) {
+    auto catalog = model_catalog();
+    auto it = std::find_if(catalog.begin(), catalog.end(), [&](const ModelCatalogEntry& entry) {
+        return entry.filename == filename;
+    });
+    if (it == catalog.end()) {
+        return std::nullopt;
+    }
+    return *it;
+}
+
+std::vector<std::string> expected_packaged_models_for_platform(const std::filesystem::path& models_dir,
+                                                               bool windows_platform) {
+    if (auto inventory = load_packaged_model_inventory(models_dir); inventory.has_value()) {
+        return inventory->expected_models;
+    }
+
+    std::vector<std::string> expected_models;
+    for (const auto& model : model_catalog()) {
+        const bool packaged_for_current_platform =
+            windows_platform ? model.packaged_for_windows : model.packaged_for_macos;
+        if (!packaged_for_current_platform) {
+            continue;
+        }
+        expected_models.push_back(model.filename);
+    }
+    return expected_models;
+}
+
 BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_dir) {
     BundleLayoutInfo layout;
 #if defined(_WIN32)
@@ -688,28 +866,33 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         find_libraries_with_prefixes(executable_dir, {"cudart64_", "cudart"});
     auto compiled_context_models = nlohmann::json::array();
 
-    nlohmann::json packaged_models = nlohmann::json::array();
-    bool packaged_models_present = true;
-    for (const auto& model : model_catalog()) {
-        bool packaged_for_current_platform =
+    const auto packaged_inventory = load_packaged_model_inventory(models_dir);
+    const auto expected_packaged_models =
+        expected_packaged_models_for_platform(models_dir,
 #if defined(_WIN32)
-            model.packaged_for_windows;
+                                              true
 #else
-            model.packaged_for_macos;
+                                              false
 #endif
-        if (!packaged_for_current_platform) {
-            continue;
-        }
+        );
 
-        std::filesystem::path model_path = models_dir / model.filename;
+    nlohmann::json packaged_models = nlohmann::json::array();
+    bool packaged_models_present = !expected_packaged_models.empty();
+    for (const auto& filename : expected_packaged_models) {
+        std::filesystem::path model_path = models_dir / filename;
         bool found = std::filesystem::exists(model_path);
         packaged_models_present = packaged_models_present && found;
 
         nlohmann::json entry;
-        entry["filename"] = model.filename;
+        entry["filename"] = filename;
         entry["found"] = found;
-        entry["validated_platforms"] = model.validated_platforms;
-        entry["validated_hardware_tiers"] = model.validated_hardware_tiers;
+        if (auto model = find_model_catalog_entry(filename); model.has_value()) {
+            entry["validated_platforms"] = model->validated_platforms;
+            entry["validated_hardware_tiers"] = model->validated_hardware_tiers;
+        } else {
+            entry["validated_platforms"] = nlohmann::json::array();
+            entry["validated_hardware_tiers"] = nlohmann::json::array();
+        }
         packaged_models.push_back(entry);
     }
 
@@ -778,8 +961,64 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["mlx_bridge_present"] = mlx_bridge_present;
     json["mlx_bridge_artifacts"] = mlx_bridge_artifacts;
     json["compiled_context_models"] = compiled_context_models;
-    json["bundle_track"] =
-        windows_rtx_bundle ? "rtx" : (windows_directml_bundle ? "directml" : "generic");
+    const bool inventory_contract_complete =
+        packaged_inventory.has_value() ? packaged_inventory_contract_complete(*packaged_inventory)
+                                       : !packaged_layout_detected;
+    const bool compiled_contexts_ready =
+        packaged_inventory.has_value()
+            ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
+            : !windows_rtx_bundle;
+    json["model_inventory"] = nlohmann::json::object();
+    if (packaged_inventory.has_value()) {
+        json["model_inventory"]["package_type"] = packaged_inventory->package_type;
+        json["model_inventory"]["model_profile"] = packaged_inventory->model_profile;
+        json["model_inventory"]["bundle_track"] = packaged_inventory->bundle_track;
+        json["model_inventory"]["release_label"] = packaged_inventory->release_label;
+        json["model_inventory"]["optimization_profile_id"] =
+            packaged_inventory->optimization_profile_id;
+        json["model_inventory"]["optimization_profile_label"] =
+            packaged_inventory->optimization_profile_label;
+        json["model_inventory"]["backend_intent"] = packaged_inventory->backend_intent;
+        json["model_inventory"]["fallback_policy"] = packaged_inventory->fallback_policy;
+        json["model_inventory"]["warmup_policy"] = packaged_inventory->warmup_policy;
+        json["model_inventory"]["certification_tier"] = packaged_inventory->certification_tier;
+        json["model_inventory"]["unrestricted_quality_attempt"] =
+            packaged_inventory->unrestricted_quality_attempt;
+        json["model_inventory"]["compiled_context_models"] =
+            packaged_inventory->compiled_context_models;
+        json["model_inventory"]["expected_compiled_context_models"] =
+            packaged_inventory->expected_compiled_context_models;
+        json["model_inventory"]["missing_compiled_context_models"] =
+            packaged_inventory->missing_compiled_context_models;
+        json["model_inventory"]["compiled_context_complete"] =
+            packaged_inventory->compiled_context_complete;
+        json["model_inventory"]["contract_complete"] = inventory_contract_complete;
+    } else {
+        json["model_inventory"]["contract_complete"] = inventory_contract_complete;
+    }
+    json["model_profile"] = packaged_inventory.has_value() ? packaged_inventory->model_profile : "";
+    json["bundle_track"] = packaged_inventory.has_value() && !packaged_inventory->bundle_track.empty()
+                               ? packaged_inventory->bundle_track
+                               : (windows_rtx_bundle ? "rtx"
+                                                     : (windows_directml_bundle ? "dml"
+                                                                                : "generic"));
+    json["release_label"] =
+        packaged_inventory.has_value() ? packaged_inventory->release_label : "";
+    json["optimization_profile_id"] =
+        packaged_inventory.has_value() ? packaged_inventory->optimization_profile_id : "";
+    json["optimization_profile_label"] =
+        packaged_inventory.has_value() ? packaged_inventory->optimization_profile_label : "";
+    json["certification_tier"] =
+        packaged_inventory.has_value() ? packaged_inventory->certification_tier : "";
+    json["unrestricted_quality_attempt"] =
+        packaged_inventory.has_value() && packaged_inventory->unrestricted_quality_attempt_set
+            ? packaged_inventory->unrestricted_quality_attempt
+            : false;
+    json["compiled_context_complete"] =
+        packaged_inventory.has_value() && packaged_inventory->compiled_context_complete_set
+            ? packaged_inventory->compiled_context_complete
+            : compiled_context_models.empty();
+    json["model_inventory_contract_complete"] = inventory_contract_complete;
     json["runtime_backend_bundle_ready"] = runtime_backend_bundle_ready;
     json["tensorrt_rtx_provider_libraries"] = nlohmann::json::array();
     for (const auto& path : tensorrt_provider_libraries) {
@@ -808,13 +1047,15 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["signature"] = inspect_signature(executable_path);
 #if defined(_WIN32)
     json["healthy"] = packaged_layout_detected && packaged_models_present &&
-                      runtime_backend_bundle_ready &&
+                      json["model_inventory_contract_complete"].get<bool>() &&
+                      compiled_contexts_ready && runtime_backend_bundle_ready &&
                       (windows_ofx_layout || core_library.has_value());
 #else
     json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
                       runtime_reference_found && core_library.has_value() && core_reference_found &&
                       mlx_library.has_value() && mlx_reference_found && mlx_metallib.has_value() &&
-                      mlx_bridge_present && packaged_models_present;
+                      mlx_bridge_present && packaged_models_present &&
+                      json["model_inventory_contract_complete"].get<bool>();
 #endif
     return json;
 }
@@ -1164,7 +1405,9 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["runtime_cache_dir"] = "";
     json["runtime_cache_ready"] = true;
 
-    bool packaged_models_ready = true;
+    const auto packaged_inventory = load_packaged_model_inventory(models_dir);
+    const auto expected_windows_models = expected_packaged_models_for_platform(models_dir, true);
+    bool packaged_models_ready = !expected_windows_models.empty();
     bool any_packaged_model_found = false;
     std::error_code error;
     if (std::filesystem::exists(models_dir, error)) {
@@ -1179,23 +1422,25 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         }
     }
 
-    for (const auto& model : model_catalog()) {
-        if (!model.packaged_for_windows) {
-            continue;
-        }
-
-        std::filesystem::path model_path = models_dir / model.filename;
+    for (const auto& filename : expected_windows_models) {
+        std::filesystem::path model_path = models_dir / filename;
         bool found = std::filesystem::exists(model_path);
         any_packaged_model_found = any_packaged_model_found || found;
         packaged_models_ready = packaged_models_ready && found;
 
         nlohmann::json entry;
-        entry["filename"] = model.filename;
+        entry["filename"] = filename;
         entry["found"] = found;
-        entry["recommended_backend"] = model.recommended_backend;
-        entry["validated_platforms"] = model.validated_platforms;
-        entry["intended_platforms"] = model.intended_platforms;
-        if (model.recommended_backend == "tensorrt") {
+        if (auto model = find_model_catalog_entry(filename); model.has_value()) {
+            entry["recommended_backend"] = model->recommended_backend;
+            entry["validated_platforms"] = model->validated_platforms;
+            entry["intended_platforms"] = model->intended_platforms;
+        } else {
+            entry["recommended_backend"] = "cpu";
+            entry["validated_platforms"] = nlohmann::json::array();
+            entry["intended_platforms"] = nlohmann::json::array();
+        }
+        if (entry["recommended_backend"] == "tensorrt") {
             auto compiled_context_path =
                 common::existing_tensorrt_rtx_compiled_context_model_path(model_path);
             entry["compiled_context_path"] =
@@ -1205,6 +1450,27 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         json["packaged_models"].push_back(entry);
     }
 
+    const bool inventory_contract_complete =
+        !packaged_inventory.has_value() || packaged_inventory_contract_complete(*packaged_inventory);
+    const bool compiled_contexts_ready = packaged_inventory.has_value()
+                                             ? packaged_inventory_compiled_contexts_ready(
+                                                   packaged_inventory)
+                                             : true;
+    json["model_profile"] = packaged_inventory.has_value() ? packaged_inventory->model_profile : "";
+    json["bundle_track"] = packaged_inventory.has_value() ? packaged_inventory->bundle_track : "";
+    json["optimization_profile_id"] =
+        packaged_inventory.has_value() ? packaged_inventory->optimization_profile_id : "";
+    json["certification_tier"] =
+        packaged_inventory.has_value() ? packaged_inventory->certification_tier : "";
+    json["unrestricted_quality_attempt"] =
+        packaged_inventory.has_value() && packaged_inventory->unrestricted_quality_attempt_set
+            ? packaged_inventory->unrestricted_quality_attempt
+            : false;
+    json["compiled_context_complete"] =
+        packaged_inventory.has_value() && packaged_inventory->compiled_context_complete_set
+            ? packaged_inventory->compiled_context_complete
+            : false;
+    json["model_inventory_contract_complete"] = inventory_contract_complete;
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
 
     auto preferred_probe = preferred_windows_probe(probes);
@@ -1236,8 +1502,10 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 
     bool backend_ok = json.value("backend_integrated", false);
     bool models_ok = json.value("packaged_models_ready", false);
+    bool inventory_contract_ok = json.value("model_inventory_contract_complete", true);
+    bool compiled_contexts_ok = compiled_contexts_ready;
 
-    json["healthy"] = backend_ok && models_ok;
+    json["healthy"] = backend_ok && models_ok && inventory_contract_ok && compiled_contexts_ok;
 #endif
 
     return json;

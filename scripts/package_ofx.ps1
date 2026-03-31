@@ -3,6 +3,10 @@ param(
     [string]$OrtRoot = "",
     [string]$ModelsDir = "",
     [string]$OutputDir = "",
+    [string]$ArtifactManifestPath = "",
+    [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
+    [string]$ModelProfile = "rtx-full",
+    [switch]$AllowUncertifiedTensorRtContexts,
     [switch]$Skip2048
 )
 
@@ -28,6 +32,7 @@ $runtimeServerBinary = Join-Path $BuildDir "src\cli\corridorkey.exe"
 $win64Dir = Join-Path $OutputDir "Contents\Win64"
 $resourcesDir = Join-Path $OutputDir "Contents\Resources\models"
 $modelInventoryPath = Join-Path $OutputDir "model_inventory.json"
+$artifactManifestOutputPath = Join-Path $OutputDir "artifact_manifest.json"
 
 function Assert-FileExists {
     param([string]$Path, [string]$Message)
@@ -161,6 +166,71 @@ function Test-RuntimeBackendSupport {
     }
 }
 
+function Ensure-TensorRtCompiledContext {
+    param(
+        [string]$RuntimeDir,
+        [string]$ModelPath,
+        [string]$OutputPath
+    )
+
+    if (Test-Path $OutputPath) {
+        return
+    }
+
+    $runtimeBinary = Join-Path $RuntimeDir "corridorkey.exe"
+    if (-not (Test-Path $runtimeBinary)) {
+        throw "Cannot compile TensorRT context because $runtimeBinary was not found."
+    }
+
+    $envPathOld = $env:PATH
+    Push-Location $RuntimeDir
+    try {
+        $env:PATH = "$RuntimeDir;$envPathOld"
+        $json = & $runtimeBinary `
+            compile-context `
+            --model $ModelPath `
+            --output $OutputPath `
+            --device tensorrt `
+            --json 2>$null
+        $exitCode = $LASTEXITCODE
+        $parsed = $null
+        if (-not [string]::IsNullOrWhiteSpace($json)) {
+            try {
+                $parsed = $json | ConvertFrom-Json
+            } catch {
+                $parsed = $null
+            }
+        }
+
+        if ($exitCode -ne 0) {
+            if ($null -ne $parsed -and $parsed.PSObject.Properties.Match("error").Count -gt 0) {
+                throw [string]$parsed.error
+            }
+            throw "compile-context failed for $(Split-Path -Leaf $ModelPath)"
+        }
+
+        if ($null -eq $parsed) {
+            throw "compile-context did not return valid JSON for $(Split-Path -Leaf $ModelPath)"
+        }
+
+        if (-not $parsed.success) {
+            $errorMessage = if ($parsed.PSObject.Properties.Match("error").Count -gt 0) {
+                [string]$parsed.error
+            } else {
+                "compile-context returned success=false"
+            }
+            throw $errorMessage
+        }
+    } finally {
+        $env:PATH = $envPathOld
+        Pop-Location
+    }
+
+    if (-not (Test-Path $OutputPath)) {
+        throw "compile-context did not produce the expected output file: $OutputPath"
+    }
+}
+
 if (Test-Path $OutputDir) {
     Remove-Item $OutputDir -Recurse -Force
 }
@@ -285,22 +355,108 @@ if ($null -ne $tensorrtProvider) {
     }
 }
 
-$targetModels = Get-CorridorKeyOfxBundleTargetModels -Include2048:(-not $Skip2048.IsPresent)
+$targetModels = Get-CorridorKeyOfxBundleTargetModels -ModelProfile $ModelProfile
+if ($Skip2048.IsPresent) {
+    $targetModels = @($targetModels | Where-Object { $_ -ne "corridorkey_fp16_2048.onnx" })
+}
+$profileContract = Get-CorridorKeyModelProfileContract -ModelProfile $ModelProfile
 $modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
+$compiledContextModels = @()
+$expectedCompiledContextModels = Get-CorridorKeyExpectedCompiledContextModels `
+    -PresentModels $modelInventory.present_models `
+    -ModelProfile $ModelProfile
+$strictCertifiedRtxPackaging = $profileContract.expects_compiled_context_models -and
+    (-not $AllowUncertifiedTensorRtContexts.IsPresent)
+$artifactManifest = $null
+
+if ($strictCertifiedRtxPackaging) {
+    if ([string]::IsNullOrWhiteSpace($ArtifactManifestPath)) {
+        $ArtifactManifestPath = Get-CorridorKeyWindowsRtxArtifactManifestPath -ModelsDir $ModelsDir
+    }
+
+    $artifactManifest = Assert-CorridorKeyWindowsRtxArtifactManifestHealthy `
+        -ArtifactsDir $ModelsDir `
+        -ExpectedModels $modelInventory.present_models `
+        -ExpectedCompiledContextModels $expectedCompiledContextModels `
+        -ArtifactManifestPath $ArtifactManifestPath `
+        -Label "$ModelProfile package source"
+}
 
 foreach ($model in $modelInventory.present_models) {
     $sourcePath = Join-Path $ModelsDir $model
     Copy-Item $sourcePath $resourcesDir -Force
+
+    $compiledContextName = ([System.IO.Path]::GetFileNameWithoutExtension($model)) + "_ctx.onnx"
+    $compiledContextPath = Join-Path $ModelsDir $compiledContextName
+    if (Test-Path $compiledContextPath) {
+        Copy-Item $compiledContextPath $resourcesDir -Force
+        $compiledContextModels += $compiledContextName
+    }
+}
+
+if ($profileContract.expects_compiled_context_models -and -not $strictCertifiedRtxPackaging) {
+    foreach ($compiledContextName in $expectedCompiledContextModels) {
+        if ($compiledContextModels -contains $compiledContextName) {
+            continue
+        }
+
+        $modelName = $compiledContextName -replace '_ctx\.onnx$', '.onnx'
+        $stagedModelPath = Join-Path $resourcesDir $modelName
+        $stagedCompiledContextPath = Join-Path $resourcesDir $compiledContextName
+        Ensure-TensorRtCompiledContext `
+            -RuntimeDir $win64Dir `
+            -ModelPath $stagedModelPath `
+            -OutputPath $stagedCompiledContextPath
+        $compiledContextModels += $compiledContextName
+    }
+}
+
+$missingCompiledContextModels = @(
+    $expectedCompiledContextModels |
+        Where-Object { $compiledContextModels -notcontains $_ }
+)
+
+$certificationContractIssues = @()
+$certificationContractComplete = $false
+if ($strictCertifiedRtxPackaging) {
+    Copy-Item $ArtifactManifestPath $artifactManifestOutputPath -Force
+    $stagedManifest = Assert-CorridorKeyWindowsRtxArtifactManifestHealthy `
+        -ArtifactsDir $resourcesDir `
+        -ExpectedModels $modelInventory.present_models `
+        -ExpectedCompiledContextModels $expectedCompiledContextModels `
+        -ArtifactManifestPath $artifactManifestOutputPath `
+        -Label "$ModelProfile staged package"
+    $artifactManifest = $stagedManifest
+    $certificationContractComplete = $true
+} elseif ($profileContract.expects_compiled_context_models) {
+    $certificationContractIssues += "RTX packaging did not use a certified artifact manifest."
 }
 
 $inventoryPayload = [ordered]@{
-    package_type = "ofx_bundle"
+    package_type = $profileContract.package_type
+    model_profile = $profileContract.model_profile
+    bundle_track = $profileContract.bundle_track
+    release_label = $profileContract.release_label
+    optimization_profile_id = $profileContract.optimization_profile_id
+    optimization_profile_label = $profileContract.optimization_profile_label
+    backend_intent = $profileContract.backend_intent
+    fallback_policy = $profileContract.fallback_policy
+    warmup_policy = $profileContract.warmup_policy
+    certification_tier = $profileContract.certification_tier
+    unrestricted_quality_attempt = $profileContract.unrestricted_quality_attempt
     models_dir = [System.IO.Path]::GetFullPath($ModelsDir)
     expected_models = @($modelInventory.expected_models)
     present_models = @($modelInventory.present_models)
     missing_models = @($modelInventory.missing_models)
     present_count = $modelInventory.present_count
     missing_count = $modelInventory.missing_count
+    compiled_context_models = @($compiledContextModels)
+    expected_compiled_context_models = @($expectedCompiledContextModels)
+    missing_compiled_context_models = @($missingCompiledContextModels)
+    compiled_context_complete = @($missingCompiledContextModels).Count -eq 0
+    certification_manifest_present = $strictCertifiedRtxPackaging
+    certification_contract_complete = $certificationContractComplete
+    certification_contract_issues = @($certificationContractIssues)
 }
 Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
 

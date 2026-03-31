@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "package-ofx", "package-runtime", "release", "sync-version")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "certify-rtx-artifacts", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -16,6 +16,18 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+
+function Assert-CorridorKeyVariantDoctorHealthy {
+    param(
+        [string]$Version,
+        [string]$ReleaseSuffix
+    )
+
+    $bundleValidationPath = Join-Path $repoRoot ("dist\\CorridorKey_Resolve_v${Version}_Windows_${ReleaseSuffix}\\bundle_validation.json")
+    Assert-CorridorKeyBundleValidationHealthy `
+        -ValidationReportPath $bundleValidationPath `
+        -Label "Variant $ReleaseSuffix" | Out-Null
+}
 
 function Invoke-CorridorKeyScript {
     param(
@@ -37,16 +49,6 @@ function Invoke-CorridorKeyScript {
     & powershell.exe @command
     if ($LASTEXITCODE -ne 0) {
         throw "Script failed: $scriptPath"
-    }
-}
-
-function Get-CorridorKeyReleaseSuffixes {
-    param([string]$Track)
-
-    switch ($Track) {
-        "rtx" { return @("RTX") }
-        "dml" { return @("DirectML") }
-        default { return @("DirectML", "RTX") }
     }
 }
 
@@ -104,15 +106,33 @@ switch ($Task) {
         Invoke-CorridorKeyScript -ScriptName "prepare_windows_rtx_release.ps1" -Arguments $arguments
         break
     }
+    "certify-rtx-artifacts" {
+        $arguments = @(
+            "-Version", $resolvedVersion,
+            "-BuildPreset", $Preset
+        ) + $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "certify_windows_rtx_artifacts.ps1" -Arguments $arguments
+        break
+    }
     "package-ofx" {
-        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $resolvedTrack) {
-            $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
+        foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $resolvedTrack) {
+            $arguments = @(
+                "-Version", $resolvedVersion,
+                "-ReleaseSuffix", $variant.Suffix,
+                "-ModelProfile", $variant.ModelProfile
+            ) + $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_ofx_installer_windows.ps1" -Arguments $arguments
+            Assert-CorridorKeyVariantDoctorHealthy -Version $resolvedVersion -ReleaseSuffix $variant.Suffix
         }
         break
     }
     "package-runtime" {
-        foreach ($suffix in Get-CorridorKeyReleaseSuffixes -Track $resolvedTrack) {
+        $runtimeSuffixes = switch ($resolvedTrack) {
+            "rtx" { @("RTX") }
+            "dml" { @("DirectML") }
+            default { @("DirectML", "RTX") }
+        }
+        foreach ($suffix in $runtimeSuffixes) {
             $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_runtime_installer_windows.ps1" -Arguments $arguments
         }
@@ -121,6 +141,18 @@ switch ($Task) {
     "release" {
         $arguments = @("-Version", $resolvedVersion, "-Track", $resolvedTrack) + $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments
+        break
+    }
+    "regen-rtx-release" {
+        $arguments = @("-Version", $resolvedVersion, "-BuildPreset", $Preset)
+        if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
+            $arguments += @("-Checkpoint", $Checkpoint)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
+            $arguments += @("-CorridorKeyRepo", $CorridorKeyRepo)
+        }
+        $arguments += $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "regen_windows_rtx_release.ps1" -Arguments $arguments
         break
     }
 }

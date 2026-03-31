@@ -59,6 +59,16 @@ TEST_CASE("Model resolution inference from input shape", "[unit][inference][regr
     REQUIRE_FALSE(core::infer_model_resolution({1, 4, 2048}).has_value());
 }
 
+TEST_CASE("Model resolution inference falls back to artifact filename", "[unit][inference][regression]") {
+    REQUIRE(core::infer_model_resolution_from_path("corridorkey_fp16_1536.onnx") ==
+            std::optional<int>(1536));
+    REQUIRE(core::infer_model_resolution_from_path("corridorkey_fp16_1536_ctx.onnx") ==
+            std::optional<int>(1536));
+    REQUIRE(core::infer_model_resolution_from_path("corridorkey_fp16_1024.onnx") ==
+            std::optional<int>(1024));
+    REQUIRE_FALSE(core::infer_model_resolution_from_path("corridorkey_fp16.onnx").has_value());
+}
+
 TEST_CASE("Output validation rejects non-finite model output", "[unit][inference][regression]") {
     SECTION("Finite values pass with correct stats") {
         const std::vector<float> values = {0.0F, 0.5F, 1.0F};

@@ -65,8 +65,6 @@ inline int quality_mode_for_resolution(int resolution) {
     switch (resolution) {
         case 512:
             return kQualityPreview;
-        case 768:
-            return kQualityStandard;
         case 1024:
             return kQualityHigh;
         case 1536:
@@ -93,7 +91,7 @@ inline int quality_search_resolution(const DeviceInfo& device, int quality_mode,
 }
 
 inline int rounded_gb_from_mb(std::int64_t memory_mb) {
-    return static_cast<int>((memory_mb + 512) / 1024);
+    return static_cast<int>((memory_mb + 1023) / 1024);
 }
 
 inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& device,
@@ -101,6 +99,14 @@ inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& 
                                                               int requested_resolution) {
     if (!is_fixed_quality_mode(quality_mode)) {
         return std::nullopt;
+    }
+
+    if ((device.backend == Backend::TensorRT || device.backend == Backend::CUDA ||
+         device.backend == Backend::DirectML || device.backend == Backend::WindowsML ||
+         device.backend == Backend::OpenVINO) &&
+        requested_resolution == 768) {
+        return "768px is not part of CorridorKey's current public Windows quality ladder. "
+               "Please use Draft (512) or High (1024).";
     }
 
     auto max_supported_resolution = app::max_supported_resolution_for_device(device);
@@ -281,7 +287,6 @@ inline bool should_prepare_bootstrap_during_instance_create(bool use_runtime_ser
 
 inline int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
     if (quality_mode == kQualityPreview) return 512;
-    if (quality_mode == kQualityStandard) return 768;
     if (quality_mode == kQualityHigh) return 1024;
     if (quality_mode == kQualityUltra) return 1536;
     if (quality_mode == kQualityMaximum) return 2048;
@@ -290,7 +295,14 @@ inline int resolve_target_resolution(int quality_mode, int input_width, int inpu
     if (max_dim > 3000) return 2048;
     if (max_dim > 2000) return 1536;
     if (max_dim > 1000) return 1024;
-    return 768;
+    return 512;
+}
+
+inline int normalize_target_resolution_for_backend(Backend backend, int quality_mode,
+                                                   int requested_resolution) {
+    (void)backend;
+    (void)quality_mode;
+    return requested_resolution;
 }
 
 inline int initial_requested_resolution_for_quality_mode(int quality_mode) {
@@ -389,8 +401,9 @@ inline std::string missing_quality_artifact_message(
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
-    const int requested_resolution =
-        resolve_target_resolution(effective_quality_mode, input_width, input_height);
+    const int requested_resolution = normalize_target_resolution_for_backend(
+        backend, effective_quality_mode,
+        resolve_target_resolution(effective_quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(effective_quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto expected = app::expected_artifact_paths_for_request(
@@ -482,8 +495,8 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0) {
-    const int requested_resolution =
-        resolve_target_resolution(quality_mode, input_width, input_height);
+    const int requested_resolution = normalize_target_resolution_for_backend(
+        backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto candidates = app::quality_artifact_candidates_for_request(

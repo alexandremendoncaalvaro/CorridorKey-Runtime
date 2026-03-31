@@ -24,6 +24,70 @@ function Test-CorridorKeyJsonProperty {
     return $Object.PSObject.Properties.Match($Name).Count -gt 0
 }
 
+function Get-CorridorKeyInventoryContractIssues {
+    param(
+        [object]$Inventory,
+        [object]$ExpectedContract
+    )
+
+    $issues = @()
+
+    $stringFields = @(
+        "package_type",
+        "model_profile",
+        "bundle_track",
+        "release_label",
+        "optimization_profile_id",
+        "optimization_profile_label",
+        "backend_intent",
+        "fallback_policy",
+        "warmup_policy",
+        "certification_tier"
+    )
+
+    foreach ($field in $stringFields) {
+        if (-not (Test-CorridorKeyJsonProperty -Object $Inventory -Name $field)) {
+            $issues += "Missing inventory field '$field'."
+            continue
+        }
+
+        $actualValue = [string]$Inventory.$field
+        $expectedValue = [string]$ExpectedContract.$field
+        if ($actualValue -ne $expectedValue) {
+            $issues += "Inventory field '$field' expected '$expectedValue' but found '$actualValue'."
+        }
+    }
+
+    foreach ($field in @("expected_compiled_context_models", "compiled_context_models", "missing_compiled_context_models")) {
+        if (-not (Test-CorridorKeyJsonProperty -Object $Inventory -Name $field)) {
+            $issues += "Missing inventory field '$field'."
+            continue
+        }
+
+        if ($null -eq $Inventory.$field -or $Inventory.$field -isnot [System.Array]) {
+            $issues += "Inventory field '$field' must be an array."
+        }
+    }
+
+    foreach ($field in @("compiled_context_complete", "unrestricted_quality_attempt")) {
+        if (-not (Test-CorridorKeyJsonProperty -Object $Inventory -Name $field)) {
+            $issues += "Missing inventory field '$field'."
+        }
+    }
+
+    if ($ExpectedContract.expects_compiled_context_models) {
+        $compiledContextComplete = $false
+        if (Test-CorridorKeyJsonProperty -Object $Inventory -Name "compiled_context_complete") {
+            $compiledContextComplete = [bool]$Inventory.compiled_context_complete
+        }
+        if (-not $compiledContextComplete) {
+            $issues += "Inventory requires precompiled TensorRT context models, but the packaged set is incomplete."
+        }
+    }
+
+    return @($issues)
+}
+
 Write-Host "Validating OFX bundle: $BundlePath" -ForegroundColor Cyan
 Write-Host ""
 
@@ -32,7 +96,9 @@ $bundleRoot = Split-Path -Parent $bundleDescriptor
 $win64Dir = Join-Path $bundleDescriptor "Contents\Win64"
 $resourcesDir = Join-Path $bundleDescriptor "Contents\Resources\models"
 $modelInventoryPath = Join-Path $bundleDescriptor "model_inventory.json"
+$artifactManifestPath = Join-Path $bundleDescriptor "artifact_manifest.json"
 $bundleValidationPath = Join-Path $bundleRoot "bundle_validation.json"
+$defaultModelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix (Split-Path $bundleRoot -Leaf)
 $expectsUniversalGpuPath = $bundleDescriptor -match 'Universal'
 $expectsDirectMlPath = $bundleDescriptor -match 'DirectML'
 
@@ -191,13 +257,66 @@ if ($expectsDirectMlPath -and ($supportedBackends -notcontains "dml")) {
 $bundleModelInventory = if (Test-Path $modelInventoryPath) {
     Get-Content -Path $modelInventoryPath -Raw | ConvertFrom-Json
 } else {
-    $expectedModels = Get-CorridorKeyOfxBundleTargetModels -Include2048
-    [pscustomobject](Get-CorridorKeyModelInventory -ModelsDir $resourcesDir -ExpectedModels $expectedModels)
+    $expectedModels = Get-CorridorKeyOfxBundleTargetModels -ModelProfile $defaultModelProfile
+    $fallbackInventory = [ordered]@{}
+    foreach ($property in (Get-CorridorKeyModelInventory -ModelsDir $resourcesDir -ExpectedModels $expectedModels).GetEnumerator()) {
+        $fallbackInventory[$property.Key] = $property.Value
+    }
+    $fallbackInventory["model_profile"] = $defaultModelProfile
+    [pscustomobject]$fallbackInventory
 }
 
 $presentModels = @($bundleModelInventory.present_models)
 $missingModels = @($bundleModelInventory.missing_models)
 $expectedModels = @($bundleModelInventory.expected_models)
+$modelProfile = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "model_profile") {
+    $bundleModelInventory.model_profile
+} else {
+    $defaultModelProfile
+}
+$expectedProfileContract = Get-CorridorKeyModelProfileContract -ModelProfile $modelProfile
+$compiledContextComplete = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "compiled_context_complete") {
+    [bool]$bundleModelInventory.compiled_context_complete
+} else {
+    $false
+}
+$expectedCompiledContextModels = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "expected_compiled_context_models") {
+    @($bundleModelInventory.expected_compiled_context_models)
+} else {
+    @()
+}
+$missingCompiledContextModels = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "missing_compiled_context_models") {
+    @($bundleModelInventory.missing_compiled_context_models)
+} else {
+    @()
+}
+$inventoryContractIssues = Get-CorridorKeyInventoryContractIssues `
+    -Inventory $bundleModelInventory `
+    -ExpectedContract $expectedProfileContract
+$inventoryContractComplete = @($inventoryContractIssues).Count -eq 0
+if (-not $inventoryContractComplete) {
+    throw "Bundle model inventory contract is invalid. Issues: $($inventoryContractIssues -join ' | ')"
+}
+
+$certificationContractIssues = @()
+$certificationContractComplete = $false
+$certificationManifestPresent = Test-Path $artifactManifestPath
+if ($expectedProfileContract.expects_compiled_context_models) {
+    if (-not $certificationManifestPresent) {
+        $certificationContractIssues += "Packaged RTX bundle is missing artifact_manifest.json."
+    } else {
+        $certificationManifest = Read-CorridorKeyWindowsRtxArtifactManifest -ArtifactManifestPath $artifactManifestPath
+        $certificationContractIssues = Get-CorridorKeyWindowsRtxArtifactManifestIssues `
+            -Manifest $certificationManifest `
+            -ArtifactsDir $resourcesDir `
+            -ExpectedModels $presentModels `
+            -ExpectedCompiledContextModels $expectedCompiledContextModels
+        $certificationContractComplete = @($certificationContractIssues).Count -eq 0
+        if (-not $certificationContractComplete) {
+            throw "Bundle RTX certification contract is invalid. Issues: $($certificationContractIssues -join ' | ')"
+        }
+    }
+}
 
 foreach ($model in $presentModels) {
     $path = Join-Path $resourcesDir $model
@@ -275,6 +394,9 @@ try {
         if (Test-CorridorKeyJsonProperty -Object $doctor.summary -Name "model_contracts_healthy") {
             $doctorModelContractsHealthy = [bool]$doctor.summary.model_contracts_healthy
             $doctorModelContractsAvailable = $true
+        } elseif (Test-CorridorKeyJsonProperty -Object $doctor.summary -Name "bundle_inventory_contract_healthy") {
+            $doctorModelContractsHealthy = [bool]$doctor.summary.bundle_inventory_contract_healthy
+            $doctorModelContractsAvailable = $true
         }
 
         Write-Host "[PASS] Wrote doctor report: $doctorReportPath" -ForegroundColor Green
@@ -284,7 +406,8 @@ try {
             "n/a"
         }
         Write-Host "[INFO] Doctor summary healthy=$($doctor.summary.healthy) model_contracts_healthy=$summaryModelContractsHealthy windows_universal_healthy=$($doctor.summary.windows_universal_healthy)" -ForegroundColor Cyan
-        if ($doctorModelContractsAvailable -and $null -ne $doctor.model_contracts) {
+        if ((Test-CorridorKeyJsonProperty -Object $doctor -Name "model_contracts") -and
+            $null -ne $doctor.model_contracts) {
             $contractGroups = @($doctor.model_contracts.groups)
             foreach ($group in $contractGroups) {
                 Write-Host "[INFO] Model contract group '$($group.group)': healthy=$($group.healthy) loadable=$($group.all_models_loadable) consistent=$($group.contract_consistent) baseline=$($group.baseline_model)" -ForegroundColor Cyan
@@ -334,6 +457,21 @@ if ($doctorSucceeded -and $doctorModelContractsAvailable -and -not $doctorModelC
     }
 }
 
+if ($doctorSucceeded -and -not $doctorHealthy -and -not $doctorFailureTolerated) {
+    $missingModelProbeFailuresOnly = Test-CorridorKeyDoctorMissingModelProbeFailuresOnly `
+        -Doctor $doctor `
+        -MissingModels $missingModels
+    if ($missingModelProbeFailuresOnly) {
+        $doctorFailureTolerated = $true
+        if ([string]::IsNullOrWhiteSpace($doctorFailureReason)) {
+            $doctorFailureReason = "Packaged runtime doctor reported unhealthy execution probes only because model(s) are absent from this bundle."
+        }
+        Write-Host "[INFO] Packaged runtime doctor reported unhealthy execution probes only because model(s) are absent from this bundle." -ForegroundColor Cyan
+    } else {
+        throw "Packaged runtime doctor reported unhealthy status. See $doctorReportPath."
+    }
+}
+
 $validationPayload = [ordered]@{
     bundle_path = $bundleDescriptor
     validation_passed = $true
@@ -341,11 +479,37 @@ $validationPayload = [ordered]@{
         supported_backends = @($supportedBackends)
     }
     models = [ordered]@{
+        model_profile = $modelProfile
         expected_models = @($expectedModels)
         present_models = @($presentModels)
         missing_models = @($missingModels)
         present_count = @($presentModels).Count
         missing_count = @($missingModels).Count
+        inventory_contract = [ordered]@{
+            complete = $inventoryContractComplete
+            issues = @($inventoryContractIssues)
+            expected_contract = [ordered]@{
+                package_type = $expectedProfileContract.package_type
+                model_profile = $expectedProfileContract.model_profile
+                bundle_track = $expectedProfileContract.bundle_track
+                release_label = $expectedProfileContract.release_label
+                optimization_profile_id = $expectedProfileContract.optimization_profile_id
+                optimization_profile_label = $expectedProfileContract.optimization_profile_label
+                backend_intent = $expectedProfileContract.backend_intent
+                fallback_policy = $expectedProfileContract.fallback_policy
+                warmup_policy = $expectedProfileContract.warmup_policy
+                certification_tier = $expectedProfileContract.certification_tier
+                unrestricted_quality_attempt = $expectedProfileContract.unrestricted_quality_attempt
+            }
+            compiled_context_complete = $compiledContextComplete
+            expected_compiled_context_models = @($expectedCompiledContextModels)
+            missing_compiled_context_models = @($missingCompiledContextModels)
+        }
+        certification_contract = [ordered]@{
+            complete = $certificationContractComplete
+            issues = @($certificationContractIssues)
+            manifest_present = $certificationManifestPresent
+        }
     }
     doctor = [ordered]@{
         attempted = $true

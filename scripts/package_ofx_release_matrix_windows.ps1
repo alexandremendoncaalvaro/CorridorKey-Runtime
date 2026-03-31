@@ -37,7 +37,8 @@ function Invoke-PackageVariant {
     param(
         [string]$Label,
         [string]$OrtRoot,
-        [string]$ReleaseSuffix
+        [string]$ReleaseSuffix,
+        [string]$ModelProfile
     )
 
     if (-not (Test-Path $OrtRoot)) {
@@ -53,6 +54,9 @@ function Invoke-PackageVariant {
     )
     if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
         $arguments += @("-ReleaseSuffix", $ReleaseSuffix)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ModelProfile)) {
+        $arguments += @("-ModelProfile", $ModelProfile)
     }
     if ($Skip2048.IsPresent) {
         $arguments += "-Skip2048"
@@ -77,7 +81,8 @@ if ($SyncDirectML.IsPresent -or -not (Test-Path $DirectMlOrtRoot)) {
     }
 }
 
-Invoke-PackageVariant -Label "RTX" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX"
-Invoke-PackageVariant -Label "DirectML" -OrtRoot $DirectMlOrtRoot -ReleaseSuffix "DirectML"
+Invoke-PackageVariant -Label "RTX Lite" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX_Lite" -ModelProfile "rtx-lite"
+Invoke-PackageVariant -Label "RTX Full" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX_Full" -ModelProfile "rtx-full"
+Invoke-PackageVariant -Label "DirectML" -OrtRoot $DirectMlOrtRoot -ReleaseSuffix "DirectML" -ModelProfile "windows-universal"
 
 Write-Host "[done] Windows Resolve OFX package matrix is ready under dist\\" -ForegroundColor Green

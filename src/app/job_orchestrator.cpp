@@ -45,6 +45,31 @@ std::vector<StageTiming> finalize_timings(common::StageProfiler& profiler,
     return profiler.snapshot();
 }
 
+std::string stage_group_name(std::string_view stage_name) {
+    const auto contains = [&](std::string_view token) {
+        return stage_name.find(token) != std::string_view::npos;
+    };
+
+    if (stage_name == "job_total" || stage_name == "benchmark_total") {
+        return "total";
+    }
+    if (contains("compile") || contains("warmup")) {
+        return "warmup_compile";
+    }
+    if (contains("write") || contains("encode") || contains("artifact")) {
+        return "write_output";
+    }
+    if (contains("prepare") || contains("engine_create") || contains("hardware_strategy") ||
+        contains("collect_inputs") || contains("session_create")) {
+        return "prepare";
+    }
+    if (contains("render") || contains("infer") || contains("_run") || contains("pipeline") ||
+        contains("frame_total")) {
+        return "execute";
+    }
+    return "other";
+}
+
 Result<std::filesystem::path> make_benchmark_output_path(const JobRequest& request,
                                                          bool video_input) {
     auto temp_root = std::filesystem::temp_directory_path() / "corridorkey-benchmark";
@@ -125,6 +150,82 @@ Result<void> prepare_output_path(const std::filesystem::path& output_path) {
     }
 
     return {};
+}
+
+bool report_flag(const nlohmann::json& report, const char* section, const char* field,
+                 bool default_value = false) {
+    if (!report.contains(section) || !report[section].is_object()) {
+        return default_value;
+    }
+    return report[section].value(field, default_value);
+}
+
+std::string report_string(const nlohmann::json& report, const char* section, const char* field) {
+    if (!report.contains(section) || !report[section].is_object()) {
+        return "";
+    }
+    return report[section].value(field, "");
+}
+
+bool packaged_profile_matches_active_profile(const nlohmann::json& report) {
+    if (!report.contains("optimization_profile") || !report["optimization_profile"].is_object()) {
+        return true;
+    }
+
+    const auto bundle_profile = report_string(report, "bundle", "model_profile");
+    const auto active_profile = report["optimization_profile"].value("id", "");
+    if (bundle_profile.empty() || active_profile.empty()) {
+        return true;
+    }
+
+    if (bundle_profile == "rtx-lite" || bundle_profile == "rtx-stable") {
+        return active_profile == "windows-rtx-lite";
+    }
+    if (bundle_profile == "rtx-full") {
+        return active_profile == "windows-rtx-full";
+    }
+
+    return true;
+}
+
+std::size_t count_models_with_artifact_state(const nlohmann::json& models, const char* field) {
+    if (!models.is_array()) {
+        return 0;
+    }
+
+    return static_cast<std::size_t>(std::count_if(models.begin(), models.end(), [&](const auto& entry) {
+        return entry.contains("artifact_state") && entry["artifact_state"].is_object() &&
+               entry["artifact_state"].value(field, false);
+    }));
+}
+
+std::pair<bool, bool> windows_packaged_model_presence(const nlohmann::json& report,
+                                                      const nlohmann::json& models) {
+    const auto bundle = report.contains("bundle") ? report["bundle"] : nlohmann::json::object();
+    if (bundle.value("packaged_layout_detected", false) && bundle.contains("packaged_models") &&
+        bundle["packaged_models"].is_array()) {
+        const auto& packaged_models = bundle["packaged_models"];
+        const bool any_models = !packaged_models.empty();
+        const bool all_found =
+            std::all_of(packaged_models.begin(), packaged_models.end(), [](const auto& entry) {
+                return entry.value("found", false);
+            });
+        return {any_models, !any_models || all_found};
+    }
+
+    bool packaged_windows_models_present = true;
+    bool any_packaged_windows_model = false;
+    for (const auto& entry : models) {
+        if (!entry.value("packaged_for_windows", false)) {
+            continue;
+        }
+        any_packaged_windows_model = true;
+        packaged_windows_models_present =
+            packaged_windows_models_present && entry.value("found", false);
+    }
+
+    return {any_packaged_windows_model,
+            !any_packaged_windows_model || packaged_windows_models_present};
 }
 
 struct ResolvedVideoOutput {
@@ -482,7 +583,8 @@ bool JobOrchestrator::is_video_file(const std::filesystem::path& p) {
 nlohmann::json JobOrchestrator::get_system_info() {
     nlohmann::json info;
     info["version"] = CORRIDORKEY_VERSION_STRING;
-    info["capabilities"] = to_json(runtime_capabilities());
+    auto capabilities = runtime_capabilities();
+    info["capabilities"] = to_json(capabilities);
 
     auto devices = list_devices();
     nlohmann::json devices_json = nlohmann::json::array();
@@ -522,19 +624,155 @@ nlohmann::json JobOrchestrator::get_system_info() {
 
     info["devices"] = devices_json;
 
-    // Recommendation based on primary device
-    auto strategy = HardwareProfile::get_best_strategy(devices[0]);
-    info["recommendation"]["resolution"] = strategy.target_resolution;
-    info["recommendation"]["variant"] = strategy.recommended_variant;
+    auto active_device = preferred_runtime_device(capabilities, devices);
+    if (active_device.has_value()) {
+        nlohmann::json active_device_json;
+        active_device_json["name"] = active_device->name;
+        active_device_json["memory_mb"] = active_device->available_memory_mb;
+        active_device_json["backend"] = backend_to_string(active_device->backend);
+        info["active_device"] = active_device_json;
+
+        auto strategy = HardwareProfile::get_best_strategy(*active_device);
+        info["recommendation"]["resolution"] = strategy.target_resolution;
+        info["recommendation"]["variant"] = strategy.recommended_variant;
+        info["recommendation"]["optimization_profile"] =
+            to_json(runtime_optimization_profile_for_device(capabilities, *active_device));
+    }
     info["commands"] = {"info",   "doctor",  "benchmark", "download",
                         "models", "presets", "process",   "compile-context"};
 
     return info;
 }
 
+nlohmann::json summarize_stage_groups(const std::vector<StageTiming>& timings) {
+    std::vector<StageTiming> grouped;
+
+    for (const auto& timing : timings) {
+        const auto group_name = stage_group_name(timing.name);
+        auto existing =
+            std::find_if(grouped.begin(), grouped.end(), [&](const StageTiming& grouped_timing) {
+                return grouped_timing.name == group_name;
+            });
+        if (existing == grouped.end()) {
+            grouped.push_back(StageTiming{group_name, timing.total_ms, timing.sample_count,
+                                          timing.work_units});
+            continue;
+        }
+
+        existing->total_ms += timing.total_ms;
+        existing->sample_count += timing.sample_count;
+        existing->work_units += timing.work_units;
+    }
+
+    static const std::array<std::string_view, 6> order = {"prepare",        "warmup_compile",
+                                                          "execute",        "write_output",
+                                                          "total",          "other"};
+    std::sort(grouped.begin(), grouped.end(), [&](const StageTiming& left, const StageTiming& right) {
+        const auto rank = [&](std::string_view name) {
+            auto it = std::find(order.begin(), order.end(), name);
+            if (it == order.end()) {
+                return static_cast<int>(order.size());
+            }
+            return static_cast<int>(std::distance(order.begin(), it));
+        };
+        return rank(left.name) < rank(right.name);
+    });
+
+    nlohmann::json json = nlohmann::json::array();
+    for (const auto& timing : grouped) {
+        json.push_back(to_json(timing));
+    }
+    return json;
+}
+
+nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
+    nlohmann::json summary;
+    const auto platform = report["system"]["capabilities"].value("platform", "");
+    const bool bundle_healthy = report_flag(report, "bundle", "healthy", false);
+    const bool video_healthy = report_flag(report, "video", "healthy", false);
+    const bool cache_healthy = report_flag(report, "cache", "healthy", false);
+    const bool coreml_healthy =
+        !report_flag(report, "coreml", "applicable", false) ||
+        report_flag(report, "coreml", "healthy", false);
+    const bool apple_probe_ready =
+        !report_flag(report, "mlx", "applicable", false) ||
+        (report_flag(report, "mlx", "probe_available", false) &&
+         report_flag(report, "mlx", "primary_pack_ready", false));
+    const bool apple_bridge_ready =
+        !report_flag(report, "mlx", "applicable", false) ||
+        report_flag(report, "mlx", "bridge_ready", false);
+    const bool apple_backend_integrated =
+        !report_flag(report, "mlx", "applicable", false) ||
+        report_flag(report, "mlx", "backend_integrated", false);
+    const bool apple_healthy =
+        !report_flag(report, "mlx", "applicable", false) ||
+        report_flag(report, "mlx", "healthy", false);
+    const bool windows_provider_ready =
+        !report_flag(report, "windows_universal", "applicable", false) ||
+        report_flag(report, "windows_universal", "provider_available", false);
+    const bool windows_execution_ready =
+        !report_flag(report, "windows_universal", "applicable", false) ||
+        report_flag(report, "windows_universal", "backend_integrated", false);
+
+    const auto [any_packaged_windows_model, packaged_windows_models_present] =
+        windows_packaged_model_presence(report, report["models"]);
+    bool validated_models_present = true;
+    if (platform == "windows") {
+        validated_models_present =
+            !any_packaged_windows_model || packaged_windows_models_present;
+    } else {
+        for (const auto& entry : report["models"]) {
+            if (!entry["validated_platforms"].empty() && entry.value("packaged_for_macos", false)) {
+                validated_models_present =
+                    validated_models_present && entry.value("found", false);
+            }
+        }
+    }
+
+    summary["bundle_healthy"] = bundle_healthy;
+    summary["video_healthy"] = video_healthy;
+    summary["cache_healthy"] = cache_healthy;
+    summary["coreml_healthy"] = coreml_healthy;
+    summary["apple_acceleration_probe_ready"] = apple_probe_ready;
+    summary["apple_acceleration_bridge_ready"] = apple_bridge_ready;
+    summary["apple_acceleration_backend_integrated"] = apple_backend_integrated;
+    summary["apple_acceleration_healthy"] = apple_healthy;
+    summary["validated_models_present"] = validated_models_present;
+    summary["windows_universal_provider_ready"] = windows_provider_ready;
+    summary["windows_universal_execution_ready"] = windows_execution_ready;
+    summary["windows_universal_packaged_models_present"] =
+        !report_flag(report, "windows_universal", "applicable", false) ||
+        !any_packaged_windows_model || packaged_windows_models_present;
+    summary["windows_universal_preferred_backend"] =
+        report["windows_universal"].value("recommended_backend", "");
+    summary["windows_universal_preferred_model"] =
+        report["windows_universal"].value("recommended_model", "");
+    summary["bundle_inventory_contract_healthy"] =
+        report_flag(report, "bundle", "model_inventory_contract_complete", true);
+    summary["packaged_profile_matches_active_profile"] =
+        packaged_profile_matches_active_profile(report);
+    summary["certified_model_count"] = count_models_with_artifact_state(report["models"],
+                                                                        "certified_for_active_device");
+    summary["recommended_model_present"] =
+        count_models_with_artifact_state(report["models"], "recommended_for_active_device") > 0;
+    summary["windows_universal_healthy"] =
+        !report_flag(report, "windows_universal", "applicable", false) ||
+        report_flag(report, "windows_universal", "healthy", false);
+    summary["healthy"] = bundle_healthy && video_healthy && cache_healthy && apple_healthy &&
+                         summary["windows_universal_healthy"].get<bool>() &&
+                         validated_models_present &&
+                         summary["bundle_inventory_contract_healthy"].get<bool>() &&
+                         summary["packaged_profile_matches_active_profile"].get<bool>();
+    return summary;
+}
+
 nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_dir) {
     nlohmann::json report;
     report["timestamp"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+
+    auto capabilities = runtime_capabilities();
+    auto devices = list_devices();
+    auto active_device = preferred_runtime_device(capabilities, devices);
 
     report["system"] = get_system_info();
     auto health = inspect_operational_health(models_dir);
@@ -547,9 +785,6 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["windows_universal"] = health["windows_universal"];
 
     nlohmann::json models = nlohmann::json::array();
-    bool validated_models_present = true;
-    bool packaged_windows_models_present = true;
-    bool any_packaged_windows_model = false;
     for (const auto& model : model_catalog()) {
         std::filesystem::path path = models_dir / model.filename;
         nlohmann::json entry = to_json(model);
@@ -558,60 +793,23 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
         if (entry["found"]) {
             entry["size_bytes"] = std::filesystem::file_size(path);
         }
-        if (!model.validated_platforms.empty() && model.packaged_for_macos) {
-            validated_models_present = validated_models_present && entry["found"].get<bool>();
-        }
-        if (model.packaged_for_windows) {
-            any_packaged_windows_model = true;
-            packaged_windows_models_present =
-                packaged_windows_models_present && entry["found"].get<bool>();
+        if (active_device.has_value()) {
+            entry["artifact_state"] =
+                to_json(artifact_runtime_state_for_device(model, capabilities, *active_device,
+                                                          entry["found"].get<bool>()));
         }
         models.push_back(entry);
     }
     report["models"] = models;
+    if (active_device.has_value()) {
+        report["active_device"]["name"] = active_device->name;
+        report["active_device"]["memory_mb"] = active_device->available_memory_mb;
+        report["active_device"]["backend"] = backend_to_string(active_device->backend);
+        report["optimization_profile"] =
+            to_json(runtime_optimization_profile_for_device(capabilities, *active_device));
+    }
     report["presets"] = list_presets();
-    bool platform_validated_models_present =
-        report["system"]["capabilities"]["platform"] == "windows"
-            ? (!any_packaged_windows_model || packaged_windows_models_present)
-            : validated_models_present;
-    report["summary"]["bundle_healthy"] = report["bundle"]["healthy"];
-    report["summary"]["video_healthy"] = report["video"]["healthy"];
-    report["summary"]["cache_healthy"] = report["cache"]["healthy"];
-    report["summary"]["coreml_healthy"] =
-        !report["coreml"]["applicable"].get<bool>() || report["coreml"]["healthy"].get<bool>();
-    report["summary"]["apple_acceleration_probe_ready"] =
-        !report["mlx"]["applicable"].get<bool>() ||
-        (report["mlx"]["probe_available"].get<bool>() &&
-         report["mlx"]["primary_pack_ready"].get<bool>());
-    report["summary"]["apple_acceleration_bridge_ready"] =
-        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["bridge_ready"].get<bool>();
-    report["summary"]["apple_acceleration_backend_integrated"] =
-        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["backend_integrated"].get<bool>();
-    report["summary"]["apple_acceleration_healthy"] =
-        !report["mlx"]["applicable"].get<bool>() || report["mlx"]["healthy"].get<bool>();
-    report["summary"]["validated_models_present"] = platform_validated_models_present;
-    report["summary"]["windows_universal_provider_ready"] =
-        !report["windows_universal"]["applicable"].get<bool>() ||
-        report["windows_universal"]["provider_available"].get<bool>();
-    report["summary"]["windows_universal_execution_ready"] =
-        !report["windows_universal"]["applicable"].get<bool>() ||
-        report["windows_universal"]["backend_integrated"].get<bool>();
-    report["summary"]["windows_universal_packaged_models_present"] =
-        !report["windows_universal"]["applicable"].get<bool>() || !any_packaged_windows_model ||
-        packaged_windows_models_present;
-    report["summary"]["windows_universal_preferred_backend"] =
-        report["windows_universal"]["recommended_backend"];
-    report["summary"]["windows_universal_preferred_model"] =
-        report["windows_universal"]["recommended_model"];
-    report["summary"]["windows_universal_healthy"] =
-        !report["windows_universal"]["applicable"].get<bool>() ||
-        report["windows_universal"]["healthy"].get<bool>();
-    report["summary"]["healthy"] = report["summary"]["bundle_healthy"].get<bool>() &&
-                                   report["summary"]["video_healthy"].get<bool>() &&
-                                   report["summary"]["cache_healthy"].get<bool>() &&
-                                   report["summary"]["apple_acceleration_healthy"].get<bool>() &&
-                                   report["summary"]["windows_universal_healthy"].get<bool>() &&
-                                   platform_validated_models_present;
+    report["summary"] = summarize_doctor_report(report);
 
     return report;
 }
@@ -710,6 +908,9 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["requested_device"] = request.device.name;
         results["device"] = engine->current_device().name;
         results["backend"] = backend_to_string(engine->current_device().backend);
+        results["execution_profile"] = to_json(
+            runtime_optimization_profile_for_device(runtime_capabilities(),
+                                                    engine->current_device()));
         results["warmup_runs"] = warmup_runs;
         results["benchmark_runs"] = benchmark_runs;
         results["cold_latency_ms"] = cold_latency_ms;
@@ -718,9 +919,11 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["latency_ms"]["warmup"] = summarize_latency_samples(warmup_latencies);
         results["latency_ms"]["steady_state"] = summarize_latency_samples(benchmark_latencies);
         results["stage_timings"] = nlohmann::json::array();
-        for (const auto& timing : profiler.snapshot()) {
+        const auto stage_timings = profiler.snapshot();
+        for (const auto& timing : stage_timings) {
             results["stage_timings"].push_back(to_json(timing));
         }
+        results["phase_timings"] = summarize_stage_groups(stage_timings);
         if (engine->backend_fallback().has_value()) {
             results["fallback"] = to_json(*engine->backend_fallback());
         }
@@ -773,6 +976,11 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     results["requested_device"] = benchmark_request.device.name;
     results["device"] = selected_device_name;
     results["backend"] = backend_to_string(selected_backend);
+    DeviceInfo execution_device = benchmark_request.device;
+    execution_device.name = selected_device_name.empty() ? execution_device.name : selected_device_name;
+    execution_device.backend = selected_backend == Backend::Auto ? execution_device.backend : selected_backend;
+    results["execution_profile"] =
+        to_json(runtime_optimization_profile_for_device(runtime_capabilities(), execution_device));
     results["total_duration_ms"] = total_ms;
     if (units > 0) {
         results["processed_units"] = units;
@@ -783,6 +991,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     for (const auto& timing : timings) {
         results["stage_timings"].push_back(to_json(timing));
     }
+    results["phase_timings"] = summarize_stage_groups(timings);
     if (fallback.has_value()) {
         results["fallback"] = to_json(*fallback);
     }

@@ -79,11 +79,25 @@ track. Do not rely on it for production use.
 AMD GPUs are not officially supported. Do not rely on them for production use.
 
 **Windows product tracks:** The canonical public Windows release emits the
-official `RTX` installer by default. The `DirectML` installer is experimental
-and should only be published intentionally. Other execution-provider hooks
-present in the core runtime, such as CUDA, WinML, and OpenVINO, are not
-current product support tracks unless they are explicitly packaged and
-validated.
+supported `RTX Lite` and `RTX Full` installers by default. The `DirectML`
+installer is experimental and should only be published intentionally. Other
+execution-provider hooks present in the core runtime, such as CUDA, WinML, and
+OpenVINO, are not current product support tracks unless they are explicitly
+packaged and validated.
+
+**Windows RTX installer policy:**
+- `RTX Lite` is the conservative Windows RTX installer. It packages the
+  validated FP16 and INT8 ladder through `1024px`.
+- `RTX Full` packages the complete FP16 ladder through `2048px`.
+- `RTX Full` does not clamp a user-selected quality by VRAM policy. It attempts
+  the requested packaged quality and then follows the established runtime
+  failure path if that quality cannot execute.
+- `RTX Lite` and `RTX Full` install to the same OFX bundle location.
+  Installing one replaces the other.
+- The current public Windows RTX quality ladder in the OFX plugin is
+  `Draft (512)`, `High (1024)`, `Ultra (1536)`, and `Maximum (2048)`.
+  The historical `768px` rung remains reference-only and is not part of the
+  public OFX quality UI.
 
 The `corridorkey doctor` command reports the active backend and any fallback
 conditions on your specific hardware before processing begins.

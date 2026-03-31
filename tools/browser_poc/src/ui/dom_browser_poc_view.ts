@@ -1,0 +1,797 @@
+import {
+  CHECKER_DARK,
+  CHECKER_LIGHT,
+  CHECKER_TILE_SIZE,
+} from "../common/constants";
+import { app_error, type AppError } from "../common/errors";
+import {
+  resolve_target_resolution,
+  type ProcessingResolutionPreset,
+} from "../common/processing_resolution";
+import { err, ok, type Result } from "../common/result";
+import type { BrowserModelDefinition, RgbaFrame } from "../core/image_types";
+import {
+  DEFAULT_STAGE_CANVAS_ASPECT_RATIO,
+  DEFAULT_STAGE_VIDEO_ASPECT_RATIO,
+  resolve_stage_canvas_dimensions,
+  resolve_stage_draw_rect,
+  resolve_stage_aspect_ratio,
+  type StageCanvasDimensions,
+} from "./stage_aspect_ratio";
+
+export interface ViewMetrics {
+  mode: string;
+  backend: string;
+  frame_time_ms: number | null;
+  export_state: string;
+}
+
+export interface ViewModelState {
+  active_model_label: string;
+  state_label: string;
+  progress_ratio: number | null;
+  detail: string;
+}
+
+export interface ViewSequenceState {
+  visible: boolean;
+  current_index: number;
+  total_count: number;
+}
+
+export interface ViewHintSequenceState {
+  visible: boolean;
+  current_index: number;
+  total_count: number;
+}
+
+export interface ViewButtonsState {
+  can_change_source: boolean;
+  can_change_hint: boolean;
+  can_change_model: boolean;
+  can_change_resolution: boolean;
+  can_process_full_media: boolean;
+  can_scrub_source_sequence: boolean;
+  can_scrub_hint_sequence: boolean;
+}
+
+export interface ViewProcessingState {
+  visible: boolean;
+  stage_label: string;
+  detail: string;
+  progress_ratio: number | null;
+}
+
+export interface ViewDownloadArtifacts {
+  preview:
+    | {
+        url: string;
+        filename: string;
+        label: string;
+      }
+    | null;
+  alpha:
+    | {
+        url: string;
+        filename: string;
+        label: string;
+      }
+    | null;
+}
+
+export interface ViewHandlers {
+  on_source_video_selected: () => void;
+  on_source_stills_selected: () => void;
+  on_hint_files_selected: () => void;
+  on_hint_video_ready: () => void;
+  on_model_selection_changed: () => void;
+  on_resolution_changed: () => void;
+  on_process_full_media_requested: () => void;
+  on_video_metadata_loaded: () => void;
+  on_video_played: () => void;
+  on_video_paused: () => void;
+  on_video_seeked: () => void;
+  on_video_ended: () => void;
+  on_sequence_index_changed: () => void;
+  on_hint_sequence_index_changed: () => void;
+}
+
+function require_element<T extends HTMLElement>(id: string): T {
+  const element = document.getElementById(id);
+  if (!(element instanceof HTMLElement)) {
+    throw new Error(`Missing required element: ${id}`);
+  }
+
+  return element as T;
+}
+
+function require_context(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const context = canvas.getContext("2d", {
+    alpha: true,
+    willReadFrequently: true,
+  });
+  if (context === null) {
+    throw new Error("Failed to acquire a 2D canvas context.");
+  }
+
+  return context;
+}
+
+function resolve_canvas_source_dimensions(
+  source: CanvasImageSource,
+): { width: number; height: number } | null {
+  if (source instanceof HTMLVideoElement) {
+    return {
+      width: source.videoWidth,
+      height: source.videoHeight,
+    };
+  }
+
+  if (source instanceof ImageBitmap) {
+    return {
+      width: source.width,
+      height: source.height,
+    };
+  }
+
+  if (source instanceof HTMLCanvasElement) {
+    return {
+      width: source.width,
+      height: source.height,
+    };
+  }
+
+  if (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) {
+    return {
+      width: source.width,
+      height: source.height,
+    };
+  }
+
+  return null;
+}
+
+function fill_checkerboard(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): void {
+  const normalized_width = Math.max(1, Math.round(width));
+  const normalized_height = Math.max(1, Math.round(height));
+
+  for (let y = 0; y < normalized_height; y += CHECKER_TILE_SIZE) {
+    for (let x = 0; x < normalized_width; x += CHECKER_TILE_SIZE) {
+      const checker =
+        (Math.floor(y / CHECKER_TILE_SIZE) + Math.floor(x / CHECKER_TILE_SIZE)) % 2 ===
+        0
+          ? CHECKER_DARK
+          : CHECKER_LIGHT;
+      context.fillStyle = `rgb(${checker}, ${checker}, ${checker})`;
+      context.fillRect(x, y, CHECKER_TILE_SIZE, CHECKER_TILE_SIZE);
+    }
+  }
+}
+
+export class DomBrowserPocView {
+  private readonly source_video_input =
+    require_element<HTMLInputElement>("source-video-files");
+  private readonly source_stills_input =
+    require_element<HTMLInputElement>("source-stills-files");
+  private readonly hint_files_input =
+    require_element<HTMLInputElement>("hint-files");
+  private readonly model_select =
+    require_element<HTMLSelectElement>("model-select");
+  private readonly resolution_input =
+    require_element<HTMLSelectElement>("target-resolution");
+  private readonly resolution_detail =
+    require_element<HTMLElement>("target-resolution-detail");
+  private readonly process_full_media_button =
+    require_element<HTMLButtonElement>("process-full-media");
+  private readonly preview_download =
+    require_element<HTMLAnchorElement>("download-preview");
+  private readonly alpha_download =
+    require_element<HTMLAnchorElement>("download-alpha");
+  private readonly preview_download_default_label =
+    require_element<HTMLAnchorElement>("download-preview").textContent ??
+    "Download Preview Video";
+  private readonly alpha_download_default_label =
+    require_element<HTMLAnchorElement>("download-alpha").textContent ??
+    "Download Alpha ZIP";
+  private readonly source_video =
+    require_element<HTMLVideoElement>("source-video");
+  private readonly hint_video =
+    require_element<HTMLVideoElement>("hint-video");
+  private readonly active_model_value =
+    require_element<HTMLElement>("active-model-value");
+  private readonly model_state_value =
+    require_element<HTMLElement>("model-state-value");
+  private readonly model_progress =
+    require_element<HTMLProgressElement>("model-load-progress");
+  private readonly model_progress_detail =
+    require_element<HTMLElement>("model-progress-detail");
+  private readonly process_panel =
+    require_element<HTMLDivElement>("process-panel");
+  private readonly process_stage_value =
+    require_element<HTMLElement>("process-stage-value");
+  private readonly process_progress =
+    require_element<HTMLProgressElement>("process-progress");
+  private readonly process_progress_detail =
+    require_element<HTMLElement>("process-progress-detail");
+  private readonly sequence_panel =
+    require_element<HTMLDivElement>("sequence-panel");
+  private readonly sequence_index =
+    require_element<HTMLInputElement>("sequence-index");
+  private readonly sequence_frame_value =
+    require_element<HTMLElement>("sequence-frame-value");
+  private readonly hint_sequence_panel =
+    require_element<HTMLDivElement>("hint-sequence-panel");
+  private readonly hint_sequence_index =
+    require_element<HTMLInputElement>("hint-sequence-index");
+  private readonly hint_sequence_frame_value =
+    require_element<HTMLElement>("hint-sequence-frame-value");
+  private readonly capability_note =
+    require_element<HTMLElement>("export-capability");
+  private readonly status_log = require_element<HTMLDivElement>("status-log");
+  private readonly mode_value = require_element<HTMLElement>("mode-value");
+  private readonly backend_value = require_element<HTMLElement>("backend-value");
+  private readonly frame_time_value =
+    require_element<HTMLElement>("frame-time-value");
+  private readonly export_value = require_element<HTMLElement>("export-value");
+  private readonly source_canvas =
+    require_element<HTMLCanvasElement>("source-canvas");
+  private readonly output_canvas =
+    require_element<HTMLCanvasElement>("output-canvas");
+  private readonly source_ctx = require_context(this.source_canvas);
+  private readonly output_ctx = require_context(this.output_canvas);
+  private readonly working_canvas = document.createElement("canvas");
+  private readonly working_ctx = require_context(this.working_canvas);
+  private readonly output_frame_canvas = document.createElement("canvas");
+  private readonly output_frame_ctx = require_context(this.output_frame_canvas);
+  private readonly hint_canvas = document.createElement("canvas");
+  private readonly hint_ctx = require_context(this.hint_canvas);
+  private m_auto_target_resolution = 512;
+  private m_stage_target_resolution = 512;
+  private m_stage_display_width = 1;
+  private m_stage_display_height = 1;
+  private m_stage_canvas_lock: StageCanvasDimensions | null = null;
+  private m_locked_stage_aspect_ratio: string | null = null;
+
+  bind_handlers(handlers: ViewHandlers): void {
+    this.source_video_input.addEventListener(
+      "change",
+      handlers.on_source_video_selected,
+    );
+    this.source_stills_input.addEventListener(
+      "change",
+      handlers.on_source_stills_selected,
+    );
+    this.hint_files_input.addEventListener(
+      "change",
+      handlers.on_hint_files_selected,
+    );
+    this.hint_video.addEventListener("loadeddata", handlers.on_hint_video_ready);
+    this.hint_video.addEventListener("seeked", handlers.on_hint_video_ready);
+    this.model_select.addEventListener(
+      "change",
+      handlers.on_model_selection_changed,
+    );
+    this.resolution_input.addEventListener("change", handlers.on_resolution_changed);
+    this.process_full_media_button.addEventListener(
+      "click",
+      handlers.on_process_full_media_requested,
+    );
+    this.source_video.addEventListener(
+      "loadedmetadata",
+      handlers.on_video_metadata_loaded,
+    );
+    this.source_video.addEventListener("play", handlers.on_video_played);
+    this.source_video.addEventListener("pause", handlers.on_video_paused);
+    this.source_video.addEventListener("seeked", handlers.on_video_seeked);
+    this.source_video.addEventListener("ended", handlers.on_video_ended);
+    this.sequence_index.addEventListener(
+      "input",
+      handlers.on_sequence_index_changed,
+    );
+    this.hint_sequence_index.addEventListener(
+      "input",
+      handlers.on_hint_sequence_index_changed,
+    );
+  }
+
+  selected_source_video_files(): File[] {
+    return Array.from(this.source_video_input.files ?? []);
+  }
+
+  selected_source_still_files(): File[] {
+    return Array.from(this.source_stills_input.files ?? []);
+  }
+
+  selected_hint_files(): File[] {
+    return Array.from(this.hint_files_input.files ?? []);
+  }
+
+  selected_sequence_index(): number {
+    const parsed = Number.parseInt(this.sequence_index.value, 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed - 1) : 0;
+  }
+
+  selected_hint_sequence_index(): number {
+    const parsed = Number.parseInt(this.hint_sequence_index.value, 10);
+    return Number.isFinite(parsed) ? Math.max(0, parsed - 1) : 0;
+  }
+
+  selected_model_id(): string {
+    return this.model_select.value;
+  }
+
+  selected_resolution_preset_id(): string {
+    return this.resolution_input.value;
+  }
+
+  set_model_catalog(
+    models: readonly BrowserModelDefinition[],
+    selected_model_id: string,
+  ): void {
+    this.model_select.replaceChildren();
+
+    for (const model of models) {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = `${model.label} | ${model.resolution}px | ${model.size_label}`;
+      option.title = model.description;
+      option.selected = model.id === selected_model_id;
+      this.model_select.append(option);
+    }
+  }
+
+  set_resolution_presets(
+    presets: readonly ProcessingResolutionPreset[],
+    selected_preset_id: string,
+  ): void {
+    this.resolution_input.replaceChildren();
+
+    for (const preset of presets) {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.label;
+      option.title = preset.description;
+      option.selected = preset.id === selected_preset_id;
+      this.resolution_input.append(option);
+    }
+  }
+
+  set_auto_target_resolution(auto_target_resolution: number): void {
+    this.m_auto_target_resolution = auto_target_resolution;
+  }
+
+  set_resolution_detail(detail: string): void {
+    this.resolution_detail.textContent = detail;
+  }
+
+  set_export_capability(message: string | null): void {
+    if (message === null) {
+      this.capability_note.textContent =
+        "Full export is ready for Chromium-class desktop browsers.";
+      this.capability_note.classList.remove("warning");
+      return;
+    }
+
+    this.capability_note.textContent = message;
+    this.capability_note.classList.add("warning");
+  }
+
+  set_sequence_state(state: ViewSequenceState): void {
+    this.sequence_panel.classList.toggle("hidden", !state.visible);
+    this.sequence_index.min = "1";
+    this.sequence_index.max = `${Math.max(1, state.total_count)}`;
+    this.sequence_index.value = `${Math.min(
+      Math.max(1, state.current_index + 1),
+      Math.max(1, state.total_count),
+    )}`;
+    this.sequence_frame_value.textContent = `Frame ${state.current_index + 1} / ${Math.max(1, state.total_count)}`;
+  }
+
+  set_hint_sequence_state(state: ViewHintSequenceState): void {
+    this.hint_sequence_panel.classList.toggle("hidden", !state.visible);
+    this.hint_sequence_index.min = "1";
+    this.hint_sequence_index.max = `${Math.max(1, state.total_count)}`;
+    this.hint_sequence_index.value = `${Math.min(
+      Math.max(1, state.current_index + 1),
+      Math.max(1, state.total_count),
+    )}`;
+    this.hint_sequence_frame_value.textContent = `Frame ${state.current_index + 1} / ${Math.max(1, state.total_count)}`;
+  }
+
+  target_resolution(): number {
+    return resolve_target_resolution(
+      this.selected_resolution_preset_id(),
+      this.m_auto_target_resolution,
+    );
+  }
+
+  private sync_stage_aspect_styles(
+    canvas_aspect_ratio: string,
+    video_aspect_ratio: string,
+  ): void {
+    this.source_video.style.aspectRatio = video_aspect_ratio;
+    this.source_canvas.style.aspectRatio = canvas_aspect_ratio;
+    this.output_canvas.style.aspectRatio = canvas_aspect_ratio;
+  }
+
+  sync_stage_resolution(size: number): void {
+    this.m_stage_target_resolution = size;
+    const stage_dimensions =
+      this.m_stage_canvas_lock ??
+      resolve_stage_canvas_dimensions(
+        size,
+        this.m_stage_display_width,
+        this.m_stage_display_height,
+      );
+    this.source_canvas.width = stage_dimensions.width;
+    this.source_canvas.height = stage_dimensions.height;
+    this.output_canvas.width = stage_dimensions.width;
+    this.output_canvas.height = stage_dimensions.height;
+    this.working_canvas.width = size;
+    this.working_canvas.height = size;
+  }
+
+  set_stage_aspect_ratio(width: number, height: number): void {
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      const normalized_width = Math.round(width);
+      const normalized_height = Math.round(height);
+      if (normalized_width > 0 && normalized_height > 0) {
+        this.m_stage_display_width = normalized_width;
+        this.m_stage_display_height = normalized_height;
+      }
+    }
+
+    const video_aspect_ratio = resolve_stage_aspect_ratio(
+      width,
+      height,
+      DEFAULT_STAGE_VIDEO_ASPECT_RATIO,
+    );
+    const canvas_aspect_ratio =
+      this.m_locked_stage_aspect_ratio ?? resolve_stage_aspect_ratio(width, height);
+    this.sync_stage_aspect_styles(canvas_aspect_ratio, video_aspect_ratio);
+    this.sync_stage_resolution(this.m_stage_target_resolution);
+  }
+
+  reset_stage_aspect_ratio(): void {
+    this.m_stage_display_width = 1;
+    this.m_stage_display_height = 1;
+    this.sync_stage_aspect_styles(
+      this.m_locked_stage_aspect_ratio ?? DEFAULT_STAGE_CANVAS_ASPECT_RATIO,
+      DEFAULT_STAGE_VIDEO_ASPECT_RATIO,
+    );
+    this.sync_stage_resolution(this.m_stage_target_resolution);
+  }
+
+  load_video_source(video_url: string): void {
+    this.source_video.srcObject = null;
+    this.source_video.src = video_url;
+    this.source_video.load();
+  }
+
+  clear_video_source(): void {
+    this.source_video.pause();
+    this.source_video.srcObject = null;
+    this.source_video.removeAttribute("src");
+    this.source_video.load();
+  }
+
+  load_hint_video_source(video_url: string): void {
+    this.hint_video.src = video_url;
+    this.hint_video.load();
+  }
+
+  clear_hint_video_source(): void {
+    this.hint_video.pause();
+    this.hint_video.removeAttribute("src");
+    this.hint_video.load();
+  }
+
+  video_ready(): boolean {
+    return this.source_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+  }
+
+  video_has_metadata(): boolean {
+    return this.source_video.readyState >= HTMLMediaElement.HAVE_METADATA;
+  }
+
+  hint_video_ready(): boolean {
+    return this.hint_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+  }
+
+  hint_video_has_metadata(): boolean {
+    return this.hint_video.readyState >= HTMLMediaElement.HAVE_METADATA;
+  }
+
+  video_dimensions(): { width: number; height: number } {
+    return {
+      width: this.source_video.videoWidth,
+      height: this.source_video.videoHeight,
+    };
+  }
+
+  video_paused(): boolean {
+    return this.source_video.paused;
+  }
+
+  video_duration(): number {
+    return Number.isFinite(this.source_video.duration) ? this.source_video.duration : 0;
+  }
+
+  video_current_time(): number {
+    return this.source_video.currentTime;
+  }
+
+  video_ended(): boolean {
+    return this.source_video.ended;
+  }
+
+  async play_video(): Promise<Result<void, AppError>> {
+    try {
+      await this.source_video.play();
+      return ok(undefined);
+    } catch (cause) {
+      return err(
+        app_error(
+          "invalid_state",
+          "The browser refused to start source video playback.",
+          cause,
+        ),
+      );
+    }
+  }
+
+  pause_video(): void {
+    this.source_video.pause();
+  }
+
+  async seek_video(time_seconds: number): Promise<Result<void, AppError>> {
+    return this.seek_media_element(this.source_video, time_seconds);
+  }
+
+  async seek_hint_video(time_seconds: number): Promise<Result<void, AppError>> {
+    return this.seek_media_element(this.hint_video, time_seconds);
+  }
+
+  private draw_canvas_image_source(source: CanvasImageSource): RgbaFrame {
+    const size = this.target_resolution();
+    const display_dimensions = resolve_canvas_source_dimensions(source);
+    const stage_width = this.source_canvas.width;
+    const stage_height = this.source_canvas.height;
+    const stage_rect = resolve_stage_draw_rect(
+      stage_width,
+      stage_height,
+      display_dimensions?.width ?? stage_width,
+      display_dimensions?.height ?? stage_height,
+    );
+    this.source_ctx.clearRect(0, 0, stage_width, stage_height);
+    this.working_ctx.clearRect(0, 0, size, size);
+    this.source_ctx.drawImage(
+      source,
+      stage_rect.x,
+      stage_rect.y,
+      stage_rect.width,
+      stage_rect.height,
+    );
+    this.working_ctx.drawImage(source, 0, 0, size, size);
+    const image_data = this.working_ctx.getImageData(0, 0, size, size);
+
+    return {
+      width: image_data.width,
+      height: image_data.height,
+      data: image_data.data,
+      display_width: display_dimensions?.width,
+      display_height: display_dimensions?.height,
+    };
+  }
+
+  draw_source_video_frame(): Result<RgbaFrame, AppError> {
+    if (!this.video_ready()) {
+      return err(
+        app_error(
+          "invalid_state",
+          "The source video is not ready for frame extraction.",
+        ),
+      );
+    }
+
+    return ok(this.draw_canvas_image_source(this.source_video));
+  }
+
+  draw_canvas_frame(source: CanvasImageSource): Result<RgbaFrame, AppError> {
+    return ok(this.draw_canvas_image_source(source));
+  }
+
+  private capture_hint_canvas(source: CanvasImageSource): Float32Array {
+    const size = this.target_resolution();
+    this.hint_canvas.width = size;
+    this.hint_canvas.height = size;
+    this.hint_ctx.clearRect(0, 0, size, size);
+    this.hint_ctx.drawImage(source, 0, 0, size, size);
+    const image_data = this.hint_ctx.getImageData(0, 0, size, size);
+    const plane_size = size * size;
+    const output = new Float32Array(plane_size);
+
+    for (let index = 0; index < plane_size; index += 1) {
+      const rgba_index = index * 4;
+      const red = image_data.data[rgba_index] / 255;
+      const green = image_data.data[rgba_index + 1] / 255;
+      const blue = image_data.data[rgba_index + 2] / 255;
+      output[index] = 0.299 * red + 0.587 * green + 0.114 * blue;
+    }
+
+    return output;
+  }
+
+  draw_hint_video_frame(): Result<Float32Array, AppError> {
+    if (!this.hint_video_ready()) {
+      return err(
+        app_error(
+          "invalid_state",
+          "The hint video is not ready for frame extraction.",
+        ),
+      );
+    }
+
+    return ok(this.capture_hint_canvas(this.hint_video));
+  }
+
+  draw_hint_canvas(source: CanvasImageSource): Float32Array {
+    return this.capture_hint_canvas(source);
+  }
+
+  render_output(frame: RgbaFrame): void {
+    const image_data = new ImageData(frame.data, frame.width, frame.height);
+    const output_rect = resolve_stage_draw_rect(
+      this.output_canvas.width,
+      this.output_canvas.height,
+      frame.display_width ?? frame.width,
+      frame.display_height ?? frame.height,
+    );
+    this.output_frame_canvas.width = frame.width;
+    this.output_frame_canvas.height = frame.height;
+    this.output_frame_ctx.putImageData(image_data, 0, 0);
+    fill_checkerboard(
+      this.output_ctx,
+      this.output_canvas.width,
+      this.output_canvas.height,
+    );
+    this.output_ctx.drawImage(
+      this.output_frame_canvas,
+      output_rect.x,
+      output_rect.y,
+      output_rect.width,
+      output_rect.height,
+    );
+  }
+
+  set_status(message: string): void {
+    this.status_log.textContent = message;
+  }
+
+  set_metrics(metrics: ViewMetrics): void {
+    this.mode_value.textContent = metrics.mode;
+    this.backend_value.textContent = metrics.backend;
+    this.frame_time_value.textContent =
+      metrics.frame_time_ms === null ? "-" : `${metrics.frame_time_ms.toFixed(1)} ms`;
+    this.export_value.textContent = metrics.export_state;
+  }
+
+  set_model_state(state: ViewModelState): void {
+    this.active_model_value.textContent = state.active_model_label;
+    this.model_state_value.textContent = state.state_label;
+    this.model_progress_detail.textContent = state.detail;
+
+    if (state.progress_ratio === null) {
+      this.model_progress.removeAttribute("value");
+      return;
+    }
+
+    this.model_progress.value = Math.max(0, Math.min(1, state.progress_ratio));
+  }
+
+  set_processing_state(state: ViewProcessingState): void {
+    this.process_panel.classList.toggle("hidden", !state.visible);
+    this.process_stage_value.textContent = state.stage_label;
+    this.process_progress_detail.textContent = state.detail;
+
+    if (state.progress_ratio === null) {
+      this.process_progress.removeAttribute("value");
+      return;
+    }
+
+    this.process_progress.value = Math.max(0, Math.min(1, state.progress_ratio));
+  }
+
+  set_button_state(state: ViewButtonsState): void {
+    this.source_video_input.disabled = !state.can_change_source;
+    this.source_stills_input.disabled = !state.can_change_source;
+    this.hint_files_input.disabled = !state.can_change_hint;
+    this.model_select.disabled = !state.can_change_model;
+    this.resolution_input.disabled = !state.can_change_resolution;
+    this.process_full_media_button.disabled = !state.can_process_full_media;
+    this.sequence_index.disabled = !state.can_scrub_source_sequence;
+    this.hint_sequence_index.disabled = !state.can_scrub_hint_sequence;
+  }
+
+  set_download_artifacts(artifacts: ViewDownloadArtifacts): void {
+    this.set_download_link(this.preview_download, artifacts.preview);
+    this.set_download_link(this.alpha_download, artifacts.alpha);
+  }
+
+  private set_download_link(
+    link: HTMLAnchorElement,
+    artifact:
+      | {
+          url: string;
+          filename: string;
+          label: string;
+        }
+      | null,
+  ): void {
+    if (artifact === null) {
+      link.removeAttribute("href");
+      link.removeAttribute("download");
+      link.textContent =
+        link === this.preview_download
+          ? this.preview_download_default_label
+          : this.alpha_download_default_label;
+      link.classList.add("disabled");
+      return;
+    }
+
+    link.href = artifact.url;
+    link.download = artifact.filename;
+    link.textContent = artifact.label;
+    link.classList.remove("disabled");
+  }
+
+  private async seek_media_element(
+    element: HTMLVideoElement,
+    time_seconds: number,
+  ): Promise<Result<void, AppError>> {
+    if (element.readyState < HTMLMediaElement.HAVE_METADATA) {
+      return err(
+        app_error(
+          "invalid_state",
+          "The video metadata is not ready for timeline seeking.",
+        ),
+      );
+    }
+
+    const duration = Number.isFinite(element.duration) ? element.duration : 0;
+    const clamped_time = Math.max(0, Math.min(time_seconds, duration || time_seconds));
+    if (Math.abs(element.currentTime - clamped_time) < 0.001) {
+      return ok(undefined);
+    }
+
+    return new Promise<Result<void, AppError>>((resolve) => {
+      const handle_seeked = () => {
+        cleanup();
+        resolve(ok(undefined));
+      };
+      const handle_error = () => {
+        cleanup();
+        resolve(
+          err(
+            app_error(
+              "invalid_state",
+              "The browser failed to seek the requested video frame.",
+            ),
+          ),
+        );
+      };
+      const cleanup = () => {
+        element.removeEventListener("seeked", handle_seeked);
+        element.removeEventListener("error", handle_error);
+      };
+
+      element.addEventListener("seeked", handle_seeked, { once: true });
+      element.addEventListener("error", handle_error, { once: true });
+      element.currentTime = clamped_time;
+    });
+  }
+}

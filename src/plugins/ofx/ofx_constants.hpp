@@ -12,17 +12,14 @@ namespace corridorkey::ofx {
 // Quality mode choice indices
 constexpr int kQualityAuto = 0;
 constexpr int kQualityPreview = 1;
-constexpr int kQualityStandard = 2;
-constexpr int kQualityHigh = 3;
-constexpr int kQualityUltra = 4;
-constexpr int kQualityMaximum = 5;
+constexpr int kQualityHigh = 2;
+constexpr int kQualityUltra = 3;
+constexpr int kQualityMaximum = 4;
 
 inline const char* quality_mode_ui_label(int quality_mode) {
     switch (quality_mode) {
         case kQualityPreview:
             return "Draft (512)";
-        case kQualityStandard:
-            return "Standard (768)";
         case kQualityHigh:
             return "High (1024)";
         case kQualityUltra:
@@ -88,17 +85,14 @@ inline RefinementMode refinement_mode_from_choice(int choice) {
 
 constexpr int kCoarseResolutionAutomatic = 0;
 constexpr int kCoarseResolution512 = 1;
-constexpr int kCoarseResolution768 = 2;
-constexpr int kCoarseResolution1024 = 3;
-constexpr int kCoarseResolution1536 = 4;
-constexpr int kCoarseResolution2048 = 5;
+constexpr int kCoarseResolution1024 = 2;
+constexpr int kCoarseResolution1536 = 3;
+constexpr int kCoarseResolution2048 = 4;
 
 inline int coarse_resolution_override_from_choice(int choice) {
     switch (choice) {
         case kCoarseResolution512:
             return 512;
-        case kCoarseResolution768:
-            return 768;
         case kCoarseResolution1024:
             return 1024;
         case kCoarseResolution1536:

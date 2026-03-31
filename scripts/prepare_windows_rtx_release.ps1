@@ -5,7 +5,7 @@ param(
     [string]$CorridorKeyRepo = "",
     [string]$Checkpoint = "",
     [string]$OrtSourceDir = "",
-    [string]$OrtSourceRef = "v1.23.0",
+    [string]$OrtSourceRef = "",
     [string]$CudaHome = "",
     [string]$TensorRtRtxHome = "",
     [string]$VsDevCmd = "",
@@ -28,8 +28,12 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $modelsDir = Join-Path $repoRoot "models"
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+$rtxBuildContract = Get-CorridorKeyWindowsRtxBuildContract
 
 $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
+if ([string]::IsNullOrWhiteSpace($OrtSourceRef)) {
+    $OrtSourceRef = $rtxBuildContract.ort_source_ref
+}
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot ("build\" + $BuildPreset)
 }
@@ -189,12 +193,20 @@ function Invoke-ExternalCommand {
     $display = @($FilePath) + $Arguments
     Write-Host ("  > " + ($display -join " "))
 
+    $invoke = {
+        if ([System.StringComparer]::OrdinalIgnoreCase.Equals([System.IO.Path]::GetExtension($FilePath), ".ps1")) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $FilePath @Arguments
+        } else {
+            & $FilePath @Arguments
+        }
+    }
+
     if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-        & $FilePath @Arguments
+        & $invoke
     } else {
         Push-Location $WorkingDirectory
         try {
-            & $FilePath @Arguments
+            & $invoke
         } finally {
             Pop-Location
         }
@@ -450,10 +462,9 @@ if (-not $SkipModelPreparation.IsPresent) {
 } else {
     $uvPath = Resolve-CommandPath -ExplicitPath $Uv -CandidateNames @("uv.exe", "uv") `
         -ErrorMessage "uv was not found. Install uv or pass -Uv."
+    Write-Host "[model-pack] Skipping model preparation and model validation by request." -ForegroundColor Yellow
     $presentPreparedModels = Get-PresentModelsInDirectory -Directory $modelsDir `
         -ExpectedModels (Get-CorridorKeyPreparedModelList)
-    Invoke-ModelPackValidation -UvPath $uvPath -ToolDir (Join-Path $repoRoot "tools\model_exporter") `
-        -ModelsDirectory $modelsDir -Models $presentPreparedModels
     Write-ModelPackStatus -Stage "skip-model-preparation" -Directory $modelsDir `
         -ExpectedModels (Get-CorridorKeyPreparedModelList) -ValidatedModels $presentPreparedModels `
         -ParityModels @()
@@ -466,14 +477,24 @@ if (-not $SkipOrtBuild.IsPresent) {
         -Bootstrap:$BootstrapOrtSource.IsPresent -GitPath $gitPath -OrtRef $OrtSourceRef
 
     Write-Host "[4/5] Building curated ONNX Runtime for Windows RTX..."
-    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\build_ort_windows_rtx.ps1") -Arguments @(
+    $buildOrtArguments = @(
         "-OrtSourceDir", $resolvedOrtSourceDir,
-        "-InstallDir", $ortInstallDir,
-        "-CudaHome", $CudaHome,
-        "-TensorRtRtxHome", $TensorRtRtxHome,
-        "-VsDevCmd", $VsDevCmd,
-        "-PythonExe", $PythonExe
+        "-InstallDir", $ortInstallDir
     )
+    if (-not [string]::IsNullOrWhiteSpace($CudaHome)) {
+        $buildOrtArguments += @("-CudaHome", $CudaHome)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($TensorRtRtxHome)) {
+        $buildOrtArguments += @("-TensorRtRtxHome", $TensorRtRtxHome)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($VsDevCmd)) {
+        $buildOrtArguments += @("-VsDevCmd", $VsDevCmd)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PythonExe)) {
+        $buildOrtArguments += @("-PythonExe", $PythonExe)
+    }
+
+    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\build_ort_windows_rtx.ps1") -Arguments $buildOrtArguments
 }
 
 if (-not $SkipRuntimeBuild.IsPresent) {

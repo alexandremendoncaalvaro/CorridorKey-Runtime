@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>CorridorKey Browser</title>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <p class="eyebrow">Browser POC</p>
+        <h1>CorridorKey Browser</h1>
+        <p class="lede">
+          Load a source video, add an optional hint, preview the current frame, and export the full result.
+        </p>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls-panel">
+          <div class="panel-header">
+            <h2>Source Video</h2>
+            <p>Use the main flow for video. Still images and image sequences stay in Advanced.</p>
+          </div>
+
+          <label class="field">
+            <span>Video File</span>
+            <input id="source-video-files" type="file" accept="video/*" />
+          </label>
+
+          <label class="field">
+            <span>Optional Hint</span>
+            <input id="hint-files" type="file" accept="video/*,image/*" multiple />
+          </label>
+
+          <details class="advanced-panel">
+            <summary>Advanced</summary>
+
+            <div class="advanced-grid">
+              <label class="field">
+                <span>Still Image or Sequence</span>
+                <input id="source-stills-files" type="file" accept="image/*" multiple />
+              </label>
+
+              <label class="field">
+                <span>Model</span>
+                <select id="model-select"></select>
+              </label>
+
+              <label class="field">
+                <span>Quality</span>
+                <select id="target-resolution"></select>
+              </label>
+            </div>
+
+            <p id="target-resolution-detail" class="resolution-detail">
+              Auto currently follows the active browser model.
+            </p>
+          </details>
+
+          <div class="model-panel">
+            <div class="model-panel-header">
+              <div>
+                <span class="status-label">Active Model</span>
+                <strong id="active-model-value">bootstrapping</strong>
+              </div>
+              <div>
+                <span class="status-label">Model State</span>
+                <strong id="model-state-value">loading</strong>
+              </div>
+            </div>
+            <progress id="model-load-progress" max="1" value="0"></progress>
+            <p id="model-progress-detail" class="model-progress-detail">Preparing the default bundled model.</p>
+          </div>
+
+          <div id="process-panel" class="process-panel hidden">
+            <div class="process-panel-header">
+              <div>
+                <span class="status-label">Processing Stage</span>
+                <strong id="process-stage-value">idle</strong>
+              </div>
+            </div>
+            <progress id="process-progress" max="1" value="0"></progress>
+            <p id="process-progress-detail" class="model-progress-detail">Waiting for a source frame.</p>
+          </div>
+
+          <div class="primary-action">
+            <button id="process-full-media" class="primary wide">Process Full Media</button>
+            <p id="export-capability" class="capability-note">Checking browser export support...</p>
+          </div>
+
+          <div id="sequence-panel" class="sequence-panel hidden">
+            <div class="sequence-panel-header">
+              <span class="status-label">Sequence Frame</span>
+              <strong id="sequence-frame-value">Frame 1 / 1</strong>
+            </div>
+            <input id="sequence-index" type="range" min="1" max="1" step="1" value="1" />
+          </div>
+
+          <div id="hint-sequence-panel" class="sequence-panel hidden">
+            <div class="sequence-panel-header">
+              <span class="status-label">Hint Frame</span>
+              <strong id="hint-sequence-frame-value">Frame 1 / 1</strong>
+            </div>
+            <input id="hint-sequence-index" type="range" min="1" max="1" step="1" value="1" />
+          </div>
+
+          <div class="downloads-panel">
+            <a id="download-preview" class="download disabled" download>Download Preview Video</a>
+            <a id="download-alpha" class="download disabled" download>Download Alpha ZIP</a>
+          </div>
+
+          <div class="status-grid">
+            <div class="status-card">
+              <span class="status-label">Mode</span>
+              <strong id="mode-value">rough matte</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">Backend</span>
+              <strong id="backend-value">none</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">Frame Time</span>
+              <strong id="frame-time-value">-</strong>
+            </div>
+            <div class="status-card">
+              <span class="status-label">Export</span>
+              <strong id="export-value">idle</strong>
+            </div>
+          </div>
+
+          <div id="status-log" class="log">Waiting for input.</div>
+        </section>
+
+        <section class="panel stage-panel">
+          <div class="panel-header">
+            <h2>Preview</h2>
+            <p>The left side tracks the current source frame. The right side shows the checker-composited preview.</p>
+          </div>
+
+          <video id="source-video" class="source-video" controls muted playsinline preload="metadata"></video>
+          <video id="hint-video" class="hidden" muted playsinline preload="metadata"></video>
+
+          <div class="canvas-grid">
+            <figure class="canvas-card">
+              <figcaption>Source</figcaption>
+              <canvas id="source-canvas"></canvas>
+            </figure>
+
+            <figure class="canvas-card">
+              <figcaption>Preview</figcaption>
+              <canvas id="output-canvas"></canvas>
+            </figure>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

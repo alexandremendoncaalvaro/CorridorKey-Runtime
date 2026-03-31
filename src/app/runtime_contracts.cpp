@@ -4,8 +4,10 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <utility>
 
+#include "../common/runtime_paths.hpp"
 #include "../core/mlx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 
@@ -32,21 +34,120 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
     return normalized_lower(selector);
 }
 
+std::optional<std::string> detect_active_packaged_model_profile() {
+    const auto models_root = common::default_models_root();
+    if (models_root.empty() || models_root.filename() != "models") {
+        return std::nullopt;
+    }
+
+    std::vector<std::filesystem::path> inventory_candidates = {
+        models_root.parent_path() / "model_inventory.json",
+    };
+
+    const auto parent = models_root.parent_path();
+    if (parent.filename() == "Resources" && parent.parent_path().filename() == "Contents") {
+        inventory_candidates.push_back(parent.parent_path().parent_path() / "model_inventory.json");
+    }
+
+    for (const auto& inventory_path : inventory_candidates) {
+        std::error_code error;
+        if (!std::filesystem::exists(inventory_path, error) || error) {
+            continue;
+        }
+
+        try {
+            std::ifstream stream(inventory_path);
+            if (!stream.is_open()) {
+                continue;
+            }
+
+            nlohmann::json parsed = nlohmann::json::parse(stream, nullptr, true, true);
+            if (parsed.contains("model_profile") && parsed["model_profile"].is_string()) {
+                return parsed["model_profile"].get<std::string>();
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::vector<std::string> validation_tiers_for_device(const DeviceInfo& device,
+                                                     const RuntimeCapabilities& capabilities) {
+    std::vector<std::string> tiers;
+
+    if (capabilities.platform == "windows" &&
+        (device.backend == Backend::TensorRT || device.backend == Backend::CUDA)) {
+        if (device.available_memory_mb >= 8000) {
+            tiers.push_back("rtx_8gb");
+        }
+        if (device.available_memory_mb >= 10000) {
+            tiers.push_back("rtx_10gb");
+            tiers.push_back("rtx_10gb_plus");
+        }
+        if (device.available_memory_mb >= 16000) {
+            tiers.push_back("rtx_16gb_plus");
+        }
+        if (device.available_memory_mb >= 24000) {
+            tiers.push_back("rtx_24gb");
+        }
+    }
+
+    if (capabilities.platform == "macos" &&
+        (device.backend == Backend::MLX || device.backend == Backend::CoreML ||
+         device.backend == Backend::Auto)) {
+        if (device.available_memory_mb >= 8000) {
+            tiers.push_back("apple_silicon_8gb");
+        }
+        if (device.available_memory_mb >= 16000) {
+            tiers.push_back("apple_silicon_16gb");
+        }
+    }
+
+    return tiers;
+}
+
+bool has_validated_tier_for_device(const ModelCatalogEntry& model, const DeviceInfo& device,
+                                   const RuntimeCapabilities& capabilities) {
+    auto device_tiers = validation_tiers_for_device(device, capabilities);
+    return std::any_of(model.validated_hardware_tiers.begin(), model.validated_hardware_tiers.end(),
+                       [&](const std::string& tier) {
+                           return std::find(device_tiers.begin(), device_tiers.end(), tier) !=
+                                  device_tiers.end();
+                       });
+}
+
+bool windows_tensorrt_packaged_resolution_supported(int resolution) {
+    switch (resolution) {
+        case 512:
+        case 1024:
+        case 1536:
+        case 2048:
+            return true;
+        default:
+            return false;
+    }
+}
+
 std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_memory_mb) {
+    if (auto model_profile = detect_active_packaged_model_profile(); model_profile.has_value()) {
+        if (*model_profile == "rtx-full") {
+            return 2048;
+        }
+        if (*model_profile == "rtx-lite" || *model_profile == "rtx-stable") {
+            return 1024;
+        }
+    }
+
     if (available_memory_mb <= 0) {
         return std::nullopt;
     }
     if (available_memory_mb >= 24000) {
         return 2048;
     }
-    if (available_memory_mb >= 16000) {
-        return 1536;
-    }
     if (available_memory_mb >= 10000) {
-        return 1024;
-    }
-    if (available_memory_mb >= 8000) {
-        return 768;
+        return 1536;
     }
     return 512;
 }
@@ -57,9 +158,6 @@ std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_m
     }
     if (available_memory_mb >= 10000) {
         return 1024;
-    }
-    if (available_memory_mb >= 8000) {
-        return 768;
     }
     return 512;
 }
@@ -110,6 +208,9 @@ std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
         models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
 
     if (backend == Backend::TensorRT || backend == Backend::CUDA) {
+        if (!windows_tensorrt_packaged_resolution_supported(resolution)) {
+            return {};
+        }
         if (backend == Backend::TensorRT) {
             return {fp16_path};
         }
@@ -297,7 +398,8 @@ std::optional<ModelCatalogEntry> default_model_for_request(
     auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
-            if (preset_model.has_value()) {
+            if (preset_model.has_value() &&
+                has_validated_tier_for_device(*preset_model, requested_device, capabilities)) {
                 return preset_model;
             }
         }
@@ -310,9 +412,6 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         }
         if (requested_device.available_memory_mb >= 10000) {
             return find_model_by_filename("corridorkey_fp16_1024.onnx");
-        }
-        if (requested_device.available_memory_mb >= 8000) {
-            return find_model_by_filename("corridorkey_fp16_768.onnx");
         }
         return find_model_by_filename("corridorkey_fp16_512.onnx");
     };
@@ -385,9 +484,9 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "windows_rtx_reference", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb"}),
         make_model_entry("fp16", 768, "corridorkey_fp16_768.onnx", "onnx", "tensorrt",
-                         "Portable Windows RTX balanced pack for Ampere-class GPUs.",
-                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_8gb", "rtx_10gb"}),
+                         "Reference-only Windows RTX artifact retained for 768px investigation.",
+                         "reference_validation", false, false, false, {}, {"windows_rtx_30_plus"},
+                         {}),
         make_model_entry("fp16", 1024, "corridorkey_fp16_1024.onnx", "onnx", "tensorrt",
                          "Maximum quality Windows RTX pack for 10 GB and higher tiers.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
@@ -480,8 +579,8 @@ std::vector<PresetDefinition> preset_catalog() {
             "Windows RTX Balanced",
             "Default Windows RTX preset with FP16 inference, runtime cache enabled, and tiling "
             "ready for portable bundles.",
-            make_preset_inference_params(768, false, true, 64),
-            "corridorkey_fp16_768.onnx",
+            make_preset_inference_params(1024, false, true, 64),
+            "corridorkey_fp16_1024.onnx",
             "windows_rtx_primary",
             false,
             true,
@@ -534,6 +633,173 @@ std::vector<PresetDefinition> preset_catalog() {
 }  // namespace corridorkey
 
 namespace corridorkey::app {
+
+std::optional<std::string> active_packaged_model_profile() {
+    return detect_active_packaged_model_profile();
+}
+
+std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& capabilities,
+                                                   const std::vector<DeviceInfo>& devices) {
+    if (devices.empty()) {
+        return std::nullopt;
+    }
+
+    auto prefer_backend = [&](Backend backend) -> std::optional<DeviceInfo> {
+        auto it = std::find_if(devices.begin(), devices.end(), [&](const DeviceInfo& device) {
+            return device.backend == backend;
+        });
+        if (it == devices.end()) {
+            return std::nullopt;
+        }
+        return *it;
+    };
+
+    if (capabilities.platform == "windows") {
+        if (auto preferred = prefer_backend(Backend::TensorRT); preferred.has_value()) {
+            return preferred;
+        }
+        if (auto preferred = prefer_backend(Backend::DirectML); preferred.has_value()) {
+            return preferred;
+        }
+    }
+
+    if (capabilities.platform == "macos") {
+        if (auto preferred = prefer_backend(Backend::MLX); preferred.has_value()) {
+            return preferred;
+        }
+        if (auto preferred = prefer_backend(Backend::CoreML); preferred.has_value()) {
+            return preferred;
+        }
+    }
+
+    auto non_cpu = std::find_if(devices.begin(), devices.end(), [](const DeviceInfo& device) {
+        return device.backend != Backend::CPU;
+    });
+    if (non_cpu != devices.end()) {
+        return *non_cpu;
+    }
+
+    return devices.front();
+}
+
+RuntimeOptimizationProfile runtime_optimization_profile_for_device(
+    const RuntimeCapabilities& capabilities, const DeviceInfo& device) {
+    RuntimeOptimizationProfile profile;
+
+    if (capabilities.platform == "windows" &&
+        (device.backend == Backend::TensorRT || device.backend == Backend::CUDA)) {
+        const auto model_profile = active_packaged_model_profile().value_or("rtx-full");
+        if (model_profile == "rtx-lite" || model_profile == "rtx-stable") {
+            profile.id = "windows-rtx-lite";
+            profile.label = "Windows RTX Lite";
+            profile.intended_track = "windows_rtx";
+            profile.backend_intent = "tensorrt";
+            profile.fallback_policy = "conservative_safe_quality_ceiling";
+            profile.warmup_policy = "precompiled_context_or_first_run_compile";
+            profile.certification_tier = "validated_ladder_through_1024";
+            profile.unrestricted_quality_attempt = false;
+            return profile;
+        }
+
+        profile.id = "windows-rtx-full";
+        profile.label = "Windows RTX Full";
+        profile.intended_track = "windows_rtx";
+        profile.backend_intent = "tensorrt";
+        profile.fallback_policy = "attempt_packaged_quality_then_runtime_failure";
+        profile.warmup_policy = "precompiled_context_or_first_run_compile";
+        profile.certification_tier = "packaged_fp16_ladder_through_2048";
+        profile.unrestricted_quality_attempt = true;
+        return profile;
+    }
+
+    if (capabilities.platform == "windows" &&
+        (device.backend == Backend::DirectML || device.backend == Backend::WindowsML ||
+         device.backend == Backend::OpenVINO)) {
+        profile.id = "windows-directml";
+        profile.label = "Windows DirectML";
+        profile.intended_track = "windows_universal";
+        profile.backend_intent = backend_to_string(device.backend);
+        profile.fallback_policy = "experimental_gpu_then_cpu_tolerant_workflows";
+        profile.warmup_policy = "provider_specific_session_warmup";
+        profile.certification_tier = "experimental";
+        profile.unrestricted_quality_attempt = false;
+        return profile;
+    }
+
+    if (capabilities.platform == "macos" &&
+        (device.backend == Backend::MLX || device.backend == Backend::CoreML ||
+         device.backend == Backend::Auto)) {
+        profile.id = "apple-silicon-mlx";
+        profile.label = "Apple Silicon MLX";
+        profile.intended_track = "apple_silicon";
+        profile.backend_intent = "mlx";
+        profile.fallback_policy = "curated_primary_pack_with_bridge_exports";
+        profile.warmup_policy = "bridge_import_and_callable_compile";
+        profile.certification_tier = "official_apple_silicon_track";
+        profile.unrestricted_quality_attempt = true;
+        return profile;
+    }
+
+    profile.id = "cpu-fallback";
+    profile.label = "CPU Fallback";
+    profile.intended_track = "portable_fallback";
+    profile.backend_intent = "cpu";
+    profile.fallback_policy = "tolerant_workflow_only";
+    profile.warmup_policy = "minimal";
+    profile.certification_tier = "best_effort";
+    profile.unrestricted_quality_attempt = false;
+    return profile;
+}
+
+ArtifactRuntimeState artifact_runtime_state_for_device(const ModelCatalogEntry& model,
+                                                       const RuntimeCapabilities& capabilities,
+                                                       const DeviceInfo& device, bool present) {
+    ArtifactRuntimeState state;
+    state.present = present;
+    state.packaged_for_active_track =
+        capabilities.platform == "windows" ? model.packaged_for_windows : model.packaged_for_macos;
+
+    if (capabilities.platform == "windows") {
+        state.certified_for_active_track =
+            std::any_of(model.validated_hardware_tiers.begin(), model.validated_hardware_tiers.end(),
+                        [](const std::string& tier) { return tier.rfind("rtx_", 0) == 0; }) ||
+            std::any_of(model.validated_platforms.begin(), model.validated_platforms.end(),
+                        [](const std::string& platform) {
+                            return platform.rfind("windows", 0) == 0;
+                        });
+        state.certified_for_active_device =
+            state.certified_for_active_track &&
+            has_validated_tier_for_device(model, device, capabilities);
+    } else if (capabilities.platform == "macos") {
+        state.certified_for_active_track =
+            model.validated_for_macos ||
+            std::find(model.validated_platforms.begin(), model.validated_platforms.end(),
+                      "macos_apple_silicon") != model.validated_platforms.end();
+        state.certified_for_active_device =
+            state.certified_for_active_track &&
+            (model.validated_hardware_tiers.empty() ||
+             has_validated_tier_for_device(model, device, capabilities));
+    }
+
+    auto recommended_model = corridorkey::app::default_model_for_request(
+        capabilities, device, corridorkey::app::default_preset_for_capabilities(capabilities));
+    state.recommended_for_active_device =
+        recommended_model.has_value() && recommended_model->filename == model.filename;
+
+    if (!state.packaged_for_active_track) {
+        state.state = "reference_only";
+    } else if (!state.present) {
+        state.state = "missing";
+    } else if (state.recommended_for_active_device) {
+        state.state = "recommended";
+    } else if (state.certified_for_active_device) {
+        state.state = "certified";
+    } else {
+        state.state = "packaged";
+    }
+
+    return state;
+}
 
 std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filename) {
     return corridorkey::find_model_by_filename(filename);
@@ -637,13 +903,10 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
                 return 24000;
             }
             if (resolution >= 1536) {
-                return 16000;
+                return 10000;
             }
             if (resolution >= 1024) {
                 return 10000;
-            }
-            if (resolution >= 768) {
-                return 8000;
             }
             return std::nullopt;
         case Backend::DirectML:
@@ -651,9 +914,6 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
         case Backend::OpenVINO:
             if (resolution >= 1024) {
                 return 10000;
-            }
-            if (resolution >= 768) {
-                return 8000;
             }
             return std::nullopt;
         default:
@@ -803,7 +1063,7 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
         !allow_lower_resolution_fallback && (!coarse_to_fine || coarse_resolution_override > 0);
 
     std::vector<std::filesystem::path> expected;
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 512};
     for (int resolution : kFallbackResolutions) {
         if (resolution > search_resolution) {
             continue;
@@ -845,7 +1105,7 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
 
     std::vector<ArtifactSelection> selections;
     bool exact_artifact_available = false;
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 768, 512};
+    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 512};
     for (int resolution : kFallbackResolutions) {
         if (resolution > search_resolution) {
             continue;
@@ -1082,6 +1342,30 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     json["intended_platforms"] = preset.intended_platforms;
     json["validated_hardware_tiers"] = preset.validated_hardware_tiers;
     json["params"] = params;
+    return json;
+}
+
+nlohmann::json to_json(const RuntimeOptimizationProfile& profile) {
+    nlohmann::json json;
+    json["id"] = profile.id;
+    json["label"] = profile.label;
+    json["intended_track"] = profile.intended_track;
+    json["backend_intent"] = profile.backend_intent;
+    json["fallback_policy"] = profile.fallback_policy;
+    json["warmup_policy"] = profile.warmup_policy;
+    json["certification_tier"] = profile.certification_tier;
+    json["unrestricted_quality_attempt"] = profile.unrestricted_quality_attempt;
+    return json;
+}
+
+nlohmann::json to_json(const ArtifactRuntimeState& state) {
+    nlohmann::json json;
+    json["packaged_for_active_track"] = state.packaged_for_active_track;
+    json["present"] = state.present;
+    json["certified_for_active_track"] = state.certified_for_active_track;
+    json["certified_for_active_device"] = state.certified_for_active_device;
+    json["recommended_for_active_device"] = state.recommended_for_active_device;
+    json["state"] = state.state;
     return json;
 }
 

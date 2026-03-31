@@ -98,18 +98,22 @@ try {
     Write-Step "Quality Gate: Packaging and Backend Validation"
 
     $variants = @()
-    if ($needsDirectMlTrack) {
-        $variants += @{ Suffix = "DirectML"; Root = $directMlOrtRoot }
-    }
-    if ($needsRtxTrack) {
-        $variants += @{ Suffix = "RTX"; Root = $rtxOrtRoot }
+    foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
+        $variantOrtRoot = if ($variant.Track -eq "dml") { $directMlOrtRoot } else { $rtxOrtRoot }
+        $variants += @{
+            Label = $variant.Label
+            Suffix = $variant.Suffix
+            Root = $variantOrtRoot
+            ModelProfile = $variant.ModelProfile
+        }
     }
 
     foreach ($v in $variants) {
-        Write-Host "--- Packaging Variant: $($v.Suffix) ---" -ForegroundColor Yellow
+        Write-Host "--- Packaging Variant: $($v.Label) ---" -ForegroundColor Yellow
         & powershell.exe -NoProfile -File "scripts/package_ofx_installer_windows.ps1" `
             -Version $Version `
             -ReleaseSuffix $v.Suffix `
+            -ModelProfile $v.ModelProfile `
             -OrtRoot $v.Root
 
         if ($LASTEXITCODE -ne 0) { throw "Packaging failed for variant: $($v.Suffix)" }
@@ -122,7 +126,9 @@ try {
         if (-not (Test-Path $expectedValidationReport)) {
             throw "CRITICAL: Bundle validation did not produce a validation report at: $expectedValidationReport"
         }
-        $validation = Get-Content -Path $expectedValidationReport -Raw | ConvertFrom-Json
+        $validation = Assert-CorridorKeyBundleValidationHealthy `
+            -ValidationReportPath $expectedValidationReport `
+            -Label "Variant $($v.Suffix)"
         Write-Host "[VERIFIED] Artifact created: $expectedInstaller" -ForegroundColor Green
         Write-Host "[VERIFIED] Bundle validation report created: $expectedValidationReport" -ForegroundColor Green
         if ($validation.models.missing_count -gt 0) {

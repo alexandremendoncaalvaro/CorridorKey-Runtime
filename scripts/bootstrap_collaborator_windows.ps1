@@ -1,10 +1,12 @@
 param(
-    [string]$Version = "0.5.2",
-    [string]$RuntimeBranch = "codex/windows-proofed-validation",
+    [string]$Version = "0.6.0",
+    [string]$RuntimeBranch = "codex/windows-rtx-054-regeneration",
     [string]$RuntimeRepoUrl = "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git",
     [string]$RuntimeRepoName = "CorridorKey-Runtime",
-    [string]$SourceRepoName = "CorridorKey",
+    [string]$SourceRepoName = "",
     [string]$CommitBranch = "",
+    [string]$GitUserName = "",
+    [string]$GitUserEmail = "",
     [switch]$SkipReleaseTests
 )
 
@@ -36,6 +38,26 @@ function Invoke-BootstrapCommand {
     }
 }
 
+function Invoke-BootstrapCommandWithLfsSkipSmudge {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = ""
+    )
+
+    $previousSkipSmudge = $env:GIT_LFS_SKIP_SMUDGE
+    try {
+        $env:GIT_LFS_SKIP_SMUDGE = "1"
+        Invoke-BootstrapCommand -FilePath $FilePath -Arguments $Arguments -WorkingDirectory $WorkingDirectory
+    } finally {
+        if ($null -eq $previousSkipSmudge) {
+            Remove-Item Env:GIT_LFS_SKIP_SMUDGE -ErrorAction SilentlyContinue
+        } else {
+            $env:GIT_LFS_SKIP_SMUDGE = $previousSkipSmudge
+        }
+    }
+}
+
 function Get-SafeBranchSuffix {
     param([string]$Value)
 
@@ -56,8 +78,43 @@ function Resolve-CommitBranch {
     return "codex/model-pack-" + (Get-SafeBranchSuffix -Value $env:USERNAME)
 }
 
+function Test-SourceRepoPath {
+    param([string]$Path)
+
+    return (Test-Path (Join-Path $Path "CorridorKeyModule"))
+}
+
+function Resolve-SourceRepoRoot {
+    param(
+        [string]$ParentRoot,
+        [string]$ExplicitName
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitName)) {
+        $explicitRoot = Join-Path $ParentRoot $ExplicitName
+        if (Test-SourceRepoPath -Path $explicitRoot) {
+            return $explicitRoot
+        }
+        throw "Expected source repo '$ExplicitName' at $explicitRoot."
+    }
+
+    $candidateNames = @(
+        "CorridorKey-Engine",
+        "CorridorKey"
+    )
+
+    foreach ($candidateName in $candidateNames) {
+        $candidateRoot = Join-Path $ParentRoot $candidateName
+        if (Test-SourceRepoPath -Path $candidateRoot) {
+            return $candidateRoot
+        }
+    }
+
+    throw "Expected a sibling source repo named CorridorKey-Engine or CorridorKey under $ParentRoot."
+}
+
 $parentRoot = (Get-Location).Path
-$sourceRepoRoot = Join-Path $parentRoot $SourceRepoName
+$sourceRepoRoot = Resolve-SourceRepoRoot -ParentRoot $parentRoot -ExplicitName $SourceRepoName
 $runtimeRepoRoot = Join-Path $parentRoot $RuntimeRepoName
 $commitBranchName = Resolve-CommitBranch -ExplicitBranch $CommitBranch
 
@@ -65,13 +122,9 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw "git was not found on PATH."
 }
 
-if (-not (Test-Path (Join-Path $sourceRepoRoot "CorridorKeyModule"))) {
-    throw "Expected sibling source repo at $sourceRepoRoot. Run this from the parent folder that contains CorridorKey."
-}
-
 if (-not (Test-Path $runtimeRepoRoot)) {
     Write-Host "[bootstrap] Cloning CorridorKey-Runtime into $runtimeRepoRoot" -ForegroundColor Cyan
-    Invoke-BootstrapCommand -FilePath "git" -Arguments @(
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -Arguments @(
         "clone",
         "--branch", $RuntimeBranch,
         $RuntimeRepoUrl,
@@ -81,9 +134,9 @@ if (-not (Test-Path $runtimeRepoRoot)) {
     throw "Existing path is not a git repository: $runtimeRepoRoot"
 } else {
     Write-Host "[bootstrap] Reusing existing CorridorKey-Runtime clone at $runtimeRepoRoot" -ForegroundColor Cyan
-    Invoke-BootstrapCommand -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("fetch", "origin", $RuntimeBranch)
-    Invoke-BootstrapCommand -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("checkout", $RuntimeBranch)
-    Invoke-BootstrapCommand -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("pull", "--ff-only", "origin", $RuntimeBranch)
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("fetch", "origin", $RuntimeBranch)
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("checkout", $RuntimeBranch)
+    Invoke-BootstrapCommandWithLfsSkipSmudge -FilePath "git" -WorkingDirectory $runtimeRepoRoot -Arguments @("pull", "--ff-only", "origin", $RuntimeBranch)
 }
 
 $collaboratorScript = Join-Path $runtimeRepoRoot "scripts\collaborator_prepare_windows_models.ps1"
@@ -102,6 +155,14 @@ $arguments = @(
     "-BuildRelease",
     "-CommitBranch", $commitBranchName
 )
+
+if (-not [string]::IsNullOrWhiteSpace($GitUserName)) {
+    $arguments += @("-GitUserName", $GitUserName)
+}
+
+if (-not [string]::IsNullOrWhiteSpace($GitUserEmail)) {
+    $arguments += @("-GitUserEmail", $GitUserEmail)
+}
 
 if ($SkipReleaseTests.IsPresent) {
     $arguments += "-SkipReleaseTests"
