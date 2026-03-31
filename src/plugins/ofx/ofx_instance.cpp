@@ -276,8 +276,9 @@ std::uint64_t models_bundle_token(const std::filesystem::path& models_root) {
             continue;
         }
 
-        entries.push_back(entry.path().filename().string() + "|" + std::to_string(size_bytes) +
-                          "|" + std::to_string(write_time.time_since_epoch().count()));
+        entries.push_back(
+            entry.path().filename().string() + "|" + std::to_string(size_bytes) + "|" +
+            std::to_string(static_cast<long long>(write_time.time_since_epoch().count())));
     }
 
     std::sort(entries.begin(), entries.end());

@@ -182,6 +182,7 @@ Backend diagnostic_backend_from_string(const std::string& value) {
     return Backend::CPU;
 }
 
+#if defined(_WIN32)
 std::optional<int> resolution_from_model_filename(const std::string& filename) {
     auto stem = std::filesystem::path(filename).stem().string();
     auto separator = stem.find_last_of('_');
@@ -197,6 +198,7 @@ std::optional<int> resolution_from_model_filename(const std::string& filename) {
 
     return std::stoi(token);
 }
+#endif
 
 void append_unique_model(std::vector<std::string>& models, const std::string& filename) {
     if (std::find(models.begin(), models.end(), filename) == models.end()) {
@@ -586,6 +588,7 @@ bool packaged_inventory_contract_complete(const PackagedModelInventory& inventor
            inventory.compiled_context_complete_set;
 }
 
+#if defined(_WIN32)
 bool packaged_inventory_requires_compiled_contexts(const PackagedModelInventory& inventory) {
     return inventory.bundle_track == "rtx";
 }
@@ -600,6 +603,7 @@ bool packaged_inventory_compiled_contexts_ready(
     }
     return inventory->compiled_context_complete_set && inventory->compiled_context_complete;
 }
+#endif
 
 std::vector<std::filesystem::path> packaged_model_inventory_candidates(
     const std::filesystem::path& models_dir) {
@@ -929,7 +933,6 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     }
 
     const bool packaged_layout_detected = layout.packaged_layout_detected;
-    const bool windows_ofx_layout = layout.kind == "windows_ofx";
     const bool windows_rtx_bundle =
         !tensorrt_provider_libraries.empty() || !tensorrt_rtx_core_libraries.empty() ||
         !tensorrt_rtx_parser_libraries.empty() || !cuda_runtime_libraries.empty();
@@ -984,10 +987,6 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     const bool inventory_contract_complete =
         packaged_inventory.has_value() ? packaged_inventory_contract_complete(*packaged_inventory)
                                        : !packaged_layout_detected;
-    const bool compiled_contexts_ready =
-        packaged_inventory.has_value()
-            ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
-            : !windows_rtx_bundle;
     json["model_inventory"] = nlohmann::json::object();
     if (packaged_inventory.has_value()) {
         json["model_inventory"]["package_type"] = packaged_inventory->package_type;
@@ -1064,6 +1063,11 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["packaged_models"] = packaged_models;
     json["signature"] = inspect_signature(executable_path);
 #if defined(_WIN32)
+    const bool windows_ofx_layout = layout.kind == "windows_ofx";
+    const bool compiled_contexts_ready =
+        packaged_inventory.has_value()
+            ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
+            : !windows_rtx_bundle;
     json["healthy"] = packaged_layout_detected && packaged_models_present &&
                       json["model_inventory_contract_complete"].get<bool>() &&
                       compiled_contexts_ready && runtime_backend_bundle_ready &&
