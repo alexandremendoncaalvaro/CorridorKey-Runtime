@@ -1,99 +1,116 @@
 {
-    "manifest_type":  "windows_rtx_artifact_manifest",
-    "bundle_track":  "rtx",
-    "certification_report":  "C:\\Dev\\CorridorKey-Runtime\\build\\release\\windows_rtx_certified\\local1536ctx\\windows_rtx_validation_report.json",
-    "all_profiles_certified":  true,
-    "certified_models":  [
-                             "corridorkey_fp16_512.onnx",
-                             "corridorkey_fp16_1024.onnx",
-                             "corridorkey_fp16_1536.onnx"
-                         ],
-    "expected_promoted_models":  [
-                                     "corridorkey_fp16_512.onnx",
-                                     "corridorkey_fp16_1024.onnx",
-                                     "corridorkey_fp16_1536.onnx",
-                                     "corridorkey_fp16_2048.onnx",
-                                     "corridorkey_int8_512.onnx",
-                                     "corridorkey_int8_768.onnx",
-                                     "corridorkey_int8_1024.onnx"
-                                 ],
-    "artifacts":  [
-                      {
-                          "filename":  "corridorkey_fp16_1024.onnx",
-                          "sha256":  "9E764280CD41CA7241AF19F5F778DD9031E995F55E191199C87791A7E09452F8",
-                          "artifact_kind":  "runtime_model",
-                          "base_model":  "corridorkey_fp16_1024.onnx",
-                          "certified":  true,
-                          "resolution":  1024
-                      },
-                      {
-                          "filename":  "corridorkey_fp16_1024_ctx.onnx",
-                          "sha256":  "6FDD7B405E2C80EB4A544B0DB812383B70D9130BF0B110958F75A6B7ED88ECDE",
-                          "artifact_kind":  "compiled_context",
-                          "base_model":  "corridorkey_fp16_1024.onnx",
-                          "certified":  true,
-                          "resolution":  1024
-                      },
-                      {
-                          "filename":  "corridorkey_fp16_1536.onnx",
-                          "sha256":  "8B9D1712A32EEEE0F3A6A9CE19BDABFA7D2DD7086737777628B3E497E204227F",
-                          "artifact_kind":  "runtime_model",
-                          "base_model":  "corridorkey_fp16_1536.onnx",
-                          "certified":  true,
-                          "resolution":  1536
-                      },
-                      {
-                          "filename":  "corridorkey_fp16_1536_ctx.onnx",
-                          "sha256":  "BB53DF880CAD6996685DEF21F5687B47AEFE48B186FD1408DDE1B87E03F19CF6",
-                          "artifact_kind":  "compiled_context",
-                          "base_model":  "corridorkey_fp16_1536.onnx",
-                          "certified":  true,
-                          "resolution":  1536
-                      },
-                      {
-                          "filename":  "corridorkey_fp16_512.onnx",
-                          "sha256":  "02FBD11E448405DE16926AE56D6AE38B1855FC989EFE574B9A601624DE7EDAD4",
-                          "artifact_kind":  "runtime_model",
-                          "base_model":  "corridorkey_fp16_512.onnx",
-                          "certified":  true,
-                          "resolution":  512
-                      },
-                      {
-                          "filename":  "corridorkey_fp16_512_ctx.onnx",
-                          "sha256":  "91B9304732F357D5DA6DAF2C111144B1269DDB999DC6619ED56803120667BE19",
-                          "artifact_kind":  "compiled_context",
-                          "base_model":  "corridorkey_fp16_512.onnx",
-                          "certified":  true,
-                          "resolution":  512
-                      },
-                      {
-                          "filename":  "corridorkey_int8_1024.onnx",
-                          "sha256":  "9AA1DA1F9F14B049E6FF5101DE373D12BF238BCE03346EA04345358F7AD38E69",
-                          "artifact_kind":  "supporting_model",
-                          "base_model":  "corridorkey_int8_1024.onnx",
-                          "certified":  false,
-                          "resolution":  1024
-                      },
-                      {
-                          "filename":  "corridorkey_int8_512.onnx",
-                          "sha256":  "498BC2D3A4E02E023059E3EC33275D878D11234A1A68FE2D8A2E1A259BFB0257",
-                          "artifact_kind":  "supporting_model",
-                          "base_model":  "corridorkey_int8_512.onnx",
-                          "certified":  false,
-                          "resolution":  512
-                      },
-                      {
-                          "filename":  "corridorkey_int8_768.onnx",
-                          "sha256":  "FB82E565F0ABD0A116F8AC411F859A11F5A7D177BE9EF60985E4BEF183370206",
-                          "artifact_kind":  "supporting_model",
-                          "base_model":  "corridorkey_int8_768.onnx",
-                          "certified":  false,
-                          "resolution":  768
-                      }
-                  ],
-    "certification_device":  {
-                                 "backend":  "tensorrt",
-                                 "memory_mb":  10051,
-                                 "name":  "NVIDIA GeForce RTX 3080 (TensorRT)"
-                             }
+    "manifest_type": "windows_rtx_artifact_manifest",
+    "bundle_track": "rtx",
+    "certification_report": "C:\\Dev\\CorridorKey-Runtime\\build\\release\\windows_rtx_certified\\rtx-full\\windows_rtx_validation_report.json",
+    "all_profiles_certified": true,
+    "certified_models": [
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_fp16_1536.onnx",
+        "corridorkey_fp16_2048.onnx"
+    ],
+    "expected_promoted_models": [
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_fp16_1536.onnx",
+        "corridorkey_fp16_2048.onnx",
+        "corridorkey_int8_512.onnx",
+        "corridorkey_int8_768.onnx",
+        "corridorkey_int8_1024.onnx"
+    ],
+    "artifacts": [
+        {
+            "filename": "corridorkey_fp16_1024.onnx",
+            "sha256": "9E764280CD41CA7241AF19F5F778DD9031E995F55E191199C87791A7E09452F8",
+            "artifact_kind": "runtime_model",
+            "base_model": "corridorkey_fp16_1024.onnx",
+            "certified": true,
+            "resolution": 1024
+        },
+        {
+            "filename": "corridorkey_fp16_1024_ctx.onnx",
+            "sha256": "674FB14D50DD8320D1737A579B0490B840EFE6EE409071B6B5F3965F22A910E7",
+            "artifact_kind": "compiled_context",
+            "base_model": "corridorkey_fp16_1024.onnx",
+            "certified": true,
+            "resolution": 1024
+        },
+        {
+            "filename": "corridorkey_fp16_1536.onnx",
+            "sha256": "8B9D1712A32EEEE0F3A6A9CE19BDABFA7D2DD7086737777628B3E497E204227F",
+            "artifact_kind": "runtime_model",
+            "base_model": "corridorkey_fp16_1536.onnx",
+            "certified": true,
+            "resolution": 1536
+        },
+        {
+            "filename": "corridorkey_fp16_1536_ctx.onnx",
+            "sha256": "BC8C095324080BECB73F06AB84DE1804BB641990A783E801015609E57C161043",
+            "artifact_kind": "compiled_context",
+            "base_model": "corridorkey_fp16_1536.onnx",
+            "certified": true,
+            "resolution": 1536
+        },
+        {
+            "filename": "corridorkey_fp16_2048.onnx",
+            "sha256": "A26031B5732DC663FCF5C451C9CFB315F59B0ACB5361D7CEAB5428F9E70A0C62",
+            "artifact_kind": "runtime_model",
+            "base_model": "corridorkey_fp16_2048.onnx",
+            "certified": true,
+            "resolution": 2048
+        },
+        {
+            "filename": "corridorkey_fp16_2048_ctx.onnx",
+            "sha256": "2A610AFDEAA7DBAD3EDD467203C5A1D7720E29DDAFA3BA943DE56AE830C5C624",
+            "artifact_kind": "compiled_context",
+            "base_model": "corridorkey_fp16_2048.onnx",
+            "certified": true,
+            "resolution": 2048
+        },
+        {
+            "filename": "corridorkey_fp16_512.onnx",
+            "sha256": "02FBD11E448405DE16926AE56D6AE38B1855FC989EFE574B9A601624DE7EDAD4",
+            "artifact_kind": "runtime_model",
+            "base_model": "corridorkey_fp16_512.onnx",
+            "certified": true,
+            "resolution": 512
+        },
+        {
+            "filename": "corridorkey_fp16_512_ctx.onnx",
+            "sha256": "7ADB45DFC35F1CF50C3E4CE59C50DF601C9197A3D7076C3AD352B0B9ECF523F7",
+            "artifact_kind": "compiled_context",
+            "base_model": "corridorkey_fp16_512.onnx",
+            "certified": true,
+            "resolution": 512
+        },
+        {
+            "filename": "corridorkey_int8_1024.onnx",
+            "sha256": "9AA1DA1F9F14B049E6FF5101DE373D12BF238BCE03346EA04345358F7AD38E69",
+            "artifact_kind": "supporting_model",
+            "base_model": "corridorkey_int8_1024.onnx",
+            "certified": false,
+            "resolution": 1024
+        },
+        {
+            "filename": "corridorkey_int8_512.onnx",
+            "sha256": "498BC2D3A4E02E023059E3EC33275D878D11234A1A68FE2D8A2E1A259BFB0257",
+            "artifact_kind": "supporting_model",
+            "base_model": "corridorkey_int8_512.onnx",
+            "certified": false,
+            "resolution": 512
+        },
+        {
+            "filename": "corridorkey_int8_768.onnx",
+            "sha256": "FB82E565F0ABD0A116F8AC411F859A11F5A7D177BE9EF60985E4BEF183370206",
+            "artifact_kind": "supporting_model",
+            "base_model": "corridorkey_int8_768.onnx",
+            "certified": false,
+            "resolution": 768
+        }
+    ],
+    "certification_device": {
+        "backend": "tensorrt",
+        "memory_mb": 10051,
+        "name": "NVIDIA GeForce RTX 3080 (TensorRT)"
+    }
 }
