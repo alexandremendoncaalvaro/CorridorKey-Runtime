@@ -397,7 +397,8 @@ std::optional<nlohmann::json> preferred_windows_probe(const nlohmann::json& prob
 
 namespace {
 
-std::optional<std::filesystem::path> find_runtime_library(const std::filesystem::path& directory) {
+std::optional<std::filesystem::path> find_runtime_library(const std::filesystem::path& directory,
+                                                          const std::string& layout_kind) {
     std::error_code error;
     if (!std::filesystem::exists(directory, error)) {
         return std::nullopt;
@@ -408,20 +409,27 @@ std::optional<std::filesystem::path> find_runtime_library(const std::filesystem:
             continue;
         }
 
-        std::string filename = entry.path().filename().string();
+        const std::string filename = entry.path().filename().string();
+        if (layout_kind == "windows_ofx") {
+            if (filename == "onnxruntime.dll") {
+                return entry.path();
+            }
+        } else {
 #if defined(__APPLE__)
-        if (filename.rfind("libonnxruntime", 0) == 0 && entry.path().extension() == ".dylib") {
-            return entry.path();
-        }
+            if (filename.rfind("libonnxruntime", 0) == 0 && entry.path().extension() == ".dylib") {
+                return entry.path();
+            }
 #elif defined(_WIN32)
-        if (filename == "onnxruntime.dll") {
-            return entry.path();
-        }
+            if (filename == "onnxruntime.dll") {
+                return entry.path();
+            }
 #else
-        if (filename.rfind("libonnxruntime", 0) == 0 && filename.find(".so") != std::string::npos) {
-            return entry.path();
-        }
+            if (filename.rfind("libonnxruntime", 0) == 0 &&
+                filename.find(".so") != std::string::npos) {
+                return entry.path();
+            }
 #endif
+        }
     }
 
     return std::nullopt;
@@ -588,7 +596,6 @@ bool packaged_inventory_contract_complete(const PackagedModelInventory& inventor
            inventory.compiled_context_complete_set;
 }
 
-#if defined(_WIN32)
 bool packaged_inventory_requires_compiled_contexts(const PackagedModelInventory& inventory) {
     return inventory.bundle_track == "rtx";
 }
@@ -603,7 +610,6 @@ bool packaged_inventory_compiled_contexts_ready(
     }
     return inventory->compiled_context_complete_set && inventory->compiled_context_complete;
 }
-#endif
 
 std::vector<std::filesystem::path> packaged_model_inventory_candidates(
     const std::filesystem::path& models_dir) {
@@ -718,7 +724,6 @@ std::vector<std::string> expected_packaged_models_for_platform(
 
 BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_dir) {
     BundleLayoutInfo layout;
-#if defined(_WIN32)
     if (executable_dir.filename() == "Win64" &&
         executable_dir.parent_path().filename() == "Contents") {
         auto contents_dir = executable_dir.parent_path();
@@ -745,7 +750,6 @@ BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_di
             cli_present && runtime_server_present && plugin_present && models_present;
         return layout;
     }
-#endif
 
     layout.root =
         executable_dir.filename() == "bin" ? executable_dir.parent_path() : executable_dir;
@@ -821,7 +825,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     const std::filesystem::path& readme_path = layout.readme_path;
     const std::filesystem::path& smoke_test_path = layout.smoke_test_path;
 
-    auto runtime_library = find_runtime_library(executable_dir);
+    auto runtime_library = find_runtime_library(executable_dir, layout.kind);
     auto core_library = find_exact_library(executable_dir,
 #if defined(_WIN32)
                                            "corridorkey_core.dll"
@@ -880,13 +884,8 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     auto compiled_context_models = nlohmann::json::array();
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
-    const auto expected_packaged_models = expected_packaged_models_for_platform(models_dir,
-#if defined(_WIN32)
-                                                                                true
-#else
-                                                                                false
-#endif
-    );
+    const auto expected_packaged_models =
+        expected_packaged_models_for_platform(models_dir, layout.kind == "windows_ofx");
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_present = !expected_packaged_models.empty();
@@ -932,21 +931,22 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         }
     }
 
+    const bool windows_ofx_layout = layout.kind == "windows_ofx";
     const bool packaged_layout_detected = layout.packaged_layout_detected;
     const bool windows_rtx_bundle =
         !tensorrt_provider_libraries.empty() || !tensorrt_rtx_core_libraries.empty() ||
         !tensorrt_rtx_parser_libraries.empty() || !cuda_runtime_libraries.empty();
     const bool windows_directml_bundle = directml_library.has_value() && !windows_rtx_bundle;
     bool runtime_backend_bundle_ready = runtime_library.has_value();
-#if defined(_WIN32)
-    if (windows_rtx_bundle) {
-        runtime_backend_bundle_ready =
-            !tensorrt_provider_libraries.empty() && !tensorrt_rtx_core_libraries.empty() &&
-            !tensorrt_rtx_parser_libraries.empty() && !cuda_runtime_libraries.empty();
-    } else if (windows_directml_bundle) {
-        runtime_backend_bundle_ready = directml_library.has_value();
+    if (windows_ofx_layout) {
+        if (windows_rtx_bundle) {
+            runtime_backend_bundle_ready =
+                !tensorrt_provider_libraries.empty() && !tensorrt_rtx_core_libraries.empty() &&
+                !tensorrt_rtx_parser_libraries.empty() && !cuda_runtime_libraries.empty();
+        } else if (windows_directml_bundle) {
+            runtime_backend_bundle_ready = directml_library.has_value();
+        }
     }
-#endif
 
     json["root"] = bundle_root.string();
     json["layout_kind"] = layout.kind;
@@ -1062,23 +1062,22 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["core_dependency_references"] = core_references;
     json["packaged_models"] = packaged_models;
     json["signature"] = inspect_signature(executable_path);
-#if defined(_WIN32)
-    const bool windows_ofx_layout = layout.kind == "windows_ofx";
-    const bool compiled_contexts_ready =
-        packaged_inventory.has_value()
-            ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
-            : !windows_rtx_bundle;
-    json["healthy"] = packaged_layout_detected && packaged_models_present &&
-                      json["model_inventory_contract_complete"].get<bool>() &&
-                      compiled_contexts_ready && runtime_backend_bundle_ready &&
-                      (windows_ofx_layout || core_library.has_value());
-#else
-    json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
-                      runtime_reference_found && core_library.has_value() && core_reference_found &&
-                      mlx_library.has_value() && mlx_reference_found && mlx_metallib.has_value() &&
-                      mlx_bridge_present && packaged_models_present &&
-                      json["model_inventory_contract_complete"].get<bool>();
-#endif
+    if (windows_ofx_layout) {
+        const bool compiled_contexts_ready =
+            packaged_inventory.has_value()
+                ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
+                : !windows_rtx_bundle;
+        json["healthy"] = packaged_layout_detected && packaged_models_present &&
+                          json["model_inventory_contract_complete"].get<bool>() &&
+                          compiled_contexts_ready && runtime_backend_bundle_ready &&
+                          (windows_ofx_layout || core_library.has_value());
+    } else {
+        json["healthy"] =
+            packaged_layout_detected && runtime_library.has_value() && runtime_reference_found &&
+            core_library.has_value() && core_reference_found && mlx_library.has_value() &&
+            mlx_reference_found && mlx_metallib.has_value() && mlx_bridge_present &&
+            packaged_models_present && json["model_inventory_contract_complete"].get<bool>();
+    }
     return json;
 }
 
