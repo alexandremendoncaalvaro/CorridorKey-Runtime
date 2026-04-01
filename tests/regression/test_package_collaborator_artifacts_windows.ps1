@@ -39,10 +39,10 @@ project(CorridorKey-Runtime
 
     Write-Utf8File -Path (Join-Path $tempRepo "models\corridorkey_fp16_2048.onnx") -Content "fake-2048-model"
     Write-Utf8File -Path (Join-Path $tempRepo "models\corridorkey_fp16_2048_ctx.onnx") -Content "fake-2048-context"
-    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX_Full_Installer.exe") -Content "fake-installer"
-    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX_Full\bundle_validation.json") -Content "{`"healthy`":true}"
-    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX_Full\doctor_report.json") -Content "{`"healthy`":true}"
-    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX_Full\model_inventory.json") -Content "{`"present_models`":[`"corridorkey_fp16_2048.onnx`"]}"
+    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX_Installer.exe") -Content "fake-installer"
+    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX\bundle_validation.json") -Content "{`"healthy`":true}"
+    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX\doctor_report.json") -Content "{`"healthy`":true}"
+    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_Resolve_v0.6.0_Windows_RTX\model_inventory.json") -Content "{`"present_models`":[`"corridorkey_fp16_2048.onnx`"]}"
 
     $outputZip = Join-Path $tempRepo "dist\CorridorKey_Collaborator_v0.6.0_Windows_RTX.zip"
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
@@ -73,10 +73,10 @@ project(CorridorKey-Runtime
     foreach ($expectedEntry in @(
             "models\corridorkey_fp16_2048.onnx",
             "models\corridorkey_fp16_2048_ctx.onnx",
-            "installers\CorridorKey_Resolve_v0.6.0_Windows_RTX_Full_Installer.exe",
-            "reports\RTX_Full_bundle_validation.json",
-            "reports\RTX_Full_doctor_report.json",
-            "reports\RTX_Full_model_inventory.json",
+            "installers\CorridorKey_Resolve_v0.6.0_Windows_RTX_Installer.exe",
+            "reports\RTX_bundle_validation.json",
+            "reports\RTX_doctor_report.json",
+            "reports\RTX_model_inventory.json",
             "artifact_manifest.json"
         )) {
         if ($expectedEntry -notin $zipEntries) {

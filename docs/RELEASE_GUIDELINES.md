@@ -239,8 +239,7 @@ Use the following release description template:
 ## Assets & Downloads
 
 ### Windows
-- **NVIDIA RTX 30 Series or newer (Lite):** Download `CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Lite_Installer.exe`.
-- **NVIDIA RTX 30 Series or newer (Full):** Download `CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Full_Installer.exe`.
+- **NVIDIA RTX 30 Series or newer:** Download `CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe`.
 - **Windows DirectML track (experimental):** Download `CorridorKey_Resolve_vX.Y.Z_Windows_DirectML_Installer.exe`.
 - Do not describe the DirectML installer as official support for every AMD, Intel, or RTX 20 series GPU family. Refer readers to `help/SUPPORT_MATRIX.md` for the real support designation.
 
