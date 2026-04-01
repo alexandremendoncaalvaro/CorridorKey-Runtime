@@ -4,8 +4,6 @@ import {
   DEFAULT_RESOLUTION_PRESET_ID,
   PROCESSING_RESOLUTION_PRESETS,
   fallback_auto_resolution,
-  resolution_preset_detail,
-  resolve_target_resolution,
 } from "../common/processing_resolution";
 import {
   BROWSER_MODEL_CATALOG,
@@ -25,13 +23,15 @@ type SourceState =
   | { kind: "none" }
   | { kind: "video"; file: File }
   | { kind: "image"; file: File; bitmap: ImageBitmap }
-  | { kind: "sequence"; files: File[]; current_index: number; current_bitmap: ImageBitmap | null };
+  | { kind: "sequence"; files: File[]; current_index: number; current_bitmap: ImageBitmap | null }
+  | { kind: "webcam"; stream: MediaStream };
 
 type HintState =
   | { kind: "none" }
   | { kind: "video"; file: File; url: string }
   | { kind: "image"; file: File; bitmap: ImageBitmap }
-  | { kind: "sequence"; files: File[]; current_index: number; current_bitmap: ImageBitmap | null };
+  | { kind: "sequence"; files: File[]; current_index: number; current_bitmap: ImageBitmap | null }
+  | { kind: "webcam"; stream: MediaStream };
 
 function mode_label(mode: ProcessMode): string {
   return mode === "model" ? MODEL_LABEL : ROUGH_MATTE_LABEL;
@@ -66,14 +66,19 @@ export class BrowserPocController {
     private readonly m_processing_service: FrameProcessingService,
   ) {
     this.m_view.bind_handlers({
-      on_source_video_selected: () => void this.handle_source_video_selected(),
-      on_source_stills_selected: () => void this.handle_source_stills_selected(),
+      on_source_type_changed: () => void this.handle_source_type_changed(),
+      on_source_files_selected: () => void this.handle_source_files_selected(),
+      on_hint_type_changed: () => void this.handle_hint_type_changed(),
       on_hint_files_selected: () => void this.handle_hint_files_selected(),
       on_hint_video_ready: () => void this.handle_hint_video_ready(),
+      on_quality_changed: () => void this.handle_quality_changed(),
       on_model_selection_changed: () => void this.handle_model_selection_changed(),
       on_resolution_changed: () => void this.handle_resolution_changed(),
+      on_process_frame_requested: () => void this.process_current_frame(),
+      on_clear_requested: () => void this.handle_clear_requested(),
       on_process_full_media_requested: () => void this.process_full_media(),
       on_video_metadata_loaded: () => void this.handle_video_metadata_loaded(),
+      on_video_data_loaded: () => void this.handle_video_data_loaded(),
       on_video_played: () => this.handle_video_played(),
       on_video_paused: () => void this.handle_video_paused(),
       on_video_seeked: () => void this.handle_video_seeked(),
@@ -152,6 +157,9 @@ export class BrowserPocController {
     if (this.m_source.kind === "sequence") {
       return this.m_source.current_bitmap !== null;
     }
+    if (this.m_source.kind === "webcam") {
+      return true;
+    }
 
     return false;
   }
@@ -164,20 +172,46 @@ export class BrowserPocController {
     );
   }
 
+  private resolved_quality_options(): {
+    target_resolution: number;
+    strategy: import("../core/image_types").InferenceStrategy;
+  } {
+    const preset = this.m_view.selected_quality_preset();
+    const auto_res = this.auto_target_resolution();
+    
+    switch (preset) {
+      case "draft":
+        return { target_resolution: 384, strategy: { type: "singlepass" } };
+      case "balanced":
+        return { target_resolution: 512, strategy: { type: "singlepass" } };
+      case "high":
+        return { target_resolution: 1024, strategy: { type: "singlepass" } };
+      case "studio":
+        // Fall back to 1024 if native resolution is ridiculously small or auto parsing fails, 
+        // but generally follow the source media or auto-dimension for tiling.
+        // For POC we use the auto_target_resolution but assume the user wants native.
+        // Tiling at 512x512 with 64px overlap
+        return { 
+          target_resolution: auto_res, 
+          strategy: { type: "tiling", tile_size: 512, overlap: 64 } 
+        };
+      default:
+        return { target_resolution: auto_res, strategy: { type: "singlepass" } };
+    }
+  }
+
   private resolved_target_resolution(): number {
-    return resolve_target_resolution(
-      this.m_view.selected_resolution_preset_id(),
-      this.auto_target_resolution(),
-    );
+    return this.resolved_quality_options().target_resolution;
   }
 
   private apply_resolution_state(): void {
     const auto_resolution = this.auto_target_resolution();
+    const options = this.resolved_quality_options();
     this.m_view.set_auto_target_resolution(auto_resolution);
     this.m_view.set_resolution_detail(
-      resolution_preset_detail(this.m_view.selected_resolution_preset_id(), auto_resolution),
+      `Processing at ${options.target_resolution}x${options.target_resolution} via ${options.strategy.type === "tiling" ? "Tiled Inference" : "Single Pass"}`,
     );
-    this.m_view.sync_stage_resolution(this.resolved_target_resolution());
+    this.m_view.sync_stage_resolution(options.target_resolution);
   }
 
   private refresh_button_state(): void {
@@ -257,9 +291,15 @@ export class BrowserPocController {
       safe_close_bitmap(this.m_source.bitmap);
     } else if (this.m_source.kind === "sequence") {
       safe_close_bitmap(this.m_source.current_bitmap);
+    } else if (this.m_source.kind === "webcam") {
+      this.m_source.stream.getTracks().forEach((track) => track.stop());
+      const webcam_video = this.m_view.webcam_video_element();
+      webcam_video.srcObject = null;
+      webcam_video.classList.add("hidden");
     }
 
     this.m_source = { kind: "none" };
+    this.m_view.set_active_source_element("canvas");
     this.m_view.reset_stage_aspect_ratio();
     this.m_view.set_sequence_state({ visible: false, current_index: 0, total_count: 1 });
   }
@@ -272,6 +312,8 @@ export class BrowserPocController {
       safe_close_bitmap(this.m_hint.bitmap);
     } else if (this.m_hint.kind === "sequence") {
       safe_close_bitmap(this.m_hint.current_bitmap);
+    } else if (this.m_hint.kind === "webcam") {
+      this.m_hint.stream.getTracks().forEach((track) => track.stop());
     }
 
     this.m_hint = { kind: "none" };
@@ -296,6 +338,7 @@ export class BrowserPocController {
     this.clear_download_artifacts();
     this.m_video_url = URL.createObjectURL(file);
     this.m_source = { kind: "video", file };
+    this.m_view.set_active_source_element("video");
     this.m_view.load_video_source(this.m_video_url);
     this.m_view.set_status(`Loading source video ${file.name}...`);
     this.refresh_button_state();
@@ -311,6 +354,7 @@ export class BrowserPocController {
       return;
     }
     this.m_source = { kind: "image", file, bitmap: bitmap_result.value };
+    this.m_view.set_active_source_element("canvas");
     this.m_view.set_stage_aspect_ratio(bitmap_result.value.width, bitmap_result.value.height);
     this.m_view.set_status(`Loaded source image ${file.name}.`);
     await this.process_current_frame();
@@ -349,6 +393,7 @@ export class BrowserPocController {
     this.prepare_for_source_change();
     this.clear_download_artifacts();
     this.m_source = { kind: "sequence", files, current_index: 0, current_bitmap: null };
+    this.m_view.set_active_source_element("canvas");
     this.m_view.set_sequence_state({ visible: true, current_index: 0, total_count: files.length });
     const frame_result = await this.set_sequence_frame(0, true);
     if (!frame_result.ok) {
@@ -525,15 +570,39 @@ export class BrowserPocController {
     this.refresh_button_state();
   }
 
-  private async handle_source_video_selected(): Promise<void> {
-    const files = this.m_view.selected_source_video_files();
-    if (files.length > 0) {
-      await this.load_video_file(files[0]);
+  private async handle_source_type_changed(): Promise<void> {
+    this.m_view.sync_input_visibilities();
+    const type = this.m_view.selected_source_type();
+    if (type === "webcam") {
+      await this.load_webcam_source();
+    } else if (type === "file") {
+      await this.handle_source_files_selected();
     }
   }
 
-  private async handle_source_stills_selected(): Promise<void> {
-    const selection = classify_source_files(this.m_view.selected_source_still_files());
+  private async load_webcam_source(): Promise<void> {
+    this.prepare_for_source_change();
+    this.clear_download_artifacts();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 } } });
+      this.m_source = { kind: "webcam", stream };
+      this.m_view.set_active_source_element("webcam");
+      const video_element = this.m_view.webcam_video_element();
+      video_element.srcObject = stream;
+      
+      video_element.onloadedmetadata = () => {
+        this.m_view.set_stage_aspect_ratio(video_element.videoWidth, video_element.videoHeight);
+        this.m_view.set_status(`Webcam connected: ${video_element.videoWidth}x${video_element.videoHeight}.`);
+        this.start_preview_loop();
+      };
+    } catch (cause) {
+      this.m_view.set_status("Failed to request webcam permission.");
+    }
+    this.refresh_button_state();
+  }
+
+  private async handle_source_files_selected(): Promise<void> {
+    const selection = classify_source_files(this.m_view.selected_source_files());
     if (!selection.ok) {
       this.m_view.set_status(selection.error.message);
       this.refresh_button_state();
@@ -541,9 +610,33 @@ export class BrowserPocController {
     }
     if (selection.value.kind === "image") {
       await this.load_image_file(selection.value.files[0]);
-      return;
+    } else if (selection.value.kind === "video") {
+      await this.load_video_file(selection.value.files[0]);
+    } else {
+      await this.load_image_sequence(selection.value.files);
     }
-    await this.load_image_sequence(selection.value.files);
+  }
+
+  private async handle_hint_type_changed(): Promise<void> {
+    this.m_view.sync_input_visibilities();
+    const type = this.m_view.selected_hint_type();
+    // Similar to source, either load webcam hint or file hint
+    if (type === "webcam") {
+      this.release_hint();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        this.m_hint = { kind: "webcam", stream };
+        this.m_view.set_status("Webcam Hint connected.");
+      } catch (e) {
+        this.m_view.set_status("Failed to open hint webcam.");
+      }
+      this.refresh_button_state();
+    } else if (type === "file") {
+      await this.handle_hint_files_selected();
+    } else {
+      this.release_hint();
+      this.refresh_button_state();
+    }
   }
 
   private async handle_hint_files_selected(): Promise<void> {
@@ -596,6 +689,20 @@ export class BrowserPocController {
     this.refresh_button_state();
   }
 
+  private handle_quality_changed(): void {
+    this.apply_resolution_state();
+    // Quality recipes logic could be expanded here. For now, trigger process.
+    if (this.source_ready()) {
+      void this.process_current_frame();
+    }
+    this.refresh_button_state();
+  }
+
+  private handle_clear_requested(): void {
+    this.dispose_resources();
+    this.m_view.set_status("Inputs cleared.");
+  }
+
   private async handle_video_metadata_loaded(): Promise<void> {
     if (this.m_source.kind !== "video") {
       return;
@@ -605,6 +712,13 @@ export class BrowserPocController {
     this.m_view.set_status(
       `Loaded source video ${this.m_source.file.name}: ${dimensions.width}x${dimensions.height}.`,
     );
+    this.refresh_button_state();
+  }
+
+  private async handle_video_data_loaded(): Promise<void> {
+    if (this.m_source.kind !== "video") {
+      return;
+    }
     await this.process_current_frame();
     this.refresh_button_state();
   }
@@ -660,6 +774,9 @@ export class BrowserPocController {
     if (this.m_source.kind === "sequence" && this.m_source.current_bitmap !== null) {
       return this.m_view.draw_canvas_frame(this.m_source.current_bitmap);
     }
+    if (this.m_source.kind === "webcam") {
+      return this.m_view.draw_canvas_frame(this.m_view.webcam_video_element());
+    }
     return err(
       app_error("missing_input", "Load a source video, image, or image sequence before processing."),
     );
@@ -692,6 +809,12 @@ export class BrowserPocController {
     if (this.m_hint.kind === "sequence" && this.m_hint.current_bitmap !== null) {
       return ok(this.m_view.draw_hint_canvas(this.m_hint.current_bitmap));
     }
+    if (this.m_hint.kind === "webcam") {
+      const tmp_video = (this.m_hint as any).video_element;
+      if (tmp_video && tmp_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        return ok(this.m_view.draw_hint_canvas(tmp_video));
+      }
+    }
     return ok(null);
   }
 
@@ -702,6 +825,7 @@ export class BrowserPocController {
     report_status: boolean,
   ): Promise<Result<ProcessedFrame, AppError>> {
     const started_at = performance.now();
+    const strategy = this.resolved_quality_options().strategy;
     const result = await this.m_processing_service.process_frame(
       frame,
       alpha_hint ?? undefined,
@@ -713,6 +837,7 @@ export class BrowserPocController {
           progress_ratio: progress.progress_ratio,
         });
       },
+      strategy
     );
     if (!result.ok) {
       return result;

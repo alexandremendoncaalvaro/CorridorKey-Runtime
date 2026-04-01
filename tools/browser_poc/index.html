@@ -21,40 +21,60 @@
       <main class="layout">
         <section class="panel controls-panel">
           <div class="panel-header">
-            <h2>Source Video</h2>
-            <p>Use the main flow for video. Still images and image sequences stay in Advanced.</p>
+            <h2>Source Media</h2>
+            <p>Select your input source. Auto-detects Video, Image, or Image Sequences.</p>
           </div>
 
-          <label class="field">
-            <span>Video File</span>
-            <input id="source-video-files" type="file" accept="video/*" />
+          <div class="field">
+            <span>Source Type</span>
+            <select id="source-type">
+              <option value="file">File Upload</option>
+              <option value="webcam">Webcam</option>
+            </select>
+          </div>
+
+          <label id="source-file-wrapper" class="field">
+            <span>Source File(s)</span>
+            <input id="source-files" type="file" accept="video/*,image/*" multiple />
           </label>
 
-          <label class="field">
-            <span>Optional Hint</span>
+          <div class="field">
+            <span>Alpha Hint Type</span>
+            <select id="hint-type">
+              <option value="none">Auto (Internal)</option>
+              <option value="file">File Upload</option>
+              <option value="webcam">Webcam</option>
+            </select>
+          </div>
+
+          <label id="hint-file-wrapper" class="field hidden">
+            <span>Hint File(s)</span>
             <input id="hint-files" type="file" accept="video/*,image/*" multiple />
           </label>
 
-          <details class="advanced-panel">
-            <summary>Advanced</summary>
+          <div class="field">
+            <span>Quality Preset</span>
+            <select id="quality-preset">
+              <option value="draft">Draft (Fast)</option>
+              <option value="balanced" selected>Balanced (Default)</option>
+              <option value="high">High Quality</option>
+              <option value="studio">Studio Max (Tiling)</option>
+            </select>
+          </div>
 
+          <details class="advanced-panel">
+            <summary>Advanced Settings</summary>
             <div class="advanced-grid">
               <label class="field">
-                <span>Still Image or Sequence</span>
-                <input id="source-stills-files" type="file" accept="image/*" multiple />
-              </label>
-
-              <label class="field">
-                <span>Model</span>
+                <span>Model Override</span>
                 <select id="model-select"></select>
               </label>
 
               <label class="field">
-                <span>Quality</span>
+                <span>Resolution Override</span>
                 <select id="target-resolution"></select>
               </label>
             </div>
-
             <p id="target-resolution-detail" class="resolution-detail">
               Auto currently follows the active browser model.
             </p>
@@ -86,6 +106,10 @@
             <p id="process-progress-detail" class="model-progress-detail">Waiting for a source frame.</p>
           </div>
 
+          <div class="primary-action action-group">
+            <button id="process-frame" class="secondary wide">Process Frame</button>
+            <button id="clear-inputs" class="secondary wide">Clear</button>
+          </div>
           <div class="primary-action">
             <button id="process-full-media" class="primary wide">Process Full Media</button>
             <p id="export-capability" class="capability-note">Checking browser export support...</p>
@@ -134,22 +158,23 @@
           <div id="status-log" class="log">Waiting for input.</div>
         </section>
 
-        <section class="panel stage-panel">
+        <section class="panel stage-panel" id="stage-panel-container">
           <div class="panel-header">
             <h2>Preview</h2>
-            <p>The left side tracks the current source frame. The right side shows the checker-composited preview.</p>
+            <p>Click media to toggle size. Double-click for Fullscreen.</p>
           </div>
 
-          <video id="source-video" class="source-video" controls muted playsinline preload="metadata"></video>
           <video id="hint-video" class="hidden" muted playsinline preload="metadata"></video>
 
-          <div class="canvas-grid">
-            <figure class="canvas-card">
+          <div class="canvas-grid" id="main-canvas-grid">
+            <figure class="canvas-card interactive" id="source-canvas-card">
               <figcaption>Source</figcaption>
+              <video id="source-video" class="hidden" controls muted playsinline preload="metadata"></video>
+              <video id="webcam-video" class="hidden" autoplay muted playsinline></video>
               <canvas id="source-canvas"></canvas>
             </figure>
 
-            <figure class="canvas-card">
+            <figure class="canvas-card interactive" id="preview-canvas-card">
               <figcaption>Preview</figcaption>
               <canvas id="output-canvas"></canvas>
             </figure>

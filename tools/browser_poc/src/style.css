@@ -265,6 +265,19 @@ button.primary {
   border-color: transparent;
 }
 
+button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.action-group {
+  display: flex;
+  gap: 12px;
+}
+
+.action-group button {
+  flex: 1;
+}
+
 button.wide {
   width: 100%;
 }
@@ -353,11 +366,34 @@ button:disabled,
   text-transform: uppercase;
 }
 
-.canvas-card canvas {
+.canvas-card canvas,
+.canvas-card video {
   width: 100%;
   display: block;
   border-radius: 16px;
   background: rgba(0, 0, 0, 0.3);
+}
+
+.canvas-card.interactive {
+  cursor: zoom-in;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.canvas-card.interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(0,0,0,0.4);
+}
+
+.canvas-grid.zoomed {
+  grid-template-columns: 1fr;
+}
+
+.canvas-grid.zoomed .canvas-card:not(.active-zoom) {
+  display: none;
+}
+
+.canvas-grid.zoomed .active-zoom {
+  cursor: zoom-out;
 }
 
 @media (max-width: 1080px) {
