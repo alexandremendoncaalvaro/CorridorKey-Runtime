@@ -35,7 +35,8 @@
       "artifacts": {
         "raw_onnx": "corridorkey_fp32_512.onnx",
         "runtime_onnx": "corridorkey_fp16_512.onnx",
-        "cpu_fallback_int8": "corridorkey_int8_512.onnx"
+        "cpu_fallback_int8": "corridorkey_int8_512.onnx",
+        "torch_torchscript": "corridorkey_torchtrt_fp16_512.ts"
       }
     },
     {
@@ -70,7 +71,8 @@
       "artifacts": {
         "raw_onnx": "corridorkey_fp32_768.onnx",
         "runtime_onnx": "corridorkey_fp16_768.onnx",
-        "cpu_fallback_int8": "corridorkey_int8_768.onnx"
+        "cpu_fallback_int8": "corridorkey_int8_768.onnx",
+        "torch_torchscript": "corridorkey_torchtrt_fp16_768.ts"
       }
     },
     {
@@ -105,7 +107,8 @@
       "artifacts": {
         "raw_onnx": "corridorkey_fp32_1024.onnx",
         "runtime_onnx": "corridorkey_fp16_1024.onnx",
-        "cpu_fallback_int8": "corridorkey_int8_1024.onnx"
+        "cpu_fallback_int8": "corridorkey_int8_1024.onnx",
+        "torch_torchscript": "corridorkey_torchtrt_fp16_1024.ts"
       }
     },
     {
@@ -139,7 +142,8 @@
       },
       "artifacts": {
         "raw_onnx": "corridorkey_fp32_1536.onnx",
-        "runtime_onnx": "corridorkey_fp16_1536.onnx"
+        "runtime_onnx": "corridorkey_fp16_1536.onnx",
+        "torch_torchscript": "corridorkey_torchtrt_fp16_1536.ts"
       }
     },
     {
@@ -173,7 +177,8 @@
       },
       "artifacts": {
         "raw_onnx": "corridorkey_fp32_2048.onnx",
-        "runtime_onnx": "corridorkey_fp16_2048.onnx"
+        "runtime_onnx": "corridorkey_fp16_2048.onnx",
+        "torch_torchscript": "corridorkey_torchtrt_fp16_2048.ts"
       }
     }
   ]
