@@ -108,32 +108,85 @@ function Copy-OrtDllByPattern {
     return $resolved.Name
 }
 
-function Get-RuntimeSupportedBackends {
+function Copy-StagedRuntimeDlls {
+    param(
+        [string]$SourceDir,
+        [string]$DestinationDir
+    )
+
+    if (-not (Test-Path $SourceDir)) {
+        return
+    }
+
+    Get-ChildItem -Path $SourceDir -Filter "*.dll" -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Copy-Item $_.FullName $DestinationDir -Force
+        }
+}
+
+function Get-RuntimeCapabilitiesPayload {
     param([string]$RuntimeDir)
 
     $runtimeBinary = Join-Path $RuntimeDir "corridorkey.exe"
     if (-not (Test-Path $runtimeBinary)) {
-        return @()
+        return $null
     }
+
+    $previousModelsDir = if (Test-Path Env:CORRIDORKEY_MODELS_DIR) {
+        $env:CORRIDORKEY_MODELS_DIR
+    } else {
+        $null
+    }
+    $bundleModelsDir = Join-Path (Split-Path -Parent $RuntimeDir) "Resources\models"
 
     Push-Location $RuntimeDir
     try {
+        if (Test-Path $bundleModelsDir) {
+            $env:CORRIDORKEY_MODELS_DIR = [System.IO.Path]::GetFullPath($bundleModelsDir)
+        }
         $json = & $runtimeBinary info --json 2>$null
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
-            return @()
+            return $null
         }
 
         $parsed = $json | ConvertFrom-Json
-        if ($null -eq $parsed.capabilities -or $null -eq $parsed.capabilities.supported_backends) {
-            return @()
+        if ($null -eq $parsed.capabilities) {
+            return $null
         }
 
-        return @($parsed.capabilities.supported_backends)
+        return $parsed.capabilities
     } catch {
-        return @()
+        return $null
     } finally {
+        if ($null -ne $previousModelsDir) {
+            $env:CORRIDORKEY_MODELS_DIR = $previousModelsDir
+        } else {
+            Remove-Item Env:CORRIDORKEY_MODELS_DIR -ErrorAction SilentlyContinue
+        }
         Pop-Location
     }
+}
+
+function Get-RuntimeSupportedBackends {
+    param([string]$RuntimeDir)
+
+    $capabilities = Get-RuntimeCapabilitiesPayload -RuntimeDir $RuntimeDir
+    if ($null -eq $capabilities -or $null -eq $capabilities.supported_backends) {
+        return @()
+    }
+
+    return @($capabilities.supported_backends)
+}
+
+function Get-RuntimeSupportedExecutionEngines {
+    param([string]$RuntimeDir)
+
+    $capabilities = Get-RuntimeCapabilitiesPayload -RuntimeDir $RuntimeDir
+    if ($null -eq $capabilities -or $null -eq $capabilities.supported_execution_engines) {
+        return @()
+    }
+
+    return @($capabilities.supported_execution_engines)
 }
 
 function Test-RuntimeBackendSupport {
@@ -245,6 +298,9 @@ Assert-FileExists -Path $runtimeServerBinary -Message "Runtime server binary not
 Copy-Item $pluginBinary $win64Dir -Force
 Copy-Item $cliBinary $win64Dir -Force
 Copy-Item $runtimeServerBinary $win64Dir -Force
+Copy-StagedRuntimeDlls -SourceDir (Split-Path -Parent $pluginBinary) -DestinationDir $win64Dir
+Copy-StagedRuntimeDlls -SourceDir (Split-Path -Parent $cliBinary) -DestinationDir $win64Dir
+Copy-StagedRuntimeDlls -SourceDir (Split-Path -Parent $runtimeServerBinary) -DestinationDir $win64Dir
 
 Write-Host "Staging ONNX Runtime core DLLs from $OrtRoot" -ForegroundColor Cyan
 Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
@@ -368,6 +424,10 @@ $compiledContextModels = @()
 $expectedCompiledContextModels = Get-CorridorKeyExpectedCompiledContextModels `
     -PresentModels $modelInventory.present_models `
     -ModelProfile $ModelProfile
+$torchTensorRtArtifacts = @()
+$expectedTorchTensorRtArtifacts = Get-CorridorKeyExpectedTorchTensorRtArtifacts `
+    -PresentModels $modelInventory.present_models `
+    -ModelProfile $ModelProfile
 $strictCertifiedRtxPackaging = $profileContract.expects_compiled_context_models -and
     (-not $AllowUncertifiedTensorRtContexts.IsPresent)
 $artifactManifest = $null
@@ -397,6 +457,16 @@ foreach ($model in $modelInventory.present_models) {
     }
 }
 
+foreach ($torchArtifact in $expectedTorchTensorRtArtifacts) {
+    $sourcePath = Join-Path $ModelsDir $torchArtifact
+    if (-not (Test-Path $sourcePath)) {
+        continue
+    }
+
+    Copy-Item $sourcePath $resourcesDir -Force
+    $torchTensorRtArtifacts += $torchArtifact
+}
+
 if ($profileContract.expects_compiled_context_models -and -not $strictCertifiedRtxPackaging) {
     foreach ($compiledContextName in $expectedCompiledContextModels) {
         if ($compiledContextModels -contains $compiledContextName) {
@@ -417,6 +487,10 @@ if ($profileContract.expects_compiled_context_models -and -not $strictCertifiedR
 $missingCompiledContextModels = @(
     $expectedCompiledContextModels |
         Where-Object { $compiledContextModels -notcontains $_ }
+)
+$missingTorchTensorRtArtifacts = @(
+    $expectedTorchTensorRtArtifacts |
+        Where-Object { $torchTensorRtArtifacts -notcontains $_ }
 )
 
 $certificationContractIssues = @()
@@ -457,6 +531,11 @@ $inventoryPayload = [ordered]@{
     expected_compiled_context_models = @($expectedCompiledContextModels)
     missing_compiled_context_models = @($missingCompiledContextModels)
     compiled_context_complete = @($missingCompiledContextModels).Count -eq 0
+    torch_tensorrt_artifacts = @($torchTensorRtArtifacts)
+    expected_torch_tensorrt_artifacts = @($expectedTorchTensorRtArtifacts)
+    missing_torch_tensorrt_artifacts = @($missingTorchTensorRtArtifacts)
+    torch_tensorrt_artifact_complete = @($missingTorchTensorRtArtifacts).Count -eq 0
+    supported_execution_engines = @(Get-RuntimeSupportedExecutionEngines -RuntimeDir $win64Dir)
     certification_manifest_present = $strictCertifiedRtxPackaging
     certification_contract_complete = $certificationContractComplete
     certification_contract_issues = @($certificationContractIssues)

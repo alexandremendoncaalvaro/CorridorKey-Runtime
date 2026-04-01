@@ -46,7 +46,7 @@ function Write-ReleaseReadme {
     )
 
     $modelCoverageText = switch ($ModelProfile) {
-        "windows-rtx" { "This Windows RTX package includes the official FP16 ladder through 2048px plus the portable INT8 CPU artifacts." }
+        "windows-rtx" { "This Windows RTX package includes the official FP16 ladder through 2048px, the portable INT8 CPU artifacts, and any validated experimental Torch-TensorRT artifacts packaged with the same installer." }
         "windows-universal" { "This Windows DirectML package includes the Windows universal GPU and CPU model set." }
         default { "This package includes the packaged model set recorded in CorridorKey.ofx.bundle\\model_inventory.json." }
     }
@@ -58,14 +58,16 @@ CorridorKey Resolve OFX v$Version - $ReleaseLabel
 $modelCoverageText
 
 Files in this release:
+- $ReleaseBasename`_Installer.exe: installer that copies the adjacent packaged bundle
 - CorridorKey.ofx.bundle: the packaged OFX bundle payload
 - install_plugin.bat: manual installer helper for the bundle
 - bundle_validation.json: packaging-time validation and doctor status
 - CorridorKey.ofx.bundle\model_inventory.json: packaged model inventory
 
 Recommended install path:
-1. Run $ReleaseBasename`_Installer.exe as Administrator.
-2. Start DaVinci Resolve after the installer finishes.
+1. Extract the full release zip so the installer and CorridorKey.ofx.bundle stay together.
+2. Run $ReleaseBasename`_Installer.exe as Administrator from the extracted folder.
+3. Start DaVinci Resolve after the installer finishes.
 
 Installer behavior:
 - This installer replaces any existing CorridorKey Windows OFX installation before copying the new bundle.
@@ -99,7 +101,9 @@ $releaseBasename = "CorridorKey_Resolve_v${Version}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
 $zipPath = Join-Path $repoRoot ("dist\" + $releaseBasename + ".zip")
-$installerPath = Join-Path $repoRoot ("dist\" + $releaseBasename + "_Installer.exe")
+$installerFileName = $releaseBasename + "_Installer.exe"
+$installerPath = Join-Path $repoRoot ("dist\" + $installerFileName)
+$installerInReleasePath = Join-Path $releaseDir $installerFileName
 $installScriptPath = Join-Path $releaseDir "install_plugin.bat"
 $readmePath = Join-Path $releaseDir "README.txt"
 $nsisCompiler = Resolve-NsisCompiler
@@ -114,6 +118,9 @@ if (Test-Path $zipPath) {
 }
 if (Test-Path $installerPath) {
     Remove-Item $installerPath -Force
+}
+if (Test-Path $installerInReleasePath) {
+    Remove-Item $installerInReleasePath -Force
 }
 New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 
@@ -155,10 +162,10 @@ Write-ReleaseReadme -Path $readmePath `
     -ReleaseBasename $releaseBasename `
     -ReleaseLabel $releaseLabel `
     -ModelProfile $ModelProfile
-Compress-Archive -Path $releaseDir -DestinationPath $zipPath -CompressionLevel Optimal
 
 $escapedBundlePath = $bundlePath.Replace('\', '\\')
-$escapedInstallerPath = $installerPath.Replace('\', '\\')
+$escapedInstallerPath = $installerInReleasePath.Replace('\', '\\')
+$escapedReleaseBasename = $releaseBasename.Replace('\', '\\')
 $nsiScript = @"
 Unicode True
 RequestExecutionLevel admin
@@ -172,14 +179,52 @@ ShowUninstDetails show
 
 !define PRODUCT_NAME "CorridorKey Resolve OFX ($releaseLabel)"
 !define PRODUCT_VERSION "$Version"
-!define PLUGIN_SOURCE "$escapedBundlePath"
 !define PLUGIN_DEST "`$COMMONFILES64\OFX\Plugins\CorridorKey.ofx.bundle"
 !define CACHE_FILE "`$APPDATA\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\CorridorKeyResolveOFX"
+!define RELEASE_DIR_NAME "$escapedReleaseBasename"
+!define BUNDLE_SENTINEL "Contents\Win64\CorridorKey.ofx"
+
+Var BundleSource
+Var RoboCopyExit
+Var RoboCopyLog
+Var BrowseResult
 
 Section "Install"
   SetRegView 64
 
+  ; --- Probe 1: bundle right next to the installer (flat extraction or release dir) ---
+  StrCpy `$BundleSource "`$EXEDIR\CorridorKey.ofx.bundle"
+  IfFileExists "`$BundleSource\`${BUNDLE_SENTINEL}" found_bundle 0
+
+  ; --- Probe 2: release subfolder next to the installer (standalone installer at dist root) ---
+  StrCpy `$BundleSource "`$EXEDIR\`${RELEASE_DIR_NAME}\CorridorKey.ofx.bundle"
+  IfFileExists "`$BundleSource\`${BUNDLE_SENTINEL}" found_bundle 0
+
+  ; --- Probe 3: parent directory (handles Windows Extract All double-nesting) ---
+  StrCpy `$BundleSource "`$EXEDIR\..\CorridorKey.ofx.bundle"
+  IfFileExists "`$BundleSource\`${BUNDLE_SENTINEL}" found_bundle 0
+
+  ; --- Probe 4: parent has the release subfolder ---
+  StrCpy `$BundleSource "`$EXEDIR\..\`${RELEASE_DIR_NAME}\CorridorKey.ofx.bundle"
+  IfFileExists "`$BundleSource\`${BUNDLE_SENTINEL}" found_bundle 0
+
+  ; --- Fallback: let the user browse for the extracted release folder ---
+  MessageBox MB_YESNO "CorridorKey.ofx.bundle was not found next to the installer.`$\nExtract the full release zip first, then click Yes to browse to the extracted folder, or No to cancel." IDYES browse_for_bundle
+  Abort
+
+browse_for_bundle:
+  nsDialogs::SelectFolderDialog "Select the extracted release folder containing CorridorKey.ofx.bundle" "`$EXEDIR"
+  Pop `$BrowseResult
+  StrCmp `$BrowseResult "error" missing_bundle
+  StrCpy `$BundleSource "`$BrowseResult\CorridorKey.ofx.bundle"
+  IfFileExists "`$BundleSource\`${BUNDLE_SENTINEL}" found_bundle 0
+
+missing_bundle:
+  MessageBox MB_ICONSTOP "CorridorKey.ofx.bundle was not found. Extract the full Windows RTX release zip and run the installer from inside the extracted folder."
+  Abort
+
+found_bundle:
   DetailPrint "Closing DaVinci Resolve..."
   nsExec::ExecToStack 'taskkill /F /IM Resolve.exe'
   Pop `$0
@@ -189,8 +234,17 @@ Section "Install"
   RMDir /r "`${PLUGIN_DEST}"
 
   DetailPrint "Installing CorridorKey OFX bundle..."
-  SetOutPath "`${PLUGIN_DEST}"
-  File /r "`${PLUGIN_SOURCE}\*"
+  CreateDirectory "`$COMMONFILES64\OFX\Plugins"
+  nsExec::ExecToStack '"`$SYSDIR\robocopy.exe" "`$BundleSource" "`${PLUGIN_DEST}" /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NP'
+  Pop `$RoboCopyExit
+  Pop `$RoboCopyLog
+  IntCmp `$RoboCopyExit 8 copy_failed copy_succeeded copy_succeeded
+
+copy_failed:
+  MessageBox MB_ICONSTOP "Failed to copy CorridorKey.ofx.bundle into the OFX plugin directory."
+  Abort
+
+copy_succeeded:
 
   DetailPrint "Writing uninstaller..."
   SetOutPath "`$INSTDIR"
@@ -237,6 +291,8 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "NSIS installer build failed."
     }
+    Copy-Item $installerInReleasePath $installerPath -Force
+    Compress-Archive -Path (Join-Path $releaseDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
 } finally {
     if (Test-Path $tempNsiPath) {
         Remove-Item $tempNsiPath -Force

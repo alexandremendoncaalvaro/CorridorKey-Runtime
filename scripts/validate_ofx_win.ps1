@@ -58,7 +58,15 @@ function Get-CorridorKeyInventoryContractIssues {
         }
     }
 
-    foreach ($field in @("expected_compiled_context_models", "compiled_context_models", "missing_compiled_context_models")) {
+    foreach ($field in @(
+            "expected_compiled_context_models",
+            "compiled_context_models",
+            "missing_compiled_context_models",
+            "torch_tensorrt_artifacts",
+            "expected_torch_tensorrt_artifacts",
+            "missing_torch_tensorrt_artifacts",
+            "supported_execution_engines"
+        )) {
         if (-not (Test-CorridorKeyJsonProperty -Object $Inventory -Name $field)) {
             $issues += "Missing inventory field '$field'."
             continue
@@ -69,7 +77,11 @@ function Get-CorridorKeyInventoryContractIssues {
         }
     }
 
-    foreach ($field in @("compiled_context_complete", "unrestricted_quality_attempt")) {
+    foreach ($field in @(
+            "compiled_context_complete",
+            "unrestricted_quality_attempt",
+            "torch_tensorrt_artifact_complete"
+        )) {
         if (-not (Test-CorridorKeyJsonProperty -Object $Inventory -Name $field)) {
             $issues += "Missing inventory field '$field'."
         }
@@ -180,14 +192,24 @@ $runtimeServerSize = (Get-Item $runtimeServer).Length
 Write-Host "[PASS] Found runtime server binary ($([math]::Round($runtimeServerSize / 1MB, 2)) MB)" -ForegroundColor Green
 
 $supportedBackends = @()
+$supportedExecutionEngines = @()
+$previousProbeModelsDir = if (Test-Path Env:CORRIDORKEY_MODELS_DIR) {
+    $env:CORRIDORKEY_MODELS_DIR
+} else {
+    $null
+}
 Push-Location $win64Dir
 try {
+    $env:CORRIDORKEY_MODELS_DIR = [System.IO.Path]::GetFullPath($resourcesDir)
     $runtimeInfoJson = & ".\corridorkey.exe" info --json 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($runtimeInfoJson)) {
         $runtimeInfo = $runtimeInfoJson | ConvertFrom-Json
         if ($null -ne $runtimeInfo.capabilities -and
             $null -ne $runtimeInfo.capabilities.supported_backends) {
             $supportedBackends = @($runtimeInfo.capabilities.supported_backends)
+            if ($null -ne $runtimeInfo.capabilities.supported_execution_engines) {
+                $supportedExecutionEngines = @($runtimeInfo.capabilities.supported_execution_engines)
+            }
             Write-Host "[PASS] Runtime probe succeeded: $($supportedBackends -join ', ')" -ForegroundColor Green
         } else {
             Write-Host "[WARN] Runtime probe returned no supported_backends payload" -ForegroundColor Yellow
@@ -198,6 +220,11 @@ try {
 } catch {
     Write-Host "[WARN] Runtime probe failed; falling back to DLL inspection" -ForegroundColor Yellow
 } finally {
+    if ($null -ne $previousProbeModelsDir) {
+        $env:CORRIDORKEY_MODELS_DIR = $previousProbeModelsDir
+    } else {
+        Remove-Item Env:CORRIDORKEY_MODELS_DIR -ErrorAction SilentlyContinue
+    }
     Pop-Location
 }
 
@@ -299,6 +326,31 @@ $missingCompiledContextModels = if (Test-CorridorKeyJsonProperty -Object $bundle
 } else {
     @()
 }
+$torchTensorRtArtifacts = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "torch_tensorrt_artifacts") {
+    @($bundleModelInventory.torch_tensorrt_artifacts)
+} else {
+    @()
+}
+$expectedTorchTensorRtArtifacts = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "expected_torch_tensorrt_artifacts") {
+    @($bundleModelInventory.expected_torch_tensorrt_artifacts)
+} else {
+    @()
+}
+$missingTorchTensorRtArtifacts = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "missing_torch_tensorrt_artifacts") {
+    @($bundleModelInventory.missing_torch_tensorrt_artifacts)
+} else {
+    @()
+}
+$torchTensorRtArtifactComplete = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "torch_tensorrt_artifact_complete") {
+    [bool]$bundleModelInventory.torch_tensorrt_artifact_complete
+} else {
+    $false
+}
+$inventorySupportedExecutionEngines = if (Test-CorridorKeyJsonProperty -Object $bundleModelInventory -Name "supported_execution_engines") {
+    @($bundleModelInventory.supported_execution_engines)
+} else {
+    @()
+}
 $inventoryContractIssues = Get-CorridorKeyInventoryContractIssues `
     -Inventory $bundleModelInventory `
     -ExpectedContract $expectedProfileContract
@@ -327,6 +379,33 @@ if ($expectedProfileContract.expects_compiled_context_models) {
     }
 }
 
+$advertisedExecutionEngines = @($supportedExecutionEngines + $inventorySupportedExecutionEngines) |
+    Sort-Object -Unique
+$torchEngineAdvertised = $advertisedExecutionEngines -contains "torch-tensorrt"
+$missingTorchRuntimeDlls = @()
+if ($torchEngineAdvertised) {
+    foreach ($dll in @(
+            "torchtrt.dll",
+            "torch.dll",
+            "torch_cpu.dll",
+            "c10.dll",
+            "torch_cuda.dll",
+            "c10_cuda.dll"
+        )) {
+        if (-not (Test-Path (Join-Path $win64Dir $dll))) {
+            $missingTorchRuntimeDlls += $dll
+        }
+    }
+
+    if ($missingTorchRuntimeDlls.Count -gt 0) {
+        throw "Bundle advertises Torch-TensorRT support, but required runtime DLLs are missing: $($missingTorchRuntimeDlls -join ', ')"
+    }
+
+    if ($torchTensorRtArtifacts.Count -eq 0) {
+        throw "Bundle advertises Torch-TensorRT support, but no packaged Torch-TensorRT artifacts were found."
+    }
+}
+
 foreach ($model in $presentModels) {
     $path = Join-Path $resourcesDir $model
     $modelSize = (Get-Item $path).Length
@@ -334,6 +413,14 @@ foreach ($model in $presentModels) {
 }
 foreach ($model in $missingModels) {
     Write-Host "[INFO] Packaged bundle omits model: $model" -ForegroundColor Cyan
+}
+foreach ($artifact in $torchTensorRtArtifacts) {
+    $path = Join-Path $resourcesDir $artifact
+    $artifactSize = (Get-Item $path).Length
+    Write-Host "[PASS] Found $artifact ($([math]::Round($artifactSize / 1MB, 2)) MB)" -ForegroundColor Green
+}
+foreach ($artifact in $missingTorchTensorRtArtifacts) {
+    Write-Host "[INFO] Packaged bundle omits Torch-TensorRT artifact: $artifact" -ForegroundColor Cyan
 }
 
 $doctorReportPath = Join-Path $bundleRoot "doctor_report.json"
@@ -486,6 +573,9 @@ $validationPayload = [ordered]@{
     validation_passed = $true
     runtime_probe = [ordered]@{
         supported_backends = @($supportedBackends)
+        supported_execution_engines = @($supportedExecutionEngines)
+        torch_runtime_dlls_complete = $missingTorchRuntimeDlls.Count -eq 0
+        missing_torch_runtime_dlls = @($missingTorchRuntimeDlls)
     }
     models = [ordered]@{
         model_profile = $modelProfile
@@ -513,6 +603,11 @@ $validationPayload = [ordered]@{
             compiled_context_complete = $compiledContextComplete
             expected_compiled_context_models = @($expectedCompiledContextModels)
             missing_compiled_context_models = @($missingCompiledContextModels)
+            supported_execution_engines = @($inventorySupportedExecutionEngines)
+            torch_tensorrt_artifacts = @($torchTensorRtArtifacts)
+            expected_torch_tensorrt_artifacts = @($expectedTorchTensorRtArtifacts)
+            missing_torch_tensorrt_artifacts = @($missingTorchTensorRtArtifacts)
+            torch_tensorrt_artifact_complete = $torchTensorRtArtifactComplete
         }
         certification_contract = [ordered]@{
             complete = $certificationContractComplete

@@ -875,6 +875,15 @@ function Get-CorridorKeyWindowsRtxPromotedModelList {
     )
 }
 
+function Get-CorridorKeyWindowsRtxTorchTensorRtArtifactList {
+    return @(
+        "corridorkey_torchtrt_fp16_512.ts",
+        "corridorkey_torchtrt_fp16_1024.ts",
+        "corridorkey_torchtrt_fp16_1536.ts",
+        "corridorkey_torchtrt_fp16_2048.ts"
+    )
+}
+
 function Get-CorridorKeyIntermediateModelList {
     return @(
         "corridorkey_fp32_512.onnx",
@@ -974,6 +983,28 @@ function Get-CorridorKeyExpectedCompiledContextModels {
         $PresentModels |
             Where-Object { $_ -match '^corridorkey_fp16_[0-9]+\.onnx$' } |
             ForEach-Object { ([System.IO.Path]::GetFileNameWithoutExtension($_)) + "_ctx.onnx" }
+    )
+}
+
+function Get-CorridorKeyExpectedTorchTensorRtArtifacts {
+    param(
+        [string[]]$PresentModels,
+        [ValidateSet("windows-rtx", "windows-universal")]
+        [string]$ModelProfile = "windows-rtx"
+    )
+
+    if ($ModelProfile -ne "windows-rtx") {
+        return @()
+    }
+
+    return @(
+        $PresentModels |
+            Where-Object { $_ -match '^corridorkey_fp16_[0-9]+\.onnx$' } |
+            ForEach-Object {
+                if ($_ -match 'corridorkey_fp16_([0-9]+)\.onnx') {
+                    "corridorkey_torchtrt_fp16_$($Matches[1]).ts"
+                }
+            }
     )
 }
 

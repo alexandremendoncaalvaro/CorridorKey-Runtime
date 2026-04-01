@@ -3,17 +3,18 @@
     Downloads CorridorKey model files from Hugging Face Hub into the local models/ directory.
 
 .DESCRIPTION
-    Fetches ONNX, MLX, and PyTorch model files from the Hugging Face repository
+    Fetches ONNX, Torch-TensorRT TorchScript, MLX, and PyTorch model files from the Hugging Face repository
     (alexandrealvaro/CorridorKey) into the local models/ directory. The release
     pipeline and runtime continue to read models from this directory unchanged.
 
-    By default, only the ONNX models (FP16 + INT8) needed for Windows builds
-    are downloaded. Use -Profile to select a different set.
+    By default, the Windows RTX profile downloads the ONNX ladder, CPU INT8
+    fallbacks, and any packaged Torch-TensorRT TorchScript artifacts used by the
+    experimental Windows RTX engine selector.
 
 .PARAMETER Profile
     Model set to download:
-      windows-rtx  : FP16 + INT8 ONNX models (default)
-      windows-all  : FP16 + FP16 context + INT8 ONNX models
+      windows-rtx  : FP16 + INT8 ONNX models + Torch-TensorRT TorchScript artifacts (default)
+      windows-all  : FP16 + FP16 context + INT8 ONNX models + Torch-TensorRT TorchScript artifacts
       apple        : MLX safetensors + bridge files
       pytorch      : Training checkpoint (.pth)
       all          : Everything
@@ -64,6 +65,13 @@ $windowsRtxFiles = @{
     "onnx/int8/corridorkey_int8_1024.onnx"  = "corridorkey_int8_1024.onnx"
 }
 
+$windowsTorchTensorRtFiles = @{
+    "torchtrt/fp16/corridorkey_torchtrt_fp16_512.ts"  = "corridorkey_torchtrt_fp16_512.ts"
+    "torchtrt/fp16/corridorkey_torchtrt_fp16_1024.ts" = "corridorkey_torchtrt_fp16_1024.ts"
+    "torchtrt/fp16/corridorkey_torchtrt_fp16_1536.ts" = "corridorkey_torchtrt_fp16_1536.ts"
+    "torchtrt/fp16/corridorkey_torchtrt_fp16_2048.ts" = "corridorkey_torchtrt_fp16_2048.ts"
+}
+
 $windowsCtxFiles = @{
     "onnx/fp16_ctx/corridorkey_fp16_512_ctx.onnx"   = "corridorkey_fp16_512_ctx.onnx"
     "onnx/fp16_ctx/corridorkey_fp16_1024_ctx.onnx"  = "corridorkey_fp16_1024_ctx.onnx"
@@ -89,10 +97,16 @@ $filesToDownload = @{}
 switch ($Profile) {
     "windows-rtx" {
         $filesToDownload = $windowsRtxFiles.Clone()
+        foreach ($entry in $windowsTorchTensorRtFiles.GetEnumerator()) {
+            $filesToDownload[$entry.Key] = $entry.Value
+        }
     }
     "windows-all" {
         $filesToDownload = $windowsRtxFiles.Clone()
         foreach ($entry in $windowsCtxFiles.GetEnumerator()) {
+            $filesToDownload[$entry.Key] = $entry.Value
+        }
+        foreach ($entry in $windowsTorchTensorRtFiles.GetEnumerator()) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
     }
@@ -103,7 +117,7 @@ switch ($Profile) {
         $filesToDownload = $pytorchFiles.Clone()
     }
     "all" {
-        foreach ($table in @($windowsRtxFiles, $windowsCtxFiles, $appleFiles, $pytorchFiles)) {
+        foreach ($table in @($windowsRtxFiles, $windowsCtxFiles, $windowsTorchTensorRtFiles, $appleFiles, $pytorchFiles)) {
             foreach ($entry in $table.GetEnumerator()) {
                 $filesToDownload[$entry.Key] = $entry.Value
             }
