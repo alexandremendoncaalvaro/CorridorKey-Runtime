@@ -180,7 +180,7 @@ export class OnnxRuntimeModelSession implements ModelSession {
     try {
       const outputs = await this.m_session.run(feeds);
       tensor.dispose();
-      
+
       const alpha_tensor = outputs[this.m_session.outputNames[0] ?? "alpha"];
 
       if (alpha_tensor === undefined) {
@@ -207,10 +207,10 @@ export class OnnxRuntimeModelSession implements ModelSession {
         height,
         mode: "model" as const,
       });
-      
+
       alpha_tensor.dispose();
       if (fg_tensor) fg_tensor.dispose();
-      
+
       return result;
     } catch (cause) {
       tensor.dispose();
@@ -240,7 +240,7 @@ export class OnnxRuntimeModelSession implements ModelSession {
         on_progress
       );
     }
-    
+
     // Default to single pass
     return this._run_single_pass(frame, alpha_hint);
   }
