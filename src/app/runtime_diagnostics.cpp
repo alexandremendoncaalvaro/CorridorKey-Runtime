@@ -547,6 +547,12 @@ struct PackagedModelInventory {
     std::vector<std::string> missing_compiled_context_models = {};
     bool compiled_context_complete = false;
     bool compiled_context_complete_set = false;
+    std::vector<std::string> torch_tensorrt_artifacts = {};
+    std::vector<std::string> expected_torch_tensorrt_artifacts = {};
+    std::vector<std::string> missing_torch_tensorrt_artifacts = {};
+    bool torch_tensorrt_artifact_complete = false;
+    bool torch_tensorrt_artifact_complete_set = false;
+    std::vector<std::string> supported_execution_engines = {};
 };
 
 std::optional<std::string> optional_inventory_string(const nlohmann::json& parsed,
@@ -583,7 +589,8 @@ bool packaged_inventory_contract_complete(const PackagedModelInventory& inventor
            !inventory.optimization_profile_label.empty() && !inventory.backend_intent.empty() &&
            !inventory.fallback_policy.empty() && !inventory.warmup_policy.empty() &&
            !inventory.certification_tier.empty() && inventory.unrestricted_quality_attempt_set &&
-           inventory.compiled_context_complete_set;
+           inventory.compiled_context_complete_set &&
+           inventory.torch_tensorrt_artifact_complete_set;
 }
 
 bool packaged_inventory_requires_compiled_contexts(const PackagedModelInventory& inventory) {
@@ -664,6 +671,14 @@ std::optional<PackagedModelInventory> load_packaged_model_inventory(
                 optional_inventory_string_array(parsed, "expected_compiled_context_models");
             inventory.missing_compiled_context_models =
                 optional_inventory_string_array(parsed, "missing_compiled_context_models");
+            inventory.torch_tensorrt_artifacts =
+                optional_inventory_string_array(parsed, "torch_tensorrt_artifacts");
+            inventory.expected_torch_tensorrt_artifacts =
+                optional_inventory_string_array(parsed, "expected_torch_tensorrt_artifacts");
+            inventory.missing_torch_tensorrt_artifacts =
+                optional_inventory_string_array(parsed, "missing_torch_tensorrt_artifacts");
+            inventory.supported_execution_engines =
+                optional_inventory_string_array(parsed, "supported_execution_engines");
             if (auto value = optional_inventory_bool(parsed, "unrestricted_quality_attempt");
                 value.has_value()) {
                 inventory.unrestricted_quality_attempt = *value;
@@ -673,6 +688,11 @@ std::optional<PackagedModelInventory> load_packaged_model_inventory(
                 value.has_value()) {
                 inventory.compiled_context_complete = *value;
                 inventory.compiled_context_complete_set = true;
+            }
+            if (auto value = optional_inventory_bool(parsed, "torch_tensorrt_artifact_complete");
+                value.has_value()) {
+                inventory.torch_tensorrt_artifact_complete = *value;
+                inventory.torch_tensorrt_artifact_complete_set = true;
             }
             return inventory;
         } catch (...) {
@@ -873,7 +893,12 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         find_libraries_with_prefixes(executable_dir, {"tensorrt_onnxparser_rtx", "nvonnxparser"});
     auto cuda_runtime_libraries =
         find_libraries_with_prefixes(executable_dir, {"cudart64_", "cudart"});
+    auto torch_runtime_libraries =
+        find_libraries_with_prefixes(executable_dir, {"torch", "c10", "fbgemm"});
+    auto torch_tensorrt_runtime_libraries =
+        find_libraries_with_prefixes(executable_dir, {"torchtrt"});
     auto compiled_context_models = nlohmann::json::array();
+    auto torch_tensorrt_artifacts = nlohmann::json::array();
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
     const auto expected_packaged_models = expected_packaged_models_for_platform(models_dir,
@@ -916,6 +941,11 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
             if (entry.path().extension() == ".onnx" &&
                 entry.path().stem().string().find("_ctx") != std::string::npos) {
                 compiled_context_models.push_back(entry.path().filename().string());
+                continue;
+            }
+
+            if (is_packaged_torch_tensorrt_artifact(entry.path())) {
+                torch_tensorrt_artifacts.push_back(entry.path().filename().string());
                 continue;
             }
 
@@ -981,6 +1011,9 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["mlx_bridge_present"] = mlx_bridge_present;
     json["mlx_bridge_artifacts"] = mlx_bridge_artifacts;
     json["compiled_context_models"] = compiled_context_models;
+    json["torch_runtime_libraries"] = torch_runtime_libraries;
+    json["torch_tensorrt_runtime_libraries"] = torch_tensorrt_runtime_libraries;
+    json["torch_tensorrt_artifacts"] = torch_tensorrt_artifacts;
     const bool inventory_contract_complete =
         packaged_inventory.has_value() ? packaged_inventory_contract_complete(*packaged_inventory)
                                        : !packaged_layout_detected;
@@ -1012,6 +1045,16 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
             packaged_inventory->missing_compiled_context_models;
         json["model_inventory"]["compiled_context_complete"] =
             packaged_inventory->compiled_context_complete;
+        json["model_inventory"]["torch_tensorrt_artifacts"] =
+            packaged_inventory->torch_tensorrt_artifacts;
+        json["model_inventory"]["expected_torch_tensorrt_artifacts"] =
+            packaged_inventory->expected_torch_tensorrt_artifacts;
+        json["model_inventory"]["missing_torch_tensorrt_artifacts"] =
+            packaged_inventory->missing_torch_tensorrt_artifacts;
+        json["model_inventory"]["torch_tensorrt_artifact_complete"] =
+            packaged_inventory->torch_tensorrt_artifact_complete;
+        json["model_inventory"]["supported_execution_engines"] =
+            packaged_inventory->supported_execution_engines;
         json["model_inventory"]["contract_complete"] = inventory_contract_complete;
     } else {
         json["model_inventory"]["contract_complete"] = inventory_contract_complete;
@@ -1346,6 +1389,11 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["gpu_memory_mb"] = 0;
     json["packaged_models"] = nlohmann::json::array();
     json["compiled_context_models"] = nlohmann::json::array();
+    json["torch_tensorrt_artifacts"] = nlohmann::json::array();
+    json["expected_torch_tensorrt_artifacts"] = nlohmann::json::array();
+    json["missing_torch_tensorrt_artifacts"] = nlohmann::json::array();
+    json["torch_tensorrt_artifact_complete"] = false;
+    json["supported_execution_engines"] = nlohmann::json::array();
     json["execution_probe_policy"] = "strict_engine_create_and_synthetic_frame_no_cpu_fallback";
     json["execution_probes"] = nlohmann::json::array();
     json["recommended_backend"] = "cpu";
@@ -1442,6 +1490,10 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
             if (item.path().extension() == ".onnx" &&
                 item.path().stem().string().find("_ctx") != std::string::npos) {
                 json["compiled_context_models"].push_back(item.path().filename().string());
+                continue;
+            }
+            if (is_packaged_torch_tensorrt_artifact(item.path())) {
+                json["torch_tensorrt_artifacts"].push_back(item.path().filename().string());
             }
         }
     }
@@ -1494,6 +1546,22 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["compiled_context_complete"] =
         packaged_inventory.has_value() && packaged_inventory->compiled_context_complete_set
             ? packaged_inventory->compiled_context_complete
+            : false;
+    json["supported_execution_engines"] =
+        packaged_inventory.has_value()
+            ? nlohmann::json(packaged_inventory->supported_execution_engines)
+            : nlohmann::json::array();
+    json["expected_torch_tensorrt_artifacts"] =
+        packaged_inventory.has_value()
+            ? nlohmann::json(packaged_inventory->expected_torch_tensorrt_artifacts)
+            : nlohmann::json::array();
+    json["missing_torch_tensorrt_artifacts"] =
+        packaged_inventory.has_value()
+            ? nlohmann::json(packaged_inventory->missing_torch_tensorrt_artifacts)
+            : nlohmann::json::array();
+    json["torch_tensorrt_artifact_complete"] =
+        packaged_inventory.has_value() && packaged_inventory->torch_tensorrt_artifact_complete_set
+            ? packaged_inventory->torch_tensorrt_artifact_complete
             : false;
     json["model_inventory_contract_complete"] = inventory_contract_complete;
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;

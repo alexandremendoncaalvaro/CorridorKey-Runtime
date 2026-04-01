@@ -43,7 +43,7 @@ class Engine::Impl {
         Backend failed_backend = session->device().backend;
         SessionCreateOptions session_options;
         session_options.disable_cpu_ep_fallback = create_options.disable_cpu_ep_fallback;
-        session_options.execution_engine = create_options.execution_engine;
+        session_options.execution_engine = ExecutionEngine::Official;
         auto fallback_res =
             InferenceSession::create(model_path, *cpu_fallback_device, session_options);
         if (!fallback_res) {

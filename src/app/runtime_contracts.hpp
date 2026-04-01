@@ -44,6 +44,7 @@ std::string backend_to_string(Backend backend);
 std::string job_event_type_to_string(JobEventType type);
 
 CORRIDORKEY_API std::optional<std::string> active_packaged_model_profile();
+RuntimeCapabilities runtime_capabilities_for_models_root(const std::filesystem::path& models_root);
 CORRIDORKEY_API std::optional<DeviceInfo> preferred_runtime_device(
     const RuntimeCapabilities& capabilities, const std::vector<DeviceInfo>& devices);
 CORRIDORKEY_API RuntimeOptimizationProfile runtime_optimization_profile_for_device(
@@ -73,9 +74,19 @@ CORRIDORKEY_API std::optional<int> coarse_artifact_resolution_for_request(
     int coarse_resolution_override = 0);
 CORRIDORKEY_API std::optional<int> packaged_model_resolution(
     const std::filesystem::path& model_path);
+CORRIDORKEY_API std::optional<int> torch_tensorrt_artifact_resolution(
+    const std::filesystem::path& model_path);
 CORRIDORKEY_API bool is_packaged_corridorkey_model(const std::filesystem::path& model_path);
+CORRIDORKEY_API bool is_packaged_torch_tensorrt_artifact(const std::filesystem::path& model_path);
 CORRIDORKEY_API std::filesystem::path sibling_model_path_for_resolution(
     const std::filesystem::path& model_path, int resolution);
+CORRIDORKEY_API std::vector<std::string> expected_torch_tensorrt_artifacts_for_models(
+    const std::vector<std::string>& packaged_models);
+CORRIDORKEY_API bool has_packaged_torch_tensorrt_artifacts(
+    const std::filesystem::path& models_root);
+CORRIDORKEY_API Result<std::filesystem::path> executable_model_path_for_engine(
+    const std::filesystem::path& model_path, const DeviceInfo& requested_device,
+    ExecutionEngine execution_engine);
 CORRIDORKEY_API Result<void> validate_refinement_mode_for_artifact(
     const std::filesystem::path& model_path, RefinementMode refinement_mode);
 CORRIDORKEY_API Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(

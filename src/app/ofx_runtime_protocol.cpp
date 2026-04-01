@@ -194,9 +194,7 @@ Result<PrecisionPreference> precision_preference_from_string(const std::string& 
 std::string execution_engine_to_string(ExecutionEngine engine) {
     switch (engine) {
         case ExecutionEngine::Official:
-            return "official";
-        case ExecutionEngine::MaxPerformance:
-            return "max";
+            return "ort-tensorrt";
         case ExecutionEngine::TorchTensorRt:
             return "torch-tensorrt";
         case ExecutionEngine::Auto:
@@ -207,8 +205,10 @@ std::string execution_engine_to_string(ExecutionEngine engine) {
 
 Result<ExecutionEngine> execution_engine_from_string(const std::string& value) {
     if (value == "auto") return ExecutionEngine::Auto;
-    if (value == "official") return ExecutionEngine::Official;
-    if (value == "max") return ExecutionEngine::MaxPerformance;
+    if (value == "ort-tensorrt" || value == "official" || value == "ort" || value == "max" ||
+        value == "max-performance") {
+        return ExecutionEngine::Official;
+    }
     if (value == "torch-tensorrt") return ExecutionEngine::TorchTensorRt;
     return Unexpected<Error>(invalid_protocol_error("Unknown execution engine: " + value));
 }

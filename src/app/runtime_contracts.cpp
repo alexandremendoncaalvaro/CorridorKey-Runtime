@@ -9,6 +9,7 @@
 
 #include "../common/runtime_paths.hpp"
 #include "../core/mlx_probe.hpp"
+#include "../core/torch_trt_session.hpp"
 #include "../frame_io/video_io.hpp"
 
 namespace corridorkey {
@@ -37,9 +38,7 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
 std::string execution_engine_to_string_local(ExecutionEngine engine) {
     switch (engine) {
         case ExecutionEngine::Official:
-            return "official";
-        case ExecutionEngine::MaxPerformance:
-            return "max";
+            return "ort-tensorrt";
         case ExecutionEngine::TorchTensorRt:
             return "torch-tensorrt";
         case ExecutionEngine::Auto:
@@ -325,7 +324,8 @@ InferenceParams make_preset_inference_params(int target_resolution, bool auto_de
 
 }  // namespace
 
-RuntimeCapabilities runtime_capabilities() {
+RuntimeCapabilities runtime_capabilities_for_models_root_impl(
+    const std::filesystem::path& models_root) {
     RuntimeCapabilities capabilities;
 
 #if defined(__APPLE__)
@@ -355,7 +355,10 @@ RuntimeCapabilities runtime_capabilities() {
 
     if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
         capabilities.supported_execution_engines.push_back(ExecutionEngine::Official);
-        capabilities.supported_execution_engines.push_back(ExecutionEngine::MaxPerformance);
+        if (core::torch_tensorrt_runtime_available() &&
+            app::has_packaged_torch_tensorrt_artifacts(models_root)) {
+            capabilities.supported_execution_engines.push_back(ExecutionEngine::TorchTensorRt);
+        }
     } else if (!devices.empty()) {
         capabilities.supported_execution_engines.push_back(ExecutionEngine::Official);
     }
@@ -371,6 +374,10 @@ RuntimeCapabilities runtime_capabilities() {
     capabilities.lossless_video_unavailable_reason = video_support.lossless_unavailable_reason;
 
     return capabilities;
+}
+
+RuntimeCapabilities runtime_capabilities() {
+    return runtime_capabilities_for_models_root_impl(common::default_models_root());
 }
 
 std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filename) {
@@ -671,6 +678,10 @@ std::vector<PresetDefinition> preset_catalog() {
 }  // namespace corridorkey
 
 namespace corridorkey::app {
+
+RuntimeCapabilities runtime_capabilities_for_models_root(const std::filesystem::path& models_root) {
+    return runtime_capabilities_for_models_root_impl(models_root);
+}
 
 std::optional<std::string> active_packaged_model_profile() {
     return detect_active_packaged_model_profile();
@@ -1015,6 +1026,27 @@ std::optional<int> packaged_model_resolution(const std::filesystem::path& model_
     return std::stoi(token);
 }
 
+std::optional<int> torch_tensorrt_artifact_resolution(const std::filesystem::path& model_path) {
+    const std::string filename = model_path.filename().string();
+    if (!filename.starts_with("corridorkey_torchtrt_fp16_") || model_path.extension() != ".ts") {
+        return std::nullopt;
+    }
+
+    const std::string stem = model_path.stem().string();
+    const std::size_t separator = stem.find_last_of('_');
+    if (separator == std::string::npos || separator + 1 >= stem.size()) {
+        return std::nullopt;
+    }
+
+    const std::string token = stem.substr(separator + 1);
+    if (token.empty() || !std::all_of(token.begin(), token.end(),
+                                      [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
+        return std::nullopt;
+    }
+
+    return std::stoi(token);
+}
+
 bool is_packaged_corridorkey_model(const std::filesystem::path& model_path) {
     if (auto catalog_entry = model_catalog_entry_for_path(model_path); catalog_entry.has_value()) {
         return true;
@@ -1023,6 +1055,10 @@ bool is_packaged_corridorkey_model(const std::filesystem::path& model_path) {
     const std::string filename = model_path.filename().string();
     return filename.rfind("corridorkey_", 0) == 0 &&
            packaged_model_resolution(model_path).has_value();
+}
+
+bool is_packaged_torch_tensorrt_artifact(const std::filesystem::path& model_path) {
+    return torch_tensorrt_artifact_resolution(model_path).has_value();
 }
 
 std::filesystem::path sibling_model_path_for_resolution(const std::filesystem::path& model_path,
@@ -1045,6 +1081,95 @@ std::filesystem::path sibling_model_path_for_resolution(const std::filesystem::p
 
     filename.replace(token_pos + 1, current_token.size() - 1, std::to_string(resolution));
     return model_path.parent_path() / filename;
+}
+
+std::vector<std::string> expected_torch_tensorrt_artifacts_for_models(
+    const std::vector<std::string>& packaged_models) {
+    std::vector<std::string> artifacts;
+    artifacts.reserve(packaged_models.size());
+
+    for (const auto& model : packaged_models) {
+        const auto path = std::filesystem::path(model);
+        const auto resolution = packaged_model_resolution(path);
+        if (!resolution.has_value()) {
+            continue;
+        }
+
+        const std::string filename = path.filename().string();
+        if (!filename.starts_with("corridorkey_fp16_") || path.extension() != ".onnx") {
+            continue;
+        }
+
+        artifacts.push_back("corridorkey_torchtrt_fp16_" + std::to_string(*resolution) + ".ts");
+    }
+
+    return artifacts;
+}
+
+bool has_packaged_torch_tensorrt_artifacts(const std::filesystem::path& models_root) {
+    std::error_code error;
+    if (!std::filesystem::exists(models_root, error) || error) {
+        return false;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(models_root, error)) {
+        if (error || !entry.is_regular_file()) {
+            continue;
+        }
+        if (is_packaged_torch_tensorrt_artifact(entry.path())) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+Result<std::filesystem::path> executable_model_path_for_engine(
+    const std::filesystem::path& model_path, const DeviceInfo& requested_device,
+    ExecutionEngine execution_engine) {
+    if (execution_engine != ExecutionEngine::TorchTensorRt) {
+        return model_path;
+    }
+
+    if (requested_device.backend != Backend::TensorRT &&
+        requested_device.backend != Backend::CUDA && requested_device.backend != Backend::Auto) {
+        return Unexpected<Error>{Error{
+            ErrorCode::HardwareNotSupported,
+            "Torch-TensorRT is only available on the Windows RTX GPU path.",
+        }};
+    }
+
+    const std::string filename = model_path.filename().string();
+    if (filename.starts_with("corridorkey_torchtrt_fp16_") && model_path.extension() == ".ts") {
+        if (!std::filesystem::exists(model_path)) {
+            return Unexpected<Error>{Error{
+                ErrorCode::ModelLoadFailed,
+                "Torch-TensorRT artifact is missing: " + model_path.string(),
+            }};
+        }
+        return model_path;
+    }
+
+    const auto resolution = packaged_model_resolution(model_path);
+    if (!resolution.has_value() || !filename.starts_with("corridorkey_fp16_") ||
+        model_path.extension() != ".onnx") {
+        return Unexpected<Error>{Error{
+            ErrorCode::InvalidParameters,
+            "Torch-TensorRT currently requires a packaged Windows RTX FP16 artifact as the "
+            "source rung.",
+        }};
+    }
+
+    const auto torch_path = model_path.parent_path() /
+                            ("corridorkey_torchtrt_fp16_" + std::to_string(*resolution) + ".ts");
+    if (!std::filesystem::exists(torch_path)) {
+        return Unexpected<Error>{Error{
+            ErrorCode::ModelLoadFailed,
+            "Torch-TensorRT artifact is missing: " + torch_path.string(),
+        }};
+    }
+
+    return torch_path;
 }
 
 Result<void> validate_refinement_mode_for_artifact(const std::filesystem::path& model_path,
@@ -1231,6 +1356,30 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
             }};
         }
         return validate_resolved_model(direct_attempt_path);
+    }
+
+    if (is_packaged_corridorkey_model(model_path) && model_resolution > 0 &&
+        requested_resolution > 0 && requested_resolution != model_resolution &&
+        !should_use_coarse_to_fine_for_request(
+            requested_device, requested_resolution, params.quality_fallback_mode,
+            params.coarse_resolution_override, allow_unrestricted_quality_attempt)) {
+        auto exact_resolution_path =
+            sibling_model_path_for_resolution(model_path, requested_resolution);
+        if (exact_resolution_path.empty()) {
+            return Unexpected<Error>{Error{
+                ErrorCode::InvalidParameters,
+                "The requested packaged quality artifact could not be derived from the selected "
+                "model.",
+            }};
+        }
+        if (!std::filesystem::exists(exact_resolution_path)) {
+            return Unexpected<Error>{Error{
+                ErrorCode::ModelLoadFailed,
+                "The requested packaged quality artifact is missing: " +
+                    exact_resolution_path.string(),
+            }};
+        }
+        return validate_resolved_model(exact_resolution_path);
     }
 
     if (!should_use_coarse_to_fine_for_request(

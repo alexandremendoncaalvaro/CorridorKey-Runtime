@@ -213,9 +213,7 @@ std::string precision_preference_to_string(PrecisionPreference preference) {
 std::string execution_engine_to_string(ExecutionEngine engine) {
     switch (engine) {
         case ExecutionEngine::Official:
-            return "official";
-        case ExecutionEngine::MaxPerformance:
-            return "max-performance";
+            return "ort-tensorrt";
         case ExecutionEngine::TorchTensorRt:
             return "torch-tensorrt";
         case ExecutionEngine::Auto:
@@ -303,7 +301,7 @@ void append_benchmark_artifact_metadata(nlohmann::json& results, const JobReques
             engine_fallback["reason"] = "Auto resolved to the official shipping engine.";
         } else if (request.engine_options.execution_engine == ExecutionEngine::TorchTensorRt) {
             engine_fallback["reason"] =
-                "Torch-TensorRT is not packaged as a zero-friction C++ runtime in this build.";
+                "Torch-TensorRT could not satisfy the explicit request on this system.";
         } else {
             engine_fallback["reason"] =
                 "The selected backend does not expose a separate engine implementation here.";

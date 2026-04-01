@@ -55,9 +55,7 @@ std::string backend_to_string_local(Backend backend) {
 std::string execution_engine_to_string_local(ExecutionEngine engine) {
     switch (engine) {
         case ExecutionEngine::Official:
-            return "official";
-        case ExecutionEngine::MaxPerformance:
-            return "max-performance";
+            return "ort-tensorrt";
         case ExecutionEngine::TorchTensorRt:
             return "torch-tensorrt";
         case ExecutionEngine::Auto:
@@ -255,18 +253,18 @@ Result<ExecutionEngine> parse_execution_engine(const std::string& value) {
     if (normalized == "auto") {
         return ExecutionEngine::Auto;
     }
-    if (normalized == "official" || normalized == "ort") {
+    if (normalized == "ort-tensorrt" || normalized == "official" || normalized == "ort") {
         return ExecutionEngine::Official;
     }
     if (normalized == "max-performance" || normalized == "max_performance" || normalized == "max") {
-        return ExecutionEngine::MaxPerformance;
+        return ExecutionEngine::Official;
     }
     if (normalized == "torch-tensorrt" || normalized == "torchtrt") {
         return ExecutionEngine::TorchTensorRt;
     }
     return Unexpected<Error>{Error{
         ErrorCode::InvalidParameters,
-        "Invalid --engine value. Use 'auto', 'official', 'max-performance', or "
+        "Invalid --engine value. Use 'auto', 'ort-tensorrt', or "
         "'torch-tensorrt'.",
     }};
 }
@@ -437,6 +435,7 @@ struct ResolvedExecution {
 
 Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult& result, int argc,
                                                      char* argv[], const DeviceInfo& device,
+                                                     ExecutionEngine execution_engine,
                                                      bool requires_output) {
     ResolvedExecution resolved;
     resolved.models_dir = default_models_dir();
@@ -472,6 +471,12 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
             return Unexpected<Error>(explicit_model.error());
         }
         resolved.model_path = *explicit_model;
+        auto engine_model =
+            app::executable_model_path_for_engine(resolved.model_path, device, execution_engine);
+        if (!engine_model) {
+            return Unexpected<Error>(engine_model.error());
+        }
+        resolved.model_path = *engine_model;
     } else {
         resolved.params = build_inference_params(
             result,
@@ -498,6 +503,12 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
             return Unexpected<Error>(effective_model.error());
         }
         resolved.model_path = *effective_model;
+        auto engine_model =
+            app::executable_model_path_for_engine(resolved.model_path, device, execution_engine);
+        if (!engine_model) {
+            return Unexpected<Error>(engine_model.error());
+        }
+        resolved.model_path = *engine_model;
         if (!std::filesystem::exists(resolved.model_path)) {
             return Unexpected<Error>{
                 Error{ErrorCode::ModelLoadFailed,
@@ -647,7 +658,7 @@ int main(int argc, char* argv[]) {
         "precision", "Runtime precision preference for process/benchmark (auto, fp16, int8)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "engine",
-        "Execution engine policy for process/benchmark (auto, official, max-performance, "
+        "Execution engine policy for process/benchmark (auto, ort-tensorrt, "
         "torch-tensorrt)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
@@ -900,14 +911,15 @@ int main(int argc, char* argv[]) {
                 result.count("input") ? std::filesystem::path(result["input"].as<std::string>())
                                       : (args.empty() ? std::filesystem::path{}
                                                       : std::filesystem::path(args.front()));
-            auto resolved = resolve_execution_defaults(result, argc, argv, device, false);
-            if (!resolved) {
-                std::cerr << "Error: " << resolved.error().message << std::endl;
-                return 1;
-            }
             auto execution_engine = parse_execution_engine(result["engine"].as<std::string>());
             if (!execution_engine) {
                 std::cerr << "Error: " << execution_engine.error().message << std::endl;
+                return 1;
+            }
+            auto resolved =
+                resolve_execution_defaults(result, argc, argv, device, *execution_engine, false);
+            if (!resolved) {
+                std::cerr << "Error: " << resolved.error().message << std::endl;
                 return 1;
             }
 
@@ -1088,14 +1100,15 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: " << video_output_options_res.error().message << std::endl;
                 return 1;
             }
-            auto resolved = resolve_execution_defaults(result, argc, argv, device, true);
-            if (!resolved) {
-                std::cerr << "Error: " << resolved.error().message << std::endl;
-                return 1;
-            }
             auto execution_engine = parse_execution_engine(result["engine"].as<std::string>());
             if (!execution_engine) {
                 std::cerr << "Error: " << execution_engine.error().message << std::endl;
+                return 1;
+            }
+            auto resolved =
+                resolve_execution_defaults(result, argc, argv, device, *execution_engine, true);
+            if (!resolved) {
+                std::cerr << "Error: " << resolved.error().message << std::endl;
                 return 1;
             }
             if (output_path.empty()) {
