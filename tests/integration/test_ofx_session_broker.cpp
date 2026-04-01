@@ -88,13 +88,13 @@ TEST_CASE("OFX session broker isolates sessions across execution engine requests
     REQUIRE(official_prepare.has_value());
     CHECK(official_prepare->session.requested_engine == ExecutionEngine::Official);
 
-    auto max_request = official_request;
-    max_request.client_instance_id = "max";
-    max_request.engine_options.execution_engine = ExecutionEngine::MaxPerformance;
+    auto torch_request = official_request;
+    torch_request.client_instance_id = "torch";
+    torch_request.engine_options.execution_engine = ExecutionEngine::TorchTensorRt;
 
-    auto max_prepare = broker.prepare_session(max_request);
-    REQUIRE(max_prepare.has_value());
-    CHECK(max_prepare->session.requested_engine == ExecutionEngine::MaxPerformance);
-    CHECK(max_prepare->session.session_id != official_prepare->session.session_id);
+    auto torch_prepare = broker.prepare_session(torch_request);
+    REQUIRE(torch_prepare.has_value());
+    CHECK(torch_prepare->session.requested_engine == ExecutionEngine::TorchTensorRt);
+    CHECK(torch_prepare->session.session_id != official_prepare->session.session_id);
     CHECK(broker.session_count() == 2);
 }

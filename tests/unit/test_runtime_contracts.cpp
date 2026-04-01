@@ -7,6 +7,7 @@
 #include "app/hardware_profile.hpp"
 #include "app/runtime_contracts.hpp"
 #include "app/runtime_diagnostics.hpp"
+#include "core/torch_trt_session.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -83,6 +84,80 @@ TEST_CASE("runtime capabilities expose stable diagnostics", "[unit][runtime]") {
     REQUIRE(json.contains("supported_execution_engines"));
     REQUIRE(json["supported_execution_engines"].is_array());
     REQUIRE_FALSE(json["supported_execution_engines"].empty());
+}
+
+TEST_CASE("Torch-TensorRT artifacts map from packaged FP16 rungs", "[unit][runtime][regression]") {
+    std::vector<std::string> packaged_models = {
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_int8_512.onnx",
+    };
+
+    auto expected = expected_torch_tensorrt_artifacts_for_models(packaged_models);
+
+    REQUIRE(expected == std::vector<std::string>{
+                            "corridorkey_torchtrt_fp16_512.ts",
+                            "corridorkey_torchtrt_fp16_1024.ts",
+                        });
+    REQUIRE(torch_tensorrt_artifact_resolution("corridorkey_torchtrt_fp16_1536.ts") == 1536);
+    REQUIRE_FALSE(torch_tensorrt_artifact_resolution("corridorkey_fp16_1536.onnx").has_value());
+}
+
+TEST_CASE("runtime capabilities expose Torch-TensorRT only when packaged artifacts are present",
+          "[unit][runtime][regression]") {
+    const auto temp_dir =
+        std::filesystem::temp_directory_path() / "corridorkey-runtime-capabilities-torch";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+
+    auto without_torch = runtime_capabilities_for_models_root(temp_dir);
+    CHECK(std::find(without_torch.supported_execution_engines.begin(),
+                    without_torch.supported_execution_engines.end(),
+                    ExecutionEngine::TorchTensorRt) ==
+          without_torch.supported_execution_engines.end());
+
+    std::ofstream(temp_dir / "corridorkey_torchtrt_fp16_1024.ts").put('\n');
+
+    auto with_torch = runtime_capabilities_for_models_root(temp_dir);
+    if (with_torch.platform == "windows" && core::torch_tensorrt_runtime_available() &&
+        std::find(with_torch.supported_backends.begin(), with_torch.supported_backends.end(),
+                  Backend::TensorRT) != with_torch.supported_backends.end()) {
+        CHECK(std::find(with_torch.supported_execution_engines.begin(),
+                        with_torch.supported_execution_engines.end(),
+                        ExecutionEngine::TorchTensorRt) !=
+              with_torch.supported_execution_engines.end());
+    }
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("Torch-TensorRT executable artifact resolution prefers fixed-rung torchscript",
+          "[unit][runtime][regression]") {
+    const auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-torch-artifacts";
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+    std::ofstream(temp_dir / "corridorkey_fp16_1024.onnx").put('\n');
+    std::ofstream(temp_dir / "corridorkey_torchtrt_fp16_1024.ts").put('\n');
+
+    DeviceInfo tensor_rt_device{"RTX 3080", 10240, Backend::TensorRT};
+
+    auto resolved = executable_model_path_for_engine(
+        temp_dir / "corridorkey_fp16_1024.onnx", tensor_rt_device, ExecutionEngine::TorchTensorRt);
+    REQUIRE(resolved.has_value());
+    REQUIRE(resolved->filename() == "corridorkey_torchtrt_fp16_1024.ts");
+
+    auto explicit_artifact =
+        executable_model_path_for_engine(temp_dir / "corridorkey_torchtrt_fp16_1024.ts",
+                                         tensor_rt_device, ExecutionEngine::TorchTensorRt);
+    REQUIRE(explicit_artifact.has_value());
+    REQUIRE(explicit_artifact->filename() == "corridorkey_torchtrt_fp16_1024.ts");
+
+    auto unsupported_backend = executable_model_path_for_engine(
+        temp_dir / "corridorkey_fp16_1024.onnx", DeviceInfo{"CPU", 0, Backend::CPU},
+        ExecutionEngine::TorchTensorRt);
+    REQUIRE_FALSE(unsupported_backend.has_value());
+
+    std::filesystem::remove_all(temp_dir);
 }
 
 TEST_CASE("preferred runtime device and optimization profile stay product-aligned",
@@ -203,7 +278,7 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     REQUIRE(json["type"] == "backend_selected");
     REQUIRE(json["phase"] == "prepare");
     REQUIRE(json["backend"] == "cpu");
-    REQUIRE(json["engine"] == "official");
+    REQUIRE(json["engine"] == "ort-tensorrt");
     REQUIRE(json["fallback"]["requested_backend"] == "coreml");
     REQUIRE(json["fallback"]["selected_backend"] == "cpu");
     REQUIRE(json["timings"][0]["name"] == "ort_run");

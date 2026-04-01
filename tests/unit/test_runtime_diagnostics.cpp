@@ -151,6 +151,11 @@ TEST_CASE("doctor bundle inspection recognizes Windows OFX DirectML layout",
         {"expected_compiled_context_models", nlohmann::json::array()},
         {"missing_compiled_context_models", nlohmann::json::array()},
         {"compiled_context_complete", true},
+        {"torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"expected_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"missing_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"torch_tensorrt_artifact_complete", true},
+        {"supported_execution_engines", nlohmann::json::array({"auto", "ort-tensorrt"})},
     };
     std::ofstream(temp_dir / "model_inventory.json") << inventory.dump(2);
 
@@ -290,6 +295,11 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
                                 "corridorkey_fp16_2048_ctx.onnx"})},
         {"missing_compiled_context_models", nlohmann::json::array()},
         {"compiled_context_complete", true},
+        {"torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"expected_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"missing_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"torch_tensorrt_artifact_complete", true},
+        {"supported_execution_engines", nlohmann::json::array({"auto", "ort-tensorrt"})},
     };
     std::filesystem::create_directories(bundle_dir);
     std::ofstream(bundle_dir / "model_inventory.json") << inventory.dump(2);
@@ -369,6 +379,11 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
                                 "corridorkey_fp16_1536_ctx.onnx",
                                 "corridorkey_fp16_2048_ctx.onnx"})},
         {"compiled_context_complete", false},
+        {"torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"expected_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"missing_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"torch_tensorrt_artifact_complete", true},
+        {"supported_execution_engines", nlohmann::json::array({"auto", "ort-tensorrt"})},
     };
     std::filesystem::create_directories(bundle_dir);
     std::ofstream(bundle_dir / "model_inventory.json") << inventory.dump(2);
@@ -428,6 +443,11 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
          nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx"})},
         {"missing_compiled_context_models", nlohmann::json::array()},
         {"compiled_context_complete", true},
+        {"torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"expected_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"missing_torch_tensorrt_artifacts", nlohmann::json::array()},
+        {"torch_tensorrt_artifact_complete", true},
+        {"supported_execution_engines", nlohmann::json::array({"auto", "ort-tensorrt"})},
     };
     touch_file(bundle_root / "model_inventory.json", inventory.dump(2));
 
