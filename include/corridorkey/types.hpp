@@ -363,6 +363,11 @@ enum class QualityFallbackMode : std::uint8_t { Auto, Direct, CoarseToFine };
 enum class RefinementMode : std::uint8_t { Auto, FullFrame, Tiled };
 
 /**
+ * @brief Preferred model precision when multiple packaged artifact variants exist.
+ */
+enum class PrecisionPreference : std::uint8_t { Auto, FP16, Int8 };
+
+/**
  * @brief Runtime policy for obtaining the alpha hint guide when the caller does not provide one.
  */
 enum class AlphaHintPolicy : std::uint8_t { AutoRoughFallback, RequireExternalHint };
@@ -398,6 +403,7 @@ struct InferenceParams {
     int requested_quality_resolution = 0;  // 0 = use target_resolution
     QualityFallbackMode quality_fallback_mode = QualityFallbackMode::Auto;
     RefinementMode refinement_mode = RefinementMode::Auto;
+    PrecisionPreference precision_preference = PrecisionPreference::Auto;
     int coarse_resolution_override = 0;  // 0 = automatic smaller artifact choice
 };
 

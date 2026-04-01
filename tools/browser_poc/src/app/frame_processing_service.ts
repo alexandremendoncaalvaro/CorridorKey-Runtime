@@ -5,6 +5,7 @@ import type {
   ModelSession,
   ProcessedFrame,
   RgbaFrame,
+  InferenceStrategy,
 } from "../core/image_types";
 import { ok, type Result } from "../common/result";
 import type { AppError } from "../common/errors";
@@ -39,20 +40,28 @@ export class FrameProcessingService {
     frame: RgbaFrame,
     alpha_hint?: Float32Array,
     on_progress?: (progress: FrameProcessingProgress) => void,
+    strategy?: InferenceStrategy
   ): Promise<Result<ProcessedFrame, AppError>> {
+    const is_fallback = this.m_model_session === null;
+
     on_progress?.({
       stage: "inference",
       progress_ratio: 0.62,
-      detail:
-        this.m_model_session === null
+      detail: is_fallback
           ? "Running the rough matte fallback."
           : `Running ${this.current_backend_label()} inference in the browser.`,
     });
 
-    const result =
-      this.m_model_session === null
+    const model_session = this.m_model_session;
+    const result = (model_session === null)
         ? ok(create_fallback_process_result(frame))
-        : await this.m_model_session.run_frame(frame, alpha_hint);
+        : await model_session.run_frame(frame, alpha_hint, strategy, (p) => {
+            on_progress?.({
+              stage: "inference",
+              progress_ratio: 0.62 + (0.2 * (p.current_tile / p.total_tiles)),
+              detail: `Inference via Tiling (Tile ${p.current_tile} of ${p.total_tiles})`,
+            });
+          });
 
     if (!result.ok) {
       return result;

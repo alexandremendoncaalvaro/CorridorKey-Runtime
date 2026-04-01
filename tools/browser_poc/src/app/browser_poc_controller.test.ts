@@ -77,20 +77,16 @@ class FakeView {
     this.handlers = handlers;
   }
 
-  selected_source_video_files(): File[] {
+  selected_source_files(): File[] {
     return this.source_video_files;
-  }
-
-  selected_source_still_files(): File[] {
-    return this.source_still_files;
   }
 
   selected_hint_files(): File[] {
     return this.hint_files;
   }
 
-  selected_resolution_preset_id(): string {
-    return "auto";
+  selected_quality_preset(): string {
+    return "balanced";
   }
 
   selected_model_id(): string {
@@ -112,6 +108,8 @@ class FakeView {
   set_resolution_detail(): void {}
 
   sync_stage_resolution(): void {}
+
+  set_active_source_element(): void {}
 
   set_processing_state(): void {}
 
@@ -220,7 +218,7 @@ describe("BrowserPocController", () => {
     await flush_async_work();
 
     view.source_video_files = [create_video_file("plate_a.mp4")];
-    view.handlers?.on_source_video_selected();
+    view.handlers?.on_source_files_selected();
     await flush_async_work();
 
     view.hint_files = [create_video_file("hint.mp4")];
@@ -228,7 +226,7 @@ describe("BrowserPocController", () => {
     await flush_async_work();
 
     view.source_video_files = [create_video_file("plate_b.mp4")];
-    view.handlers?.on_source_video_selected();
+    view.handlers?.on_source_files_selected();
     await flush_async_work();
 
     expect(view.loaded_hint_urls).toHaveLength(1);
@@ -243,7 +241,7 @@ describe("BrowserPocController", () => {
     await flush_async_work();
 
     view.source_video_files = [create_video_file("plate.mp4")];
-    view.handlers?.on_source_video_selected();
+    view.handlers?.on_source_files_selected();
     await flush_async_work();
 
     view.hint_files = [create_video_file("hint.mp4")];

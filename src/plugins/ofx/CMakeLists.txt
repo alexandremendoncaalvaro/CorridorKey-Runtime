@@ -44,6 +44,46 @@ if(WIN32)
     target_sources(corridorkey_ofx PRIVATE win_delayload_hook.cpp)
 endif()
 
+if(WIN32)
+    add_executable(corridorkey_ofx_runtime_server WIN32
+        ofx_runtime_server_main.cpp
+    )
+
+    target_include_directories(corridorkey_ofx_runtime_server PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(corridorkey_ofx_runtime_server PRIVATE corridorkey_core)
+    corridorkey_apply_windows_common_compile_defs(corridorkey_ofx_runtime_server)
+    corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx_runtime_server)
+
+    if(MSVC)
+        target_compile_options(corridorkey_ofx_runtime_server PRIVATE /W4 /WX /permissive-)
+    else()
+        target_compile_options(corridorkey_ofx_runtime_server PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+
+    set_target_properties(corridorkey_ofx_runtime_server PROPERTIES
+        OUTPUT_NAME "corridorkey_ofx_runtime_server"
+    )
+
+    set(_corridorkey_ofx_runtime_server_runtime_dlls "")
+    if(CORRIDORKEY_ORT_RUNTIME_DIR)
+        file(GLOB _corridorkey_ofx_runtime_server_ort_runtime_dlls
+            "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
+        list(APPEND _corridorkey_ofx_runtime_server_runtime_dlls
+            ${_corridorkey_ofx_runtime_server_ort_runtime_dlls})
+    endif()
+
+    add_custom_command(TARGET corridorkey_ofx_runtime_server POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:corridorkey_ofx_runtime_server>
+            ${_corridorkey_ofx_runtime_server_runtime_dlls}
+            $<TARGET_FILE_DIR:corridorkey_ofx_runtime_server>
+        COMMAND_EXPAND_LISTS
+    )
+endif()
+
 target_include_directories(corridorkey_ofx PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${_corridorkey_ofx_sdk_root}/include
@@ -75,7 +115,7 @@ if(WIN32)
 endif()
 
 if(WIN32)
-    add_dependencies(corridorkey_ofx corridorkey_cli)
+    add_dependencies(corridorkey_ofx corridorkey_cli corridorkey_ofx_runtime_server)
     # Package the OFX bundle
     set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey.ofx.bundle")
     file(GLOB _corridorkey_ofx_runtime_dlls
@@ -93,6 +133,7 @@ if(WIN32)
             # Copy the plugin binary
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
 
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
@@ -112,6 +153,7 @@ if(WIN32)
             # Copy the plugin binary
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
 
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"

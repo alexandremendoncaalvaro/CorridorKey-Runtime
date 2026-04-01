@@ -454,9 +454,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_choice_param(
         param_set, kParamQuantizationMode, "Precision", kDefaultQuantizationMode,
-        {"FP16 (Full)", "INT8 (Compact)"},
-        "Model precision. FP16 (Full) selects highest quality files. "
-        "INT8 (Compact) selects memory-efficient quantized files for faster inference.",
+        {"FP16 (Official)", "INT8 (Experimental)"},
+        "Model precision. FP16 (Official) is the validated Windows RTX path. "
+        "INT8 (Experimental) remains part of the decision program and currently requires "
+        "Allow CPU Fallback on Windows GPU tracks.",
         "performance_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process the full model output in overlapping tiles at source resolution. "
@@ -557,6 +558,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Maximum time in seconds to wait for model loading and bootstrap. "
                      "Increase if first-frame initialization times out.",
                      "advanced_runtime_group");
+    define_bool_param(
+        param_set, kParamAllowCpuFallback, "Allow CPU Fallback", 0,
+        "Opt in to CPU fallback when the requested Windows GPU path cannot satisfy the current "
+        "precision or backend request. INT8 on Windows currently uses this path.",
+        "advanced_runtime_group");
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;

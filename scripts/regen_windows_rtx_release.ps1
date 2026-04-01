@@ -423,12 +423,10 @@ $summary = [ordered]@{
     promoted_artifact_manifest = $promotedManifestPath
     validation_report = [System.IO.Path]::GetFullPath($validationReportPath)
     installers = [ordered]@{
-        rtx_lite = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Lite_Installer.exe"))
-        rtx_full = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Full_Installer.exe"))
+        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Installer.exe"))
     }
     bundle_validation = [ordered]@{
-        rtx_lite = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Lite\\bundle_validation.json"))
-        rtx_full = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Full\\bundle_validation.json"))
+        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX\\bundle_validation.json"))
     }
 }
 

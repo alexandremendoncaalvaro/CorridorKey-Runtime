@@ -5,7 +5,7 @@
 using namespace corridorkey;
 using namespace corridorkey::app;
 
-TEST_CASE("doctor summary honors packaged bundle inventory for RTX lite",
+TEST_CASE("doctor summary honors packaged bundle inventory for Windows RTX",
           "[unit][doctor][regression]") {
     nlohmann::json report;
     report["system"]["capabilities"]["platform"] = "windows";
@@ -33,8 +33,8 @@ TEST_CASE("doctor summary honors packaged bundle inventory for RTX lite",
     report["windows_universal"]["recommended_backend"] = "tensorrt";
     report["windows_universal"]["recommended_model"] = "corridorkey_fp16_512.onnx";
     report["bundle"]["model_inventory_contract_complete"] = true;
-    report["bundle"]["model_profile"] = "rtx-lite";
-    report["optimization_profile"]["id"] = "windows-rtx-lite";
+    report["bundle"]["model_profile"] = "windows-rtx";
+    report["optimization_profile"]["id"] = "windows-rtx";
     report["models"] = nlohmann::json::array(
         {{{"filename", "corridorkey_fp16_512.onnx"},
           {"packaged_for_windows", true},
@@ -86,8 +86,8 @@ TEST_CASE("doctor summary fails when an expected packaged bundle model is missin
     report["windows_universal"]["recommended_backend"] = "tensorrt";
     report["windows_universal"]["recommended_model"] = "corridorkey_fp16_512.onnx";
     report["bundle"]["model_inventory_contract_complete"] = true;
-    report["bundle"]["model_profile"] = "rtx-lite";
-    report["optimization_profile"]["id"] = "windows-rtx-lite";
+    report["bundle"]["model_profile"] = "windows-rtx";
+    report["optimization_profile"]["id"] = "windows-rtx";
     report["models"] = nlohmann::json::array();
 
     auto summary = summarize_doctor_report(report);
@@ -103,14 +103,14 @@ TEST_CASE("doctor summary reports recommended and certified artifact state",
     report["system"]["capabilities"]["platform"] = "windows";
     report["bundle"]["healthy"] = true;
     report["bundle"]["model_inventory_contract_complete"] = true;
-    report["bundle"]["model_profile"] = "rtx-full";
+    report["bundle"]["model_profile"] = "windows-rtx";
     report["video"]["healthy"] = true;
     report["cache"]["healthy"] = true;
     report["coreml"]["applicable"] = false;
     report["mlx"]["applicable"] = false;
     report["windows_universal"]["applicable"] = true;
     report["windows_universal"]["healthy"] = true;
-    report["optimization_profile"]["id"] = "windows-rtx-full";
+    report["optimization_profile"]["id"] = "windows-rtx";
     report["models"] = nlohmann::json::array(
         {{{"filename", "corridorkey_fp16_1024.onnx"},
           {"found", true},
@@ -135,14 +135,14 @@ TEST_CASE("doctor summary fails when packaged RTX profile and active profile div
     report["system"]["capabilities"]["platform"] = "windows";
     report["bundle"]["healthy"] = true;
     report["bundle"]["model_inventory_contract_complete"] = true;
-    report["bundle"]["model_profile"] = "rtx-full";
+    report["bundle"]["model_profile"] = "windows-rtx";
     report["video"]["healthy"] = true;
     report["cache"]["healthy"] = true;
     report["coreml"]["applicable"] = false;
     report["mlx"]["applicable"] = false;
     report["windows_universal"]["applicable"] = true;
     report["windows_universal"]["healthy"] = true;
-    report["optimization_profile"]["id"] = "windows-rtx-lite";
+    report["optimization_profile"]["id"] = "windows-directml";
     report["models"] = nlohmann::json::array();
 
     auto summary = summarize_doctor_report(report);

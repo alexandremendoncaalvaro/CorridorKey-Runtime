@@ -96,7 +96,8 @@ inline int rounded_gb_from_mb(std::int64_t memory_mb) {
 
 inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& device,
                                                               int quality_mode,
-                                                              int requested_resolution) {
+                                                              int requested_resolution,
+                                                              bool allow_unrestricted_quality_attempt = false) {
     if (!is_fixed_quality_mode(quality_mode)) {
         return std::nullopt;
     }
@@ -112,6 +113,9 @@ inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& 
     auto max_supported_resolution = app::max_supported_resolution_for_device(device);
     if (!max_supported_resolution.has_value() ||
         requested_resolution <= *max_supported_resolution) {
+        return std::nullopt;
+    }
+    if (allow_unrestricted_quality_attempt) {
         return std::nullopt;
     }
 
@@ -256,19 +260,22 @@ inline bool should_abort_quality_fallback_after_compile_failure(
 }
 
 inline std::optional<std::string> unsupported_quantization_message(Backend backend,
-                                                                   int quantization_mode) {
+                                                                   int quantization_mode,
+                                                                   bool allow_cpu_fallback = false) {
     if (quantization_mode != kQuantizationInt8) {
         return std::nullopt;
     }
 
-    if (backend == Backend::TensorRT) {
-        return "INT8 (Compact) is not supported by the TensorRT RTX execution provider. "
-               "Please use FP16 (Full).";
+    if ((backend == Backend::TensorRT || backend == Backend::CUDA) && !allow_cpu_fallback) {
+        return "INT8 (Experimental) is currently CPU-only on the Windows RTX track. "
+               "Enable Allow CPU Fallback or use FP16 (Official).";
     }
 
-    if (backend == Backend::DirectML) {
-        return "INT8 (Compact) is not yet validated for the DirectML execution provider. "
-               "Please use FP16 (Full) for AMD/DirectML runs.";
+    if ((backend == Backend::DirectML || backend == Backend::WindowsML ||
+         backend == Backend::OpenVINO) &&
+        !allow_cpu_fallback) {
+        return "INT8 (Experimental) is not yet validated on the selected Windows GPU backend. "
+               "Enable Allow CPU Fallback or use FP16 (Official).";
     }
 
     return std::nullopt;
@@ -362,7 +369,8 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0) {
+    int coarse_resolution_override = 0,
+    bool allow_unrestricted_quality_attempt = false) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
     const int requested_resolution =
         resolve_target_resolution(effective_quality_mode, input_width, input_height);
@@ -371,7 +379,8 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
 
     auto expected = app::expected_artifact_paths_for_request(
         models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt);
     if (!expected) {
         return {};
     }
@@ -399,7 +408,8 @@ inline std::string missing_quality_artifact_message(
     int input_height, int quantization_mode, bool cpu_quality_guardrail_active,
     std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0) {
+    int coarse_resolution_override = 0,
+    bool allow_unrestricted_quality_attempt = false) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, effective_quality_mode,
@@ -408,7 +418,8 @@ inline std::string missing_quality_artifact_message(
     DeviceInfo device{"", available_memory_mb, backend};
     auto expected = app::expected_artifact_paths_for_request(
         models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt);
     if (!expected) {
         return expected.error().message;
     }
@@ -494,14 +505,16 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0) {
+    int coarse_resolution_override = 0,
+    bool allow_unrestricted_quality_attempt = false) {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto candidates = app::quality_artifact_candidates_for_request(
         models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt);
     if (!candidates) {
         return {};
     }
@@ -579,11 +592,13 @@ inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0) {
+    int coarse_resolution_override = 0,
+    bool allow_unrestricted_quality_attempt = false) {
     auto candidates = quality_artifact_candidates(models_root, backend, quality_mode, input_width,
                                                   input_height, quantization_mode,
                                                   available_memory_mb, fallback_mode,
-                                                  coarse_resolution_override);
+                                                  coarse_resolution_override,
+                                                  allow_unrestricted_quality_attempt);
     if (!candidates.empty()) {
         return candidates.front();
     }

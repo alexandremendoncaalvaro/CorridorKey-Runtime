@@ -143,7 +143,7 @@ std::filesystem::path resolve_ofx_runtime_server_binary(
 
 #if defined(_WIN32)
     auto win64_dir = plugin_module_path.parent_path();
-    return win64_dir / "corridorkey.exe";
+    return win64_dir / "corridorkey_ofx_runtime_server.exe";
 #else
     auto bundle_root = plugin_module_path.parent_path().parent_path();
     return bundle_root / "Resources" / "bin" / "corridorkey";
@@ -540,6 +540,8 @@ Result<void> OfxRuntimeClient::launch_server() {
 
     STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
+    startup_info.dwFlags = STARTF_USESHOWWINDOW;
+    startup_info.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION process_info{};
     if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
                         DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &startup_info,

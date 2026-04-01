@@ -218,6 +218,63 @@ Result<RefinementMode> parse_refinement_mode(const std::string& value) {
     }};
 }
 
+Result<PrecisionPreference> parse_precision_preference(const std::string& value) {
+    const std::string normalized = normalized_lower(value);
+    if (normalized == "auto") {
+        return PrecisionPreference::Auto;
+    }
+    if (normalized == "fp16") {
+        return PrecisionPreference::FP16;
+    }
+    if (normalized == "int8") {
+        return PrecisionPreference::Int8;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --precision value. Use 'auto', 'fp16', or 'int8'.",
+    }};
+}
+
+std::string precision_preference_to_string(PrecisionPreference preference) {
+    switch (preference) {
+        case PrecisionPreference::FP16:
+            return "fp16";
+        case PrecisionPreference::Int8:
+            return "int8";
+        case PrecisionPreference::Auto:
+        default:
+            return "auto";
+    }
+}
+
+std::string artifact_precision_label(const std::filesystem::path& model_path) {
+    const std::string filename = normalized_lower(model_path.filename().string());
+    if (filename.find("_fp16_") != std::string::npos) {
+        return "fp16";
+    }
+    if (filename.find("_int8_") != std::string::npos) {
+        return "int8";
+    }
+    if (filename.find("_mlx") != std::string::npos || model_path.extension() == ".mlxfn" ||
+        model_path.extension() == ".safetensors") {
+        return "mlx";
+    }
+    return "auto";
+}
+
+ArtifactVariantPreference artifact_variant_preference_for_precision(
+    PrecisionPreference preference) {
+    switch (preference) {
+        case PrecisionPreference::FP16:
+            return ArtifactVariantPreference::FP16;
+        case PrecisionPreference::Int8:
+            return ArtifactVariantPreference::Int8;
+        case PrecisionPreference::Auto:
+        default:
+            return ArtifactVariantPreference::Auto;
+    }
+}
+
 Result<int> parse_coarse_resolution_override(const std::string& value) {
     if (value == "0") {
         return 0;
@@ -283,6 +340,13 @@ InferenceParams build_inference_params(const cxxopts::ParseResult& result,
             throw std::runtime_error(coarse_resolution.error().message);
         }
         params.coarse_resolution_override = *coarse_resolution;
+    }
+    if (!base_params.has_value() || option_present(argc, argv, {"--precision"})) {
+        auto precision = parse_precision_preference(result["precision"].as<std::string>());
+        if (!precision) {
+            throw std::runtime_error(precision.error().message);
+        }
+        params.precision_preference = *precision;
     }
 
     if (params.target_resolution > 0) {
@@ -380,7 +444,9 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
                                         : std::nullopt,
             argc, argv);
 
-        auto selected_model = default_model_for_request(capabilities, device, resolved.preset);
+        auto selected_model = default_model_for_request(
+            capabilities, device, resolved.preset,
+            artifact_variant_preference_for_precision(resolved.params.precision_preference));
         if (!selected_model.has_value()) {
             return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                            "Could not resolve a default model for this device."}};
@@ -433,6 +499,39 @@ void print_stage_timings(const nlohmann::json& timings) {
             std::cout << ", " << timing["ms_per_unit"].get<double>() << " ms/unit";
         }
         std::cout << "\n";
+    }
+}
+
+void print_benchmark_artifact_summary(const nlohmann::json& report) {
+    if (report.contains("artifact")) {
+        std::cout << "Artifact: " << report["artifact"].get<std::string>() << "\n";
+    }
+    if (report.contains("requested_precision")) {
+        std::cout << "Requested precision: "
+                  << report["requested_precision"].get<std::string>() << "\n";
+    }
+    if (report.contains("effective_precision")) {
+        std::cout << "Effective precision: "
+                  << report["effective_precision"].get<std::string>() << "\n";
+    }
+    if (report.contains("requested_resolution") && report.contains("effective_resolution")) {
+        std::cout << "Requested resolution: " << report["requested_resolution"].get<int>() << "\n"
+                  << "Effective resolution: " << report["effective_resolution"].get<int>() << "\n";
+    }
+    if (report.contains("safe_quality_ceiling")) {
+        std::cout << "Safe quality ceiling: " << report["safe_quality_ceiling"].get<int>() << "\n";
+    }
+    if (report.value("manual_override_above_safe_ceiling", false)) {
+        std::cout << "Manual override: above safe ceiling\n";
+    }
+    if (report.value("quality_fallback_used", false)) {
+        std::cout << "Quality fallback: "
+                  << report.value("quality_fallback_mode", std::string("auto")) << "\n";
+    }
+    if (report.contains("precision_fallback") && report["precision_fallback"].is_object()) {
+        std::cout << "Precision fallback: "
+                  << report["precision_fallback"].value("requested", std::string("auto")) << " -> "
+                  << report["precision_fallback"].value("effective", std::string("auto")) << "\n";
     }
 }
 
@@ -499,11 +598,13 @@ int main(int argc, char* argv[]) {
                                        cxxopts::value<std::string>())(
         "preset", "Preset (preview, balanced, max)", cxxopts::value<std::string>())(
         "quality", "Alias for --preset", cxxopts::value<std::string>())(
-        "r,resolution", "Resolution (0=auto, 512, 768, 1024)",
+        "r,resolution", "Resolution (0=auto, 512, 768, 1024, 1536, 2048)",
         cxxopts::value<int>()->default_value("0"))(
         "quality-fallback", "Quality fallback mode (auto, direct, coarse_to_fine)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "refinement-mode", "Validated refinement strategy override (auto, full_frame, tiled)",
+        cxxopts::value<std::string>()->default_value("auto"))(
+        "precision", "Runtime precision preference for process/benchmark (auto, fp16, int8)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
         cxxopts::value<std::string>()->default_value("0"))(
@@ -513,7 +614,8 @@ int main(int argc, char* argv[]) {
         "idle-timeout-ms", "Local OFX runtime server idle timeout in milliseconds",
         cxxopts::value<int>())("video-encode", "Video output encoding (lossless, balanced)",
                                cxxopts::value<std::string>()->default_value("lossless"))(
-        "variant", "ONNX model variant (int8, fp16, fp32)", cxxopts::value<std::string>())(
+        "variant", "ONNX model variant for download only (int8, fp16, fp32)",
+        cxxopts::value<std::string>())(
         "batch-size", "Number of frames to process in a single GPU call",
         cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
                                                    cxxopts::value<float>()->default_value("0.5"))(
@@ -793,6 +895,9 @@ int main(int argc, char* argv[]) {
                 if (resolved->preset.has_value()) {
                     std::cout << "Preset: " << resolved->preset->name << "\n";
                 }
+                std::cout << "Requested precision: "
+                          << precision_preference_to_string(benchmark_request.params.precision_preference)
+                          << "\n";
                 std::cout << "Requested device: " << report["requested_device"].get<std::string>()
                           << "\n"
                           << "Backend: " << report["backend"].get<std::string>() << "\n";
@@ -823,6 +928,7 @@ int main(int argc, char* argv[]) {
                         std::cout << "Output: " << report["output_path"].get<std::string>() << "\n";
                     }
                 }
+                print_benchmark_artifact_summary(report);
                 print_stage_timings(report["stage_timings"]);
             }
             return 0;
@@ -970,13 +1076,24 @@ int main(int argc, char* argv[]) {
                 if (resolved->preset.has_value()) {
                     std::cout << " - Preset: " << resolved->preset->name << "\n";
                 }
+                std::cout << " - Precision: "
+                          << precision_preference_to_string(req.params.precision_preference)
+                          << "\n";
                 std::cout << " - Model: " << req.model_path.filename().string();
                 if (resolved->default_model_selected) {
                     std::cout << " [auto]";
                 }
+                const std::string effective_precision = artifact_precision_label(req.model_path);
+                if (effective_precision != "auto") {
+                    std::cout << " [" << effective_precision << "]";
+                }
                 std::cout << "\n"
                           << " - Requested device: " << req.device.name << " [" << device_str
                           << "]\n";
+                if (auto model_resolution = packaged_model_resolution(req.model_path);
+                    model_resolution.has_value()) {
+                    std::cout << " - Effective resolution: " << *model_resolution << "\n";
+                }
             }
 
             auto progress = [](float p, const std::string& status) -> bool {

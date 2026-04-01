@@ -18,6 +18,7 @@ add_executable(test_integration
     test_video_roundtrip.cpp
     test_post_process_chain.cpp
     test_shared_memory_transport.cpp
+    test_windows_gpu_detection.cpp
     test_engine_warmup.cpp
     test_regression_0000_video_decode_bframes.cpp
 )

@@ -778,26 +778,18 @@ function Get-CorridorKeyOfxModelProfileFromReleaseSuffix {
     param([string]$ReleaseSuffix)
 
     if ([string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
-        return "rtx-full"
+        return "windows-rtx"
     }
 
     if ($ReleaseSuffix -match "DirectML" -or $ReleaseSuffix -match "DML") {
         return "windows-universal"
     }
 
-    if ($ReleaseSuffix -match "RTX[_-]?Lite" -or $ReleaseSuffix -match "RTX[_-]?Stable") {
-        return "rtx-lite"
-    }
-
-    if ($ReleaseSuffix -match "RTX[_-]?Full") {
-        return "rtx-full"
-    }
-
     if ($ReleaseSuffix -match "RTX") {
-        return "rtx-full"
+        return "windows-rtx"
     }
 
-    return "rtx-full"
+    return "windows-rtx"
 }
 
 function Get-CorridorKeyWindowsReleaseLabelFromSuffix {
@@ -805,11 +797,9 @@ function Get-CorridorKeyWindowsReleaseLabelFromSuffix {
 
     $modelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix
     switch ($modelProfile) {
-        "rtx-lite" { return "Windows RTX Lite" }
-        "rtx-stable" { return "Windows RTX Lite" }
-        "rtx-full" { return "Windows RTX Full" }
+        "windows-rtx" { return "Windows RTX" }
         "windows-universal" { return "Windows DirectML" }
-        default { return "Windows RTX Full" }
+        default { return "Windows RTX" }
     }
 }
 
@@ -897,26 +887,13 @@ function Get-CorridorKeyIntermediateModelList {
 
 function Get-CorridorKeyOfxBundleTargetModels {
     param(
-        [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
-        [string]$ModelProfile = "rtx-full"
+        [ValidateSet("windows-rtx", "windows-universal")]
+        [string]$ModelProfile = "windows-rtx"
     )
 
     switch ($ModelProfile) {
-        "rtx-lite" {
-            return @(
-                (Get-CorridorKeyWindowsRtxPromotedModelList | Where-Object {
-                    $_ -in @(
-                        "corridorkey_fp16_512.onnx",
-                        "corridorkey_fp16_1024.onnx",
-                        "corridorkey_int8_512.onnx",
-                        "corridorkey_int8_768.onnx",
-                        "corridorkey_int8_1024.onnx"
-                    )
-                })
-            )
-        }
-        "rtx-stable" {
-            return @(Get-CorridorKeyOfxBundleTargetModels -ModelProfile "rtx-lite")
+        "windows-rtx" {
+            return @(Get-CorridorKeyWindowsRtxPromotedModelList)
         }
         "windows-universal" {
             return @(
@@ -938,29 +915,26 @@ function Get-CorridorKeyOfxBundleTargetModels {
 
 function Get-CorridorKeyModelProfileContract {
     param(
-        [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
-        [string]$ModelProfile = "rtx-full"
+        [ValidateSet("windows-rtx", "windows-universal")]
+        [string]$ModelProfile = "windows-rtx"
     )
 
     switch ($ModelProfile) {
-        "rtx-lite" {
+        "windows-rtx" {
             return [pscustomobject]@{
-                model_profile = "rtx-lite"
+                model_profile = "windows-rtx"
                 package_type = "ofx_bundle"
                 bundle_track = "rtx"
-                release_label = "Windows RTX Lite"
-                optimization_profile_id = "windows-rtx-lite"
-                optimization_profile_label = "Windows RTX Lite"
+                release_label = "Windows RTX"
+                optimization_profile_id = "windows-rtx"
+                optimization_profile_label = "Windows RTX"
                 backend_intent = "tensorrt"
-                fallback_policy = "conservative_safe_quality_ceiling"
+                fallback_policy = "safe_auto_quality_with_manual_override"
                 warmup_policy = "precompiled_context_or_first_run_compile"
-                certification_tier = "validated_ladder_through_1024"
-                unrestricted_quality_attempt = $false
+                certification_tier = "packaged_fp16_ladder_through_2048"
+                unrestricted_quality_attempt = $true
                 expects_compiled_context_models = $true
             }
-        }
-        "rtx-stable" {
-            return Get-CorridorKeyModelProfileContract -ModelProfile "rtx-lite"
         }
         "windows-universal" {
             return [pscustomobject]@{
@@ -979,20 +953,7 @@ function Get-CorridorKeyModelProfileContract {
             }
         }
         default {
-            return [pscustomobject]@{
-                model_profile = "rtx-full"
-                package_type = "ofx_bundle"
-                bundle_track = "rtx"
-                release_label = "Windows RTX Full"
-                optimization_profile_id = "windows-rtx-full"
-                optimization_profile_label = "Windows RTX Full"
-                backend_intent = "tensorrt"
-                fallback_policy = "attempt_packaged_quality_then_runtime_failure"
-                warmup_policy = "precompiled_context_or_first_run_compile"
-                certification_tier = "packaged_fp16_ladder_through_2048"
-                unrestricted_quality_attempt = $true
-                expects_compiled_context_models = $true
-            }
+            return Get-CorridorKeyModelProfileContract -ModelProfile "windows-rtx"
         }
     }
 }
@@ -1000,8 +961,8 @@ function Get-CorridorKeyModelProfileContract {
 function Get-CorridorKeyExpectedCompiledContextModels {
     param(
         [string[]]$PresentModels,
-        [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
-        [string]$ModelProfile = "rtx-full"
+        [ValidateSet("windows-rtx", "windows-universal")]
+        [string]$ModelProfile = "windows-rtx"
     )
 
     $contract = Get-CorridorKeyModelProfileContract -ModelProfile $ModelProfile
@@ -1026,16 +987,10 @@ function Get-CorridorKeyWindowsOfxReleaseVariants {
 
     if ($Track -in @("rtx", "all")) {
         $variants += [pscustomobject]@{
-            Label = "RTX Lite"
-            Suffix = "RTX_Lite"
+            Label = "RTX"
+            Suffix = "RTX"
             Track = "rtx"
-            ModelProfile = "rtx-lite"
-        }
-        $variants += [pscustomobject]@{
-            Label = "RTX Full"
-            Suffix = "RTX_Full"
-            Track = "rtx"
-            ModelProfile = "rtx-full"
+            ModelProfile = "windows-rtx"
         }
     }
 

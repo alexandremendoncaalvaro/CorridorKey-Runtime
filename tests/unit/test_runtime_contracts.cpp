@@ -98,16 +98,16 @@ TEST_CASE("preferred runtime device and optimization profile stay product-aligne
     REQUIRE(preferred_windows.has_value());
     REQUIRE(preferred_windows->backend == Backend::TensorRT);
 
-    const auto lite_models_dir = write_models_inventory_fixture("rtx-lite");
+    const auto windows_rtx_models_dir = write_models_inventory_fixture("windows-rtx");
     {
-        ScopedModelsDirOverride lite_override(lite_models_dir);
+        ScopedModelsDirOverride windows_rtx_override(windows_rtx_models_dir);
         auto profile =
             runtime_optimization_profile_for_device(windows_capabilities, *preferred_windows);
-        REQUIRE(profile.id == "windows-rtx-lite");
-        REQUIRE(profile.certification_tier == "validated_ladder_through_1024");
-        REQUIRE_FALSE(profile.unrestricted_quality_attempt);
+        REQUIRE(profile.id == "windows-rtx");
+        REQUIRE(profile.certification_tier == "packaged_fp16_ladder_through_2048");
+        REQUIRE(profile.unrestricted_quality_attempt);
     }
-    std::filesystem::remove_all(lite_models_dir.parent_path());
+    std::filesystem::remove_all(windows_rtx_models_dir.parent_path());
 
     RuntimeCapabilities mac_capabilities;
     mac_capabilities.platform = "macos";
@@ -304,10 +304,22 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_rtx_model.has_value());
     REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_1024.onnx");
 
+    auto windows_rtx_fp16_model = default_model_for_request(
+        windows_capabilities, DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
+        windows_default, ArtifactVariantPreference::FP16);
+    REQUIRE(windows_rtx_fp16_model.has_value());
+    REQUIRE(windows_rtx_fp16_model->filename == "corridorkey_fp16_1024.onnx");
+
     auto windows_cpu_model = default_model_for_request(
         windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default);
     REQUIRE(windows_cpu_model.has_value());
     REQUIRE(windows_cpu_model->filename == "corridorkey_int8_512.onnx");
+
+    auto windows_cpu_fp16_model = default_model_for_request(
+        windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default,
+        ArtifactVariantPreference::FP16);
+    REQUIRE(windows_cpu_fp16_model.has_value());
+    REQUIRE(windows_cpu_fp16_model->filename == "corridorkey_fp16_512.onnx");
 
     RuntimeCapabilities windows_universal_capabilities;
     windows_universal_capabilities.platform = "windows";
@@ -324,7 +336,7 @@ TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"RTX 3070", 8192, Backend::TensorRT}) == 512);
     REQUIRE(max_supported_resolution_for_device(
-                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1536);
+                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) == 1536);
     REQUIRE(max_supported_resolution_for_device(
@@ -333,37 +345,17 @@ TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit
                 DeviceInfo{"AMD Radeon", 8192, Backend::DirectML}) == 512);
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"AMD Radeon", 16384, Backend::DirectML}) == 1024);
-    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 10000);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 1536) == 16000);
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
     REQUIRE_FALSE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 768).has_value());
     REQUIRE_FALSE(minimum_supported_memory_mb_for_resolution(Backend::DirectML, 768).has_value());
-}
-
-TEST_CASE("windows RTX bundle profile controls the safe quality ceiling",
-          "[unit][runtime][regression]") {
-    const auto lite_models_dir = write_models_inventory_fixture("rtx-lite");
-    {
-        ScopedModelsDirOverride lite_override(lite_models_dir);
-        REQUIRE(max_supported_resolution_for_device(
-                    DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
-    }
-
-    const auto full_models_dir = write_models_inventory_fixture("rtx-full");
-    {
-        ScopedModelsDirOverride full_override(full_models_dir);
-        REQUIRE(max_supported_resolution_for_device(
-                    DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 2048);
-    }
-
-    std::filesystem::remove_all(lite_models_dir.parent_path());
-    std::filesystem::remove_all(full_models_dir.parent_path());
 }
 
 TEST_CASE("hardware profile delegates Windows safe quality ceilings to runtime contracts",
           "[unit][runtime][regression]") {
     const auto rtx_strategy =
         HardwareProfile::get_best_strategy(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
-    CHECK(rtx_strategy.target_resolution == 1536);
+    CHECK(rtx_strategy.target_resolution == 1024);
     CHECK(rtx_strategy.recommended_variant == "fp16");
 
     const auto directml_strategy =
@@ -383,13 +375,15 @@ TEST_CASE("runtime coarse-to-fine policy prefers safer coarse artifacts", "[unit
     ScopedModelsDirOverride legacy_override(legacy_models_dir);
 
     const DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
-    REQUIRE_FALSE(
+    REQUIRE(
         should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536) == 1024);
     REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 2048, QualityFallbackMode::Auto));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 2048) == 1024);
     REQUIRE_FALSE(
         should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Direct));
+    REQUIRE_FALSE(should_use_coarse_to_fine_for_request(
+        rtx_3080, 1536, QualityFallbackMode::Auto, 0, true));
     REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536,
                                                   QualityFallbackMode::CoarseToFine));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 768) == 768);
@@ -452,8 +446,8 @@ TEST_CASE("artifact runtime state separates packaged, certified, and recommended
     windows_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
     DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
 
-    const auto lite_models_dir = write_models_inventory_fixture("rtx-lite");
-    ScopedModelsDirOverride lite_override(lite_models_dir);
+    const auto windows_rtx_models_dir = write_models_inventory_fixture("windows-rtx");
+    ScopedModelsDirOverride windows_rtx_override(windows_rtx_models_dir);
 
     auto fp16_1024 = find_model_by_filename("corridorkey_fp16_1024.onnx");
     REQUIRE(fp16_1024.has_value());
@@ -501,7 +495,7 @@ TEST_CASE("artifact runtime state separates packaged, certified, and recommended
     REQUIRE_FALSE(missing_state.present);
     REQUIRE(missing_state.state == "missing");
 
-    std::filesystem::remove_all(lite_models_dir.parent_path());
+    std::filesystem::remove_all(windows_rtx_models_dir.parent_path());
 }
 
 TEST_CASE("latency summaries stay stable for benchmark payloads", "[unit][runtime]") {

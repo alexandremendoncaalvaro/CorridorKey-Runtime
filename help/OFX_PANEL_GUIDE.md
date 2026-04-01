@@ -118,8 +118,11 @@ Current backend-specific rules:
 - **Windows RTX** uses the current public quality ladder:
   `512 / 1024 / 1536 / 2048`. The old `768` rung is not part of the current
   public OFX quality UI.
-- **RTX Lite** is validated through **High (1024)**.
-- **RTX Full** exposes **Ultra (1536)** and **Maximum (2048)** as well.
+- **Windows RTX Auto** respects the current safe quality ceiling for the
+  detected VRAM tier.
+- A manual **Windows RTX** quality selection can still attempt `Ultra (1536)`
+  or `Maximum (2048)` above the current safe ceiling, but you must confirm the
+  actual result in the runtime panel.
 - **DirectML** currently tops out at a `1024px` safe quality ceiling, so
   `Ultra (1536)` and `Maximum (2048)` will not hold on that path.
 - **CPU** is clamped to **Draft (512)**.

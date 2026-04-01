@@ -2,9 +2,10 @@ import * as ort from "onnxruntime-web";
 import { MAX_WASM_THREADS } from "../common/constants";
 import { app_error, type AppError } from "../common/errors";
 import { err, ok, type Result } from "../common/result";
-import type { ModelSession, ProcessResult, RgbaFrame } from "./image_types";
+import type { ModelSession, ProcessResult, RgbaFrame, InferenceStrategy, TileProgress } from "./image_types";
 import { create_rough_matte } from "./rough_matte";
 import { prepare_model_input } from "./model_input";
+import { process_frame_tiled } from "./tiling";
 
 let runtime_configured = false;
 type SessionBackend = "webgpu" | "wasm";
@@ -163,7 +164,7 @@ export class OnnxRuntimeModelSession implements ModelSession {
     return err(model_load_failure(failures));
   }
 
-  async run_frame(
+  private async _run_single_pass(
     frame: RgbaFrame,
     alpha_hint?: Float32Array,
   ): Promise<Result<ProcessResult, AppError>> {
@@ -178,6 +179,8 @@ export class OnnxRuntimeModelSession implements ModelSession {
 
     try {
       const outputs = await this.m_session.run(feeds);
+      tensor.dispose();
+      
       const alpha_tensor = outputs[this.m_session.outputNames[0] ?? "alpha"];
 
       if (alpha_tensor === undefined) {
@@ -190,7 +193,7 @@ export class OnnxRuntimeModelSession implements ModelSession {
       const width = Number(alpha_tensor.dims[3] ?? frame.width);
       const height = Number(alpha_tensor.dims[2] ?? frame.height);
 
-      return ok({
+      const result = ok({
         alpha: tensor_to_float32(
           alpha_tensor.data as Float32Array | ArrayLike<number>,
         ),
@@ -202,9 +205,15 @@ export class OnnxRuntimeModelSession implements ModelSession {
               ),
         width,
         height,
-        mode: "model",
+        mode: "model" as const,
       });
+      
+      alpha_tensor.dispose();
+      if (fg_tensor) fg_tensor.dispose();
+      
+      return result;
     } catch (cause) {
+      tensor.dispose();
       return err(
         app_error(
           "inference_failed",
@@ -213,6 +222,27 @@ export class OnnxRuntimeModelSession implements ModelSession {
         ),
       );
     }
+  }
+
+  async run_frame(
+    frame: RgbaFrame,
+    alpha_hint?: Float32Array,
+    strategy?: InferenceStrategy,
+    on_progress?: (progress: TileProgress) => void,
+  ): Promise<Result<ProcessResult, AppError>> {
+    if (strategy?.type === "tiling") {
+      return process_frame_tiled(
+        frame,
+        alpha_hint,
+        strategy.tile_size,
+        strategy.overlap,
+        (patch_frame, patch_hint) => this._run_single_pass(patch_frame, patch_hint),
+        on_progress
+      );
+    }
+    
+    // Default to single pass
+    return this._run_single_pass(frame, alpha_hint);
   }
 
   dispose(): void {}

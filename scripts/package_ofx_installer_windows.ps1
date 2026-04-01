@@ -5,7 +5,7 @@ param(
     [string]$ModelsDir = "",
     [string]$ArtifactManifestPath = "",
     [string]$ReleaseSuffix = "",
-    [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
+    [ValidateSet("windows-rtx", "windows-universal")]
     [string]$ModelProfile = "",
     [switch]$Skip2048
 )
@@ -46,9 +46,7 @@ function Write-ReleaseReadme {
     )
 
     $modelCoverageText = switch ($ModelProfile) {
-        "rtx-lite" { "This Windows RTX Lite package includes the validated FP16 and INT8 models through 1024px." }
-        "rtx-stable" { "This Windows RTX Lite package includes the validated FP16 and INT8 models through 1024px." }
-        "rtx-full" { "This Windows RTX Full package includes the complete FP16 ladder through 2048px plus the portable INT8 models." }
+        "windows-rtx" { "This Windows RTX package includes the official FP16 ladder through 2048px plus the portable INT8 CPU artifacts." }
         "windows-universal" { "This Windows DirectML package includes the Windows universal GPU and CPU model set." }
         default { "This package includes the packaged model set recorded in CorridorKey.ofx.bundle\\model_inventory.json." }
     }

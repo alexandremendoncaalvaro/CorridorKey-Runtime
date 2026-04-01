@@ -80,14 +80,19 @@ export interface ViewDownloadArtifacts {
 }
 
 export interface ViewHandlers {
-  on_source_video_selected: () => void;
-  on_source_stills_selected: () => void;
+  on_source_type_changed: () => void;
+  on_source_files_selected: () => void;
+  on_hint_type_changed: () => void;
   on_hint_files_selected: () => void;
   on_hint_video_ready: () => void;
   on_model_selection_changed: () => void;
   on_resolution_changed: () => void;
+  on_quality_changed: () => void;
+  on_process_frame_requested: () => void;
   on_process_full_media_requested: () => void;
+  on_clear_requested: () => void;
   on_video_metadata_loaded: () => void;
+  on_video_data_loaded: () => void;
   on_video_played: () => void;
   on_video_paused: () => void;
   on_video_seeked: () => void;
@@ -173,12 +178,26 @@ function fill_checkerboard(
 }
 
 export class DomBrowserPocView {
-  private readonly source_video_input =
-    require_element<HTMLInputElement>("source-video-files");
-  private readonly source_stills_input =
-    require_element<HTMLInputElement>("source-stills-files");
+  private readonly source_type_select =
+    require_element<HTMLSelectElement>("source-type");
+  private readonly source_files_input =
+    require_element<HTMLInputElement>("source-files");
+  private readonly source_file_wrapper =
+    require_element<HTMLElement>("source-file-wrapper");
+  private readonly hint_type_select =
+    require_element<HTMLSelectElement>("hint-type");
   private readonly hint_files_input =
     require_element<HTMLInputElement>("hint-files");
+  private readonly hint_file_wrapper =
+    require_element<HTMLElement>("hint-file-wrapper");
+  private readonly quality_preset_select =
+    require_element<HTMLSelectElement>("quality-preset");
+  private readonly process_frame_button =
+    require_element<HTMLButtonElement>("process-frame");
+  private readonly clear_inputs_button =
+    require_element<HTMLButtonElement>("clear-inputs");
+  private readonly webcam_video =
+    require_element<HTMLVideoElement>("webcam-video");
   private readonly model_select =
     require_element<HTMLSelectElement>("model-select");
   private readonly resolution_input =
@@ -197,6 +216,12 @@ export class DomBrowserPocView {
   private readonly alpha_download_default_label =
     require_element<HTMLAnchorElement>("download-alpha").textContent ??
     "Download Alpha ZIP";
+  private readonly main_canvas_grid =
+    require_element<HTMLElement>("main-canvas-grid");
+  private readonly source_canvas_card =
+    require_element<HTMLElement>("source-canvas-card");
+  private readonly preview_canvas_card =
+    require_element<HTMLElement>("preview-canvas-card");
   private readonly source_video =
     require_element<HTMLVideoElement>("source-video");
   private readonly hint_video =
@@ -257,17 +282,33 @@ export class DomBrowserPocView {
   private m_locked_stage_aspect_ratio: string | null = null;
 
   bind_handlers(handlers: ViewHandlers): void {
-    this.source_video_input.addEventListener(
+    this.source_type_select.addEventListener(
       "change",
-      handlers.on_source_video_selected,
+      handlers.on_source_type_changed,
     );
-    this.source_stills_input.addEventListener(
+    this.source_files_input.addEventListener(
       "change",
-      handlers.on_source_stills_selected,
+      handlers.on_source_files_selected,
+    );
+    this.hint_type_select.addEventListener(
+      "change",
+      handlers.on_hint_type_changed,
     );
     this.hint_files_input.addEventListener(
       "change",
       handlers.on_hint_files_selected,
+    );
+    this.quality_preset_select.addEventListener(
+      "change",
+      handlers.on_quality_changed,
+    );
+    this.process_frame_button.addEventListener(
+      "click",
+      handlers.on_process_frame_requested,
+    );
+    this.clear_inputs_button.addEventListener(
+      "click",
+      handlers.on_clear_requested,
     );
     this.hint_video.addEventListener("loadeddata", handlers.on_hint_video_ready);
     this.hint_video.addEventListener("seeked", handlers.on_hint_video_ready);
@@ -284,6 +325,10 @@ export class DomBrowserPocView {
       "loadedmetadata",
       handlers.on_video_metadata_loaded,
     );
+    this.source_video.addEventListener(
+      "loadeddata",
+      handlers.on_video_data_loaded,
+    );
     this.source_video.addEventListener("play", handlers.on_video_played);
     this.source_video.addEventListener("pause", handlers.on_video_paused);
     this.source_video.addEventListener("seeked", handlers.on_video_seeked);
@@ -296,18 +341,156 @@ export class DomBrowserPocView {
       "input",
       handlers.on_hint_sequence_index_changed,
     );
+    
+    const toggle_zoom = (card_id: string) => {
+      const is_zoomed = this.main_canvas_grid.classList.contains("zoomed");
+      const current_active = this.main_canvas_grid.querySelector(".active-zoom");
+
+      if (is_zoomed && current_active?.id === card_id) {
+        this.main_canvas_grid.classList.remove("zoomed");
+        current_active.classList.remove("active-zoom");
+      } else {
+        this.main_canvas_grid.classList.add("zoomed");
+        current_active?.classList.remove("active-zoom");
+        document.getElementById(card_id)?.classList.add("active-zoom");
+      }
+    };
+
+    const setup_pan_zoom = (container: HTMLElement) => {
+      let zoom = 1;
+      let offset_x = 0;
+      let offset_y = 0;
+      let is_dragging = false;
+      let start_x = 0;
+      let start_y = 0;
+      let start_client_x = 0;
+      let start_client_y = 0;
+      let was_drag = false;
+
+      const update_transform = () => {
+        const visuals = Array.from(container.children).filter(
+          (el) => el.tagName === "CANVAS" || el.tagName === "VIDEO",
+        ) as HTMLElement[];
+        
+        for (const el of visuals) {
+          el.style.transform = `translate(${offset_x}px, ${offset_y}px) scale(${zoom})`;
+          if (zoom >= 2) {
+            el.style.imageRendering = "pixelated";
+          } else {
+            el.style.imageRendering = "auto";
+          }
+        }
+      };
+
+      container.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const zoom_intensity = 0.2;
+        const delta = e.deltaY > 0 ? -1 : 1;
+        
+        const prev_zoom = zoom;
+        zoom += delta * zoom_intensity * zoom;
+        zoom = Math.max(1, Math.min(zoom, 50)); 
+
+        const rect = container.getBoundingClientRect();
+        const mouse_x = e.clientX - rect.left - rect.width / 2;
+        const mouse_y = e.clientY - rect.top - rect.height / 2;
+        
+        offset_x -= mouse_x * (zoom / prev_zoom - 1);
+        offset_y -= mouse_y * (zoom / prev_zoom - 1);
+        
+        if (zoom <= 1) {
+          zoom = 1;
+          offset_x = 0;
+          offset_y = 0;
+        }
+
+        update_transform();
+      }, { passive: false });
+
+      container.addEventListener("mousedown", (e) => {
+        if (zoom > 1) {
+          is_dragging = true;
+          was_drag = false;
+          start_client_x = e.clientX;
+          start_client_y = e.clientY;
+          start_x = e.clientX - offset_x;
+          start_y = e.clientY - offset_y;
+          container.style.cursor = "grabbing";
+        }
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!is_dragging) return;
+        offset_x = e.clientX - start_x;
+        offset_y = e.clientY - start_y;
+        
+        const dx = e.clientX - start_client_x;
+        const dy = e.clientY - start_client_y;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          was_drag = true;
+        }
+        update_transform();
+      });
+
+      window.addEventListener("mouseup", () => {
+        if (is_dragging) {
+          is_dragging = false;
+          container.style.cursor = zoom > 1 ? "grab" : "default";
+        }
+      });
+
+      container.addEventListener("dblclick", () => {
+        const activeElement = Array.from(container.children).find(
+          (el) => !el.classList.contains("hidden") && (el.tagName === "CANVAS" || el.tagName === "VIDEO"),
+        );
+        if (activeElement && !document.fullscreenElement) {
+          void activeElement.requestFullscreen();
+        } else if (document.fullscreenElement) {
+          void document.exitFullscreen();
+        }
+      });
+
+      container.addEventListener("click", (e) => {
+        if (was_drag) {
+          was_drag = false;
+          e.stopImmediatePropagation();
+          return;
+        }
+        toggle_zoom(container.id);
+      });
+    };
+
+    setup_pan_zoom(this.source_canvas_card);
+    setup_pan_zoom(this.preview_canvas_card);
   }
 
-  selected_source_video_files(): File[] {
-    return Array.from(this.source_video_input.files ?? []);
+  selected_source_type(): string {
+    return this.source_type_select.value;
   }
 
-  selected_source_still_files(): File[] {
-    return Array.from(this.source_stills_input.files ?? []);
+  selected_source_files(): File[] {
+    return Array.from(this.source_files_input.files ?? []);
+  }
+
+  selected_hint_type(): string {
+    return this.hint_type_select.value;
   }
 
   selected_hint_files(): File[] {
     return Array.from(this.hint_files_input.files ?? []);
+  }
+
+  selected_quality_preset(): string {
+    return this.quality_preset_select.value;
+  }
+
+  sync_input_visibilities(): void {
+    this.source_file_wrapper.classList.toggle("hidden", this.source_type_select.value !== "file");
+    this.hint_file_wrapper.classList.toggle("hidden", this.hint_type_select.value !== "file");
+  }
+
+  webcam_video_element(): HTMLVideoElement {
+    return this.webcam_video;
   }
 
   selected_sequence_index(): number {
@@ -472,6 +655,12 @@ export class DomBrowserPocView {
     this.source_video.load();
   }
 
+  set_active_source_element(element: "canvas" | "video" | "webcam"): void {
+    this.source_canvas.classList.toggle("hidden", element !== "canvas");
+    this.source_video.classList.toggle("hidden", element !== "video");
+    this.webcam_video.classList.toggle("hidden", element !== "webcam");
+  }
+
   clear_video_source(): void {
     this.source_video.pause();
     this.source_video.srcObject = null;
@@ -615,12 +804,26 @@ export class DomBrowserPocView {
     const plane_size = size * size;
     const output = new Float32Array(plane_size);
 
+    let has_variable_alpha = false;
     for (let index = 0; index < plane_size; index += 1) {
-      const rgba_index = index * 4;
-      const red = image_data.data[rgba_index] / 255;
-      const green = image_data.data[rgba_index + 1] / 255;
-      const blue = image_data.data[rgba_index + 2] / 255;
-      output[index] = 0.299 * red + 0.587 * green + 0.114 * blue;
+      if (image_data.data[index * 4 + 3] !== 255) {
+         has_variable_alpha = true;
+         break;
+      }
+    }
+
+    if (has_variable_alpha) {
+      for (let index = 0; index < plane_size; index += 1) {
+        output[index] = image_data.data[index * 4 + 3] / 255;
+      }
+    } else {
+      for (let index = 0; index < plane_size; index += 1) {
+        const rgba_index = index * 4;
+        const red = image_data.data[rgba_index] / 255;
+        const green = image_data.data[rgba_index + 1] / 255;
+        const blue = image_data.data[rgba_index + 2] / 255;
+        output[index] = 0.299 * red + 0.587 * green + 0.114 * blue;
+      }
     }
 
     return output;
@@ -644,7 +847,7 @@ export class DomBrowserPocView {
   }
 
   render_output(frame: RgbaFrame): void {
-    const image_data = new ImageData(frame.data, frame.width, frame.height);
+    const image_data = new ImageData(frame.data as any, frame.width, frame.height);
     const output_rect = resolve_stage_draw_rect(
       this.output_canvas.width,
       this.output_canvas.height,
@@ -707,9 +910,13 @@ export class DomBrowserPocView {
   }
 
   set_button_state(state: ViewButtonsState): void {
-    this.source_video_input.disabled = !state.can_change_source;
-    this.source_stills_input.disabled = !state.can_change_source;
+    this.source_type_select.disabled = !state.can_change_source;
+    this.source_files_input.disabled = !state.can_change_source;
+    this.hint_type_select.disabled = !state.can_change_hint;
     this.hint_files_input.disabled = !state.can_change_hint;
+    this.quality_preset_select.disabled = !state.can_change_resolution;
+    this.process_frame_button.disabled = !state.can_change_source;
+    this.clear_inputs_button.disabled = !state.can_change_source;
     this.model_select.disabled = !state.can_change_model;
     this.resolution_input.disabled = !state.can_change_resolution;
     this.process_full_media_button.disabled = !state.can_process_full_media;

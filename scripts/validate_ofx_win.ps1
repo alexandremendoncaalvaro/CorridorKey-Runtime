@@ -151,10 +151,16 @@ if (-not (Test-Path $plugin)) {
 $pluginSize = (Get-Item $plugin).Length
 Write-Host "[PASS] Found plugin binary ($([math]::Round($pluginSize / 1MB, 2)) MB)" -ForegroundColor Green
 
-$runtimeServer = Join-Path $win64Dir "corridorkey.exe"
+$cliBinary = Join-Path $win64Dir "corridorkey.exe"
+if (-not (Test-Path $cliBinary)) {
+    Write-Host "[FAIL] CLI binary not found" -ForegroundColor Red
+    throw "CLI binary not found: corridorkey.exe"
+}
+
+$runtimeServer = Join-Path $win64Dir "corridorkey_ofx_runtime_server.exe"
 if (-not (Test-Path $runtimeServer)) {
     Write-Host "[FAIL] Runtime server binary not found" -ForegroundColor Red
-    throw "Runtime server binary not found: corridorkey.exe"
+    throw "Runtime server binary not found: corridorkey_ofx_runtime_server.exe"
 }
 
 $directmlDll = Join-Path $win64Dir "DirectML.dll"
@@ -166,6 +172,9 @@ if (Test-Path $directmlDll) {
 } else {
     Write-Host "[INFO] DirectML.dll not found (RTX bundle)" -ForegroundColor Cyan
 }
+
+$cliBinarySize = (Get-Item $cliBinary).Length
+Write-Host "[PASS] Found CLI binary ($([math]::Round($cliBinarySize / 1MB, 2)) MB)" -ForegroundColor Green
 
 $runtimeServerSize = (Get-Item $runtimeServer).Length
 Write-Host "[PASS] Found runtime server binary ($([math]::Round($runtimeServerSize / 1MB, 2)) MB)" -ForegroundColor Green

@@ -3,6 +3,15 @@ import type { Result } from "../common/result";
 
 export type ProcessMode = "rough_matte" | "model";
 
+export type InferenceStrategy = 
+  | { type: "singlepass" }
+  | { type: "tiling", tile_size: number, overlap: number };
+
+export interface TileProgress {
+  current_tile: number;
+  total_tiles: number;
+}
+
 export interface RgbaFrame {
   width: number;
   height: number;
@@ -28,7 +37,12 @@ export interface ProcessedFrame {
 
 export interface ModelSession {
   backend_label: string;
-  run_frame(frame: RgbaFrame, alpha_hint?: Float32Array): Promise<Result<ProcessResult, AppError>>;
+  run_frame(
+    frame: RgbaFrame, 
+    alpha_hint?: Float32Array,
+    strategy?: InferenceStrategy,
+    on_progress?: (progress: TileProgress) => void
+  ): Promise<Result<ProcessResult, AppError>>;
   dispose(): void;
 }
 
