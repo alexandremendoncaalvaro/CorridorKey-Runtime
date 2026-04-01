@@ -1366,6 +1366,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["gpus"] = nlohmann::json::array();
 
     bool any_provider_available = false;
+    bool preferred_tensorrt_gpu_selected = false;
     nlohmann::json probes = nlohmann::json::array();
     for (size_t index = 0; index < gpus.size(); ++index) {
         const auto& gpu = gpus[index];
@@ -1376,6 +1377,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         gpu_json["tensorrt_available"] = gpu.tensorrt_rtx_available;
         gpu_json["cuda_available"] = gpu.cuda_available;
         gpu_json["directml_available"] = gpu.directml_available;
+        gpu_json["driver_query_available"] = gpu.driver_query_available;
         gpu_json["driver_version"] = gpu.driver_version;
         json["gpus"].push_back(gpu_json);
 
@@ -1385,13 +1387,17 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         if (has_windows_provider && json["gpu_name"] == "") {
             json["gpu_name"] = gpu.adapter_name;
             json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
+            json["driver_query_available"] = gpu.driver_query_available;
+            json["driver_version"] = gpu.driver_version;
         }
 
-        if (gpu.tensorrt_rtx_available && json["gpu_name"] == "") {
+        if (gpu.tensorrt_rtx_available && !preferred_tensorrt_gpu_selected) {
             json["gpu_name"] = gpu.adapter_name;
             json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
             json["ampere_or_newer"] = gpu.is_rtx;
+            json["driver_query_available"] = gpu.driver_query_available;
             json["driver_version"] = gpu.driver_version;
+            preferred_tensorrt_gpu_selected = true;
         }
 
         const auto queue_backend_probes = [&](Backend backend, bool available,
