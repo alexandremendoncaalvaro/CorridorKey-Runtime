@@ -26,8 +26,7 @@ installation.
 2. Confirm the correct installer for your platform was used. The macOS `.pkg`
    installer and the Windows `.exe` installer are not interchangeable.
 3. On Windows, confirm you chose the right Windows track:
-   - `RTX Lite` for the conservative official RTX ladder through `1024`
-   - `RTX Full` when you want the full RTX ladder through `2048`
+   - `Windows RTX` for the official NVIDIA RTX 30 series and newer track
    - `DirectML` only for the experimental non-RTX Windows track
 4. On Windows, confirm the installer was run as Administrator. The OFX plugin
    directory (`C:\Program Files\Common Files\OFX\Plugins`) requires elevated
@@ -99,8 +98,8 @@ backend failure, or a different backend than expected.
    and any fallback or failure conditions.
 2. Confirm the correct package was installed for your hardware:
    - Apple Silicon: the `.pkg` installer uses the MLX path automatically.
-   - NVIDIA RTX 30 series or newer: the Windows `RTX Lite` and `RTX Full`
-     installers are the official paths.
+   - NVIDIA RTX 30 series or newer: the Windows `Windows RTX` installer is the
+     official path.
    - Other Windows GPUs: the Windows `DirectML` installer is the only shipped
      experimental Windows fallback track.
 3. On Windows, confirm that the required DirectX 12 runtime is present. Run
@@ -122,10 +121,8 @@ different backend than anticipated.
 
 Each packaged track has a different support level:
 
-- `RTX Lite` is the conservative official Windows RTX package for NVIDIA RTX 30
-  series and newer through ONNX Runtime TensorRT RTX EP.
-- `RTX Full` is the unrestricted official Windows RTX package for NVIDIA RTX 30
-  series and newer through ONNX Runtime TensorRT RTX EP.
+- `Windows RTX` is the official Windows RTX package for NVIDIA RTX 30 series
+  and newer through ONNX Runtime TensorRT RTX EP.
 - The `DirectML` package is an experimental Windows track. It must not be
   treated as proof of official support across AMD, Intel, or RTX 20 series
   hardware.
@@ -173,7 +170,8 @@ Fallback is surface-dependent.
 
 - CLI and tolerant automation workflows may fall back to ONNX CPU execution.
 - The OFX plugin prefers explicit failure over silent CPU fallback on
-  unsupported interactive GPU requests.
+  unsupported interactive GPU requests. CPU fallback there only happens when
+  the advanced `Allow CPU Fallback` option is enabled.
 
 CPU fallback is significantly slower than GPU execution. It is suitable for
 validation and tolerant workflows, but not recommended for production

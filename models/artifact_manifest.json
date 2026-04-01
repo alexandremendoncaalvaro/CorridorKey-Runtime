@@ -1,7 +1,7 @@
 {
     "manifest_type": "windows_rtx_artifact_manifest",
     "bundle_track": "rtx",
-    "certification_report": "C:\\Dev\\CorridorKey-Runtime\\build\\release\\windows_rtx_certified\\rtx-full\\windows_rtx_validation_report.json",
+    "certification_report": "C:\\Dev\\CorridorKey-Runtime\\build\\release\\windows_rtx_certified\\windows-rtx\\windows_rtx_validation_report.json",
     "all_profiles_certified": true,
     "certified_models": [
         "corridorkey_fp16_512.onnx",

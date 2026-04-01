@@ -71,8 +71,11 @@ Windows RTX note:
 
 - The current public OFX ladder is **Draft (512)**, **High (1024)**,
   **Ultra (1536)**, and **Maximum (2048)**.
-- `RTX Lite` is the conservative installer and stops at **High (1024)**.
-- `RTX Full` exposes **Ultra (1536)** and **Maximum (2048)** as well.
+- In `Auto`, the Windows RTX track respects the current safe quality ceiling
+  for the detected VRAM tier.
+- In a fixed mode, the Windows RTX track can still attempt `Ultra (1536)` or
+  `Maximum (2048)` above the safe ceiling, so always confirm **Effective
+  Quality** after the switch.
 
 ## Tutorial 2: Feed Alpha Hint in a Format the Plugin Reads Correctly
 
