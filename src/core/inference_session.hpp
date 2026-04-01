@@ -28,9 +28,9 @@
 #endif
 #endif
 
+#include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
-#include "post_process/alpha_edge.hpp"
 
 #ifdef __APPLE__
 #if __has_include(<onnxruntime/coreml_provider_factory.h>)
@@ -49,6 +49,7 @@ class MlxSession;
 struct SessionCreateOptions {
     bool disable_cpu_ep_fallback = false;
     OrtLoggingLevel log_severity = ORT_LOGGING_LEVEL_ERROR;
+    ExecutionEngine execution_engine = ExecutionEngine::Auto;
 };
 
 /**
@@ -85,6 +86,9 @@ class InferenceSession {
 
     [[nodiscard]] DeviceInfo device() const {
         return m_device;
+    }
+    [[nodiscard]] ExecutionEngine execution_engine() const {
+        return m_execution_engine;
     }
     [[nodiscard]] int recommended_resolution() const {
         return m_recommended_resolution;
@@ -147,13 +151,24 @@ class InferenceSession {
     std::vector<const char*> m_input_node_names_ptr = {};
     std::vector<const char*> m_output_node_names_ptr = {};
     std::vector<std::vector<int64_t>> m_input_node_dims = {};
+    std::vector<std::vector<int64_t>> m_output_node_dims = {};
     ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+    std::vector<ONNXTensorElementDataType> m_output_element_types = {};
     std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
+    ExecutionEngine m_execution_engine = ExecutionEngine::Official;
 
     // Pre-allocated buffer pools (reused across run() calls)
     std::vector<ImageBuffer> m_resize_pool = {};
     std::vector<ImageBuffer> m_planar_pool = {};
     std::vector<Ort::Float16_t> m_fp16_pool = {};
+    std::vector<float> m_alpha_output_scratch = {};
+    std::vector<float> m_fg_output_scratch = {};
+    std::vector<Ort::Float16_t> m_alpha_output_fp16_pool = {};
+    std::vector<Ort::Float16_t> m_fg_output_fp16_pool = {};
+    Ort::IoBinding m_io_binding{nullptr};
+    std::vector<int64_t> m_bound_input_shape = {};
+    std::vector<int64_t> m_bound_alpha_shape = {};
+    std::vector<int64_t> m_bound_fg_shape = {};
     std::vector<ImageBuffer> m_tiled_rgb_pool = {};
     std::vector<ImageBuffer> m_tiled_hint_pool = {};
     ImageBuffer m_tiled_weight_mask = {};

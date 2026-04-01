@@ -51,6 +51,7 @@ using JobEventCallback = std::function<bool(const JobEvent& event)>;
 struct EngineCreateOptions {
     bool allow_cpu_fallback = true;
     bool disable_cpu_ep_fallback = false;
+    ExecutionEngine execution_engine = ExecutionEngine::Auto;
 };
 
 /**
@@ -174,6 +175,11 @@ class CORRIDORKEY_API Engine {
      * @brief Get information about the last backend fallback, if one happened.
      */
     [[nodiscard]] std::optional<BackendFallbackInfo> backend_fallback() const;
+
+    /**
+     * @brief Get the effective execution engine used by the current session.
+     */
+    [[nodiscard]] ExecutionEngine execution_engine() const;
 
    private:
     // Private constructor used by the factory method

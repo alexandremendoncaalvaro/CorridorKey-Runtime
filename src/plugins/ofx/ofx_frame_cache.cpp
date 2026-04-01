@@ -46,20 +46,22 @@ std::uint64_t inference_params_hash(const InferenceParams& params) {
     hash = mix_signature(hash, params.auto_despeckle ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.despeckle_size));
     hash = mix_signature(hash, params.refiner_scale);
-    hash = mix_signature(hash, static_cast<float>(static_cast<std::uint8_t>(params.alpha_hint_policy)));
+    hash = mix_signature(hash,
+                         static_cast<float>(static_cast<std::uint8_t>(params.alpha_hint_policy)));
     hash = mix_signature(hash, params.input_is_linear ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.batch_size));
     hash = mix_signature(hash, params.enable_tiling ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.tile_padding));
-    hash = mix_signature(hash,
-                         static_cast<float>(static_cast<std::uint8_t>(params.upscale_method)));
+    hash =
+        mix_signature(hash, static_cast<float>(static_cast<std::uint8_t>(params.upscale_method)));
     hash = mix_signature(hash, params.source_passthrough ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.sp_erode_px));
     hash = mix_signature(hash, static_cast<float>(params.sp_blur_px));
     hash = mix_signature(hash, static_cast<float>(params.requested_quality_resolution));
     hash = mix_signature(
         hash, static_cast<float>(static_cast<std::uint8_t>(params.quality_fallback_mode)));
-    hash = mix_signature(hash, static_cast<float>(static_cast<std::uint8_t>(params.refinement_mode)));
+    hash =
+        mix_signature(hash, static_cast<float>(static_cast<std::uint8_t>(params.refinement_mode)));
     hash = mix_signature(hash, static_cast<float>(params.coarse_resolution_override));
     return hash;
 }
@@ -127,8 +129,8 @@ bool SharedFrameCache::try_retrieve(const SharedCacheKey& key, ImageBuffer& out_
     return true;
 }
 
-void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha,
-                             const Image& foreground, std::vector<StageTiming> stage_timings) {
+void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha, const Image& foreground,
+                             std::vector<StageTiming> stage_timings) {
     auto alpha_copy = deep_copy_buffer(alpha);
     auto fg_copy = deep_copy_buffer(foreground);
     if (!alpha_copy.has_value() || !fg_copy.has_value()) {

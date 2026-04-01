@@ -1,6 +1,5 @@
-#include <catch2/catch_all.hpp>
-
 #include <array>
+#include <catch2/catch_all.hpp>
 #include <map>
 #include <string>
 
@@ -34,8 +33,7 @@ OfxStatus fake_prop_get_pointer(OfxPropertySetHandle handle, const char* name, i
     return kOfxStatOK;
 }
 
-OfxStatus fake_prop_set_pointer(OfxPropertySetHandle handle, const char* name, int,
-                                void* value) {
+OfxStatus fake_prop_set_pointer(OfxPropertySetHandle handle, const char* name, int, void* value) {
     if (handle == nullptr || name == nullptr) {
         return kOfxStatErrBadHandle;
     }
@@ -234,8 +232,8 @@ TEST_CASE("get regions of interest propagates the requested ROI to source clips"
                                     reinterpret_cast<OfxPropertySetHandle>(&out_args)) ==
             kOfxStatOK);
 
-    const auto source_it =
-        out_args.clip_rois.find(std::string("OfxImageClipPropRoI_") + kOfxImageEffectSimpleSourceClipName);
+    const auto source_it = out_args.clip_rois.find(std::string("OfxImageClipPropRoI_") +
+                                                   kOfxImageEffectSimpleSourceClipName);
     REQUIRE(source_it != out_args.clip_rois.end());
     CHECK(source_it->second == in_args.roi);
 

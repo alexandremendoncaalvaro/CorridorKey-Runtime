@@ -192,6 +192,40 @@ inline bool input_color_runtime_mode_is_linear(InputColorRuntimeMode mode) {
 constexpr int kQuantizationFp16 = 0;
 constexpr int kQuantizationInt8 = 1;
 
+// Execution engine
+constexpr int kExecutionEngineAuto = 0;
+constexpr int kExecutionEngineOfficial = 1;
+constexpr int kExecutionEngineMaxPerformance = 2;
+constexpr int kExecutionEngineTorchTensorRt = 3;
+
+inline const char* execution_engine_ui_label(int choice) {
+    switch (choice) {
+        case kExecutionEngineOfficial:
+            return "ORT TensorRT (Official)";
+        case kExecutionEngineMaxPerformance:
+            return "ORT TensorRT Max (Experimental)";
+        case kExecutionEngineTorchTensorRt:
+            return "Torch-TensorRT (Unavailable)";
+        case kExecutionEngineAuto:
+        default:
+            return "Auto (Official)";
+    }
+}
+
+inline ExecutionEngine execution_engine_from_choice(int choice) {
+    switch (choice) {
+        case kExecutionEngineOfficial:
+            return ExecutionEngine::Official;
+        case kExecutionEngineMaxPerformance:
+            return ExecutionEngine::MaxPerformance;
+        case kExecutionEngineTorchTensorRt:
+            return ExecutionEngine::TorchTensorRt;
+        case kExecutionEngineAuto:
+        default:
+            return ExecutionEngine::Auto;
+    }
+}
+
 // Screen color
 constexpr int kScreenColorGreen = 0;
 constexpr int kScreenColorBlue = 1;

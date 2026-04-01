@@ -31,7 +31,8 @@ bool same_device_info(const DeviceInfo& lhs, const DeviceInfo& rhs) {
 
 bool same_engine_options(const EngineCreateOptions& lhs, const EngineCreateOptions& rhs) {
     return lhs.allow_cpu_fallback == rhs.allow_cpu_fallback &&
-           lhs.disable_cpu_ep_fallback == rhs.disable_cpu_ep_fallback;
+           lhs.disable_cpu_ep_fallback == rhs.disable_cpu_ep_fallback &&
+           lhs.execution_engine == rhs.execution_engine;
 }
 
 bool same_prepare_request(const app::OfxRuntimePrepareSessionRequest& lhs,
@@ -50,6 +51,7 @@ app::OfxRuntimeSessionSnapshot with_prepare_request_metadata(
     snapshot.model_path = request.model_path;
     snapshot.artifact_name = request.artifact_name;
     snapshot.requested_device = request.requested_device;
+    snapshot.requested_engine = request.engine_options.execution_engine;
     snapshot.requested_quality_mode = request.requested_quality_mode;
     snapshot.requested_resolution = request.requested_resolution;
     snapshot.effective_resolution = request.effective_resolution;
@@ -341,6 +343,10 @@ Result<void> OfxRuntimeClient::release_session() {
 
 DeviceInfo OfxRuntimeClient::current_device() const {
     return m_session.effective_device;
+}
+
+ExecutionEngine OfxRuntimeClient::current_execution_engine() const {
+    return m_session.effective_engine;
 }
 
 std::optional<BackendFallbackInfo> OfxRuntimeClient::backend_fallback() const {

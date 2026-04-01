@@ -287,6 +287,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
         "Shows the device selected for this OFX instance.", "runtime_group");
     define_runtime_status_param(
+        param_set, kParamRuntimeEngine, "Processing Engine", "Initializing...",
+        "Shows the execution engine currently used by this OFX instance.", "runtime_group");
+    define_runtime_status_param(
         param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
         "Shows the actual resolution currently used for inference after artifact selection.",
         "runtime_group");
@@ -329,8 +332,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_runtime_status_param(
         param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
-        "Shows the quality mode currently requested by the OFX controls.",
-        "runtime_details_group");
+        "Shows the quality mode currently requested by the OFX controls.", "runtime_details_group");
     define_runtime_status_param(
         param_set, kParamRuntimeSafeQualityCeiling, "Safe Quality Ceiling", "Initializing...",
         "Shows the highest quality CorridorKey currently considers safe on the active backend "
@@ -480,8 +482,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 9: Advanced (subdivided by intent for expert tuning) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
 
-    define_group_param(param_set, "advanced_interior_detail_group",
-                       "Advanced | Interior Detail", false, "advanced_group");
+    define_group_param(param_set, "advanced_interior_detail_group", "Advanced | Interior Detail",
+                       false, "advanced_group");
     define_group_param(param_set, "advanced_matte_group", "Advanced | Matte Cleanup", false,
                        "advanced_group");
     define_group_param(param_set, "advanced_processing_group", "Advanced | Processing", false,
@@ -511,10 +513,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Minimum connected component area in pixels to keep. "
                      "Regions smaller than this are removed.",
                      "advanced_matte_group");
-    define_double_param(
-        param_set, kParamTemporalSmoothing, "Temporal Smoothing", kDefaultTemporalSmoothing, 0.0,
-        1.0, "Blend current output with the previous frame for temporal stability.",
-        "advanced_matte_group");
+    define_double_param(param_set, kParamTemporalSmoothing, "Temporal Smoothing",
+                        kDefaultTemporalSmoothing, 0.0, 1.0,
+                        "Blend current output with the previous frame for temporal stability.",
+                        "advanced_matte_group");
     define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
                         {"Average", "Double Limit", "Neutral"},
                         "How removed spill color is replaced. Average redistributes to "
@@ -535,16 +537,15 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Advanced diagnostics override. Auto chooses the safest runtime path. Direct disables "
         "coarse-to-fine. Coarse to Fine forces the fallback path.",
         "advanced_processing_group");
-    define_choice_param(param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,
-                        {refinement_mode_ui_label(kRefinementAuto),
-                         refinement_mode_ui_label(kRefinementFullFrame),
-                         refinement_mode_ui_label(kRefinementTiled)},
-                        "Advanced diagnostics override for validated refinement strategy "
-                        "artifacts. Current packaged ONNX artifacts only support Auto.",
-                        "advanced_processing_group", false);
+    define_choice_param(
+        param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,
+        {refinement_mode_ui_label(kRefinementAuto), refinement_mode_ui_label(kRefinementFullFrame),
+         refinement_mode_ui_label(kRefinementTiled)},
+        "Advanced diagnostics override for validated refinement strategy "
+        "artifacts. Current packaged ONNX artifacts only support Auto.",
+        "advanced_processing_group", false);
     define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
-                        kCoarseResolutionAutomatic,
-                        {"Automatic", "512", "1024", "1536", "2048"},
+                        kCoarseResolutionAutomatic, {"Automatic", "512", "1024", "1536", "2048"},
                         "Advanced diagnostics override for the coarse artifact resolution.",
                         "advanced_processing_group");
 
@@ -563,6 +564,21 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Opt in to CPU fallback when the requested Windows GPU path cannot satisfy the current "
         "precision or backend request. INT8 on Windows currently uses this path.",
         "advanced_runtime_group");
+    define_choice_param(
+        param_set, kParamExecutionEngine, "Engine", kExecutionEngineAuto,
+        {execution_engine_ui_label(kExecutionEngineAuto),
+         execution_engine_ui_label(kExecutionEngineOfficial),
+         execution_engine_ui_label(kExecutionEngineMaxPerformance)},
+        "Execution engine policy for Windows RTX. Auto keeps the validated official path. "
+        "ORT TensorRT Max enables more aggressive runtime optimizations for comparison on "
+        "static-shape RTX sessions.",
+        "advanced_runtime_group",
+#if defined(_WIN32)
+        true
+#else
+        false
+#endif
+    );
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;

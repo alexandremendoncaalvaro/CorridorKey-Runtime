@@ -299,10 +299,10 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
 
     json["model_found"] = true;
 
-    auto session = InferenceSession::create(
-        model_path, device,
-        SessionCreateOptions{.disable_cpu_ep_fallback = true,
-                             .log_severity = ORT_LOGGING_LEVEL_FATAL});
+    auto session =
+        InferenceSession::create(model_path, device,
+                                 SessionCreateOptions{.disable_cpu_ep_fallback = true,
+                                                      .log_severity = ORT_LOGGING_LEVEL_FATAL});
     if (!session) {
         json["error"] = session.error().message;
         return json;
@@ -590,7 +590,8 @@ bool packaged_inventory_requires_compiled_contexts(const PackagedModelInventory&
     return inventory.bundle_track == "rtx";
 }
 
-bool packaged_inventory_compiled_contexts_ready(const std::optional<PackagedModelInventory>& inventory) {
+bool packaged_inventory_compiled_contexts_ready(
+    const std::optional<PackagedModelInventory>& inventory) {
     if (!inventory.has_value()) {
         return false;
     }
@@ -640,9 +641,11 @@ std::optional<PackagedModelInventory> load_packaged_model_inventory(
             PackagedModelInventory inventory;
             inventory.expected_models = parsed["expected_models"].get<std::vector<std::string>>();
             inventory.package_type = optional_inventory_string(parsed, "package_type").value_or("");
-            inventory.model_profile = optional_inventory_string(parsed, "model_profile").value_or("");
+            inventory.model_profile =
+                optional_inventory_string(parsed, "model_profile").value_or("");
             inventory.bundle_track = optional_inventory_string(parsed, "bundle_track").value_or("");
-            inventory.release_label = optional_inventory_string(parsed, "release_label").value_or("");
+            inventory.release_label =
+                optional_inventory_string(parsed, "release_label").value_or("");
             inventory.optimization_profile_id =
                 optional_inventory_string(parsed, "optimization_profile_id").value_or("");
             inventory.optimization_profile_label =
@@ -691,8 +694,8 @@ std::optional<ModelCatalogEntry> find_model_catalog_entry(const std::string& fil
     return *it;
 }
 
-std::vector<std::string> expected_packaged_models_for_platform(const std::filesystem::path& models_dir,
-                                                               bool windows_platform) {
+std::vector<std::string> expected_packaged_models_for_platform(
+    const std::filesystem::path& models_dir, bool windows_platform) {
     if (auto inventory = load_packaged_model_inventory(models_dir); inventory.has_value()) {
         return inventory->expected_models;
     }
@@ -728,12 +731,11 @@ BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_di
             std::filesystem::exists(executable_dir / "corridorkey_ofx_runtime_server.exe", error) &&
             !error;
         error.clear();
-        const bool plugin_present = std::filesystem::exists(executable_dir / "CorridorKey.ofx",
-                                                            error) &&
-                                    !error;
+        const bool plugin_present =
+            std::filesystem::exists(executable_dir / "CorridorKey.ofx", error) && !error;
         error.clear();
-        const bool models_present = std::filesystem::exists(layout.expected_models_dir, error) &&
-                                    !error;
+        const bool models_present =
+            std::filesystem::exists(layout.expected_models_dir, error) && !error;
         layout.kind = "windows_ofx";
         layout.packaged_layout_detected =
             cli_present && runtime_server_present && plugin_present && models_present;
@@ -741,7 +743,8 @@ BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_di
     }
 #endif
 
-    layout.root = executable_dir.filename() == "bin" ? executable_dir.parent_path() : executable_dir;
+    layout.root =
+        executable_dir.filename() == "bin" ? executable_dir.parent_path() : executable_dir;
     layout.expected_models_dir = layout.root / "models";
     layout.readme_path = layout.root / "README.txt";
 #if defined(_WIN32)
@@ -873,14 +876,13 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     auto compiled_context_models = nlohmann::json::array();
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
-    const auto expected_packaged_models =
-        expected_packaged_models_for_platform(models_dir,
+    const auto expected_packaged_models = expected_packaged_models_for_platform(models_dir,
 #if defined(_WIN32)
-                                              true
+                                                                                true
 #else
-                                              false
+                                                                                false
 #endif
-        );
+    );
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_present = !expected_packaged_models.empty();
@@ -935,10 +937,9 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     bool runtime_backend_bundle_ready = runtime_library.has_value();
 #if defined(_WIN32)
     if (windows_rtx_bundle) {
-        runtime_backend_bundle_ready = !tensorrt_provider_libraries.empty() &&
-                                       !tensorrt_rtx_core_libraries.empty() &&
-                                       !tensorrt_rtx_parser_libraries.empty() &&
-                                       !cuda_runtime_libraries.empty();
+        runtime_backend_bundle_ready =
+            !tensorrt_provider_libraries.empty() && !tensorrt_rtx_core_libraries.empty() &&
+            !tensorrt_rtx_parser_libraries.empty() && !cuda_runtime_libraries.empty();
     } else if (windows_directml_bundle) {
         runtime_backend_bundle_ready = directml_library.has_value();
     }
@@ -1016,13 +1017,11 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         json["model_inventory"]["contract_complete"] = inventory_contract_complete;
     }
     json["model_profile"] = packaged_inventory.has_value() ? packaged_inventory->model_profile : "";
-    json["bundle_track"] = packaged_inventory.has_value() && !packaged_inventory->bundle_track.empty()
-                               ? packaged_inventory->bundle_track
-                               : (windows_rtx_bundle ? "rtx"
-                                                     : (windows_directml_bundle ? "dml"
-                                                                                : "generic"));
-    json["release_label"] =
-        packaged_inventory.has_value() ? packaged_inventory->release_label : "";
+    json["bundle_track"] =
+        packaged_inventory.has_value() && !packaged_inventory->bundle_track.empty()
+            ? packaged_inventory->bundle_track
+            : (windows_rtx_bundle ? "rtx" : (windows_directml_bundle ? "dml" : "generic"));
+    json["release_label"] = packaged_inventory.has_value() ? packaged_inventory->release_label : "";
     json["optimization_profile_id"] =
         packaged_inventory.has_value() ? packaged_inventory->optimization_profile_id : "";
     json["optimization_profile_label"] =
@@ -1476,11 +1475,12 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     }
 
     const bool inventory_contract_complete =
-        !packaged_inventory.has_value() || packaged_inventory_contract_complete(*packaged_inventory);
-    const bool compiled_contexts_ready = packaged_inventory.has_value()
-                                             ? packaged_inventory_compiled_contexts_ready(
-                                                   packaged_inventory)
-                                             : true;
+        !packaged_inventory.has_value() ||
+        packaged_inventory_contract_complete(*packaged_inventory);
+    const bool compiled_contexts_ready =
+        packaged_inventory.has_value()
+            ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
+            : true;
     json["model_profile"] = packaged_inventory.has_value() ? packaged_inventory->model_profile : "";
     json["bundle_track"] = packaged_inventory.has_value() ? packaged_inventory->bundle_track : "";
     json["optimization_profile_id"] =

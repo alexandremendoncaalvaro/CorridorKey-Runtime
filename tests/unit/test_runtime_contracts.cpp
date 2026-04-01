@@ -80,6 +80,9 @@ TEST_CASE("runtime capabilities expose stable diagnostics", "[unit][runtime]") {
     REQUIRE(json.contains("mlx_probe_available"));
     REQUIRE(json.contains("default_video_mode"));
     REQUIRE(json.contains("lossless_video_available"));
+    REQUIRE(json.contains("supported_execution_engines"));
+    REQUIRE(json["supported_execution_engines"].is_array());
+    REQUIRE_FALSE(json["supported_execution_engines"].empty());
 }
 
 TEST_CASE("preferred runtime device and optimization profile stay product-aligned",
@@ -93,8 +96,7 @@ TEST_CASE("preferred runtime device and optimization profile stay product-aligne
         DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
     };
 
-    auto preferred_windows =
-        preferred_runtime_device(windows_capabilities, windows_devices);
+    auto preferred_windows = preferred_runtime_device(windows_capabilities, windows_devices);
     REQUIRE(preferred_windows.has_value());
     REQUIRE(preferred_windows->backend == Backend::TensorRT);
 
@@ -191,6 +193,7 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     event.phase = "prepare";
     event.progress = 0.0F;
     event.backend = Backend::CPU;
+    event.engine = ExecutionEngine::Official;
     event.message = "Generic CPU";
     event.fallback = BackendFallbackInfo{Backend::CoreML, Backend::CPU, "CoreML session failed"};
     event.timings.push_back(StageTiming{"ort_run", 12.5, 1, 3});
@@ -200,6 +203,7 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     REQUIRE(json["type"] == "backend_selected");
     REQUIRE(json["phase"] == "prepare");
     REQUIRE(json["backend"] == "cpu");
+    REQUIRE(json["engine"] == "official");
     REQUIRE(json["fallback"]["requested_backend"] == "coreml");
     REQUIRE(json["fallback"]["selected_backend"] == "cpu");
     REQUIRE(json["timings"][0]["name"] == "ort_run");
@@ -315,9 +319,9 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_cpu_model.has_value());
     REQUIRE(windows_cpu_model->filename == "corridorkey_int8_512.onnx");
 
-    auto windows_cpu_fp16_model = default_model_for_request(
-        windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default,
-        ArtifactVariantPreference::FP16);
+    auto windows_cpu_fp16_model =
+        default_model_for_request(windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU},
+                                  windows_default, ArtifactVariantPreference::FP16);
     REQUIRE(windows_cpu_fp16_model.has_value());
     REQUIRE(windows_cpu_fp16_model->filename == "corridorkey_fp16_512.onnx");
 
@@ -333,14 +337,14 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
 }
 
 TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
-    REQUIRE(max_supported_resolution_for_device(
-                DeviceInfo{"RTX 3070", 8192, Backend::TensorRT}) == 512);
-    REQUIRE(max_supported_resolution_for_device(
-                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) == 1024);
-    REQUIRE(max_supported_resolution_for_device(
-                DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) == 1536);
-    REQUIRE(max_supported_resolution_for_device(
-                DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) == 2048);
+    REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3070", 8192, Backend::TensorRT}) ==
+            512);
+    REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) ==
+            1024);
+    REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 4080", 16384, Backend::TensorRT}) ==
+            1536);
+    REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}) ==
+            2048);
     REQUIRE(max_supported_resolution_for_device(
                 DeviceInfo{"AMD Radeon", 8192, Backend::DirectML}) == 512);
     REQUIRE(max_supported_resolution_for_device(
@@ -375,17 +379,16 @@ TEST_CASE("runtime coarse-to-fine policy prefers safer coarse artifacts", "[unit
     ScopedModelsDirOverride legacy_override(legacy_models_dir);
 
     const DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
-    REQUIRE(
-        should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto));
+    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536) == 1024);
     REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 2048, QualityFallbackMode::Auto));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 2048) == 1024);
     REQUIRE_FALSE(
         should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Direct));
-    REQUIRE_FALSE(should_use_coarse_to_fine_for_request(
-        rtx_3080, 1536, QualityFallbackMode::Auto, 0, true));
-    REQUIRE(should_use_coarse_to_fine_for_request(rtx_3080, 1536,
-                                                  QualityFallbackMode::CoarseToFine));
+    REQUIRE_FALSE(
+        should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::Auto, 0, true));
+    REQUIRE(
+        should_use_coarse_to_fine_for_request(rtx_3080, 1536, QualityFallbackMode::CoarseToFine));
     REQUIRE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 768) == 768);
     REQUIRE_FALSE(coarse_artifact_resolution_for_request(rtx_3080, 1536, 1536).has_value());
 
@@ -402,8 +405,7 @@ TEST_CASE("runtime refinement override validation is explicit for current artifa
         validate_refinement_mode_for_artifact("corridorkey_fp16_1024.onnx", RefinementMode::Tiled);
     REQUIRE_FALSE(tiled_mode.has_value());
     REQUIRE(tiled_mode.error().code == ErrorCode::InvalidParameters);
-    REQUIRE(tiled_mode.error().message.find("refinement strategy override") !=
-            std::string::npos);
+    REQUIRE(tiled_mode.error().message.find("refinement strategy override") != std::string::npos);
 }
 
 TEST_CASE("runtime artifact selection prefers lower packaged candidates automatically",

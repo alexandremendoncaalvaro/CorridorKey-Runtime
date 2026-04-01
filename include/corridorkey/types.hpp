@@ -138,6 +138,11 @@ enum class Backend : std::uint8_t {
     WindowsML,
     OpenVINO
 };
+
+/**
+ * @brief Execution engine implementation policy used by a runtime session.
+ */
+enum class ExecutionEngine : std::uint8_t { Auto, Official, MaxPerformance, TorchTensorRt };
 /**
  * @brief Output encoding policy for video exports.
  */
@@ -175,6 +180,7 @@ struct RuntimeCapabilities {
     bool tiling_supported = true;
     bool batching_supported = true;
     std::vector<Backend> supported_backends = {};
+    std::vector<ExecutionEngine> supported_execution_engines = {};
     VideoOutputMode default_video_mode = VideoOutputMode::Lossless;
     std::string default_video_container = "";
     std::string default_video_encoder = "";
@@ -219,6 +225,7 @@ struct JobEvent {
     std::string phase = "";
     float progress = 0.0F;
     Backend backend = Backend::Auto;
+    ExecutionEngine engine = ExecutionEngine::Auto;
     std::string message = "";
     std::string artifact_path = "";
     std::optional<Error> error = std::nullopt;

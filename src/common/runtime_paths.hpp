@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <corridorkey/types.hpp>
 #include <corridorkey/version.hpp>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>

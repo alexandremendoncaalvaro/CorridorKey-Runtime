@@ -94,10 +94,9 @@ inline int rounded_gb_from_mb(std::int64_t memory_mb) {
     return static_cast<int>((memory_mb + 1023) / 1024);
 }
 
-inline std::optional<std::string> unsupported_quality_message(const DeviceInfo& device,
-                                                              int quality_mode,
-                                                              int requested_resolution,
-                                                              bool allow_unrestricted_quality_attempt = false) {
+inline std::optional<std::string> unsupported_quality_message(
+    const DeviceInfo& device, int quality_mode, int requested_resolution,
+    bool allow_unrestricted_quality_attempt = false) {
     if (!is_fixed_quality_mode(quality_mode)) {
         return std::nullopt;
     }
@@ -158,8 +157,7 @@ inline bool use_quality_compile_failure_cache(Backend backend) {
 }
 
 inline bool quality_compile_failure_cache_matches(
-    const QualityCompileFailureCache& cache,
-    const QualityCompileFailureCacheContext& context) {
+    const QualityCompileFailureCache& cache, const QualityCompileFailureCacheContext& context) {
     return cache.initialized && cache.context.models_root == context.models_root &&
            cache.context.models_bundle_token == context.models_bundle_token &&
            cache.context.backend == context.backend &&
@@ -178,8 +176,7 @@ inline void prepare_quality_compile_failure_cache(
 }
 
 inline std::optional<CachedQualityCompileFailure> cached_quality_compile_failure(
-    const QualityCompileFailureCache& cache,
-    const QualityCompileFailureCacheContext& context,
+    const QualityCompileFailureCache& cache, const QualityCompileFailureCacheContext& context,
     const QualityArtifactSelection& selection) {
     if (!use_quality_compile_failure_cache(context.backend) ||
         !quality_compile_failure_cache_matches(cache, context)) {
@@ -187,8 +184,7 @@ inline std::optional<CachedQualityCompileFailure> cached_quality_compile_failure
     }
 
     auto existing = std::find_if(
-        cache.entries.begin(), cache.entries.end(),
-        [&](const QualityCompileFailureEntry& entry) {
+        cache.entries.begin(), cache.entries.end(), [&](const QualityCompileFailureEntry& entry) {
             return entry.artifact_path == selection.executable_model_path &&
                    entry.requested_resolution == selection.requested_resolution &&
                    entry.effective_resolution == selection.effective_resolution;
@@ -213,8 +209,7 @@ inline void record_quality_compile_failure(QualityCompileFailureCache& cache,
 
     prepare_quality_compile_failure_cache(cache, context);
     auto existing = std::find_if(
-        cache.entries.begin(), cache.entries.end(),
-        [&](const QualityCompileFailureEntry& entry) {
+        cache.entries.begin(), cache.entries.end(), [&](const QualityCompileFailureEntry& entry) {
             return entry.artifact_path == selection.executable_model_path &&
                    entry.requested_resolution == selection.requested_resolution &&
                    entry.effective_resolution == selection.effective_resolution;
@@ -234,8 +229,7 @@ inline void record_quality_compile_failure(QualityCompileFailureCache& cache,
 
 inline std::vector<QualityArtifactSelection> filter_quality_artifacts_with_compile_cache(
     const std::vector<QualityArtifactSelection>& candidates,
-    const QualityCompileFailureCache& cache,
-    const QualityCompileFailureCacheContext& context) {
+    const QualityCompileFailureCache& cache, const QualityCompileFailureCacheContext& context) {
     if (!use_quality_compile_failure_cache(context.backend) ||
         !quality_compile_failure_cache_matches(cache, context)) {
         return candidates;
@@ -259,9 +253,8 @@ inline bool should_abort_quality_fallback_after_compile_failure(
            selection.effective_resolution == selection.requested_resolution;
 }
 
-inline std::optional<std::string> unsupported_quantization_message(Backend backend,
-                                                                   int quantization_mode,
-                                                                   bool allow_cpu_fallback = false) {
+inline std::optional<std::string> unsupported_quantization_message(
+    Backend backend, int quantization_mode, bool allow_cpu_fallback = false) {
     if (quantization_mode != kQuantizationInt8) {
         return std::nullopt;
     }
@@ -369,8 +362,7 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0,
-    bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
     const int requested_resolution =
         resolve_target_resolution(effective_quality_mode, input_width, input_height);
@@ -408,8 +400,7 @@ inline std::string missing_quality_artifact_message(
     int input_height, int quantization_mode, bool cpu_quality_guardrail_active,
     std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0,
-    bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, effective_quality_mode,
@@ -431,10 +422,10 @@ inline std::string missing_quality_artifact_message(
             models_root, expected_artifacts);
     }
 
-    return missing_artifact_message(
-        "Requested quality " + std::string(quality_mode_label(quality_mode)) +
-            " is missing the required model artifact",
-        models_root, expected_artifacts);
+    return missing_artifact_message("Requested quality " +
+                                        std::string(quality_mode_label(quality_mode)) +
+                                        " is missing the required model artifact",
+                                    models_root, expected_artifacts);
 }
 inline bool path_exists(const std::filesystem::path& path) {
     std::error_code error;
@@ -493,9 +484,9 @@ inline std::vector<std::filesystem::path> expected_bootstrap_artifact_paths(
     return expected;
 }
 
-inline std::string missing_bootstrap_artifact_message(
-    const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
-    const std::filesystem::path& models_root) {
+inline std::string missing_bootstrap_artifact_message(const RuntimeCapabilities& capabilities,
+                                                      const DeviceInfo& detected_device,
+                                                      const std::filesystem::path& models_root) {
     return missing_artifact_message(
         "No compatible bootstrap model artifact was found for this device", models_root,
         expected_bootstrap_artifact_paths(capabilities, detected_device, models_root));
@@ -505,8 +496,7 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0,
-    bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -572,7 +562,8 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
             }
         }
 
-        int effective_resolution = app::packaged_model_resolution(executable_model_path).value_or(512);
+        int effective_resolution =
+            app::packaged_model_resolution(executable_model_path).value_or(512);
         int requested_resolution =
             app::packaged_model_resolution(requested_model_path).value_or(effective_resolution);
         append_unique({device, requested_model_path, executable_model_path, requested_resolution,
@@ -592,13 +583,11 @@ inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0,
-    bool allow_unrestricted_quality_attempt = false) {
-    auto candidates = quality_artifact_candidates(models_root, backend, quality_mode, input_width,
-                                                  input_height, quantization_mode,
-                                                  available_memory_mb, fallback_mode,
-                                                  coarse_resolution_override,
-                                                  allow_unrestricted_quality_attempt);
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
+    auto candidates =
+        quality_artifact_candidates(models_root, backend, quality_mode, input_width, input_height,
+                                    quantization_mode, available_memory_mb, fallback_mode,
+                                    coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!candidates.empty()) {
         return candidates.front();
     }

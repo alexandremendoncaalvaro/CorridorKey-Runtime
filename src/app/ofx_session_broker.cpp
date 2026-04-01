@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <filesystem>
 
-#include "ofx_session_policy.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../common/shared_memory_transport.hpp"
+#include "ofx_session_policy.hpp"
 
 namespace corridorkey::app {
 
@@ -13,12 +13,13 @@ namespace {
 
 void refresh_engine_snapshot(OfxRuntimeSessionSnapshot& snapshot, const Engine& engine) {
     snapshot.effective_device = engine.current_device();
+    snapshot.effective_engine = engine.execution_engine();
     snapshot.backend_fallback = engine.backend_fallback();
     snapshot.recommended_resolution = engine.recommended_resolution();
 }
 
 OfxRuntimeSessionSnapshot response_snapshot(const OfxRuntimeSessionSnapshot& snapshot,
-                                           bool reused_existing_session) {
+                                            bool reused_existing_session) {
     auto response = snapshot;
     response.reused_existing_session = reused_existing_session;
     return response;
@@ -53,8 +54,8 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         refresh_engine_snapshot(existing->second.snapshot, *existing->second.engine);
         existing->second.snapshot.ref_count += 1;
         existing->second.last_used_at = now();
-        return OfxRuntimePrepareSessionResponse{
-            response_snapshot(existing->second.snapshot, true), {}};
+        return OfxRuntimePrepareSessionResponse{response_snapshot(existing->second.snapshot, true),
+                                                {}};
     }
 
     std::vector<StageTiming> timings;
@@ -75,6 +76,7 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.snapshot.model_path = request.model_path;
     entry.snapshot.artifact_name = detail::canonical_ofx_artifact_name(request.model_path);
     entry.snapshot.requested_device = request.requested_device;
+    entry.snapshot.requested_engine = request.engine_options.execution_engine;
     entry.snapshot.requested_quality_mode = request.requested_quality_mode;
     entry.snapshot.requested_resolution = request.requested_resolution;
     entry.snapshot.effective_resolution = request.effective_resolution;
@@ -142,7 +144,8 @@ Result<void> OfxSessionBroker::release_session(const OfxRuntimeReleaseSessionReq
         session->second.snapshot.ref_count -= 1;
     }
     if (session->second.snapshot.ref_count == 0 &&
-        detail::should_destroy_zero_ref_session(session->second.snapshot.effective_device.backend)) {
+        detail::should_destroy_zero_ref_session(
+            session->second.snapshot.effective_device.backend)) {
         m_sessions.erase(session);
         return {};
     }
@@ -183,6 +186,7 @@ std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest&
     return std::to_string(common::detail::fnv1a_64(
         canonical_model_path.string() + "|" +
         std::to_string(static_cast<int>(request.requested_device.backend)) + "|" +
+        std::to_string(static_cast<int>(request.engine_options.execution_engine)) + "|" +
         std::to_string(request.engine_options.allow_cpu_fallback) + "|" +
         std::to_string(request.engine_options.disable_cpu_ep_fallback)));
 }

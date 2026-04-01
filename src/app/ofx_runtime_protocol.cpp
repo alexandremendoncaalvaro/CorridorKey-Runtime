@@ -188,8 +188,29 @@ Result<PrecisionPreference> precision_preference_from_string(const std::string& 
     if (value == "auto") return PrecisionPreference::Auto;
     if (value == "fp16") return PrecisionPreference::FP16;
     if (value == "int8") return PrecisionPreference::Int8;
-    return Unexpected<Error>(
-        invalid_protocol_error("Unknown precision preference: " + value));
+    return Unexpected<Error>(invalid_protocol_error("Unknown precision preference: " + value));
+}
+
+std::string execution_engine_to_string(ExecutionEngine engine) {
+    switch (engine) {
+        case ExecutionEngine::Official:
+            return "official";
+        case ExecutionEngine::MaxPerformance:
+            return "max";
+        case ExecutionEngine::TorchTensorRt:
+            return "torch-tensorrt";
+        case ExecutionEngine::Auto:
+        default:
+            return "auto";
+    }
+}
+
+Result<ExecutionEngine> execution_engine_from_string(const std::string& value) {
+    if (value == "auto") return ExecutionEngine::Auto;
+    if (value == "official") return ExecutionEngine::Official;
+    if (value == "max") return ExecutionEngine::MaxPerformance;
+    if (value == "torch-tensorrt") return ExecutionEngine::TorchTensorRt;
+    return Unexpected<Error>(invalid_protocol_error("Unknown execution engine: " + value));
 }
 
 Json backend_fallback_json(const BackendFallbackInfo& fallback) {
@@ -276,7 +297,8 @@ Result<BackendFallbackInfo> backend_fallback_from_json(const nlohmann::json& jso
 
 nlohmann::json to_json(const EngineCreateOptions& options) {
     return Json{{"allow_cpu_fallback", options.allow_cpu_fallback},
-                {"disable_cpu_ep_fallback", options.disable_cpu_ep_fallback}};
+                {"disable_cpu_ep_fallback", options.disable_cpu_ep_fallback},
+                {"execution_engine", execution_engine_to_string(options.execution_engine)}};
 }
 
 Result<EngineCreateOptions> engine_create_options_from_json(const nlohmann::json& json) {
@@ -284,37 +306,42 @@ Result<EngineCreateOptions> engine_create_options_from_json(const nlohmann::json
     if (!allow) return Unexpected<Error>(allow.error());
     auto disable = required_bool(json, "disable_cpu_ep_fallback");
     if (!disable) return Unexpected<Error>(disable.error());
+    auto execution_engine =
+        json.contains("execution_engine") && json.at("execution_engine").is_string()
+            ? execution_engine_from_string(json.at("execution_engine").get<std::string>())
+            : Result<ExecutionEngine>(ExecutionEngine::Auto);
+    if (!execution_engine) return Unexpected<Error>(execution_engine.error());
 
     EngineCreateOptions options;
     options.allow_cpu_fallback = *allow;
     options.disable_cpu_ep_fallback = *disable;
+    options.execution_engine = *execution_engine;
     return options;
 }
 
 nlohmann::json to_json(const InferenceParams& params) {
-    return Json{{"target_resolution", params.target_resolution},
-                {"requested_quality_resolution", params.requested_quality_resolution},
-                {"quality_fallback_mode",
-                 quality_fallback_mode_to_string(params.quality_fallback_mode)},
-                {"refinement_mode", refinement_mode_to_string(params.refinement_mode)},
-                {"precision_preference",
-                 precision_preference_to_string(params.precision_preference)},
-                {"coarse_resolution_override", params.coarse_resolution_override},
-                {"despill_strength", params.despill_strength},
-                {"spill_method", params.spill_method},
-                {"auto_despeckle", params.auto_despeckle},
-                {"despeckle_size", params.despeckle_size},
-                {"refiner_scale", params.refiner_scale},
-                {"alpha_hint_policy", alpha_hint_policy_to_string(params.alpha_hint_policy)},
-                {"input_is_linear", params.input_is_linear},
-                {"batch_size", params.batch_size},
-                {"enable_tiling", params.enable_tiling},
-                {"tile_padding", params.tile_padding},
-                {"upscale_method",
-                 params.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear"},
-                {"source_passthrough", params.source_passthrough},
-                {"sp_erode_px", params.sp_erode_px},
-                {"sp_blur_px", params.sp_blur_px}};
+    return Json{
+        {"target_resolution", params.target_resolution},
+        {"requested_quality_resolution", params.requested_quality_resolution},
+        {"quality_fallback_mode", quality_fallback_mode_to_string(params.quality_fallback_mode)},
+        {"refinement_mode", refinement_mode_to_string(params.refinement_mode)},
+        {"precision_preference", precision_preference_to_string(params.precision_preference)},
+        {"coarse_resolution_override", params.coarse_resolution_override},
+        {"despill_strength", params.despill_strength},
+        {"spill_method", params.spill_method},
+        {"auto_despeckle", params.auto_despeckle},
+        {"despeckle_size", params.despeckle_size},
+        {"refiner_scale", params.refiner_scale},
+        {"alpha_hint_policy", alpha_hint_policy_to_string(params.alpha_hint_policy)},
+        {"input_is_linear", params.input_is_linear},
+        {"batch_size", params.batch_size},
+        {"enable_tiling", params.enable_tiling},
+        {"tile_padding", params.tile_padding},
+        {"upscale_method",
+         params.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear"},
+        {"source_passthrough", params.source_passthrough},
+        {"sp_erode_px", params.sp_erode_px},
+        {"sp_blur_px", params.sp_blur_px}};
 }
 
 Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
@@ -324,8 +351,7 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
     params.target_resolution = *target_resolution;
     if (json.contains("requested_quality_resolution") &&
         json.at("requested_quality_resolution").is_number_integer()) {
-        params.requested_quality_resolution =
-            json.at("requested_quality_resolution").get<int>();
+        params.requested_quality_resolution = json.at("requested_quality_resolution").get<int>();
     }
     if (json.contains("quality_fallback_mode") && json.at("quality_fallback_mode").is_string()) {
         auto fallback_mode =
@@ -515,6 +541,8 @@ nlohmann::json to_json(const OfxRuntimeSessionSnapshot& snapshot) {
               {"artifact_name", snapshot.artifact_name},
               {"requested_device", to_json(snapshot.requested_device)},
               {"effective_device", to_json(snapshot.effective_device)},
+              {"requested_engine", execution_engine_to_string(snapshot.requested_engine)},
+              {"effective_engine", execution_engine_to_string(snapshot.effective_engine)},
               {"requested_quality_mode", snapshot.requested_quality_mode},
               {"requested_resolution", snapshot.requested_resolution},
               {"effective_resolution", snapshot.effective_resolution},
@@ -542,6 +570,14 @@ Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::jso
     if (!effective_device_json) return Unexpected<Error>(effective_device_json.error());
     auto effective_device = device_from_json(*effective_device_json);
     if (!effective_device) return Unexpected<Error>(effective_device.error());
+    auto requested_engine_string = required_string(json, "requested_engine");
+    if (!requested_engine_string) return Unexpected<Error>(requested_engine_string.error());
+    auto requested_engine = execution_engine_from_string(*requested_engine_string);
+    if (!requested_engine) return Unexpected<Error>(requested_engine.error());
+    auto effective_engine_string = required_string(json, "effective_engine");
+    if (!effective_engine_string) return Unexpected<Error>(effective_engine_string.error());
+    auto effective_engine = execution_engine_from_string(*effective_engine_string);
+    if (!effective_engine) return Unexpected<Error>(effective_engine.error());
     auto requested_quality_mode = required_int(json, "requested_quality_mode");
     if (!requested_quality_mode) return Unexpected<Error>(requested_quality_mode.error());
     auto requested_resolution = required_int(json, "requested_resolution");
@@ -571,6 +607,8 @@ Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::jso
     snapshot.artifact_name = *artifact_name;
     snapshot.requested_device = *requested_device;
     snapshot.effective_device = *effective_device;
+    snapshot.requested_engine = *requested_engine;
+    snapshot.effective_engine = *effective_engine;
     snapshot.backend_fallback = backend_fallback;
     snapshot.requested_quality_mode = *requested_quality_mode;
     snapshot.requested_resolution = *requested_resolution;

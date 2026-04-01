@@ -30,7 +30,7 @@ class HardwareProfile {
             safe_ceiling.has_value()) {
             const std::string variant =
                 (device.backend == Backend::TensorRT || device.backend == Backend::CUDA) ? "fp16"
-                                                                                          : "int8";
+                                                                                         : "int8";
             return {*safe_ceiling, variant};
         }
 

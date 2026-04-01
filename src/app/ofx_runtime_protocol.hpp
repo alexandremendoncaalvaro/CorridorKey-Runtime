@@ -50,6 +50,8 @@ struct OfxRuntimeSessionSnapshot {
     std::string artifact_name = "";
     DeviceInfo requested_device = {};
     DeviceInfo effective_device = {};
+    ExecutionEngine requested_engine = ExecutionEngine::Auto;
+    ExecutionEngine effective_engine = ExecutionEngine::Auto;
     std::optional<BackendFallbackInfo> backend_fallback = std::nullopt;
     int requested_quality_mode = 0;
     int requested_resolution = 0;

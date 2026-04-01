@@ -64,3 +64,37 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 0);
 }
+
+TEST_CASE("OFX session broker isolates sessions across execution engine requests",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    if (!std::filesystem::exists(model_path)) {
+        SKIP("Model not available");
+    }
+
+    OfxSessionBroker broker;
+
+    OfxRuntimePrepareSessionRequest official_request;
+    official_request.client_instance_id = "official";
+    official_request.model_path = model_path;
+    official_request.artifact_name = model_path.filename().string();
+    official_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    official_request.requested_quality_mode = 1;
+    official_request.requested_resolution = 512;
+    official_request.effective_resolution = 512;
+    official_request.engine_options.execution_engine = ExecutionEngine::Official;
+
+    auto official_prepare = broker.prepare_session(official_request);
+    REQUIRE(official_prepare.has_value());
+    CHECK(official_prepare->session.requested_engine == ExecutionEngine::Official);
+
+    auto max_request = official_request;
+    max_request.client_instance_id = "max";
+    max_request.engine_options.execution_engine = ExecutionEngine::MaxPerformance;
+
+    auto max_prepare = broker.prepare_session(max_request);
+    REQUIRE(max_prepare.has_value());
+    CHECK(max_prepare->session.requested_engine == ExecutionEngine::MaxPerformance);
+    CHECK(max_prepare->session.session_id != official_prepare->session.session_id);
+    CHECK(broker.session_count() == 2);
+}

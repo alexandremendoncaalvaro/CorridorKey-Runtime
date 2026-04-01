@@ -1,7 +1,6 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-
 #include <string>
 
 namespace corridorkey::common {

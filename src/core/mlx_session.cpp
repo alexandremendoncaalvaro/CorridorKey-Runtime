@@ -179,8 +179,8 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         ColorUtils::resize_area_into(rgb, m_impl->prepared_rgb.view(), m_impl->color_utils_state);
 
         ensure_buffer_shape(m_impl->prepared_hint, model_res, model_res, 1);
-        ColorUtils::resize_area_into(alpha_hint, m_impl->prepared_hint.view(), m_impl->color_utils_state);
-
+        ColorUtils::resize_area_into(alpha_hint, m_impl->prepared_hint.view(),
+                                     m_impl->color_utils_state);
 
         Image input = m_impl->input_buffer.view();
         Image rgb_view = m_impl->prepared_rgb.view();
@@ -271,10 +271,12 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         FrameResult result;
         bool use_lanczos = upscale_method == UpscaleMethod::Lanczos4;
 
-        result.alpha = use_lanczos ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height, m_impl->color_utils_state)
+        result.alpha = use_lanczos ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height,
+                                                                m_impl->color_utils_state)
                                    : ColorUtils::resize(full_alpha, rgb.width, rgb.height);
         ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-        result.foreground = use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height, m_impl->color_utils_state)
+        result.foreground = use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height,
+                                                                     m_impl->color_utils_state)
                                         : ColorUtils::resize(full_fg, rgb.width, rgb.height);
         return result;
     } catch (const std::exception& error) {

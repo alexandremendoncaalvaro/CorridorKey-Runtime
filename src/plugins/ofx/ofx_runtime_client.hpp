@@ -36,6 +36,7 @@ class OfxRuntimeClient {
     Result<void> release_session();
 
     [[nodiscard]] DeviceInfo current_device() const;
+    [[nodiscard]] ExecutionEngine current_execution_engine() const;
     [[nodiscard]] std::optional<BackendFallbackInfo> backend_fallback() const;
     [[nodiscard]] bool has_session() const;
     [[nodiscard]] std::uint64_t session_ref_count() const;

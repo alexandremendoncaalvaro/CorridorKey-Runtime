@@ -41,7 +41,11 @@ class Engine::Impl {
         }
 
         Backend failed_backend = session->device().backend;
-        auto fallback_res = InferenceSession::create(model_path, *cpu_fallback_device);
+        SessionCreateOptions session_options;
+        session_options.disable_cpu_ep_fallback = create_options.disable_cpu_ep_fallback;
+        session_options.execution_engine = create_options.execution_engine;
+        auto fallback_res =
+            InferenceSession::create(model_path, *cpu_fallback_device, session_options);
         if (!fallback_res) {
             return Unexpected(fallback_res.error());
         }
@@ -187,13 +191,15 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
 
     SessionCreateOptions session_options;
     session_options.disable_cpu_ep_fallback = options.disable_cpu_ep_fallback;
+    session_options.execution_engine = options.execution_engine;
 
     auto session_res = common::measure_stage(on_stage, "session_create_requested", [&]() {
         return InferenceSession::create(model_path, requested_device, session_options);
     });
     if (!session_res && engine->m_impl->cpu_fallback_device.has_value()) {
         auto fallback_res = common::measure_stage(on_stage, "session_create_cpu_fallback", [&]() {
-            return InferenceSession::create(model_path, *engine->m_impl->cpu_fallback_device);
+            return InferenceSession::create(model_path, *engine->m_impl->cpu_fallback_device,
+                                            session_options);
         });
         if (!fallback_res) {
             return Unexpected(session_res.error());
@@ -595,6 +601,11 @@ DeviceInfo Engine::current_device() const {
 
 std::optional<BackendFallbackInfo> Engine::backend_fallback() const {
     return m_impl ? m_impl->fallback_info : std::nullopt;
+}
+
+ExecutionEngine Engine::execution_engine() const {
+    return m_impl != nullptr && m_impl->session != nullptr ? m_impl->session->execution_engine()
+                                                           : ExecutionEngine::Auto;
 }
 
 }  // namespace corridorkey

@@ -210,6 +210,20 @@ std::string precision_preference_to_string(PrecisionPreference preference) {
     }
 }
 
+std::string execution_engine_to_string(ExecutionEngine engine) {
+    switch (engine) {
+        case ExecutionEngine::Official:
+            return "official";
+        case ExecutionEngine::MaxPerformance:
+            return "max-performance";
+        case ExecutionEngine::TorchTensorRt:
+            return "torch-tensorrt";
+        case ExecutionEngine::Auto:
+        default:
+            return "auto";
+    }
+}
+
 std::string artifact_precision_to_string(const std::filesystem::path& model_path) {
     const auto filename = model_path.filename().string();
     if (filename.find("_fp16_") != std::string::npos) {
@@ -226,7 +240,8 @@ std::string artifact_precision_to_string(const std::filesystem::path& model_path
 }
 
 void append_benchmark_artifact_metadata(nlohmann::json& results, const JobRequest& request,
-                                        const DeviceInfo& execution_device) {
+                                        const DeviceInfo& execution_device,
+                                        ExecutionEngine effective_engine) {
     const auto requested_resolution =
         request.params.requested_quality_resolution > 0
             ? request.params.requested_quality_resolution
@@ -237,25 +252,28 @@ void append_benchmark_artifact_metadata(nlohmann::json& results, const JobReques
     const auto execution_profile =
         runtime_optimization_profile_for_device(runtime_capabilities(), execution_device);
     const auto safe_quality_ceiling = max_supported_resolution_for_device(execution_device);
-    const bool quality_fallback_used =
-        requested_resolution > 0 && effective_resolution > 0 && effective_resolution != requested_resolution;
-    const bool manual_override_above_safe =
-        execution_profile.unrestricted_quality_attempt && safe_quality_ceiling.has_value() &&
-        requested_resolution > *safe_quality_ceiling;
+    const bool quality_fallback_used = requested_resolution > 0 && effective_resolution > 0 &&
+                                       effective_resolution != requested_resolution;
+    const bool manual_override_above_safe = execution_profile.unrestricted_quality_attempt &&
+                                            safe_quality_ceiling.has_value() &&
+                                            requested_resolution > *safe_quality_ceiling;
 
     results["artifact"] = request.model_path.filename().string();
     results["artifact_path"] = request.model_path.string();
     results["requested_precision"] =
         precision_preference_to_string(request.params.precision_preference);
     results["effective_precision"] = artifact_precision_to_string(request.model_path);
+    results["requested_engine"] =
+        execution_engine_to_string(request.engine_options.execution_engine);
+    results["effective_engine"] = execution_engine_to_string(effective_engine);
     results["requested_resolution"] = requested_resolution;
     results["effective_resolution"] = effective_resolution;
-    results["quality_fallback_mode"] = request.params.quality_fallback_mode == QualityFallbackMode::Direct
-                                           ? "direct"
-                                           : (request.params.quality_fallback_mode ==
-                                                      QualityFallbackMode::CoarseToFine
-                                                  ? "coarse_to_fine"
-                                                  : "auto");
+    results["quality_fallback_mode"] =
+        request.params.quality_fallback_mode == QualityFallbackMode::Direct
+            ? "direct"
+            : (request.params.quality_fallback_mode == QualityFallbackMode::CoarseToFine
+                   ? "coarse_to_fine"
+                   : "auto");
     results["quality_fallback_used"] = quality_fallback_used;
     results["manual_override_above_safe_ceiling"] = manual_override_above_safe;
     if (safe_quality_ceiling.has_value()) {
@@ -266,7 +284,8 @@ void append_benchmark_artifact_metadata(nlohmann::json& results, const JobReques
         nlohmann::json precision_fallback;
         precision_fallback["requested"] = results["requested_precision"];
         precision_fallback["effective"] = results["effective_precision"];
-        if (execution_device.backend == Backend::TensorRT || execution_device.backend == Backend::CUDA) {
+        if (execution_device.backend == Backend::TensorRT ||
+            execution_device.backend == Backend::CUDA) {
             precision_fallback["reason"] =
                 "Windows RTX currently ships FP16 as the official TensorRT path.";
         } else {
@@ -275,6 +294,22 @@ void append_benchmark_artifact_metadata(nlohmann::json& results, const JobReques
         }
         results["precision_fallback"] = std::move(precision_fallback);
     }
+
+    if (results["requested_engine"] != results["effective_engine"]) {
+        nlohmann::json engine_fallback;
+        engine_fallback["requested"] = results["requested_engine"];
+        engine_fallback["effective"] = results["effective_engine"];
+        if (request.engine_options.execution_engine == ExecutionEngine::Auto) {
+            engine_fallback["reason"] = "Auto resolved to the official shipping engine.";
+        } else if (request.engine_options.execution_engine == ExecutionEngine::TorchTensorRt) {
+            engine_fallback["reason"] =
+                "Torch-TensorRT is not packaged as a zero-friction C++ runtime in this build.";
+        } else {
+            engine_fallback["reason"] =
+                "The selected backend does not expose a separate engine implementation here.";
+        }
+        results["engine_fallback"] = std::move(engine_fallback);
+    }
 }
 
 std::size_t count_models_with_artifact_state(const nlohmann::json& models, const char* field) {
@@ -282,10 +317,11 @@ std::size_t count_models_with_artifact_state(const nlohmann::json& models, const
         return 0;
     }
 
-    return static_cast<std::size_t>(std::count_if(models.begin(), models.end(), [&](const auto& entry) {
-        return entry.contains("artifact_state") && entry["artifact_state"].is_object() &&
-               entry["artifact_state"].value(field, false);
-    }));
+    return static_cast<std::size_t>(
+        std::count_if(models.begin(), models.end(), [&](const auto& entry) {
+            return entry.contains("artifact_state") && entry["artifact_state"].is_object() &&
+                   entry["artifact_state"].value(field, false);
+        }));
 }
 
 std::pair<bool, bool> windows_packaged_model_presence(const nlohmann::json& report,
@@ -296,9 +332,8 @@ std::pair<bool, bool> windows_packaged_model_presence(const nlohmann::json& repo
         const auto& packaged_models = bundle["packaged_models"];
         const bool any_models = !packaged_models.empty();
         const bool all_found =
-            std::all_of(packaged_models.begin(), packaged_models.end(), [](const auto& entry) {
-                return entry.value("found", false);
-            });
+            std::all_of(packaged_models.begin(), packaged_models.end(),
+                        [](const auto& entry) { return entry.value("found", false); });
         return {any_models, !any_models || all_found};
     }
 
@@ -398,14 +433,19 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     auto job_start = std::chrono::steady_clock::now();
     bool total_recorded = false;
 
-    auto started_event =
-        JobEvent{JobEventType::JobStarted, "prepare", 0.0F, Backend::Auto, "Job accepted"};
+    JobEvent started_event;
+    started_event.type = JobEventType::JobStarted;
+    started_event.phase = "prepare";
+    started_event.progress = 0.0F;
+    started_event.backend = Backend::Auto;
+    started_event.engine = req.engine_options.execution_engine;
+    started_event.message = "Job accepted";
     auto started_res = emit_event(on_event, started_event);
     if (!started_res) return Unexpected(started_res.error());
 
     // 1. Create Engine
     auto engine_res = profiler.measure("engine_create", [&]() {
-        return Engine::create(req.model_path, req.device, stage_callback);
+        return Engine::create(req.model_path, req.device, stage_callback, req.engine_options);
     });
     if (!engine_res) {
         auto failed_event = JobEvent{
@@ -413,6 +453,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             "prepare",
             0.0F,
             Backend::Auto,
+            req.engine_options.execution_engine,
             "Engine initialization failed",
             "",
             engine_res.error(),
@@ -437,7 +478,11 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     }
 
     auto backend_event = JobEvent{
-        JobEventType::BackendSelected, "prepare", 0.0F, engine->current_device().backend,
+        JobEventType::BackendSelected,
+        "prepare",
+        0.0F,
+        engine->current_device().backend,
+        engine->execution_engine(),
         engine->current_device().name,
     };
     if (engine->backend_fallback().has_value()) {
@@ -453,6 +498,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             "prepare",
             0.0F,
             engine->current_device().backend,
+            engine->execution_engine(),
             "Fell back to CPU for compatibility.",
             "",
             std::nullopt,
@@ -468,6 +514,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             "prepare",
             0.0F,
             engine->current_device().backend,
+            engine->execution_engine(),
             "No alpha hint provided. Rough matte generation will be used.",
         };
         auto emit_warning_res = emit_event(on_event, warning_event);
@@ -483,6 +530,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             "prepare",
             0.0F,
             engine->current_device().backend,
+            engine->execution_engine(),
             "Output path preparation failed",
             "",
             output_prepare_res.error(),
@@ -501,6 +549,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
                 "inference",
                 progress,
                 engine->current_device().backend,
+                engine->execution_engine(),
                 "Fell back to CPU during execution.",
                 "",
                 std::nullopt,
@@ -514,6 +563,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
                 "inference",
                 progress,
                 engine->current_device().backend,
+                engine->execution_engine(),
                 engine->current_device().name,
                 "",
                 std::nullopt,
@@ -528,7 +578,8 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         }
 
         JobEvent progress_event{
-            JobEventType::Progress, "inference", progress, engine->current_device().backend, status,
+            JobEventType::Progress,     "inference", progress, engine->current_device().backend,
+            engine->execution_engine(), status,
         };
 
         // Capture system metrics without performance cost
@@ -546,6 +597,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         failed_event.phase = "complete";
         failed_event.progress = 1.0F;
         failed_event.backend = engine->current_device().backend;
+        failed_event.engine = engine->execution_engine();
         failed_event.message = error.message;
         failed_event.error = error;
         if (engine->backend_fallback().has_value()) {
@@ -567,7 +619,11 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         req.output_path = resolved_output->output_path;
         if (resolved_output->warning.has_value()) {
             auto warning_event = JobEvent{
-                JobEventType::Warning,     "prepare", 0.0F, engine->current_device().backend,
+                JobEventType::Warning,
+                "prepare",
+                0.0F,
+                engine->current_device().backend,
+                engine->execution_engine(),
                 *resolved_output->warning,
             };
             auto emit_warning_res = emit_event(on_event, warning_event);
@@ -637,6 +693,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         "complete",
         1.0F,
         engine->current_device().backend,
+        engine->execution_engine(),
         "Primary output written",
         req.output_path.string(),
     };
@@ -651,6 +708,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         "complete",
         1.0F,
         engine->current_device().backend,
+        engine->execution_engine(),
         "Processing finished successfully",
     };
     if (engine->backend_fallback().has_value()) {
@@ -738,13 +796,12 @@ nlohmann::json summarize_stage_groups(const std::vector<StageTiming>& timings) {
 
     for (const auto& timing : timings) {
         const auto group_name = stage_group_name(timing.name);
-        auto existing =
-            std::find_if(grouped.begin(), grouped.end(), [&](const StageTiming& grouped_timing) {
-                return grouped_timing.name == group_name;
-            });
+        auto existing = std::find_if(
+            grouped.begin(), grouped.end(),
+            [&](const StageTiming& grouped_timing) { return grouped_timing.name == group_name; });
         if (existing == grouped.end()) {
-            grouped.push_back(StageTiming{group_name, timing.total_ms, timing.sample_count,
-                                          timing.work_units});
+            grouped.push_back(
+                StageTiming{group_name, timing.total_ms, timing.sample_count, timing.work_units});
             continue;
         }
 
@@ -753,19 +810,19 @@ nlohmann::json summarize_stage_groups(const std::vector<StageTiming>& timings) {
         existing->work_units += timing.work_units;
     }
 
-    static const std::array<std::string_view, 6> order = {"prepare",        "warmup_compile",
-                                                          "execute",        "write_output",
-                                                          "total",          "other"};
-    std::sort(grouped.begin(), grouped.end(), [&](const StageTiming& left, const StageTiming& right) {
-        const auto rank = [&](std::string_view name) {
-            auto it = std::find(order.begin(), order.end(), name);
-            if (it == order.end()) {
-                return static_cast<int>(order.size());
-            }
-            return static_cast<int>(std::distance(order.begin(), it));
-        };
-        return rank(left.name) < rank(right.name);
-    });
+    static const std::array<std::string_view, 6> order = {
+        "prepare", "warmup_compile", "execute", "write_output", "total", "other"};
+    std::sort(grouped.begin(), grouped.end(),
+              [&](const StageTiming& left, const StageTiming& right) {
+                  const auto rank = [&](std::string_view name) {
+                      auto it = std::find(order.begin(), order.end(), name);
+                      if (it == order.end()) {
+                          return static_cast<int>(order.size());
+                      }
+                      return static_cast<int>(std::distance(order.begin(), it));
+                  };
+                  return rank(left.name) < rank(right.name);
+              });
 
     nlohmann::json json = nlohmann::json::array();
     for (const auto& timing : grouped) {
@@ -780,22 +837,17 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
     const bool bundle_healthy = report_flag(report, "bundle", "healthy", false);
     const bool video_healthy = report_flag(report, "video", "healthy", false);
     const bool cache_healthy = report_flag(report, "cache", "healthy", false);
-    const bool coreml_healthy =
-        !report_flag(report, "coreml", "applicable", false) ||
-        report_flag(report, "coreml", "healthy", false);
-    const bool apple_probe_ready =
-        !report_flag(report, "mlx", "applicable", false) ||
-        (report_flag(report, "mlx", "probe_available", false) &&
-         report_flag(report, "mlx", "primary_pack_ready", false));
-    const bool apple_bridge_ready =
-        !report_flag(report, "mlx", "applicable", false) ||
-        report_flag(report, "mlx", "bridge_ready", false);
-    const bool apple_backend_integrated =
-        !report_flag(report, "mlx", "applicable", false) ||
-        report_flag(report, "mlx", "backend_integrated", false);
-    const bool apple_healthy =
-        !report_flag(report, "mlx", "applicable", false) ||
-        report_flag(report, "mlx", "healthy", false);
+    const bool coreml_healthy = !report_flag(report, "coreml", "applicable", false) ||
+                                report_flag(report, "coreml", "healthy", false);
+    const bool apple_probe_ready = !report_flag(report, "mlx", "applicable", false) ||
+                                   (report_flag(report, "mlx", "probe_available", false) &&
+                                    report_flag(report, "mlx", "primary_pack_ready", false));
+    const bool apple_bridge_ready = !report_flag(report, "mlx", "applicable", false) ||
+                                    report_flag(report, "mlx", "bridge_ready", false);
+    const bool apple_backend_integrated = !report_flag(report, "mlx", "applicable", false) ||
+                                          report_flag(report, "mlx", "backend_integrated", false);
+    const bool apple_healthy = !report_flag(report, "mlx", "applicable", false) ||
+                               report_flag(report, "mlx", "healthy", false);
     const bool windows_provider_ready =
         !report_flag(report, "windows_universal", "applicable", false) ||
         report_flag(report, "windows_universal", "provider_available", false);
@@ -807,13 +859,11 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
         windows_packaged_model_presence(report, report["models"]);
     bool validated_models_present = true;
     if (platform == "windows") {
-        validated_models_present =
-            !any_packaged_windows_model || packaged_windows_models_present;
+        validated_models_present = !any_packaged_windows_model || packaged_windows_models_present;
     } else {
         for (const auto& entry : report["models"]) {
             if (!entry["validated_platforms"].empty() && entry.value("packaged_for_macos", false)) {
-                validated_models_present =
-                    validated_models_present && entry.value("found", false);
+                validated_models_present = validated_models_present && entry.value("found", false);
             }
         }
     }
@@ -840,8 +890,8 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
         report_flag(report, "bundle", "model_inventory_contract_complete", true);
     summary["packaged_profile_matches_active_profile"] =
         packaged_profile_matches_active_profile(report);
-    summary["certified_model_count"] = count_models_with_artifact_state(report["models"],
-                                                                        "certified_for_active_device");
+    summary["certified_model_count"] =
+        count_models_with_artifact_state(report["models"], "certified_for_active_device");
     summary["recommended_model_present"] =
         count_models_with_artifact_state(report["models"], "recommended_for_active_device") > 0;
     summary["windows_universal_healthy"] =
@@ -883,9 +933,8 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
             entry["size_bytes"] = std::filesystem::file_size(path);
         }
         if (active_device.has_value()) {
-            entry["artifact_state"] =
-                to_json(artifact_runtime_state_for_device(model, capabilities, *active_device,
-                                                          entry["found"].get<bool>()));
+            entry["artifact_state"] = to_json(artifact_runtime_state_for_device(
+                model, capabilities, *active_device, entry["found"].get<bool>()));
         }
         models.push_back(entry);
     }
@@ -910,7 +959,8 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         auto stage_callback = [&](const StageTiming& timing) { profiler.record(timing); };
 
         auto engine_res = profiler.measure("engine_create", [&]() {
-            return Engine::create(request.model_path, request.device, stage_callback);
+            return Engine::create(request.model_path, request.device, stage_callback,
+                                  request.engine_options);
         });
         if (!engine_res) {
             results["error"] = engine_res.error().message;
@@ -997,10 +1047,10 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["requested_device"] = request.device.name;
         results["device"] = engine->current_device().name;
         results["backend"] = backend_to_string(engine->current_device().backend);
-        results["execution_profile"] = to_json(
-            runtime_optimization_profile_for_device(runtime_capabilities(),
-                                                    engine->current_device()));
-        append_benchmark_artifact_metadata(results, request, engine->current_device());
+        results["execution_profile"] = to_json(runtime_optimization_profile_for_device(
+            runtime_capabilities(), engine->current_device()));
+        append_benchmark_artifact_metadata(results, request, engine->current_device(),
+                                           engine->execution_engine());
         results["warmup_runs"] = warmup_runs;
         results["benchmark_runs"] = benchmark_runs;
         results["cold_latency_ms"] = cold_latency_ms;
@@ -1036,6 +1086,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     std::vector<StageTiming> timings;
     Backend selected_backend = Backend::Auto;
     std::string selected_device_name = benchmark_request.device.name;
+    ExecutionEngine effective_engine = benchmark_request.engine_options.execution_engine;
     std::optional<BackendFallbackInfo> fallback;
 
     auto start = std::chrono::steady_clock::now();
@@ -1046,6 +1097,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
                 selected_device_name = event.message;
             }
         }
+        effective_engine = event.engine;
         if (event.fallback.has_value()) {
             fallback = event.fallback;
         }
@@ -1067,11 +1119,14 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     results["device"] = selected_device_name;
     results["backend"] = backend_to_string(selected_backend);
     DeviceInfo execution_device = benchmark_request.device;
-    execution_device.name = selected_device_name.empty() ? execution_device.name : selected_device_name;
-    execution_device.backend = selected_backend == Backend::Auto ? execution_device.backend : selected_backend;
+    execution_device.name =
+        selected_device_name.empty() ? execution_device.name : selected_device_name;
+    execution_device.backend =
+        selected_backend == Backend::Auto ? execution_device.backend : selected_backend;
     results["execution_profile"] =
         to_json(runtime_optimization_profile_for_device(runtime_capabilities(), execution_device));
-    append_benchmark_artifact_metadata(results, benchmark_request, execution_device);
+    append_benchmark_artifact_metadata(results, benchmark_request, execution_device,
+                                       effective_engine);
     results["total_duration_ms"] = total_ms;
     if (units > 0) {
         results["processed_units"] = units;

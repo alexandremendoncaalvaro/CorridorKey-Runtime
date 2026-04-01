@@ -1,6 +1,5 @@
-#include <catch2/catch_all.hpp>
-
 #include <algorithm>
+#include <catch2/catch_all.hpp>
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -21,8 +20,7 @@ void touch_file(const std::filesystem::path& path, const std::string& contents =
 
 }  // namespace
 
-TEST_CASE("windows TensorRT probes respect supported VRAM tiers",
-          "[unit][doctor][regression]") {
+TEST_CASE("windows TensorRT probes respect supported VRAM tiers", "[unit][doctor][regression]") {
     SECTION("10 GB probes include 1024 and below") {
         DeviceInfo device{"RTX 3080", 10240, Backend::TensorRT, 0};
         auto models = windows_probe_models_for_backend(Backend::TensorRT, device);
@@ -43,10 +41,9 @@ TEST_CASE("windows TensorRT probes respect supported VRAM tiers",
     SECTION("24 GB keeps the full packaged FP16 probe ladder") {
         DeviceInfo device{"RTX 4090", 24576, Backend::TensorRT, 0};
         auto models = windows_probe_models_for_backend(Backend::TensorRT, device);
-        const std::vector<std::string> expected_models{"corridorkey_fp16_2048.onnx",
-                                                       "corridorkey_fp16_1536.onnx",
-                                                       "corridorkey_fp16_1024.onnx",
-                                                       "corridorkey_fp16_512.onnx"};
+        const std::vector<std::string> expected_models{
+            "corridorkey_fp16_2048.onnx", "corridorkey_fp16_1536.onnx",
+            "corridorkey_fp16_1024.onnx", "corridorkey_fp16_512.onnx"};
         REQUIRE(models == expected_models);
     }
 
@@ -54,33 +51,30 @@ TEST_CASE("windows TensorRT probes respect supported VRAM tiers",
         DeviceInfo smaller_device{"AMD Radeon", 8192, Backend::DirectML, 0};
         auto smaller_models = windows_probe_models_for_backend(Backend::DirectML, smaller_device);
         REQUIRE(smaller_models ==
-                std::vector<std::string>{"corridorkey_fp16_512.onnx",
-                                         "corridorkey_int8_512.onnx"});
+                std::vector<std::string>{"corridorkey_fp16_512.onnx", "corridorkey_int8_512.onnx"});
 
         DeviceInfo larger_device{"AMD Radeon", 16384, Backend::DirectML, 0};
         auto larger_models = windows_probe_models_for_backend(Backend::DirectML, larger_device);
-        REQUIRE(larger_models ==
-                std::vector<std::string>{"corridorkey_fp16_1024.onnx",
-                                         "corridorkey_fp16_512.onnx",
-                                         "corridorkey_int8_512.onnx"});
+        REQUIRE(larger_models == std::vector<std::string>{"corridorkey_fp16_1024.onnx",
+                                                          "corridorkey_fp16_512.onnx",
+                                                          "corridorkey_int8_512.onnx"});
     }
 }
 
 TEST_CASE("preferred Windows probe prioritizes strict TensorRT success",
           "[unit][doctor][regression]") {
-    nlohmann::json probes = nlohmann::json::array(
-        {{{"backend", "winml"},
-          {"model", "corridorkey_fp16_1024.onnx"},
-          {"requested_resolution", 1024},
-          {"session_create_ok", true},
-          {"frame_execute_ok", true},
-          {"fallback_used", false}},
-         {{"backend", "tensorrt"},
-          {"model", "corridorkey_fp16_1536.onnx"},
-          {"requested_resolution", 1536},
-          {"session_create_ok", true},
-          {"frame_execute_ok", true},
-          {"fallback_used", false}}});
+    nlohmann::json probes = nlohmann::json::array({{{"backend", "winml"},
+                                                    {"model", "corridorkey_fp16_1024.onnx"},
+                                                    {"requested_resolution", 1024},
+                                                    {"session_create_ok", true},
+                                                    {"frame_execute_ok", true},
+                                                    {"fallback_used", false}},
+                                                   {{"backend", "tensorrt"},
+                                                    {"model", "corridorkey_fp16_1536.onnx"},
+                                                    {"requested_resolution", 1536},
+                                                    {"session_create_ok", true},
+                                                    {"frame_execute_ok", true},
+                                                    {"fallback_used", false}}});
 
     auto preferred = preferred_windows_probe(probes);
 
@@ -91,19 +85,18 @@ TEST_CASE("preferred Windows probe prioritizes strict TensorRT success",
 
 TEST_CASE("preferred Windows probe ignores probes that used fallback",
           "[unit][doctor][regression]") {
-    nlohmann::json probes = nlohmann::json::array(
-        {{{"backend", "tensorrt"},
-          {"model", "corridorkey_fp16_2048.onnx"},
-          {"requested_resolution", 2048},
-          {"session_create_ok", true},
-          {"frame_execute_ok", true},
-          {"fallback_used", true}},
-         {{"backend", "winml"},
-          {"model", "corridorkey_fp16_1024.onnx"},
-          {"requested_resolution", 1024},
-          {"session_create_ok", true},
-          {"frame_execute_ok", true},
-          {"fallback_used", false}}});
+    nlohmann::json probes = nlohmann::json::array({{{"backend", "tensorrt"},
+                                                    {"model", "corridorkey_fp16_2048.onnx"},
+                                                    {"requested_resolution", 2048},
+                                                    {"session_create_ok", true},
+                                                    {"frame_execute_ok", true},
+                                                    {"fallback_used", true}},
+                                                   {{"backend", "winml"},
+                                                    {"model", "corridorkey_fp16_1024.onnx"},
+                                                    {"requested_resolution", 1024},
+                                                    {"session_create_ok", true},
+                                                    {"frame_execute_ok", true},
+                                                    {"fallback_used", false}}});
 
     auto preferred = preferred_windows_probe(probes);
 
@@ -128,8 +121,8 @@ TEST_CASE("doctor bundle inspection recognizes Windows OFX DirectML layout",
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx", "onnxruntime.dll",
-          "onnxruntime_providers_shared.dll", "DirectML.dll"}) {
+         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+          "onnxruntime.dll", "onnxruntime_providers_shared.dll", "DirectML.dll"}) {
         touch_file(win64_dir / filename);
     }
 
@@ -212,16 +205,16 @@ TEST_CASE("doctor bundle inspection reports packaged TensorRT context models",
 
     for (const auto& filename :
          {"corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx",
-          "corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx",
-          "corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx",
-          "corridorkey_fp16_1024_ctx.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx"}) {
+          "corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_768.onnx",
+          "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1024_ctx.onnx",
+          "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}) {
         touch_file(models_dir / filename);
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx", "onnxruntime.dll",
-          "onnxruntime_providers_shared.dll", "onnxruntime_providers_nv_tensorrt_rtx.dll"}) {
+         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+          "onnxruntime.dll", "onnxruntime_providers_shared.dll",
+          "onnxruntime_providers_nv_tensorrt_rtx.dll"}) {
         touch_file(win64_dir / filename);
     }
 
@@ -259,9 +252,10 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx", "onnxruntime.dll",
-          "onnxruntime_providers_shared.dll", "onnxruntime_providers_nv_tensorrt_rtx.dll",
-          "cudart64_12.dll", "tensorrt_rtx_1_2.dll", "tensorrt_onnxparser_rtx_1_2.dll"}) {
+         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+          "onnxruntime.dll", "onnxruntime_providers_shared.dll",
+          "onnxruntime_providers_nv_tensorrt_rtx.dll", "cudart64_12.dll", "tensorrt_rtx_1_2.dll",
+          "tensorrt_onnxparser_rtx_1_2.dll"}) {
         touch_file(win64_dir / filename);
     }
 
@@ -279,21 +273,19 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
         {"unrestricted_quality_attempt", true},
         {"expected_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx",
-          "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
+          "corridorkey_int8_1024.onnx"}},
         {"present_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx",
-          "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
+          "corridorkey_int8_1024.onnx"}},
         {"missing_models", nlohmann::json::array()},
         {"compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx",
-                                "corridorkey_fp16_1024_ctx.onnx",
+         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
                                 "corridorkey_fp16_1536_ctx.onnx",
                                 "corridorkey_fp16_2048_ctx.onnx"})},
         {"expected_compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx",
-                                "corridorkey_fp16_1024_ctx.onnx",
+         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
                                 "corridorkey_fp16_1536_ctx.onnx",
                                 "corridorkey_fp16_2048_ctx.onnx"})},
         {"missing_compiled_context_models", nlohmann::json::array()},
@@ -333,15 +325,16 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
 
     for (const auto& filename :
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx",
-          "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx"}) {
+          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
+          "corridorkey_int8_1024.onnx"}) {
         touch_file(models_dir / filename);
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx", "onnxruntime.dll",
-          "onnxruntime_providers_shared.dll", "onnxruntime_providers_nv_tensorrt_rtx.dll",
-          "cudart64_12.dll", "tensorrt_rtx_1_2.dll", "tensorrt_onnxparser_rtx_1_2.dll"}) {
+         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+          "onnxruntime.dll", "onnxruntime_providers_shared.dll",
+          "onnxruntime_providers_nv_tensorrt_rtx.dll", "cudart64_12.dll", "tensorrt_rtx_1_2.dll",
+          "tensorrt_onnxparser_rtx_1_2.dll"}) {
         touch_file(win64_dir / filename);
     }
 
@@ -359,22 +352,20 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
         {"unrestricted_quality_attempt", true},
         {"expected_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx",
-          "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
+          "corridorkey_int8_1024.onnx"}},
         {"present_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx",
-          "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
+          "corridorkey_int8_1024.onnx"}},
         {"missing_models", nlohmann::json::array()},
         {"compiled_context_models", nlohmann::json::array()},
         {"expected_compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx",
-                                "corridorkey_fp16_1024_ctx.onnx",
+         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
                                 "corridorkey_fp16_1536_ctx.onnx",
                                 "corridorkey_fp16_2048_ctx.onnx"})},
         {"missing_compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx",
-                                "corridorkey_fp16_1024_ctx.onnx",
+         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
                                 "corridorkey_fp16_1536_ctx.onnx",
                                 "corridorkey_fp16_2048_ctx.onnx"})},
         {"compiled_context_complete", false},
@@ -440,7 +431,8 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
     };
     touch_file(bundle_root / "model_inventory.json", inventory.dump(2));
 
-    const auto diagnostics = inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
+    const auto diagnostics =
+        inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
 
     REQUIRE(diagnostics["packaged_layout_detected"].get<bool>());
     REQUIRE(diagnostics["healthy"].get<bool>());

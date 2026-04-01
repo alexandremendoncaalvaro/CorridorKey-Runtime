@@ -1,5 +1,7 @@
+// clang-format off
 #include <windows.h>
 #include <shellapi.h>
+// clang-format on
 
 #include <charconv>
 #include <chrono>
@@ -21,9 +23,8 @@ Result<std::string> wide_to_utf8(std::wstring_view value) {
         return std::string{};
     }
 
-    const int size = WideCharToMultiByte(CP_UTF8, 0, value.data(),
-                                         static_cast<int>(value.size()), nullptr, 0, nullptr,
-                                         nullptr);
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                                         nullptr, 0, nullptr, nullptr);
     if (size <= 0) {
         return Unexpected<Error>(
             Error{ErrorCode::IoError, "Failed to convert the OFX runtime arguments."});
@@ -31,8 +32,8 @@ Result<std::string> wide_to_utf8(std::wstring_view value) {
 
     std::string utf8(static_cast<std::size_t>(size), '\0');
     const int written =
-        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
-                            utf8.data(), size, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), utf8.data(),
+                            size, nullptr, nullptr);
     if (written != size) {
         return Unexpected<Error>(
             Error{ErrorCode::IoError, "Failed to convert the OFX runtime arguments."});
@@ -95,21 +96,21 @@ Result<void> parse_runtime_service_options(const std::vector<std::string>& args,
             }
             auto port = parse_positive_int(args[++index], "--endpoint-port");
             if (!port || *port > 65535) {
-                return Unexpected<Error>(port ? Error{ErrorCode::InvalidParameters,
-                                                      "Invalid value for --endpoint-port."}
-                                              : port.error());
+                return Unexpected<Error>(
+                    port ? Error{ErrorCode::InvalidParameters, "Invalid value for --endpoint-port."}
+                         : port.error());
             }
             options.endpoint.port = static_cast<std::uint16_t>(*port);
             continue;
         }
 
         if (token.rfind("--endpoint-port=", 0) == 0) {
-            auto port = parse_positive_int(token.substr(std::string_view("--endpoint-port=").size()),
-                                           "--endpoint-port");
+            auto port = parse_positive_int(
+                token.substr(std::string_view("--endpoint-port=").size()), "--endpoint-port");
             if (!port || *port > 65535) {
-                return Unexpected<Error>(port ? Error{ErrorCode::InvalidParameters,
-                                                      "Invalid value for --endpoint-port."}
-                                              : port.error());
+                return Unexpected<Error>(
+                    port ? Error{ErrorCode::InvalidParameters, "Invalid value for --endpoint-port."}
+                         : port.error());
             }
             options.endpoint.port = static_cast<std::uint16_t>(*port);
             continue;

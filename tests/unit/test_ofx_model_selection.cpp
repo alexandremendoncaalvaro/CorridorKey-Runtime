@@ -345,8 +345,8 @@ TEST_CASE("fixed TensorRT compile failures block exact retries and lower fallbac
     auto cached = cached_quality_compile_failure(cache, context, candidates.front());
     REQUIRE(cached.has_value());
     REQUIRE(cached->error_message.find("2048") != std::string::npos);
-    REQUIRE(should_abort_quality_fallback_after_compile_failure(
-        Backend::TensorRT, kQualityMaximum, false, candidates.front()));
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(Backend::TensorRT, kQualityMaximum,
+                                                                false, candidates.front()));
 
     auto filtered = filter_quality_artifacts_with_compile_cache(candidates, cache, context);
     REQUIRE(filtered.size() == 2);
@@ -356,13 +356,13 @@ TEST_CASE("fixed TensorRT compile failures block exact retries and lower fallbac
 
 TEST_CASE("fixed TensorRT abort predicate only trips on the exact requested artifact",
           "[unit][ofx][regression]") {
-    QualityArtifactSelection exact_selection{
-        std::filesystem::path("corridorkey_fp16_2048.onnx"), 2048, 2048, false};
-    QualityArtifactSelection fallback_selection{
-        std::filesystem::path("corridorkey_fp16_1536.onnx"), 2048, 1536, true};
+    QualityArtifactSelection exact_selection{std::filesystem::path("corridorkey_fp16_2048.onnx"),
+                                             2048, 2048, false};
+    QualityArtifactSelection fallback_selection{std::filesystem::path("corridorkey_fp16_1536.onnx"),
+                                                2048, 1536, true};
 
-    REQUIRE(should_abort_quality_fallback_after_compile_failure(
-        Backend::TensorRT, kQualityMaximum, false, exact_selection));
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(Backend::TensorRT, kQualityMaximum,
+                                                                false, exact_selection));
     REQUIRE_FALSE(should_abort_quality_fallback_after_compile_failure(
         Backend::TensorRT, kQualityMaximum, false, fallback_selection));
     REQUIRE_FALSE(should_abort_quality_fallback_after_compile_failure(
@@ -481,9 +481,8 @@ TEST_CASE("auto windows tensorRT quality respects the device VRAM ceiling",
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160,
-                                kQuantizationFp16, 10240);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096,
+                                             2160, kQuantizationFp16, 10240);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -499,9 +498,8 @@ TEST_CASE("auto windows tensorRT quality keeps direct 2048 only for fully suppor
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
 
-    auto selection_16gb =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 3200, 1800,
-                                kQuantizationFp16, 16384);
+    auto selection_16gb = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto,
+                                                  3200, 1800, kQuantizationFp16, 16384);
     REQUIRE(selection_16gb.has_value());
     REQUIRE(selection_16gb->requested_resolution == 2048);
     REQUIRE(selection_16gb->effective_resolution == 1024);
@@ -509,9 +507,8 @@ TEST_CASE("auto windows tensorRT quality keeps direct 2048 only for fully suppor
     REQUIRE(selection_16gb->coarse_to_fine);
     REQUIRE(selection_16gb->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
 
-    auto selection_24gb =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160,
-                                kQuantizationFp16, 24576);
+    auto selection_24gb = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto,
+                                                  4096, 2160, kQuantizationFp16, 24576);
     REQUIRE(selection_24gb.has_value());
     REQUIRE(selection_24gb->requested_resolution == 2048);
     REQUIRE(selection_24gb->effective_resolution == 2048);
@@ -522,28 +519,26 @@ TEST_CASE("auto windows tensorRT quality keeps direct 2048 only for fully suppor
 
 TEST_CASE("fixed windows tensorRT quality reports unsupported tiers before engine creation",
           "[unit][ofx][regression]") {
-    auto removed_rung_message =
-        unsupported_quality_message(DeviceInfo{"RTX 4090", 24576, Backend::TensorRT},
-                                    kQualityHigh, 768);
+    auto removed_rung_message = unsupported_quality_message(
+        DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}, kQualityHigh, 768);
     REQUIRE(removed_rung_message.has_value());
     REQUIRE(removed_rung_message->find("768px") != std::string::npos);
     REQUIRE(removed_rung_message->find("High (1024)") != std::string::npos);
 
-    auto message =
-        unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
-                                    kQualityMaximum, 2048);
+    auto message = unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+                                               kQualityMaximum, 2048);
 
     REQUIRE(message.has_value());
     REQUIRE(message->find("24 GB") != std::string::npos);
     REQUIRE(message->find("High (1024)") != std::string::npos);
-    REQUIRE(unsupported_quality_message(
-                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, kQualityUltra, 1536)
+    REQUIRE(unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+                                        kQualityUltra, 1536)
                 .has_value());
     REQUIRE_FALSE(unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
                                               kQualityUltra, 1536, true)
                       .has_value());
-    REQUIRE_FALSE(unsupported_quality_message(
-                      DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}, kQualityMaximum, 2048)
+    REQUIRE_FALSE(unsupported_quality_message(DeviceInfo{"RTX 4090", 24576, Backend::TensorRT},
+                                              kQualityMaximum, 2048)
                       .has_value());
 }
 
@@ -551,9 +546,9 @@ TEST_CASE("missing quality artifact message names the expected model and folder"
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-missing-quality-message");
 
-    auto message = missing_quality_artifact_message(temp_dir.path(), Backend::TensorRT,
-                                                    kQualityUltra, 2560, 1440, kQuantizationFp16,
-                                                    false, 16384);
+    auto message =
+        missing_quality_artifact_message(temp_dir.path(), Backend::TensorRT, kQualityUltra, 2560,
+                                         1440, kQuantizationFp16, false, 16384);
 
     REQUIRE(message.find("Ultra (1536)") != std::string::npos);
     REQUIRE(message.find("corridorkey_fp16_1536.onnx") != std::string::npos);

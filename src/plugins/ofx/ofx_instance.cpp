@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <chrono>
-#include <cstdint>
 #include <corridorkey/engine.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <iomanip>
 #include <new>
@@ -137,13 +137,70 @@ bool is_windows_gpu_backend(Backend backend) {
            backend == Backend::OpenVINO;
 }
 
+std::string execution_engine_label(ExecutionEngine engine) {
+    switch (engine) {
+        case ExecutionEngine::Official:
+            return "ORT TensorRT (Official)";
+        case ExecutionEngine::MaxPerformance:
+            return "ORT TensorRT Max";
+        case ExecutionEngine::TorchTensorRt:
+            return "Torch-TensorRT";
+        case ExecutionEngine::Auto:
+        default:
+            return "Auto (Official)";
+    }
+}
+
+ExecutionEngine selected_execution_engine(const InstanceData* data) {
+    if (data == nullptr || data->execution_engine_param == nullptr) {
+        return ExecutionEngine::Auto;
+    }
+
+    int choice = kExecutionEngineAuto;
+    if (g_suites.parameter->paramGetValue(data->execution_engine_param, &choice) != kOfxStatOK) {
+        return ExecutionEngine::Auto;
+    }
+    return execution_engine_from_choice(choice);
+}
+
+ExecutionEngine effective_execution_engine(const InstanceData& data) {
+    if (data.use_runtime_server && data.runtime_client != nullptr &&
+        data.runtime_client->has_session()) {
+        return data.runtime_client->current_execution_engine();
+    }
+    if (data.engine != nullptr) {
+        return data.engine->execution_engine();
+    }
+    return ExecutionEngine::Auto;
+}
+
+bool execution_engine_matches_request(ExecutionEngine requested, ExecutionEngine active) {
+    const ExecutionEngine requested_effective =
+        requested == ExecutionEngine::Auto ? ExecutionEngine::Official : requested;
+    return requested_effective == active;
+}
+
+bool execution_engine_selector_enabled(const InstanceData& data) {
+#if defined(_WIN32)
+    return std::find(data.runtime_capabilities.supported_execution_engines.begin(),
+                     data.runtime_capabilities.supported_execution_engines.end(),
+                     ExecutionEngine::MaxPerformance) !=
+           data.runtime_capabilities.supported_execution_engines.end();
+#else
+    (void)data;
+    return false;
+#endif
+}
+
 EngineCreateOptions ofx_engine_options(const DeviceInfo& requested_device,
+                                       ExecutionEngine execution_engine,
                                        bool allow_cpu_fallback = false) {
     EngineCreateOptions options;
     if (requested_device.backend != Backend::CPU) {
         options.allow_cpu_fallback = allow_cpu_fallback;
         options.disable_cpu_ep_fallback = false;
     }
+    options.execution_engine = execution_engine;
     return options;
 }
 
@@ -187,15 +244,21 @@ void sync_runtime_panel_state_from_active_engine(InstanceData* data) {
     data->runtime_panel_state.safe_quality_ceiling_resolution =
         app::max_supported_resolution_for_device(data->device).value_or(0);
     data->runtime_panel_state.cpu_quality_guardrail_active = data->cpu_quality_guardrail_active;
+    data->runtime_panel_state.requested_engine = data->requested_execution_engine;
     data->runtime_panel_state.artifact_path = data->model_path;
-    if (data->use_runtime_server && data->runtime_client != nullptr && data->runtime_client->has_session()) {
+    if (data->use_runtime_server && data->runtime_client != nullptr &&
+        data->runtime_client->has_session()) {
         data->runtime_panel_state.session_prepared = true;
         data->runtime_panel_state.session_ref_count = data->runtime_client->session_ref_count();
+        data->runtime_panel_state.effective_engine =
+            data->runtime_client->current_execution_engine();
         return;
     }
 
     data->runtime_panel_state.session_prepared = data->engine != nullptr;
     data->runtime_panel_state.session_ref_count = data->engine != nullptr ? 1 : 0;
+    data->runtime_panel_state.effective_engine =
+        data->engine != nullptr ? data->engine->execution_engine() : ExecutionEngine::Auto;
 }
 
 void set_runtime_panel_state_for_failed_quality_request(
@@ -211,6 +274,8 @@ void set_runtime_panel_state_for_failed_quality_request(
     data->runtime_panel_state.safe_quality_ceiling_resolution =
         app::max_supported_resolution_for_device(data->device).value_or(0);
     data->runtime_panel_state.cpu_quality_guardrail_active = cpu_quality_guardrail_active;
+    data->runtime_panel_state.requested_engine = data->requested_execution_engine;
+    data->runtime_panel_state.effective_engine = ExecutionEngine::Auto;
     data->runtime_panel_state.artifact_path = artifact_path;
     data->runtime_panel_state.session_prepared = false;
     data->runtime_panel_state.session_ref_count = 0;
@@ -224,7 +289,8 @@ bool sync_runtime_panel_session_state_impl(InstanceData* data) {
     const bool previous_prepared = data->runtime_panel_state.session_prepared;
     const std::uint64_t previous_ref_count = data->runtime_panel_state.session_ref_count;
 
-    if (data->use_runtime_server && data->runtime_client != nullptr && data->runtime_client->has_session()) {
+    if (data->use_runtime_server && data->runtime_client != nullptr &&
+        data->runtime_client->has_session()) {
         data->runtime_panel_state.session_prepared = true;
         data->runtime_panel_state.session_ref_count = data->runtime_client->session_ref_count();
     } else if (data->engine != nullptr) {
@@ -275,8 +341,7 @@ std::uint64_t models_bundle_token(const std::filesystem::path& models_root) {
         }
 
         entries.push_back(entry.path().filename().string() + "|" + std::to_string(size_bytes) +
-                          "|" +
-                          std::to_string(write_time.time_since_epoch().count()));
+                          "|" + std::to_string(write_time.time_since_epoch().count()));
     }
 
     std::sort(entries.begin(), entries.end());
@@ -352,8 +417,8 @@ std::string runtime_status_runtime_label_impl(const InstanceData& data) {
 
 std::string runtime_session_runtime_label_impl(const InstanceData& data) {
     if (data.runtime_panel_state.session_prepared) {
-        const std::uint64_t shared_node_count = std::max<std::uint64_t>(
-            data.runtime_panel_state.session_ref_count, 1);
+        const std::uint64_t shared_node_count =
+            std::max<std::uint64_t>(data.runtime_panel_state.session_ref_count, 1);
         if (shared_node_count > 1) {
             return "Shared (" + std::to_string(shared_node_count) + " nodes)";
         }
@@ -364,6 +429,19 @@ std::string runtime_session_runtime_label_impl(const InstanceData& data) {
         return "Unavailable";
     }
 
+    return "Loading...";
+}
+
+std::string runtime_engine_runtime_label_impl(const InstanceData& data) {
+    if (data.runtime_panel_state.effective_engine != ExecutionEngine::Auto) {
+        return execution_engine_label(data.runtime_panel_state.effective_engine);
+    }
+    if (data.runtime_panel_state.requested_engine != ExecutionEngine::Auto) {
+        return execution_engine_label(data.runtime_panel_state.requested_engine);
+    }
+    if (!data.last_error.empty()) {
+        return "Unavailable";
+    }
     return "Loading...";
 }
 
@@ -524,6 +602,25 @@ void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
     data->runtime_panel_dirty = true;
 }
 
+void invalidate_active_runtime_session(InstanceData* data, std::string_view reason) {
+    if (data == nullptr) {
+        return;
+    }
+
+    if (data->runtime_client != nullptr) {
+        auto release_result = data->runtime_client->release_session();
+        if (!release_result) {
+            log_message("invalidate_active_runtime_session",
+                        std::string(reason) + " release_failed=" + release_result.error().message);
+        }
+    }
+
+    data->engine.reset();
+    data->active_execution_engine = ExecutionEngine::Auto;
+    data->runtime_panel_state.effective_engine = ExecutionEngine::Auto;
+    clear_instance_render_caches(data, true);
+}
+
 double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
     const auto elapsed = std::chrono::steady_clock::now() - start_time;
     return std::chrono::duration<double, std::milli>(elapsed).count();
@@ -624,8 +721,7 @@ std::string cpu_quality_guardrail_warning_message(int requested_quality_mode,
         return {};
     }
     return "CPU backend is limited to Draft (512) for interactive rendering. " +
-           std::string(quality_mode_label(requested_quality_mode)) +
-           " will run as Draft (512).";
+           std::string(quality_mode_label(requested_quality_mode)) + " will run as Draft (512).";
 }
 
 std::string manual_override_warning_message(const DeviceInfo& requested_device, int quality_mode,
@@ -649,8 +745,7 @@ std::string manual_override_warning_message(const DeviceInfo& requested_device, 
 bool allow_unrestricted_quality_attempt_for_request_impl(const InstanceData& data, int quality_mode,
                                                          const DeviceInfo& requested_device) {
     return is_fixed_quality_mode(quality_mode) &&
-           app::runtime_optimization_profile_for_device(data.runtime_capabilities,
-                                                        requested_device)
+           app::runtime_optimization_profile_for_device(data.runtime_capabilities, requested_device)
                .unrestricted_quality_attempt;
 }
 
@@ -672,6 +767,8 @@ void update_runtime_panel_values(InstanceData* data) {
     set_string_param_value(data->runtime_processing_param,
                            processing_backend_label(data->device.backend));
     set_string_param_value(data->runtime_device_param, processing_device_label(data->device));
+    set_string_param_value(data->runtime_engine_param,
+                           is_loading ? "Loading..." : runtime_engine_runtime_label_impl(*data));
     set_string_param_value(
         data->runtime_requested_quality_param,
         requested_quality_runtime_label(data->runtime_panel_state.requested_quality_mode,
@@ -681,18 +778,18 @@ void update_runtime_panel_values(InstanceData* data) {
         data->runtime_effective_quality_param,
         is_loading ? "Loading..."
                    : effective_quality_label(data->runtime_panel_state.effective_resolution));
-    set_string_param_value(data->runtime_safe_quality_ceiling_param,
-                           is_loading ? "Loading..."
-                                      : runtime_safe_quality_ceiling_runtime_label(*data));
+    set_string_param_value(
+        data->runtime_safe_quality_ceiling_param,
+        is_loading ? "Loading..." : runtime_safe_quality_ceiling_runtime_label(*data));
     set_string_param_value(data->runtime_artifact_param,
-                           is_loading ? "Loading..."
-                                      : runtime_artifact_label(data->runtime_panel_state.artifact_path));
+                           is_loading
+                               ? "Loading..."
+                               : runtime_artifact_label(data->runtime_panel_state.artifact_path));
     set_string_param_value(data->runtime_guide_source_param,
                            is_loading ? "Loading..." : runtime_guide_source_runtime_label(*data));
     set_string_param_value(data->runtime_path_param,
                            is_loading ? "Loading..." : runtime_path_runtime_label(*data));
-    set_string_param_value(data->runtime_session_param,
-                           runtime_session_runtime_label(*data));
+    set_string_param_value(data->runtime_session_param, runtime_session_runtime_label(*data));
     set_string_param_value(data->runtime_status_param,
                            is_loading ? "Loading..." : runtime_status_runtime_label(*data));
     set_string_param_value(data->runtime_timings_param,
@@ -702,7 +799,8 @@ void update_runtime_panel_values(InstanceData* data) {
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
-                              const std::string& device, const std::string& requested_quality,
+                              const std::string& device, const std::string& engine,
+                              const std::string& requested_quality,
                               const std::string& effective_quality, const std::string& artifact,
                               const std::string& session, const std::string& status,
                               const std::string& timings, const std::string& backend_work) {
@@ -712,6 +810,7 @@ void set_runtime_panel_status(InstanceData* data, const std::string& processing,
 
     set_string_param_value(data->runtime_processing_param, processing);
     set_string_param_value(data->runtime_device_param, device);
+    set_string_param_value(data->runtime_engine_param, engine);
     set_string_param_value(data->runtime_requested_quality_param, requested_quality);
     set_string_param_value(data->runtime_effective_quality_param, effective_quality);
     set_string_param_value(data->runtime_artifact_param, artifact);
@@ -808,13 +907,15 @@ std::filesystem::path resolve_models_root() {
 }
 
 app::OfxRuntimePrepareSessionRequest build_prepare_request(
-    const BootstrapEngineCandidate& candidate, bool allow_cpu_fallback = false) {
+    const BootstrapEngineCandidate& candidate, ExecutionEngine execution_engine,
+    bool allow_cpu_fallback = false) {
     app::OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = "bootstrap";
     request.model_path = candidate.executable_model_path;
     request.artifact_name = candidate.requested_model_path.filename().string();
     request.requested_device = candidate.device;
-    request.engine_options = ofx_engine_options(candidate.device, allow_cpu_fallback);
+    request.engine_options =
+        ofx_engine_options(candidate.device, execution_engine, allow_cpu_fallback);
     request.requested_quality_mode = kQualityAuto;
     request.requested_resolution = candidate.requested_resolution;
     request.effective_resolution = candidate.effective_resolution;
@@ -823,13 +924,14 @@ app::OfxRuntimePrepareSessionRequest build_prepare_request(
 
 app::OfxRuntimePrepareSessionRequest build_prepare_request(
     const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
-    int requested_quality_mode, bool allow_cpu_fallback = false) {
+    int requested_quality_mode, ExecutionEngine execution_engine, bool allow_cpu_fallback = false) {
     app::OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = "quality_switch";
     request.model_path = selection.executable_model_path;
     request.artifact_name = selection.executable_model_path.filename().string();
     request.requested_device = requested_device;
-    request.engine_options = ofx_engine_options(requested_device, allow_cpu_fallback);
+    request.engine_options =
+        ofx_engine_options(requested_device, execution_engine, allow_cpu_fallback);
     request.requested_quality_mode = requested_quality_mode;
     request.requested_resolution = selection.requested_resolution;
     request.effective_resolution = selection.effective_resolution;
@@ -976,6 +1078,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->input_color_space_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamQuantizationMode,
                                        &data->quantization_mode_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamExecutionEngine,
+                                       &data->execution_engine_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamScreenColor, &data->screen_color_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamTemporalSmoothing,
@@ -1013,6 +1117,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_processing_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeDevice, &data->runtime_device_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeEngine, &data->runtime_engine_param,
+                                       nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeRequestedQuality,
                                        &data->runtime_requested_quality_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeEffectiveQuality,
@@ -1023,8 +1129,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_artifact_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeGuideSource,
                                        &data->runtime_guide_source_param, nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamRuntimePath,
-                                       &data->runtime_path_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimePath, &data->runtime_path_param,
+                                       nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeSession,
                                        &data->runtime_session_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeStatus, &data->runtime_status_param,
@@ -1043,7 +1149,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     sync_dependent_params(data.get());
 
     set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
-                             "Loading...", "Loading...", "Loading...", "Loading...",
+                             "Loading...", "Loading...", "Loading...", "Loading...", "Loading...",
                              "Loading...", "Loading...");
 
     int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
@@ -1090,6 +1196,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                 std::string("Detected backend: ") + backend_label(detected_device.backend));
     auto capabilities = runtime_capabilities();
     data->runtime_capabilities = capabilities;
+    data->requested_execution_engine = selected_execution_engine(data.get());
     log_message("create_instance", std::string("Platform: ") + capabilities.platform);
 
     int initial_quality_mode = kQualityAuto;
@@ -1115,9 +1222,12 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     data->runtime_panel_state.requested_resolution = data->requested_resolution;
     data->runtime_panel_state.effective_resolution = 0;
     data->runtime_panel_state.cpu_quality_guardrail_active = false;
+    data->runtime_panel_state.requested_engine = data->requested_execution_engine;
+    data->runtime_panel_state.effective_engine = ExecutionEngine::Auto;
     data->runtime_panel_state.artifact_path.clear();
     data->model_path.clear();
     data->last_error.clear();
+    sync_dependent_params(data.get());
 
     if (!should_prepare_bootstrap_during_instance_create(data->use_runtime_server)) {
         log_message("create_instance", "Deferring runtime session bootstrap until first render.");
@@ -1139,6 +1249,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
     std::string failure_summary;
     const bool bootstrap_allow_cpu_fallback = allow_cpu_fallback_requested(data.get());
+    const ExecutionEngine selected_engine = data->requested_execution_engine;
     for (const auto& candidate : bootstrap_candidates) {
         constexpr std::string_view kBootstrapPhase = "bootstrap";
         log_message("create_instance",
@@ -1158,7 +1269,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         std::optional<BackendFallbackInfo> fallback = std::nullopt;
         if (data->use_runtime_server && data->runtime_client != nullptr) {
             auto prepare_result = data->runtime_client->prepare_session(
-                build_prepare_request(candidate, bootstrap_allow_cpu_fallback),
+                build_prepare_request(candidate, selected_engine, bootstrap_allow_cpu_fallback),
                 [&](const StageTiming& timing) {
                     log_stage_timing("create_instance", kBootstrapPhase, candidate.device,
                                      candidate.executable_model_path,
@@ -1195,7 +1306,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                      candidate.requested_resolution, candidate.effective_resolution,
                                      timing);
                 },
-                ofx_engine_options(candidate.device, bootstrap_allow_cpu_fallback));
+                ofx_engine_options(candidate.device, selected_engine,
+                                   bootstrap_allow_cpu_fallback));
             if (!engine_result) {
                 std::string failure =
                     backend_label(candidate.device.backend) + ": " + engine_result.error().message;
@@ -1251,6 +1363,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         data->preferred_device = candidate.device;
         data->device = effective_device;
         data->model_path = candidate.executable_model_path;
+        data->requested_execution_engine = selected_engine;
+        data->active_execution_engine = effective_execution_engine(*data);
         data->cached_result_valid = false;
         data->cached_signature = 0;
         data->cached_signature_valid = false;
@@ -1299,8 +1413,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height, int quantization_mode,
-                               QualityFallbackMode fallback_mode,
-                               int coarse_resolution_override,
+                               QualityFallbackMode fallback_mode, int coarse_resolution_override,
                                RefinementMode refinement_mode) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
@@ -1320,15 +1433,17 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         return true;
     }
 
+    const ExecutionEngine requested_execution_engine = selected_execution_engine(data);
+    data->requested_execution_engine = requested_execution_engine;
+
     DeviceInfo original_requested_device = data->preferred_device;
     if (original_requested_device.backend == Backend::Auto) {
         original_requested_device = data->device;
     }
 
     const bool allow_cpu_fallback = allow_cpu_fallback_requested(data);
-    const bool reroute_int8_to_cpu =
-        should_reroute_int8_to_cpu(original_requested_device, quantization_mode,
-                                   allow_cpu_fallback);
+    const bool reroute_int8_to_cpu = should_reroute_int8_to_cpu(
+        original_requested_device, quantization_mode, allow_cpu_fallback);
     DeviceInfo requested_device = reroute_int8_to_cpu
                                       ? cpu_fallback_device_for_request(original_requested_device)
                                       : original_requested_device;
@@ -1340,14 +1455,12 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
     const bool allow_unrestricted_quality_attempt = allow_unrestricted_quality_attempt_for_request(
         *data, requested_quality_mode, original_requested_device);
-    const std::string cpu_fallback_warning =
-        cpu_fallback_warning_message(reroute_int8_to_cpu);
+    const std::string cpu_fallback_warning = cpu_fallback_warning_message(reroute_int8_to_cpu);
     const std::string cpu_quality_guardrail_warning =
-        cpu_quality_guardrail_warning_message(requested_quality_mode,
-                                             cpu_quality_guardrail_active);
-    const std::string manual_override_warning = manual_override_warning_message(
-        original_requested_device, requested_quality_mode, requested_resolution,
-        allow_unrestricted_quality_attempt);
+        cpu_quality_guardrail_warning_message(requested_quality_mode, cpu_quality_guardrail_active);
+    const std::string manual_override_warning =
+        manual_override_warning_message(original_requested_device, requested_quality_mode,
+                                        requested_resolution, allow_unrestricted_quality_attempt);
     data->runtime_panel_state.requested_quality_mode = requested_quality_mode;
     data->runtime_panel_state.requested_resolution = requested_resolution;
     data->runtime_panel_state.cpu_quality_guardrail_active = cpu_quality_guardrail_active;
@@ -1355,9 +1468,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         build_quality_compile_failure_cache_context(*data, requested_device, quantization_mode);
     prepare_quality_compile_failure_cache(data->quality_compile_failure_cache,
                                           compile_cache_context);
-    if (auto unsupported_quantization =
-            unsupported_quantization_message(original_requested_device.backend, quantization_mode,
-                                             allow_cpu_fallback);
+    if (auto unsupported_quantization = unsupported_quantization_message(
+            original_requested_device.backend, quantization_mode, allow_cpu_fallback);
         unsupported_quantization.has_value()) {
         data->last_error = *unsupported_quantization;
         log_message("ensure_engine_for_quality", data->last_error);
@@ -1368,8 +1480,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     auto unsupported_quality =
         fallback_mode == QualityFallbackMode::Direct
             ? unsupported_quality_message(requested_device, requested_quality_mode,
-                                          requested_resolution,
-                                          allow_unrestricted_quality_attempt)
+                                          requested_resolution, allow_unrestricted_quality_attempt)
             : std::nullopt;
     if (unsupported_quality.has_value()) {
         data->last_warning.clear();
@@ -1378,24 +1489,22 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data, requested_quality_mode, requested_resolution, cpu_quality_guardrail_active,
             artifact_path_for_backend(data->models_root, requested_device.backend,
                                       requested_resolution));
-        log_message("ensure_engine_for_quality",
-                    "event=quality_guardrail requested_backend=" +
-                        backend_label(requested_device.backend) + " requested_device=" +
-                        requested_device.name + " available_memory_mb=" +
-                        std::to_string(requested_device.available_memory_mb) +
-                        " requested_resolution=" + std::to_string(requested_resolution) +
-                        " detail=" + *unsupported_quality);
+        log_message(
+            "ensure_engine_for_quality",
+            "event=quality_guardrail requested_backend=" + backend_label(requested_device.backend) +
+                " requested_device=" + requested_device.name +
+                " available_memory_mb=" + std::to_string(requested_device.available_memory_mb) +
+                " requested_resolution=" + std::to_string(requested_resolution) +
+                " detail=" + *unsupported_quality);
         log_message("ensure_engine_for_quality", data->last_error);
         update_runtime_panel(data);
         log_quality_total("unsupported_quality", data->last_error);
         return false;
     }
-    auto selections = quality_artifact_candidates(data->models_root, requested_device.backend,
-                                                  effective_quality_mode, input_width, input_height,
-                                                  quantization_mode,
-                                                  requested_device.available_memory_mb,
-                                                  fallback_mode, coarse_resolution_override,
-                                                  allow_unrestricted_quality_attempt);
+    auto selections = quality_artifact_candidates(
+        data->models_root, requested_device.backend, effective_quality_mode, input_width,
+        input_height, quantization_mode, requested_device.available_memory_mb, fallback_mode,
+        coarse_resolution_override, allow_unrestricted_quality_attempt);
     const auto original_selections = selections;
     data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     if (!cpu_fallback_warning.empty()) {
@@ -1465,9 +1574,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     if (should_abort_quality_fallback_after_compile_failure(
             requested_device.backend, requested_quality_mode, cpu_quality_guardrail_active,
             selections.front())) {
-        if (auto cached_failure = cached_quality_compile_failure(data->quality_compile_failure_cache,
-                                                                 compile_cache_context,
-                                                                 selections.front());
+        if (auto cached_failure = cached_quality_compile_failure(
+                data->quality_compile_failure_cache, compile_cache_context, selections.front());
             cached_failure.has_value()) {
             data->last_warning.clear();
             data->last_error = cached_failure->error_message;
@@ -1508,7 +1616,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         const bool session_alive = data->use_runtime_server ? (data->runtime_client != nullptr &&
                                                                data->runtime_client->has_session())
                                                             : (data->engine != nullptr);
-        if (current_backend_matches && session_alive &&
+        const bool current_engine_matches = execution_engine_matches_request(
+            requested_execution_engine, effective_execution_engine(*data));
+        if (current_backend_matches && session_alive && current_engine_matches &&
             selection.executable_model_path == data->model_path &&
             selection.effective_resolution == data->active_resolution) {
             std::string runtime_warning = cpu_fallback_warning;
@@ -1519,6 +1629,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data->active_quality_mode = requested_quality_mode;
             data->requested_resolution = requested_resolution;
             data->active_resolution = selection.effective_resolution;
+            data->requested_execution_engine = requested_execution_engine;
+            data->active_execution_engine = effective_execution_engine(*data);
             data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
             data->last_warning = runtime_warning;
             data->last_error.clear();
@@ -1542,7 +1654,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             set_string_param_value(data->runtime_timings_param, "Loading...");
             auto prepare_result = data->runtime_client->prepare_session(
                 build_prepare_request(requested_device, selection, requested_quality_mode,
-                                      allow_cpu_fallback),
+                                      requested_execution_engine, allow_cpu_fallback),
                 [&](const StageTiming& timing) {
                     log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
                                      requested_device, selection.executable_model_path,
@@ -1596,7 +1708,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                      requested_device, selection.executable_model_path,
                                      requested_resolution, selection.effective_resolution, timing);
                 },
-                ofx_engine_options(requested_device, allow_cpu_fallback));
+                ofx_engine_options(requested_device, requested_execution_engine,
+                                   allow_cpu_fallback));
             if (!engine_result) {
                 data->last_error = "Failed to create engine for " +
                                    std::string(quality_mode_label(requested_quality_mode)) +
@@ -1671,8 +1784,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             log_message("ensure_engine_for_quality", data->last_error);
             if (should_record_quality_backend_mismatch(requested_device.backend)) {
                 record_quality_compile_failure(data->quality_compile_failure_cache,
-                                               compile_cache_context, selection,
-                                               data->last_error);
+                                               compile_cache_context, selection, data->last_error);
             }
             if (should_abort_quality_fallback_after_compile_failure(
                     requested_device.backend, requested_quality_mode, cpu_quality_guardrail_active,
@@ -1690,6 +1802,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 
         data->device = effective_device;
         data->model_path = selection.executable_model_path;
+        data->requested_execution_engine = requested_execution_engine;
+        data->active_execution_engine = effective_execution_engine(*data);
         data->cached_result_valid = false;
         data->cached_signature = 0;
         data->cached_signature_valid = false;
@@ -1826,6 +1940,10 @@ void set_param_enabled(OfxParamHandle param, bool enabled) {
 }
 
 void sync_dependent_params(InstanceData* data) {
+    if (data == nullptr) {
+        return;
+    }
+
     int tiling_enabled = 0;
     if (data->enable_tiling_param) {
         g_suites.parameter->paramGetValue(data->enable_tiling_param, &tiling_enabled);
@@ -1844,6 +1962,8 @@ void sync_dependent_params(InstanceData* data) {
     }
     set_param_enabled(data->edge_erode_param, source_passthrough != 0);
     set_param_enabled(data->edge_blur_param, source_passthrough != 0);
+
+    set_param_enabled(data->execution_engine_param, execution_engine_selector_enabled(*data));
 }
 
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args) {
@@ -1902,7 +2022,17 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                     data->runtime_client->set_prepare_timeout_ms(prepare_t * 1000);
                 }
             }
-            if (changed_param == kParamQuantizationMode || changed_param == kParamAllowCpuFallback) {
+            if (changed_param == kParamExecutionEngine || changed_param == kParamAllowCpuFallback) {
+                data->requested_execution_engine = selected_execution_engine(data);
+                invalidate_active_runtime_session(
+                    data, "event=runtime_reconfigure param=" + changed_param);
+                data->model_path.clear();
+                data->active_resolution = 0;
+                sync_runtime_panel_state_from_active_engine(data);
+                data->runtime_panel_dirty = true;
+            }
+            if (changed_param == kParamQuantizationMode ||
+                changed_param == kParamAllowCpuFallback) {
                 int quant = 0;
                 if (data->quantization_mode_param &&
                     g_suites.parameter->paramGetValue(data->quantization_mode_param, &quant) ==
@@ -1912,9 +2042,8 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                         requested_device = data->device;
                     }
                     const bool allow_cpu_fallback = allow_cpu_fallback_requested(data);
-                    if (auto unsupported_quantization =
-                            unsupported_quantization_message(requested_device.backend, quant,
-                                                             allow_cpu_fallback);
+                    if (auto unsupported_quantization = unsupported_quantization_message(
+                            requested_device.backend, quant, allow_cpu_fallback);
                         unsupported_quantization.has_value()) {
                         data->last_error = *unsupported_quantization;
                         data->quantization_error_active = true;

@@ -3,8 +3,8 @@
 #include <limits>
 #include <vector>
 
-#include "core/inference_session.hpp"
 #include "core/inference_output_validation.hpp"
+#include "core/inference_session.hpp"
 #include "core/inference_session_metadata.hpp"
 
 using namespace corridorkey;
@@ -59,7 +59,8 @@ TEST_CASE("Model resolution inference from input shape", "[unit][inference][regr
     REQUIRE_FALSE(core::infer_model_resolution({1, 4, 2048}).has_value());
 }
 
-TEST_CASE("Model resolution inference falls back to artifact filename", "[unit][inference][regression]") {
+TEST_CASE("Model resolution inference falls back to artifact filename",
+          "[unit][inference][regression]") {
     REQUIRE(core::infer_model_resolution_from_path("corridorkey_fp16_1536.onnx") ==
             std::optional<int>(1536));
     REQUIRE(core::infer_model_resolution_from_path("corridorkey_fp16_1536_ctx.onnx") ==

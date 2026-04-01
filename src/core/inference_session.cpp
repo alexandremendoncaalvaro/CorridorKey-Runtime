@@ -25,11 +25,11 @@
 #include <fstream>
 #include <mutex>
 
+#include "coarse_to_fine_policy.hpp"
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
-#include "coarse_to_fine_policy.hpp"
 #include "inference_output_validation.hpp"
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
@@ -120,6 +120,32 @@ void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, 
 
 constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
 
+bool should_use_max_performance_engine(ExecutionEngine engine, Backend backend) {
+    return engine == ExecutionEngine::MaxPerformance && backend == Backend::TensorRT;
+}
+
+Result<ExecutionEngine> resolve_execution_engine(ExecutionEngine requested, Backend backend) {
+    switch (requested) {
+        case ExecutionEngine::Auto:
+            return ExecutionEngine::Official;
+        case ExecutionEngine::Official:
+            return ExecutionEngine::Official;
+        case ExecutionEngine::MaxPerformance:
+            if (backend == Backend::TensorRT) {
+                return ExecutionEngine::MaxPerformance;
+            }
+            return ExecutionEngine::Official;
+        case ExecutionEngine::TorchTensorRt:
+            return Unexpected(Error{
+                ErrorCode::HardwareNotSupported,
+                "Torch-TensorRT is not packaged as a zero-friction C++ runtime in this build. "
+                "Use the official ORT TensorRT engine instead.",
+            });
+        default:
+            return ExecutionEngine::Official;
+    }
+}
+
 #ifdef _WIN32
 constexpr const char* kTensorRtRtxExecutionProvider = "NvTensorRTRTXExecutionProvider";
 using OrtDmlAppendExecutionProviderFn = OrtStatus*(ORT_API_CALL*)(OrtSessionOptions*, int);
@@ -131,12 +157,14 @@ constexpr const char* kDumpSubgraphs = onnxruntime::nv::provider_option_names::k
 constexpr const char* kDetailedBuildLog = onnxruntime::nv::provider_option_names::kDetailedBuildLog;
 constexpr const char* kRuntimeCacheFile = onnxruntime::nv::provider_option_names::kRuntimeCacheFile;
 constexpr const char* kMaxWorkspaceSize = onnxruntime::nv::provider_option_names::kMaxWorkspaceSize;
+constexpr const char* kCudaGraphEnable = onnxruntime::nv::provider_option_names::kCudaGraphEnable;
 #else
 constexpr const char* kDeviceId = "device_id";
 constexpr const char* kDumpSubgraphs = "nv_dump_subgraphs";
 constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
 constexpr const char* kRuntimeCacheFile = "nv_runtime_cache_path";
 constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
+constexpr const char* kCudaGraphEnable = "enable_cuda_graph";
 #endif
 }  // namespace tensorrt_rtx_option_names
 
@@ -222,7 +250,8 @@ int extract_model_resolution(const std::filesystem::path& model_path) {
 }
 
 void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options,
-                                            const std::filesystem::path& model_path) {
+                                            const std::filesystem::path& model_path,
+                                            ExecutionEngine execution_engine) {
     debug_log("Configuring TensorRT RTX execution provider");
 
     int model_res = extract_model_resolution(model_path);
@@ -231,9 +260,9 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
     // Workspace scales proportionally with spatial resolution. TensorRT uses workspace as an upper
     // bound for tactic discovery during engine build; it only allocates what each tactic actually
     // needs at runtime.
-    constexpr const char* kWorkspace2GB = "2147483648";   // 512, 768, 1024
-    constexpr const char* kWorkspace4GB = "4294967296";   // 1536
-    constexpr const char* kWorkspace8GB = "8589934592";   // 2048
+    constexpr const char* kWorkspace2GB = "2147483648";  // 512, 768, 1024
+    constexpr const char* kWorkspace4GB = "4294967296";  // 1536
+    constexpr const char* kWorkspace8GB = "8589934592";  // 2048
     constexpr const char* kProfileMinShapes = "nv_profile_min_shapes";
     constexpr const char* kProfileOptShapes = "nv_profile_opt_shapes";
     constexpr const char* kProfileMaxShapes = "nv_profile_max_shapes";
@@ -248,6 +277,10 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
         {tensorrt_rtx_option_names::kDeviceId, "0"},
         {tensorrt_rtx_option_names::kMaxWorkspaceSize, workspace_size},
     };
+    if (should_use_max_performance_engine(execution_engine, Backend::TensorRT)) {
+        provider_options.emplace(tensorrt_rtx_option_names::kCudaGraphEnable, "1");
+        debug_log("TensorRT RTX CUDA graph enabled for max-performance engine");
+    }
 
     const std::string profile_shapes =
         "input_rgb_hint:1x4x" + std::to_string(model_res) + "x" + std::to_string(model_res);
@@ -365,6 +398,38 @@ void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weig
     }
 }
 
+void convert_fp16_to_fp32(const Ort::Float16_t* source, std::vector<float>& destination,
+                          size_t element_count) {
+    destination.resize(element_count);
+    common::parallel_for_rows(
+        static_cast<int>(element_count),
+        [&](int begin, int end) {
+            for (int index = begin; index < end; ++index) {
+                destination[static_cast<size_t>(index)] =
+                    source[static_cast<size_t>(index)].ToFloat();
+            }
+        },
+        4096);
+}
+
+void from_planar_parallel(const float* source, Image destination) {
+    const size_t channel_stride =
+        static_cast<size_t>(destination.height) * static_cast<size_t>(destination.width);
+    common::parallel_for_rows(destination.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            const size_t row_offset =
+                static_cast<size_t>(y) * static_cast<size_t>(destination.width);
+            for (int x = 0; x < destination.width; ++x) {
+                const size_t pixel_index = row_offset + static_cast<size_t>(x);
+                for (int channel = 0; channel < destination.channels; ++channel) {
+                    destination(y, x, channel) =
+                        source[static_cast<size_t>(channel) * channel_stride + pixel_index];
+                }
+            }
+        }
+    });
+}
+
 }  // namespace
 
 InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {
@@ -434,7 +499,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         case Backend::TensorRT: {
 #ifdef _WIN32
             debug_log("Adding TensorRT RTX execution provider");
-            append_tensorrt_rtx_execution_provider(m_session_options, model_path);
+            append_tensorrt_rtx_execution_provider(m_session_options, model_path,
+                                                   options.execution_engine);
             debug_log("TensorRT RTX execution provider added");
 #else
             debug_log("Adding TensorRT execution provider");
@@ -474,6 +540,13 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 void InferenceSession::extract_metadata(const std::filesystem::path& model_path) {
     debug_log("Extracting model metadata");
     Ort::AllocatorWithDefaultOptions allocator;
+    m_input_node_names.clear();
+    m_output_node_names.clear();
+    m_input_node_names_ptr.clear();
+    m_output_node_names_ptr.clear();
+    m_input_node_dims.clear();
+    m_output_node_dims.clear();
+    m_output_element_types.clear();
 
     size_t num_input_nodes = m_session.GetInputCount();
     debug_log("Model has " + std::to_string(num_input_nodes) + " inputs");
@@ -512,25 +585,27 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
         model_path, m_device.backend,
         m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
+    const size_t num_output_nodes = m_session.GetOutputCount();
     if (use_packaged_output_contract) {
         debug_log("Using packaged CorridorKey output contract");
         m_output_node_names.emplace_back(core::k_corridorkey_alpha_output_name);
         m_output_node_names.emplace_back(core::k_corridorkey_fg_output_name);
     } else {
-        fprintf(stderr, "[InferenceSession] Getting output count\n");
-        size_t num_output_nodes = m_session.GetOutputCount();
-        fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
-
         for (size_t i = 0; i < num_output_nodes; i++) {
-            fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
             auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
             m_output_node_names.push_back(output_name_ptr.get());
         }
     }
+    for (size_t i = 0; i < num_output_nodes; ++i) {
+        auto type_info = m_session.GetOutputTypeInfo(i);
+        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        m_output_node_dims.push_back(tensor_info.GetShape());
+        m_output_element_types.push_back(tensor_info.GetElementType());
+    }
     for (const auto& name : m_output_node_names) {
         m_output_node_names_ptr.push_back(name.c_str());
     }
-    fprintf(stderr, "[InferenceSession] Metadata extraction complete\n");
+    debug_log("Metadata extraction complete");
 }
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
@@ -549,6 +624,13 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         fprintf(stderr, "[InferenceSession] Allocating InferenceSession object\n");
         auto session_ptr =
             std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
+        auto execution_engine =
+            resolve_execution_engine(options.execution_engine, requested_device.backend);
+        if (!execution_engine) {
+            return Unexpected(execution_engine.error());
+        }
+        session_ptr->m_execution_engine = *execution_engine;
+        options.execution_engine = *execution_engine;
         if (requested_device.backend == Backend::MLX) {
             auto mlx_session_res = core::MlxSession::create(model_path, requested_device);
             if (!mlx_session_res) {
@@ -590,8 +672,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         }
 
         fprintf(stderr, "[InferenceSession] Configuring session options\n");
-        session_ptr->configure_session_options(using_optimized_model_cache, options,
-                                               model_path);
+        session_ptr->configure_session_options(using_optimized_model_cache, options, model_path);
         fprintf(stderr, "[InferenceSession] Session options configured\n");
 
         if (!using_optimized_model_cache && optimized_model_path.has_value()) {
@@ -629,6 +710,13 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 try {
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
+                    auto execution_engine = resolve_execution_engine(options.execution_engine,
+                                                                     requested_device.backend);
+                    if (!execution_engine) {
+                        return Unexpected(execution_engine.error());
+                    }
+                    session_ptr->m_execution_engine = *execution_engine;
+                    options.execution_engine = *execution_engine;
                     session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
                     session_ptr->configure_session_options(false, options, model_path);
 #ifdef _WIN32
@@ -955,12 +1043,27 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     // 5. Composite on checker (linear space), then convert to sRGB
     result.composite = ImageBuffer(w, h, 4);
     Image comp = result.composite.view();
+    const float bg_dark = lut.to_linear(0.15F);
+    const float bg_light = lut.to_linear(0.55F);
     common::measure_stage(
         on_stage, "post_composite",
         [&]() {
-            std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
-            ColorUtils::composite_over_checker(comp);
-            ColorUtils::linear_to_srgb(comp);
+            common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+                for (int y = y_begin; y < y_end; ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        const float alpha = proc(y, x, 3);
+                        const bool use_dark_checker = ((y / 16) + (x / 16)) % 2 == 0;
+                        const float bg_value = use_dark_checker ? bg_dark : bg_light;
+                        comp(y, x, 0) =
+                            lut.to_srgb(proc(y, x, 0) * alpha + bg_value * (1.0F - alpha));
+                        comp(y, x, 1) =
+                            lut.to_srgb(proc(y, x, 1) * alpha + bg_value * (1.0F - alpha));
+                        comp(y, x, 2) =
+                            lut.to_srgb(proc(y, x, 2) * alpha + bg_value * (1.0F - alpha));
+                        comp(y, x, 3) = 1.0F;
+                    }
+                }
+            });
         },
         1);
 }
@@ -1090,6 +1193,19 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
         bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
         std::vector<Ort::Value> input_tensors;
+        auto ensure_resize_buffer = [&](std::size_t index, int width, int height,
+                                        int channels) -> Image {
+            if (m_resize_pool.size() <= index) {
+                m_resize_pool.resize(index + 1);
+            }
+            Image current = m_resize_pool[index].view();
+            if (current.width != width || current.height != height ||
+                current.channels != channels) {
+                m_resize_pool[index] = ImageBuffer(width, height, channels);
+                current = m_resize_pool[index].view();
+            }
+            return current;
+        };
 
         if (is_concatenated) {
             auto shape = m_input_node_dims[0];
@@ -1105,45 +1221,35 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             float* dst_base = m_planar_pool[0].view().data.data();
             size_t image_stride = 4 * model_h * model_w;
             size_t channel_stride = model_h * model_w;
-
             common::measure_stage(
                 on_stage, "batch_prepare_inputs",
                 [&]() {
                     for (size_t b = 0; b < batch_size; ++b) {
-                        if (m_resize_pool.size() <= b * 2 + 1) {
-                            m_resize_pool.resize(b * 2 + 2);
-                        }
-                        Image cur_rgb = m_resize_pool[b * 2].view();
-                        if (cur_rgb.width != model_w || cur_rgb.height != model_h ||
-                            cur_rgb.channels != 3) {
-                            m_resize_pool[b * 2] = ImageBuffer(static_cast<int>(model_w),
-                                                               static_cast<int>(model_h), 3);
-                            cur_rgb = m_resize_pool[b * 2].view();
-                        }
+                        Image cur_rgb = ensure_resize_buffer(b * 2, static_cast<int>(model_w),
+                                                             static_cast<int>(model_h), 3);
                         ColorUtils::resize_area_into(rgbs[b], cur_rgb, m_color_utils_state);
 
-                        Image cur_hint = m_resize_pool[b * 2 + 1].view();
-                        if (cur_hint.width != model_w || cur_hint.height != model_h ||
-                            cur_hint.channels != 1) {
-                            m_resize_pool[b * 2 + 1] = ImageBuffer(static_cast<int>(model_w),
-                                                                   static_cast<int>(model_h), 1);
-                            cur_hint = m_resize_pool[b * 2 + 1].view();
-                        }
+                        Image cur_hint = ensure_resize_buffer(b * 2 + 1, static_cast<int>(model_w),
+                                                              static_cast<int>(model_h), 1);
                         ColorUtils::resize_area_into(alpha_hints[b], cur_hint, m_color_utils_state);
                         float* dst = dst_base + (b * image_stride);
 
-                        for (int y = 0; y < model_h; ++y) {
-                            for (int x = 0; x < model_w; ++x) {
-                                size_t idx = y * model_w + x;
-                                dst[0 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
-                                dst[1 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
-                                dst[2 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
-                                dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
+                        common::parallel_for_rows(static_cast<int>(model_h), [&](int y_begin,
+                                                                                 int y_end) {
+                            for (int y = y_begin; y < y_end; ++y) {
+                                for (int x = 0; x < model_w; ++x) {
+                                    size_t idx =
+                                        static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
+                                    dst[0 * channel_stride + idx] =
+                                        (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
+                                    dst[1 * channel_stride + idx] =
+                                        (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
+                                    dst[2 * channel_stride + idx] =
+                                        (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
+                                    dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
+                                }
                             }
-                        }
+                        });
                     }
                 },
                 batch_size);
@@ -1201,17 +1307,13 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         size_t alpha_image_stride = alpha_shape[1] * alpha_shape[2] * alpha_shape[3];
 
         float* alpha_ptr = nullptr;
-        std::vector<float> alpha_fp32_conv;
 
         if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
             debug_log("Converting alpha output from FP16 to FP32");
             const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
             size_t total_alpha_elements = batch_size * alpha_image_stride;
-            alpha_fp32_conv.resize(total_alpha_elements);
-            for (size_t i = 0; i < total_alpha_elements; ++i) {
-                alpha_fp32_conv[i] = alpha_fp16[i].ToFloat();
-            }
-            alpha_ptr = alpha_fp32_conv.data();
+            convert_fp16_to_fp32(alpha_fp16, m_alpha_output_scratch, total_alpha_elements);
+            alpha_ptr = m_alpha_output_scratch.data();
         } else {
             alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
         }
@@ -1227,7 +1329,6 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         }
 
         float* fg_ptr = nullptr;
-        std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
         size_t fg_image_stride = 0;
 
@@ -1242,11 +1343,8 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 debug_log("Converting FG output from FP16 to FP32");
                 const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
                 size_t total_fg_elements = batch_size * fg_image_stride;
-                fg_fp32_conv.resize(total_fg_elements);
-                for (size_t i = 0; i < total_fg_elements; ++i) {
-                    fg_fp32_conv[i] = fg_fp16[i].ToFloat();
-                }
-                fg_ptr = fg_fp32_conv.data();
+                convert_fp16_to_fp32(fg_fp16, m_fg_output_scratch, total_fg_elements);
+                fg_ptr = m_fg_output_scratch.data();
             } else {
                 fg_ptr = output_tensors[1].GetTensorMutableData<float>();
             }
@@ -1270,28 +1368,31 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                     FrameResult& result = batch_results[b];
                     bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
 
-                    ImageBuffer model_alpha((int)alpha_shape[3], (int)alpha_shape[2],
-                                            (int)alpha_shape[1]);
-                    ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride),
-                                            model_alpha.view());
-
-                    result.alpha =
-                        use_lanczos
-                            ? ColorUtils::resize_lanczos(model_alpha.view(), rgbs[b].width,
-                                                         rgbs[b].height, m_color_utils_state)
-                            : ColorUtils::resize(model_alpha.view(), rgbs[b].width, rgbs[b].height);
+                    result.alpha = ImageBuffer(rgbs[b].width, rgbs[b].height, 1);
+                    Image model_alpha = ensure_resize_buffer(
+                        batch_size * 2 + b * 2, static_cast<int>(alpha_shape[3]),
+                        static_cast<int>(alpha_shape[2]), static_cast<int>(alpha_shape[1]));
+                    from_planar_parallel(alpha_ptr + (b * alpha_image_stride), model_alpha);
+                    if (use_lanczos) {
+                        ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
+                                                        m_color_utils_state);
+                    } else {
+                        ColorUtils::resize_into(model_alpha, result.alpha.view());
+                    }
                     ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
 
                     if (fg_ptr != nullptr) {
-                        ImageBuffer model_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
-                        ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), model_fg.view());
-
-                        result.foreground =
-                            use_lanczos
-                                ? ColorUtils::resize_lanczos(model_fg.view(), rgbs[b].width,
-                                                             rgbs[b].height, m_color_utils_state)
-                                : ColorUtils::resize(model_fg.view(), rgbs[b].width,
-                                                     rgbs[b].height);
+                        result.foreground = ImageBuffer(rgbs[b].width, rgbs[b].height, 3);
+                        Image model_fg = ensure_resize_buffer(
+                            batch_size * 2 + b * 2 + 1, static_cast<int>(fg_shape[3]),
+                            static_cast<int>(fg_shape[2]), static_cast<int>(fg_shape[1]));
+                        from_planar_parallel(fg_ptr + (b * fg_image_stride), model_fg);
+                        if (use_lanczos) {
+                            ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
+                                                            m_color_utils_state);
+                        } else {
+                            ColorUtils::resize_into(model_fg, result.foreground.view());
+                        }
                     }
                 }
             },
@@ -1389,18 +1490,20 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
                 ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
 
-                for (int y = 0; y < model_h; ++y) {
-                    for (int x = 0; x < model_w; ++x) {
-                        size_t idx = static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
-                        planar_ptr[0 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 0) - 0.485f) / 0.229f;
-                        planar_ptr[1 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 1) - 0.456f) / 0.224f;
-                        planar_ptr[2 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 2) - 0.406f) / 0.225f;
-                        planar_ptr[3 * channel_stride + idx] = prepared_hint(y, x, 0);
+                common::parallel_for_rows(static_cast<int>(model_h), [&](int y_begin, int y_end) {
+                    for (int y = y_begin; y < y_end; ++y) {
+                        for (int x = 0; x < model_w; ++x) {
+                            size_t idx = static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
+                            planar_ptr[0 * channel_stride + idx] =
+                                (prepared_rgb(y, x, 0) - 0.485f) / 0.229f;
+                            planar_ptr[1 * channel_stride + idx] =
+                                (prepared_rgb(y, x, 1) - 0.456f) / 0.224f;
+                            planar_ptr[2 * channel_stride + idx] =
+                                (prepared_rgb(y, x, 2) - 0.406f) / 0.225f;
+                            planar_ptr[3 * channel_stride + idx] = prepared_hint(y, x, 0);
+                        }
                     }
-                }
+                });
             },
             1);
 
@@ -1443,14 +1546,10 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                                     static_cast<size_t>(alpha_shape[3]);
 
         float* alpha_ptr = nullptr;
-        std::vector<float> alpha_fp32_conv;
         if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
             const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
-            alpha_fp32_conv.resize(alpha_image_stride);
-            for (size_t index = 0; index < alpha_image_stride; ++index) {
-                alpha_fp32_conv[index] = alpha_fp16[index].ToFloat();
-            }
-            alpha_ptr = alpha_fp32_conv.data();
+            convert_fp16_to_fp32(alpha_fp16, m_alpha_output_scratch, alpha_image_stride);
+            alpha_ptr = m_alpha_output_scratch.data();
         } else {
             alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
         }
@@ -1465,7 +1564,6 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         }
 
         float* fg_ptr = nullptr;
-        std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
         size_t fg_image_stride = 0;
         if (output_tensors.size() > 1) {
@@ -1476,11 +1574,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                               static_cast<size_t>(fg_shape[3]);
             if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
                 const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
-                fg_fp32_conv.resize(fg_image_stride);
-                for (size_t index = 0; index < fg_image_stride; ++index) {
-                    fg_fp32_conv[index] = fg_fp16[index].ToFloat();
-                }
-                fg_ptr = fg_fp32_conv.data();
+                convert_fp16_to_fp32(fg_fp16, m_fg_output_scratch, fg_image_stride);
+                fg_ptr = m_fg_output_scratch.data();
             } else {
                 fg_ptr = output_tensors[1].GetTensorMutableData<float>();
             }
@@ -1508,7 +1603,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         common::measure_stage(
             on_stage, "frame_extract_outputs",
             [&]() {
-                ColorUtils::from_planar(alpha_ptr, model_alpha);
+                from_planar_parallel(alpha_ptr, model_alpha);
                 if (use_lanczos) {
                     ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
                                                     m_color_utils_state);
@@ -1521,7 +1616,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                     Image model_fg = ensure_resize_buffer(3, static_cast<int>(fg_shape[3]),
                                                           static_cast<int>(fg_shape[2]),
                                                           static_cast<int>(fg_shape[1]));
-                    ColorUtils::from_planar(fg_ptr, model_fg);
+                    from_planar_parallel(fg_ptr, model_fg);
                     if (use_lanczos) {
                         ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
                                                         m_color_utils_state);

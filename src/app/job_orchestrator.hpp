@@ -32,6 +32,7 @@ struct JobRequest {
     InferenceParams params;
     VideoOutputOptions video_output;
     DeviceInfo device;
+    EngineCreateOptions engine_options = {};
 };
 
 /**

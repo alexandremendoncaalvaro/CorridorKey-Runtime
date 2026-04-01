@@ -20,8 +20,8 @@
 #include "../app/model_compiler.hpp"
 #include "../app/ofx_runtime_service.hpp"
 #include "../app/runtime_contracts.hpp"
-#include "../common/local_ipc.hpp"
 #include "../common/json_utils.hpp"
+#include "../common/local_ipc.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
@@ -47,6 +47,20 @@ std::string backend_to_string_local(Backend backend) {
             return "dml";
         case Backend::MLX:
             return "mlx";
+        default:
+            return "auto";
+    }
+}
+
+std::string execution_engine_to_string_local(ExecutionEngine engine) {
+    switch (engine) {
+        case ExecutionEngine::Official:
+            return "official";
+        case ExecutionEngine::MaxPerformance:
+            return "max-performance";
+        case ExecutionEngine::TorchTensorRt:
+            return "torch-tensorrt";
+        case ExecutionEngine::Auto:
         default:
             return "auto";
     }
@@ -87,6 +101,7 @@ nlohmann::json event_to_json(const JobEvent& event) {
     if (event.backend != Backend::Auto) {
         json["backend"] = backend_to_string_local(event.backend);
     }
+    json["engine"] = execution_engine_to_string_local(event.engine);
     if (!event.message.empty()) {
         json["message"] = event.message;
     }
@@ -235,6 +250,27 @@ Result<PrecisionPreference> parse_precision_preference(const std::string& value)
     }};
 }
 
+Result<ExecutionEngine> parse_execution_engine(const std::string& value) {
+    const std::string normalized = normalized_lower(value);
+    if (normalized == "auto") {
+        return ExecutionEngine::Auto;
+    }
+    if (normalized == "official" || normalized == "ort") {
+        return ExecutionEngine::Official;
+    }
+    if (normalized == "max-performance" || normalized == "max_performance" || normalized == "max") {
+        return ExecutionEngine::MaxPerformance;
+    }
+    if (normalized == "torch-tensorrt" || normalized == "torchtrt") {
+        return ExecutionEngine::TorchTensorRt;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --engine value. Use 'auto', 'official', 'max-performance', or "
+        "'torch-tensorrt'.",
+    }};
+}
+
 std::string precision_preference_to_string(PrecisionPreference preference) {
     switch (preference) {
         case PrecisionPreference::FP16:
@@ -326,8 +362,7 @@ InferenceParams build_inference_params(const cxxopts::ParseResult& result,
         params.quality_fallback_mode = *fallback_mode;
     }
     if (!base_params.has_value() || option_present(argc, argv, {"--refinement-mode"})) {
-        auto refinement_mode =
-            parse_refinement_mode(result["refinement-mode"].as<std::string>());
+        auto refinement_mode = parse_refinement_mode(result["refinement-mode"].as<std::string>());
         if (!refinement_mode) {
             throw std::runtime_error(refinement_mode.error().message);
         }
@@ -428,8 +463,8 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
         resolved.params = build_inference_params(result, std::nullopt, argc, argv);
         if (resolved.params.requested_quality_resolution <= 0) {
             resolved.params.requested_quality_resolution =
-                app::packaged_model_resolution(result["model"].as<std::string>()).value_or(
-                    resolved.params.target_resolution);
+                app::packaged_model_resolution(result["model"].as<std::string>())
+                    .value_or(resolved.params.target_resolution);
         }
         auto explicit_model =
             app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
@@ -453,10 +488,9 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
         }
 
         resolved.model_path = resolved.models_dir / selected_model->filename;
-        const int requested_resolution =
-            resolved.params.requested_quality_resolution > 0
-                ? resolved.params.requested_quality_resolution
-                : selected_model->resolution;
+        const int requested_resolution = resolved.params.requested_quality_resolution > 0
+                                             ? resolved.params.requested_quality_resolution
+                                             : selected_model->resolution;
         resolved.params.requested_quality_resolution = requested_resolution;
         auto effective_model =
             app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
@@ -507,12 +541,18 @@ void print_benchmark_artifact_summary(const nlohmann::json& report) {
         std::cout << "Artifact: " << report["artifact"].get<std::string>() << "\n";
     }
     if (report.contains("requested_precision")) {
-        std::cout << "Requested precision: "
-                  << report["requested_precision"].get<std::string>() << "\n";
+        std::cout << "Requested precision: " << report["requested_precision"].get<std::string>()
+                  << "\n";
     }
     if (report.contains("effective_precision")) {
-        std::cout << "Effective precision: "
-                  << report["effective_precision"].get<std::string>() << "\n";
+        std::cout << "Effective precision: " << report["effective_precision"].get<std::string>()
+                  << "\n";
+    }
+    if (report.contains("requested_engine")) {
+        std::cout << "Requested engine: " << report["requested_engine"].get<std::string>() << "\n";
+    }
+    if (report.contains("effective_engine")) {
+        std::cout << "Effective engine: " << report["effective_engine"].get<std::string>() << "\n";
     }
     if (report.contains("requested_resolution") && report.contains("effective_resolution")) {
         std::cout << "Requested resolution: " << report["requested_resolution"].get<int>() << "\n"
@@ -606,6 +646,10 @@ int main(int argc, char* argv[]) {
         cxxopts::value<std::string>()->default_value("auto"))(
         "precision", "Runtime precision preference for process/benchmark (auto, fp16, int8)",
         cxxopts::value<std::string>()->default_value("auto"))(
+        "engine",
+        "Execution engine policy for process/benchmark (auto, official, max-performance, "
+        "torch-tensorrt)",
+        cxxopts::value<std::string>()->default_value("auto"))(
         "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
         cxxopts::value<std::string>()->default_value("0"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
@@ -615,10 +659,10 @@ int main(int argc, char* argv[]) {
         cxxopts::value<int>())("video-encode", "Video output encoding (lossless, balanced)",
                                cxxopts::value<std::string>()->default_value("lossless"))(
         "variant", "ONNX model variant for download only (int8, fp16, fp32)",
-        cxxopts::value<std::string>())(
-        "batch-size", "Number of frames to process in a single GPU call",
-        cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
-                                                   cxxopts::value<float>()->default_value("0.5"))(
+        cxxopts::value<std::string>())("batch-size",
+                                       "Number of frames to process in a single GPU call",
+                                       cxxopts::value<int>()->default_value("1"))(
+        "despill", "Green spill removal (0.0-1.0)", cxxopts::value<float>()->default_value("0.5"))(
         "despeckle", "Enable morphological cleanup")("tiled", "Enable tiling for high-res (4K+)")(
         "json", "Output results in JSON format")("v,version", "Print version")(
         "h,help", "Print detailed help");
@@ -669,9 +713,9 @@ int main(int argc, char* argv[]) {
 
         if (result.count("version")) {
             if (use_json) {
-                std::cout
-                    << common::safe_json_dump(nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}))
-                    << std::endl;
+                std::cout << common::safe_json_dump(
+                                 nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}))
+                          << std::endl;
             } else {
                 std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << std::endl;
             }
@@ -861,12 +905,18 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: " << resolved.error().message << std::endl;
                 return 1;
             }
+            auto execution_engine = parse_execution_engine(result["engine"].as<std::string>());
+            if (!execution_engine) {
+                std::cerr << "Error: " << execution_engine.error().message << std::endl;
+                return 1;
+            }
 
             JobRequest benchmark_request;
             benchmark_request.model_path = resolved->model_path;
             benchmark_request.device = device;
             benchmark_request.params = resolved->params;
             benchmark_request.video_output = *video_output_options_res;
+            benchmark_request.engine_options.execution_engine = *execution_engine;
             if (!input_path.empty()) {
                 benchmark_request.input_path = input_path;
             }
@@ -895,8 +945,13 @@ int main(int argc, char* argv[]) {
                 if (resolved->preset.has_value()) {
                     std::cout << "Preset: " << resolved->preset->name << "\n";
                 }
+                std::cout << "Requested engine: "
+                          << execution_engine_to_string_local(
+                                 benchmark_request.engine_options.execution_engine)
+                          << "\n";
                 std::cout << "Requested precision: "
-                          << precision_preference_to_string(benchmark_request.params.precision_preference)
+                          << precision_preference_to_string(
+                                 benchmark_request.params.precision_preference)
                           << "\n";
                 std::cout << "Requested device: " << report["requested_device"].get<std::string>()
                           << "\n"
@@ -1038,6 +1093,11 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: " << resolved.error().message << std::endl;
                 return 1;
             }
+            auto execution_engine = parse_execution_engine(result["engine"].as<std::string>());
+            if (!execution_engine) {
+                std::cerr << "Error: " << execution_engine.error().message << std::endl;
+                return 1;
+            }
             if (output_path.empty()) {
                 auto default_output =
                     default_output_path_for_input(input_path, *video_output_options_res);
@@ -1058,6 +1118,7 @@ int main(int argc, char* argv[]) {
             req.params = resolved->params;
             req.video_output = *video_output_options_res;
             req.device = device;
+            req.engine_options.execution_engine = *execution_engine;
 
             if (!use_json) {
                 std::cout << "Processing setup:\n"
@@ -1076,6 +1137,9 @@ int main(int argc, char* argv[]) {
                 if (resolved->preset.has_value()) {
                     std::cout << " - Preset: " << resolved->preset->name << "\n";
                 }
+                std::cout << " - Engine: "
+                          << execution_engine_to_string_local(req.engine_options.execution_engine)
+                          << "\n";
                 std::cout << " - Precision: "
                           << precision_preference_to_string(req.params.precision_preference)
                           << "\n";
@@ -1116,7 +1180,9 @@ int main(int argc, char* argv[]) {
             } else {
                 events = [](const JobEvent& event) -> bool {
                     if (event.type == JobEventType::BackendSelected) {
-                        std::cout << "Selected backend: " << backend_to_string_local(event.backend);
+                        std::cout << "Selected backend: " << backend_to_string_local(event.backend)
+                                  << " | engine: "
+                                  << execution_engine_to_string_local(event.engine);
                         if (!event.message.empty()) {
                             std::cout << " (" << event.message << ")";
                         }

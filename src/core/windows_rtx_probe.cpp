@@ -161,8 +161,7 @@ std::optional<LoadedCudaDriverApi> load_cuda_driver_api() {
     }
 
     api.cu_init = load_cuda_symbol<CuInitFn>(api.module, "cuInit");
-    api.cu_device_get_count =
-        load_cuda_symbol<CuDeviceGetCountFn>(api.module, "cuDeviceGetCount");
+    api.cu_device_get_count = load_cuda_symbol<CuDeviceGetCountFn>(api.module, "cuDeviceGetCount");
     api.cu_device_get = load_cuda_symbol<CuDeviceGetFn>(api.module, "cuDeviceGet");
     api.cu_device_get_attribute =
         load_cuda_symbol<CuDeviceGetAttributeFn>(api.module, "cuDeviceGetAttribute");
@@ -273,7 +272,8 @@ bool directml_provider_available() {
 
 bool winml_provider_available() {
 #if defined(_WIN32)
-    return provider_available("WinML") || provider_available(std::string(corridorkey::detail::providers::WINML));
+    return provider_available("WinML") ||
+           provider_available(std::string(corridorkey::detail::providers::WINML));
 #else
     return false;
 #endif
@@ -281,7 +281,8 @@ bool winml_provider_available() {
 
 bool openvino_provider_available() {
 #if defined(_WIN32)
-    return provider_available("OpenVINO") || provider_available(std::string(corridorkey::detail::providers::OPENVINO));
+    return provider_available("OpenVINO") ||
+           provider_available(std::string(corridorkey::detail::providers::OPENVINO));
 #else
     return false;
 #endif
@@ -337,8 +338,8 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
                 info.compute_capability_minor = cuda_device->compute_capability_minor;
                 info.tensorrt_rtx_available =
                     info.is_rtx && trt_available &&
-                    detail::compute_capability_supports_tensorrt_rtx(
-                        info.compute_capability_major, info.compute_capability_minor);
+                    detail::compute_capability_supports_tensorrt_rtx(info.compute_capability_major,
+                                                                     info.compute_capability_minor);
             }
         } else if (info.vendor_id == kIntelVendorId) {
             info.openvino_available = openvino_available;

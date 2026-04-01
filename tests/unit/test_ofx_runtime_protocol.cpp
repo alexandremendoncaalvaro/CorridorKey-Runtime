@@ -14,6 +14,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     prepare_request.requested_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
     prepare_request.engine_options.allow_cpu_fallback = false;
     prepare_request.engine_options.disable_cpu_ep_fallback = true;
+    prepare_request.engine_options.execution_engine = ExecutionEngine::MaxPerformance;
     prepare_request.requested_quality_mode = 2;
     prepare_request.requested_resolution = 1024;
     prepare_request.effective_resolution = 1024;
@@ -26,6 +27,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     CHECK(parsed_prepare->requested_device.backend == Backend::TensorRT);
     CHECK_FALSE(parsed_prepare->engine_options.allow_cpu_fallback);
     CHECK(parsed_prepare->engine_options.disable_cpu_ep_fallback);
+    CHECK(parsed_prepare->engine_options.execution_engine == ExecutionEngine::MaxPerformance);
 
     OfxRuntimeSessionSnapshot snapshot;
     snapshot.session_id = "session-1";
@@ -33,6 +35,8 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     snapshot.artifact_name = prepare_request.artifact_name;
     snapshot.requested_device = prepare_request.requested_device;
     snapshot.effective_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
+    snapshot.requested_engine = ExecutionEngine::MaxPerformance;
+    snapshot.effective_engine = ExecutionEngine::Official;
     snapshot.backend_fallback =
         BackendFallbackInfo{Backend::TensorRT, Backend::CPU, "GPU residency was not maintained"};
     snapshot.requested_quality_mode = prepare_request.requested_quality_mode;
@@ -50,6 +54,8 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     CHECK(parsed_snapshot->backend_fallback->requested_backend == Backend::TensorRT);
     CHECK(parsed_snapshot->backend_fallback->selected_backend == Backend::CPU);
     CHECK(parsed_snapshot->backend_fallback->reason == "GPU residency was not maintained");
+    CHECK(parsed_snapshot->requested_engine == ExecutionEngine::MaxPerformance);
+    CHECK(parsed_snapshot->effective_engine == ExecutionEngine::Official);
     CHECK(parsed_snapshot->ref_count == 2);
     CHECK(parsed_snapshot->reused_existing_session);
 
