@@ -13,7 +13,7 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.8.0
+    VERSION 0.9.1
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
@@ -77,6 +77,18 @@ set(CORRIDORKEY_MLX_PYTHON "" CACHE FILEPATH "Optional Python interpreter used t
 set(CORRIDORKEY_WINDOWS_ORT_ROOT "" CACHE PATH
     "Curated Windows ONNX Runtime root (vendor/onnxruntime-windows-rtx or vendor/onnxruntime-windows-dml)")
 set(CORRIDORKEY_ORT_RUNTIME_DIR "" CACHE INTERNAL "Resolved ONNX Runtime DLL directory")
+option(CORRIDORKEY_ENABLE_TORCH_TENSORRT
+    "Enable optional Torch-TensorRT runtime support on Windows RTX" ON)
+set(CORRIDORKEY_TORCH_CMAKE_DIR "" CACHE PATH "Optional Torch CMake package directory")
+set(CORRIDORKEY_TORCH_RUNTIME_DIR "" CACHE INTERNAL "Resolved Torch runtime DLL directory")
+set(CORRIDORKEY_TORCHTRT_RUNTIME_DIR "" CACHE INTERNAL
+    "Resolved Torch-TensorRT runtime DLL directory")
+set(CORRIDORKEY_TENSORRT_STANDARD_RUNTIME_DIR "" CACHE INTERNAL
+    "Resolved standard TensorRT runtime DLL directory for Torch-TensorRT")
+set(CORRIDORKEY_TORCHTRT_IMPORT_LIB "" CACHE INTERNAL
+    "Resolved Torch-TensorRT import library")
+set(CORRIDORKEY_TORCH_INCLUDE_DIRS "" CACHE INTERNAL "Resolved Torch C++ include directories")
+set(CORRIDORKEY_TORCH_LIBRARIES "" CACHE INTERNAL "Resolved Torch C++ import libraries")
 
 # --- Project Rules & Standards ---
 
@@ -286,6 +298,113 @@ find_package(cxxopts REQUIRED)
 find_package(cpr CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Catch2 3 REQUIRED)
+
+set(CORRIDORKEY_WITH_TORCH_TENSORRT OFF)
+if(WIN32 AND CORRIDORKEY_ENABLE_TORCH_TENSORRT)
+    set(_corridorkey_torch_site_packages
+        "${CMAKE_SOURCE_DIR}/tools/model_exporter/.venv_torchtrt/Lib/site-packages")
+    set(_corridorkey_torch_include_dir "${_corridorkey_torch_site_packages}/torch/include")
+    set(_corridorkey_torch_api_include_dir
+        "${_corridorkey_torch_include_dir}/torch/csrc/api/include")
+    set(_corridorkey_torch_runtime_dir "${_corridorkey_torch_site_packages}/torch/lib")
+    set(_corridorkey_torchtrt_runtime_dir "${_corridorkey_torch_site_packages}/torch_tensorrt/lib")
+    set(_corridorkey_standard_tensorrt_runtime_dir
+        "${_corridorkey_torch_site_packages}/tensorrt_libs")
+
+    file(GLOB _corridorkey_cuda_include_candidates
+        "${_corridorkey_torch_site_packages}/nvidia/*/include/cuda_runtime_api.h")
+    set(_corridorkey_cuda_include_dir "")
+    if(_corridorkey_cuda_include_candidates)
+        list(GET _corridorkey_cuda_include_candidates 0 _corridorkey_cuda_header)
+        get_filename_component(_corridorkey_cuda_include_dir "${_corridorkey_cuda_header}" DIRECTORY)
+    endif()
+
+    set(_corridorkey_torch_import_libs "")
+    foreach(_corridorkey_torch_lib_name IN ITEMS torch c10 torch_cpu torch_cuda c10_cuda caffe2_nvrtc)
+        set(_corridorkey_torch_lib_path
+            "${_corridorkey_torch_runtime_dir}/${_corridorkey_torch_lib_name}.lib")
+        if(EXISTS "${_corridorkey_torch_lib_path}")
+            list(APPEND _corridorkey_torch_import_libs "${_corridorkey_torch_lib_path}")
+        endif()
+    endforeach()
+    set(_corridorkey_torchtrt_import_lib "${_corridorkey_torchtrt_runtime_dir}/torchtrt.lib")
+    if(EXISTS "${_corridorkey_torchtrt_import_lib}")
+        list(APPEND _corridorkey_torch_import_libs "${_corridorkey_torchtrt_import_lib}")
+    endif()
+
+    set(_corridorkey_torch_include_dirs "")
+    foreach(_corridorkey_include_dir IN ITEMS
+            "${_corridorkey_torch_include_dir}"
+            "${_corridorkey_torch_api_include_dir}"
+            "${_corridorkey_cuda_include_dir}")
+        if(NOT _corridorkey_include_dir STREQUAL "" AND EXISTS "${_corridorkey_include_dir}")
+            list(APPEND _corridorkey_torch_include_dirs "${_corridorkey_include_dir}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _corridorkey_torch_include_dirs)
+
+    if(EXISTS "${_corridorkey_torch_include_dir}" AND
+       EXISTS "${_corridorkey_torch_api_include_dir}" AND
+       NOT _corridorkey_cuda_include_dir STREQUAL "" AND
+       EXISTS "${_corridorkey_torch_runtime_dir}" AND
+       NOT _corridorkey_torchtrt_runtime_dir STREQUAL "" AND
+       EXISTS "${_corridorkey_torchtrt_runtime_dir}" AND
+       NOT _corridorkey_standard_tensorrt_runtime_dir STREQUAL "" AND
+       EXISTS "${_corridorkey_standard_tensorrt_runtime_dir}" AND
+       _corridorkey_torch_import_libs)
+        set(CORRIDORKEY_WITH_TORCH_TENSORRT ON)
+        set(CORRIDORKEY_TORCH_INCLUDE_DIRS "${_corridorkey_torch_include_dirs}" CACHE INTERNAL
+            "Resolved Torch C++ include directories" FORCE)
+        set(CORRIDORKEY_TORCH_LIBRARIES "${_corridorkey_torch_import_libs}" CACHE INTERNAL
+            "Resolved Torch C++ import libraries" FORCE)
+        set(CORRIDORKEY_TORCH_RUNTIME_DIR "${_corridorkey_torch_runtime_dir}" CACHE INTERNAL
+            "Resolved Torch runtime DLL directory" FORCE)
+        set(CORRIDORKEY_TORCHTRT_RUNTIME_DIR "${_corridorkey_torchtrt_runtime_dir}" CACHE INTERNAL
+            "Resolved Torch-TensorRT runtime DLL directory" FORCE)
+        set(CORRIDORKEY_TENSORRT_STANDARD_RUNTIME_DIR
+            "${_corridorkey_standard_tensorrt_runtime_dir}" CACHE INTERNAL
+            "Resolved standard TensorRT runtime DLL directory for Torch-TensorRT" FORCE)
+        set(CORRIDORKEY_TORCHTRT_IMPORT_LIB "${_corridorkey_torchtrt_import_lib}" CACHE INTERNAL
+            "Resolved Torch-TensorRT import library" FORCE)
+        message(STATUS "Torch-TensorRT runtime support enabled from the local Python wheel layout")
+    else()
+        message(STATUS "Torch C++ runtime not found; building without Torch-TensorRT support")
+    endif()
+endif()
+
+function(corridorkey_stage_windows_runtime target_name)
+    if(NOT WIN32)
+        return()
+    endif()
+
+    set(_corridorkey_runtime_dlls "")
+    if(CORRIDORKEY_ORT_RUNTIME_DIR)
+        file(GLOB _corridorkey_ort_runtime_dlls "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
+        list(APPEND _corridorkey_runtime_dlls ${_corridorkey_ort_runtime_dlls})
+    endif()
+    if(CORRIDORKEY_TORCH_RUNTIME_DIR)
+        file(GLOB _corridorkey_torch_runtime_dlls "${CORRIDORKEY_TORCH_RUNTIME_DIR}/*.dll")
+        list(APPEND _corridorkey_runtime_dlls ${_corridorkey_torch_runtime_dlls})
+    endif()
+    if(CORRIDORKEY_TORCHTRT_RUNTIME_DIR)
+        file(GLOB _corridorkey_torchtrt_runtime_dlls "${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}/*.dll")
+        list(APPEND _corridorkey_runtime_dlls ${_corridorkey_torchtrt_runtime_dlls})
+    endif()
+    if(CORRIDORKEY_TENSORRT_STANDARD_RUNTIME_DIR)
+        file(GLOB _corridorkey_standard_tensorrt_dlls
+            "${CORRIDORKEY_TENSORRT_STANDARD_RUNTIME_DIR}/*.dll")
+        list(APPEND _corridorkey_runtime_dlls ${_corridorkey_standard_tensorrt_dlls})
+    endif()
+
+    add_custom_command(TARGET ${target_name} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_RUNTIME_DLLS:${target_name}>
+            ${_corridorkey_runtime_dlls}
+            $<TARGET_FILE_DIR:${target_name}>
+        COMMAND_EXPAND_LISTS
+        COMMENT "Staging Windows runtime DLLs for ${target_name}"
+    )
+endfunction()
 
 # --- Project Structure ---
 
