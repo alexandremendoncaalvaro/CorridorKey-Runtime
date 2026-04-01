@@ -721,16 +721,22 @@ BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_di
         layout.smoke_test_path = layout.root / "smoke_test.bat";
 
         std::error_code error;
-        const bool runtime_present = std::filesystem::exists(executable_dir / "corridorkey.exe",
-                                                             error) &&
-                                     !error;
+        const bool cli_present =
+            std::filesystem::exists(executable_dir / "corridorkey.exe", error) && !error;
+        error.clear();
+        const bool runtime_server_present =
+            std::filesystem::exists(executable_dir / "corridorkey_ofx_runtime_server.exe", error) &&
+            !error;
+        error.clear();
         const bool plugin_present = std::filesystem::exists(executable_dir / "CorridorKey.ofx",
                                                             error) &&
                                     !error;
+        error.clear();
         const bool models_present = std::filesystem::exists(layout.expected_models_dir, error) &&
                                     !error;
         layout.kind = "windows_ofx";
-        layout.packaged_layout_detected = runtime_present && plugin_present && models_present;
+        layout.packaged_layout_detected =
+            cli_present && runtime_server_present && plugin_present && models_present;
         return layout;
     }
 #endif
@@ -945,6 +951,19 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["smoke_test_present"] = std::filesystem::exists(smoke_test_path);
     json["models_dir_exists"] = std::filesystem::exists(models_dir);
     json["models_dir_matches_bundle"] = paths_equivalent(models_dir, expected_models_dir);
+#if defined(_WIN32)
+    const auto cli_binary_path = executable_dir / "corridorkey.exe";
+    const auto ofx_runtime_server_path = executable_dir / "corridorkey_ofx_runtime_server.exe";
+    json["cli_binary_found"] = std::filesystem::exists(cli_binary_path);
+    json["cli_binary_path"] = cli_binary_path.string();
+    json["ofx_runtime_server_found"] = std::filesystem::exists(ofx_runtime_server_path);
+    json["ofx_runtime_server_path"] = ofx_runtime_server_path.string();
+#else
+    json["cli_binary_found"] = true;
+    json["cli_binary_path"] = executable_path.string();
+    json["ofx_runtime_server_found"] = true;
+    json["ofx_runtime_server_path"] = "";
+#endif
     json["runtime_library_found"] = runtime_library.has_value();
     json["runtime_library_path"] = runtime_library.has_value() ? runtime_library->string() : "";
     json["runtime_library_referenced"] = runtime_reference_found;

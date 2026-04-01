@@ -28,7 +28,8 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
 }
 
 $pluginBinary = Join-Path $BuildDir "src\plugins\ofx\CorridorKey.ofx"
-$runtimeServerBinary = Join-Path $BuildDir "src\cli\corridorkey.exe"
+$cliBinary = Join-Path $BuildDir "src\cli\corridorkey.exe"
+$runtimeServerBinary = Join-Path $BuildDir "src\plugins\ofx\corridorkey_ofx_runtime_server.exe"
 $win64Dir = Join-Path $OutputDir "Contents\Win64"
 $resourcesDir = Join-Path $OutputDir "Contents\Resources\models"
 $modelInventoryPath = Join-Path $OutputDir "model_inventory.json"
@@ -239,8 +240,10 @@ New-Item -ItemType Directory -Path $win64Dir -Force | Out-Null
 New-Item -ItemType Directory -Path $resourcesDir -Force | Out-Null
 
 Assert-FileExists -Path $pluginBinary -Message "OpenFX plugin binary not found at $pluginBinary"
+Assert-FileExists -Path $cliBinary -Message "CLI binary not found at $cliBinary"
 Assert-FileExists -Path $runtimeServerBinary -Message "Runtime server binary not found at $runtimeServerBinary"
 Copy-Item $pluginBinary $win64Dir -Force
+Copy-Item $cliBinary $win64Dir -Force
 Copy-Item $runtimeServerBinary $win64Dir -Force
 
 Write-Host "Staging ONNX Runtime core DLLs from $OrtRoot" -ForegroundColor Cyan
