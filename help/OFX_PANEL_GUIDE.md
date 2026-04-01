@@ -42,6 +42,9 @@ The runtime panel at the top is the first place to look after any change.
 The always-visible fields are the fast triage view:
 
 - **Processing Backend** tells you which execution path is active.
+- **Processing Engine** tells you which implementation policy is active for the
+  current backend. On Windows RTX this distinguishes the supported official
+  path from the experimental max-performance path.
 - **Processing Device** tells you which device the plugin is using.
 - **Effective Quality** tells you what resolution is actually running.
 - **Guide Source** tells you whether the last render used a connected external
@@ -62,6 +65,7 @@ result looks the way it does. That closed-by-default view contains:
 - **Safe Quality Ceiling** for the highest quality CorridorKey currently
   considers safe on the active backend and memory tier.
 - **Loaded Artifact** for the actual packaged model file or bridge file in use.
+- **Requested Engine** for the engine policy you selected in the panel.
 - **Runtime Path** for whether the last render used the direct path, artifact
   fallback, or full-model tiling.
 - **Backend Work** for whether the visible result came from real backend work
@@ -290,11 +294,27 @@ not feel like one long dump of unrelated settings.
   controls for the generated alpha.
 - **Advanced | Processing** contains technical processing-path controls such as
   spill replacement method, upscale method, and artifact fallback diagnostics.
-- **Advanced | Runtime** contains timeout and stability controls for bootstrap
-  and render waits.
+- **Advanced | Runtime** contains timeout, engine selection, and stability
+  controls for bootstrap and render waits.
 
 If you are not actively diagnosing a problem, leave these groups closed and
 work in the main creative panels first.
+
+### Execution Engine
+
+This control only appears on the `Windows RTX` track because that is the only
+packaged path that currently exposes more than one engine policy.
+
+- **Auto** keeps the supported shipping path.
+- **ORT TensorRT (Official)** pins the plugin to the supported Windows RTX
+  path.
+- **ORT TensorRT Max (Experimental)** keeps the same packaged model ladder but
+  enables the higher-overhead comparison mode intended for local performance
+  testing.
+
+Use the runtime panel to confirm what actually happened. The plugin reports the
+requested engine and the effective engine separately so it is obvious when the
+runtime stayed on the official path.
 
 ## Recover Original Details
 
