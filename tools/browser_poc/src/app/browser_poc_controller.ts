@@ -85,6 +85,7 @@ export class BrowserPocController {
       on_video_ended: () => this.stop_preview_loop(),
       on_sequence_index_changed: () => void this.handle_sequence_index_changed(),
       on_hint_sequence_index_changed: () => void this.handle_hint_sequence_index_changed(),
+      on_live_processing_toggled: () => void this.handle_live_processing_toggled(),
     });
     window.addEventListener("beforeunload", () => this.dispose_resources());
     this.m_view.set_model_catalog(BROWSER_MODEL_CATALOG, DEFAULT_BROWSER_MODEL_ID);
@@ -92,6 +93,7 @@ export class BrowserPocController {
     this.m_view.reset_stage_aspect_ratio();
     this.m_view.set_sequence_state({ visible: false, current_index: 0, total_count: 1 });
     this.m_view.set_hint_sequence_state({ visible: false, current_index: 0, total_count: 1 });
+    this.m_view.sync_input_visibilities();
     this.apply_resolution_state();
     this.m_view.set_processing_state({
       visible: false,
@@ -173,45 +175,57 @@ export class BrowserPocController {
   }
 
   private resolved_quality_options(): {
-    target_resolution: number;
+    extraction: import("../core/image_types").InputExtractionStrategy;
     strategy: import("../core/image_types").InferenceStrategy;
   } {
     const preset = this.m_view.selected_quality_preset();
-    const auto_res = this.auto_target_resolution();
-    
+
     switch (preset) {
       case "draft":
-        return { target_resolution: 384, strategy: { type: "singlepass" } };
+        return { extraction: { type: "squash", size: 384 }, strategy: { type: "singlepass" } };
       case "balanced":
-        return { target_resolution: 512, strategy: { type: "singlepass" } };
+        return { extraction: { type: "squash", size: 512 }, strategy: { type: "singlepass" } };
       case "high":
-        return { target_resolution: 1024, strategy: { type: "singlepass" } };
-      case "studio":
-        // Fall back to 1024 if native resolution is ridiculously small or auto parsing fails, 
-        // but generally follow the source media or auto-dimension for tiling.
-        // For POC we use the auto_target_resolution but assume the user wants native.
-        // Tiling at 512x512 with 64px overlap
-        return { 
-          target_resolution: auto_res, 
-          strategy: { type: "tiling", tile_size: 512, overlap: 64 } 
+        return { extraction: { type: "squash", size: 1024 }, strategy: { type: "singlepass" } };
+      case "studio-720":
+        return {
+          extraction: { type: "native_bounded", max_size: 1280 },
+          strategy: { type: "tiling", tile_size: 512, overlap: 64 }
+        };
+      case "studio-1080":
+        return {
+          extraction: { type: "native_bounded", max_size: 1920 },
+          strategy: { type: "tiling", tile_size: 512, overlap: 64 }
+        };
+      case "studio-max":
+        return {
+          extraction: { type: "native_bounded", max_size: 4096 },
+          strategy: { type: "tiling", tile_size: 512, overlap: 64 }
         };
       default:
-        return { target_resolution: auto_res, strategy: { type: "singlepass" } };
+        // default fallback to auto_target_resolution
+        return { extraction: { type: "squash", size: this.auto_target_resolution() }, strategy: { type: "singlepass" } };
     }
   }
 
-  private resolved_target_resolution(): number {
-    return this.resolved_quality_options().target_resolution;
+  private resolved_extraction_limit(): number {
+    const ext = this.resolved_quality_options().extraction;
+    return ext.type === "squash" ? ext.size : ext.max_size;
   }
 
   private apply_resolution_state(): void {
     const auto_resolution = this.auto_target_resolution();
     const options = this.resolved_quality_options();
     this.m_view.set_auto_target_resolution(auto_resolution);
+
+    const size_label = options.extraction.type === "squash"
+      ? `${options.extraction.size}x${options.extraction.size}`
+      : `Max ${options.extraction.max_size}px Native Edge`;
+
     this.m_view.set_resolution_detail(
-      `Processing at ${options.target_resolution}x${options.target_resolution} via ${options.strategy.type === "tiling" ? "Tiled Inference" : "Single Pass"}`,
+      `Processing at ${size_label} via ${options.strategy.type === "tiling" ? "Tiled Inference" : "Single Pass"}`,
     );
-    this.m_view.sync_stage_resolution(options.target_resolution);
+    this.m_view.sync_stage_resolution(options.extraction);
   }
 
   private refresh_button_state(): void {
@@ -589,10 +603,11 @@ export class BrowserPocController {
       this.m_view.set_active_source_element("webcam");
       const video_element = this.m_view.webcam_video_element();
       video_element.srcObject = stream;
-      
+
       video_element.onloadedmetadata = () => {
         this.m_view.set_stage_aspect_ratio(video_element.videoWidth, video_element.videoHeight);
         this.m_view.set_status(`Webcam connected: ${video_element.videoWidth}x${video_element.videoHeight}.`);
+        video_element.play().catch(() => {});
         this.start_preview_loop();
       };
     } catch (cause) {
@@ -689,11 +704,24 @@ export class BrowserPocController {
     this.refresh_button_state();
   }
 
-  private handle_quality_changed(): void {
+  private async handle_quality_changed(): Promise<void> {
+    this.m_view.sync_input_visibilities();
     this.apply_resolution_state();
-    // Quality recipes logic could be expanded here. For now, trigger process.
+
+    // Auto-select optimal model for the chosen quality preset
+    const preset = this.m_view.selected_quality_preset();
+    if (preset !== "custom") {
+      const target_model_id = preset === "high" ? "corridorkey_int8_1024" : "corridorkey_int8_512";
+
+      if (this.m_active_model_id !== target_model_id && !this.m_model_load_in_flight) {
+        this.m_view.set_selected_model_id(target_model_id);
+        await this.load_browser_model(target_model_id, false);
+        return;
+      }
+    }
+
     if (this.source_ready()) {
-      void this.process_current_frame();
+      await this.process_current_frame();
     }
     this.refresh_button_state();
   }
@@ -719,27 +747,25 @@ export class BrowserPocController {
     if (this.m_source.kind !== "video") {
       return;
     }
-    await this.process_current_frame();
+    this.m_view.set_status("Video loaded. Press 'Process Frame' to run inference.");
     this.refresh_button_state();
   }
 
   private handle_video_played(): void {
-    if (this.m_source.kind === "video" && !this.m_full_media_job_active) {
+    if (this.m_view.live_processing_enabled()) {
       this.start_preview_loop();
     }
   }
 
   private async handle_video_paused(): Promise<void> {
-    this.stop_preview_loop();
-    if (this.m_source.kind === "video" && this.source_ready()) {
+    if (!this.m_view.live_processing_enabled()) {
+      this.stop_preview_loop();
       await this.process_current_frame();
     }
   }
 
   private async handle_video_seeked(): Promise<void> {
-    if (this.m_source.kind === "video" && this.source_ready()) {
-      await this.process_current_frame();
-    }
+    // Deliberately empty: User seeks to find a frame without freezing the UI under Tiling
   }
 
   private async handle_sequence_index_changed(): Promise<void> {
@@ -870,7 +896,7 @@ export class BrowserPocController {
     this.m_view.set_processing_state({
       visible: true,
       stage_label: "capture",
-      detail: `Capturing a ${this.resolved_target_resolution()}x${this.resolved_target_resolution()} source frame.`,
+      detail: `Capturing a source frame honoring extraction boundaries.`,
       progress_ratio: 0.12,
     });
     try {
@@ -1012,7 +1038,7 @@ export class BrowserPocController {
           source_bitmap: this.m_source.bitmap,
           source_name: this.m_source.file.name,
           model_id: this.active_model_id_for_manifest(),
-          resolution: this.resolved_target_resolution(),
+          resolution: this.resolved_extraction_limit(),
           on_progress: (progress) => this.apply_export_progress(progress),
           resolve_hint: async () => this.resolve_image_export_hint(),
           process_frame: async (source, hint) => this.process_canvas_sources_for_export(source, hint),
@@ -1022,7 +1048,7 @@ export class BrowserPocController {
           source_files: this.m_source.files,
           source_name: this.m_source.files[0]?.name ?? "sequence",
           model_id: this.active_model_id_for_manifest(),
-          resolution: this.resolved_target_resolution(),
+          resolution: this.resolved_extraction_limit(),
           preview_format: this.m_export_capability.preview_format!,
           preview_codec: this.m_export_capability.codec!,
           on_progress: (progress) => this.apply_export_progress(progress),
@@ -1035,7 +1061,7 @@ export class BrowserPocController {
           hint_video_file: this.m_hint.kind === "video" ? this.m_hint.file : undefined,
           source_name: this.m_source.file.name,
           model_id: this.active_model_id_for_manifest(),
-          resolution: this.resolved_target_resolution(),
+          resolution: this.resolved_extraction_limit(),
           preview_format: this.m_export_capability.preview_format!,
           preview_codec: this.m_export_capability.codec!,
           on_progress: (progress) => this.apply_export_progress(progress),
@@ -1084,22 +1110,59 @@ export class BrowserPocController {
     });
   }
 
+  private handle_live_processing_toggled(): void {
+    if (this.m_view.live_processing_enabled()) {
+      this.start_preview_loop();
+    } else {
+      this.stop_preview_loop();
+    }
+  }
+
   private preview_tick = async (): Promise<void> => {
-    if (!this.m_preview_loop_active || this.m_source.kind !== "video") {
+    if (!this.m_preview_loop_active) {
       return;
     }
-    if (!this.m_view.video_paused() && !this.m_view.video_ended() && !this.m_frame_in_flight) {
+
+    const is_video = this.m_source.kind === "video";
+    const is_webcam = this.m_source.kind === "webcam";
+
+    if (!is_video && !is_webcam) {
+      return;
+    }
+
+    if (is_video && (this.m_view.video_paused() || this.m_view.video_ended())) {
+      // Keep the loop ticking if live processing is forced ON, wait for video to resume
+      if (this.m_view.live_processing_enabled()) {
+        requestAnimationFrame(() => void this.preview_tick());
+      } else {
+        this.stop_preview_loop();
+      }
+      return;
+    }
+
+    if (!this.m_frame_in_flight) {
       await this.process_current_frame();
     }
+
     if (this.m_preview_loop_active) {
       requestAnimationFrame(() => void this.preview_tick());
     }
   };
 
   private start_preview_loop(): void {
-    if (this.m_preview_loop_active || this.m_source.kind !== "video" || !this.source_ready()) {
+    if (!this.m_view.live_processing_enabled() && this.m_source.kind !== "webcam") {
       return;
     }
+
+    if (this.m_preview_loop_active || !this.source_ready()) {
+      return;
+    }
+    const is_video = this.m_source.kind === "video";
+    const is_webcam = this.m_source.kind === "webcam";
+    if (!is_video && !is_webcam) {
+      return;
+    }
+
     this.m_preview_loop_active = true;
     requestAnimationFrame(() => void this.preview_tick());
   }

@@ -99,6 +99,10 @@ class FakeView {
 
   reset_stage_aspect_ratio(): void {}
 
+  sync_input_visibilities(): void {}
+
+  live_processing_enabled(): boolean { return false; }
+
   set_sequence_state(): void {}
 
   set_hint_sequence_state(): void {}

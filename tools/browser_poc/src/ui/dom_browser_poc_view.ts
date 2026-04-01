@@ -4,10 +4,7 @@ import {
   CHECKER_TILE_SIZE,
 } from "../common/constants";
 import { app_error, type AppError } from "../common/errors";
-import {
-  resolve_target_resolution,
-  type ProcessingResolutionPreset,
-} from "../common/processing_resolution";
+import type { ProcessingResolutionPreset } from "../common/processing_resolution";
 import { err, ok, type Result } from "../common/result";
 import type { BrowserModelDefinition, RgbaFrame } from "../core/image_types";
 import {
@@ -99,6 +96,7 @@ export interface ViewHandlers {
   on_video_ended: () => void;
   on_sequence_index_changed: () => void;
   on_hint_sequence_index_changed: () => void;
+  on_live_processing_toggled: () => void;
 }
 
 function require_element<T extends HTMLElement>(id: string): T {
@@ -192,6 +190,10 @@ export class DomBrowserPocView {
     require_element<HTMLElement>("hint-file-wrapper");
   private readonly quality_preset_select =
     require_element<HTMLSelectElement>("quality-preset");
+  private readonly advanced_panel =
+    require_element<HTMLDivElement>("advanced-panel");
+  private readonly live_processing_toggle =
+    require_element<HTMLInputElement>("live-processing-toggle");
   private readonly process_frame_button =
     require_element<HTMLButtonElement>("process-frame");
   private readonly clear_inputs_button =
@@ -274,8 +276,7 @@ export class DomBrowserPocView {
   private readonly output_frame_ctx = require_context(this.output_frame_canvas);
   private readonly hint_canvas = document.createElement("canvas");
   private readonly hint_ctx = require_context(this.hint_canvas);
-  private m_auto_target_resolution = 512;
-  private m_stage_target_resolution = 512;
+  private m_extraction_strategy: import("../core/image_types").InputExtractionStrategy = { type: "squash", size: 512 };
   private m_stage_display_width = 1;
   private m_stage_display_height = 1;
   private m_stage_canvas_lock: StageCanvasDimensions | null = null;
@@ -341,7 +342,11 @@ export class DomBrowserPocView {
       "input",
       handlers.on_hint_sequence_index_changed,
     );
-    
+    this.live_processing_toggle.addEventListener(
+      "change",
+      handlers.on_live_processing_toggled,
+    );
+
     const toggle_zoom = (card_id: string) => {
       const is_zoomed = this.main_canvas_grid.classList.contains("zoomed");
       const current_active = this.main_canvas_grid.querySelector(".active-zoom");
@@ -371,7 +376,7 @@ export class DomBrowserPocView {
         const visuals = Array.from(container.children).filter(
           (el) => el.tagName === "CANVAS" || el.tagName === "VIDEO",
         ) as HTMLElement[];
-        
+
         for (const el of visuals) {
           el.style.transform = `translate(${offset_x}px, ${offset_y}px) scale(${zoom})`;
           if (zoom >= 2) {
@@ -386,18 +391,18 @@ export class DomBrowserPocView {
         e.preventDefault();
         const zoom_intensity = 0.2;
         const delta = e.deltaY > 0 ? -1 : 1;
-        
+
         const prev_zoom = zoom;
         zoom += delta * zoom_intensity * zoom;
-        zoom = Math.max(1, Math.min(zoom, 50)); 
+        zoom = Math.max(1, Math.min(zoom, 50));
 
         const rect = container.getBoundingClientRect();
         const mouse_x = e.clientX - rect.left - rect.width / 2;
         const mouse_y = e.clientY - rect.top - rect.height / 2;
-        
+
         offset_x -= mouse_x * (zoom / prev_zoom - 1);
         offset_y -= mouse_y * (zoom / prev_zoom - 1);
-        
+
         if (zoom <= 1) {
           zoom = 1;
           offset_x = 0;
@@ -423,7 +428,7 @@ export class DomBrowserPocView {
         if (!is_dragging) return;
         offset_x = e.clientX - start_x;
         offset_y = e.clientY - start_y;
-        
+
         const dx = e.clientX - start_client_x;
         const dy = e.clientY - start_client_y;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
@@ -440,11 +445,8 @@ export class DomBrowserPocView {
       });
 
       container.addEventListener("dblclick", () => {
-        const activeElement = Array.from(container.children).find(
-          (el) => !el.classList.contains("hidden") && (el.tagName === "CANVAS" || el.tagName === "VIDEO"),
-        );
-        if (activeElement && !document.fullscreenElement) {
-          void activeElement.requestFullscreen();
+        if (!document.fullscreenElement) {
+          void container.requestFullscreen();
         } else if (document.fullscreenElement) {
           void document.exitFullscreen();
         }
@@ -456,6 +458,13 @@ export class DomBrowserPocView {
           e.stopImmediatePropagation();
           return;
         }
+
+        const target = e.target as HTMLElement;
+        if (target instanceof HTMLVideoElement && e.offsetY > target.clientHeight - 54) {
+          // Do not enter zoom if clicking near the bottom of a video, as this intercepts native controls
+          return;
+        }
+
         toggle_zoom(container.id);
       });
     };
@@ -466,6 +475,10 @@ export class DomBrowserPocView {
 
   selected_source_type(): string {
     return this.source_type_select.value;
+  }
+
+  live_processing_enabled(): boolean {
+    return this.live_processing_toggle.checked;
   }
 
   selected_source_files(): File[] {
@@ -487,6 +500,7 @@ export class DomBrowserPocView {
   sync_input_visibilities(): void {
     this.source_file_wrapper.classList.toggle("hidden", this.source_type_select.value !== "file");
     this.hint_file_wrapper.classList.toggle("hidden", this.hint_type_select.value !== "file");
+    this.advanced_panel.classList.toggle("hidden", this.quality_preset_select.value !== "custom");
   }
 
   webcam_video_element(): HTMLVideoElement {
@@ -505,6 +519,12 @@ export class DomBrowserPocView {
 
   selected_model_id(): string {
     return this.model_select.value;
+  }
+
+  set_selected_model_id(model_id: string): void {
+    if (this.model_select.value !== model_id) {
+      this.model_select.value = model_id;
+    }
   }
 
   selected_resolution_preset_id(): string {
@@ -543,8 +563,8 @@ export class DomBrowserPocView {
     }
   }
 
-  set_auto_target_resolution(auto_target_resolution: number): void {
-    this.m_auto_target_resolution = auto_target_resolution;
+  set_auto_target_resolution(_auto_target_resolution: number): void {
+    // Deliberately empty, managed dynamically by the InputExtractionStrategy
   }
 
   set_resolution_detail(detail: string): void {
@@ -585,11 +605,8 @@ export class DomBrowserPocView {
     this.hint_sequence_frame_value.textContent = `Frame ${state.current_index + 1} / ${Math.max(1, state.total_count)}`;
   }
 
-  target_resolution(): number {
-    return resolve_target_resolution(
-      this.selected_resolution_preset_id(),
-      this.m_auto_target_resolution,
-    );
+  extraction_strategy(): import("../core/image_types").InputExtractionStrategy {
+    return this.m_extraction_strategy;
   }
 
   private sync_stage_aspect_styles(
@@ -601,21 +618,29 @@ export class DomBrowserPocView {
     this.output_canvas.style.aspectRatio = canvas_aspect_ratio;
   }
 
-  sync_stage_resolution(size: number): void {
-    this.m_stage_target_resolution = size;
+  sync_stage_resolution(strategy: import("../core/image_types").InputExtractionStrategy): void {
+    this.m_extraction_strategy = strategy;
+    const base_size = strategy.type === "squash" ? strategy.size : strategy.max_size;
+
+    // Default visual stage dimension bounding is based on the extraction max size
+    // to keep the layout proportional.
     const stage_dimensions =
       this.m_stage_canvas_lock ??
       resolve_stage_canvas_dimensions(
-        size,
+        base_size,
         this.m_stage_display_width,
         this.m_stage_display_height,
       );
+
     this.source_canvas.width = stage_dimensions.width;
     this.source_canvas.height = stage_dimensions.height;
     this.output_canvas.width = stage_dimensions.width;
     this.output_canvas.height = stage_dimensions.height;
-    this.working_canvas.width = size;
-    this.working_canvas.height = size;
+
+    // The working_canvas will be dynamically resized during draw_canvas_image_source
+    // if native_bounded is used, but we default to base_size for squash mode.
+    this.working_canvas.width = base_size;
+    this.working_canvas.height = base_size;
   }
 
   set_stage_aspect_ratio(width: number, height: number): void {
@@ -636,7 +661,7 @@ export class DomBrowserPocView {
     const canvas_aspect_ratio =
       this.m_locked_stage_aspect_ratio ?? resolve_stage_aspect_ratio(width, height);
     this.sync_stage_aspect_styles(canvas_aspect_ratio, video_aspect_ratio);
-    this.sync_stage_resolution(this.m_stage_target_resolution);
+    this.sync_stage_resolution(this.m_extraction_strategy);
   }
 
   reset_stage_aspect_ratio(): void {
@@ -646,7 +671,7 @@ export class DomBrowserPocView {
       this.m_locked_stage_aspect_ratio ?? DEFAULT_STAGE_CANVAS_ASPECT_RATIO,
       DEFAULT_STAGE_VIDEO_ASPECT_RATIO,
     );
-    this.sync_stage_resolution(this.m_stage_target_resolution);
+    this.sync_stage_resolution(this.m_extraction_strategy);
   }
 
   load_video_source(video_url: string): void {
@@ -746,18 +771,39 @@ export class DomBrowserPocView {
   }
 
   private draw_canvas_image_source(source: CanvasImageSource): RgbaFrame {
-    const size = this.target_resolution();
+    const strategy = this.extraction_strategy();
     const display_dimensions = resolve_canvas_source_dimensions(source);
+
     const stage_width = this.source_canvas.width;
     const stage_height = this.source_canvas.height;
+
+    const source_width = display_dimensions?.width ?? stage_width;
+    const source_height = display_dimensions?.height ?? stage_height;
+
+    // Determine the internal drawing resolution based on strategy
+    let extracted_width = source_width;
+    let extracted_height = source_height;
+
+    if (strategy.type === "squash") {
+      extracted_width = strategy.size;
+      extracted_height = strategy.size;
+    } else {
+      const max_size = strategy.max_size;
+      const largest_side = Math.max(source_width, source_height);
+      if (largest_side > max_size) {
+        const factor = max_size / largest_side;
+        extracted_width = Math.round(source_width * factor);
+        extracted_height = Math.round(source_height * factor);
+      }
+    }
+
     const stage_rect = resolve_stage_draw_rect(
       stage_width,
       stage_height,
-      display_dimensions?.width ?? stage_width,
-      display_dimensions?.height ?? stage_height,
+      source_width,
+      source_height,
     );
     this.source_ctx.clearRect(0, 0, stage_width, stage_height);
-    this.working_ctx.clearRect(0, 0, size, size);
     this.source_ctx.drawImage(
       source,
       stage_rect.x,
@@ -765,15 +811,19 @@ export class DomBrowserPocView {
       stage_rect.width,
       stage_rect.height,
     );
-    this.working_ctx.drawImage(source, 0, 0, size, size);
-    const image_data = this.working_ctx.getImageData(0, 0, size, size);
+
+    this.working_canvas.width = extracted_width;
+    this.working_canvas.height = extracted_height;
+    this.working_ctx.clearRect(0, 0, extracted_width, extracted_height);
+    this.working_ctx.drawImage(source, 0, 0, extracted_width, extracted_height);
+    const image_data = this.working_ctx.getImageData(0, 0, extracted_width, extracted_height);
 
     return {
       width: image_data.width,
       height: image_data.height,
       data: image_data.data,
-      display_width: display_dimensions?.width,
-      display_height: display_dimensions?.height,
+      display_width: source_width,
+      display_height: source_height,
     };
   }
 
@@ -795,13 +845,31 @@ export class DomBrowserPocView {
   }
 
   private capture_hint_canvas(source: CanvasImageSource): Float32Array {
-    const size = this.target_resolution();
-    this.hint_canvas.width = size;
-    this.hint_canvas.height = size;
-    this.hint_ctx.clearRect(0, 0, size, size);
-    this.hint_ctx.drawImage(source, 0, 0, size, size);
-    const image_data = this.hint_ctx.getImageData(0, 0, size, size);
-    const plane_size = size * size;
+    const strategy = this.extraction_strategy();
+    const display_dimensions = resolve_canvas_source_dimensions(source);
+
+    let extracted_width = display_dimensions?.width ?? 512;
+    let extracted_height = display_dimensions?.height ?? 512;
+
+    if (strategy.type === "squash") {
+      extracted_width = strategy.size;
+      extracted_height = strategy.size;
+    } else {
+      const max_size = strategy.max_size;
+      const largest_side = Math.max(extracted_width, extracted_height);
+      if (largest_side > max_size) {
+        const factor = max_size / largest_side;
+        extracted_width = Math.round(extracted_width * factor);
+        extracted_height = Math.round(extracted_height * factor);
+      }
+    }
+
+    this.hint_canvas.width = extracted_width;
+    this.hint_canvas.height = extracted_height;
+    this.hint_ctx.clearRect(0, 0, extracted_width, extracted_height);
+    this.hint_ctx.drawImage(source, 0, 0, extracted_width, extracted_height);
+    const image_data = this.hint_ctx.getImageData(0, 0, extracted_width, extracted_height);
+    const plane_size = extracted_width * extracted_height;
     const output = new Float32Array(plane_size);
 
     let has_variable_alpha = false;

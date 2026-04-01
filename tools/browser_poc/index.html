@@ -41,7 +41,7 @@
           <div class="field">
             <span>Alpha Hint Type</span>
             <select id="hint-type">
-              <option value="none">Auto (Internal)</option>
+              <option value="none">None Selected (Self-Computed)</option>
               <option value="file">File Upload</option>
               <option value="webcam">Webcam</option>
             </select>
@@ -55,15 +55,24 @@
           <div class="field">
             <span>Quality Preset</span>
             <select id="quality-preset">
-              <option value="draft">Draft (Fast)</option>
-              <option value="balanced" selected>Balanced (Default)</option>
-              <option value="high">High Quality</option>
-              <option value="studio">Studio Max (Tiling)</option>
+              <optgroup label="Single Pass (Webcam / Live)">
+                <option value="draft">Draft (Fast 384)</option>
+                <option value="balanced" selected>Balanced (Default 512)</option>
+                <option value="high">High Quality (1024)</option>
+              </optgroup>
+              <optgroup label="Tiled Strategy (Best Detail)">
+                <option value="studio-720">Tiled HD (Max 720p)</option>
+                <option value="studio-1080">Tiled FHD (Max 1080p)</option>
+                <option value="studio-max">Studio Max (Native 4K)</option>
+              </optgroup>
+              <optgroup label="Advanced">
+                <option value="custom">Custom (Manual Override)</option>
+              </optgroup>
             </select>
           </div>
 
-          <details class="advanced-panel">
-            <summary>Advanced Settings</summary>
+          <div id="advanced-panel" class="advanced-panel hidden">
+            <h3 class="status-label" style="margin-top:0;">Advanced Settings</h3>
             <div class="advanced-grid">
               <label class="field">
                 <span>Model Override</span>
@@ -78,7 +87,7 @@
             <p id="target-resolution-detail" class="resolution-detail">
               Auto currently follows the active browser model.
             </p>
-          </details>
+          </div>
 
           <div class="model-panel">
             <div class="model-panel-header">
@@ -109,6 +118,12 @@
           <div class="primary-action action-group">
             <button id="process-frame" class="secondary wide">Process Frame</button>
             <button id="clear-inputs" class="secondary wide">Clear</button>
+          </div>
+          <div class="field live-toggle">
+            <label style="display:flex; align-items:center; gap:0.5rem; justify-content:center; cursor:pointer;">
+              <input type="checkbox" id="live-processing-toggle" />
+              <span style="font-size:0.9rem; font-weight:600;">Enable Live Processing (Realtime Flow)</span>
+            </label>
           </div>
           <div class="primary-action">
             <button id="process-full-media" class="primary wide">Process Full Media</button>

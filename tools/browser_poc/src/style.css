@@ -374,6 +374,34 @@ button:disabled,
   background: rgba(0, 0, 0, 0.3);
 }
 
+.canvas-card:fullscreen {
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.canvas-card:fullscreen figcaption {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+  background: rgba(0,0,0,0.5);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.canvas-card:fullscreen canvas,
+.canvas-card:fullscreen video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 0;
+}
+
 .canvas-card.interactive {
   cursor: zoom-in;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
