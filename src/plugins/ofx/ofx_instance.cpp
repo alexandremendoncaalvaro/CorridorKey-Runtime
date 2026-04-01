@@ -646,6 +646,14 @@ std::string manual_override_warning_message(const DeviceInfo& requested_device, 
            quality_mode_label(quality_mode_for_resolution(*safe_quality_ceiling)) + ".";
 }
 
+bool allow_unrestricted_quality_attempt_for_request_impl(const InstanceData& data, int quality_mode,
+                                                         const DeviceInfo& requested_device) {
+    return is_fixed_quality_mode(quality_mode) &&
+           app::runtime_optimization_profile_for_device(data.runtime_capabilities,
+                                                        requested_device)
+               .unrestricted_quality_attempt;
+}
+
 void update_runtime_panel_values(InstanceData* data) {
     if (data == nullptr) {
         return;
@@ -829,6 +837,12 @@ app::OfxRuntimePrepareSessionRequest build_prepare_request(
 }
 
 }  // namespace
+
+bool allow_unrestricted_quality_attempt_for_request(const InstanceData& data, int quality_mode,
+                                                    const DeviceInfo& requested_device) {
+    return allow_unrestricted_quality_attempt_for_request_impl(data, quality_mode,
+                                                               requested_device);
+}
 
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
                                             bool cpu_quality_guardrail_active) {
@@ -1075,6 +1089,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     log_message("create_instance",
                 std::string("Detected backend: ") + backend_label(detected_device.backend));
     auto capabilities = runtime_capabilities();
+    data->runtime_capabilities = capabilities;
     log_message("create_instance", std::string("Platform: ") + capabilities.platform);
 
     int initial_quality_mode = kQualityAuto;
@@ -1323,11 +1338,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     const bool cpu_quality_guardrail_active = effective_quality_mode != requested_quality_mode;
     const int requested_resolution =
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
-    const bool allow_unrestricted_quality_attempt =
-        is_fixed_quality_mode(requested_quality_mode) &&
-        app::runtime_optimization_profile_for_device(runtime_capabilities(),
-                                                     original_requested_device)
-            .unrestricted_quality_attempt;
+    const bool allow_unrestricted_quality_attempt = allow_unrestricted_quality_attempt_for_request(
+        *data, requested_quality_mode, original_requested_device);
     const std::string cpu_fallback_warning =
         cpu_fallback_warning_message(reroute_int8_to_cpu);
     const std::string cpu_quality_guardrail_warning =

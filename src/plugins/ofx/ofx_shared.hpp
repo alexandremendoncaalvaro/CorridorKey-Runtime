@@ -181,6 +181,7 @@ struct InstanceData {
     std::filesystem::path runtime_server_path = {};
     DeviceInfo device = {};
     DeviceInfo preferred_device = {};
+    RuntimeCapabilities runtime_capabilities = {};
     int active_quality_mode = kQualityAuto;
     int requested_resolution = 0;
     int active_resolution = 0;
@@ -255,6 +256,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
                                int coarse_resolution_override = 0,
                                RefinementMode refinement_mode = RefinementMode::Auto);
+bool allow_unrestricted_quality_attempt_for_request(const InstanceData& data, int quality_mode,
+                                                    const DeviceInfo& requested_device);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
                                             bool cpu_quality_guardrail_active);
 bool sync_runtime_panel_session_state(InstanceData* data);
