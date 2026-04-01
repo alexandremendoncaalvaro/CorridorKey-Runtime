@@ -91,8 +91,8 @@ packaged and validated.
   the portable INT8 CPU artifacts.
 - `Windows RTX` exposes an advanced execution-engine selector for local
   comparison work. `ORT TensorRT (Official)` remains the supported path.
-  `ORT TensorRT Max (Experimental)` is an experimental comparison mode on the
-  same packaged ladder, not a separate support designation.
+  `Torch-TensorRT (Experimental)` is an experimental comparison engine in the
+  same installer, not a separate support designation.
 - In `Auto`, `Windows RTX` respects the current safe quality ceiling for the
   detected VRAM tier.
 - In fixed modes, `Windows RTX` can attempt a packaged quality above the safe

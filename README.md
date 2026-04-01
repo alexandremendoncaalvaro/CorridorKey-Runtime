@@ -84,16 +84,16 @@ corridorkey process input.mp4 output.mp4 --preset max
 corridorkey process input.mp4 output.mp4 --alpha-hint hint.mp4
 ```
 
-**Compare the Windows RTX shipping path against the experimental max-performance mode:**
+**Compare the Windows RTX official path against the experimental Torch-TensorRT engine:**
 ```bash
-corridorkey benchmark --preset balanced --engine official
-corridorkey benchmark --preset balanced --engine max-performance
+corridorkey benchmark --preset balanced --engine ort-tensorrt
+corridorkey benchmark --preset balanced --engine torch-tensorrt
 ```
 
 Append `--json` to any command to receive NDJSON event streams for pipeline
-integration. On Windows RTX, `--engine official` keeps the supported ORT
-TensorRT path, while `--engine max-performance` enables the experimental
-comparison mode on the same packaged ladder.
+integration. On Windows RTX, `--engine ort-tensorrt` keeps the supported ORT
+TensorRT path, while `--engine torch-tensorrt` enables the experimental
+direct C++ Torch-TensorRT comparison path on the same packaged ladder.
 
 ## Building from Source
 

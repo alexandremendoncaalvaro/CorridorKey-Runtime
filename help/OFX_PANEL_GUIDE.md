@@ -44,7 +44,7 @@ The always-visible fields are the fast triage view:
 - **Processing Backend** tells you which execution path is active.
 - **Processing Engine** tells you which implementation policy is active for the
   current backend. On Windows RTX this distinguishes the supported official
-  path from the experimental max-performance path.
+  path from the experimental Torch-TensorRT path.
 - **Processing Device** tells you which device the plugin is using.
 - **Effective Quality** tells you what resolution is actually running.
 - **Guide Source** tells you whether the last render used a connected external
@@ -308,13 +308,12 @@ packaged path that currently exposes more than one engine policy.
 - **Auto** keeps the supported shipping path.
 - **ORT TensorRT (Official)** pins the plugin to the supported Windows RTX
   path.
-- **ORT TensorRT Max (Experimental)** keeps the same packaged model ladder but
-  enables the higher-overhead comparison mode intended for local performance
-  testing.
+- **Torch-TensorRT (Experimental)** keeps the same packaged quality ladder but
+  switches to the experimental direct C++ Torch-TensorRT comparison engine.
 
 Use the runtime panel to confirm what actually happened. The plugin reports the
 requested engine and the effective engine separately so it is obvious when the
-runtime stayed on the official path.
+runtime stayed on the official path or the experimental engine was unavailable.
 
 ## Recover Original Details
 

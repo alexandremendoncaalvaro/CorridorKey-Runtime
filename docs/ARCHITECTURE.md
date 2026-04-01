@@ -30,7 +30,9 @@ plugin).
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
    through MLX and Windows RTX through ONNX Runtime TensorRT RTX EP on NVIDIA
-   RTX 30 series and newer. Windows DirectML is an explicit experimental
+   RTX 30 series and newer. The same Windows RTX installer may also expose an
+   experimental Torch-TensorRT comparison engine when its runtime and artifacts
+   are packaged and validated. Windows DirectML is an explicit experimental
    product track. Other provider hooks present in the core runtime do not
    become support claims unless they are packaged and validated. See
    [Support Matrix](../help/SUPPORT_MATRIX.md).
@@ -47,9 +49,10 @@ plugin).
 The engine, math, and I/O capabilities.
 
 - **Inference:** Backend adapters and session management for the official MLX
-  and TensorRT RTX EP product tracks, the experimental DirectML track, and
-  other internal provider hooks used for diagnostics, bring-up, or future
-  packaging work.
+  and TensorRT RTX EP product tracks, the experimental Windows RTX
+  Torch-TensorRT comparison engine, the experimental DirectML track, and other
+  internal provider hooks used for diagnostics, bring-up, or future packaging
+  work.
 - **Hardware:** Device detection and provider selection.
 - **Video Pipeline:** FFmpeg integration for direct memory processing.
 - **Math:** Color space conversion, despill, despeckle algorithms.
@@ -149,6 +152,7 @@ src/
 |   |-- device_detection.cpp
 |   |-- mlx_probe.cpp           macOS MLX backend probe
 |   |-- mlx_session.cpp         MLX inference session
+|   |-- torch_trt_session.cpp   Experimental Windows RTX Torch-TensorRT session
 |   |-- windows_rtx_probe.cpp   Windows TensorRT RTX backend probe
 |   |-- session_cache_policy.hpp
 |   |-- session_policy.hpp
@@ -196,7 +200,7 @@ Standalone auxiliary tools. Must not leak dependencies into the main build.
 
 ```text
 tools/
-|-- model_exporter/     Python scripts to export PyTorch models to ONNX
+|-- model_exporter/     Python scripts to export PyTorch checkpoints to packaged ONNX and Torch artifacts
 `-- hint_generator/     Reference auto-hint implementation
 ```
 
