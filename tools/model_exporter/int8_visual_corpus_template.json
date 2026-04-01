@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "hair_backlight",
+      "category": "hair",
+      "input": "path/to/hair_backlight_input.png",
+      "alpha_hint": "",
+      "notes": "Backlit hair with fine flyaway strands."
+    },
+    {
+      "id": "fine_edge_glasses",
+      "category": "fine_edge",
+      "input": "path/to/fine_edge_glasses_input.png",
+      "alpha_hint": "",
+      "notes": "Thin glasses frame and narrow contour edges."
+    },
+    {
+      "id": "motion_blur_hand",
+      "category": "motion_blur",
+      "input": "path/to/motion_blur_hand_input.png",
+      "alpha_hint": "",
+      "notes": "Fast hand movement with visible motion blur."
+    },
+    {
+      "id": "transparent_fabric",
+      "category": "transparency",
+      "input": "path/to/transparent_fabric_input.png",
+      "alpha_hint": "",
+      "notes": "Semi-transparent veil or fabric crossing the matte edge."
+    },
+    {
+      "id": "green_spill_shoulders",
+      "category": "spill",
+      "input": "path/to/green_spill_shoulders_input.png",
+      "alpha_hint": "",
+      "notes": "Green spill on shoulders, collar and reflective surfaces."
+    }
+  ]
+}
