@@ -21,8 +21,12 @@ vcpkg_installed_static/
 # CMake user presets (local machine overrides, not committed)
 CMakeUserPresets.json
 
-# Models tracked via Git LFS (see .gitattributes)
-
+# Models fetched from Hugging Face Hub (scripts/fetch_models.ps1)
+models/*.onnx
+models/*.pth
+models/*.safetensors
+models/*.mlxfn
+models/artifact_manifest.json
 # Local vendor payloads for release preparation
 vendor/onnxruntime-src/
 vendor/onnxruntime-source/
