@@ -72,6 +72,9 @@ each session. It contains the non-negotiable rules for this repository.
 - Use `scripts/build.ps1` for Windows development builds
 - Use `scripts/prepare_windows_rtx_release.ps1` for Windows RTX runtime preparation
 - Use `scripts/release_pipeline_windows.ps1` for Windows release packaging
+- Use `scripts/fetch_models.ps1` to download model files from Hugging Face Hub
+  into the local `models/` directory. Models are hosted at
+  `alexandrealvaro/CorridorKey` on Hugging Face and are not tracked in Git
 - The only supported repo-local Windows runtime roots are
   `vendor/onnxruntime-windows-rtx` and `vendor/onnxruntime-windows-dml`
 - Do not use `vendor/onnxruntime-universal` or a globally installed ONNX Runtime
@@ -113,7 +116,8 @@ each session. It contains the non-negotiable rules for this repository.
 - Do not leak external library types into `include/corridorkey/`
 - Do not create documentation files unless explicitly asked
 - Do not bypass hooks with `--no-verify`
-- Do not commit model files (`.onnx`, `.pth`) unless the repository already tracks them
+- Do not commit model files (`.onnx`, `.pth`, `.safetensors`, `.mlxfn`) to Git;
+  they are hosted on Hugging Face Hub and fetched via `scripts/fetch_models.ps1`
 - Do not add dependencies without a `$comment` in `vcpkg.json`
 - Do not put source code in documentation files
 - Do not write comments that restate what the code does

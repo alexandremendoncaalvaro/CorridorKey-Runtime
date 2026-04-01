@@ -25,7 +25,19 @@ git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
 ```
 
-#### 2. Configure Environment
+#### 2. Fetch Models (Required)
+
+Models are hosted on Hugging Face Hub, not in Git LFS. You must download them before building or running tests.
+
+```powershell
+# Windows (downloads the RTX profile by default)
+.\scripts\fetch_models.ps1
+
+# macOS / Apple Silicon (requires pwsh)
+pwsh ./scripts/fetch_models.ps1 -Profile apple
+```
+
+#### 3. Configure Environment
 
 <details>
 <summary>Linux / macOS</summary>
@@ -79,7 +91,7 @@ Windows rules:
 
 </details>
 
-#### 3. Run Tests
+#### 4. Run Tests
 
 ```bash
 # Run unit tests

@@ -109,6 +109,11 @@ comparison mode on the same packaged ladder.
 ```bash
 git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
 cd CorridorKey-Runtime
+
+# Fetch models from Hugging Face Hub (required for inference and E2E tests)
+.\scripts\fetch_models.ps1            # Windows (default: windows-rtx)
+# or: ./scripts/fetch_models.ps1 -Profile all   # All platforms
+
 export VCPKG_ROOT="$HOME/vcpkg"
 cmake --preset release
 cmake --build --preset release
