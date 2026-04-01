@@ -568,10 +568,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamExecutionEngine, "Engine", kExecutionEngineAuto,
         {execution_engine_ui_label(kExecutionEngineAuto),
          execution_engine_ui_label(kExecutionEngineOfficial),
-         execution_engine_ui_label(kExecutionEngineMaxPerformance)},
+         execution_engine_ui_label(kExecutionEngineTorchTensorRt)},
         "Execution engine policy for Windows RTX. Auto keeps the validated official path. "
-        "ORT TensorRT Max enables more aggressive runtime optimizations for comparison on "
-        "static-shape RTX sessions.",
+        "Torch-TensorRT is experimental and intended for side-by-side comparison.",
         "advanced_runtime_group",
 #if defined(_WIN32)
         true

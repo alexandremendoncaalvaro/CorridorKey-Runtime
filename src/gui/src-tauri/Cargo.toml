@@ -1,6 +1,6 @@
 [package]
 name = "corridorkey-gui"
-version = "0.8.0"
+version = "0.9.1"
 description = "CorridorKey Native Runtime GUI"
 authors = ["Alexandre Alvaro"]
 edition = "2021"
