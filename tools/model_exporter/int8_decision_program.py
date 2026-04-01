@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import json
+import os
 import subprocess
 import tempfile
 import time
@@ -133,10 +134,10 @@ def run_cli_benchmark(
         "--precision",
         precision,
         "--json",
-        "--model",
-        str(models_dir / f"corridorkey_fp16_{resolution}.onnx"),
         *benchmark_resolution_args(resolution),
     ]
+    environment = os.environ.copy()
+    environment["CORRIDORKEY_MODELS_DIR"] = str(models_dir)
 
     temp_output_path: Path | None = None
     if corpus_case is not None:
@@ -146,7 +147,13 @@ def run_cli_benchmark(
         if corpus_case.alpha_hint_path is not None:
             command.extend(["--alpha-hint", str(corpus_case.alpha_hint_path)])
 
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=environment,
+    )
     if completed.returncode != 0:
         raise RuntimeError(
             f"corridorkey benchmark failed for {backend}/{precision}/{resolution}: "
@@ -243,17 +250,17 @@ def load_corridorkey_model(checkpoint_path: Path, repo_path: Path, resolution: i
     return load_model_with_pos_embed_interpolation(str(checkpoint_path), resolution, device_name)
 
 
-class CorridorKeyTorchWrapper:
-    def __init__(self, model: Any):
-        self.model = model
+def build_corridorkey_torch_wrapper(torch_module: Any, model: Any) -> Any:
+    class CorridorKeyTorchWrapper(torch_module.nn.Module):
+        def __init__(self, wrapped_model: Any):
+            super().__init__()
+            self.model = wrapped_model
 
-    def __call__(self, tensor: Any) -> tuple[Any, Any]:
-        output = self.model(tensor)
-        return output["alpha"], output.get("fg", tensor[:, :3, :, :])
+        def forward(self, tensor: Any) -> tuple[Any, Any]:
+            output = self.model(tensor)
+            return output["alpha"], output.get("fg", tensor[:, :3, :, :])
 
-    def eval(self) -> "CorridorKeyTorchWrapper":
-        self.model.eval()
-        return self
+    return CorridorKeyTorchWrapper(model)
 
 
 def benchmark_torch_callable(
@@ -416,7 +423,7 @@ def run_torch_tensorrt_candidate_benchmark(
         raise RuntimeError("CUDA is required for the Torch-TensorRT INT8 spike.")
 
     base_model = load_corridorkey_model(checkpoint_path, repo_path, resolution, "cuda")
-    wrapped_model = CorridorKeyTorchWrapper(base_model).eval()
+    wrapped_model = build_corridorkey_torch_wrapper(torch, base_model).eval()
     calibration_batches = None
     input_batches = []
     numeric_drift = []
@@ -505,6 +512,8 @@ def build_decision_summary(
 ) -> dict[str, Any]:
     speedups: dict[str, float] = {}
     reasons: list[str] = []
+    gpu_gate_failed = False
+    visual_review_pending = False
     if not gpu_int8_reports:
         reasons.append("Torch-TensorRT GPU INT8 candidate results are unavailable.")
 
@@ -516,6 +525,7 @@ def build_decision_summary(
         )
         speedups[resolution] = speedup
         if speedup < GPU_INT8_SPEEDUP_THRESHOLD:
+            gpu_gate_failed = True
             reasons.append(
                 f"GPU INT8 at {resolution}px did not reach the {GPU_INT8_SPEEDUP_THRESHOLD:.1f}x "
                 f"steady-state speedup gate."
@@ -523,12 +533,14 @@ def build_decision_summary(
 
     numeric_drift = summarize_numeric_drift(gpu_int8_reports)
     if not visual_corpus_cases:
+        visual_review_pending = True
         reasons.append("Visual corpus review is still pending because no corpus manifest was provided.")
-        decision_status = "pending_visual_review"
-    elif not gpu_int8_reports:
+    if not gpu_int8_reports:
         decision_status = "insufficient_data"
-    elif reasons:
+    elif gpu_gate_failed:
         decision_status = "hold"
+    elif visual_review_pending:
+        decision_status = "pending_visual_review"
     else:
         decision_status = "candidate_pass"
 
@@ -536,7 +548,9 @@ def build_decision_summary(
         "status": decision_status,
         "gpu_int8_speedup_threshold": GPU_INT8_SPEEDUP_THRESHOLD,
         "gpu_int8_speedups": speedups,
-        "cpu_int8_fallback_available": bool(cpu_int8_cli_reports),
+        "cpu_int8_fallback_available": any(
+            report.get("effective_precision") == "int8" for report in cpu_int8_cli_reports
+        ),
         "visual_review_required_categories": list(REQUIRED_CORPUS_CATEGORIES),
         "visual_corpus_case_count": len(visual_corpus_cases),
         "numeric_drift_summary": numeric_drift,
@@ -610,9 +624,8 @@ def main() -> None:
                 summarize_cli_report(fp16_report, "tensorrt", "fp16", resolution)
             )
 
-            cpu_case = visual_corpus_cases[0] if visual_corpus_cases else None
             cpu_report = run_cli_benchmark(
-                cli_path, models_dir, "cpu", "int8", resolution, cpu_case
+                cli_path, models_dir, "cpu", "int8", resolution, None
             )
             cpu_int8_cli_reports.append(
                 summarize_cli_report(cpu_report, "cpu", "int8", resolution)

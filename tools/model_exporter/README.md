@@ -45,6 +45,11 @@ That runner compares:
 - CorridorKey CLI `cpu + int8` as the fallback baseline
 - Torch-TensorRT GPU INT8 as the candidate path
 
+The CLI baselines intentionally rely on the normal runtime artifact selection
+path. `int8_decision_program.py` points the CLI at `--models-dir` through
+`CORRIDORKEY_MODELS_DIR` instead of forcing a specific `.onnx` file so the
+measured backend and precision match the real product contract.
+
 The decision report enforces the current product gate:
 
 - GPU INT8 must beat the official FP16 path by at least `1.8x` steady-state
