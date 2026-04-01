@@ -142,7 +142,7 @@ enum class Backend : std::uint8_t {
 /**
  * @brief Execution engine implementation policy used by a runtime session.
  */
-enum class ExecutionEngine : std::uint8_t { Auto, Official, MaxPerformance, TorchTensorRt };
+enum class ExecutionEngine : std::uint8_t { Auto, Official, TorchTensorRt };
 /**
  * @brief Output encoding policy for video exports.
  */
