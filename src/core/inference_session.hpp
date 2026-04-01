@@ -44,7 +44,8 @@ namespace corridorkey {
 
 namespace core {
 class MlxSession;
-}
+class TorchTrtSession;
+}  // namespace core
 
 struct SessionCreateOptions {
     bool disable_cpu_ep_fallback = false;
@@ -53,8 +54,9 @@ struct SessionCreateOptions {
 };
 
 /**
- * @brief Private wrapper for an ONNX Runtime session.
- * This class isolates Ort types from the rest of the core.
+ * @brief Private wrapper for packaged inference sessions on the active backend.
+ * This class
+ * isolates backend-specific runtime types from the rest of the core.
  */
 class InferenceSession {
    public:
@@ -155,6 +157,7 @@ class InferenceSession {
     ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     std::vector<ONNXTensorElementDataType> m_output_element_types = {};
     std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
+    std::unique_ptr<core::TorchTrtSession> m_torch_trt_session = nullptr;
     ExecutionEngine m_execution_engine = ExecutionEngine::Official;
 
     // Pre-allocated buffer pools (reused across run() calls)

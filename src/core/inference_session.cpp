@@ -2,6 +2,7 @@
 
 #include <corridorkey/detail/constants.hpp>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <new>
 #include <string_view>
@@ -40,6 +41,7 @@
 #include "session_cache_policy.hpp"
 #include "session_policy.hpp"
 #include "tile_blend.hpp"
+#include "torch_trt_session.hpp"
 
 namespace {
 void debug_log(const std::string& message) {
@@ -120,8 +122,18 @@ void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, 
 
 constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
 
-bool should_use_max_performance_engine(ExecutionEngine engine, Backend backend) {
-    return engine == ExecutionEngine::MaxPerformance && backend == Backend::TensorRT;
+bool should_enable_tensorrt_cuda_graph(Backend backend) {
+    if (backend != Backend::TensorRT) {
+        return false;
+    }
+
+    if (auto disable_cuda_graph =
+            common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DISABLE_CUDA_GRAPH");
+        disable_cuda_graph.has_value() && std::string_view(*disable_cuda_graph) == "1") {
+        return false;
+    }
+
+    return true;
 }
 
 Result<ExecutionEngine> resolve_execution_engine(ExecutionEngine requested, Backend backend) {
@@ -130,17 +142,14 @@ Result<ExecutionEngine> resolve_execution_engine(ExecutionEngine requested, Back
             return ExecutionEngine::Official;
         case ExecutionEngine::Official:
             return ExecutionEngine::Official;
-        case ExecutionEngine::MaxPerformance:
-            if (backend == Backend::TensorRT) {
-                return ExecutionEngine::MaxPerformance;
-            }
-            return ExecutionEngine::Official;
         case ExecutionEngine::TorchTensorRt:
-            return Unexpected(Error{
-                ErrorCode::HardwareNotSupported,
-                "Torch-TensorRT is not packaged as a zero-friction C++ runtime in this build. "
-                "Use the official ORT TensorRT engine instead.",
-            });
+            if (backend != Backend::TensorRT) {
+                return Unexpected(Error{
+                    ErrorCode::HardwareNotSupported,
+                    "Torch-TensorRT currently requires the Windows RTX TensorRT backend.",
+                });
+            }
+            return ExecutionEngine::TorchTensorRt;
         default:
             return ExecutionEngine::Official;
     }
@@ -253,6 +262,7 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
                                             const std::filesystem::path& model_path,
                                             ExecutionEngine execution_engine) {
     debug_log("Configuring TensorRT RTX execution provider");
+    (void)execution_engine;
 
     int model_res = extract_model_resolution(model_path);
     debug_log("Detected model resolution: " + std::to_string(model_res));
@@ -277,9 +287,9 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
         {tensorrt_rtx_option_names::kDeviceId, "0"},
         {tensorrt_rtx_option_names::kMaxWorkspaceSize, workspace_size},
     };
-    if (should_use_max_performance_engine(execution_engine, Backend::TensorRT)) {
+    if (should_enable_tensorrt_cuda_graph(Backend::TensorRT)) {
         provider_options.emplace(tensorrt_rtx_option_names::kCudaGraphEnable, "1");
-        debug_log("TensorRT RTX CUDA graph enabled for max-performance engine");
+        debug_log("TensorRT RTX CUDA graph enabled for the official Windows RTX engine");
     }
 
     const std::string profile_shapes =
@@ -425,6 +435,28 @@ void from_planar_parallel(const float* source, Image destination) {
                     destination(y, x, channel) =
                         source[static_cast<size_t>(channel) * channel_stride + pixel_index];
                 }
+            }
+        }
+    });
+}
+
+void from_planar_into_result_parallel(const float* source, Image destination) {
+    const size_t channel_stride =
+        static_cast<size_t>(destination.height) * static_cast<size_t>(destination.width);
+    if (destination.channels == 1) {
+        std::memcpy(destination.data.data(), source, channel_stride * sizeof(float));
+        return;
+    }
+
+    common::parallel_for_rows(destination.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            const size_t row_offset =
+                static_cast<size_t>(y) * static_cast<size_t>(destination.width);
+            for (int x = 0; x < destination.width; ++x) {
+                const size_t pixel_index = row_offset + static_cast<size_t>(x);
+                destination(y, x, 0) = source[pixel_index];
+                destination(y, x, 1) = source[channel_stride + pixel_index];
+                destination(y, x, 2) = source[channel_stride * 2 + pixel_index];
             }
         }
     });
@@ -638,6 +670,15 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             }
             session_ptr->m_recommended_resolution = (*mlx_session_res)->model_resolution();
             session_ptr->m_mlx_session = std::move(*mlx_session_res);
+            return session_ptr;
+        }
+        if (*execution_engine == ExecutionEngine::TorchTensorRt) {
+            auto torch_session_res = core::TorchTrtSession::create(model_path, requested_device);
+            if (!torch_session_res) {
+                return Unexpected(torch_session_res.error());
+            }
+            session_ptr->m_recommended_resolution = (*torch_session_res)->model_resolution();
+            session_ptr->m_torch_trt_session = std::move(*torch_session_res);
             return session_ptr;
         }
 
@@ -1183,6 +1224,19 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         }
         return results;
     }
+    if (m_torch_trt_session != nullptr) {
+        std::vector<FrameResult> results;
+        results.reserve(rgbs.size());
+        for (size_t index = 0; index < rgbs.size(); ++index) {
+            auto result =
+                m_torch_trt_session->infer(rgbs[index], alpha_hints[index], params, on_stage);
+            if (!result) {
+                return Unexpected(result.error());
+            }
+            results.push_back(std::move(*result));
+        }
+        return results;
+    }
 
     try {
         Ort::MemoryInfo memory_info =
@@ -1369,29 +1423,42 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                     bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
 
                     result.alpha = ImageBuffer(rgbs[b].width, rgbs[b].height, 1);
-                    Image model_alpha = ensure_resize_buffer(
-                        batch_size * 2 + b * 2, static_cast<int>(alpha_shape[3]),
-                        static_cast<int>(alpha_shape[2]), static_cast<int>(alpha_shape[1]));
-                    from_planar_parallel(alpha_ptr + (b * alpha_image_stride), model_alpha);
-                    if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
-                                                        m_color_utils_state);
+                    const bool exact_output_size =
+                        static_cast<int>(alpha_shape[3]) == rgbs[b].width &&
+                        static_cast<int>(alpha_shape[2]) == rgbs[b].height;
+                    if (exact_output_size) {
+                        from_planar_into_result_parallel(alpha_ptr + (b * alpha_image_stride),
+                                                         result.alpha.view());
                     } else {
-                        ColorUtils::resize_into(model_alpha, result.alpha.view());
+                        Image model_alpha = ensure_resize_buffer(
+                            batch_size * 2 + b * 2, static_cast<int>(alpha_shape[3]),
+                            static_cast<int>(alpha_shape[2]), static_cast<int>(alpha_shape[1]));
+                        from_planar_parallel(alpha_ptr + (b * alpha_image_stride), model_alpha);
+                        if (use_lanczos) {
+                            ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
+                                                            m_color_utils_state);
+                        } else {
+                            ColorUtils::resize_into(model_alpha, result.alpha.view());
+                        }
                     }
                     ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
 
                     if (fg_ptr != nullptr) {
                         result.foreground = ImageBuffer(rgbs[b].width, rgbs[b].height, 3);
-                        Image model_fg = ensure_resize_buffer(
-                            batch_size * 2 + b * 2 + 1, static_cast<int>(fg_shape[3]),
-                            static_cast<int>(fg_shape[2]), static_cast<int>(fg_shape[1]));
-                        from_planar_parallel(fg_ptr + (b * fg_image_stride), model_fg);
-                        if (use_lanczos) {
-                            ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
-                                                            m_color_utils_state);
+                        if (exact_output_size) {
+                            from_planar_into_result_parallel(fg_ptr + (b * fg_image_stride),
+                                                             result.foreground.view());
                         } else {
-                            ColorUtils::resize_into(model_fg, result.foreground.view());
+                            Image model_fg = ensure_resize_buffer(
+                                batch_size * 2 + b * 2 + 1, static_cast<int>(fg_shape[3]),
+                                static_cast<int>(fg_shape[2]), static_cast<int>(fg_shape[1]));
+                            from_planar_parallel(fg_ptr + (b * fg_image_stride), model_fg);
+                            if (use_lanczos) {
+                                ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
+                                                                m_color_utils_state);
+                            } else {
+                                ColorUtils::resize_into(model_fg, result.foreground.view());
+                            }
                         }
                     }
                 }
@@ -1436,6 +1503,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             return Unexpected(batch_res.error());
         }
         return std::move((*batch_res)[0]);
+    }
+    if (m_torch_trt_session != nullptr) {
+        return m_torch_trt_session->infer(rgb, alpha_hint, params, on_stage);
     }
 
     try {
@@ -1603,27 +1673,36 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         common::measure_stage(
             on_stage, "frame_extract_outputs",
             [&]() {
-                from_planar_parallel(alpha_ptr, model_alpha);
-                if (use_lanczos) {
-                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
-                                                    m_color_utils_state);
+                const bool exact_output_size = static_cast<int>(alpha_shape[3]) == rgb.width &&
+                                               static_cast<int>(alpha_shape[2]) == rgb.height;
+                if (exact_output_size) {
+                    from_planar_into_result_parallel(alpha_ptr, result.alpha.view());
+                    if (fg_ptr != nullptr) {
+                        from_planar_into_result_parallel(fg_ptr, result.foreground.view());
+                    }
                 } else {
-                    ColorUtils::resize_into(model_alpha, result.alpha.view());
-                }
-                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-
-                if (fg_ptr != nullptr) {
-                    Image model_fg = ensure_resize_buffer(3, static_cast<int>(fg_shape[3]),
-                                                          static_cast<int>(fg_shape[2]),
-                                                          static_cast<int>(fg_shape[1]));
-                    from_planar_parallel(fg_ptr, model_fg);
+                    from_planar_parallel(alpha_ptr, model_alpha);
                     if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
+                        ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
                                                         m_color_utils_state);
                     } else {
-                        ColorUtils::resize_into(model_fg, result.foreground.view());
+                        ColorUtils::resize_into(model_alpha, result.alpha.view());
+                    }
+
+                    if (fg_ptr != nullptr) {
+                        Image model_fg = ensure_resize_buffer(3, static_cast<int>(fg_shape[3]),
+                                                              static_cast<int>(fg_shape[2]),
+                                                              static_cast<int>(fg_shape[1]));
+                        from_planar_parallel(fg_ptr, model_fg);
+                        if (use_lanczos) {
+                            ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
+                                                            m_color_utils_state);
+                        } else {
+                            ColorUtils::resize_into(model_fg, result.foreground.view());
+                        }
                     }
                 }
+                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
             },
             1);
 
