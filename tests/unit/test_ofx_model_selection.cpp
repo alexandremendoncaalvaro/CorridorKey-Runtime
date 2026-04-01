@@ -256,14 +256,14 @@ TEST_CASE("automatic coarse-to-fine selection falls back to lower packaged coars
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
-TEST_CASE("fixed windows tensorRT ultra accepts 1536 on a 10 GB RTX tier",
+TEST_CASE("fixed windows tensorRT manual override may attempt 1536 on a 10 GB RTX tier",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-quality-ultra-10gb-direct");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
 
     auto selection =
         select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
-                                kQuantizationFp16, 10240, QualityFallbackMode::Auto);
+                                kQuantizationFp16, 10240, QualityFallbackMode::Auto, 0, true);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 1536);
@@ -535,9 +535,12 @@ TEST_CASE("fixed windows tensorRT quality reports unsupported tiers before engin
 
     REQUIRE(message.has_value());
     REQUIRE(message->find("24 GB") != std::string::npos);
-    REQUIRE(message->find("Ultra (1536)") != std::string::npos);
-    REQUIRE_FALSE(unsupported_quality_message(
-                      DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, kQualityUltra, 1536)
+    REQUIRE(message->find("High (1024)") != std::string::npos);
+    REQUIRE(unsupported_quality_message(
+                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, kQualityUltra, 1536)
+                .has_value());
+    REQUIRE_FALSE(unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+                                              kQualityUltra, 1536, true)
                       .has_value());
     REQUIRE_FALSE(unsupported_quality_message(
                       DeviceInfo{"RTX 4090", 24576, Backend::TensorRT}, kQualityMaximum, 2048)
@@ -619,13 +622,18 @@ TEST_CASE("unsupported OFX quantization combinations report product-safe guidanc
           "[unit][ofx][regression]") {
     auto tensorrt_message = unsupported_quantization_message(Backend::TensorRT, kQuantizationInt8);
     REQUIRE(tensorrt_message.has_value());
-    REQUIRE(tensorrt_message->find("TensorRT RTX") != std::string::npos);
+    REQUIRE(tensorrt_message->find("Windows RTX track") != std::string::npos);
+    REQUIRE(tensorrt_message->find("Allow CPU Fallback") != std::string::npos);
 
     auto directml_message = unsupported_quantization_message(Backend::DirectML, kQuantizationInt8);
     REQUIRE(directml_message.has_value());
-    REQUIRE(directml_message->find("DirectML") != std::string::npos);
+    REQUIRE(directml_message->find("selected Windows GPU backend") != std::string::npos);
     REQUIRE(directml_message->find("FP16") != std::string::npos);
 
+    REQUIRE_FALSE(
+        unsupported_quantization_message(Backend::TensorRT, kQuantizationInt8, true).has_value());
+    REQUIRE_FALSE(
+        unsupported_quantization_message(Backend::DirectML, kQuantizationInt8, true).has_value());
     REQUIRE_FALSE(
         unsupported_quantization_message(Backend::DirectML, kQuantizationFp16).has_value());
     REQUIRE_FALSE(unsupported_quantization_message(Backend::CPU, kQuantizationInt8).has_value());

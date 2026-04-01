@@ -5,8 +5,8 @@ param(
     [string]$OrtRoot = "",
     [string]$SourceModelsDir = "",
     [string]$OutputModelsDir = "",
-    [ValidateSet("rtx-lite", "rtx-stable", "rtx-full")]
-    [string]$ModelProfile = "rtx-full",
+    [ValidateSet("windows-rtx")]
+    [string]$ModelProfile = "windows-rtx",
     [switch]$Skip2048
 )
 

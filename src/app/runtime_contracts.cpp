@@ -34,6 +34,18 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
     return normalized_lower(selector);
 }
 
+std::string normalize_packaged_model_profile_name(const std::string& value) {
+    const auto normalized = normalized_lower(value);
+    if (normalized == "rtx-lite" || normalized == "rtx-stable" || normalized == "rtx-full" ||
+        normalized == "windows-rtx") {
+        return "windows-rtx";
+    }
+    if (normalized == "windows-universal") {
+        return "windows-universal";
+    }
+    return normalized;
+}
+
 std::optional<std::string> detect_active_packaged_model_profile() {
     const auto models_root = common::default_models_root();
     if (models_root.empty() || models_root.filename() != "models") {
@@ -63,7 +75,8 @@ std::optional<std::string> detect_active_packaged_model_profile() {
 
             nlohmann::json parsed = nlohmann::json::parse(stream, nullptr, true, true);
             if (parsed.contains("model_profile") && parsed["model_profile"].is_string()) {
-                return parsed["model_profile"].get<std::string>();
+                return normalize_packaged_model_profile_name(
+                    parsed["model_profile"].get<std::string>());
             }
         } catch (...) {
             continue;
@@ -131,23 +144,17 @@ bool windows_tensorrt_packaged_resolution_supported(int resolution) {
 }
 
 std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_memory_mb) {
-    if (auto model_profile = detect_active_packaged_model_profile(); model_profile.has_value()) {
-        if (*model_profile == "rtx-full") {
-            return 2048;
-        }
-        if (*model_profile == "rtx-lite" || *model_profile == "rtx-stable") {
-            return 1024;
-        }
-    }
-
     if (available_memory_mb <= 0) {
         return std::nullopt;
     }
     if (available_memory_mb >= 24000) {
         return 2048;
     }
-    if (available_memory_mb >= 10000) {
+    if (available_memory_mb >= 16000) {
         return 1536;
+    }
+    if (available_memory_mb >= 10000) {
+        return 1024;
     }
     return 512;
 }
@@ -237,9 +244,11 @@ std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
 Result<std::pair<int, bool>> search_resolution_for_request(const DeviceInfo& requested_device,
                                                            int requested_resolution,
                                                            QualityFallbackMode fallback_mode,
-                                                           int coarse_resolution_override) {
+                                                           int coarse_resolution_override,
+                                                           bool allow_unrestricted_quality_attempt) {
     const bool coarse_to_fine = app::should_use_coarse_to_fine_for_request(
-        requested_device, requested_resolution, fallback_mode, coarse_resolution_override);
+        requested_device, requested_resolution, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt);
     if (!coarse_to_fine) {
         return std::pair<int, bool>{requested_resolution, false};
     }
@@ -394,7 +403,8 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset) {
+    const std::optional<PresetDefinition>& preset,
+    app::ArtifactVariantPreference variant_preference) {
     auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
@@ -417,16 +427,23 @@ std::optional<ModelCatalogEntry> default_model_for_request(
     };
 
     auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
+        const bool prefer_fp16 = variant_preference == app::ArtifactVariantPreference::FP16;
         if (requested_device.available_memory_mb >= 10000) {
-            return find_model_by_filename("corridorkey_int8_1024.onnx");
+            return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_1024.onnx"
+                                                      : "corridorkey_int8_1024.onnx");
         }
         if (requested_device.available_memory_mb >= 8000) {
-            return find_model_by_filename("corridorkey_int8_768.onnx");
+            return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_768.onnx"
+                                                      : "corridorkey_int8_768.onnx");
         }
-        return find_model_by_filename("corridorkey_int8_512.onnx");
+        return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_512.onnx"
+                                                  : "corridorkey_int8_512.onnx");
     };
 
     if (requested_device.backend == Backend::CPU) {
+        if (variant_preference == app::ArtifactVariantPreference::FP16) {
+            return find_model_by_filename("corridorkey_fp16_512.onnx");
+        }
         return find_model_by_filename("corridorkey_int8_512.onnx");
     }
 
@@ -688,24 +705,11 @@ RuntimeOptimizationProfile runtime_optimization_profile_for_device(
 
     if (capabilities.platform == "windows" &&
         (device.backend == Backend::TensorRT || device.backend == Backend::CUDA)) {
-        const auto model_profile = active_packaged_model_profile().value_or("rtx-full");
-        if (model_profile == "rtx-lite" || model_profile == "rtx-stable") {
-            profile.id = "windows-rtx-lite";
-            profile.label = "Windows RTX Lite";
-            profile.intended_track = "windows_rtx";
-            profile.backend_intent = "tensorrt";
-            profile.fallback_policy = "conservative_safe_quality_ceiling";
-            profile.warmup_policy = "precompiled_context_or_first_run_compile";
-            profile.certification_tier = "validated_ladder_through_1024";
-            profile.unrestricted_quality_attempt = false;
-            return profile;
-        }
-
-        profile.id = "windows-rtx-full";
-        profile.label = "Windows RTX Full";
+        profile.id = "windows-rtx";
+        profile.label = "Windows RTX";
         profile.intended_track = "windows_rtx";
         profile.backend_intent = "tensorrt";
-        profile.fallback_policy = "attempt_packaged_quality_then_runtime_failure";
+        profile.fallback_policy = "safe_auto_quality_with_manual_override";
         profile.warmup_policy = "precompiled_context_or_first_run_compile";
         profile.certification_tier = "packaged_fp16_ladder_through_2048";
         profile.unrestricted_quality_attempt = true;
@@ -816,8 +820,9 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset) {
-    return corridorkey::default_model_for_request(capabilities, requested_device, preset);
+    const std::optional<PresetDefinition>& preset, ArtifactVariantPreference variant_preference) {
+    return corridorkey::default_model_for_request(capabilities, requested_device, preset,
+                                                  variant_preference);
 }
 
 std::string backend_to_string(Backend backend) {
@@ -903,7 +908,7 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
                 return 24000;
             }
             if (resolution >= 1536) {
-                return 10000;
+                return 16000;
             }
             if (resolution >= 1024) {
                 return 10000;
@@ -924,7 +929,8 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
 bool should_use_coarse_to_fine_for_request(const DeviceInfo& requested_device,
                                            int requested_resolution,
                                            QualityFallbackMode fallback_mode,
-                                           int coarse_resolution_override) {
+                                           int coarse_resolution_override,
+                                           bool allow_unrestricted_quality_attempt) {
     if (fallback_mode == QualityFallbackMode::Direct) {
         return false;
     }
@@ -936,6 +942,9 @@ bool should_use_coarse_to_fine_for_request(const DeviceInfo& requested_device,
     }
     auto max_resolution = max_supported_resolution_for_device(requested_device);
     if (!max_resolution.has_value()) {
+        return false;
+    }
+    if (allow_unrestricted_quality_attempt && requested_resolution > *max_resolution) {
         return false;
     }
     return requested_resolution > *max_resolution;
@@ -1036,7 +1045,8 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, ArtifactVariantPreference variant_preference,
     bool allow_lower_resolution_fallback,
-    QualityFallbackMode fallback_mode, int coarse_resolution_override) {
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt) {
     if (requested_resolution <= 0) {
         return Unexpected<Error>{Error{
             ErrorCode::InvalidParameters,
@@ -1052,7 +1062,8 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     }
 
     auto resolution_search = search_resolution_for_request(
-        requested_device, requested_resolution, fallback_mode, coarse_resolution_override);
+        requested_device, requested_resolution, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt);
     if (!resolution_search) {
         return Unexpected<Error>(resolution_search.error());
     }
@@ -1084,16 +1095,19 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, ArtifactVariantPreference variant_preference,
     bool allow_lower_resolution_fallback,
-    QualityFallbackMode fallback_mode, int coarse_resolution_override) {
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt) {
     auto expected_paths = expected_artifact_paths_for_request(
         models_root, requested_device, requested_resolution, variant_preference,
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override);
+        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt);
     if (!expected_paths) {
         return Unexpected<Error>(expected_paths.error());
     }
 
     auto resolution_search = search_resolution_for_request(
-        requested_device, requested_resolution, fallback_mode, coarse_resolution_override);
+        requested_device, requested_resolution, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt);
     if (!resolution_search) {
         return Unexpected<Error>(resolution_search.error());
     }
@@ -1150,6 +1164,9 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
         params.requested_quality_resolution > 0
             ? params.requested_quality_resolution
             : (params.target_resolution > 0 ? params.target_resolution : model_resolution);
+    const bool allow_unrestricted_quality_attempt =
+        runtime_optimization_profile_for_device(runtime_capabilities(), requested_device)
+            .unrestricted_quality_attempt;
 
     const bool has_override = params.coarse_resolution_override > 0;
     const bool coarse_to_fine_requested =
@@ -1173,9 +1190,35 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
         return resolved_model_path;
     };
 
+    if (allow_unrestricted_quality_attempt && is_packaged_corridorkey_model(model_path) &&
+        model_resolution > 0 && requested_resolution > model_resolution &&
+        !should_use_coarse_to_fine_for_request(requested_device, requested_resolution,
+                                               params.quality_fallback_mode,
+                                               params.coarse_resolution_override,
+                                               allow_unrestricted_quality_attempt)) {
+        auto direct_attempt_path =
+            sibling_model_path_for_resolution(model_path, requested_resolution);
+        if (direct_attempt_path.empty()) {
+            return Unexpected<Error>{Error{
+                ErrorCode::InvalidParameters,
+                "The requested packaged quality artifact could not be derived from the selected "
+                "model.",
+            }};
+        }
+        if (!std::filesystem::exists(direct_attempt_path)) {
+            return Unexpected<Error>{Error{
+                ErrorCode::ModelLoadFailed,
+                "The requested packaged quality artifact is missing: " +
+                    direct_attempt_path.string(),
+            }};
+        }
+        return validate_resolved_model(direct_attempt_path);
+    }
+
     if (!should_use_coarse_to_fine_for_request(requested_device, requested_resolution,
                                                params.quality_fallback_mode,
-                                               params.coarse_resolution_override)) {
+                                               params.coarse_resolution_override,
+                                               allow_unrestricted_quality_attempt)) {
         return validate_resolved_model(model_path);
     }
 
@@ -1189,7 +1232,7 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
 
     auto coarse_resolution_search = search_resolution_for_request(
         requested_device, requested_resolution, params.quality_fallback_mode,
-        params.coarse_resolution_override);
+        params.coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!coarse_resolution_search) {
         return Unexpected<Error>(coarse_resolution_search.error());
     }

@@ -4,8 +4,8 @@ param(
     [string]$ModelsDir = "",
     [string]$OutputDir = "",
     [string]$ArtifactManifestPath = "",
-    [ValidateSet("rtx-lite", "rtx-stable", "rtx-full", "windows-universal")]
-    [string]$ModelProfile = "rtx-full",
+    [ValidateSet("windows-rtx", "windows-universal")]
+    [string]$ModelProfile = "windows-rtx",
     [switch]$AllowUncertifiedTensorRtContexts,
     [switch]$Skip2048
 )

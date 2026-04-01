@@ -81,8 +81,7 @@ if ($SyncDirectML.IsPresent -or -not (Test-Path $DirectMlOrtRoot)) {
     }
 }
 
-Invoke-PackageVariant -Label "RTX Lite" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX_Lite" -ModelProfile "rtx-lite"
-Invoke-PackageVariant -Label "RTX Full" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX_Full" -ModelProfile "rtx-full"
+Invoke-PackageVariant -Label "RTX" -OrtRoot $RtxOrtRoot -ReleaseSuffix "RTX" -ModelProfile "windows-rtx"
 Invoke-PackageVariant -Label "DirectML" -OrtRoot $DirectMlOrtRoot -ReleaseSuffix "DirectML" -ModelProfile "windows-universal"
 
 Write-Host "[done] Windows Resolve OFX package matrix is ready under dist\\" -ForegroundColor Green

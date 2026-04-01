@@ -167,25 +167,114 @@ std::string report_string(const nlohmann::json& report, const char* section, con
     return report[section].value(field, "");
 }
 
+std::string normalize_packaged_profile_for_comparison(std::string profile) {
+    if (profile == "rtx-lite" || profile == "rtx-stable" || profile == "rtx-full" ||
+        profile == "windows-rtx") {
+        return "windows-rtx";
+    }
+    return profile;
+}
+
+std::string normalize_optimization_profile_for_comparison(std::string profile) {
+    if (profile == "windows-rtx-lite" || profile == "windows-rtx-full" ||
+        profile == "windows-rtx") {
+        return "windows-rtx";
+    }
+    return profile;
+}
+
 bool packaged_profile_matches_active_profile(const nlohmann::json& report) {
     if (!report.contains("optimization_profile") || !report["optimization_profile"].is_object()) {
         return true;
     }
 
-    const auto bundle_profile = report_string(report, "bundle", "model_profile");
-    const auto active_profile = report["optimization_profile"].value("id", "");
+    const auto bundle_profile =
+        normalize_packaged_profile_for_comparison(report_string(report, "bundle", "model_profile"));
+    const auto active_profile = normalize_optimization_profile_for_comparison(
+        report["optimization_profile"].value("id", ""));
     if (bundle_profile.empty() || active_profile.empty()) {
         return true;
     }
+    return bundle_profile == active_profile;
+}
 
-    if (bundle_profile == "rtx-lite" || bundle_profile == "rtx-stable") {
-        return active_profile == "windows-rtx-lite";
+std::string precision_preference_to_string(PrecisionPreference preference) {
+    switch (preference) {
+        case PrecisionPreference::FP16:
+            return "fp16";
+        case PrecisionPreference::Int8:
+            return "int8";
+        case PrecisionPreference::Auto:
+        default:
+            return "auto";
     }
-    if (bundle_profile == "rtx-full") {
-        return active_profile == "windows-rtx-full";
+}
+
+std::string artifact_precision_to_string(const std::filesystem::path& model_path) {
+    const auto filename = model_path.filename().string();
+    if (filename.find("_fp16_") != std::string::npos) {
+        return "fp16";
+    }
+    if (filename.find("_int8_") != std::string::npos) {
+        return "int8";
+    }
+    if (filename.find("_mlx") != std::string::npos || model_path.extension() == ".mlxfn" ||
+        model_path.extension() == ".safetensors") {
+        return "mlx";
+    }
+    return "auto";
+}
+
+void append_benchmark_artifact_metadata(nlohmann::json& results, const JobRequest& request,
+                                        const DeviceInfo& execution_device) {
+    const auto requested_resolution =
+        request.params.requested_quality_resolution > 0
+            ? request.params.requested_quality_resolution
+            : (request.params.target_resolution > 0
+                   ? request.params.target_resolution
+                   : packaged_model_resolution(request.model_path).value_or(0));
+    const int effective_resolution = packaged_model_resolution(request.model_path).value_or(0);
+    const auto execution_profile =
+        runtime_optimization_profile_for_device(runtime_capabilities(), execution_device);
+    const auto safe_quality_ceiling = max_supported_resolution_for_device(execution_device);
+    const bool quality_fallback_used =
+        requested_resolution > 0 && effective_resolution > 0 && effective_resolution != requested_resolution;
+    const bool manual_override_above_safe =
+        execution_profile.unrestricted_quality_attempt && safe_quality_ceiling.has_value() &&
+        requested_resolution > *safe_quality_ceiling;
+
+    results["artifact"] = request.model_path.filename().string();
+    results["artifact_path"] = request.model_path.string();
+    results["requested_precision"] =
+        precision_preference_to_string(request.params.precision_preference);
+    results["effective_precision"] = artifact_precision_to_string(request.model_path);
+    results["requested_resolution"] = requested_resolution;
+    results["effective_resolution"] = effective_resolution;
+    results["quality_fallback_mode"] = request.params.quality_fallback_mode == QualityFallbackMode::Direct
+                                           ? "direct"
+                                           : (request.params.quality_fallback_mode ==
+                                                      QualityFallbackMode::CoarseToFine
+                                                  ? "coarse_to_fine"
+                                                  : "auto");
+    results["quality_fallback_used"] = quality_fallback_used;
+    results["manual_override_above_safe_ceiling"] = manual_override_above_safe;
+    if (safe_quality_ceiling.has_value()) {
+        results["safe_quality_ceiling"] = *safe_quality_ceiling;
     }
 
-    return true;
+    if (results["requested_precision"] != results["effective_precision"]) {
+        nlohmann::json precision_fallback;
+        precision_fallback["requested"] = results["requested_precision"];
+        precision_fallback["effective"] = results["effective_precision"];
+        if (execution_device.backend == Backend::TensorRT || execution_device.backend == Backend::CUDA) {
+            precision_fallback["reason"] =
+                "Windows RTX currently ships FP16 as the official TensorRT path.";
+        } else {
+            precision_fallback["reason"] =
+                "The requested precision was unavailable for the selected artifact path.";
+        }
+        results["precision_fallback"] = std::move(precision_fallback);
+    }
 }
 
 std::size_t count_models_with_artifact_state(const nlohmann::json& models, const char* field) {
@@ -911,6 +1000,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["execution_profile"] = to_json(
             runtime_optimization_profile_for_device(runtime_capabilities(),
                                                     engine->current_device()));
+        append_benchmark_artifact_metadata(results, request, engine->current_device());
         results["warmup_runs"] = warmup_runs;
         results["benchmark_runs"] = benchmark_runs;
         results["cold_latency_ms"] = cold_latency_ms;
@@ -981,6 +1071,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     execution_device.backend = selected_backend == Backend::Auto ? execution_device.backend : selected_backend;
     results["execution_profile"] =
         to_json(runtime_optimization_profile_for_device(runtime_capabilities(), execution_device));
+    append_benchmark_artifact_metadata(results, benchmark_request, execution_device);
     results["total_duration_ms"] = total_ms;
     if (units > 0) {
         results["processed_units"] = units;

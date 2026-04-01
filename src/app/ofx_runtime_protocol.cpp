@@ -172,6 +172,26 @@ Result<RefinementMode> refinement_mode_from_string(const std::string& value) {
     return Unexpected<Error>(invalid_protocol_error("Unknown refinement mode: " + value));
 }
 
+std::string precision_preference_to_string(PrecisionPreference preference) {
+    switch (preference) {
+        case PrecisionPreference::FP16:
+            return "fp16";
+        case PrecisionPreference::Int8:
+            return "int8";
+        case PrecisionPreference::Auto:
+        default:
+            return "auto";
+    }
+}
+
+Result<PrecisionPreference> precision_preference_from_string(const std::string& value) {
+    if (value == "auto") return PrecisionPreference::Auto;
+    if (value == "fp16") return PrecisionPreference::FP16;
+    if (value == "int8") return PrecisionPreference::Int8;
+    return Unexpected<Error>(
+        invalid_protocol_error("Unknown precision preference: " + value));
+}
+
 Json backend_fallback_json(const BackendFallbackInfo& fallback) {
     return Json{{"requested_backend", backend_to_string(fallback.requested_backend)},
                 {"selected_backend", backend_to_string(fallback.selected_backend)},
@@ -277,6 +297,8 @@ nlohmann::json to_json(const InferenceParams& params) {
                 {"quality_fallback_mode",
                  quality_fallback_mode_to_string(params.quality_fallback_mode)},
                 {"refinement_mode", refinement_mode_to_string(params.refinement_mode)},
+                {"precision_preference",
+                 precision_preference_to_string(params.precision_preference)},
                 {"coarse_resolution_override", params.coarse_resolution_override},
                 {"despill_strength", params.despill_strength},
                 {"spill_method", params.spill_method},
@@ -316,6 +338,12 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
             refinement_mode_from_string(json.at("refinement_mode").get<std::string>());
         if (!refinement_mode) return Unexpected<Error>(refinement_mode.error());
         params.refinement_mode = *refinement_mode;
+    }
+    if (json.contains("precision_preference") && json.at("precision_preference").is_string()) {
+        auto precision =
+            precision_preference_from_string(json.at("precision_preference").get<std::string>());
+        if (!precision) return Unexpected<Error>(precision.error());
+        params.precision_preference = *precision;
     }
     if (json.contains("coarse_resolution_override") &&
         json.at("coarse_resolution_override").is_number_integer()) {

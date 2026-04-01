@@ -80,6 +80,7 @@ constexpr const char* kParamRuntimeTimings = "runtime_timings";
 constexpr const char* kParamRuntimeBackendWork = "runtime_backend_work";
 constexpr const char* kParamRenderTimeout = "render_timeout";
 constexpr const char* kParamPrepareTimeout = "prepare_timeout";
+constexpr const char* kParamAllowCpuFallback = "allow_cpu_fallback";
 constexpr const char* kParamOpenStartHereGuide = "open_start_here_guide";
 constexpr const char* kParamOpenQualityGuide = "open_quality_guide";
 constexpr const char* kParamOpenAlphaHintGuide = "open_alpha_hint_guide";
@@ -172,6 +173,7 @@ struct InstanceData {
     OfxParamHandle runtime_backend_work_param = nullptr;
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
+    OfxParamHandle allow_cpu_fallback_param = nullptr;
     std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
     std::unique_ptr<Engine> engine = nullptr;
     std::filesystem::path models_root = {};
@@ -246,7 +248,8 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
     int input_width, int input_height, int quantization_mode, std::int64_t available_memory_mb,
-    QualityFallbackMode fallback_mode, int coarse_resolution_override);
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
                                int input_height = 0, int quantization_mode = kQuantizationFp16,
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
