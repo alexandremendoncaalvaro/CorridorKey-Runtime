@@ -195,17 +195,14 @@ constexpr int kQuantizationInt8 = 1;
 // Execution engine
 constexpr int kExecutionEngineAuto = 0;
 constexpr int kExecutionEngineOfficial = 1;
-constexpr int kExecutionEngineMaxPerformance = 2;
-constexpr int kExecutionEngineTorchTensorRt = 3;
+constexpr int kExecutionEngineTorchTensorRt = 2;
 
 inline const char* execution_engine_ui_label(int choice) {
     switch (choice) {
         case kExecutionEngineOfficial:
             return "ORT TensorRT (Official)";
-        case kExecutionEngineMaxPerformance:
-            return "ORT TensorRT Max (Experimental)";
         case kExecutionEngineTorchTensorRt:
-            return "Torch-TensorRT (Unavailable)";
+            return "Torch-TensorRT (Experimental)";
         case kExecutionEngineAuto:
         default:
             return "Auto (Official)";
@@ -216,8 +213,6 @@ inline ExecutionEngine execution_engine_from_choice(int choice) {
     switch (choice) {
         case kExecutionEngineOfficial:
             return ExecutionEngine::Official;
-        case kExecutionEngineMaxPerformance:
-            return ExecutionEngine::MaxPerformance;
         case kExecutionEngineTorchTensorRt:
             return ExecutionEngine::TorchTensorRt;
         case kExecutionEngineAuto:

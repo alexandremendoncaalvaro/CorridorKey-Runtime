@@ -141,8 +141,6 @@ std::string execution_engine_label(ExecutionEngine engine) {
     switch (engine) {
         case ExecutionEngine::Official:
             return "ORT TensorRT (Official)";
-        case ExecutionEngine::MaxPerformance:
-            return "ORT TensorRT Max";
         case ExecutionEngine::TorchTensorRt:
             return "Torch-TensorRT";
         case ExecutionEngine::Auto:
@@ -177,14 +175,16 @@ ExecutionEngine effective_execution_engine(const InstanceData& data) {
 bool execution_engine_matches_request(ExecutionEngine requested, ExecutionEngine active) {
     const ExecutionEngine requested_effective =
         requested == ExecutionEngine::Auto ? ExecutionEngine::Official : requested;
-    return requested_effective == active;
+    const ExecutionEngine active_effective =
+        active == ExecutionEngine::Auto ? ExecutionEngine::Official : active;
+    return requested_effective == active_effective;
 }
 
 bool execution_engine_selector_enabled(const InstanceData& data) {
 #if defined(_WIN32)
     return std::find(data.runtime_capabilities.supported_execution_engines.begin(),
                      data.runtime_capabilities.supported_execution_engines.end(),
-                     ExecutionEngine::MaxPerformance) !=
+                     ExecutionEngine::TorchTensorRt) !=
            data.runtime_capabilities.supported_execution_engines.end();
 #else
     (void)data;
@@ -1194,7 +1194,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     log_message("create_instance", std::string("Detected device: ") + detected_device.name);
     log_message("create_instance",
                 std::string("Detected backend: ") + backend_label(detected_device.backend));
-    auto capabilities = runtime_capabilities();
+    auto capabilities = app::runtime_capabilities_for_models_root(data->models_root);
     data->runtime_capabilities = capabilities;
     data->requested_execution_engine = selected_execution_engine(data.get());
     log_message("create_instance", std::string("Platform: ") + capabilities.platform);
@@ -1237,8 +1237,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatOK;
     }
 
-    auto bootstrap_candidates =
-        build_bootstrap_candidates(capabilities, detected_device, data->models_root);
+    auto bootstrap_candidates = build_bootstrap_candidates(
+        capabilities, detected_device, data->models_root, data->requested_execution_engine);
     if (bootstrap_candidates.empty()) {
         log_message("create_instance", "No compatible model artifacts found for OFX bootstrap.");
         post_message(kOfxMessageError, "No compatible model artifacts found for this device.",
@@ -1504,7 +1504,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     auto selections = quality_artifact_candidates(
         data->models_root, requested_device.backend, effective_quality_mode, input_width,
         input_height, quantization_mode, requested_device.available_memory_mb, fallback_mode,
-        coarse_resolution_override, allow_unrestricted_quality_attempt);
+        coarse_resolution_override, allow_unrestricted_quality_attempt, requested_execution_engine);
     const auto original_selections = selections;
     data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     if (!cpu_fallback_warning.empty()) {
@@ -1525,7 +1525,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data->models_root, requested_device.backend, effective_quality_mode, input_width,
             input_height, quantization_mode, cpu_quality_guardrail_active,
             requested_device.available_memory_mb, fallback_mode, coarse_resolution_override,
-            allow_unrestricted_quality_attempt);
+            allow_unrestricted_quality_attempt, requested_execution_engine);
         if (auto expected_artifact = primary_expected_artifact_path(expected_artifacts);
             expected_artifact.has_value()) {
             set_runtime_panel_state_for_failed_quality_request(

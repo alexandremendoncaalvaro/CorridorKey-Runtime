@@ -395,12 +395,24 @@ inline std::string missing_artifact_message(
     return message;
 }
 
+inline std::optional<std::filesystem::path> resolve_engine_artifact_path(
+    const std::filesystem::path& requested_model_path, const DeviceInfo& device,
+    ExecutionEngine execution_engine) {
+    auto executable_model =
+        app::executable_model_path_for_engine(requested_model_path, device, execution_engine);
+    if (!executable_model) {
+        return std::nullopt;
+    }
+    return *executable_model;
+}
+
 inline std::string missing_quality_artifact_message(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, bool cpu_quality_guardrail_active,
     std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    ExecutionEngine execution_engine = ExecutionEngine::Official) {
     const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, effective_quality_mode,
@@ -415,7 +427,15 @@ inline std::string missing_quality_artifact_message(
         return expected.error().message;
     }
 
-    const auto& expected_artifacts = *expected;
+    std::vector<std::filesystem::path> expected_artifacts;
+    expected_artifacts.reserve(expected->size());
+    for (const auto& expected_path : *expected) {
+        auto executable_path =
+            resolve_engine_artifact_path(expected_path, device, execution_engine);
+        if (executable_path.has_value()) {
+            expected_artifacts.push_back(*executable_path);
+        }
+    }
     if (cpu_quality_guardrail_active) {
         return missing_artifact_message(
             "CPU backend is limited to Draft (512), but the required model artifact is missing",
@@ -439,7 +459,8 @@ inline bool has_mlx_bootstrap_artifacts(const std::filesystem::path& models_root
 
 inline std::vector<std::filesystem::path> expected_bootstrap_artifact_paths(
     const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
-    const std::filesystem::path& models_root) {
+    const std::filesystem::path& models_root,
+    ExecutionEngine execution_engine = ExecutionEngine::Official) {
     std::vector<std::filesystem::path> expected;
     auto append_unique_path = [&](const std::filesystem::path& path) {
         if (path.empty()) {
@@ -472,6 +493,13 @@ inline std::vector<std::filesystem::path> expected_bootstrap_artifact_paths(
 
         if (device.backend == Backend::MLX) {
             append_unique_path(artifact_path_for_backend(models_root, Backend::MLX, 512));
+            return;
+        }
+
+        auto executable_model_path =
+            resolve_engine_artifact_path(requested_model_path, device, execution_engine);
+        if (executable_model_path.has_value()) {
+            append_unique_path(*executable_model_path);
         }
     };
 
@@ -484,19 +512,22 @@ inline std::vector<std::filesystem::path> expected_bootstrap_artifact_paths(
     return expected;
 }
 
-inline std::string missing_bootstrap_artifact_message(const RuntimeCapabilities& capabilities,
-                                                      const DeviceInfo& detected_device,
-                                                      const std::filesystem::path& models_root) {
+inline std::string missing_bootstrap_artifact_message(
+    const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
+    const std::filesystem::path& models_root,
+    ExecutionEngine execution_engine = ExecutionEngine::Official) {
     return missing_artifact_message(
         "No compatible bootstrap model artifact was found for this device", models_root,
-        expected_bootstrap_artifact_paths(capabilities, detected_device, models_root));
+        expected_bootstrap_artifact_paths(capabilities, detected_device, models_root,
+                                          execution_engine));
 }
 
 inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    ExecutionEngine execution_engine = ExecutionEngine::Official) {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -508,12 +539,27 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     if (!candidates) {
         return {};
     }
-    return *candidates;
+
+    std::vector<QualityArtifactSelection> resolved;
+    resolved.reserve(candidates->size());
+    for (const auto& candidate : *candidates) {
+        auto executable_model_path =
+            resolve_engine_artifact_path(candidate.executable_model_path, device, execution_engine);
+        if (!executable_model_path.has_value()) {
+            continue;
+        }
+
+        auto adjusted_candidate = candidate;
+        adjusted_candidate.executable_model_path = *executable_model_path;
+        resolved.push_back(std::move(adjusted_candidate));
+    }
+    return resolved;
 }
 
 inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
     const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
-    const std::filesystem::path& models_root) {
+    const std::filesystem::path& models_root,
+    ExecutionEngine execution_engine = ExecutionEngine::Official) {
     std::vector<BootstrapEngineCandidate> candidates;
 
     auto append_unique = [&](BootstrapEngineCandidate candidate) {
@@ -560,6 +606,13 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
             if (!path_exists(executable_model_path)) {
                 return;
             }
+        } else {
+            auto resolved_engine_model =
+                resolve_engine_artifact_path(requested_model_path, device, execution_engine);
+            if (!resolved_engine_model.has_value()) {
+                return;
+            }
+            executable_model_path = *resolved_engine_model;
         }
 
         int effective_resolution =
@@ -581,13 +634,13 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
 
 inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
-    int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
-    QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
-    auto candidates =
-        quality_artifact_candidates(models_root, backend, quality_mode, input_width, input_height,
-                                    quantization_mode, available_memory_mb, fallback_mode,
-                                    coarse_resolution_override, allow_unrestricted_quality_attempt);
+    int input_height, int quantization_mode, std::int64_t available_memory_mb,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt, ExecutionEngine execution_engine) {
+    auto candidates = quality_artifact_candidates(
+        models_root, backend, quality_mode, input_width, input_height, quantization_mode,
+        available_memory_mb, fallback_mode, coarse_resolution_override,
+        allow_unrestricted_quality_attempt, execution_engine);
     if (!candidates.empty()) {
         return candidates.front();
     }

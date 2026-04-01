@@ -51,60 +51,56 @@ static FARPROC WINAPI corridorkey_delay_load_hook(unsigned dliNotify, PDelayLoad
         size_t dll_name_len = strlen(pdli->szDll);
         std::wstring dll_name_wide(dll_name_len, L'\0');
         mbstowcs(&dll_name_wide[0], pdli->szDll, dll_name_len);
-        debug_log(L"[HOOK] DLL: " + dll_name_wide);
+        debug_log(L"[HOOK] Intercepted delay-load request for DLL: " + dll_name_wide);
 
-        if (_stricmp(pdli->szDll, "onnxruntime.dll") == 0) {
-            debug_log(L"[HOOK] Intercepted onnxruntime.dll load request");
+        HMODULE hPlugin = nullptr;
+        BOOL result = GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&corridorkey_delay_load_hook), &hPlugin);
 
-            HMODULE hPlugin = nullptr;
-            BOOL result = GetModuleHandleExW(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                reinterpret_cast<LPCWSTR>(&corridorkey_delay_load_hook), &hPlugin);
-
-            if (!result) {
-                DWORD error = GetLastError();
-                debug_log(L"[ERROR] GetModuleHandleExW failed with error code: " +
-                          std::to_wstring(error));
-                return nullptr;
-            }
-
-            debug_log(L"[OK] Got plugin module handle");
-
-            wchar_t path[MAX_PATH];
-            DWORD length = GetModuleFileNameW(hPlugin, path, MAX_PATH);
-            if (length == 0) {
-                DWORD error = GetLastError();
-                debug_log(L"[ERROR] GetModuleFileNameW failed with error code: " +
-                          std::to_wstring(error));
-                return nullptr;
-            }
-
-            std::wstring plugin_path(path);
-            debug_log(L"[OK] Plugin path: " + plugin_path);
-
-            auto last_slash = plugin_path.find_last_of(L"\\/");
-            if (last_slash == std::wstring::npos) {
-                debug_log(L"[ERROR] No path separator found in plugin path");
-                return nullptr;
-            }
-
-            std::wstring dir = plugin_path.substr(0, last_slash + 1);
-            std::wstring local_dll = dir + L"onnxruntime.dll";
-
-            debug_log(L"[ATTEMPT] Loading local DLL: " + local_dll);
-
-            HMODULE hMod = LoadLibraryW(local_dll.c_str());
-            if (hMod) {
-                debug_log(L"[SUCCESS] Loaded local onnxruntime.dll");
-                return reinterpret_cast<FARPROC>(hMod);
-            }
-
+        if (!result) {
             DWORD error = GetLastError();
-            debug_log(L"[ERROR] LoadLibraryW failed with error code: " + std::to_wstring(error));
-            debug_log(L"[ERROR] Expected path: " + local_dll);
+            debug_log(L"[ERROR] GetModuleHandleExW failed with error code: " +
+                      std::to_wstring(error));
             return nullptr;
         }
+
+        debug_log(L"[OK] Got plugin module handle");
+
+        wchar_t path[MAX_PATH];
+        DWORD length = GetModuleFileNameW(hPlugin, path, MAX_PATH);
+        if (length == 0) {
+            DWORD error = GetLastError();
+            debug_log(L"[ERROR] GetModuleFileNameW failed with error code: " +
+                      std::to_wstring(error));
+            return nullptr;
+        }
+
+        std::wstring plugin_path(path);
+        debug_log(L"[OK] Plugin path: " + plugin_path);
+
+        auto last_slash = plugin_path.find_last_of(L"\\/");
+        if (last_slash == std::wstring::npos) {
+            debug_log(L"[ERROR] No path separator found in plugin path");
+            return nullptr;
+        }
+
+        std::wstring dir = plugin_path.substr(0, last_slash + 1);
+        std::wstring local_dll = dir + dll_name_wide;
+
+        debug_log(L"[ATTEMPT] Loading local DLL: " + local_dll);
+
+        HMODULE hMod = LoadLibraryW(local_dll.c_str());
+        if (hMod) {
+            debug_log(L"[SUCCESS] Loaded local DLL: " + dll_name_wide);
+            return reinterpret_cast<FARPROC>(hMod);
+        }
+
+        DWORD error = GetLastError();
+        debug_log(L"[ERROR] LoadLibraryW failed with error code: " + std::to_wstring(error));
+        debug_log(L"[ERROR] Expected path: " + local_dll);
+        return nullptr;
     }
     return nullptr;
 }
