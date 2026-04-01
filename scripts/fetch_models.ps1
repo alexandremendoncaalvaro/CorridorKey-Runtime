@@ -1,0 +1,159 @@
+<#
+.SYNOPSIS
+    Downloads CorridorKey model files from Hugging Face Hub into the local models/ directory.
+
+.DESCRIPTION
+    Fetches ONNX, MLX, and PyTorch model files from the Hugging Face repository
+    (alexandrealvaro/CorridorKey) into the local models/ directory. The release
+    pipeline and runtime continue to read models from this directory unchanged.
+
+    By default, only the ONNX models (FP16 + INT8) needed for Windows builds
+    are downloaded. Use -Profile to select a different set.
+
+.PARAMETER Profile
+    Model set to download:
+      windows-rtx  : FP16 + INT8 ONNX models (default)
+      windows-all  : FP16 + FP16 context + INT8 ONNX models
+      apple        : MLX safetensors + bridge files
+      pytorch      : Training checkpoint (.pth)
+      all          : Everything
+
+.PARAMETER HfRepo
+    Hugging Face repository identifier. Defaults to alexandrealvaro/CorridorKey.
+
+.PARAMETER Revision
+    Branch, tag, or commit to download from. Defaults to main.
+
+.PARAMETER Force
+    Re-download files even if they already exist locally.
+
+.EXAMPLE
+    .\scripts\fetch_models.ps1
+    .\scripts\fetch_models.ps1 -Profile all
+    .\scripts\fetch_models.ps1 -Profile apple -Revision v0.5
+#>
+
+param(
+    [ValidateSet("windows-rtx", "windows-all", "apple", "pytorch", "all")]
+    [string]$Profile = "windows-rtx",
+
+    [string]$HfRepo = "alexandrealvaro/CorridorKey",
+    [string]$Revision = "main",
+    [switch]$Force
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$modelsDir = Join-Path $repoRoot "models"
+
+if (-not (Test-Path $modelsDir)) {
+    New-Item -ItemType Directory -Path $modelsDir | Out-Null
+}
+
+$hfBaseUrl = "https://huggingface.co/$HfRepo/resolve/$Revision"
+
+$windowsRtxFiles = @{
+    "onnx/fp16/corridorkey_fp16_512.onnx"   = "corridorkey_fp16_512.onnx"
+    "onnx/fp16/corridorkey_fp16_1024.onnx"  = "corridorkey_fp16_1024.onnx"
+    "onnx/fp16/corridorkey_fp16_1536.onnx"  = "corridorkey_fp16_1536.onnx"
+    "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
+    "onnx/int8/corridorkey_int8_512.onnx"   = "corridorkey_int8_512.onnx"
+    "onnx/int8/corridorkey_int8_768.onnx"   = "corridorkey_int8_768.onnx"
+    "onnx/int8/corridorkey_int8_1024.onnx"  = "corridorkey_int8_1024.onnx"
+}
+
+$windowsCtxFiles = @{
+    "onnx/fp16_ctx/corridorkey_fp16_512_ctx.onnx"   = "corridorkey_fp16_512_ctx.onnx"
+    "onnx/fp16_ctx/corridorkey_fp16_1024_ctx.onnx"  = "corridorkey_fp16_1024_ctx.onnx"
+    "onnx/fp16_ctx/corridorkey_fp16_1536_ctx.onnx"  = "corridorkey_fp16_1536_ctx.onnx"
+    "onnx/fp16_ctx/corridorkey_fp16_2048_ctx.onnx"  = "corridorkey_fp16_2048_ctx.onnx"
+}
+
+$appleFiles = @{
+    "mlx/corridorkey_mlx.safetensors"            = "corridorkey_mlx.safetensors"
+    "mlx/corridorkey_mlx_bridge_512.mlxfn"       = "corridorkey_mlx_bridge_512.mlxfn"
+    "mlx/corridorkey_mlx_bridge_768.mlxfn"       = "corridorkey_mlx_bridge_768.mlxfn"
+    "mlx/corridorkey_mlx_bridge_1024.mlxfn"      = "corridorkey_mlx_bridge_1024.mlxfn"
+    "mlx/corridorkey_mlx_bridge_1536.mlxfn"      = "corridorkey_mlx_bridge_1536.mlxfn"
+    "mlx/corridorkey_mlx_bridge_2048.mlxfn"      = "corridorkey_mlx_bridge_2048.mlxfn"
+}
+
+$pytorchFiles = @{
+    "pytorch/CorridorKey.pth" = "CorridorKey.pth"
+}
+
+$filesToDownload = @{}
+
+switch ($Profile) {
+    "windows-rtx" {
+        $filesToDownload = $windowsRtxFiles.Clone()
+    }
+    "windows-all" {
+        $filesToDownload = $windowsRtxFiles.Clone()
+        foreach ($entry in $windowsCtxFiles.GetEnumerator()) {
+            $filesToDownload[$entry.Key] = $entry.Value
+        }
+    }
+    "apple" {
+        $filesToDownload = $appleFiles.Clone()
+    }
+    "pytorch" {
+        $filesToDownload = $pytorchFiles.Clone()
+    }
+    "all" {
+        foreach ($table in @($windowsRtxFiles, $windowsCtxFiles, $appleFiles, $pytorchFiles)) {
+            foreach ($entry in $table.GetEnumerator()) {
+                $filesToDownload[$entry.Key] = $entry.Value
+            }
+        }
+    }
+}
+
+Write-Host "[fetch-models] Profile: $Profile ($($filesToDownload.Count) files)"
+Write-Host "[fetch-models] Source:  $HfRepo@$Revision"
+Write-Host "[fetch-models] Target:  $modelsDir"
+Write-Host ""
+
+$downloaded = 0
+$skipped = 0
+$failed = 0
+
+foreach ($entry in $filesToDownload.GetEnumerator() | Sort-Object Value) {
+    $remotePath = $entry.Key
+    $localName = $entry.Value
+    $localPath = Join-Path $modelsDir $localName
+    $url = "$hfBaseUrl/$remotePath"
+
+    if ((Test-Path $localPath) -and -not $Force.IsPresent) {
+        Write-Host "  [skip] $localName (already exists, use -Force to re-download)"
+        $skipped++
+        continue
+    }
+
+    Write-Host "  [download] $localName ..." -NoNewline
+    try {
+        $tempPath = "$localPath.download"
+        Invoke-WebRequest -Uri $url -OutFile $tempPath -UseBasicParsing
+        Move-Item -Path $tempPath -Destination $localPath -Force
+        $sizeMb = [math]::Round((Get-Item $localPath).Length / 1MB, 1)
+        Write-Host " OK (${sizeMb} MB)" -ForegroundColor Green
+        $downloaded++
+    } catch {
+        Write-Host " FAILED" -ForegroundColor Red
+        Write-Host "    Error: $($_.Exception.Message)" -ForegroundColor Red
+        if (Test-Path "$localPath.download") {
+            Remove-Item "$localPath.download" -Force -ErrorAction SilentlyContinue
+        }
+        $failed++
+    }
+}
+
+Write-Host ""
+Write-Host "[fetch-models] Done: $downloaded downloaded, $skipped skipped, $failed failed."
+
+if ($failed -gt 0) {
+    Write-Host "[fetch-models] Some downloads failed. Re-run the script to retry." -ForegroundColor Yellow
+    exit 1
+}
