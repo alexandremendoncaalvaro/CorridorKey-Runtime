@@ -1,8 +1,7 @@
 #include "torch_trt_session.hpp"
 
-#include <corridorkey/detail/constants.hpp>
-
 #include <array>
+#include <corridorkey/detail/constants.hpp>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -32,23 +31,35 @@
 
 namespace corridorkey::core {
 
+namespace {
+
+#if defined(_WIN32)
+constexpr std::array<std::string_view, 8> kRequiredTorchRuntimeFiles = {
+    "torchtrt.dll", "torch.dll",    "torch_cpu.dll",  "torch_cuda.dll",
+    "c10.dll",      "c10_cuda.dll", "nvinfer_10.dll", "nvinfer_plugin_10.dll",
+};
+
+std::filesystem::path runtime_library_dir() {
+    if (auto executable_path = common::current_executable_path(); executable_path.has_value()) {
+        return executable_path->parent_path();
+    }
+    return {};
+}
+#endif
+
+}  // namespace
+
 #if defined(CORRIDORKEY_WITH_TORCH_TENSORRT) && CORRIDORKEY_WITH_TORCH_TENSORRT
 
 namespace {
-
-constexpr std::array<std::string_view, 8> kRequiredTorchRuntimeFiles = {
-    "torchtrt.dll", "torch.dll",          "torch_cpu.dll",      "torch_cuda.dll",
-    "c10.dll",      "c10_cuda.dll",       "nvinfer_10.dll",     "nvinfer_plugin_10.dll",
-};
 
 void debug_log(const std::string& message) {
 #ifdef _WIN32
     static const bool enabled = []() {
         char* value = nullptr;
         size_t len = 0;
-        const bool result =
-            _dupenv_s(&value, &len, "CORRIDORKEY_TORCHTRT_DEBUG") == 0 && value != nullptr &&
-            std::string_view(value) == "1";
+        const bool result = _dupenv_s(&value, &len, "CORRIDORKEY_TORCHTRT_DEBUG") == 0 &&
+                            value != nullptr && std::string_view(value) == "1";
         free(value);
         return result;
     }();
@@ -98,10 +109,9 @@ std::string format_windows_error_message(DWORD error_code) {
     }
 
     LPWSTR buffer = nullptr;
-    const DWORD length =
-        FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                           FORMAT_MESSAGE_IGNORE_INSERTS,
-                       nullptr, error_code, 0, reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
+    const DWORD length = FormatMessageW(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, error_code, 0, reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
     if (length == 0 || buffer == nullptr) {
         return "Windows error " + std::to_string(error_code);
     }
@@ -117,15 +127,8 @@ std::string format_windows_error_message(DWORD error_code) {
         return "Windows error " + std::to_string(error_code);
     }
 
-    return std::string(message.begin(), message.end()) + " (code " +
-           std::to_string(error_code) + ")";
-}
-
-std::filesystem::path runtime_library_dir() {
-    if (auto executable_path = common::current_executable_path(); executable_path.has_value()) {
-        return executable_path->parent_path();
-    }
-    return {};
+    return std::string(message.begin(), message.end()) + " (code " + std::to_string(error_code) +
+           ")";
 }
 
 HMODULE load_required_library(const std::filesystem::path& library_path) {
@@ -241,29 +244,28 @@ class TorchTrtSession::Impl {
                                .layout(torch::kStrided)
                                .device(torch::kCPU)
                                .pinned_memory(true);
-        auto cuda_half =
-            torch::TensorOptions().dtype(torch::kFloat16).layout(torch::kStrided).device(
-                torch::kCUDA, device.device_index);
+        auto cuda_half = torch::TensorOptions()
+                             .dtype(torch::kFloat16)
+                             .layout(torch::kStrided)
+                             .device(torch::kCUDA, device.device_index);
 
-        if (!host_input.defined() || host_input.size(2) != resolution || host_input.size(3) != resolution) {
+        if (!host_input.defined() || host_input.size(2) != resolution ||
+            host_input.size(3) != resolution) {
             host_input = torch::zeros({1, 4, resolution, resolution}, pinned_half);
             device_input = torch::zeros({1, 4, resolution, resolution}, cuda_half);
             host_alpha = torch::zeros({1, 1, resolution, resolution}, pinned_half);
             host_fg = torch::zeros({1, 3, resolution, resolution}, pinned_half);
-            host_alpha_float = torch::zeros(
-                {resolution, resolution},
-                torch::TensorOptions()
-                    .dtype(torch::kFloat32)
-                    .layout(torch::kStrided)
-                    .device(torch::kCPU)
-                    .pinned_memory(true));
-            host_fg_hwc_float = torch::zeros(
-                {resolution, resolution, 3},
-                torch::TensorOptions()
-                    .dtype(torch::kFloat32)
-                    .layout(torch::kStrided)
-                    .device(torch::kCPU)
-                    .pinned_memory(true));
+            host_alpha_float = torch::zeros({resolution, resolution}, torch::TensorOptions()
+                                                                          .dtype(torch::kFloat32)
+                                                                          .layout(torch::kStrided)
+                                                                          .device(torch::kCPU)
+                                                                          .pinned_memory(true));
+            host_fg_hwc_float =
+                torch::zeros({resolution, resolution, 3}, torch::TensorOptions()
+                                                              .dtype(torch::kFloat32)
+                                                              .layout(torch::kStrided)
+                                                              .device(torch::kCPU)
+                                                              .pinned_memory(true));
         }
 
         return {};
@@ -278,9 +280,9 @@ TorchTrtSession& TorchTrtSession::operator=(TorchTrtSession&&) noexcept = defaul
 
 Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
     const std::filesystem::path& model_path, DeviceInfo device) {
-    debug_log("create.begin model=" + model_path.string() + " backend=" +
-              std::to_string(static_cast<int>(device.backend)) + " device_index=" +
-              std::to_string(device.device_index));
+    debug_log("create.begin model=" + model_path.string() +
+              " backend=" + std::to_string(static_cast<int>(device.backend)) +
+              " device_index=" + std::to_string(device.device_index));
     if (device.backend != Backend::TensorRT) {
         return Unexpected<Error>{Error{
             ErrorCode::HardwareNotSupported,
@@ -333,19 +335,19 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
                     std::filesystem::absolute(model_path).string(),
             }};
         }
-        impl->module =
-            torch::jit::load(model_stream,
-                             c10::Device(c10::kCUDA, torch_device_index(device.device_index)));
+        impl->module = torch::jit::load(
+            model_stream, c10::Device(c10::kCUDA, torch_device_index(device.device_index)));
         debug_log("create.after_jit_load");
         impl->module.eval();
         debug_log("create.after_eval");
 
-        // Warm the engine once during prepare so the frame hot path only measures steady-state work.
-        auto warm_input = torch::zeros({1, 4, impl->model_resolution, impl->model_resolution},
-                                       torch::TensorOptions()
-                                           .dtype(torch::kFloat16)
-                                           .device(torch::kCUDA,
-                                                   torch_device_index(device.device_index)));
+        // Warm the engine once during prepare so the frame hot path only measures steady-state
+        // work.
+        auto warm_input =
+            torch::zeros({1, 4, impl->model_resolution, impl->model_resolution},
+                         torch::TensorOptions()
+                             .dtype(torch::kFloat16)
+                             .device(torch::kCUDA, torch_device_index(device.device_index)));
         debug_log("create.before_warmup_forward");
         auto warm_output = impl->module.forward({warm_input});
         debug_log("create.after_warmup_forward");
@@ -393,7 +395,8 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
     common::measure_stage(
         on_stage, "frame_prepare_inputs",
         [&]() {
-            ColorUtils::resize_area_into(rgb, m_impl->prepared_rgb.view(), m_impl->color_utils_state);
+            ColorUtils::resize_area_into(rgb, m_impl->prepared_rgb.view(),
+                                         m_impl->color_utils_state);
             ColorUtils::resize_area_into(alpha_hint, m_impl->prepared_hint.view(),
                                          m_impl->color_utils_state);
 
@@ -403,12 +406,12 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
                     for (int x = 0; x < model_resolution; ++x) {
                         const size_t index =
                             static_cast<size_t>(y) * static_cast<size_t>(model_resolution) + x;
-                        host_ptr[0 * channel_stride + index] = c10::Half(
-                            (m_impl->prepared_rgb.view()(y, x, 0) - 0.485f) / 0.229f);
-                        host_ptr[1 * channel_stride + index] = c10::Half(
-                            (m_impl->prepared_rgb.view()(y, x, 1) - 0.456f) / 0.224f);
-                        host_ptr[2 * channel_stride + index] = c10::Half(
-                            (m_impl->prepared_rgb.view()(y, x, 2) - 0.406f) / 0.225f);
+                        host_ptr[0 * channel_stride + index] =
+                            c10::Half((m_impl->prepared_rgb.view()(y, x, 0) - 0.485f) / 0.229f);
+                        host_ptr[1 * channel_stride + index] =
+                            c10::Half((m_impl->prepared_rgb.view()(y, x, 1) - 0.456f) / 0.224f);
+                        host_ptr[2 * channel_stride + index] =
+                            c10::Half((m_impl->prepared_rgb.view()(y, x, 2) - 0.406f) / 0.225f);
                         host_ptr[3 * channel_stride + index] =
                             c10::Half(m_impl->prepared_hint.view()(y, x, 0));
                     }
@@ -468,7 +471,8 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
                 m_impl->host_alpha_float.copy_(alpha_hw);
                 m_impl->host_fg_hwc_float.copy_(fg_hwc);
 
-                std::memcpy(result.alpha.view().data.data(), m_impl->host_alpha_float.data_ptr<float>(),
+                std::memcpy(result.alpha.view().data.data(),
+                            m_impl->host_alpha_float.data_ptr<float>(),
                             channel_stride * sizeof(float));
                 std::memcpy(result.foreground.view().data.data(),
                             m_impl->host_fg_hwc_float.data_ptr<float>(),
@@ -499,21 +503,20 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
                     ColorUtils::resize_lanczos_into(model_fg_view, result.foreground.view(),
                                                     m_impl->color_utils_state);
                 } else {
-                    auto alpha_resized = F::interpolate(
-                        alpha_tensor.to(torch::kFloat32),
-                        F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>{rgb.height, rgb.width})
-                            .mode(torch::kBilinear)
-                            .align_corners(false));
-                    auto fg_resized = F::interpolate(
-                        fg_tensor.to(torch::kFloat32),
-                        F::InterpolateFuncOptions()
-                            .size(std::vector<int64_t>{rgb.height, rgb.width})
-                            .mode(torch::kBilinear)
-                            .align_corners(false));
+                    auto alpha_resized =
+                        F::interpolate(alpha_tensor.to(torch::kFloat32),
+                                       F::InterpolateFuncOptions()
+                                           .size(std::vector<int64_t>{rgb.height, rgb.width})
+                                           .mode(torch::kBilinear)
+                                           .align_corners(false));
+                    auto fg_resized =
+                        F::interpolate(fg_tensor.to(torch::kFloat32),
+                                       F::InterpolateFuncOptions()
+                                           .size(std::vector<int64_t>{rgb.height, rgb.width})
+                                           .mode(torch::kBilinear)
+                                           .align_corners(false));
                     auto alpha_host = alpha_resized.squeeze(0).squeeze(0).contiguous().cpu();
-                    auto fg_host =
-                        fg_resized.squeeze(0).permute({1, 2, 0}).contiguous().cpu();
+                    auto fg_host = fg_resized.squeeze(0).permute({1, 2, 0}).contiguous().cpu();
                     std::memcpy(result.alpha.view().data.data(), alpha_host.data_ptr<float>(),
                                 static_cast<size_t>(rgb.width) * static_cast<size_t>(rgb.height) *
                                     sizeof(float));
@@ -551,21 +554,6 @@ DeviceInfo TorchTrtSession::device() const {
     return m_impl->device;
 }
 
-bool torch_tensorrt_runtime_available() {
-    const auto library_dir = runtime_library_dir();
-    if (library_dir.empty()) {
-        return false;
-    }
-
-    for (const auto filename : kRequiredTorchRuntimeFiles) {
-        std::error_code error;
-        if (!std::filesystem::exists(library_dir / filename, error) || error) {
-            return false;
-        }
-    }
-
-    return true;
-}
 
 #else
 
@@ -607,11 +595,28 @@ DeviceInfo TorchTrtSession::device() const {
     return {};
 }
 
-bool torch_tensorrt_runtime_available() {
-    return false;
-}
-
 #endif
+
+bool torch_tensorrt_runtime_available() {
+#if defined(_WIN32)
+    const auto library_dir = runtime_library_dir();
+    if (library_dir.empty()) {
+        return false;
+    }
+
+    for (const auto filename : kRequiredTorchRuntimeFiles) {
+        std::error_code error;
+        if (!std::filesystem::exists(library_dir / std::filesystem::path(filename), error) ||
+            error) {
+            return false;
+        }
+    }
+
+    return true;
+#else
+    return false;
+#endif
+}
 
 }  // namespace corridorkey::core
 

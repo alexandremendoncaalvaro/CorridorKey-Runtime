@@ -139,7 +139,11 @@ inline std::optional<std::filesystem::path> current_executable_path() {
     }
 #elif defined(_WIN32)
     std::wstring buffer(MAX_PATH, L'\0');
-    DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    HMODULE hModule = NULL;
+    GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        (LPCWSTR)&current_executable_path, &hModule);
+    DWORD length = GetModuleFileNameW(hModule, buffer.data(), static_cast<DWORD>(buffer.size()));
     if (length > 0) {
         buffer.resize(length);
         return std::filesystem::path(buffer);

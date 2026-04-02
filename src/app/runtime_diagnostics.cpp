@@ -14,7 +14,7 @@
 
 #include "../core/inference_session.hpp"
 #include "../core/mlx_probe.hpp"
-#include "../core/windows_rtx_probe.hpp"
+#include "../core/torch_trt_session.hpp"
 #include "../frame_io/video_io.hpp"
 #include "common/runtime_paths.hpp"
 #include "runtime_contracts.hpp"
@@ -241,16 +241,12 @@ std::vector<std::string> windows_probe_models_for_backend(Backend backend,
     return models;
 }
 
-std::string windows_backend_device_name(const core::WindowsGpuInfo& gpu, Backend backend) {
+std::string windows_backend_device_name(const DeviceInfo& device, Backend backend) {
     switch (backend) {
-        case Backend::DirectML:
-            return gpu.adapter_name + " (DirectML)";
-        case Backend::WindowsML:
-            return gpu.adapter_name + " (Windows AI)";
-        case Backend::OpenVINO:
-            return gpu.adapter_name + " (OpenVINO)";
+        case Backend::TensorRT:
+            return device.name + " (TensorRT)";
         default:
-            return gpu.adapter_name;
+            return device.name;
     }
 }
 
@@ -299,10 +295,8 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
 
     json["model_found"] = true;
 
-    auto session =
-        InferenceSession::create(model_path, device,
-                                 SessionCreateOptions{.disable_cpu_ep_fallback = true,
-                                                      .log_severity = ORT_LOGGING_LEVEL_FATAL});
+    auto session = InferenceSession::create(model_path, device,
+                                            SessionCreateOptions{.disable_cpu_ep_fallback = true});
     if (!session) {
         json["error"] = session.error().message;
         return json;
@@ -1244,9 +1238,7 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
         }
 
         auto probe_res = InferenceSession::create(
-            model_path, probe_device,
-            SessionCreateOptions{.disable_cpu_ep_fallback = true,
-                                 .log_severity = ORT_LOGGING_LEVEL_WARNING});
+            model_path, probe_device, SessionCreateOptions{.disable_cpu_ep_fallback = true});
         entry["full_graph_supported"] = probe_res.has_value();
         if (!probe_res) {
             entry["error"] = probe_res.error().message;
@@ -1408,68 +1400,34 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 #if defined(_WIN32)
     json["applicable"] = true;
 
-    auto gpus = core::list_windows_gpus();
-    json["gpu_detected"] = !gpus.empty();
+    auto devices = list_devices();
+    json["gpu_detected"] = !devices.empty();
     json["gpus"] = nlohmann::json::array();
 
     bool any_provider_available = false;
-    bool preferred_tensorrt_gpu_selected = false;
     nlohmann::json probes = nlohmann::json::array();
-    for (size_t index = 0; index < gpus.size(); ++index) {
-        const auto& gpu = gpus[index];
+    for (size_t index = 0; index < devices.size(); ++index) {
+        const auto& dev = devices[index];
+        if (dev.backend == Backend::CPU) continue;
+
         nlohmann::json gpu_json;
-        gpu_json["name"] = gpu.adapter_name;
-        gpu_json["memory_mb"] = gpu.dedicated_memory_mb;
-        gpu_json["is_rtx"] = gpu.is_rtx;
-        gpu_json["tensorrt_available"] = gpu.tensorrt_rtx_available;
-        gpu_json["cuda_available"] = gpu.cuda_available;
-        gpu_json["directml_available"] = gpu.directml_available;
-        gpu_json["driver_query_available"] = gpu.driver_query_available;
-        gpu_json["driver_version"] = gpu.driver_version;
+        gpu_json["name"] = dev.name;
+        gpu_json["memory_mb"] = dev.available_memory_mb;
+        gpu_json["tensorrt_available"] = (dev.backend == Backend::TensorRT);
         json["gpus"].push_back(gpu_json);
 
-        const bool has_windows_provider = gpu.tensorrt_rtx_available || gpu.directml_available ||
-                                          gpu.winml_available || gpu.openvino_available;
-        any_provider_available = any_provider_available || has_windows_provider;
-        if (has_windows_provider && json["gpu_name"] == "") {
-            json["gpu_name"] = gpu.adapter_name;
-            json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
-            json["driver_query_available"] = gpu.driver_query_available;
-            json["driver_version"] = gpu.driver_version;
+        any_provider_available = true;
+        if (json["gpu_name"] == "") {
+            json["gpu_name"] = dev.name;
+            json["gpu_memory_mb"] = dev.available_memory_mb;
+            json["ampere_or_newer"] = (dev.backend == Backend::TensorRT);
         }
 
-        if (gpu.tensorrt_rtx_available && !preferred_tensorrt_gpu_selected) {
-            json["gpu_name"] = gpu.adapter_name;
-            json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
-            json["ampere_or_newer"] = gpu.is_rtx;
-            json["driver_query_available"] = gpu.driver_query_available;
-            json["driver_version"] = gpu.driver_version;
-            preferred_tensorrt_gpu_selected = true;
+        for (const auto& model_filename : windows_probe_models_for_backend(dev.backend, dev)) {
+            probes.push_back(probe_windows_backend_execution(
+                models_dir, dev, model_filename,
+                "Torch-TensorRT exclusive Windows inference path."));
         }
-
-        const auto queue_backend_probes = [&](Backend backend, bool available,
-                                              const std::string& docs_guidance) {
-            if (!available) {
-                return;
-            }
-
-            DeviceInfo device{windows_backend_device_name(gpu, backend), gpu.dedicated_memory_mb,
-                              backend, static_cast<int>(index)};
-            for (const auto& model_filename : windows_probe_models_for_backend(backend, device)) {
-                probes.push_back(probe_windows_backend_execution(models_dir, device, model_filename,
-                                                                 docs_guidance));
-            }
-        };
-
-        queue_backend_probes(Backend::TensorRT, gpu.tensorrt_rtx_available,
-                             "Primary Windows RTX path with strict FP16 engine compilation.");
-        queue_backend_probes(Backend::WindowsML, gpu.winml_available,
-                             "Recommended by ONNX Runtime for new Windows deployments.");
-        queue_backend_probes(
-            Backend::DirectML, gpu.directml_available,
-            "Supported by ONNX Runtime, but DirectML is in sustained engineering.");
-        queue_backend_probes(Backend::OpenVINO, gpu.openvino_available,
-                             "Intel-managed Windows acceleration path.");
     }
 
     json["provider_available"] = any_provider_available;

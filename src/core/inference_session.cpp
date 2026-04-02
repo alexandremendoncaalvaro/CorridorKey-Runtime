@@ -3,47 +3,30 @@
 #include <corridorkey/detail/constants.hpp>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <exception>
-#include <new>
-#include <string_view>
-#include <unordered_map>
-
-#if defined(_WIN32)
-#if __has_include(<onnxruntime/core/providers/nv_tensorrt_rtx/nv_provider_options.h>)
-#include <onnxruntime/core/providers/nv_tensorrt_rtx/nv_provider_options.h>
-#define CORRIDORKEY_HAS_NV_TENSORRT_RTX_OPTIONS 1
-#endif
-#if __has_include(<onnxruntime/core/providers/winml/winml_provider_factory.h>)
-#include <onnxruntime/core/providers/winml/winml_provider_factory.h>
-#define CORRIDORKEY_HAS_WINML_OPTIONS 1
-#endif
-#if __has_include(<onnxruntime/core/providers/openvino/openvino_provider_factory.h>)
-#include <onnxruntime/core/providers/openvino/openvino_provider_factory.h>
-#define CORRIDORKEY_HAS_OPENVINO_OPTIONS 1
-#endif
-#endif
-
 #include <fstream>
 #include <mutex>
+#include <new>
 
 #include "coarse_to_fine_policy.hpp"
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
-#include "inference_output_validation.hpp"
-#include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
 #include "post_process/source_passthrough.hpp"
-#include "session_cache_policy.hpp"
 #include "session_policy.hpp"
 #include "tile_blend.hpp"
 #include "torch_trt_session.hpp"
 
+namespace corridorkey {
+
 namespace {
+
 void debug_log(const std::string& message) {
 #ifdef _WIN32
     char* local_app_data = nullptr;
@@ -85,258 +68,6 @@ void debug_log(const std::string& message) {
     (void)message;
 #endif
 }
-}  // namespace
-
-namespace corridorkey {
-
-namespace {
-
-Result<void> validate_output_values(std::span<const float> values, std::string_view label) {
-    const auto validation = core::validate_finite_values(values, label);
-    if (!validation) {
-        debug_log(validation.error().message);
-    }
-    return validation;
-}
-
-Result<void> validate_output_image(Image image, std::string_view label) {
-    const auto validation = core::validate_finite_image(image, label);
-    if (!validation) {
-        debug_log(validation.error().message);
-    }
-    return validation;
-}
-
-void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution,
-                                 std::span<const float> values, std::string_view label) {
-    if (device.backend != Backend::TensorRT || recommended_resolution <= 1024) {
-        return;
-    }
-    debug_log(core::format_numeric_stats(label, core::compute_numeric_stats(values)));
-}
-
-void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, Image image,
-                                 std::string_view label) {
-    log_output_stats_if_enabled(device, recommended_resolution, image.data, label);
-}
-
-constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
-
-bool should_enable_tensorrt_cuda_graph(Backend backend) {
-    if (backend != Backend::TensorRT) {
-        return false;
-    }
-
-    if (auto disable_cuda_graph =
-            common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DISABLE_CUDA_GRAPH");
-        disable_cuda_graph.has_value() && std::string_view(*disable_cuda_graph) == "1") {
-        return false;
-    }
-
-    return true;
-}
-
-Result<ExecutionEngine> resolve_execution_engine(ExecutionEngine requested, Backend backend) {
-    switch (requested) {
-        case ExecutionEngine::Auto:
-            return ExecutionEngine::Official;
-        case ExecutionEngine::Official:
-            return ExecutionEngine::Official;
-        case ExecutionEngine::TorchTensorRt:
-            if (backend != Backend::TensorRT) {
-                return Unexpected(Error{
-                    ErrorCode::HardwareNotSupported,
-                    "Torch-TensorRT currently requires the Windows RTX TensorRT backend.",
-                });
-            }
-            return ExecutionEngine::TorchTensorRt;
-        default:
-            return ExecutionEngine::Official;
-    }
-}
-
-#ifdef _WIN32
-constexpr const char* kTensorRtRtxExecutionProvider = "NvTensorRTRTXExecutionProvider";
-using OrtDmlAppendExecutionProviderFn = OrtStatus*(ORT_API_CALL*)(OrtSessionOptions*, int);
-
-namespace tensorrt_rtx_option_names {
-#if defined(CORRIDORKEY_HAS_NV_TENSORRT_RTX_OPTIONS)
-constexpr const char* kDeviceId = onnxruntime::nv::provider_option_names::kDeviceId;
-constexpr const char* kDumpSubgraphs = onnxruntime::nv::provider_option_names::kDumpSubgraphs;
-constexpr const char* kDetailedBuildLog = onnxruntime::nv::provider_option_names::kDetailedBuildLog;
-constexpr const char* kRuntimeCacheFile = onnxruntime::nv::provider_option_names::kRuntimeCacheFile;
-constexpr const char* kMaxWorkspaceSize = onnxruntime::nv::provider_option_names::kMaxWorkspaceSize;
-constexpr const char* kCudaGraphEnable = onnxruntime::nv::provider_option_names::kCudaGraphEnable;
-#else
-constexpr const char* kDeviceId = "device_id";
-constexpr const char* kDumpSubgraphs = "nv_dump_subgraphs";
-constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
-constexpr const char* kRuntimeCacheFile = "nv_runtime_cache_path";
-constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
-constexpr const char* kCudaGraphEnable = "enable_cuda_graph";
-#endif
-}  // namespace tensorrt_rtx_option_names
-
-OrtDmlAppendExecutionProviderFn resolve_directml_append_function() {
-    HMODULE runtime_module = GetModuleHandleW(L"onnxruntime.dll");
-    if (runtime_module == nullptr) {
-        runtime_module = LoadLibraryW(L"onnxruntime.dll");
-    }
-    if (runtime_module == nullptr) {
-        return nullptr;
-    }
-
-    auto symbol = GetProcAddress(runtime_module, "OrtSessionOptionsAppendExecutionProvider_DML");
-    return reinterpret_cast<OrtDmlAppendExecutionProviderFn>(symbol);
-}
-
-void append_directml_execution_provider(Ort::SessionOptions& session_options, int device_index) {
-    // Microsoft officially recommends disabling the memory pattern for DirectML
-    // to allow the DML EP to handle memory allocation and alignment natively.
-    session_options.DisableMemPattern();
-    session_options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-
-    if (auto append = resolve_directml_append_function(); append != nullptr) {
-        debug_log("Adding DirectML execution provider via exported ORT DML API for device index: " +
-                  std::to_string(device_index));
-        Ort::ThrowOnError(append(session_options, device_index));
-        return;
-    }
-
-    debug_log("Adding DirectML execution provider via generic provider options for device index: " +
-              std::to_string(device_index));
-    std::unordered_map<std::string, std::string> dml_options = {
-        {std::string(corridorkey::detail::session_options::DEVICE_ID),
-         std::to_string(device_index)}};
-    session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::DIRECTML),
-                                            dml_options);
-}
-
-void override_windows_universal_free_dimensions(Ort::SessionOptions& session_options,
-                                                Backend backend) {
-    if (backend != Backend::DirectML && backend != Backend::WindowsML) {
-        return;
-    }
-
-    // The DirectML guidance recommends overriding free dimensions during session creation so the
-    // provider can optimize and specialize the graph for the actual runtime shape.
-    debug_log("Overriding free dimension 'batch_size' to 1 for Windows universal backend");
-    Ort::ThrowOnError(
-        Ort::GetApi().AddFreeDimensionOverrideByName(session_options, "batch_size", 1));
-}
-#endif
-
-#ifdef __APPLE__
-void append_coreml_execution_provider(Ort::SessionOptions& session_options) {
-#if ORT_API_VERSION >= 24
-    std::unordered_map<std::string, std::string> provider_options = {
-        {kCoremlProviderOption_MLComputeUnits, "ALL"},
-        {kCoremlProviderOption_RequireStaticInputShapes, "1"},
-    };
-
-    if (auto cache_root = common::coreml_model_cache_root(); cache_root.has_value()) {
-        std::error_code error;
-        std::filesystem::create_directories(*cache_root, error);
-        if (!error) {
-            provider_options.emplace(kCoremlProviderOption_ModelCacheDirectory,
-                                     cache_root->string());
-        }
-    }
-
-    session_options.AppendExecutionProvider(std::string(corridorkey::detail::providers::COREML_API),
-                                            provider_options);
-#else
-    uint32_t coreml_flags = COREML_FLAG_ONLY_ALLOW_STATIC_INPUT_SHAPES;
-    Ort::ThrowOnError(
-        OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, coreml_flags));
-#endif
-}
-#endif
-
-#ifdef _WIN32
-int extract_model_resolution(const std::filesystem::path& model_path) {
-    return core::infer_model_resolution_from_path(model_path).value_or(1024);
-}
-
-void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options,
-                                            const std::filesystem::path& model_path,
-                                            ExecutionEngine execution_engine) {
-    debug_log("Configuring TensorRT RTX execution provider");
-    (void)execution_engine;
-
-    int model_res = extract_model_resolution(model_path);
-    debug_log("Detected model resolution: " + std::to_string(model_res));
-
-    // Workspace scales proportionally with spatial resolution. TensorRT uses workspace as an upper
-    // bound for tactic discovery during engine build; it only allocates what each tactic actually
-    // needs at runtime.
-    constexpr const char* kWorkspace2GB = "2147483648";  // 512, 768, 1024
-    constexpr const char* kWorkspace4GB = "4294967296";  // 1536
-    constexpr const char* kWorkspace8GB = "8589934592";  // 2048
-    constexpr const char* kProfileMinShapes = "nv_profile_min_shapes";
-    constexpr const char* kProfileOptShapes = "nv_profile_opt_shapes";
-    constexpr const char* kProfileMaxShapes = "nv_profile_max_shapes";
-    const char* workspace_size = kWorkspace2GB;
-    if (model_res >= 2048) {
-        workspace_size = kWorkspace8GB;
-    } else if (model_res >= 1536) {
-        workspace_size = kWorkspace4GB;
-    }
-
-    std::unordered_map<std::string, std::string> provider_options = {
-        {tensorrt_rtx_option_names::kDeviceId, "0"},
-        {tensorrt_rtx_option_names::kMaxWorkspaceSize, workspace_size},
-    };
-    if (should_enable_tensorrt_cuda_graph(Backend::TensorRT)) {
-        provider_options.emplace(tensorrt_rtx_option_names::kCudaGraphEnable, "1");
-        debug_log("TensorRT RTX CUDA graph enabled for the official Windows RTX engine");
-    }
-
-    const std::string profile_shapes =
-        "input_rgb_hint:1x4x" + std::to_string(model_res) + "x" + std::to_string(model_res);
-    provider_options.emplace(kProfileMinShapes, profile_shapes);
-    provider_options.emplace(kProfileOptShapes, profile_shapes);
-    provider_options.emplace(kProfileMaxShapes, profile_shapes);
-    debug_log("TensorRT RTX profile shapes: " + profile_shapes);
-
-    debug_log("Setting up runtime cache");
-    if (auto runtime_cache_dir = common::tensorrt_rtx_runtime_cache_path(model_path);
-        runtime_cache_dir.has_value()) {
-        debug_log("Runtime cache dir: " + runtime_cache_dir->string());
-        std::error_code error;
-        std::filesystem::create_directories(*runtime_cache_dir, error);
-        if (!error) {
-            provider_options.emplace(tensorrt_rtx_option_names::kRuntimeCacheFile,
-                                     runtime_cache_dir->string());
-            debug_log("Runtime cache configured successfully");
-        } else {
-            debug_log("Failed to create runtime cache dir: " + error.message());
-        }
-    }
-
-    if (auto dump_subgraphs =
-            common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DUMP_SUBGRAPHS");
-        dump_subgraphs.has_value() && std::string_view(*dump_subgraphs) == "1") {
-        provider_options.emplace(tensorrt_rtx_option_names::kDumpSubgraphs, "1");
-        debug_log("Subgraph dumping enabled");
-    }
-
-    if (auto build_log = common::environment_variable_copy("CORRIDORKEY_TENSORRT_RTX_DETAILED_LOG");
-        build_log.has_value() && std::string_view(*build_log) == "1") {
-        provider_options.emplace(tensorrt_rtx_option_names::kDetailedBuildLog, "1");
-        debug_log("Detailed build logging enabled");
-    }
-
-    debug_log("Appending execution provider to session options");
-    session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
-    debug_log("Execution provider appended successfully");
-}
-#endif
-
-void remove_cached_model(const std::filesystem::path& cache_path) {
-    std::error_code error;
-    std::filesystem::remove(cache_path, error);
-}
 
 void extract_tile_rows(const Image& source_rgb, const Image& source_hint, Image rgb_tile,
                        Image hint_tile, int y_start, int x_start, int y_begin, int y_end) {
@@ -364,15 +95,10 @@ void accumulate_tile_rows(const Image& mask, const FrameResult& tile_result, Ima
 
     for (int y = y_begin; y < y_end; ++y) {
         int global_y = y_start + y;
-        if (global_y >= image_height) {
-            break;
-        }
-
+        if (global_y >= image_height) break;
         for (int x = 0; x < mask.width; ++x) {
             int global_x = x_start + x;
-            if (global_x >= image_width) {
-                break;
-            }
+            if (global_x >= image_width) break;
 
             float weight = mask(y, x);
             if (needs_edge_aware_weights) {
@@ -395,10 +121,7 @@ void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weig
         for (int x = 0; x < acc_alpha.width; ++x) {
             size_t pixel_index = row_offset + static_cast<size_t>(x);
             float weight = acc_weight.data[pixel_index];
-            if (weight <= 0.0001f) {
-                continue;
-            }
-
+            if (weight <= 0.0001f) continue;
             acc_alpha.data[pixel_index] /= weight;
             size_t fg_index = pixel_index * 3;
             acc_fg.data[fg_index] /= weight;
@@ -408,386 +131,93 @@ void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weig
     }
 }
 
-void convert_fp16_to_fp32(const Ort::Float16_t* source, std::vector<float>& destination,
-                          size_t element_count) {
-    destination.resize(element_count);
-    common::parallel_for_rows(
-        static_cast<int>(element_count),
-        [&](int begin, int end) {
-            for (int index = begin; index < end; ++index) {
-                destination[static_cast<size_t>(index)] =
-                    source[static_cast<size_t>(index)].ToFloat();
-            }
-        },
-        4096);
-}
-
-void from_planar_parallel(const float* source, Image destination) {
-    const size_t channel_stride =
-        static_cast<size_t>(destination.height) * static_cast<size_t>(destination.width);
-    common::parallel_for_rows(destination.height, [&](int y_begin, int y_end) {
-        for (int y = y_begin; y < y_end; ++y) {
-            const size_t row_offset =
-                static_cast<size_t>(y) * static_cast<size_t>(destination.width);
-            for (int x = 0; x < destination.width; ++x) {
-                const size_t pixel_index = row_offset + static_cast<size_t>(x);
-                for (int channel = 0; channel < destination.channels; ++channel) {
-                    destination(y, x, channel) =
-                        source[static_cast<size_t>(channel) * channel_stride + pixel_index];
-                }
-            }
-        }
-    });
-}
-
-void from_planar_into_result_parallel(const float* source, Image destination) {
-    const size_t channel_stride =
-        static_cast<size_t>(destination.height) * static_cast<size_t>(destination.width);
-    if (destination.channels == 1) {
-        std::memcpy(destination.data.data(), source, channel_stride * sizeof(float));
-        return;
-    }
-
-    common::parallel_for_rows(destination.height, [&](int y_begin, int y_end) {
-        for (int y = y_begin; y < y_end; ++y) {
-            const size_t row_offset =
-                static_cast<size_t>(y) * static_cast<size_t>(destination.width);
-            for (int x = 0; x < destination.width; ++x) {
-                const size_t pixel_index = row_offset + static_cast<size_t>(x);
-                destination(y, x, 0) = source[pixel_index];
-                destination(y, x, 1) = source[channel_stride + pixel_index];
-                destination(y, x, 2) = source[channel_stride * 2 + pixel_index];
-            }
-        }
-    });
-}
-
 }  // namespace
 
-InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {
-    // Default recommended resolution. High-level layers (App)
-    // will typically override this via InferenceParams.
-    m_recommended_resolution = 512;
-}
+InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {}
 
 InferenceSession::~InferenceSession() = default;
 
-void InferenceSession::configure_session_options(bool use_optimized_model_cache,
-                                                 const SessionCreateOptions& options,
-                                                 const std::filesystem::path& model_path) {
-#ifndef _WIN32
-    (void)model_path;
-#endif
-    debug_log("Setting intra-op threads");
-    m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
-
-    debug_log("Setting graph optimization level");
-    if (use_optimized_model_cache) {
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
-    } else if (m_device.backend == Backend::DirectML) {
-        // Microsoft strongly recommends avoiding ORT_ENABLE_ALL (level 3) for DirectML
-        // because it enables CPU-specific memory layout optimizations that crash DML execution.
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
-    } else {
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-    }
-
-    debug_log("Setting log severity level");
-    m_session_options.SetLogSeverityLevel(options.log_severity);
-
-#ifdef _WIN32
-    override_windows_universal_free_dimensions(m_session_options, m_device.backend);
-#endif
-
-    if (m_device.backend != Backend::CPU) {
-        if (options.disable_cpu_ep_fallback) {
-            debug_log("Disabling CPU EP fallback");
-            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
-        } else {
-            // Explicitly enable CPU EP fallback to avoid issues in some DirectML environments
-            // where ORT might default to disabling it when an EP is added.
-            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "0");
-        }
-    }
-
-    debug_log("Configuring execution provider for backend: " +
-              std::to_string(static_cast<int>(m_device.backend)));
-
-    switch (m_device.backend) {
-        case Backend::CoreML: {
-#ifdef __APPLE__
-            debug_log("Adding CoreML execution provider");
-            append_coreml_execution_provider(m_session_options);
-#endif
-            break;
-        }
-        case Backend::CUDA: {
-            debug_log("Adding CUDA execution provider");
-            OrtCUDAProviderOptions cuda_options;
-            cuda_options.device_id = 0;
-            m_session_options.AppendExecutionProvider_CUDA(cuda_options);
-            break;
-        }
-        case Backend::TensorRT: {
-#ifdef _WIN32
-            debug_log("Adding TensorRT RTX execution provider");
-            append_tensorrt_rtx_execution_provider(m_session_options, model_path,
-                                                   options.execution_engine);
-            debug_log("TensorRT RTX execution provider added");
-#else
-            debug_log("Adding TensorRT execution provider");
-            OrtTensorRTProviderOptions trt_options;
-            trt_options.device_id = 0;
-            m_session_options.AppendExecutionProvider_TensorRT(trt_options);
-#endif
-            break;
-        }
-#ifdef _WIN32
-        case Backend::DirectML: {
-            append_directml_execution_provider(m_session_options, m_device.device_index);
-            break;
-        }
-        case Backend::WindowsML: {
-            debug_log("Adding WindowsML execution provider");
-            // In March 2026, WindowsML EP or adapter handles NPU/GPU auto-selection
-            std::unordered_map<std::string, std::string> winml_options = {};
-            m_session_options.AppendExecutionProvider("WinML", winml_options);
-            break;
-        }
-        case Backend::OpenVINO: {
-            debug_log("Adding OpenVINO execution provider");
-            // Intel specific acceleration
-            std::unordered_map<std::string, std::string> ov_options = {{"device_type", "AUTO"}};
-            m_session_options.AppendExecutionProvider("OpenVINO", ov_options);
-            break;
-        }
-#endif
-        case Backend::MLX:
-        default:
-            debug_log("Using default CPU execution provider");
-            break;
-    }
-}
-
-void InferenceSession::extract_metadata(const std::filesystem::path& model_path) {
-    debug_log("Extracting model metadata");
-    Ort::AllocatorWithDefaultOptions allocator;
-    m_input_node_names.clear();
-    m_output_node_names.clear();
-    m_input_node_names_ptr.clear();
-    m_output_node_names_ptr.clear();
-    m_input_node_dims.clear();
-    m_output_node_dims.clear();
-    m_output_element_types.clear();
-
-    size_t num_input_nodes = m_session.GetInputCount();
-    debug_log("Model has " + std::to_string(num_input_nodes) + " inputs");
-
-    for (size_t i = 0; i < num_input_nodes; i++) {
-        auto input_name_ptr = m_session.GetInputNameAllocated(i, allocator);
-        m_input_node_names.push_back(input_name_ptr.get());
-
-        auto type_info = m_session.GetInputTypeInfo(i);
-        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-        m_input_node_dims.push_back(tensor_info.GetShape());
-
-        // Capture input element type for FP16 model support
-        if (i == 0) {
-            m_input_element_type = tensor_info.GetElementType();
-            if (auto inferred_resolution = core::infer_model_resolution(m_input_node_dims.back());
-                inferred_resolution.has_value()) {
-                m_recommended_resolution = *inferred_resolution;
-                debug_log("Inferred model resolution from input shape: " +
-                          std::to_string(*inferred_resolution));
-            } else if (auto filename_resolution =
-                           core::infer_model_resolution_from_path(model_path);
-                       filename_resolution.has_value()) {
-                m_recommended_resolution = *filename_resolution;
-                debug_log("Falling back to model filename resolution: " +
-                          std::to_string(*filename_resolution));
-            }
-            debug_log("Input 0 element type: " + std::to_string(m_input_element_type) +
-                      " (FLOAT16 is 10, FLOAT is 1)");
-        }
-    }
-    for (const auto& name : m_input_node_names) {
-        m_input_node_names_ptr.push_back(name.c_str());
-    }
-
-    const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
-        model_path, m_device.backend,
-        m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
-    const size_t num_output_nodes = m_session.GetOutputCount();
-    if (use_packaged_output_contract) {
-        debug_log("Using packaged CorridorKey output contract");
-        m_output_node_names.emplace_back(core::k_corridorkey_alpha_output_name);
-        m_output_node_names.emplace_back(core::k_corridorkey_fg_output_name);
-    } else {
-        for (size_t i = 0; i < num_output_nodes; i++) {
-            auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
-            m_output_node_names.push_back(output_name_ptr.get());
-        }
-    }
-    for (size_t i = 0; i < num_output_nodes; ++i) {
-        auto type_info = m_session.GetOutputTypeInfo(i);
-        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-        m_output_node_dims.push_back(tensor_info.GetShape());
-        m_output_element_types.push_back(tensor_info.GetElementType());
-    }
-    for (const auto& name : m_output_node_names) {
-        m_output_node_names_ptr.push_back(name.c_str());
-    }
-    debug_log("Metadata extraction complete");
-}
-
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options) {
-    fprintf(stderr, "[InferenceSession] Creating session for model: %s\n",
-            model_path.string().c_str());
+    auto session = std::unique_ptr<InferenceSession>(new InferenceSession(device));
+    session->m_execution_engine = options.execution_engine;
 
-    if (!std::filesystem::exists(model_path)) {
-        return Unexpected(
-            Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
+#if defined(__APPLE__)
+    if (device.backend == Backend::MLX) {
+        auto mlx_res = core::MlxSession::create(model_path);
+        if (!mlx_res) return Unexpected(mlx_res.error());
+        session->m_mlx_session = std::move(*mlx_res);
+        session->m_recommended_resolution = session->m_mlx_session->model_resolution();
+        return std::move(session);
     }
-
-    DeviceInfo requested_device = device;
-
-    try {
-        fprintf(stderr, "[InferenceSession] Allocating InferenceSession object\n");
-        auto session_ptr =
-            std::unique_ptr<InferenceSession>(new InferenceSession(std::move(device)));
-        auto execution_engine =
-            resolve_execution_engine(options.execution_engine, requested_device.backend);
-        if (!execution_engine) {
-            return Unexpected(execution_engine.error());
-        }
-        session_ptr->m_execution_engine = *execution_engine;
-        options.execution_engine = *execution_engine;
-        if (requested_device.backend == Backend::MLX) {
-            auto mlx_session_res = core::MlxSession::create(model_path, requested_device);
-            if (!mlx_session_res) {
-                return Unexpected(mlx_session_res.error());
-            }
-            session_ptr->m_recommended_resolution = (*mlx_session_res)->model_resolution();
-            session_ptr->m_mlx_session = std::move(*mlx_session_res);
-            return session_ptr;
-        }
-        if (*execution_engine == ExecutionEngine::TorchTensorRt) {
-            auto torch_session_res = core::TorchTrtSession::create(model_path, requested_device);
-            if (!torch_session_res) {
-                return Unexpected(torch_session_res.error());
-            }
-            session_ptr->m_recommended_resolution = (*torch_session_res)->model_resolution();
-            session_ptr->m_torch_trt_session = std::move(*torch_session_res);
-            return session_ptr;
-        }
-
-        fprintf(stderr, "[InferenceSession] Creating ORT environment\n");
-        session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-        fprintf(stderr, "[InferenceSession] ORT environment created\n");
-        std::filesystem::path session_model_path = model_path;
-        std::optional<std::filesystem::path> optimized_model_path;
-        bool using_optimized_model_cache = false;
-
-#ifdef _WIN32
-        if (session_ptr->m_device.backend == Backend::TensorRT) {
-            if (auto compiled_context_path =
-                    common::existing_tensorrt_rtx_compiled_context_model_path(model_path);
-                compiled_context_path.has_value()) {
-                session_model_path = *compiled_context_path;
-            }
-        }
 #endif
 
-        if (core::use_optimized_model_cache_for_backend(session_ptr->m_device.backend)) {
-            optimized_model_path =
-                common::optimized_model_cache_path(model_path, session_ptr->m_device.backend);
-            if (optimized_model_path.has_value()) {
-                std::error_code error;
-                std::filesystem::create_directories(optimized_model_path->parent_path(), error);
-                if (!error && std::filesystem::exists(*optimized_model_path, error)) {
-                    session_model_path = *optimized_model_path;
-                    using_optimized_model_cache = true;
-                }
-            }
-        }
-
-        fprintf(stderr, "[InferenceSession] Configuring session options\n");
-        session_ptr->configure_session_options(using_optimized_model_cache, options, model_path);
-        fprintf(stderr, "[InferenceSession] Session options configured\n");
-
-        if (!using_optimized_model_cache && optimized_model_path.has_value()) {
-            fprintf(stderr, "[InferenceSession] Setting optimized model path\n");
-#ifdef _WIN32
-            session_ptr->m_session_options.SetOptimizedModelFilePath(
-                optimized_model_path->wstring().c_str());
-#else
-            session_ptr->m_session_options.SetOptimizedModelFilePath(optimized_model_path->c_str());
-#endif
-        }
-
-        fprintf(stderr, "[InferenceSession] Creating ONNX Runtime session from model: %s\n",
-                session_model_path.string().c_str());
-#ifdef _WIN32
-        session_ptr->m_session =
-            Ort::Session(session_ptr->m_env, session_model_path.wstring().c_str(),
-                         session_ptr->m_session_options);
-#else
-        session_ptr->m_session = Ort::Session(session_ptr->m_env, session_model_path.c_str(),
-                                              session_ptr->m_session_options);
-#endif
-        fprintf(stderr, "[InferenceSession] ONNX Runtime session created successfully\n");
-
-        session_ptr->extract_metadata(model_path);
-        fprintf(stderr, "[InferenceSession] Session created successfully\n");
-        return session_ptr;
-    } catch (const Ort::Exception& e) {
-        if (core::use_optimized_model_cache_for_backend(requested_device.backend)) {
-            auto optimized_model_path =
-                common::optimized_model_cache_path(model_path, requested_device.backend);
-            if (optimized_model_path.has_value() &&
-                std::filesystem::exists(*optimized_model_path)) {
-                remove_cached_model(*optimized_model_path);
-                try {
-                    auto session_ptr =
-                        std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
-                    auto execution_engine = resolve_execution_engine(options.execution_engine,
-                                                                     requested_device.backend);
-                    if (!execution_engine) {
-                        return Unexpected(execution_engine.error());
-                    }
-                    session_ptr->m_execution_engine = *execution_engine;
-                    options.execution_engine = *execution_engine;
-                    session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-                    session_ptr->configure_session_options(false, options, model_path);
-#ifdef _WIN32
-                    session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path->wstring().c_str());
-#else
-                    session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path->c_str());
-#endif
-#ifdef _WIN32
-                    session_ptr->m_session =
-                        Ort::Session(session_ptr->m_env, model_path.wstring().c_str(),
-                                     session_ptr->m_session_options);
-#else
-                    session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(),
-                                                          session_ptr->m_session_options);
-#endif
-                    session_ptr->extract_metadata(model_path);
-                    return session_ptr;
-                } catch (const Ort::Exception&) {
-                    remove_cached_model(*optimized_model_path);
-                }
-            }
-        }
-        return Unexpected(Error{ErrorCode::ModelLoadFailed,
-                                std::string("ONNX Runtime session creation failed: ") + e.what()});
-    } catch (const std::exception& e) {
-        return Unexpected(Error{ErrorCode::ModelLoadFailed,
-                                std::string("Failed to initialize session: ") + e.what()});
+#if defined(_WIN32)
+    if (device.backend == Backend::TensorRT || device.backend == Backend::CPU ||
+        device.backend == Backend::DirectML) {
+        auto torch_res = core::TorchTrtSession::create(model_path, device);
+        if (!torch_res) return Unexpected(torch_res.error());
+        session->m_torch_trt_session = std::move(*torch_res);
+        session->m_recommended_resolution = session->m_torch_trt_session->model_resolution();
+        return std::move(session);
     }
+#endif
+
+    return Unexpected(
+        Error{ErrorCode::HardwareNotSupported,
+              "No compatible inference backend found for this platform/device combination."});
+}
+
+Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
+    const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
+    const InferenceParams& params, StageTimingCallback on_stage) {
+    if (rgbs.empty()) return std::vector<FrameResult>{};
+
+    if (m_mlx_session != nullptr) {
+        int model_res = m_mlx_session->model_resolution();
+        std::vector<FrameResult> results;
+        results.reserve(rgbs.size());
+        for (size_t index = 0; index < rgbs.size(); ++index) {
+            bool is_tile = rgbs[index].width == model_res && rgbs[index].height == model_res;
+            if (is_tile) {
+                auto result = m_mlx_session->infer_tile(rgbs[index], alpha_hints[index], on_stage);
+                if (!result) return Unexpected(result.error());
+                results.push_back(std::move(*result));
+            } else {
+                auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index],
+                                                   params.upscale_method, on_stage);
+                if (!result) return Unexpected(result.error());
+                results.push_back(std::move(*result));
+            }
+        }
+        return results;
+    }
+    if (m_torch_trt_session != nullptr) {
+        std::vector<FrameResult> results;
+        results.reserve(rgbs.size());
+        for (size_t index = 0; index < rgbs.size(); ++index) {
+            auto result =
+                m_torch_trt_session->infer(rgbs[index], alpha_hints[index], params, on_stage);
+            if (!result) return Unexpected(result.error());
+            results.push_back(std::move(*result));
+        }
+        return results;
+    }
+    return Unexpected(Error{ErrorCode::HardwareNotSupported, "No backend loaded."});
+}
+
+Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
+                                                const InferenceParams& params,
+                                                StageTimingCallback on_stage) {
+    if (m_mlx_session != nullptr) {
+        auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
+        if (!batch_res) return Unexpected(batch_res.error());
+        return std::move((*batch_res)[0]);
+    }
+    if (m_torch_trt_session != nullptr) {
+        return m_torch_trt_session->infer(rgb, alpha_hint, params, on_stage);
+    }
+    return Unexpected(Error{ErrorCode::HardwareNotSupported, "No backend loaded."});
 }
 
 Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& alpha_hint,
@@ -1192,542 +622,6 @@ Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<I
         apply_post_process((*results_res)[i], params, rgbs[i], on_stage);
     }
     return results_res;
-}
-
-Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
-    const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
-    const InferenceParams& params, StageTimingCallback on_stage) {
-    if (rgbs.empty()) return std::vector<FrameResult>{};
-    if (m_mlx_session != nullptr) {
-        if (params.target_resolution > 0 && params.target_resolution != m_recommended_resolution) {
-            return Unexpected<Error>{Error{
-                ErrorCode::InvalidParameters,
-                "The current MLX bridge has a fixed resolution. Use --resolution 0 or prepare a "
-                "matching bridge artifact."}};
-        }
-
-        int model_res = m_mlx_session->model_resolution();
-        std::vector<FrameResult> results;
-        results.reserve(rgbs.size());
-        for (size_t index = 0; index < rgbs.size(); ++index) {
-            bool is_tile = rgbs[index].width == model_res && rgbs[index].height == model_res;
-            if (is_tile) {
-                auto result = m_mlx_session->infer_tile(rgbs[index], alpha_hints[index], on_stage);
-                if (!result) return Unexpected(result.error());
-                results.push_back(std::move(*result));
-            } else {
-                auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index],
-                                                   params.upscale_method, on_stage);
-                if (!result) return Unexpected(result.error());
-                results.push_back(std::move(*result));
-            }
-        }
-        return results;
-    }
-    if (m_torch_trt_session != nullptr) {
-        std::vector<FrameResult> results;
-        results.reserve(rgbs.size());
-        for (size_t index = 0; index < rgbs.size(); ++index) {
-            auto result =
-                m_torch_trt_session->infer(rgbs[index], alpha_hints[index], params, on_stage);
-            if (!result) {
-                return Unexpected(result.error());
-            }
-            results.push_back(std::move(*result));
-        }
-        return results;
-    }
-
-    try {
-        Ort::MemoryInfo memory_info =
-            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        int target_res =
-            params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-        size_t batch_size = rgbs.size();
-
-        bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
-        std::vector<Ort::Value> input_tensors;
-        auto ensure_resize_buffer = [&](std::size_t index, int width, int height,
-                                        int channels) -> Image {
-            if (m_resize_pool.size() <= index) {
-                m_resize_pool.resize(index + 1);
-            }
-            Image current = m_resize_pool[index].view();
-            if (current.width != width || current.height != height ||
-                current.channels != channels) {
-                m_resize_pool[index] = ImageBuffer(width, height, channels);
-                current = m_resize_pool[index].view();
-            }
-            return current;
-        };
-
-        if (is_concatenated) {
-            auto shape = m_input_node_dims[0];
-            int64_t model_h = shape[2] < 0 ? target_res : shape[2];
-            int64_t model_w = shape[3] < 0 ? target_res : shape[3];
-
-            size_t total_planar_size = batch_size * 4 * model_h * model_w;
-            m_planar_pool.resize(1);
-            if (m_planar_pool[0].view().data.size() != total_planar_size) {
-                m_planar_pool[0] = ImageBuffer(static_cast<int>(total_planar_size), 1, 1);
-            }
-
-            float* dst_base = m_planar_pool[0].view().data.data();
-            size_t image_stride = 4 * model_h * model_w;
-            size_t channel_stride = model_h * model_w;
-            common::measure_stage(
-                on_stage, "batch_prepare_inputs",
-                [&]() {
-                    for (size_t b = 0; b < batch_size; ++b) {
-                        Image cur_rgb = ensure_resize_buffer(b * 2, static_cast<int>(model_w),
-                                                             static_cast<int>(model_h), 3);
-                        ColorUtils::resize_area_into(rgbs[b], cur_rgb, m_color_utils_state);
-
-                        Image cur_hint = ensure_resize_buffer(b * 2 + 1, static_cast<int>(model_w),
-                                                              static_cast<int>(model_h), 1);
-                        ColorUtils::resize_area_into(alpha_hints[b], cur_hint, m_color_utils_state);
-                        float* dst = dst_base + (b * image_stride);
-
-                        common::parallel_for_rows(static_cast<int>(model_h), [&](int y_begin,
-                                                                                 int y_end) {
-                            for (int y = y_begin; y < y_end; ++y) {
-                                for (int x = 0; x < model_w; ++x) {
-                                    size_t idx =
-                                        static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
-                                    dst[0 * channel_stride + idx] =
-                                        (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
-                                    dst[1 * channel_stride + idx] =
-                                        (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
-                                    dst[2 * channel_stride + idx] =
-                                        (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
-                                    dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
-                                }
-                            }
-                        });
-                    }
-                },
-                batch_size);
-
-            std::vector<int64_t> effective_shape = {(int64_t)batch_size, 4, model_h, model_w};
-
-            // Check if model expects FP16 input (required for TensorRT on Windows)
-            if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                debug_log("Creating FP16 input tensor [BATCH SIZE=" + std::to_string(batch_size) +
-                          "]");
-                m_fp16_pool.resize(total_planar_size);
-                for (size_t i = 0; i < total_planar_size; ++i) {
-                    m_fp16_pool[i] = Ort::Float16_t(dst_base[i]);
-                }
-                input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
-                    memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
-                    effective_shape.size()));
-            } else {
-                debug_log(
-                    "Creating FP32 input tensor (type: " + std::to_string(m_input_element_type) +
-                    ") [BATCH SIZE=" + std::to_string(batch_size) + "]");
-                input_tensors.push_back(Ort::Value::CreateTensor<float>(
-                    memory_info, dst_base, total_planar_size, effective_shape.data(),
-                    effective_shape.size()));
-            }
-        } else {
-            return Unexpected(Error{ErrorCode::HardwareNotSupported,
-                                    "Non-concatenated models not yet supported with batching"});
-        }
-
-        auto output_tensors = common::measure_stage(
-            on_stage, "ort_run",
-            [&]() {
-                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
-                                     input_tensors.data(), input_tensors.size(),
-                                     m_output_node_names_ptr.data(),
-                                     m_output_node_names_ptr.size());
-            },
-            batch_size);
-
-        if (output_tensors.empty()) {
-            debug_log("Model produced no output tensors");
-            return Unexpected(
-                Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
-        }
-
-        std::vector<FrameResult> batch_results(batch_size);
-
-        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-        auto alpha_type = alpha_info.GetElementType();
-        auto alpha_shape = alpha_info.GetShape();
-        debug_log("Alpha output element type: " + std::to_string(alpha_type) +
-                  " (FLOAT16 is 10, FLOAT is 1)");
-
-        size_t alpha_image_stride = alpha_shape[1] * alpha_shape[2] * alpha_shape[3];
-
-        float* alpha_ptr = nullptr;
-
-        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            debug_log("Converting alpha output from FP16 to FP32");
-            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
-            size_t total_alpha_elements = batch_size * alpha_image_stride;
-            convert_fp16_to_fp32(alpha_fp16, m_alpha_output_scratch, total_alpha_elements);
-            alpha_ptr = m_alpha_output_scratch.data();
-        } else {
-            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
-        }
-
-        const size_t total_alpha_elements = batch_size * alpha_image_stride;
-        log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                    std::span<const float>(alpha_ptr, total_alpha_elements),
-                                    "alpha_raw_output");
-        auto alpha_validation = validate_output_values(
-            std::span<const float>(alpha_ptr, total_alpha_elements), "alpha_raw_output");
-        if (!alpha_validation) {
-            return Unexpected(alpha_validation.error());
-        }
-
-        float* fg_ptr = nullptr;
-        std::vector<int64_t> fg_shape;
-        size_t fg_image_stride = 0;
-
-        if (output_tensors.size() > 1) {
-            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
-            auto fg_type = fg_info.GetElementType();
-            fg_shape = fg_info.GetShape();
-            fg_image_stride = fg_shape[1] * fg_shape[2] * fg_shape[3];
-            debug_log("FG output element type: " + std::to_string(fg_type));
-
-            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                debug_log("Converting FG output from FP16 to FP32");
-                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
-                size_t total_fg_elements = batch_size * fg_image_stride;
-                convert_fp16_to_fp32(fg_fp16, m_fg_output_scratch, total_fg_elements);
-                fg_ptr = m_fg_output_scratch.data();
-            } else {
-                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
-            }
-
-            const size_t total_fg_elements = batch_size * fg_image_stride;
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        std::span<const float>(fg_ptr, total_fg_elements),
-                                        "fg_raw_output");
-            auto fg_validation = validate_output_values(
-                std::span<const float>(fg_ptr, total_fg_elements), "fg_raw_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
-        }
-
-        debug_log("Extracting batch outputs...");
-        common::measure_stage(
-            on_stage, "batch_extract_outputs",
-            [&]() {
-                for (size_t b = 0; b < batch_size; ++b) {
-                    FrameResult& result = batch_results[b];
-                    bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
-
-                    result.alpha = ImageBuffer(rgbs[b].width, rgbs[b].height, 1);
-                    const bool exact_output_size =
-                        static_cast<int>(alpha_shape[3]) == rgbs[b].width &&
-                        static_cast<int>(alpha_shape[2]) == rgbs[b].height;
-                    if (exact_output_size) {
-                        from_planar_into_result_parallel(alpha_ptr + (b * alpha_image_stride),
-                                                         result.alpha.view());
-                    } else {
-                        Image model_alpha = ensure_resize_buffer(
-                            batch_size * 2 + b * 2, static_cast<int>(alpha_shape[3]),
-                            static_cast<int>(alpha_shape[2]), static_cast<int>(alpha_shape[1]));
-                        from_planar_parallel(alpha_ptr + (b * alpha_image_stride), model_alpha);
-                        if (use_lanczos) {
-                            ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
-                                                            m_color_utils_state);
-                        } else {
-                            ColorUtils::resize_into(model_alpha, result.alpha.view());
-                        }
-                    }
-                    ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-
-                    if (fg_ptr != nullptr) {
-                        result.foreground = ImageBuffer(rgbs[b].width, rgbs[b].height, 3);
-                        if (exact_output_size) {
-                            from_planar_into_result_parallel(fg_ptr + (b * fg_image_stride),
-                                                             result.foreground.view());
-                        } else {
-                            Image model_fg = ensure_resize_buffer(
-                                batch_size * 2 + b * 2 + 1, static_cast<int>(fg_shape[3]),
-                                static_cast<int>(fg_shape[2]), static_cast<int>(fg_shape[1]));
-                            from_planar_parallel(fg_ptr + (b * fg_image_stride), model_fg);
-                            if (use_lanczos) {
-                                ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
-                                                                m_color_utils_state);
-                            } else {
-                                ColorUtils::resize_into(model_fg, result.foreground.view());
-                            }
-                        }
-                    }
-                }
-            },
-            batch_size);
-
-        for (size_t batch_index = 0; batch_index < batch_results.size(); ++batch_index) {
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        batch_results[batch_index].alpha.view(),
-                                        "alpha_resized_output");
-            auto alpha_resized_validation = validate_output_image(
-                batch_results[batch_index].alpha.view(), "alpha_resized_output");
-            if (!alpha_resized_validation) {
-                return Unexpected(alpha_resized_validation.error());
-            }
-            if (!batch_results[batch_index].foreground.view().empty()) {
-                log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                            batch_results[batch_index].foreground.view(),
-                                            "fg_resized_output");
-                auto fg_validation = validate_output_image(
-                    batch_results[batch_index].foreground.view(), "fg_resized_output");
-                if (!fg_validation) {
-                    return Unexpected(fg_validation.error());
-                }
-            }
-        }
-
-        return batch_results;
-
-    } catch (const Ort::Exception& e) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                std::string("ONNX Runtime execution failed: ") + e.what()});
-    }
-}
-
-Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params,
-                                                StageTimingCallback on_stage) {
-    if (m_mlx_session != nullptr) {
-        auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
-        if (!batch_res) {
-            return Unexpected(batch_res.error());
-        }
-        return std::move((*batch_res)[0]);
-    }
-    if (m_torch_trt_session != nullptr) {
-        return m_torch_trt_session->infer(rgb, alpha_hint, params, on_stage);
-    }
-
-    try {
-        Ort::MemoryInfo memory_info =
-            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        int target_res =
-            params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-
-        bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
-        if (!is_concatenated) {
-            return Unexpected(Error{ErrorCode::HardwareNotSupported,
-                                    "Non-concatenated models are not yet supported."});
-        }
-
-        auto shape = m_input_node_dims[0];
-        int64_t model_h = shape[2] < 0 ? target_res : shape[2];
-        int64_t model_w = shape[3] < 0 ? target_res : shape[3];
-        size_t channel_stride = static_cast<size_t>(model_h) * static_cast<size_t>(model_w);
-        size_t total_planar_size = 4 * channel_stride;
-
-        auto ensure_resize_buffer = [&](std::size_t index, int width, int height,
-                                        int channels) -> Image {
-            if (m_resize_pool.size() <= index) {
-                m_resize_pool.resize(index + 1);
-            }
-            Image current = m_resize_pool[index].view();
-            if (current.width != width || current.height != height ||
-                current.channels != channels) {
-                m_resize_pool[index] = ImageBuffer(width, height, channels);
-                current = m_resize_pool[index].view();
-            }
-            return current;
-        };
-
-        if (m_planar_pool.empty() || m_planar_pool[0].view().data.size() != total_planar_size) {
-            if (m_planar_pool.empty()) {
-                m_planar_pool.emplace_back(static_cast<int>(total_planar_size), 1, 1);
-            } else {
-                m_planar_pool[0] = ImageBuffer(static_cast<int>(total_planar_size), 1, 1);
-            }
-        }
-
-        Image prepared_rgb =
-            ensure_resize_buffer(0, static_cast<int>(model_w), static_cast<int>(model_h), 3);
-        Image prepared_hint =
-            ensure_resize_buffer(1, static_cast<int>(model_w), static_cast<int>(model_h), 1);
-        float* planar_ptr = m_planar_pool[0].view().data.data();
-
-        common::measure_stage(
-            on_stage, "frame_prepare_inputs",
-            [&]() {
-                ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
-                ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
-
-                common::parallel_for_rows(static_cast<int>(model_h), [&](int y_begin, int y_end) {
-                    for (int y = y_begin; y < y_end; ++y) {
-                        for (int x = 0; x < model_w; ++x) {
-                            size_t idx = static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
-                            planar_ptr[0 * channel_stride + idx] =
-                                (prepared_rgb(y, x, 0) - 0.485f) / 0.229f;
-                            planar_ptr[1 * channel_stride + idx] =
-                                (prepared_rgb(y, x, 1) - 0.456f) / 0.224f;
-                            planar_ptr[2 * channel_stride + idx] =
-                                (prepared_rgb(y, x, 2) - 0.406f) / 0.225f;
-                            planar_ptr[3 * channel_stride + idx] = prepared_hint(y, x, 0);
-                        }
-                    }
-                });
-            },
-            1);
-
-        std::vector<Ort::Value> input_tensors;
-        std::vector<int64_t> effective_shape = {1, 4, model_h, model_w};
-        if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            m_fp16_pool.resize(total_planar_size);
-            for (size_t index = 0; index < total_planar_size; ++index) {
-                m_fp16_pool[index] = Ort::Float16_t(planar_ptr[index]);
-            }
-            input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
-                memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
-                effective_shape.size()));
-        } else {
-            input_tensors.push_back(
-                Ort::Value::CreateTensor<float>(memory_info, planar_ptr, total_planar_size,
-                                                effective_shape.data(), effective_shape.size()));
-        }
-
-        auto output_tensors = common::measure_stage(
-            on_stage, "ort_run",
-            [&]() {
-                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
-                                     input_tensors.data(), input_tensors.size(),
-                                     m_output_node_names_ptr.data(),
-                                     m_output_node_names_ptr.size());
-            },
-            1);
-
-        if (output_tensors.empty()) {
-            return Unexpected(
-                Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
-        }
-
-        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-        auto alpha_type = alpha_info.GetElementType();
-        auto alpha_shape = alpha_info.GetShape();
-        size_t alpha_image_stride = static_cast<size_t>(alpha_shape[1]) *
-                                    static_cast<size_t>(alpha_shape[2]) *
-                                    static_cast<size_t>(alpha_shape[3]);
-
-        float* alpha_ptr = nullptr;
-        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
-            convert_fp16_to_fp32(alpha_fp16, m_alpha_output_scratch, alpha_image_stride);
-            alpha_ptr = m_alpha_output_scratch.data();
-        } else {
-            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
-        }
-
-        log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                    std::span<const float>(alpha_ptr, alpha_image_stride),
-                                    "alpha_raw_output");
-        auto alpha_validation = validate_output_values(
-            std::span<const float>(alpha_ptr, alpha_image_stride), "alpha_raw_output");
-        if (!alpha_validation) {
-            return Unexpected(alpha_validation.error());
-        }
-
-        float* fg_ptr = nullptr;
-        std::vector<int64_t> fg_shape;
-        size_t fg_image_stride = 0;
-        if (output_tensors.size() > 1) {
-            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
-            auto fg_type = fg_info.GetElementType();
-            fg_shape = fg_info.GetShape();
-            fg_image_stride = static_cast<size_t>(fg_shape[1]) * static_cast<size_t>(fg_shape[2]) *
-                              static_cast<size_t>(fg_shape[3]);
-            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
-                convert_fp16_to_fp32(fg_fp16, m_fg_output_scratch, fg_image_stride);
-                fg_ptr = m_fg_output_scratch.data();
-            } else {
-                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
-            }
-
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        std::span<const float>(fg_ptr, fg_image_stride),
-                                        "fg_raw_output");
-            auto fg_validation = validate_output_values(
-                std::span<const float>(fg_ptr, fg_image_stride), "fg_raw_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
-        }
-
-        FrameResult result;
-        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        if (fg_ptr != nullptr) {
-            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
-        }
-
-        bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
-        Image model_alpha = ensure_resize_buffer(2, static_cast<int>(alpha_shape[3]),
-                                                 static_cast<int>(alpha_shape[2]),
-                                                 static_cast<int>(alpha_shape[1]));
-        common::measure_stage(
-            on_stage, "frame_extract_outputs",
-            [&]() {
-                const bool exact_output_size = static_cast<int>(alpha_shape[3]) == rgb.width &&
-                                               static_cast<int>(alpha_shape[2]) == rgb.height;
-                if (exact_output_size) {
-                    from_planar_into_result_parallel(alpha_ptr, result.alpha.view());
-                    if (fg_ptr != nullptr) {
-                        from_planar_into_result_parallel(fg_ptr, result.foreground.view());
-                    }
-                } else {
-                    from_planar_parallel(alpha_ptr, model_alpha);
-                    if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
-                                                        m_color_utils_state);
-                    } else {
-                        ColorUtils::resize_into(model_alpha, result.alpha.view());
-                    }
-
-                    if (fg_ptr != nullptr) {
-                        Image model_fg = ensure_resize_buffer(3, static_cast<int>(fg_shape[3]),
-                                                              static_cast<int>(fg_shape[2]),
-                                                              static_cast<int>(fg_shape[1]));
-                        from_planar_parallel(fg_ptr, model_fg);
-                        if (use_lanczos) {
-                            ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
-                                                            m_color_utils_state);
-                        } else {
-                            ColorUtils::resize_into(model_fg, result.foreground.view());
-                        }
-                    }
-                }
-                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-            },
-            1);
-
-        log_output_stats_if_enabled(m_device, m_recommended_resolution, result.alpha.view(),
-                                    "alpha_resized_output");
-        auto alpha_resized_validation =
-            validate_output_image(result.alpha.view(), "alpha_resized_output");
-        if (!alpha_resized_validation) {
-            return Unexpected(alpha_resized_validation.error());
-        }
-        if (!result.foreground.view().empty()) {
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        result.foreground.view(), "fg_resized_output");
-            auto fg_validation =
-                validate_output_image(result.foreground.view(), "fg_resized_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
-        }
-
-        return result;
-    } catch (const Ort::Exception& e) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                std::string("ONNX Runtime execution failed: ") + e.what()});
-    }
 }
 
 Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,

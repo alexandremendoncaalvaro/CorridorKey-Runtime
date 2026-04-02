@@ -6,39 +6,9 @@
 #include <string>
 #include <vector>
 
-// Keep the C++ wrapper aligned with the provider header layout for each platform.
-// The curated Windows RTX package only ships the core/session layout; falling back
-// to the vcpkg top-level wrapper alongside vendor provider headers causes duplicate
-// ONNX Runtime type definitions during compilation.
-#if defined(_WIN32)
-#if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
-#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
-#elif __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
-#include <onnxruntime/onnxruntime_cxx_api.h>
-#else
-#error "ONNX Runtime C++ headers not found"
-#endif
-#else
-#if __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
-#include <onnxruntime/onnxruntime_cxx_api.h>
-#elif __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
-#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
-#else
-#error "ONNX Runtime C++ headers not found"
-#endif
-#endif
-
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
-
-#ifdef __APPLE__
-#if __has_include(<onnxruntime/coreml_provider_factory.h>)
-#include <onnxruntime/coreml_provider_factory.h>
-#else
-#include <onnxruntime/core/providers/coreml/coreml_provider_factory.h>
-#endif
-#endif
 
 namespace corridorkey {
 
@@ -49,14 +19,12 @@ class TorchTrtSession;
 
 struct SessionCreateOptions {
     bool disable_cpu_ep_fallback = false;
-    OrtLoggingLevel log_severity = ORT_LOGGING_LEVEL_ERROR;
     ExecutionEngine execution_engine = ExecutionEngine::Auto;
 };
 
 /**
  * @brief Private wrapper for packaged inference sessions on the active backend.
- * This class
- * isolates backend-specific runtime types from the rest of the core.
+ * This class isolates backend-specific runtime types from the rest of the core.
  */
 class InferenceSession {
    public:
@@ -99,11 +67,6 @@ class InferenceSession {
    private:
     explicit InferenceSession(DeviceInfo device);
 
-    void configure_session_options(bool use_optimized_model_cache,
-                                   const SessionCreateOptions& options,
-                                   const std::filesystem::path& model_path);
-    void extract_metadata(const std::filesystem::path& model_path);
-
     /**
      * @brief Internal raw inference (no post-processing).
      */
@@ -142,36 +105,11 @@ class InferenceSession {
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 
-    // Ort handles (RAII)
-    Ort::Env m_env{nullptr};
-    Ort::Session m_session{nullptr};
-    Ort::SessionOptions m_session_options;
-
-    // Input/Output metadata
-    std::vector<std::string> m_input_node_names = {};
-    std::vector<std::string> m_output_node_names = {};
-    std::vector<const char*> m_input_node_names_ptr = {};
-    std::vector<const char*> m_output_node_names_ptr = {};
-    std::vector<std::vector<int64_t>> m_input_node_dims = {};
-    std::vector<std::vector<int64_t>> m_output_node_dims = {};
-    ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
-    std::vector<ONNXTensorElementDataType> m_output_element_types = {};
     std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
     std::unique_ptr<core::TorchTrtSession> m_torch_trt_session = nullptr;
-    ExecutionEngine m_execution_engine = ExecutionEngine::Official;
+    ExecutionEngine m_execution_engine = ExecutionEngine::Auto;
 
     // Pre-allocated buffer pools (reused across run() calls)
-    std::vector<ImageBuffer> m_resize_pool = {};
-    std::vector<ImageBuffer> m_planar_pool = {};
-    std::vector<Ort::Float16_t> m_fp16_pool = {};
-    std::vector<float> m_alpha_output_scratch = {};
-    std::vector<float> m_fg_output_scratch = {};
-    std::vector<Ort::Float16_t> m_alpha_output_fp16_pool = {};
-    std::vector<Ort::Float16_t> m_fg_output_fp16_pool = {};
-    Ort::IoBinding m_io_binding{nullptr};
-    std::vector<int64_t> m_bound_input_shape = {};
-    std::vector<int64_t> m_bound_alpha_shape = {};
-    std::vector<int64_t> m_bound_fg_shape = {};
     std::vector<ImageBuffer> m_tiled_rgb_pool = {};
     std::vector<ImageBuffer> m_tiled_hint_pool = {};
     ImageBuffer m_tiled_weight_mask = {};

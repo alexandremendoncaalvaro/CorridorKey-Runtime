@@ -219,40 +219,24 @@ std::optional<ModelCatalogEntry> model_catalog_entry_for_path(
 std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
     const std::filesystem::path& models_root, Backend backend, int resolution,
     app::ArtifactVariantPreference variant_preference) {
+    (void)variant_preference;
     if (backend == Backend::MLX) {
         return {models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn")};
     }
 
+    const std::filesystem::path torchtrt_fp16_path =
+        models_root / ("corridorkey_torchtrt_fp16_" + std::to_string(resolution) + ".ts");
     const std::filesystem::path fp16_path =
         models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
-    const std::filesystem::path int8_path =
-        models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
 
     if (backend == Backend::TensorRT || backend == Backend::CUDA) {
         if (!windows_tensorrt_packaged_resolution_supported(resolution)) {
             return {};
         }
-        if (backend == Backend::TensorRT) {
-            return {fp16_path};
-        }
-        switch (variant_preference) {
-            case app::ArtifactVariantPreference::Int8:
-                return {int8_path, fp16_path};
-            case app::ArtifactVariantPreference::Auto:
-            case app::ArtifactVariantPreference::FP16:
-            default:
-                return {fp16_path, int8_path};
-        }
+        return {torchtrt_fp16_path, fp16_path};
     }
 
-    switch (variant_preference) {
-        case app::ArtifactVariantPreference::FP16:
-            return {fp16_path, int8_path};
-        case app::ArtifactVariantPreference::Int8:
-        case app::ArtifactVariantPreference::Auto:
-        default:
-            return {int8_path, fp16_path};
-    }
+    return {fp16_path};
 }
 
 Result<std::pair<int, bool>> search_resolution_for_request(
