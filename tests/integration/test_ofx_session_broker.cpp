@@ -2,13 +2,18 @@
 #include <filesystem>
 
 #include "app/ofx_session_broker.hpp"
+#include "core/torch_trt_session.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
 
 TEST_CASE("OFX session broker reuses sessions for the same executable model",
           "[integration][ofx][runtime][regression]") {
-    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    if (!core::torch_tensorrt_runtime_available()) {
+        SKIP("TorchTRT runtime not available");
+    }
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_fp16_512_trt.ts";
     if (!std::filesystem::exists(model_path)) {
         SKIP("Model not available");
     }
@@ -18,8 +23,8 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     OfxRuntimePrepareSessionRequest first_request;
     first_request.client_instance_id = "bootstrap";
     first_request.model_path = model_path;
-    first_request.artifact_name = "requested_alias.onnx";
-    first_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    first_request.artifact_name = "requested_alias.ts";
+    first_request.requested_device = DeviceInfo{"TensorRT", 0, Backend::TensorRT};
     first_request.requested_quality_mode = 1;
     first_request.requested_resolution = 512;
     first_request.effective_resolution = 512;
@@ -67,7 +72,11 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
 
 TEST_CASE("OFX session broker isolates sessions across execution engine requests",
           "[integration][ofx][runtime][regression]") {
-    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    if (!core::torch_tensorrt_runtime_available()) {
+        SKIP("TorchTRT runtime not available");
+    }
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_fp16_512_trt.ts";
     if (!std::filesystem::exists(model_path)) {
         SKIP("Model not available");
     }
@@ -78,7 +87,7 @@ TEST_CASE("OFX session broker isolates sessions across execution engine requests
     official_request.client_instance_id = "official";
     official_request.model_path = model_path;
     official_request.artifact_name = model_path.filename().string();
-    official_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    official_request.requested_device = DeviceInfo{"TensorRT", 0, Backend::TensorRT};
     official_request.requested_quality_mode = 1;
     official_request.requested_resolution = 512;
     official_request.effective_resolution = 512;

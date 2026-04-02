@@ -3,6 +3,8 @@
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 
+#include "core/torch_trt_session.hpp"
+
 using namespace corridorkey;
 
 namespace {
@@ -27,14 +29,17 @@ std::uint64_t sum_stage_work_units(const std::vector<StageTiming>& timings,
 }  // namespace
 
 TEST_CASE("Tiled inference preserves input resolution", "[integration][tiling]") {
-    auto model_path = std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (!core::torch_tensorrt_runtime_available()) {
+        SKIP("TorchTRT runtime not available");
+    }
+    auto model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_fp16_512_trt.ts";
     if (!std::filesystem::exists(model_path)) {
-        SUCCEED("Model file not found, skipping tiled inference integration test.");
-        return;
+        SKIP("TorchTRT model not found");
     }
 
-    DeviceInfo cpu_device{"Generic CPU", 0, Backend::CPU};
-    auto engine_res = Engine::create(model_path, cpu_device);
+    DeviceInfo device{"TensorRT", 0, Backend::TensorRT};
+    auto engine_res = Engine::create(model_path, device);
     REQUIRE(engine_res.has_value());
     auto engine = std::move(*engine_res);
 
@@ -62,14 +67,17 @@ TEST_CASE("Tiled inference preserves input resolution", "[integration][tiling]")
 }
 
 TEST_CASE("Tiled CPU inference batches tiles when batch size allows it", "[integration][tiling]") {
-    auto model_path = std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (!core::torch_tensorrt_runtime_available()) {
+        SKIP("TorchTRT runtime not available");
+    }
+    auto model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_fp16_512_trt.ts";
     if (!std::filesystem::exists(model_path)) {
-        SUCCEED("Model file not found, skipping tiled batching integration test.");
-        return;
+        SKIP("TorchTRT model not found");
     }
 
-    DeviceInfo cpu_device{"Generic CPU", 0, Backend::CPU};
-    auto engine_res = Engine::create(model_path, cpu_device);
+    DeviceInfo device{"TensorRT", 0, Backend::TensorRT};
+    auto engine_res = Engine::create(model_path, device);
     REQUIRE(engine_res.has_value());
     auto engine = std::move(*engine_res);
 

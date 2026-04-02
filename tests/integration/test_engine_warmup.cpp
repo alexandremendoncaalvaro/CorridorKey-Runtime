@@ -3,6 +3,8 @@
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 
+#include "core/torch_trt_session.hpp"
+
 using namespace corridorkey;
 
 namespace {
@@ -15,14 +17,18 @@ bool has_stage(const std::vector<StageTiming>& timings, const std::string& name)
 }  // namespace
 
 TEST_CASE("Engine warmup happens on first processing call", "[integration][engine]") {
-    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    if (!core::torch_tensorrt_runtime_available()) {
+        SKIP("TorchTRT runtime not available");
+    }
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_fp16_512_trt.ts";
     if (!std::filesystem::exists(model_path)) {
         SKIP("Model not available");
     }
 
     std::vector<StageTiming> create_timings;
     auto create_res =
-        Engine::create(model_path, DeviceInfo{"Generic CPU", 0, Backend::CPU},
+        Engine::create(model_path, DeviceInfo{"TensorRT", 0, Backend::TensorRT},
                        [&](const StageTiming& timing) { create_timings.push_back(timing); });
     REQUIRE(create_res.has_value());
     REQUIRE_FALSE(has_stage(create_timings, "engine_warmup"));
@@ -39,5 +45,5 @@ TEST_CASE("Engine warmup happens on first processing call", "[integration][engin
                             [&](const StageTiming& timing) { run_timings.push_back(timing); });
     REQUIRE(run_res.has_value());
     REQUIRE(has_stage(run_timings, "engine_warmup"));
-    REQUIRE(has_stage(run_timings, "ort_run"));
+    REQUIRE(has_stage(run_timings, "torchtrt_run"));
 }

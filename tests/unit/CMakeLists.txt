@@ -39,7 +39,6 @@ add_executable(test_unit
     test_stage_profiler.cpp
     test_ofx_stubs.cpp
     test_tile_blend.cpp
-    test_windows_rtx_probe.cpp
     test_warmup_policy.cpp
 )
 
@@ -60,7 +59,6 @@ target_compile_definitions(test_unit PRIVATE
     PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
 )
 
-corridorkey_stage_ort_runtime(test_unit)
 
 # Target-based compiler warnings for tests
 if(NOT MSVC)

@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "app/job_orchestrator.hpp"
+#include "core/torch_trt_session.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -27,10 +28,13 @@ std::filesystem::path create_dummy_frame(const std::filesystem::path& dir, int i
 }  // namespace
 
 TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[integration][app]") {
-    auto model_path = std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (!core::torch_tensorrt_runtime_available()) {
+        SKIP("TorchTRT runtime not available");
+    }
+    auto model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_fp16_512_trt.ts";
     if (!std::filesystem::exists(model_path)) {
-        SUCCEED("Model file not found, skipping orchestrator integration test.");
-        return;
+        SKIP("TorchTRT model not found");
     }
 
     auto tmp_dir = std::filesystem::temp_directory_path() / "corridorkey_test_orchest";
@@ -46,7 +50,7 @@ TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[inte
     request.input_path = tmp_dir;
     request.output_path = tmp_dir / "out_seq";
     request.model_path = model_path;
-    request.device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    request.device = DeviceInfo{"TensorRT", 0, Backend::TensorRT};
     request.params.target_resolution = 512;
     request.params.enable_tiling = false;
 

@@ -12,6 +12,7 @@
 
 #include "app/job_orchestrator.hpp"
 #include "core/inference_session.hpp"
+#include "core/torch_trt_session.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -196,7 +197,11 @@ class ScopedWindowsDenyWrite {
 
 TEST_CASE("session creation falls back to writable cache root when configured cache is locked",
           "[integration][cache]") {
-    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    if (!core::torch_tensorrt_runtime_available()) {
+        SKIP("TorchTRT runtime not available");
+    }
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_fp16_512_trt.ts";
     if (!std::filesystem::exists(model_path)) {
         SKIP("Model not available");
     }
@@ -233,7 +238,7 @@ TEST_CASE("session creation falls back to writable cache root when configured ca
                 report["cache"]["selected_path"].get<std::string>(), 0) == 0);
 
     auto session_res =
-        InferenceSession::create(model_path, DeviceInfo{"Generic CPU", 0, Backend::CPU});
+        InferenceSession::create(model_path, DeviceInfo{"TensorRT", 0, Backend::TensorRT});
     REQUIRE(session_res.has_value());
 
 #ifndef _WIN32

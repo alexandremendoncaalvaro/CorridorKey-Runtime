@@ -503,9 +503,11 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
         temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
         ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
     REQUIRE(expected.has_value());
-    REQUIRE(expected->size() == 2);
-    CHECK(expected->front().filename() == "corridorkey_fp16_1024.onnx");
-    CHECK((*expected)[1].filename() == "corridorkey_fp16_512.onnx");
+    REQUIRE(expected->size() == 4);
+    CHECK(expected->front().filename() == "corridorkey_torchtrt_fp16_1024.ts");
+    CHECK((*expected)[1].filename() == "corridorkey_fp16_1024.onnx");
+    CHECK((*expected)[2].filename() == "corridorkey_torchtrt_fp16_512.ts");
+    CHECK((*expected)[3].filename() == "corridorkey_fp16_512.onnx");
 
     std::filesystem::remove_all(temp_dir);
 }

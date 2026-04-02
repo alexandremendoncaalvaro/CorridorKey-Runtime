@@ -10,10 +10,10 @@
 using namespace corridorkey;
 
 TEST_CASE("InferenceSession::create validation", "[unit][inference]") {
-    DeviceInfo cpu_device = {"CPU", 0, Backend::CPU};
+    DeviceInfo test_device = {"TensorRT", 0, Backend::TensorRT};
 
     SECTION("Fails when model file does not exist") {
-        auto result = InferenceSession::create("non_existent_model.onnx", cpu_device);
+        auto result = InferenceSession::create("non_existent_model.onnx", test_device);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().code == ErrorCode::ModelLoadFailed);
     }

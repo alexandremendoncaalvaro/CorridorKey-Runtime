@@ -2,8 +2,7 @@
 
 add_executable(test_regression
     test_placeholder.cpp
-    test_regression_dml_provider.cpp
-    test_regression_hardware_providers.cpp
+
 )
 
 target_link_libraries(test_regression
@@ -12,7 +11,7 @@ target_link_libraries(test_regression
         Catch2::Catch2WithMain
 )
 
-corridorkey_stage_ort_runtime(test_regression)
+
 
 if(NOT MSVC)
     target_compile_options(test_regression PRIVATE -Wall -Wextra -Wpedantic -Werror)
