@@ -219,7 +219,22 @@ and artifact type quickly.
 - macOS only: `CorridorKey Runtime vX.Y.Z (macOS)`
 - Windows and macOS: `CorridorKey Runtime vX.Y.Z (Windows & macOS)`
 
-Use the following release description template:
+### Large Artifact Publishing (Hugging Face)
+
+Because CorridorKey bundles heavy AI models (TensorScript caches, ONNX graphs),
+Windows installers typically exceed GitHub's 2GB file size limit. 
+
+To solve this, **all installers must be hosted on the project's Hugging Face
+Model Hub** (`alexandrealvaro/CorridorKey`). The GitHub Release acts as the
+primary entry point, version tag, and changelog, but its download links must
+point to the Hugging Face file URL.
+
+**1. Upload to Hugging Face via CLI (`uvx` or `mise`):**
+```powershell
+uvx --from huggingface_hub hf upload alexandrealvaro/CorridorKey ./dist/CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe
+```
+
+**2. Create the GitHub Release using the following template:**
 
 ```markdown
 ## Overview
@@ -238,14 +253,17 @@ Use the following release description template:
 
 ## Assets & Downloads
 
+> 📦 **Note on File Size:** Due to the large size of the optimized neural network models (TensorScript FP16) bundled with this software, our unified installers are securely hosted on Hugging Face to bypass GitHub size limits and maximize download speeds.
+
 ### Windows
-- **NVIDIA RTX 30 Series or newer:** Download `CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe`.
-- **Windows DirectML track (experimental):** Download `CorridorKey_Resolve_vX.Y.Z_Windows_DirectML_Installer.exe`.
+- **NVIDIA RTX 30 Series or newer:** [Download RTX Installer on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe)
+- **Windows DirectML track (experimental):** [Download DirectML Installer on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/CorridorKey_Resolve_vX.Y.Z_Windows_DirectML_Installer.exe)
 - Do not describe the DirectML installer as official support for every AMD, Intel, or RTX 20 series GPU family. Refer readers to `help/SUPPORT_MATRIX.md` for the real support designation.
 
 ### macOS
 - Include this section only when the release contains a macOS installer.
-- **Apple Silicon (M-Series):** Download `CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg`.
+- **Apple Silicon (M-Series):** [Download Apple Silicon Installer on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg)
+
 
 ## Installation Instructions
 
