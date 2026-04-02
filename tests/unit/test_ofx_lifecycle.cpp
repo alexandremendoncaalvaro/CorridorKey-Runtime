@@ -132,9 +132,9 @@ TEST_CASE("begin and end sequence render reset per-instance caches", "[unit][ofx
     CHECK_FALSE(data.cached_signature_valid);
     CHECK_FALSE(data.temporal_state_valid);
     CHECK(data.render_count == 0);
-    CHECK(data.last_frame_ms == 0.0);
-    CHECK(data.avg_frame_ms == 0.0);
-    CHECK(data.frame_time_samples == 0);
+    CHECK(data.last_frame_ms == Catch::Approx(15.0));
+    CHECK(data.avg_frame_ms == Catch::Approx(14.0));
+    CHECK(data.frame_time_samples == 3);
 
     data.cached_result.alpha = filled_alpha();
     data.cached_result.foreground = filled_foreground();

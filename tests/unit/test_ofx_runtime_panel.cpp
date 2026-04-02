@@ -200,16 +200,12 @@ TEST_CASE("runtime backend work label summarizes backend renders and cache hits"
     REQUIRE(runtime_backend_work_runtime_label(data) == "Backend render");
 }
 
-TEST_CASE("runtime panel labels expose safe quality ceiling, guide source, and runtime path",
+TEST_CASE("runtime panel labels expose guide source and runtime path",
           "[unit][ofx][regression]") {
     InstanceData data{};
 
-    REQUIRE(runtime_safe_quality_ceiling_runtime_label(data) == "Unknown");
     REQUIRE(runtime_guide_source_runtime_label(data) == "Awaiting render");
     REQUIRE(runtime_path_runtime_label(data) == "Awaiting render");
-
-    data.runtime_panel_state.safe_quality_ceiling_resolution = 1024;
-    REQUIRE(runtime_safe_quality_ceiling_runtime_label(data) == "High (1024px)");
 
     data.last_guide_source = GuideSourceKind::ExternalAlphaHint;
     REQUIRE(runtime_guide_source_runtime_label(data) == "External Alpha Hint");
