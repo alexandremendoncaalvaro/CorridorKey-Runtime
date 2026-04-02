@@ -57,6 +57,23 @@ bool open_external_url(const std::string& url) {
 #endif
 }
 
+bool open_folder_in_explorer(const std::filesystem::path& folder_path) {
+#if defined(_WIN32)
+    auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
+        nullptr, L"open", folder_path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+    return result > 32;
+#elif defined(__APPLE__)
+    std::string path_str = folder_path.string();
+    char* const argv[] = {const_cast<char*>("/usr/bin/open"), const_cast<char*>(path_str.c_str()),
+                          nullptr};
+    pid_t pid = 0;
+    return posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, *_NSGetEnviron()) == 0;
+#else
+    (void)folder_path;
+    return false;
+#endif
+}
+
 std::string backend_label(Backend backend) {
     switch (backend) {
         case Backend::CPU:
@@ -246,8 +263,7 @@ void sync_runtime_panel_state_from_active_engine(InstanceData* data) {
     data->runtime_panel_state.requested_quality_mode = data->active_quality_mode;
     data->runtime_panel_state.requested_resolution = data->requested_resolution;
     data->runtime_panel_state.effective_resolution = data->active_resolution;
-    data->runtime_panel_state.safe_quality_ceiling_resolution =
-        app::max_supported_resolution_for_device(data->device).value_or(0);
+
     data->runtime_panel_state.cpu_quality_guardrail_active = data->cpu_quality_guardrail_active;
     data->runtime_panel_state.requested_engine = data->requested_execution_engine;
     data->runtime_panel_state.artifact_path = data->model_path;
@@ -276,8 +292,7 @@ void set_runtime_panel_state_for_failed_quality_request(
     data->runtime_panel_state.requested_quality_mode = requested_quality_mode;
     data->runtime_panel_state.requested_resolution = requested_resolution;
     data->runtime_panel_state.effective_resolution = 0;
-    data->runtime_panel_state.safe_quality_ceiling_resolution =
-        app::max_supported_resolution_for_device(data->device).value_or(0);
+
     data->runtime_panel_state.cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     data->runtime_panel_state.requested_engine = data->requested_execution_engine;
     data->runtime_panel_state.effective_engine = ExecutionEngine::Auto;
@@ -450,25 +465,61 @@ std::string runtime_engine_runtime_label_impl(const InstanceData& data) {
     return "Loading...";
 }
 
-std::string runtime_safe_quality_ceiling_runtime_label_impl(const InstanceData& data) {
-    const int resolution = data.runtime_panel_state.safe_quality_ceiling_resolution;
-    if (resolution <= 0) {
-        return "Unknown";
+std::string short_engine_label(ExecutionEngine engine, Backend backend) {
+    if (engine == ExecutionEngine::TorchTensorRt) {
+        return "Torch-TRT";
     }
-
-    switch (quality_mode_for_resolution(resolution)) {
-        case kQualityPreview:
-            return "Draft (" + std::to_string(resolution) + "px)";
-        case kQualityHigh:
-            return "High (" + std::to_string(resolution) + "px)";
-        case kQualityUltra:
-            return "Ultra (" + std::to_string(resolution) + "px)";
-        case kQualityMaximum:
-            return "Maximum (" + std::to_string(resolution) + "px)";
-        case kQualityAuto:
+    switch (backend) {
+        case Backend::TensorRT:
+            return "TensorRT";
+        case Backend::CUDA:
+            return "CUDA";
+        case Backend::CoreML:
+            return "CoreML";
+        case Backend::DirectML:
+            return "DirectML";
+        case Backend::MLX:
+            return "MLX";
+        case Backend::CPU:
+            return "CPU";
         default:
-            return std::to_string(resolution) + "px";
+            return "Auto";
     }
+}
+
+std::string consolidated_engine_label_impl(const InstanceData& data) {
+    std::string device_name = processing_device_label(data.device);
+    ExecutionEngine engine = data.runtime_panel_state.effective_engine;
+    if (engine == ExecutionEngine::Auto) {
+        engine = data.runtime_panel_state.requested_engine;
+    }
+    return device_name + " (" + short_engine_label(engine, data.device.backend) + ")";
+}
+
+std::string consolidated_quality_label_impl(const InstanceData& data) {
+    const int resolution = data.runtime_panel_state.effective_resolution;
+    if (resolution <= 0) {
+        return "Not loaded";
+    }
+    const int quality_mode = data.runtime_panel_state.requested_quality_mode;
+    return std::to_string(resolution) + "px (" + quality_mode_label(quality_mode) + ")";
+}
+
+std::string runtime_detail_message_impl(const InstanceData& data) {
+    if (!data.last_error.empty()) {
+        return data.last_error;
+    }
+    std::string detail;
+    if (!data.color_management_status.empty()) {
+        detail = data.color_management_status;
+    }
+    if (!data.last_warning.empty()) {
+        if (!detail.empty()) {
+            detail += " | ";
+        }
+        detail += data.last_warning;
+    }
+    return detail;
 }
 
 std::string runtime_guide_source_runtime_label_impl(const InstanceData& data) {
@@ -735,9 +786,22 @@ void update_runtime_panel_values(InstanceData* data) {
     }
     const bool is_loading = !has_session && data->last_error.empty();
 
+    // --- Top-level status fields (concise, always visible) ---
+    set_string_param_value(data->runtime_status_param,
+                           is_loading ? "Loading..." : runtime_status_runtime_label(*data));
+    set_string_param_value(data->runtime_device_param,
+                           is_loading ? "Detecting..." : consolidated_engine_label_impl(*data));
+    set_string_param_value(data->runtime_effective_quality_param,
+                           is_loading ? "Loading..." : consolidated_quality_label_impl(*data));
+    set_string_param_value(data->runtime_timings_param,
+                           runtime_timings_runtime_label(*data));
+    set_string_param_value(data->runtime_guide_source_param,
+                           is_loading ? "Awaiting render"
+                                      : runtime_guide_source_runtime_label(*data));
+
+    // --- Advanced runtime status fields (detailed diagnostics) ---
     set_string_param_value(data->runtime_processing_param,
                            processing_backend_label(data->device.backend));
-    set_string_param_value(data->runtime_device_param, processing_device_label(data->device));
     set_string_param_value(data->runtime_engine_param,
                            is_loading ? "Loading..." : runtime_engine_runtime_label_impl(*data));
     set_string_param_value(
@@ -745,28 +809,17 @@ void update_runtime_panel_values(InstanceData* data) {
         requested_quality_runtime_label(data->runtime_panel_state.requested_quality_mode,
                                         data->runtime_panel_state.requested_resolution,
                                         data->runtime_panel_state.cpu_quality_guardrail_active));
-    set_string_param_value(
-        data->runtime_effective_quality_param,
-        is_loading ? "Loading..."
-                   : effective_quality_label(data->runtime_panel_state.effective_resolution));
-    set_string_param_value(
-        data->runtime_safe_quality_ceiling_param,
-        is_loading ? "Loading..." : runtime_safe_quality_ceiling_runtime_label(*data));
     set_string_param_value(data->runtime_artifact_param,
                            is_loading
                                ? "Loading..."
                                : runtime_artifact_label(data->runtime_panel_state.artifact_path));
-    set_string_param_value(data->runtime_guide_source_param,
-                           is_loading ? "Loading..." : runtime_guide_source_runtime_label(*data));
     set_string_param_value(data->runtime_path_param,
                            is_loading ? "Loading..." : runtime_path_runtime_label(*data));
     set_string_param_value(data->runtime_session_param, runtime_session_runtime_label(*data));
-    set_string_param_value(data->runtime_status_param,
-                           is_loading ? "Loading..." : runtime_status_runtime_label(*data));
-    set_string_param_value(data->runtime_timings_param,
-                           is_loading ? "Loading..." : runtime_timings_runtime_label(*data));
     set_string_param_value(data->runtime_backend_work_param,
                            is_loading ? "Loading..." : runtime_backend_work_runtime_label(*data));
+    set_string_param_value(data->runtime_detail_message_param,
+                           runtime_detail_message_impl(*data));
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
@@ -931,8 +984,16 @@ std::string runtime_session_runtime_label(const InstanceData& data) {
     return runtime_session_runtime_label_impl(data);
 }
 
-std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data) {
-    return runtime_safe_quality_ceiling_runtime_label_impl(data);
+std::string consolidated_engine_runtime_label(const InstanceData& data) {
+    return consolidated_engine_label_impl(data);
+}
+
+std::string consolidated_quality_runtime_label(const InstanceData& data) {
+    return consolidated_quality_label_impl(data);
+}
+
+std::string runtime_detail_message(const InstanceData& data) {
+    return runtime_detail_message_impl(data);
 }
 
 std::string runtime_guide_source_runtime_label(const InstanceData& data) {
@@ -1094,8 +1155,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->runtime_requested_quality_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeEffectiveQuality,
                                        &data->runtime_effective_quality_param, nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeSafeQualityCeiling,
-                                       &data->runtime_safe_quality_ceiling_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamRuntimeDetailMessage,
+                                       &data->runtime_detail_message_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeArtifact,
                                        &data->runtime_artifact_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamRuntimeGuideSource,
@@ -1824,7 +1885,7 @@ OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHan
         return kOfxStatReplyDefault;
     }
 
-    clear_instance_render_caches(data, true);
+    clear_instance_render_caches(data, false);
     flush_runtime_panel(data);
     log_message("begin_sequence_render", "Sequence render state reset.");
     return kOfxStatOK;
@@ -1956,6 +2017,16 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 if (!open_external_url(url)) {
                     post_message(kOfxMessageError,
                                  ("Failed to open documentation URL: " + url).c_str(), instance);
+                }
+                return kOfxStatOK;
+            }
+            if (changed_param == kParamOpenLogFolder) {
+                auto log_path = log_file_path();
+                auto log_folder = log_path.parent_path();
+                if (!open_folder_in_explorer(log_folder)) {
+                    post_message(
+                        kOfxMessageError,
+                        ("Failed to open log folder: " + log_folder.string()).c_str(), instance);
                 }
                 return kOfxStatOK;
             }

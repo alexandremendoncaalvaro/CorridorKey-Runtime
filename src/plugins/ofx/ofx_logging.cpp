@@ -25,6 +25,7 @@ namespace {
 std::mutex g_log_mutex;
 std::FILE* g_log_file = nullptr;
 bool g_log_init_attempted = false;
+std::filesystem::path g_resolved_log_path;
 
 std::filesystem::path resolve_log_path() {
     if (auto override_path = common::environment_variable_copy("CORRIDORKEY_OFX_LOG");
@@ -98,9 +99,9 @@ void log_message(std::string_view scope, std::string_view message) {
 
     if (!g_log_init_attempted) {
         g_log_init_attempted = true;
-        auto path = resolve_log_path();
-        ensure_parent_directory(path);
-        g_log_file = std::fopen(path.string().c_str(), "a");
+        g_resolved_log_path = resolve_log_path();
+        ensure_parent_directory(g_resolved_log_path);
+        g_log_file = std::fopen(g_resolved_log_path.string().c_str(), "a");
     }
 
     if (g_log_file == nullptr) {
@@ -125,6 +126,14 @@ void close_log() {
         g_log_file = nullptr;
     }
     g_log_init_attempted = false;
+}
+
+std::filesystem::path log_file_path() {
+    std::lock_guard<std::mutex> lock(g_log_mutex);
+    if (g_resolved_log_path.empty()) {
+        g_resolved_log_path = resolve_log_path();
+    }
+    return g_resolved_log_path;
 }
 
 }  // namespace corridorkey::ofx

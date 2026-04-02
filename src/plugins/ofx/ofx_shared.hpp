@@ -72,7 +72,6 @@ constexpr const char* kParamRuntimeDevice = "runtime_device";
 constexpr const char* kParamRuntimeEngine = "runtime_engine";
 constexpr const char* kParamRuntimeRequestedQuality = "runtime_requested_quality";
 constexpr const char* kParamRuntimeEffectiveQuality = "runtime_effective_quality";
-constexpr const char* kParamRuntimeSafeQualityCeiling = "runtime_safe_quality_ceiling";
 constexpr const char* kParamRuntimeArtifact = "runtime_artifact";
 constexpr const char* kParamRuntimeGuideSource = "runtime_guide_source";
 constexpr const char* kParamRuntimePath = "runtime_path";
@@ -80,6 +79,7 @@ constexpr const char* kParamRuntimeSession = "runtime_session";
 constexpr const char* kParamRuntimeStatus = "runtime_status";
 constexpr const char* kParamRuntimeTimings = "runtime_timings";
 constexpr const char* kParamRuntimeBackendWork = "runtime_backend_work";
+constexpr const char* kParamRuntimeDetailMessage = "runtime_detail_message";
 constexpr const char* kParamRenderTimeout = "render_timeout";
 constexpr const char* kParamPrepareTimeout = "prepare_timeout";
 constexpr const char* kParamAllowCpuFallback = "allow_cpu_fallback";
@@ -90,6 +90,7 @@ constexpr const char* kParamOpenRecoverDetailsGuide = "open_recover_details_guid
 constexpr const char* kParamOpenTilingGuide = "open_tiling_guide";
 constexpr const char* kParamOpenResolveTutorial = "open_resolve_tutorial";
 constexpr const char* kParamOpenTroubleshooting = "open_troubleshooting";
+constexpr const char* kParamOpenLogFolder = "open_log_folder";
 constexpr const char* kParamHelpGroup = "help_group";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
@@ -105,7 +106,6 @@ struct RuntimePanelState {
     int requested_quality_mode = kQualityAuto;
     int requested_resolution = 0;
     int effective_resolution = 0;
-    int safe_quality_ceiling_resolution = 0;
     bool cpu_quality_guardrail_active = false;
     ExecutionEngine requested_engine = ExecutionEngine::Auto;
     ExecutionEngine effective_engine = ExecutionEngine::Auto;
@@ -169,7 +169,7 @@ struct InstanceData {
     OfxParamHandle runtime_engine_param = nullptr;
     OfxParamHandle runtime_requested_quality_param = nullptr;
     OfxParamHandle runtime_effective_quality_param = nullptr;
-    OfxParamHandle runtime_safe_quality_ceiling_param = nullptr;
+    OfxParamHandle runtime_detail_message_param = nullptr;
     OfxParamHandle runtime_artifact_param = nullptr;
     OfxParamHandle runtime_guide_source_param = nullptr;
     OfxParamHandle runtime_path_param = nullptr;
@@ -274,9 +274,11 @@ std::string runtime_session_runtime_label(const InstanceData& data);
 std::string runtime_status_runtime_label(const InstanceData& data);
 std::string runtime_timings_runtime_label(const InstanceData& data);
 std::string runtime_backend_work_runtime_label(const InstanceData& data);
-std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data);
 std::string runtime_guide_source_runtime_label(const InstanceData& data);
 std::string runtime_path_runtime_label(const InstanceData& data);
+std::string consolidated_engine_runtime_label(const InstanceData& data);
+std::string consolidated_quality_runtime_label(const InstanceData& data);
+std::string runtime_detail_message(const InstanceData& data);
 Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
                                                   bool hint_from_clip,
                                                   AlphaHintPolicy alpha_hint_policy);

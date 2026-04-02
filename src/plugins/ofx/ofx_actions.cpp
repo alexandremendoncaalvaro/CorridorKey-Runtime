@@ -281,46 +281,26 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
     define_runtime_status_param(
-        param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
-        "Shows the backend currently used by this OFX instance.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeDevice, "Processing Device", "Initializing...",
-        "Shows the device selected for this OFX instance.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeEngine, "Processing Engine", "Initializing...",
-        "Shows the execution engine currently used by this OFX instance.", "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeEffectiveQuality, "Effective Quality", "Initializing...",
-        "Shows the actual resolution currently used for inference after artifact selection.",
+        param_set, kParamRuntimeStatus, "Status", "Initializing...",
+        "Shows the current runtime state: Ready, Loading, or Error.",
         "runtime_group");
     define_runtime_status_param(
-        param_set, kParamRuntimeGuideSource, "Guide Source", "Initializing...",
+        param_set, kParamRuntimeDevice, "Engine", "Detecting...",
+        "Shows the active GPU and execution engine.",
+        "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeEffectiveQuality, "Quality", "Initializing...",
+        "Shows the actual inference resolution and quality mode.",
+        "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeTimings, "Last Frame", "No frames processed",
+        "Shows the real backend render time for the last processed frame. "
+        "This value persists across playback sequences until a new frame is computed.",
+        "runtime_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeGuideSource, "Guide", "Awaiting render",
         "Shows whether CorridorKey used an external Alpha Hint or generated a rough fallback "
         "guide for the last render.",
-        "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimePath, "Runtime Path", "Initializing...",
-        "Shows whether the last render used the direct path, artifact fallback, or full-model "
-        "tiling.",
-        "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeSession, "Runtime Session", "Initializing...",
-        "Shows whether this OFX instance is using a dedicated runtime session or a shared one.",
-        "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeStatus, "Status", "Initializing...",
-        "Shows the current runtime state, warnings, or the most recent error during engine load "
-        "or render.",
-        "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeTimings, "Frame Render", "Initializing...",
-        "Shows the real backend render time for the last frame result, including cached reuse "
-        "when that timing metadata is available.",
-        "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeBackendWork, "Backend Work", "Initializing...",
-        "Shows whether the last frame result came from a backend render, shared cache, or "
-        "instance cache.",
         "runtime_group");
 
     // --- Group 2: Help & Docs (actionable links only) ---
@@ -331,27 +311,38 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                        "runtime_group");
 
     define_runtime_status_param(
-        param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
-        "Shows the quality mode currently requested by the OFX controls.", "runtime_details_group");
+        param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
+        "Shows the backend currently used by this OFX instance.", "runtime_details_group");
     define_runtime_status_param(
-        param_set, kParamRuntimeSafeQualityCeiling, "Safe Quality Ceiling", "Initializing...",
-        "Shows the highest quality CorridorKey currently considers safe on the active backend "
-        "and device memory tier.",
+        param_set, kParamRuntimeEngine, "Execution Engine", "Initializing...",
+        "Shows the execution engine currently used by this OFX instance.",
         "runtime_details_group");
-    define_runtime_status_param(param_set, kParamRuntimeArtifact, "Loaded Artifact",
-                                "Initializing...",
-                                "Shows the actual model or bridge file loaded for the current "
-                                "quality mode.",
-                                "runtime_details_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeRequestedQuality, "Requested Quality", "Initializing...",
+        "Shows the quality mode currently requested by the OFX controls.",
+        "runtime_details_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeArtifact, "Loaded Artifact", "Initializing...",
+        "Shows the actual model or bridge file loaded for the current quality mode.",
+        "runtime_details_group");
     define_runtime_status_param(
         param_set, kParamRuntimePath, "Runtime Path", "Initializing...",
         "Shows whether the last render used the direct path, artifact fallback, or full-model "
         "tiling.",
         "runtime_details_group");
     define_runtime_status_param(
+        param_set, kParamRuntimeSession, "Session", "Initializing...",
+        "Shows whether this OFX instance is using a dedicated runtime session or a shared one.",
+        "runtime_details_group");
+    define_runtime_status_param(
         param_set, kParamRuntimeBackendWork, "Backend Work", "Initializing...",
         "Shows whether the last frame result came from a backend render, shared cache, or "
         "instance cache.",
+        "runtime_details_group");
+    define_runtime_status_param(
+        param_set, kParamRuntimeDetailMessage, "Detail", "",
+        "Shows extended error or warning details when available. Check here for full "
+        "error messages that are too long for the Status field.",
         "runtime_details_group");
 
     define_push_button_param(param_set, kParamOpenStartHereGuide, "Open Start Here Guide",
@@ -372,6 +363,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
                              "Open the troubleshooting guide on GitHub.", kParamHelpGroup);
+    define_push_button_param(param_set, kParamOpenLogFolder, "Open Log Folder",
+                             "Open the folder containing CorridorKey OFX plugin logs.",
+                             kParamHelpGroup);
 
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
@@ -452,7 +446,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "output_group");
 
     // --- Group 8: Performance ---
-    define_group_param(param_set, "performance_group", "Performance", false);
+    define_group_param(param_set, "performance_group", "Performance", true);
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process the full model output in overlapping tiles at source resolution. "
                       "Use this when lower quality modes lose too much detail and you accept a "
