@@ -4,11 +4,6 @@
     "version-string": "0.1.0",
     "dependencies": [
         {
-            "name": "onnxruntime",
-            "platform": "!osx",
-            "$comment": "Primary ML inference engine for CPU fallback and lab builds. Windows RTX shipping uses a curated ONNX Runtime with TensorRT RTX support."
-        },
-        {
             "name": "openexr",
             "$comment": "VFX-standard 16/32-bit linear float image format"
         },
