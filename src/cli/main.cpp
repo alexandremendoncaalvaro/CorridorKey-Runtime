@@ -23,7 +23,6 @@
 #include "../common/json_utils.hpp"
 #include "../common/local_ipc.hpp"
 #include "../common/runtime_paths.hpp"
-#include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 #include "device_selection.hpp"
 #include "process_paths.hpp"
@@ -594,21 +593,6 @@ void print_info() {
     std::cout << "------------------------------------------\n";
     std::cout << "Detected Hardware Devices:\n";
 
-#if defined(_WIN32)
-    auto gpus = corridorkey::core::list_windows_gpus();
-    if (gpus.empty()) {
-        std::cout << " - No compatible GPUs found. Using CPU fallback.\n";
-    } else {
-        for (const auto& gpu : gpus) {
-            std::cout << " - " << gpu.adapter_name;
-            if (gpu.tensorrt_rtx_available) std::cout << " [TensorRT]";
-            if (gpu.cuda_available) std::cout << " [CUDA]";
-            if (gpu.directml_available) std::cout << " [DirectML]";
-            if (gpu.dedicated_memory_mb > 0) std::cout << " (" << gpu.dedicated_memory_mb << " MB)";
-            std::cout << "\n";
-        }
-    }
-#else
     for (const auto& d : info["devices"]) {
         std::cout << " - " << std::left << std::setw(30) << d["name"].get<std::string>() << " ["
                   << d["backend"].get<std::string>() << "] "
@@ -617,7 +601,6 @@ void print_info() {
                           : "")
                   << "\n";
     }
-#endif
 
     std::cout << "Capabilities:\n"
               << " - Multi-GPU (Universal): yes\n"
