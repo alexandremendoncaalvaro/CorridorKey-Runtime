@@ -9,6 +9,8 @@
 #include <mlx/mlx.h>
 #endif
 
+#include "common/runtime_paths.hpp"
+
 namespace corridorkey::core {
 
 bool mlx_probe_available() {
@@ -20,9 +22,13 @@ bool mlx_probe_available() {
 }
 
 Result<void> probe_mlx_weights(const std::filesystem::path& weights_path) {
-    if (!std::filesystem::exists(weights_path)) {
+    const auto artifact = common::inspect_model_artifact(weights_path);
+    if (!artifact.found) {
         return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                        "MLX weights artifact not found: " + weights_path.string()}};
+    }
+    if (!artifact.usable) {
+        return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed, artifact.detail}};
     }
 
     std::error_code error;
@@ -75,10 +81,14 @@ Result<void> probe_mlx_weights(const std::filesystem::path& weights_path) {
 }
 
 Result<void> probe_mlx_function(const std::filesystem::path& function_path) {
-    if (!std::filesystem::exists(function_path)) {
+    const auto artifact = common::inspect_model_artifact(function_path);
+    if (!artifact.found) {
         return Unexpected<Error>{
             Error{ErrorCode::ModelLoadFailed,
                   "MLX function artifact not found: " + function_path.string()}};
+    }
+    if (!artifact.usable) {
+        return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed, artifact.detail}};
     }
 
 #if !CORRIDORKEY_WITH_MLX

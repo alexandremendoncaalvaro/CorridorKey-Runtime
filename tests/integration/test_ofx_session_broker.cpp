@@ -1,6 +1,7 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
 
+#include "../test_model_artifact_utils.hpp"
 #include "app/ofx_session_broker.hpp"
 
 using namespace corridorkey;
@@ -9,8 +10,9 @@ using namespace corridorkey::app;
 TEST_CASE("OFX session broker reuses sessions for the same executable model",
           "[integration][ofx][runtime][regression]") {
     const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
-    if (!std::filesystem::exists(model_path)) {
-        SKIP("Model not available");
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     OfxSessionBroker broker;

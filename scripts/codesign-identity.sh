@@ -14,9 +14,7 @@ pick_identity() {
     local prefix="$1"
     printf "%s\n" "$IDENTITIES" | awk -F'"' -v prefix="$prefix" '
         $2 ~ ("^" prefix) {
-            gsub(/^[[:space:]]+/, "", $1)
-            split($1, parts, /[[:space:]]+/)
-            print parts[2]
+            print $2
             exit
         }
     '

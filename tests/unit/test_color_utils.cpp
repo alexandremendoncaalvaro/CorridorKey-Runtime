@@ -1,3 +1,4 @@
+#include <array>
 #include <catch2/catch_all.hpp>
 #include <cmath>
 #include <limits>
@@ -112,6 +113,40 @@ TEST_CASE("ColorUtils::resize_into matches resize output", "[unit][color][regres
     for (size_t index = 0; index < actual.view().data.size(); ++index) {
         REQUIRE(actual.view().data[index] ==
                 Catch::Approx(expected.view().data[index]).margin(0.0001f));
+    }
+}
+
+TEST_CASE("ColorUtils::resize_area_into safely drops alpha for RGB model inputs",
+          "[unit][color][regression]") {
+    ImageBuffer rgba_source_buf(2, 2, 4);
+    Image rgba_source = rgba_source_buf.view();
+
+    const std::array<float, 16> rgba_values = {
+        0.0F, 0.1F, 0.2F, 0.3F, 0.4F, 0.5F, 0.6F, 0.7F,
+        0.8F, 0.9F, 1.0F, 0.2F, 0.3F, 0.2F, 0.1F, 0.0F,
+    };
+    for (size_t index = 0; index < rgba_values.size(); ++index) {
+        rgba_source.data[index] = rgba_values[index];
+    }
+
+    ImageBuffer rgb_source_buf(2, 2, 3);
+    Image rgb_source = rgb_source_buf.view();
+    for (int y_pos = 0; y_pos < rgba_source.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < rgba_source.width; ++x_pos) {
+            for (int channel = 0; channel < 3; ++channel) {
+                rgb_source(y_pos, x_pos, channel) = rgba_source(y_pos, x_pos, channel);
+            }
+        }
+    }
+
+    ColorUtils::State state;
+    ImageBuffer actual_buf(3, 3, 3);
+    ColorUtils::resize_area_into(rgba_source, actual_buf.view(), state);
+
+    ImageBuffer expected_buf = ColorUtils::resize(rgb_source, 3, 3);
+    for (size_t index = 0; index < actual_buf.view().data.size(); ++index) {
+        REQUIRE(actual_buf.view().data[index] ==
+                Catch::Approx(expected_buf.view().data[index]).margin(0.0001F));
     }
 }
 

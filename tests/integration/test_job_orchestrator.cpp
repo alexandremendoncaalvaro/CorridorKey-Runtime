@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 
+#include "../test_model_artifact_utils.hpp"
 #include "app/job_orchestrator.hpp"
 
 using namespace corridorkey;
@@ -28,9 +29,9 @@ std::filesystem::path create_dummy_frame(const std::filesystem::path& dir, int i
 
 TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[integration][app]") {
     auto model_path = std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
-    if (!std::filesystem::exists(model_path)) {
-        SUCCEED("Model file not found, skipping orchestrator integration test.");
-        return;
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     auto tmp_dir = std::filesystem::temp_directory_path() / "corridorkey_test_orchest";

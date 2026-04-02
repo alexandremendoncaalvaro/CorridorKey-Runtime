@@ -399,6 +399,9 @@ struct InferenceParams {
     int sp_erode_px = 3;  // Erosion radius for interior mask
     int sp_blur_px = 7;   // Blur radius for transition smoothing
 
+    // Skip foreground materialization when the caller only needs the matte.
+    bool output_alpha_only = false;
+
     // Quality fallback and validated refinement strategy selection
     int requested_quality_resolution = 0;  // 0 = use target_resolution
     QualityFallbackMode quality_fallback_mode = QualityFallbackMode::Auto;

@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <vector>
 
@@ -16,6 +17,28 @@ TEST_CASE("InferenceSession::create validation", "[unit][inference]") {
         auto result = InferenceSession::create("non_existent_model.onnx", cpu_device);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().code == ErrorCode::ModelLoadFailed);
+    }
+
+    SECTION("Fails when model file is a Git LFS placeholder") {
+        const auto temp_dir =
+            std::filesystem::temp_directory_path() / "corridorkey-lfs-placeholder";
+        std::filesystem::create_directories(temp_dir);
+        const auto placeholder_path = temp_dir / "placeholder.onnx";
+
+        {
+            std::ofstream stream(placeholder_path, std::ios::binary | std::ios::trunc);
+            REQUIRE(stream.is_open());
+            stream << "version https://git-lfs.github.com/spec/v1\n"
+                      "oid sha256:1234567890abcdef\n"
+                      "size 42\n";
+        }
+
+        auto result = InferenceSession::create(placeholder_path, cpu_device);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code == ErrorCode::ModelLoadFailed);
+        REQUIRE(result.error().message.find("Git LFS pointer placeholder") != std::string::npos);
+
+        std::filesystem::remove_all(temp_dir);
     }
 
     // Note: We cannot easily test successful load without a real (even tiny) ONNX file.

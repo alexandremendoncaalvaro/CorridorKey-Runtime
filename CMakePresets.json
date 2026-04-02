@@ -123,6 +123,49 @@
                     "name": "unit"
                 }
             }
+        },
+        {
+            "name": "integration",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "name": "integration"
+                }
+            }
+        },
+        {
+            "name": "regression",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "name": "regression"
+                }
+            }
+        },
+        {
+            "name": "e2e",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "name": "e2e"
+                }
+            }
+        },
+        {
+            "name": "all-debug",
+            "configurePreset": "debug",
+            "output": {
+                "outputOnFailure": true
+            }
         }
     ]
 }

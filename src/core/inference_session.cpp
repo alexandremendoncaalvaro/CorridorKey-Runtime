@@ -312,6 +312,7 @@ void accumulate_tile_rows(const Image& mask, const FrameResult& tile_result, Ima
                           int image_height, int image_width, int overlap, int y_begin, int y_end) {
     Image tile_alpha = tile_result.alpha.const_view();
     Image tile_foreground = tile_result.foreground.const_view();
+    const bool include_foreground = !acc_fg.empty() && !tile_foreground.empty();
     const bool touches_left = x_start == 0;
     const bool touches_top = y_start == 0;
     const bool touches_right = x_start + mask.width >= image_width;
@@ -338,8 +339,10 @@ void accumulate_tile_rows(const Image& mask, const FrameResult& tile_result, Ima
             }
             acc_weight(global_y, global_x) += weight;
             acc_alpha(global_y, global_x) += tile_alpha(y, x) * weight;
-            for (int channel = 0; channel < 3; ++channel) {
-                acc_fg(global_y, global_x, channel) += tile_foreground(y, x, channel) * weight;
+            if (include_foreground) {
+                for (int channel = 0; channel < 3; ++channel) {
+                    acc_fg(global_y, global_x, channel) += tile_foreground(y, x, channel) * weight;
+                }
             }
         }
     }
@@ -347,6 +350,7 @@ void accumulate_tile_rows(const Image& mask, const FrameResult& tile_result, Ima
 
 void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weight, int y_begin,
                             int y_end) {
+    const bool include_foreground = !acc_fg.empty();
     for (int y = y_begin; y < y_end; ++y) {
         size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(acc_alpha.width);
         for (int x = 0; x < acc_alpha.width; ++x) {
@@ -357,10 +361,12 @@ void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weig
             }
 
             acc_alpha.data[pixel_index] /= weight;
-            size_t fg_index = pixel_index * 3;
-            acc_fg.data[fg_index] /= weight;
-            acc_fg.data[fg_index + 1] /= weight;
-            acc_fg.data[fg_index + 2] /= weight;
+            if (include_foreground) {
+                size_t fg_index = pixel_index * 3;
+                acc_fg.data[fg_index] /= weight;
+                acc_fg.data[fg_index + 1] /= weight;
+                acc_fg.data[fg_index + 2] /= weight;
+            }
         }
     }
 }
@@ -538,9 +544,13 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     fprintf(stderr, "[InferenceSession] Creating session for model: %s\n",
             model_path.string().c_str());
 
-    if (!std::filesystem::exists(model_path)) {
+    const auto artifact = common::inspect_model_artifact(model_path);
+    if (!artifact.found) {
         return Unexpected(
             Error{ErrorCode::ModelLoadFailed, "Model file not found: " + model_path.string()});
+    }
+    if (!artifact.usable) {
+        return Unexpected(Error{ErrorCode::ModelLoadFailed, artifact.detail});
     }
 
     DeviceInfo requested_device = device;
@@ -686,6 +696,7 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
         int overlap = std::clamp(params.tile_padding, 0, tile_size - 1);
         int stride = core::tile_stride(tile_size, overlap);
         int tile_batch_size = m_device.backend == Backend::CPU ? std::max(1, params.batch_size) : 1;
+        const bool include_foreground = !params.output_alpha_only;
 
         auto validate_buffer = [&](const ImageBuffer& buffer, int width, int height, int channels,
                                    const char* label) -> Result<void> {
@@ -704,18 +715,22 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
 
         // Allocate accumulators
         ImageBuffer acc_alpha(w, h, 1);
-        ImageBuffer acc_fg(w, h, 3);
+        ImageBuffer acc_fg = include_foreground ? ImageBuffer(w, h, 3) : ImageBuffer{};
         ImageBuffer acc_weight(w, h, 1);
 
         auto acc_alpha_ok = validate_buffer(acc_alpha, w, h, 1, "alpha accumulator");
         if (!acc_alpha_ok) return Unexpected(acc_alpha_ok.error());
-        auto acc_fg_ok = validate_buffer(acc_fg, w, h, 3, "foreground accumulator");
-        if (!acc_fg_ok) return Unexpected(acc_fg_ok.error());
+        if (include_foreground) {
+            auto acc_fg_ok = validate_buffer(acc_fg, w, h, 3, "foreground accumulator");
+            if (!acc_fg_ok) return Unexpected(acc_fg_ok.error());
+        }
         auto acc_weight_ok = validate_buffer(acc_weight, w, h, 1, "weight accumulator");
         if (!acc_weight_ok) return Unexpected(acc_weight_ok.error());
 
         std::fill(acc_alpha.view().data.begin(), acc_alpha.view().data.end(), 0.0f);
-        std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0f);
+        if (include_foreground) {
+            std::fill(acc_fg.view().data.begin(), acc_fg.view().data.end(), 0.0f);
+        }
         std::fill(acc_weight.view().data.begin(), acc_weight.view().data.end(), 0.0f);
 
         if (m_tiled_weight_mask.view().width != tile_size || m_tiled_weight_padding != overlap) {
@@ -876,7 +891,9 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
 
         FrameResult result;
         result.alpha = std::move(acc_alpha);
-        result.foreground = std::move(acc_fg);
+        if (include_foreground) {
+            result.foreground = std::move(acc_fg);
+        }
         return result;
     } catch (const std::bad_alloc&) {
         return Unexpected(
@@ -1067,12 +1084,14 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         for (size_t index = 0; index < rgbs.size(); ++index) {
             bool is_tile = rgbs[index].width == model_res && rgbs[index].height == model_res;
             if (is_tile) {
-                auto result = m_mlx_session->infer_tile(rgbs[index], alpha_hints[index], on_stage);
+                auto result = m_mlx_session->infer_tile(rgbs[index], alpha_hints[index],
+                                                        params.output_alpha_only, on_stage);
                 if (!result) return Unexpected(result.error());
                 results.push_back(std::move(*result));
             } else {
-                auto result = m_mlx_session->infer(rgbs[index], alpha_hints[index],
-                                                   params.upscale_method, on_stage);
+                auto result =
+                    m_mlx_session->infer(rgbs[index], alpha_hints[index], params.output_alpha_only,
+                                         params.upscale_method, on_stage);
                 if (!result) return Unexpected(result.error());
                 results.push_back(std::move(*result));
             }
@@ -1229,8 +1248,9 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
         std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
         size_t fg_image_stride = 0;
+        const bool include_foreground = !params.output_alpha_only;
 
-        if (output_tensors.size() > 1) {
+        if (include_foreground && output_tensors.size() > 1) {
             auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
             auto fg_type = fg_info.GetElementType();
             fg_shape = fg_info.GetShape();
@@ -1467,7 +1487,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         std::vector<float> fg_fp32_conv;
         std::vector<int64_t> fg_shape;
         size_t fg_image_stride = 0;
-        if (output_tensors.size() > 1) {
+        const bool include_foreground = !params.output_alpha_only;
+
+        if (include_foreground && output_tensors.size() > 1) {
             auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
             auto fg_type = fg_info.GetElementType();
             fg_shape = fg_info.GetShape();

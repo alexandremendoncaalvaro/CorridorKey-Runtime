@@ -2,6 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "${ROOT_DIR}/scripts/model_artifact_checks.sh"
+
+if [ -f "${ROOT_DIR}/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${ROOT_DIR}/.env"
+    set +a
+fi
+
 BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
 _version_header="${ROOT_DIR}/${BUILD_DIR}/generated/include/corridorkey/version.hpp"
 if [ ! -f "$_version_header" ]; then
@@ -15,6 +24,7 @@ DIST_DMG="${ROOT_DIR}/dist/${DIST_BASENAME}.dmg"
 OUTPUT_ROOT="${CORRIDORKEY_VALIDATION_ROOT:-${ROOT_DIR}/build/macos_release_validation}"
 UNPACK_DIR="${OUTPUT_ROOT}/bundle"
 DMG_MOUNT_DIR="${OUTPUT_ROOT}/dmg_mount"
+DMG_ATTACH_INFO="${OUTPUT_ROOT}/dmg_attach.plist"
 INPUT_4K_VIDEO="${CORRIDORKEY_VALIDATION_INPUT_4K_VIDEO:-${ROOT_DIR}/assets/video_samples/100745-video-2160.mp4}"
 INPUT_4K_FRAME="${CORRIDORKEY_VALIDATION_INPUT_4K_FRAME:-${ROOT_DIR}/build/runtime_inputs/100745-video-2160-frame0.png}"
 INPUT_SMOKE="${CORRIDORKEY_VALIDATION_INPUT_SMOKE:-${ROOT_DIR}/assets/corridor.png}"
@@ -66,6 +76,30 @@ require_minos() {
     fi
 }
 
+resolve_ndjson_artifact_path() {
+    local ndjson_path="$1"
+
+    python3 - "$ndjson_path" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+ndjson_path = Path(sys.argv[1])
+artifact_path = None
+for line in ndjson_path.read_text().splitlines():
+    if not line.strip():
+        continue
+    event = json.loads(line)
+    if event.get("type") == "artifact_written" and event.get("artifact_path"):
+        artifact_path = event["artifact_path"]
+
+if artifact_path is None:
+    raise SystemExit(f"Failed to resolve output artifact from {ndjson_path}")
+
+print(artifact_path)
+PY
+}
+
 assess_gatekeeper() {
     local target_path="$1"
     local target_type="$2"
@@ -74,6 +108,27 @@ assess_gatekeeper() {
         echo "Gatekeeper rejected $target_path" >&2
         exit 1
     fi
+}
+
+resolve_dmg_mount_point() {
+    local plist_path="$1"
+
+    python3 - "$plist_path" <<'PY'
+import plistlib
+import sys
+from pathlib import Path
+
+plist_path = Path(sys.argv[1])
+document = plistlib.loads(plist_path.read_bytes())
+
+for entity in document.get("system-entities", []):
+    mount_point = entity.get("mount-point")
+    if mount_point:
+        print(mount_point)
+        break
+else:
+    raise SystemExit(f"Failed to resolve DMG mount point from {plist_path}")
+PY
 }
 
 cleanup() {
@@ -100,6 +155,7 @@ rm -rf "$OUTPUT_ROOT"
 mkdir -p "$OUTPUT_ROOT"
 rm -rf "$UNPACK_DIR"
 rm -rf "$DMG_MOUNT_DIR"
+rm -f "$DMG_ATTACH_INFO"
 
 ffmpeg -y -i "$INPUT_SAMPLE_VIDEO" -frames:v 8 "$SAMPLE_VIDEO_CLIP" >/tmp/corridorkey_validate_sample_clip.log 2>&1
 require_file "$SAMPLE_VIDEO_CLIP"
@@ -118,10 +174,11 @@ case "$ARCHIVE_FORMAT" in
         ;;
     dmg)
         require_file "$DIST_DMG"
-        mkdir -p "$DMG_MOUNT_DIR"
-        hdiutil attach "$DIST_DMG" -mountpoint "$DMG_MOUNT_DIR" -nobrowse -readonly >/tmp/corridorkey_validate_attach.log
+        hdiutil attach "$DIST_DMG" -plist -nobrowse -readonly >"$DMG_ATTACH_INFO"
+        DMG_MOUNT_DIR="$(resolve_dmg_mount_point "$DMG_ATTACH_INFO")"
         MOUNTED_DMG=1
-        cp -R "$DMG_MOUNT_DIR/${DIST_BASENAME}" "$UNPACK_DIR/"
+        mkdir -p "$UNPACK_DIR/${DIST_BASENAME}"
+        cp -R "$DMG_MOUNT_DIR/." "$UNPACK_DIR/${DIST_BASENAME}/"
         ;;
     *)
         echo "Unsupported CORRIDORKEY_ARCHIVE_FORMAT '$ARCHIVE_FORMAT'" >&2
@@ -147,6 +204,16 @@ if [ "$REQUIRE_MLX_2048" = "1" ]; then
     require_file "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn"
 fi
 require_file "${MODELS_DIR}/corridorkey_int8_512.onnx"
+
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx.safetensors" 300000000 "packaged MLX model pack"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn" 200000000 "packaged MLX bridge 512"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_768.mlxfn" 200000000 "packaged MLX bridge 768"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn" 200000000 "packaged MLX bridge 1024"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn" 200000000 "packaged MLX bridge 1536"
+if [ "$REQUIRE_MLX_2048" = "1" ]; then
+    require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn" 200000000 "packaged MLX bridge 2048"
+fi
+require_real_model_artifact "${MODELS_DIR}/corridorkey_int8_512.onnx" 50000000 "packaged CPU baseline model"
 
 chmod +x "$CLI"
 chmod +x "$LAUNCHER"
@@ -194,11 +261,16 @@ bash "${BUNDLE_ROOT}/smoke_test.sh"
 (cd "$BUNDLE_ROOT" && ./corridorkey process --json "$SAMPLE_VIDEO_CLIP" \
     sample_video_output_flat.mp4) > "${OUTPUT_ROOT}/sample_video_process_flat.ndjson"
 
+SAMPLE_VIDEO_OUTPUT_PATH="$(resolve_ndjson_artifact_path "${OUTPUT_ROOT}/sample_video_process.ndjson")"
+SAMPLE_VIDEO_OUTPUT_FLAT_PATH="$(resolve_ndjson_artifact_path "${OUTPUT_ROOT}/sample_video_process_flat.ndjson")"
+require_file "$SAMPLE_VIDEO_OUTPUT_PATH"
+require_file "$SAMPLE_VIDEO_OUTPUT_FLAT_PATH"
+
 ffprobe -v error -print_format json -show_streams "$INPUT_4K_FRAME" > "${OUTPUT_ROOT}/input_4k_ffprobe.json"
 ffprobe -v error -print_format json -show_streams "${OUTPUT_ROOT}/frame_4k_output/Comp/$(basename "$INPUT_4K_FRAME")" > "${OUTPUT_ROOT}/output_4k_ffprobe.json"
 ffprobe -v error -print_format json -show_streams "$SAMPLE_VIDEO_CLIP" > "${OUTPUT_ROOT}/input_sample_video_ffprobe.json"
-ffprobe -v error -print_format json -show_streams "${OUTPUT_ROOT}/sample_video_output.mp4" > "${OUTPUT_ROOT}/output_sample_video_ffprobe.json"
-ffprobe -v error -print_format json -show_streams "${BUNDLE_ROOT}/sample_video_output_flat.mp4" > "${OUTPUT_ROOT}/output_sample_video_flat_ffprobe.json"
+ffprobe -v error -print_format json -show_streams "$SAMPLE_VIDEO_OUTPUT_PATH" > "${OUTPUT_ROOT}/output_sample_video_ffprobe.json"
+ffprobe -v error -print_format json -show_streams "$SAMPLE_VIDEO_OUTPUT_FLAT_PATH" > "${OUTPUT_ROOT}/output_sample_video_flat_ffprobe.json"
 
 CORRIDORKEY_VALIDATION_ROOT="$OUTPUT_ROOT" \
 CORRIDORKEY_ARCHIVE_FORMAT="$ARCHIVE_FORMAT" \

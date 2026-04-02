@@ -2,7 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DEFAULT_VERSION="$(grep 'CORRIDORKEY_VERSION_STRING' "${ROOT_DIR}/include/corridorkey/version.hpp" | sed 's/.*"\(.*\)".*/\1/')"
+source "${ROOT_DIR}/scripts/model_artifact_checks.sh"
+BUILD_DIR="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}"
+VERSION_HEADER="${ROOT_DIR}/${BUILD_DIR}/generated/include/corridorkey/version.hpp"
+if [ ! -f "$VERSION_HEADER" ]; then
+    VERSION_HEADER="${ROOT_DIR}/include/corridorkey/version.hpp"
+fi
+DEFAULT_VERSION="$(grep 'CORRIDORKEY_VERSION_STRING' "$VERSION_HEADER" | sed 's/.*"\(.*\)".*/\1/')"
 VERSION="${CORRIDORKEY_VERSION:-${DEFAULT_VERSION}}"
 REQUIRE_MLX_2048="${CORRIDORKEY_REQUIRE_MLX_2048:-1}"
 BUNDLE_PATH="${CORRIDORKEY_OFX_BUNDLE:-${ROOT_DIR}/build/ofx_mac_pkg/CorridorKey.ofx.bundle}"
@@ -88,15 +94,15 @@ require_file "$CORE_LIB"
 require_file "$RUNTIME_LIB"
 require_file "$MLX_LIB"
 require_file "$MLX_METALLIB"
-require_file "${MODELS_DIR}/corridorkey_mlx.safetensors"
-require_file "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn"
-require_file "${MODELS_DIR}/corridorkey_mlx_bridge_768.mlxfn"
-require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn"
-require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx.safetensors" 300000000 "packaged MLX model pack"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn" 200000000 "packaged MLX bridge 512"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_768.mlxfn" 200000000 "packaged MLX bridge 768"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn" 200000000 "packaged MLX bridge 1024"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn" 200000000 "packaged MLX bridge 1536"
 if [ "$REQUIRE_MLX_2048" = "1" ]; then
-    require_file "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn"
+    require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn" 200000000 "packaged MLX bridge 2048"
 fi
-require_file "${MODELS_DIR}/corridorkey_int8_512.onnx"
+require_real_model_artifact "${MODELS_DIR}/corridorkey_int8_512.onnx" 50000000 "packaged CPU baseline model"
 
 require_min_size "$PLUGIN_BINARY" 100000
 require_min_size "$CLI_BINARY" 100000
@@ -104,16 +110,6 @@ require_min_size "$CORE_LIB" 5000000
 require_min_size "$RUNTIME_LIB" 5000000
 require_min_size "$MLX_LIB" 5000000
 require_min_size "$MLX_METALLIB" 50000000
-require_min_size "${MODELS_DIR}/corridorkey_mlx.safetensors" 300000000
-require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn" 200000000
-require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_768.mlxfn" 200000000
-require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_1024.mlxfn" 200000000
-require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn" 200000000
-if [ "$REQUIRE_MLX_2048" = "1" ]; then
-    require_min_size "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn" 200000000
-fi
-require_min_size "${MODELS_DIR}/corridorkey_int8_512.onnx" 50000000
-
 require_no_appledouble_entries "$BUNDLE_PATH"
 
 require_no_absolute_rpaths "$PLUGIN_BINARY"

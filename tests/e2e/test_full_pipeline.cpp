@@ -2,6 +2,8 @@
 #include <corridorkey/engine.hpp>
 #include <filesystem>
 
+#include "../test_model_artifact_utils.hpp"
+
 using namespace corridorkey;
 
 TEST_CASE("End-to-End: Full Video Pipeline Sanity Check", "[e2e][video]") {
@@ -9,12 +11,9 @@ TEST_CASE("End-to-End: Full Video Pipeline Sanity Check", "[e2e][video]") {
     std::filesystem::path model_path =
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
 
-    if (!std::filesystem::exists(model_path)) {
-        // If no model is found, we don't fail the build, but we inform the user.
-        // For CI, the model should be present or the test environment set up.
-        SUCCEED("Model file not found (" + model_path.string() +
-                "), skipping real inference E2E test.");
-        return;
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     DeviceInfo device{"Generic CPU", 0, Backend::CPU};

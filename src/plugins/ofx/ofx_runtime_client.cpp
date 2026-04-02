@@ -295,11 +295,14 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
 
         FrameResult result;
         result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
         std::copy(transport->alpha_view().data.begin(), transport->alpha_view().data.end(),
                   result.alpha.view().data.begin());
-        std::copy(transport->foreground_view().data.begin(),
-                  transport->foreground_view().data.end(), result.foreground.view().data.begin());
+        if (!params.output_alpha_only) {
+            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+            std::copy(transport->foreground_view().data.begin(),
+                      transport->foreground_view().data.end(),
+                      result.foreground.view().data.begin());
+        }
         return result;
     }();
 

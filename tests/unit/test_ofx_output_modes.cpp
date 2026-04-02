@@ -15,6 +15,15 @@ TEST_CASE("processed-like outputs stay linear regardless of input color space",
     REQUIRE_FALSE(should_apply_srgb_to_output(kOutputFGMatte, false, true));
 }
 
+TEST_CASE("matte-focused outputs do not require model foreground buffers",
+          "[unit][ofx][regression]") {
+    REQUIRE_FALSE(output_mode_requires_model_foreground(kOutputMatteOnly));
+    REQUIRE_FALSE(output_mode_requires_model_foreground(kOutputSourceMatte));
+    REQUIRE(output_mode_requires_model_foreground(kOutputProcessed));
+    REQUIRE(output_mode_requires_model_foreground(kOutputForegroundOnly));
+    REQUIRE(output_mode_requires_model_foreground(kOutputFGMatte));
+}
+
 TEST_CASE("display-referred conversion only applies to non-processed outputs with sRGB input",
           "[unit][ofx][regression]") {
     REQUIRE(should_apply_srgb_to_output(kOutputForegroundOnly, false, false));

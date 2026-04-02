@@ -50,7 +50,7 @@ CORRIDORKEY_API RuntimeOptimizationProfile runtime_optimization_profile_for_devi
     const RuntimeCapabilities& capabilities, const DeviceInfo& device);
 CORRIDORKEY_API ArtifactRuntimeState artifact_runtime_state_for_device(
     const ModelCatalogEntry& model, const RuntimeCapabilities& capabilities,
-    const DeviceInfo& device, bool present);
+    const DeviceInfo& device, bool usable);
 CORRIDORKEY_API std::optional<ModelCatalogEntry> find_model_by_filename(
     const std::string& filename);
 CORRIDORKEY_API std::optional<PresetDefinition> find_preset_by_selector(
