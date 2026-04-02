@@ -546,13 +546,15 @@ TEST_CASE("describe_in_context keeps runtime first and help second with advanced
     const auto& help_group_props = descriptor.param_set.params.at(kParamHelpGroup)->props;
     const auto& runtime_details_group_props =
         descriptor.param_set.params.at("runtime_details_group")->props;
-    const auto& guide_source_props = descriptor.param_set.params.at(kParamRuntimeGuideSource)->props;
+    const auto& guide_source_props =
+        descriptor.param_set.params.at(kParamRuntimeGuideSource)->props;
     const auto& requested_quality_props =
         descriptor.param_set.params.at(kParamRuntimeRequestedQuality)->props;
     const auto& ceiling_props =
         descriptor.param_set.params.at(kParamRuntimeSafeQualityCeiling)->props;
     const auto& runtime_path_props = descriptor.param_set.params.at(kParamRuntimePath)->props;
-    const auto& backend_work_props = descriptor.param_set.params.at(kParamRuntimeBackendWork)->props;
+    const auto& backend_work_props =
+        descriptor.param_set.params.at(kParamRuntimeBackendWork)->props;
     const auto& refinement_props = descriptor.param_set.params.at(kParamRefinementMode)->props;
     const auto& advanced_group_props = descriptor.param_set.params.at("advanced_group")->props;
     const auto& advanced_detail_group_props =
@@ -566,15 +568,15 @@ TEST_CASE("describe_in_context keeps runtime first and help second with advanced
 
     CHECK(prop_ints(runtime_group_props, kOfxParamPropGroupOpen).front() == 1);
     CHECK(prop_ints(help_group_props, kOfxParamPropGroupOpen).front() == 0);
-    CHECK(prop_strings(runtime_details_group_props, kOfxParamPropParent).front() == "runtime_group");
+    CHECK(prop_strings(runtime_details_group_props, kOfxParamPropParent).front() ==
+          "runtime_group");
     CHECK(prop_ints(runtime_details_group_props, kOfxParamPropGroupOpen).front() == 0);
     CHECK(prop_strings(guide_source_props, kOfxParamPropParent).front() == "runtime_group");
     CHECK(prop_strings(requested_quality_props, kOfxParamPropParent).front() ==
           "runtime_details_group");
     CHECK(prop_strings(ceiling_props, kOfxParamPropParent).front() == "runtime_details_group");
     CHECK(prop_strings(runtime_path_props, kOfxParamPropParent).front() == "runtime_details_group");
-    CHECK(prop_strings(backend_work_props, kOfxParamPropParent).front() ==
-          "runtime_details_group");
+    CHECK(prop_strings(backend_work_props, kOfxParamPropParent).front() == "runtime_details_group");
     CHECK(prop_ints(advanced_group_props, kOfxParamPropGroupOpen).front() == 0);
     CHECK(prop_strings(advanced_detail_group_props, kOfxParamPropParent).front() ==
           "advanced_group");

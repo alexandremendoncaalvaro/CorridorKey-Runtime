@@ -1,7 +1,7 @@
 #pragma once
 
-#include <corridorkey/types.hpp>
 #include <algorithm>
+#include <corridorkey/types.hpp>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -38,8 +38,8 @@ inline std::optional<int> packaged_corridorkey_fp16_resolution(
     return resolution;
 }
 
-inline bool should_use_packaged_corridorkey_output_contract(
-    const std::filesystem::path& model_path, Backend backend, bool input_is_fp16) {
+inline bool should_use_packaged_corridorkey_output_contract(const std::filesystem::path& model_path,
+                                                            Backend backend, bool input_is_fp16) {
 #if defined(_WIN32)
     return backend == Backend::TensorRT && input_is_fp16 &&
            packaged_corridorkey_fp16_resolution(model_path).has_value();

@@ -20,8 +20,8 @@
 #include "../app/model_compiler.hpp"
 #include "../app/ofx_runtime_service.hpp"
 #include "../app/runtime_contracts.hpp"
-#include "../common/local_ipc.hpp"
 #include "../common/json_utils.hpp"
+#include "../common/local_ipc.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
@@ -326,8 +326,7 @@ InferenceParams build_inference_params(const cxxopts::ParseResult& result,
         params.quality_fallback_mode = *fallback_mode;
     }
     if (!base_params.has_value() || option_present(argc, argv, {"--refinement-mode"})) {
-        auto refinement_mode =
-            parse_refinement_mode(result["refinement-mode"].as<std::string>());
+        auto refinement_mode = parse_refinement_mode(result["refinement-mode"].as<std::string>());
         if (!refinement_mode) {
             throw std::runtime_error(refinement_mode.error().message);
         }
@@ -428,8 +427,8 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
         resolved.params = build_inference_params(result, std::nullopt, argc, argv);
         if (resolved.params.requested_quality_resolution <= 0) {
             resolved.params.requested_quality_resolution =
-                app::packaged_model_resolution(result["model"].as<std::string>()).value_or(
-                    resolved.params.target_resolution);
+                app::packaged_model_resolution(result["model"].as<std::string>())
+                    .value_or(resolved.params.target_resolution);
         }
         auto explicit_model =
             app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
@@ -453,10 +452,9 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
         }
 
         resolved.model_path = resolved.models_dir / selected_model->filename;
-        const int requested_resolution =
-            resolved.params.requested_quality_resolution > 0
-                ? resolved.params.requested_quality_resolution
-                : selected_model->resolution;
+        const int requested_resolution = resolved.params.requested_quality_resolution > 0
+                                             ? resolved.params.requested_quality_resolution
+                                             : selected_model->resolution;
         resolved.params.requested_quality_resolution = requested_resolution;
         auto effective_model =
             app::resolve_model_artifact_for_request(resolved.model_path, resolved.params, device);
@@ -507,12 +505,12 @@ void print_benchmark_artifact_summary(const nlohmann::json& report) {
         std::cout << "Artifact: " << report["artifact"].get<std::string>() << "\n";
     }
     if (report.contains("requested_precision")) {
-        std::cout << "Requested precision: "
-                  << report["requested_precision"].get<std::string>() << "\n";
+        std::cout << "Requested precision: " << report["requested_precision"].get<std::string>()
+                  << "\n";
     }
     if (report.contains("effective_precision")) {
-        std::cout << "Effective precision: "
-                  << report["effective_precision"].get<std::string>() << "\n";
+        std::cout << "Effective precision: " << report["effective_precision"].get<std::string>()
+                  << "\n";
     }
     if (report.contains("requested_resolution") && report.contains("effective_resolution")) {
         std::cout << "Requested resolution: " << report["requested_resolution"].get<int>() << "\n"
@@ -615,10 +613,10 @@ int main(int argc, char* argv[]) {
         cxxopts::value<int>())("video-encode", "Video output encoding (lossless, balanced)",
                                cxxopts::value<std::string>()->default_value("lossless"))(
         "variant", "ONNX model variant for download only (int8, fp16, fp32)",
-        cxxopts::value<std::string>())(
-        "batch-size", "Number of frames to process in a single GPU call",
-        cxxopts::value<int>()->default_value("1"))("despill", "Green spill removal (0.0-1.0)",
-                                                   cxxopts::value<float>()->default_value("0.5"))(
+        cxxopts::value<std::string>())("batch-size",
+                                       "Number of frames to process in a single GPU call",
+                                       cxxopts::value<int>()->default_value("1"))(
+        "despill", "Green spill removal (0.0-1.0)", cxxopts::value<float>()->default_value("0.5"))(
         "despeckle", "Enable morphological cleanup")("tiled", "Enable tiling for high-res (4K+)")(
         "json", "Output results in JSON format")("v,version", "Print version")(
         "h,help", "Print detailed help");
@@ -669,9 +667,9 @@ int main(int argc, char* argv[]) {
 
         if (result.count("version")) {
             if (use_json) {
-                std::cout
-                    << common::safe_json_dump(nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}))
-                    << std::endl;
+                std::cout << common::safe_json_dump(
+                                 nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}))
+                          << std::endl;
             } else {
                 std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << std::endl;
             }
@@ -896,7 +894,8 @@ int main(int argc, char* argv[]) {
                     std::cout << "Preset: " << resolved->preset->name << "\n";
                 }
                 std::cout << "Requested precision: "
-                          << precision_preference_to_string(benchmark_request.params.precision_preference)
+                          << precision_preference_to_string(
+                                 benchmark_request.params.precision_preference)
                           << "\n";
                 std::cout << "Requested device: " << report["requested_device"].get<std::string>()
                           << "\n"

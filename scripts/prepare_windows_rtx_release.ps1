@@ -375,7 +375,7 @@ function Invoke-ModelPreparation {
 
     $generationFailures = @()
     try {
-        Write-Host "[1/6] Exporting CorridorKey ONNX models..." 
+        Write-Host "[1/6] Exporting CorridorKey ONNX models..."
         $resolutions = @(512, 768, 1024, 1536, 2048)
         foreach ($resolution in $resolutions) {
             Write-Host "  -> Exporting $resolution px runtime artifact family..." -ForegroundColor Cyan

@@ -28,9 +28,9 @@
 #endif
 #endif
 
+#include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
-#include "post_process/alpha_edge.hpp"
 
 #ifdef __APPLE__
 #if __has_include(<onnxruntime/coreml_provider_factory.h>)

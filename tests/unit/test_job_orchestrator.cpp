@@ -11,12 +11,12 @@ TEST_CASE("doctor summary honors packaged bundle inventory for Windows RTX",
     report["system"]["capabilities"]["platform"] = "windows";
     report["bundle"]["healthy"] = true;
     report["bundle"]["packaged_layout_detected"] = true;
-    report["bundle"]["packaged_models"] = nlohmann::json::array(
-        {{{"filename", "corridorkey_fp16_512.onnx"}, {"found", true}},
-         {{"filename", "corridorkey_fp16_1024.onnx"}, {"found", true}},
-         {{"filename", "corridorkey_int8_512.onnx"}, {"found", true}},
-         {{"filename", "corridorkey_int8_768.onnx"}, {"found", true}},
-         {{"filename", "corridorkey_int8_1024.onnx"}, {"found", true}}});
+    report["bundle"]["packaged_models"] =
+        nlohmann::json::array({{{"filename", "corridorkey_fp16_512.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_fp16_1024.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_int8_512.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_int8_768.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_int8_1024.onnx"}, {"found", true}}});
     report["video"]["healthy"] = true;
     report["cache"]["healthy"] = true;
     report["coreml"]["applicable"] = false;
@@ -35,27 +35,26 @@ TEST_CASE("doctor summary honors packaged bundle inventory for Windows RTX",
     report["bundle"]["model_inventory_contract_complete"] = true;
     report["bundle"]["model_profile"] = "windows-rtx";
     report["optimization_profile"]["id"] = "windows-rtx";
-    report["models"] = nlohmann::json::array(
-        {{{"filename", "corridorkey_fp16_512.onnx"},
-          {"packaged_for_windows", true},
-          {"found", true},
-          {"validated_platforms", nlohmann::json::array()},
-          {"packaged_for_macos", false}},
-         {{"filename", "corridorkey_fp16_1024.onnx"},
-          {"packaged_for_windows", true},
-          {"found", true},
-          {"validated_platforms", nlohmann::json::array()},
-          {"packaged_for_macos", false}},
-         {{"filename", "corridorkey_fp16_1536.onnx"},
-          {"packaged_for_windows", true},
-          {"found", false},
-          {"validated_platforms", nlohmann::json::array()},
-          {"packaged_for_macos", false}},
-         {{"filename", "corridorkey_fp16_2048.onnx"},
-          {"packaged_for_windows", true},
-          {"found", false},
-          {"validated_platforms", nlohmann::json::array()},
-          {"packaged_for_macos", false}}});
+    report["models"] = nlohmann::json::array({{{"filename", "corridorkey_fp16_512.onnx"},
+                                               {"packaged_for_windows", true},
+                                               {"found", true},
+                                               {"validated_platforms", nlohmann::json::array()},
+                                               {"packaged_for_macos", false}},
+                                              {{"filename", "corridorkey_fp16_1024.onnx"},
+                                               {"packaged_for_windows", true},
+                                               {"found", true},
+                                               {"validated_platforms", nlohmann::json::array()},
+                                               {"packaged_for_macos", false}},
+                                              {{"filename", "corridorkey_fp16_1536.onnx"},
+                                               {"packaged_for_windows", true},
+                                               {"found", false},
+                                               {"validated_platforms", nlohmann::json::array()},
+                                               {"packaged_for_macos", false}},
+                                              {{"filename", "corridorkey_fp16_2048.onnx"},
+                                               {"packaged_for_windows", true},
+                                               {"found", false},
+                                               {"validated_platforms", nlohmann::json::array()},
+                                               {"packaged_for_macos", false}}});
 
     auto summary = summarize_doctor_report(report);
 
@@ -72,9 +71,9 @@ TEST_CASE("doctor summary fails when an expected packaged bundle model is missin
     report["system"]["capabilities"]["platform"] = "windows";
     report["bundle"]["healthy"] = true;
     report["bundle"]["packaged_layout_detected"] = true;
-    report["bundle"]["packaged_models"] = nlohmann::json::array(
-        {{{"filename", "corridorkey_fp16_512.onnx"}, {"found", true}},
-         {{"filename", "corridorkey_fp16_1024.onnx"}, {"found", false}}});
+    report["bundle"]["packaged_models"] =
+        nlohmann::json::array({{{"filename", "corridorkey_fp16_512.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_fp16_1024.onnx"}, {"found", false}}});
     report["video"]["healthy"] = true;
     report["cache"]["healthy"] = true;
     report["coreml"]["applicable"] = false;

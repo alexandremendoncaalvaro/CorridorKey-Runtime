@@ -1,5 +1,4 @@
 #include <catch2/catch_all.hpp>
-
 #include <filesystem>
 #include <fstream>
 
@@ -49,9 +48,9 @@ TEST_CASE("packaged explicit models rewrite to a coarse sibling when coarse-to-f
     params.requested_quality_resolution = 1536;
     params.quality_fallback_mode = QualityFallbackMode::CoarseToFine;
 
-    auto resolved = resolve_model_artifact_for_request(
-        temp_dir.path() / "corridorkey_fp16_1536.onnx", params,
-        DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
+    auto resolved =
+        resolve_model_artifact_for_request(temp_dir.path() / "corridorkey_fp16_1536.onnx", params,
+                                           DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
 
     REQUIRE(resolved.has_value());
     CHECK(resolved->filename() == "corridorkey_fp16_1024.onnx");
@@ -86,8 +85,7 @@ TEST_CASE("explicit models keep direct behavior when coarse-to-fine is not reque
     CHECK(*resolved == std::filesystem::path("C:/models/custom_keyer.onnx"));
 }
 
-TEST_CASE("coarse-to-fine rejects equal coarse overrides clearly",
-          "[unit][runtime][regression]") {
+TEST_CASE("coarse-to-fine rejects equal coarse overrides clearly", "[unit][runtime][regression]") {
     TempDirGuard temp_dir("corridorkey-runtime-equal-coarse-override");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
 
@@ -97,14 +95,13 @@ TEST_CASE("coarse-to-fine rejects equal coarse overrides clearly",
     params.quality_fallback_mode = QualityFallbackMode::CoarseToFine;
     params.coarse_resolution_override = 1024;
 
-    auto resolved = resolve_model_artifact_for_request(
-        temp_dir.path() / "corridorkey_fp16_1024.onnx", params,
-        DeviceInfo{"RTX 4090", 24576, Backend::TensorRT});
+    auto resolved =
+        resolve_model_artifact_for_request(temp_dir.path() / "corridorkey_fp16_1024.onnx", params,
+                                           DeviceInfo{"RTX 4090", 24576, Backend::TensorRT});
 
     REQUIRE_FALSE(resolved.has_value());
     CHECK(resolved.error().code == ErrorCode::InvalidParameters);
-    CHECK(resolved.error().message.find("smaller than the requested quality") !=
-          std::string::npos);
+    CHECK(resolved.error().message.find("smaller than the requested quality") != std::string::npos);
 }
 
 TEST_CASE("packaged coarse-to-fine fails clearly when the coarse artifact is missing",
@@ -117,9 +114,9 @@ TEST_CASE("packaged coarse-to-fine fails clearly when the coarse artifact is mis
     params.requested_quality_resolution = 1536;
     params.quality_fallback_mode = QualityFallbackMode::CoarseToFine;
 
-    auto resolved = resolve_model_artifact_for_request(
-        temp_dir.path() / "corridorkey_fp16_1536.onnx", params,
-        DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
+    auto resolved =
+        resolve_model_artifact_for_request(temp_dir.path() / "corridorkey_fp16_1536.onnx", params,
+                                           DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
 
     REQUIRE_FALSE(resolved.has_value());
     CHECK(resolved.error().code == ErrorCode::ModelLoadFailed);
@@ -137,9 +134,9 @@ TEST_CASE("non-auto refinement overrides fail clearly for current packaged artif
     params.quality_fallback_mode = QualityFallbackMode::Direct;
     params.refinement_mode = RefinementMode::Tiled;
 
-    auto resolved = resolve_model_artifact_for_request(
-        temp_dir.path() / "corridorkey_fp16_1024.onnx", params,
-        DeviceInfo{"RTX 4090", 24576, Backend::TensorRT});
+    auto resolved =
+        resolve_model_artifact_for_request(temp_dir.path() / "corridorkey_fp16_1024.onnx", params,
+                                           DeviceInfo{"RTX 4090", 24576, Backend::TensorRT});
 
     REQUIRE_FALSE(resolved.has_value());
     CHECK(resolved.error().code == ErrorCode::InvalidParameters);

@@ -3,26 +3,28 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+
 #include "app/job_orchestrator.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
 
 namespace {
-std::filesystem::path create_dummy_frame(const std::filesystem::path& dir, int index, int width, int height) {
+std::filesystem::path create_dummy_frame(const std::filesystem::path& dir, int index, int width,
+                                         int height) {
     char filename[64];
     std::snprintf(filename, sizeof(filename), "dummy_frame_%04d.png", index);
     auto path = dir / filename;
-    
+
     ImageBuffer original(width, height, 3);
     Image view = original.view();
     std::fill(view.data.begin(), view.data.end(), 0.5f);
-    
+
     auto res = frame_io::write_frame(path, view);
     REQUIRE(res.has_value());
     return path;
 }
-}
+}  // namespace
 
 TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[integration][app]") {
     auto model_path = std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
@@ -54,14 +56,14 @@ TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[inte
             if (status.find("Processing frame") != std::string::npos) {
                 frames_processed++;
             }
-            return true; // Continue
+            return true;  // Continue
         };
 
         auto run_res = JobOrchestrator::run(request, on_progress, nullptr);
         if (!run_res.has_value()) {
             FAIL("Orchestrator returned error: " << run_res.error().message);
         }
-        
+
         // Ensure all frames were rendered
         REQUIRE(std::filesystem::exists(tmp_dir / "out_seq" / "Comp" / "dummy_frame_0001.png"));
         REQUIRE(std::filesystem::exists(tmp_dir / "out_seq" / "Comp" / "dummy_frame_0002.png"));
@@ -75,15 +77,15 @@ TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[inte
                 frames_processed++;
             }
             // Cancel immediately on first progress report
-            return false; 
+            return false;
         };
 
         auto run_res = JobOrchestrator::run(request, on_progress, nullptr);
-        
+
         // The orchestrator returns an error `Cancellation requested`
         REQUIRE(!run_res.has_value());
         REQUIRE(std::string(run_res.error().message).find("cancel") != std::string::npos);
-        
+
         // It should have halted before finishing the entire backlog
         REQUIRE(frames_processed < 3);
     }

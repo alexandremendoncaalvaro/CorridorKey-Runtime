@@ -341,7 +341,7 @@ export class DomBrowserPocView {
       "input",
       handlers.on_hint_sequence_index_changed,
     );
-    
+
     const toggle_zoom = (card_id: string) => {
       const is_zoomed = this.main_canvas_grid.classList.contains("zoomed");
       const current_active = this.main_canvas_grid.querySelector(".active-zoom");
@@ -371,7 +371,7 @@ export class DomBrowserPocView {
         const visuals = Array.from(container.children).filter(
           (el) => el.tagName === "CANVAS" || el.tagName === "VIDEO",
         ) as HTMLElement[];
-        
+
         for (const el of visuals) {
           el.style.transform = `translate(${offset_x}px, ${offset_y}px) scale(${zoom})`;
           if (zoom >= 2) {
@@ -386,18 +386,18 @@ export class DomBrowserPocView {
         e.preventDefault();
         const zoom_intensity = 0.2;
         const delta = e.deltaY > 0 ? -1 : 1;
-        
+
         const prev_zoom = zoom;
         zoom += delta * zoom_intensity * zoom;
-        zoom = Math.max(1, Math.min(zoom, 50)); 
+        zoom = Math.max(1, Math.min(zoom, 50));
 
         const rect = container.getBoundingClientRect();
         const mouse_x = e.clientX - rect.left - rect.width / 2;
         const mouse_y = e.clientY - rect.top - rect.height / 2;
-        
+
         offset_x -= mouse_x * (zoom / prev_zoom - 1);
         offset_y -= mouse_y * (zoom / prev_zoom - 1);
-        
+
         if (zoom <= 1) {
           zoom = 1;
           offset_x = 0;
@@ -423,7 +423,7 @@ export class DomBrowserPocView {
         if (!is_dragging) return;
         offset_x = e.clientX - start_x;
         offset_y = e.clientY - start_y;
-        
+
         const dx = e.clientX - start_client_x;
         const dy = e.clientY - start_client_y;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {

@@ -139,18 +139,15 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                 if (!render_response) {
                     const std::size_t sessions_after_render = broker.session_count();
                     const std::size_t active_after_render = broker.active_session_count();
-                    logger.log("event=session_render_failed session_id=" +
-                               render_request->session_id + " destroyed=" +
-                               std::to_string(sessions_after_render < sessions_before_render) +
-                               " session_count_before=" +
-                               std::to_string(sessions_before_render) +
-                               " session_count_after=" +
-                               std::to_string(sessions_after_render) +
-                               " active_session_count_before=" +
-                               std::to_string(active_before_render) +
-                               " active_session_count_after=" +
-                               std::to_string(active_after_render) + " detail=" +
-                               render_response.error().message);
+                    logger.log(
+                        "event=session_render_failed session_id=" + render_request->session_id +
+                        " destroyed=" +
+                        std::to_string(sessions_after_render < sessions_before_render) +
+                        " session_count_before=" + std::to_string(sessions_before_render) +
+                        " session_count_after=" + std::to_string(sessions_after_render) +
+                        " active_session_count_before=" + std::to_string(active_before_render) +
+                        " active_session_count_after=" + std::to_string(active_after_render) +
+                        " detail=" + render_response.error().message);
                 }
                 response = render_response ? ok_response(to_json(*render_response))
                                            : error_response(render_response.error());
@@ -188,9 +185,9 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         const std::size_t removed_idle_sessions = broker.cleanup_idle_sessions();
         if (removed_idle_sessions > 0) {
             logger.log("event=session_idle_destroyed removed_count=" +
-                       std::to_string(removed_idle_sessions) + " session_count=" +
-                       std::to_string(broker.session_count()) + " active_session_count=" +
-                       std::to_string(broker.active_session_count()));
+                       std::to_string(removed_idle_sessions) +
+                       " session_count=" + std::to_string(broker.session_count()) +
+                       " active_session_count=" + std::to_string(broker.active_session_count()));
         }
     }
 

@@ -178,7 +178,7 @@ export class BrowserPocController {
   } {
     const preset = this.m_view.selected_quality_preset();
     const auto_res = this.auto_target_resolution();
-    
+
     switch (preset) {
       case "draft":
         return { target_resolution: 384, strategy: { type: "singlepass" } };
@@ -187,13 +187,13 @@ export class BrowserPocController {
       case "high":
         return { target_resolution: 1024, strategy: { type: "singlepass" } };
       case "studio":
-        // Fall back to 1024 if native resolution is ridiculously small or auto parsing fails, 
+        // Fall back to 1024 if native resolution is ridiculously small or auto parsing fails,
         // but generally follow the source media or auto-dimension for tiling.
         // For POC we use the auto_target_resolution but assume the user wants native.
         // Tiling at 512x512 with 64px overlap
-        return { 
-          target_resolution: auto_res, 
-          strategy: { type: "tiling", tile_size: 512, overlap: 64 } 
+        return {
+          target_resolution: auto_res,
+          strategy: { type: "tiling", tile_size: 512, overlap: 64 }
         };
       default:
         return { target_resolution: auto_res, strategy: { type: "singlepass" } };
@@ -589,7 +589,7 @@ export class BrowserPocController {
       this.m_view.set_active_source_element("webcam");
       const video_element = this.m_view.webcam_video_element();
       video_element.srcObject = stream;
-      
+
       video_element.onloadedmetadata = () => {
         this.m_view.set_stage_aspect_ratio(video_element.videoWidth, video_element.videoHeight);
         this.m_view.set_status(`Webcam connected: ${video_element.videoWidth}x${video_element.videoHeight}.`);

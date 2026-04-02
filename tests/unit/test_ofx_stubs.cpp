@@ -1,5 +1,5 @@
-#include "plugins/ofx/ofx_shared.hpp"
 #include "plugins/ofx/ofx_frame_cache.hpp"
+#include "plugins/ofx/ofx_shared.hpp"
 
 namespace corridorkey::ofx {
 

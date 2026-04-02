@@ -188,8 +188,7 @@ Result<PrecisionPreference> precision_preference_from_string(const std::string& 
     if (value == "auto") return PrecisionPreference::Auto;
     if (value == "fp16") return PrecisionPreference::FP16;
     if (value == "int8") return PrecisionPreference::Int8;
-    return Unexpected<Error>(
-        invalid_protocol_error("Unknown precision preference: " + value));
+    return Unexpected<Error>(invalid_protocol_error("Unknown precision preference: " + value));
 }
 
 Json backend_fallback_json(const BackendFallbackInfo& fallback) {
@@ -292,29 +291,28 @@ Result<EngineCreateOptions> engine_create_options_from_json(const nlohmann::json
 }
 
 nlohmann::json to_json(const InferenceParams& params) {
-    return Json{{"target_resolution", params.target_resolution},
-                {"requested_quality_resolution", params.requested_quality_resolution},
-                {"quality_fallback_mode",
-                 quality_fallback_mode_to_string(params.quality_fallback_mode)},
-                {"refinement_mode", refinement_mode_to_string(params.refinement_mode)},
-                {"precision_preference",
-                 precision_preference_to_string(params.precision_preference)},
-                {"coarse_resolution_override", params.coarse_resolution_override},
-                {"despill_strength", params.despill_strength},
-                {"spill_method", params.spill_method},
-                {"auto_despeckle", params.auto_despeckle},
-                {"despeckle_size", params.despeckle_size},
-                {"refiner_scale", params.refiner_scale},
-                {"alpha_hint_policy", alpha_hint_policy_to_string(params.alpha_hint_policy)},
-                {"input_is_linear", params.input_is_linear},
-                {"batch_size", params.batch_size},
-                {"enable_tiling", params.enable_tiling},
-                {"tile_padding", params.tile_padding},
-                {"upscale_method",
-                 params.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear"},
-                {"source_passthrough", params.source_passthrough},
-                {"sp_erode_px", params.sp_erode_px},
-                {"sp_blur_px", params.sp_blur_px}};
+    return Json{
+        {"target_resolution", params.target_resolution},
+        {"requested_quality_resolution", params.requested_quality_resolution},
+        {"quality_fallback_mode", quality_fallback_mode_to_string(params.quality_fallback_mode)},
+        {"refinement_mode", refinement_mode_to_string(params.refinement_mode)},
+        {"precision_preference", precision_preference_to_string(params.precision_preference)},
+        {"coarse_resolution_override", params.coarse_resolution_override},
+        {"despill_strength", params.despill_strength},
+        {"spill_method", params.spill_method},
+        {"auto_despeckle", params.auto_despeckle},
+        {"despeckle_size", params.despeckle_size},
+        {"refiner_scale", params.refiner_scale},
+        {"alpha_hint_policy", alpha_hint_policy_to_string(params.alpha_hint_policy)},
+        {"input_is_linear", params.input_is_linear},
+        {"batch_size", params.batch_size},
+        {"enable_tiling", params.enable_tiling},
+        {"tile_padding", params.tile_padding},
+        {"upscale_method",
+         params.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear"},
+        {"source_passthrough", params.source_passthrough},
+        {"sp_erode_px", params.sp_erode_px},
+        {"sp_blur_px", params.sp_blur_px}};
 }
 
 Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
@@ -324,8 +322,7 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
     params.target_resolution = *target_resolution;
     if (json.contains("requested_quality_resolution") &&
         json.at("requested_quality_resolution").is_number_integer()) {
-        params.requested_quality_resolution =
-            json.at("requested_quality_resolution").get<int>();
+        params.requested_quality_resolution = json.at("requested_quality_resolution").get<int>();
     }
     if (json.contains("quality_fallback_mode") && json.at("quality_fallback_mode").is_string()) {
         auto fallback_mode =

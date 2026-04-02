@@ -28,6 +28,7 @@ struct DespeckleState {
     std::vector<float> blur_temp;
 };
 
-void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilation = 25, int blur_size = 5);
+void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilation = 25,
+               int blur_size = 5);
 
 }  // namespace corridorkey

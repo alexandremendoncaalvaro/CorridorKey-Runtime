@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <numeric>
 #include <vector>
-#include <iostream>
 
 #include "common/parallel_for.hpp"
 
@@ -108,7 +108,8 @@ std::vector<std::pair<int, int>> make_elliptical_kernel(int radius) {
 }
 
 // Morphological dilation with elliptical kernel
-void dilate_binary(std::vector<uint8_t>& mask, std::vector<uint8_t>& temp_result, int w, int h, int radius) {
+void dilate_binary(std::vector<uint8_t>& mask, std::vector<uint8_t>& temp_result, int w, int h,
+                   int radius) {
     if (radius <= 0) return;
 
     auto offsets = make_elliptical_kernel(radius);
@@ -164,7 +165,8 @@ std::vector<float> make_gaussian_kernel(int half_size) {
 }
 
 // Separable Gaussian blur on float buffer
-void gaussian_blur(std::vector<float>& data, std::vector<float>& temp, int w, int h, int half_size) {
+void gaussian_blur(std::vector<float>& data, std::vector<float>& temp, int w, int h,
+                   int half_size) {
     if (half_size <= 0) return;
 
     auto kernel = make_gaussian_kernel(half_size);
@@ -240,7 +242,8 @@ void apply_safe_zone(Image alpha, const std::vector<float>& safe_zone) {
 
 }  // anonymous namespace
 
-void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilation, int blur_size) {
+void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilation,
+               int blur_size) {
     if (alpha.empty() || area_threshold <= 0) return;
 
     int w = alpha.width;
@@ -266,7 +269,7 @@ void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilat
     // Step 4: Gaussian blur for smooth edges
     state.safe_zone.resize(n);
     convert_cleaned_to_safe_zone(state.cleaned, state.safe_zone, w, h);
-    
+
     state.blur_temp.resize(n);
     gaussian_blur(state.safe_zone, state.blur_temp, w, h, blur_size);
 

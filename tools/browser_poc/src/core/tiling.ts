@@ -46,7 +46,7 @@ export async function process_frame_tiled(
   const out_alpha = new Float32Array(width * height);
   const out_fg = new Float32Array(width * height * 3);
   const weight_den = new Float32Array(width * height);
-  
+
   let has_fg = false;
   let tiles_done = 0;
 
@@ -79,7 +79,7 @@ export async function process_frame_tiled(
         for (let px = 0; px < actual_w; px++) {
           const src_idx = ((y0 + py) * width + (x0 + px)) * 4;
           const dst_idx = (py * tile_size + px) * 4;
-          
+
           patch_frame.data[dst_idx] = frame.data[src_idx];
           patch_frame.data[dst_idx + 1] = frame.data[src_idx + 1];
           patch_frame.data[dst_idx + 2] = frame.data[src_idx + 2];
@@ -93,7 +93,7 @@ export async function process_frame_tiled(
 
       const result = await inference_fn(patch_frame, patch_hint);
       if (!result.ok) {
-        return result; 
+        return result;
       }
 
       // Add to accumulator
@@ -107,7 +107,7 @@ export async function process_frame_tiled(
 
           out_alpha[map_idx] += (result.value.alpha[local_idx] ?? 0) * w;
           weight_den[map_idx] += w;
-          
+
           if (result.value.foreground !== null) {
             has_fg = true;
             const fg_plane = tile_size * tile_size;
@@ -130,7 +130,7 @@ export async function process_frame_tiled(
   for (let i = 0; i < width * height; i++) {
     const den = Math.max(1e-5, weight_den[i] ?? 1);
     out_alpha[i] = (out_alpha[i] ?? 0) / den;
-    
+
     if (has_fg) {
       const full_plane = width * height;
       out_fg[i] = (out_fg[i] ?? 0) / den;

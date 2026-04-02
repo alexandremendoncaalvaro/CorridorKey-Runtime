@@ -1,7 +1,6 @@
 #pragma once
 
 #include <corridorkey/types.hpp>
-
 #include <filesystem>
 #include <string>
 

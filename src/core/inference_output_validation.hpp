@@ -1,8 +1,8 @@
 #pragma once
 
-#include <corridorkey/types.hpp>
 #include <algorithm>
 #include <cmath>
+#include <corridorkey/types.hpp>
 #include <cstddef>
 #include <span>
 #include <sstream>

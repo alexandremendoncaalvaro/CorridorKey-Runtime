@@ -58,9 +58,9 @@ void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options,
 
     // Standalone compiler has full VRAM available (no host app competing), so we can use aggressive
     // workspace sizing to give TRT the best chance of finding valid tactics for large models.
-    constexpr const char* kWorkspace2GB  = "2147483648";    // 512, 768, 1024
-    constexpr const char* kWorkspace8GB  = "8589934592";    // 1536
-    constexpr const char* kWorkspace16GB = "17179869184";   // 2048
+    constexpr const char* kWorkspace2GB = "2147483648";    // 512, 768, 1024
+    constexpr const char* kWorkspace8GB = "8589934592";    // 1536
+    constexpr const char* kWorkspace16GB = "17179869184";  // 2048
     const char* workspace_size = kWorkspace2GB;
     if (model_res >= 2048) {
         workspace_size = kWorkspace16GB;

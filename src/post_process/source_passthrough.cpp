@@ -90,7 +90,8 @@ void blend_source(Image source_rgb, Image model_fg, Image mask) {
 
 }  // namespace
 
-void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode_px, int blur_px, ColorUtils::State& state) {
+void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode_px, int blur_px,
+                        ColorUtils::State& state) {
     if (source_rgb.empty() || model_fg.empty() || alpha.empty()) return;
 
     size_t size_1c = static_cast<size_t>(alpha.width) * alpha.height;

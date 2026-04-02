@@ -364,9 +364,9 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
                     break;
                 }
                 case OfxRuntimeCommand::RenderFrame: {
-                    server_error = Error{
-                        ErrorCode::InvalidParameters,
-                        "RenderFrame is not expected in the prepare-session cache regression test."};
+                    server_error = Error{ErrorCode::InvalidParameters,
+                                         "RenderFrame is not expected in the prepare-session cache "
+                                         "regression test."};
                     return;
                 }
             }
@@ -522,8 +522,8 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
 
                     ++render_count;
                     if (prepare_count.load() == 1) {
-                        (*client)->write_json(to_json(
-                            error_response("Model output contains non-finite values.")));
+                        (*client)->write_json(
+                            to_json(error_response("Model output contains non-finite values.")));
                         break;
                     }
 

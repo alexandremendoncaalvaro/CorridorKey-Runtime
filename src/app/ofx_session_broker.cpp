@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <filesystem>
 
-#include "ofx_session_policy.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../common/shared_memory_transport.hpp"
+#include "ofx_session_policy.hpp"
 
 namespace corridorkey::app {
 
@@ -18,7 +18,7 @@ void refresh_engine_snapshot(OfxRuntimeSessionSnapshot& snapshot, const Engine& 
 }
 
 OfxRuntimeSessionSnapshot response_snapshot(const OfxRuntimeSessionSnapshot& snapshot,
-                                           bool reused_existing_session) {
+                                            bool reused_existing_session) {
     auto response = snapshot;
     response.reused_existing_session = reused_existing_session;
     return response;
@@ -53,8 +53,8 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         refresh_engine_snapshot(existing->second.snapshot, *existing->second.engine);
         existing->second.snapshot.ref_count += 1;
         existing->second.last_used_at = now();
-        return OfxRuntimePrepareSessionResponse{
-            response_snapshot(existing->second.snapshot, true), {}};
+        return OfxRuntimePrepareSessionResponse{response_snapshot(existing->second.snapshot, true),
+                                                {}};
     }
 
     std::vector<StageTiming> timings;
@@ -142,7 +142,8 @@ Result<void> OfxSessionBroker::release_session(const OfxRuntimeReleaseSessionReq
         session->second.snapshot.ref_count -= 1;
     }
     if (session->second.snapshot.ref_count == 0 &&
-        detail::should_destroy_zero_ref_session(session->second.snapshot.effective_device.backend)) {
+        detail::should_destroy_zero_ref_session(
+            session->second.snapshot.effective_device.backend)) {
         m_sessions.erase(session);
         return {};
     }

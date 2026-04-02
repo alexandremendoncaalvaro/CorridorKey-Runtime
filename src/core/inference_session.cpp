@@ -25,11 +25,11 @@
 #include <fstream>
 #include <mutex>
 
+#include "coarse_to_fine_policy.hpp"
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
-#include "coarse_to_fine_policy.hpp"
 #include "inference_output_validation.hpp"
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
@@ -231,9 +231,9 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
     // Workspace scales proportionally with spatial resolution. TensorRT uses workspace as an upper
     // bound for tactic discovery during engine build; it only allocates what each tactic actually
     // needs at runtime.
-    constexpr const char* kWorkspace2GB = "2147483648";   // 512, 768, 1024
-    constexpr const char* kWorkspace4GB = "4294967296";   // 1536
-    constexpr const char* kWorkspace8GB = "8589934592";   // 2048
+    constexpr const char* kWorkspace2GB = "2147483648";  // 512, 768, 1024
+    constexpr const char* kWorkspace4GB = "4294967296";  // 1536
+    constexpr const char* kWorkspace8GB = "8589934592";  // 2048
     constexpr const char* kProfileMinShapes = "nv_profile_min_shapes";
     constexpr const char* kProfileOptShapes = "nv_profile_opt_shapes";
     constexpr const char* kProfileMaxShapes = "nv_profile_max_shapes";
@@ -590,8 +590,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         }
 
         fprintf(stderr, "[InferenceSession] Configuring session options\n");
-        session_ptr->configure_session_options(using_optimized_model_cache, options,
-                                               model_path);
+        session_ptr->configure_session_options(using_optimized_model_cache, options, model_path);
         fprintf(stderr, "[InferenceSession] Session options configured\n");
 
         if (!using_optimized_model_cache && optimized_model_path.has_value()) {

@@ -198,7 +198,8 @@ std::string resolve_platform_preset_alias(const std::string& selector,
     return selector;
 }
 
-std::optional<ModelCatalogEntry> model_catalog_entry_for_path(const std::filesystem::path& model_path) {
+std::optional<ModelCatalogEntry> model_catalog_entry_for_path(
+    const std::filesystem::path& model_path) {
     return app::find_model_by_filename(model_path.filename().string());
 }
 
@@ -241,11 +242,9 @@ std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
     }
 }
 
-Result<std::pair<int, bool>> search_resolution_for_request(const DeviceInfo& requested_device,
-                                                           int requested_resolution,
-                                                           QualityFallbackMode fallback_mode,
-                                                           int coarse_resolution_override,
-                                                           bool allow_unrestricted_quality_attempt) {
+Result<std::pair<int, bool>> search_resolution_for_request(
+    const DeviceInfo& requested_device, int requested_resolution, QualityFallbackMode fallback_mode,
+    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
     const bool coarse_to_fine = app::should_use_coarse_to_fine_for_request(
         requested_device, requested_resolution, fallback_mode, coarse_resolution_override,
         allow_unrestricted_quality_attempt);
@@ -662,9 +661,8 @@ std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& ca
     }
 
     auto prefer_backend = [&](Backend backend) -> std::optional<DeviceInfo> {
-        auto it = std::find_if(devices.begin(), devices.end(), [&](const DeviceInfo& device) {
-            return device.backend == backend;
-        });
+        auto it = std::find_if(devices.begin(), devices.end(),
+                               [&](const DeviceInfo& device) { return device.backend == backend; });
         if (it == devices.end()) {
             return std::nullopt;
         }
@@ -765,12 +763,12 @@ ArtifactRuntimeState artifact_runtime_state_for_device(const ModelCatalogEntry& 
 
     if (capabilities.platform == "windows") {
         state.certified_for_active_track =
-            std::any_of(model.validated_hardware_tiers.begin(), model.validated_hardware_tiers.end(),
+            std::any_of(model.validated_hardware_tiers.begin(),
+                        model.validated_hardware_tiers.end(),
                         [](const std::string& tier) { return tier.rfind("rtx_", 0) == 0; }) ||
-            std::any_of(model.validated_platforms.begin(), model.validated_platforms.end(),
-                        [](const std::string& platform) {
-                            return platform.rfind("windows", 0) == 0;
-                        });
+            std::any_of(
+                model.validated_platforms.begin(), model.validated_platforms.end(),
+                [](const std::string& platform) { return platform.rfind("windows", 0) == 0; });
         state.certified_for_active_device =
             state.certified_for_active_track &&
             has_validated_tier_for_device(model, device, capabilities);
@@ -1044,9 +1042,8 @@ Result<void> validate_refinement_mode_for_artifact(const std::filesystem::path& 
 Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback,
-    QualityFallbackMode fallback_mode, int coarse_resolution_override,
-    bool allow_unrestricted_quality_attempt) {
+    bool allow_lower_resolution_fallback, QualityFallbackMode fallback_mode,
+    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
     if (requested_resolution <= 0) {
         return Unexpected<Error>{Error{
             ErrorCode::InvalidParameters,
@@ -1083,8 +1080,8 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
             continue;
         }
 
-        auto artifact_paths = candidate_artifact_paths_for_request(models_root, requested_device.backend,
-                                                                  resolution, variant_preference);
+        auto artifact_paths = candidate_artifact_paths_for_request(
+            models_root, requested_device.backend, resolution, variant_preference);
         expected.insert(expected.end(), artifact_paths.begin(), artifact_paths.end());
     }
 
@@ -1094,9 +1091,8 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
 Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback,
-    QualityFallbackMode fallback_mode, int coarse_resolution_override,
-    bool allow_unrestricted_quality_attempt) {
+    bool allow_lower_resolution_fallback, QualityFallbackMode fallback_mode,
+    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
     auto expected_paths = expected_artifact_paths_for_request(
         models_root, requested_device, requested_resolution, variant_preference,
         allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
@@ -1124,12 +1120,13 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
         if (resolution > search_resolution) {
             continue;
         }
-        if (require_exact_resolution && resolution != search_resolution && !exact_artifact_available) {
+        if (require_exact_resolution && resolution != search_resolution &&
+            !exact_artifact_available) {
             continue;
         }
 
-        auto artifact_paths = candidate_artifact_paths_for_request(models_root, requested_device.backend,
-                                                                  resolution, variant_preference);
+        auto artifact_paths = candidate_artifact_paths_for_request(
+            models_root, requested_device.backend, resolution, variant_preference);
         bool found_for_resolution = false;
         for (const auto& artifact_path : artifact_paths) {
             if (!std::filesystem::exists(artifact_path)) {
@@ -1180,8 +1177,8 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
         }};
     }
 
-    const auto validate_resolved_model = [&](const std::filesystem::path& resolved_model_path)
-        -> Result<std::filesystem::path> {
+    const auto validate_resolved_model =
+        [&](const std::filesystem::path& resolved_model_path) -> Result<std::filesystem::path> {
         auto refinement_validation =
             validate_refinement_mode_for_artifact(resolved_model_path, params.refinement_mode);
         if (!refinement_validation) {
@@ -1192,10 +1189,9 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
 
     if (allow_unrestricted_quality_attempt && is_packaged_corridorkey_model(model_path) &&
         model_resolution > 0 && requested_resolution > model_resolution &&
-        !should_use_coarse_to_fine_for_request(requested_device, requested_resolution,
-                                               params.quality_fallback_mode,
-                                               params.coarse_resolution_override,
-                                               allow_unrestricted_quality_attempt)) {
+        !should_use_coarse_to_fine_for_request(
+            requested_device, requested_resolution, params.quality_fallback_mode,
+            params.coarse_resolution_override, allow_unrestricted_quality_attempt)) {
         auto direct_attempt_path =
             sibling_model_path_for_resolution(model_path, requested_resolution);
         if (direct_attempt_path.empty()) {
@@ -1215,10 +1211,9 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
         return validate_resolved_model(direct_attempt_path);
     }
 
-    if (!should_use_coarse_to_fine_for_request(requested_device, requested_resolution,
-                                               params.quality_fallback_mode,
-                                               params.coarse_resolution_override,
-                                               allow_unrestricted_quality_attempt)) {
+    if (!should_use_coarse_to_fine_for_request(
+            requested_device, requested_resolution, params.quality_fallback_mode,
+            params.coarse_resolution_override, allow_unrestricted_quality_attempt)) {
         return validate_resolved_model(model_path);
     }
 
@@ -1368,8 +1363,7 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     params["sp_erode_px"] = preset.params.sp_erode_px;
     params["sp_blur_px"] = preset.params.sp_blur_px;
     params["requested_quality_resolution"] = preset.params.requested_quality_resolution;
-    params["quality_fallback_mode"] =
-        static_cast<int>(preset.params.quality_fallback_mode);
+    params["quality_fallback_mode"] = static_cast<int>(preset.params.quality_fallback_mode);
     params["refinement_mode"] = static_cast<int>(preset.params.refinement_mode);
     params["coarse_resolution_override"] = preset.params.coarse_resolution_override;
 

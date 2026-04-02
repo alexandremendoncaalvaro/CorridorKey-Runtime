@@ -19,7 +19,7 @@ TEST_CASE("CLI handles arguments correctly and returns proper exit codes", "[e2e
         std::string cmd = exe_path + " > NUL 2>&1";
         int result = std::system(cmd.c_str());
         // The CLI explicitly returns 0 and prints a quickstart guide when called with no args
-        REQUIRE(result == 0); 
+        REQUIRE(result == 0);
     }
 
     SECTION("Executing with invalid flags returns non-zero code") {

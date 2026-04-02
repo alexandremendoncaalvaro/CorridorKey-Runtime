@@ -1,10 +1,9 @@
 #include <catch2/catch_all.hpp>
-
 #include <corridorkey/engine.hpp>
 #include <cstring>
 
-#include "plugins/ofx/ofx_shared.hpp"
 #include "plugins/ofx/ofx_runtime_client.hpp"
+#include "plugins/ofx/ofx_shared.hpp"
 
 using namespace corridorkey::ofx;
 
@@ -28,8 +27,7 @@ struct FakeProps {
     std::string change_reason;
 };
 
-OfxStatus fake_prop_get_pointer(OfxPropertySetHandle handle, const char* name, int,
-                                void** value) {
+OfxStatus fake_prop_get_pointer(OfxPropertySetHandle handle, const char* name, int, void** value) {
     if (handle == nullptr || value == nullptr || name == nullptr) {
         return kOfxStatErrBadHandle;
     }
@@ -48,8 +46,7 @@ OfxStatus fake_get_property_set(OfxImageEffectHandle handle, OfxPropertySetHandl
     return kOfxStatOK;
 }
 
-OfxStatus fake_prop_get_string(OfxPropertySetHandle handle, const char* name, int,
-                               char** value) {
+OfxStatus fake_prop_get_string(OfxPropertySetHandle handle, const char* name, int, char** value) {
     if (handle == nullptr || value == nullptr || name == nullptr) {
         return kOfxStatErrBadHandle;
     }
@@ -129,8 +126,7 @@ TEST_CASE("runtime status omits frame timings when a dedicated timings field exi
     };
 
     REQUIRE(runtime_status_runtime_label(data) == "Ready");
-    REQUIRE(runtime_timings_runtime_label(data) ==
-            "Frame render: 1.5 s | Hotspot: ort_run 1.2 s");
+    REQUIRE(runtime_timings_runtime_label(data) == "Frame render: 1.5 s | Hotspot: ort_run 1.2 s");
 }
 
 TEST_CASE("runtime session label exposes dedicated versus shared sessions",
