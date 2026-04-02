@@ -1,10 +1,43 @@
 #!/bin/bash
 
+resolve_vcpkg_root() {
+    local helper_dir
+    local repo_root
+    local repo_parent
+    local candidate
+    local candidates=()
+
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    repo_root="$(cd "${helper_dir}/.." && pwd)"
+    repo_parent="$(cd "${repo_root}/.." && pwd)"
+
+    if [ -n "${VCPKG_ROOT:-}" ]; then
+        candidates+=("${VCPKG_ROOT}")
+    fi
+    candidates+=(
+        "${repo_parent}/vcpkg"
+        "${HOME}/vcpkg"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [ -z "$candidate" ]; then
+            continue
+        fi
+        if [ -f "${candidate}/scripts/buildsystems/vcpkg.cmake" ]; then
+            VCPKG_ROOT="$(cd "${candidate}" && pwd)"
+            export VCPKG_ROOT
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 require_vcpkg_root() {
-    if [ -z "${VCPKG_ROOT:-}" ]; then
+    resolve_vcpkg_root || {
         echo "ERROR: VCPKG_ROOT is required by CMakePresets.json." >&2
         exit 1
-    fi
+    }
 
     if [ ! -d "$VCPKG_ROOT" ]; then
         echo "ERROR: VCPKG_ROOT does not exist: $VCPKG_ROOT" >&2
