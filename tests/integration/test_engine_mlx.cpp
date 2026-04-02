@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include "../../src/frame_io/video_io.hpp"
+#include "../test_model_artifact_utils.hpp"
 #include "app/job_orchestrator.hpp"
 #include "core/mlx_probe.hpp"
 
@@ -39,9 +40,10 @@ TEST_CASE("mlx bridge executes a single frame through the runtime", "[integratio
 
     const auto model_path =
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
-    if (!std::filesystem::exists(model_path)) {
-        SUCCEED("MLX bridge artifact is not available locally.");
-        return;
+    if (auto reason =
+            corridorkey::tests::unusable_model_artifact_reason(model_path, "MLX bridge artifact");
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     ImageBuffer rgb(64, 64, 3);
@@ -73,6 +75,46 @@ TEST_CASE("mlx bridge executes a single frame through the runtime", "[integratio
 #endif
 }
 
+TEST_CASE("mlx bridge can skip foreground materialization for alpha-only requests",
+          "[integration][mlx][regression]") {
+#if !defined(__APPLE__)
+    SUCCEED("MLX runtime execution is only applicable on macOS.");
+#else
+    if (!core::mlx_probe_available()) {
+        SUCCEED("MLX runtime support is not linked in this build.");
+        return;
+    }
+
+    const auto model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
+    if (auto reason =
+            corridorkey::tests::unusable_model_artifact_reason(model_path, "MLX bridge artifact");
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    ImageBuffer rgb(64, 64, 3);
+    ImageBuffer hint(64, 64, 1);
+
+    std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.5F);
+    std::fill(hint.view().data.begin(), hint.view().data.end(), 1.0F);
+
+    auto engine = Engine::create(model_path, DeviceInfo{"Apple Silicon MLX", 16000, Backend::MLX});
+    REQUIRE(engine.has_value());
+
+    InferenceParams params;
+    params.output_alpha_only = true;
+
+    auto result = engine.value()->process_frame(rgb.view(), hint.view(), params);
+    REQUIRE(result.has_value());
+    REQUIRE(result->alpha.view().width == 64);
+    REQUIRE(result->alpha.view().height == 64);
+    CHECK(result->foreground.view().empty());
+    CHECK(result->processed.view().empty());
+    CHECK(result->composite.view().empty());
+#endif
+}
+
 TEST_CASE("mlx safetensors pack prefers the 512 bridge on 16 GB Apple Silicon",
           "[integration][mlx]") {
 #if !defined(__APPLE__)
@@ -89,10 +131,12 @@ TEST_CASE("mlx safetensors pack prefers the 512 bridge on 16 GB Apple Silicon",
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
     const auto bridge_1024 =
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_1024.mlxfn";
-    if (!std::filesystem::exists(safetensors_path) || !std::filesystem::exists(bridge_512) ||
-        !std::filesystem::exists(bridge_1024)) {
-        SUCCEED("MLX pack or bridge artifacts are not available locally.");
-        return;
+    if (auto reason = corridorkey::tests::first_unusable_model_artifact_reason(
+            {{safetensors_path, "MLX weights pack"},
+             {bridge_512, "MLX bridge 512"},
+             {bridge_1024, "MLX bridge 1024"}});
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     auto engine =
@@ -117,9 +161,10 @@ TEST_CASE("mlx safetensors pack keeps the 512 bridge on lower-memory systems",
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx.safetensors";
     const auto bridge_512 =
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
-    if (!std::filesystem::exists(safetensors_path) || !std::filesystem::exists(bridge_512)) {
-        SUCCEED("MLX pack or bridge artifacts are not available locally.");
-        return;
+    if (auto reason = corridorkey::tests::first_unusable_model_artifact_reason(
+            {{safetensors_path, "MLX weights pack"}, {bridge_512, "MLX bridge 512"}});
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     auto engine =
@@ -135,9 +180,12 @@ TEST_CASE("auto device resolution selects mlx for apple model packs", "[integrat
 #else
     const auto safetensors_path =
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx.safetensors";
-    if (!std::filesystem::exists(safetensors_path)) {
-        SUCCEED("MLX pack artifact is not available locally.");
-        return;
+    const auto bridge_512 =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
+    if (auto reason = corridorkey::tests::first_unusable_model_artifact_reason(
+            {{safetensors_path, "MLX weights pack"}, {bridge_512, "MLX bridge 512"}});
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     auto engine = Engine::create(safetensors_path, DeviceInfo{"Auto", 0, Backend::Auto});
@@ -158,9 +206,10 @@ TEST_CASE("job orchestrator keeps auto resolution compatible with mlx bridge",
 
     const auto model_path =
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
-    if (!std::filesystem::exists(model_path)) {
-        SUCCEED("MLX bridge artifact is not available locally.");
-        return;
+    if (auto reason =
+            corridorkey::tests::unusable_model_artifact_reason(model_path, "MLX bridge artifact");
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     const auto temp_root = std::filesystem::path(PROJECT_ROOT) / "build" / "test_mlx_job";
@@ -205,9 +254,12 @@ TEST_CASE("job orchestrator accepts a flat video output filename",
 
     const auto model_path =
         std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx.safetensors";
-    if (!std::filesystem::exists(model_path)) {
-        SUCCEED("MLX model pack is not available locally.");
-        return;
+    const auto bridge_512 =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_mlx_bridge_512.mlxfn";
+    if (auto reason = corridorkey::tests::first_unusable_model_artifact_reason(
+            {{model_path, "MLX model pack"}, {bridge_512, "MLX bridge 512"}});
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     const auto temp_root = std::filesystem::temp_directory_path() / "corridorkey-flat-output-video";

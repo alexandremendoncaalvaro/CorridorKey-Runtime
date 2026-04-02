@@ -194,7 +194,7 @@ bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& r
            lhs.enable_tiling == rhs.enable_tiling && lhs.tile_padding == rhs.tile_padding &&
            lhs.upscale_method == rhs.upscale_method &&
            lhs.source_passthrough == rhs.source_passthrough && lhs.sp_erode_px == rhs.sp_erode_px &&
-           lhs.sp_blur_px == rhs.sp_blur_px &&
+           lhs.sp_blur_px == rhs.sp_blur_px && lhs.output_alpha_only == rhs.output_alpha_only &&
            lhs.requested_quality_resolution == rhs.requested_quality_resolution &&
            lhs.quality_fallback_mode == rhs.quality_fallback_mode &&
            lhs.refinement_mode == rhs.refinement_mode &&
@@ -416,7 +416,7 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     ImageBuffer fg_linear_buf;
     std::vector<StageTiming> stage_timings;
 
-    if (g_frame_cache != nullptr &&
+    if (!params.output_alpha_only && g_frame_cache != nullptr &&
         g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf, &stage_timings)) {
         log_message("render", "event=cache_hit detail=shared_cache");
         return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
@@ -499,24 +499,26 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         return {{}, {}, InferenceOutcome::kFailed, LastRenderWorkOrigin::BackendRender, {}};
     }
 
-    const Image fg_srgb_view = result->foreground.view();
-    fg_linear_buf = ImageBuffer(width, height, 3);
-    Image fg_linear_local = fg_linear_buf.view();
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
-            fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
-            fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
+    if (!params.output_alpha_only) {
+        const Image fg_srgb_view = result->foreground.view();
+        fg_linear_buf = ImageBuffer(width, height, 3);
+        Image fg_linear_local = fg_linear_buf.view();
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
+                fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
+                fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
+            }
         }
-    }
 
-    if (swap_screen) {
-        swap_green_blue(fg_linear_local);
+        if (swap_screen) {
+            swap_green_blue(fg_linear_local);
+        }
     }
 
     alpha_buf = std::move(result->alpha);
 
-    if (g_frame_cache != nullptr) {
+    if (!params.output_alpha_only && g_frame_cache != nullptr) {
         g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view(),
                              std::vector<StageTiming>(stage_timings.begin(), stage_timings.end()));
     }
@@ -902,6 +904,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.source_passthrough = source_passthrough_enabled != 0;
     params.sp_erode_px = effective_edge_erode;
     params.sp_blur_px = effective_edge_blur;
+    params.output_alpha_only = !output_mode_requires_model_foreground(output_mode);
 
     data->last_guide_source = *guide_source;
     data->last_runtime_path = classify_runtime_path(data, params, width, height);
@@ -977,7 +980,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                                        data->temporal_height != height;
             if (size_mismatch) {
                 data->temporal_alpha = ImageBuffer(width, height, 1);
-                data->temporal_foreground = ImageBuffer(width, height, 3);
+                data->temporal_foreground =
+                    params.output_alpha_only ? ImageBuffer{} : ImageBuffer(width, height, 3);
                 data->temporal_width = width;
                 data->temporal_height = height;
             }
@@ -987,8 +991,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                 for (int y = 0; y < height; ++y) {
                     for (int x = 0; x < width; ++x) {
                         prev_alpha(y, x) = alpha_view_local(y, x);
-                        for (int c = 0; c < 3; ++c) {
-                            prev_foreground(y, x, c) = fg_linear_local(y, x, c);
+                        if (!params.output_alpha_only) {
+                            for (int c = 0; c < 3; ++c) {
+                                prev_foreground(y, x, c) = fg_linear_local(y, x, c);
+                            }
                         }
                     }
                 }
@@ -1001,12 +1007,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                         const float a_out = a_cur * (1.0f - blend) + a_prev * blend;
                         alpha_view_local(y, x) = a_out;
                         prev_alpha(y, x) = a_out;
-                        for (int c = 0; c < 3; ++c) {
-                            const float fg_prev = prev_foreground(y, x, c);
-                            const float fg_cur = fg_linear_local(y, x, c);
-                            const float fg_out = fg_cur * (1.0f - blend) + fg_prev * blend;
-                            fg_linear_local(y, x, c) = fg_out;
-                            prev_foreground(y, x, c) = fg_out;
+                        if (!params.output_alpha_only) {
+                            for (int c = 0; c < 3; ++c) {
+                                const float fg_prev = prev_foreground(y, x, c);
+                                const float fg_cur = fg_linear_local(y, x, c);
+                                const float fg_out = fg_cur * (1.0f - blend) + fg_prev * blend;
+                                fg_linear_local(y, x, c) = fg_out;
+                                prev_foreground(y, x, c) = fg_out;
+                            }
                         }
                     }
                 }

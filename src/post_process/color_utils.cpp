@@ -10,7 +10,24 @@ namespace corridorkey {
 
 namespace {
 
+float default_resized_channel_value(int channel, int total_channels) {
+    if (total_channels == 4 && channel == 3) {
+        return 1.0F;
+    }
+    return 0.0F;
+}
+
 void resize_bilinear_into(Image image, Image dst) {
+    if (image.empty() || dst.empty() || image.width <= 0 || image.height <= 0 || dst.width <= 0 ||
+        dst.height <= 0) {
+        return;
+    }
+
+    const int common_channels = std::min(image.channels, dst.channels);
+    if (common_channels <= 0) {
+        return;
+    }
+
     const float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
     const float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
 
@@ -26,7 +43,7 @@ void resize_bilinear_into(Image image, Image dst) {
             const int x1 = std::min(x0 + 1, image.width - 1);
             const float d_x = src_x - static_cast<float>(x0);
 
-            for (int channel = 0; channel < image.channels; ++channel) {
+            for (int channel = 0; channel < common_channels; ++channel) {
                 const float v00 = image(y0, x0, channel);
                 const float v10 = image(y0, x1, channel);
                 const float v01 = image(y1, x0, channel);
@@ -35,6 +52,10 @@ void resize_bilinear_into(Image image, Image dst) {
                 const float val_y0 = v00 * (1.0F - d_x) + v10 * d_x;
                 const float val_y1 = v01 * (1.0F - d_x) + v11 * d_x;
                 dst(y_pos, x_pos, channel) = val_y0 * (1.0F - d_y) + val_y1 * d_y;
+            }
+
+            for (int channel = common_channels; channel < dst.channels; ++channel) {
+                dst(y_pos, x_pos, channel) = default_resized_channel_value(channel, dst.channels);
             }
         }
     }
@@ -59,12 +80,22 @@ inline int reflect_101(int idx, int len) {
 }
 
 void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) {
+    if (image.empty() || dst.empty() || image.width <= 0 || image.height <= 0 || dst.width <= 0 ||
+        dst.height <= 0) {
+        return;
+    }
+
+    const int common_channels = std::min(image.channels, dst.channels);
+    if (common_channels <= 0) {
+        return;
+    }
+
     const float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
     const float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
 
-    size_t h_size = static_cast<size_t>(dst.width) * image.height * image.channels;
+    size_t h_size = static_cast<size_t>(dst.width) * image.height * common_channels;
     state.resize_lanczos_h.resize(h_size);
-    Image h_view = {dst.width, image.height, image.channels, state.resize_lanczos_h};
+    Image h_view = {dst.width, image.height, common_channels, state.resize_lanczos_h};
 
     for (int y_pos = 0; y_pos < image.height; ++y_pos) {
         for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
@@ -73,7 +104,7 @@ void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) 
             const int i_end = static_cast<int>(std::floor(center + kLanczosA));
 
             float weight_sum = 0.0F;
-            for (int channel = 0; channel < image.channels; ++channel) {
+            for (int channel = 0; channel < common_channels; ++channel) {
                 h_view(y_pos, x_pos, channel) = 0.0F;
             }
 
@@ -81,14 +112,14 @@ void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) 
                 const int src_i = reflect_101(i, image.width);
                 const float weight = lanczos_kernel(static_cast<float>(i) - center);
                 weight_sum += weight;
-                for (int channel = 0; channel < image.channels; ++channel) {
+                for (int channel = 0; channel < common_channels; ++channel) {
                     h_view(y_pos, x_pos, channel) += image(y_pos, src_i, channel) * weight;
                 }
             }
 
             if (weight_sum > 0.0F) {
                 const float inv_weight = 1.0F / weight_sum;
-                for (int channel = 0; channel < image.channels; ++channel) {
+                for (int channel = 0; channel < common_channels; ++channel) {
                     h_view(y_pos, x_pos, channel) *= inv_weight;
                 }
             }
@@ -102,7 +133,7 @@ void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) 
 
         for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
             float weight_sum = 0.0F;
-            for (int channel = 0; channel < image.channels; ++channel) {
+            for (int channel = 0; channel < common_channels; ++channel) {
                 dst(y_pos, x_pos, channel) = 0.0F;
             }
 
@@ -110,16 +141,20 @@ void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) 
                 const int src_j = reflect_101(j, h_view.height);
                 const float weight = lanczos_kernel(static_cast<float>(j) - center);
                 weight_sum += weight;
-                for (int channel = 0; channel < image.channels; ++channel) {
+                for (int channel = 0; channel < common_channels; ++channel) {
                     dst(y_pos, x_pos, channel) += h_view(src_j, x_pos, channel) * weight;
                 }
             }
 
             if (weight_sum > 0.0F) {
                 const float inv_weight = 1.0F / weight_sum;
-                for (int channel = 0; channel < image.channels; ++channel) {
+                for (int channel = 0; channel < common_channels; ++channel) {
                     dst(y_pos, x_pos, channel) *= inv_weight;
                 }
+            }
+
+            for (int channel = common_channels; channel < dst.channels; ++channel) {
+                dst(y_pos, x_pos, channel) = default_resized_channel_value(channel, dst.channels);
             }
         }
     }

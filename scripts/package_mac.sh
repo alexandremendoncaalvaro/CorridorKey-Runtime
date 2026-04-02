@@ -2,12 +2,65 @@
 set -euo pipefail
 
 REPO_ROOT_EARLY="$(cd "$(dirname "$0")/.." && pwd)"
+
+preserve_env_override() {
+    local name="$1"
+    local value_var="${name}_OVERRIDE_VALUE"
+    local set_var="${name}_OVERRIDE_SET"
+
+    if [ "${!name+x}" = "x" ]; then
+        printf -v "$set_var" '%s' "1"
+        printf -v "$value_var" '%s' "${!name}"
+    else
+        printf -v "$set_var" '%s' "0"
+    fi
+}
+
+restore_env_override() {
+    local name="$1"
+    local value_var="${name}_OVERRIDE_VALUE"
+    local set_var="${name}_OVERRIDE_SET"
+
+    if [ "${!set_var}" = "1" ]; then
+        printf -v "$name" '%s' "${!value_var}"
+        export "$name"
+    fi
+
+    unset "${value_var}" "${set_var}"
+}
+
+for override_var in \
+    CORRIDORKEY_VERSION \
+    CORRIDORKEY_BUILD_DIR \
+    CORRIDORKEY_SIGN_IDENTITY \
+    CORRIDORKEY_NOTARY_PROFILE \
+    CORRIDORKEY_ARCHIVE_FORMAT \
+    CORRIDORKEY_PUBLIC_RELEASE \
+    CORRIDORKEY_MLX_LIB \
+    CORRIDORKEY_MLX_METALLIB \
+    CORRIDORKEY_REQUIRE_MLX_2048; do
+    preserve_env_override "$override_var"
+done
+
 if [ -f "${REPO_ROOT_EARLY}/.env" ]; then
     set -a
     # shellcheck source=/dev/null
     source "${REPO_ROOT_EARLY}/.env"
     set +a
 fi
+
+for override_var in \
+    CORRIDORKEY_VERSION \
+    CORRIDORKEY_BUILD_DIR \
+    CORRIDORKEY_SIGN_IDENTITY \
+    CORRIDORKEY_NOTARY_PROFILE \
+    CORRIDORKEY_ARCHIVE_FORMAT \
+    CORRIDORKEY_PUBLIC_RELEASE \
+    CORRIDORKEY_MLX_LIB \
+    CORRIDORKEY_MLX_METALLIB \
+    CORRIDORKEY_REQUIRE_MLX_2048; do
+    restore_env_override "$override_var"
+done
 
 # Extract version from generated version.hpp (single source of truth)
 _version_header="${CORRIDORKEY_BUILD_DIR:-build/release-macos-portable}/generated/include/corridorkey/version.hpp"
@@ -40,6 +93,7 @@ ZIP_PATH="dist/${DIST_BASENAME}.zip"
 DMG_PATH="dist/${DIST_BASENAME}.dmg"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IDENTITY_HELPER="${REPO_ROOT}/scripts/codesign-identity.sh"
+source "${REPO_ROOT}/scripts/model_artifact_checks.sh"
 
 resolve_real_path() {
     python3 - "$1" <<'PY'
@@ -190,25 +244,14 @@ if [ ! -f "$CORE_LIB" ]; then
     exit 1
 fi
 
-if [ ! -f "$CPU_BASELINE_MODEL" ]; then
-    echo "ERROR: Missing required CPU baseline model: $CPU_BASELINE_MODEL"
-    exit 1
-fi
-
-if [ ! -f "$MLX_REQUIRED_PACK" ]; then
-    echo "ERROR: Missing required MLX pack: $MLX_REQUIRED_PACK"
-    exit 1
-fi
+require_real_model_artifact "$CPU_BASELINE_MODEL" 50000000 "CPU baseline model"
+require_real_model_artifact "$MLX_REQUIRED_PACK" 300000000 "MLX model pack"
 
 for bridge in "$MLX_BRIDGE_512" "$MLX_BRIDGE_768" "$MLX_BRIDGE_1024" "$MLX_BRIDGE_1536"; do
-    if [ ! -f "$bridge" ]; then
-        echo "ERROR: Missing required MLX bridge: $bridge"
-        exit 1
-    fi
+    require_real_model_artifact "$bridge" 200000000 "MLX bridge"
 done
-if [ "$REQUIRE_MLX_2048" = "1" ] && [ ! -f "$MLX_BRIDGE_2048" ]; then
-    echo "ERROR: Missing required MLX 2048 bridge: $MLX_BRIDGE_2048"
-    exit 1
+if [ "$REQUIRE_MLX_2048" = "1" ]; then
+    require_real_model_artifact "$MLX_BRIDGE_2048" 200000000 "MLX 2048 bridge"
 fi
 
 if [ -z "$MLX_LIB" ]; then
@@ -280,6 +323,10 @@ done
 if [ -f "$MLX_BRIDGE_2048" ]; then
     cp "$MLX_BRIDGE_2048" "$DIST_DIR/models/"
 fi
+
+write_macos_model_inventory "$DIST_DIR/model_inventory.json" "runtime_bundle" \
+    "macOS Apple Silicon Runtime" "apple_silicon" \
+    "$(if [ -f "$MLX_BRIDGE_2048" ]; then printf '1'; else printf '0'; fi)"
 
 echo "[3/5] Fixing library paths for portability..."
 install_name_tool -change "@rpath/libcorridorkey_core.dylib" "@executable_path/$CORE_LIB_NAME" \

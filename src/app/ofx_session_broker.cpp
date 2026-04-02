@@ -121,10 +121,12 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
     auto alpha = transport->alpha_view();
     auto foreground = transport->foreground_view();
     auto result_alpha = result->alpha.const_view();
-    auto result_foreground = result->foreground.const_view();
     std::copy(result_alpha.data.begin(), result_alpha.data.end(), alpha.data.begin());
-    std::copy(result_foreground.data.begin(), result_foreground.data.end(),
-              foreground.data.begin());
+    if (!request.params.output_alpha_only) {
+        auto result_foreground = result->foreground.const_view();
+        std::copy(result_foreground.data.begin(), result_foreground.data.end(),
+                  foreground.data.begin());
+    }
 
     refresh_engine_snapshot(session->second.snapshot, *session->second.engine);
     session->second.last_used_at = now();

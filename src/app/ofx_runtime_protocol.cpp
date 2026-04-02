@@ -312,7 +312,8 @@ nlohmann::json to_json(const InferenceParams& params) {
          params.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear"},
         {"source_passthrough", params.source_passthrough},
         {"sp_erode_px", params.sp_erode_px},
-        {"sp_blur_px", params.sp_blur_px}};
+        {"sp_blur_px", params.sp_blur_px},
+        {"output_alpha_only", params.output_alpha_only}};
 }
 
 Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
@@ -397,6 +398,9 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
     auto sp_blur_px = required_int(json, "sp_blur_px");
     if (!sp_blur_px) return Unexpected<Error>(sp_blur_px.error());
     params.sp_blur_px = *sp_blur_px;
+    if (json.contains("output_alpha_only") && json.at("output_alpha_only").is_boolean()) {
+        params.output_alpha_only = json.at("output_alpha_only").get<bool>();
+    }
     return params;
 }
 

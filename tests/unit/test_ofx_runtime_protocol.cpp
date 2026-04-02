@@ -92,6 +92,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     params.source_passthrough = true;
     params.sp_erode_px = 1;
     params.sp_blur_px = 2;
+    params.output_alpha_only = true;
 
     OfxRuntimeRenderFrameRequest request;
     request.session_id = "session-1";
@@ -114,6 +115,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     CHECK(parsed_request->params.refinement_mode == RefinementMode::Tiled);
     CHECK(parsed_request->params.coarse_resolution_override == 1024);
     CHECK(parsed_request->params.alpha_hint_policy == AlphaHintPolicy::RequireExternalHint);
+    CHECK(parsed_request->params.output_alpha_only);
     CHECK(parsed_request->render_index == 7);
 
     OfxRuntimeRequestEnvelope envelope;

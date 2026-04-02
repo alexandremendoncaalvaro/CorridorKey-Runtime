@@ -57,6 +57,7 @@ std::uint64_t inference_params_hash(const InferenceParams& params) {
     hash = mix_signature(hash, params.source_passthrough ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.sp_erode_px));
     hash = mix_signature(hash, static_cast<float>(params.sp_blur_px));
+    hash = mix_signature(hash, params.output_alpha_only ? 1.0f : 0.0f);
     hash = mix_signature(hash, static_cast<float>(params.requested_quality_resolution));
     hash = mix_signature(
         hash, static_cast<float>(static_cast<std::uint8_t>(params.quality_fallback_mode)));

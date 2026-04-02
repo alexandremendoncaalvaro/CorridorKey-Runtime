@@ -56,6 +56,8 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
         auto entry = report["coreml"]["models"].front();
         REQUIRE(entry.contains("filename"));
         REQUIRE(entry.contains("found"));
+        REQUIRE(entry.contains("usable"));
+        REQUIRE(entry.contains("artifact_status"));
         REQUIRE(entry.contains("full_graph_supported"));
         REQUIRE(entry.contains("error"));
     }
@@ -73,7 +75,10 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
     if (!report["mlx"]["primary_artifacts"].empty()) {
         auto entry = report["mlx"]["primary_artifacts"].front();
         REQUIRE(entry.contains("filename"));
+        REQUIRE(entry.contains("found"));
+        REQUIRE(entry.contains("usable"));
         REQUIRE(entry.contains("artifact_family"));
+        REQUIRE(entry.contains("artifact_status"));
         REQUIRE(entry.contains("recommended_backend"));
         REQUIRE(entry.contains("probe_ready"));
         REQUIRE(entry.contains("error"));

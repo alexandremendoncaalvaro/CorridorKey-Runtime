@@ -128,6 +128,39 @@ TEST_CASE("doctor summary reports recommended and certified artifact state",
     REQUIRE(summary["packaged_profile_matches_active_profile"].get<bool>());
 }
 
+TEST_CASE("doctor summary does not count placeholder artifacts as recommended present",
+          "[unit][doctor][regression]") {
+    nlohmann::json report;
+    report["system"]["capabilities"]["platform"] = "macos";
+    report["bundle"]["healthy"] = false;
+    report["bundle"]["model_inventory_contract_complete"] = true;
+    report["video"]["healthy"] = true;
+    report["cache"]["healthy"] = true;
+    report["coreml"]["applicable"] = true;
+    report["coreml"]["healthy"] = false;
+    report["mlx"]["applicable"] = true;
+    report["mlx"]["probe_available"] = true;
+    report["mlx"]["primary_pack_ready"] = false;
+    report["mlx"]["bridge_ready"] = false;
+    report["mlx"]["backend_integrated"] = false;
+    report["mlx"]["healthy"] = false;
+    report["windows_universal"]["applicable"] = false;
+    report["optimization_profile"]["id"] = "apple-silicon-mlx";
+    report["models"] = nlohmann::json::array(
+        {{{"filename", "corridorkey_mlx.safetensors"},
+          {"packaged_for_macos", true},
+          {"found", true},
+          {"usable", false},
+          {"validated_platforms", nlohmann::json::array({"macos_apple_silicon"})},
+          {"artifact_state", {{"present", false}, {"recommended_for_active_device", false}}}}});
+
+    auto summary = summarize_doctor_report(report);
+
+    REQUIRE_FALSE(summary["validated_models_present"].get<bool>());
+    REQUIRE_FALSE(summary["recommended_model_present"].get<bool>());
+    REQUIRE_FALSE(summary["healthy"].get<bool>());
+}
+
 TEST_CASE("doctor summary fails when packaged RTX profile and active profile diverge",
           "[unit][doctor][regression]") {
     nlohmann::json report;

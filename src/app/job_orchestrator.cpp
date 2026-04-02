@@ -8,6 +8,7 @@
 
 #include "../frame_io/video_io.hpp"
 #include "common/hardware_telemetry.hpp"
+#include "common/runtime_paths.hpp"
 #include "common/stage_profiler.hpp"
 #include "hardware_profile.hpp"
 #include "output_path_utils.hpp"
@@ -292,14 +293,18 @@ std::size_t count_models_with_artifact_state(const nlohmann::json& models, const
 
 std::pair<bool, bool> windows_packaged_model_presence(const nlohmann::json& report,
                                                       const nlohmann::json& models) {
+    const auto entry_usable = [](const nlohmann::json& entry) {
+        return entry.value("usable", entry.value("found", false));
+    };
+
     const auto bundle = report.contains("bundle") ? report["bundle"] : nlohmann::json::object();
     if (bundle.value("packaged_layout_detected", false) && bundle.contains("packaged_models") &&
         bundle["packaged_models"].is_array()) {
         const auto& packaged_models = bundle["packaged_models"];
         const bool any_models = !packaged_models.empty();
-        const bool all_found =
-            std::all_of(packaged_models.begin(), packaged_models.end(),
-                        [](const auto& entry) { return entry.value("found", false); });
+        const bool all_found = std::all_of(
+            packaged_models.begin(), packaged_models.end(),
+            [](const auto& entry) { return entry.value("usable", entry.value("found", false)); });
         return {any_models, !any_models || all_found};
     }
 
@@ -310,8 +315,7 @@ std::pair<bool, bool> windows_packaged_model_presence(const nlohmann::json& repo
             continue;
         }
         any_packaged_windows_model = true;
-        packaged_windows_models_present =
-            packaged_windows_models_present && entry.value("found", false);
+        packaged_windows_models_present = packaged_windows_models_present && entry_usable(entry);
     }
 
     return {any_packaged_windows_model,
@@ -806,7 +810,8 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
     } else {
         for (const auto& entry : report["models"]) {
             if (!entry["validated_platforms"].empty() && entry.value("packaged_for_macos", false)) {
-                validated_models_present = validated_models_present && entry.value("found", false);
+                validated_models_present =
+                    validated_models_present && entry.value("usable", entry.value("found", false));
             }
         }
     }
@@ -869,15 +874,19 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     nlohmann::json models = nlohmann::json::array();
     for (const auto& model : model_catalog()) {
         std::filesystem::path path = models_dir / model.filename;
+        const auto artifact = common::inspect_model_artifact(path);
         nlohmann::json entry = to_json(model);
         entry["path"] = path.string();
-        entry["found"] = std::filesystem::exists(path);
-        if (entry["found"]) {
-            entry["size_bytes"] = std::filesystem::file_size(path);
+        entry["found"] = artifact.found;
+        entry["usable"] = artifact.usable;
+        entry["artifact_status"] = common::model_artifact_status_to_string(artifact.status);
+        entry["artifact_error"] = artifact.usable ? "" : artifact.detail;
+        if (artifact.found) {
+            entry["size_bytes"] = artifact.size_bytes;
         }
         if (active_device.has_value()) {
             entry["artifact_state"] = to_json(artifact_runtime_state_for_device(
-                model, capabilities, *active_device, entry["found"].get<bool>()));
+                model, capabilities, *active_device, artifact.usable));
         }
         models.push_back(entry);
     }

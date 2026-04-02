@@ -62,6 +62,17 @@ bool is_metadata_sidecar(const std::filesystem::path& path) {
     return filename == ".DS_Store" || filename.rfind("._", 0) == 0;
 }
 
+void populate_artifact_fields(nlohmann::json& entry,
+                              const common::ModelArtifactInspection& artifact) {
+    entry["found"] = artifact.found;
+    entry["usable"] = artifact.usable;
+    entry["artifact_status"] = common::model_artifact_status_to_string(artifact.status);
+    entry["error"] = artifact.usable ? "" : artifact.detail;
+    if (artifact.found) {
+        entry["size_bytes"] = artifact.size_bytes;
+    }
+}
+
 std::string shell_escape(const std::filesystem::path& path) {
     std::string value = path.string();
     std::string escaped = "'";
@@ -293,13 +304,17 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
     json["error"] = "";
 
     auto model_path = models_dir / model_filename;
-    std::error_code error;
-    if (!std::filesystem::exists(model_path, error) || error) {
+    const auto artifact = common::inspect_model_artifact(model_path);
+    json["model_found"] = artifact.found;
+    json["model_usable"] = artifact.usable;
+    if (!artifact.found) {
         json["error"] = "Model not found: " + model_filename;
         return json;
     }
-
-    json["model_found"] = true;
+    if (!artifact.usable) {
+        json["error"] = artifact.detail;
+        return json;
+    }
 
     auto session =
         InferenceSession::create(model_path, device,
@@ -888,15 +903,15 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         expected_packaged_models_for_platform(models_dir, layout.kind == "windows_ofx");
 
     nlohmann::json packaged_models = nlohmann::json::array();
-    bool packaged_models_present = !expected_packaged_models.empty();
+    bool packaged_models_ready = !expected_packaged_models.empty();
     for (const auto& filename : expected_packaged_models) {
         std::filesystem::path model_path = models_dir / filename;
-        bool found = std::filesystem::exists(model_path);
-        packaged_models_present = packaged_models_present && found;
+        const auto artifact = common::inspect_model_artifact(model_path);
+        packaged_models_ready = packaged_models_ready && artifact.usable;
 
         nlohmann::json entry;
         entry["filename"] = filename;
-        entry["found"] = found;
+        populate_artifact_fields(entry, artifact);
         if (auto model = find_model_catalog_entry(filename); model.has_value()) {
             entry["validated_platforms"] = model->validated_platforms;
             entry["validated_hardware_tiers"] = model->validated_hardware_tiers;
@@ -955,19 +970,16 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["smoke_test_present"] = std::filesystem::exists(smoke_test_path);
     json["models_dir_exists"] = std::filesystem::exists(models_dir);
     json["models_dir_matches_bundle"] = paths_equivalent(models_dir, expected_models_dir);
-#if defined(_WIN32)
-    const auto cli_binary_path = executable_dir / "corridorkey.exe";
-    const auto ofx_runtime_server_path = executable_dir / "corridorkey_ofx_runtime_server.exe";
-    json["cli_binary_found"] = std::filesystem::exists(cli_binary_path);
+    const auto cli_binary_path =
+        windows_ofx_layout ? executable_dir / "corridorkey.exe" : executable_path;
+    const auto ofx_runtime_server_path = windows_ofx_layout
+                                             ? executable_dir / "corridorkey_ofx_runtime_server.exe"
+                                             : std::filesystem::path{};
+    json["cli_binary_found"] = !cli_binary_path.empty() && std::filesystem::exists(cli_binary_path);
     json["cli_binary_path"] = cli_binary_path.string();
-    json["ofx_runtime_server_found"] = std::filesystem::exists(ofx_runtime_server_path);
+    json["ofx_runtime_server_found"] =
+        !ofx_runtime_server_path.empty() && std::filesystem::exists(ofx_runtime_server_path);
     json["ofx_runtime_server_path"] = ofx_runtime_server_path.string();
-#else
-    json["cli_binary_found"] = true;
-    json["cli_binary_path"] = executable_path.string();
-    json["ofx_runtime_server_found"] = true;
-    json["ofx_runtime_server_path"] = "";
-#endif
     json["runtime_library_found"] = runtime_library.has_value();
     json["runtime_library_path"] = runtime_library.has_value() ? runtime_library->string() : "";
     json["runtime_library_referenced"] = runtime_reference_found;
@@ -1067,16 +1079,16 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
             packaged_inventory.has_value()
                 ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
                 : !windows_rtx_bundle;
-        json["healthy"] = packaged_layout_detected && packaged_models_present &&
+        json["healthy"] = packaged_layout_detected && packaged_models_ready &&
                           json["model_inventory_contract_complete"].get<bool>() &&
                           compiled_contexts_ready && runtime_backend_bundle_ready &&
                           (windows_ofx_layout || core_library.has_value());
     } else {
-        json["healthy"] =
-            packaged_layout_detected && runtime_library.has_value() && runtime_reference_found &&
-            core_library.has_value() && core_reference_found && mlx_library.has_value() &&
-            mlx_reference_found && mlx_metallib.has_value() && mlx_bridge_present &&
-            packaged_models_present && json["model_inventory_contract_complete"].get<bool>();
+        json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
+                          runtime_reference_found && core_library.has_value() &&
+                          core_reference_found && mlx_library.has_value() && mlx_reference_found &&
+                          mlx_metallib.has_value() && mlx_bridge_present && packaged_models_ready &&
+                          json["model_inventory_contract_complete"].get<bool>();
     }
     return json;
 }
@@ -1178,7 +1190,7 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
     probe_device.backend = Backend::CoreML;
 
     bool all_packaged_models_supported = true;
-    bool any_packaged_model_found = false;
+    bool any_packaged_model_usable = false;
 
     for (const auto& model : model_catalog()) {
         if (!model.packaged_for_macos || model.artifact_family != "onnx") {
@@ -1186,18 +1198,17 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
         }
 
         std::filesystem::path model_path = models_dir / model.filename;
-        bool found = std::filesystem::exists(model_path);
-        any_packaged_model_found = any_packaged_model_found || found;
+        const auto artifact = common::inspect_model_artifact(model_path);
+        any_packaged_model_usable = any_packaged_model_usable || artifact.usable;
 
         nlohmann::json entry;
         entry["filename"] = model.filename;
-        entry["found"] = found;
         entry["validated_platforms"] = model.validated_platforms;
         entry["validated_hardware_tiers"] = model.validated_hardware_tiers;
         entry["full_graph_supported"] = false;
-        entry["error"] = "";
+        populate_artifact_fields(entry, artifact);
 
-        if (!found) {
+        if (!artifact.usable) {
             all_packaged_models_supported = false;
             json["models"].push_back(entry);
             continue;
@@ -1217,7 +1228,7 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
     }
 
     json["all_packaged_models_supported"] = all_packaged_models_supported;
-    json["healthy"] = any_packaged_model_found && all_packaged_models_supported;
+    json["healthy"] = any_packaged_model_usable && all_packaged_models_supported;
 #endif
 
     return json;
@@ -1242,7 +1253,7 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
 #if defined(__APPLE__)
     json["applicable"] = true;
 
-    bool any_primary_found = false;
+    bool any_primary_usable = false;
     bool all_primary_probe_ready = true;
 
     for (const auto& model : model_catalog()) {
@@ -1251,19 +1262,18 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
         }
 
         std::filesystem::path model_path = models_dir / model.filename;
-        bool found = std::filesystem::exists(model_path);
+        const auto artifact = common::inspect_model_artifact(model_path);
 
         nlohmann::json entry;
         entry["filename"] = model.filename;
-        entry["found"] = found;
         entry["artifact_family"] = model.artifact_family;
         entry["recommended_backend"] = model.recommended_backend;
         entry["validated_platforms"] = model.validated_platforms;
         entry["validated_hardware_tiers"] = model.validated_hardware_tiers;
         entry["probe_ready"] = false;
-        entry["error"] = "";
+        populate_artifact_fields(entry, artifact);
 
-        if (!found) {
+        if (!artifact.usable) {
             json["models"].push_back(entry);
             if (model.artifact_family == "safetensors") {
                 all_primary_probe_ready = false;
@@ -1272,10 +1282,8 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
             continue;
         }
 
-        entry["size_bytes"] = std::filesystem::file_size(model_path);
-
         if (model.artifact_family == "safetensors") {
-            any_primary_found = true;
+            any_primary_usable = true;
             auto probe_res = core::probe_mlx_weights(model_path);
             entry["probe_ready"] = probe_res.has_value();
             entry["metadata_readable"] = probe_res.has_value();
@@ -1302,22 +1310,25 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
             }
 
             any_bridge_found = true;
+            const auto artifact = common::inspect_model_artifact(item.path());
             nlohmann::json entry;
             entry["filename"] = item.path().filename().string();
-            entry["found"] = true;
             entry["artifact_family"] = "mlxfn";
             entry["recommended_backend"] = "mlx";
             entry["probe_ready"] = false;
             entry["importable"] = false;
-            entry["size_bytes"] = std::filesystem::file_size(item.path(), error);
-            entry["error"] = "";
+            populate_artifact_fields(entry, artifact);
 
-            auto probe_res = core::probe_mlx_function(item.path());
-            entry["probe_ready"] = probe_res.has_value();
-            entry["importable"] = probe_res.has_value();
-            if (!probe_res) {
-                entry["error"] = probe_res.error().message;
+            if (!artifact.usable) {
                 all_bridge_importable = false;
+            } else {
+                auto probe_res = core::probe_mlx_function(item.path());
+                entry["probe_ready"] = probe_res.has_value();
+                entry["importable"] = probe_res.has_value();
+                if (!probe_res) {
+                    entry["error"] = probe_res.error().message;
+                    all_bridge_importable = false;
+                }
             }
 
             json["bridge_artifacts"].push_back(entry);
@@ -1325,7 +1336,7 @@ nlohmann::json inspect_mlx_model_pack(const std::filesystem::path& models_dir) {
         }
     }
 
-    json["primary_pack_ready"] = any_primary_found && all_primary_probe_ready;
+    json["primary_pack_ready"] = any_primary_usable && all_primary_probe_ready;
     json["bridge_ready"] = core::mlx_probe_available() && any_bridge_found && all_bridge_importable;
     json["backend_integrated"] = json["bridge_ready"];
     json["healthy"] = json["backend_integrated"] && json["primary_pack_ready"];
@@ -1451,13 +1462,13 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 
     for (const auto& filename : expected_windows_models) {
         std::filesystem::path model_path = models_dir / filename;
-        bool found = std::filesystem::exists(model_path);
-        any_packaged_model_found = any_packaged_model_found || found;
-        packaged_models_ready = packaged_models_ready && found;
+        const auto artifact = common::inspect_model_artifact(model_path);
+        any_packaged_model_found = any_packaged_model_found || artifact.usable;
+        packaged_models_ready = packaged_models_ready && artifact.usable;
 
         nlohmann::json entry;
         entry["filename"] = filename;
-        entry["found"] = found;
+        populate_artifact_fields(entry, artifact);
         if (auto model = find_model_catalog_entry(filename); model.has_value()) {
             entry["recommended_backend"] = model->recommended_backend;
             entry["validated_platforms"] = model->validated_platforms;

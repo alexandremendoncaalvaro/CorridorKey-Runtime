@@ -6,6 +6,7 @@
 #include <optional>
 #include <regex>
 
+#include "common/runtime_paths.hpp"
 #include "common/stage_profiler.hpp"
 #include "post_process/color_utils.hpp"
 
@@ -46,9 +47,13 @@ std::vector<std::filesystem::path> bridge_candidates(const std::filesystem::path
 
 Result<std::filesystem::path> resolve_executable_artifact(const std::filesystem::path& model_path,
                                                           const DeviceInfo& device) {
-    if (!std::filesystem::exists(model_path)) {
+    const auto requested_artifact = common::inspect_model_artifact(model_path);
+    if (!requested_artifact.found) {
         return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                        "MLX model artifact not found: " + model_path.string()}};
+    }
+    if (!requested_artifact.usable) {
+        return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed, requested_artifact.detail}};
     }
 
     if (model_path.extension() == ".mlxfn") {
@@ -56,10 +61,20 @@ Result<std::filesystem::path> resolve_executable_artifact(const std::filesystem:
     }
 
     if (model_path.extension() == ".safetensors") {
+        std::optional<std::string> first_unusable_bridge_error;
         for (const auto& candidate : bridge_candidates(model_path, device)) {
-            if (std::filesystem::exists(candidate)) {
+            const auto bridge_artifact = common::inspect_model_artifact(candidate);
+            if (bridge_artifact.usable) {
                 return candidate;
             }
+            if (bridge_artifact.found && !first_unusable_bridge_error.has_value()) {
+                first_unusable_bridge_error = bridge_artifact.detail;
+            }
+        }
+
+        if (first_unusable_bridge_error.has_value()) {
+            return Unexpected<Error>{
+                Error{ErrorCode::ModelLoadFailed, *first_unusable_bridge_error}};
         }
 
         return Unexpected<Error>{
@@ -157,7 +172,8 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
 }
 
 Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
-                                      UpscaleMethod upscale_method, StageTimingCallback on_stage) {
+                                      bool output_alpha_only, UpscaleMethod upscale_method,
+                                      StageTimingCallback on_stage) {
     (void)upscale_method;
 #if !CORRIDORKEY_WITH_MLX
     (void)rgb;
@@ -220,13 +236,21 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
                 return (*m_impl->imported_function)(args);
             },
             1);
-        if (outputs.size() < 2) {
-            return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
-                                           "MLX bridge returned fewer than two output tensors."}};
+        if (outputs.empty()) {
+            return Unexpected<Error>{
+                Error{ErrorCode::InferenceFailed, "MLX bridge returned no output tensors."}};
         }
 
         auto alpha = mlx::core::contiguous(outputs[0]);
-        auto foreground = mlx::core::contiguous(outputs[1]);
+        std::optional<mlx::core::array> foreground = std::nullopt;
+        if (!output_alpha_only) {
+            if (outputs.size() < 2) {
+                return Unexpected<Error>{
+                    Error{ErrorCode::InferenceFailed,
+                          "MLX bridge returned fewer than two output tensors."}};
+            }
+            foreground.emplace(mlx::core::contiguous(outputs[1]));
+        }
 
         common::measure_stage(
             on_stage, "mlx_extract_outputs",
@@ -234,37 +258,50 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
                 common::measure_stage(
                     on_stage, "mlx_materialize_outputs",
                     [&]() {
-                        mlx::core::eval(alpha, foreground);
+                        if (foreground.has_value()) {
+                            mlx::core::eval(alpha, *foreground);
+                        } else {
+                            mlx::core::eval(alpha);
+                        }
                         alpha.wait();
-                        foreground.wait();
+                        if (foreground.has_value()) {
+                            foreground->wait();
+                        }
                     },
                     1);
             },
             1);
 
         const auto& alpha_shape = alpha.shape();
-        const auto& fg_shape = foreground.shape();
-        if (alpha_shape.size() != 4 || fg_shape.size() != 4 || alpha_shape[0] != 1 ||
-            fg_shape[0] != 1 || alpha_shape[3] != 1 || fg_shape[3] != 3) {
+        if (alpha_shape.size() != 4 || alpha_shape[0] != 1 || alpha_shape[3] != 1) {
             return Unexpected<Error>{
                 Error{ErrorCode::InferenceFailed, "MLX bridge returned unexpected tensor shapes."}};
+        }
+        if (foreground.has_value()) {
+            const auto& fg_shape = foreground->shape();
+            if (fg_shape.size() != 4 || fg_shape[0] != 1 || fg_shape[3] != 3) {
+                return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
+                                               "MLX bridge returned unexpected tensor shapes."}};
+            }
         }
 
         int output_height = static_cast<int>(alpha_shape[1]);
         int output_width = static_cast<int>(alpha_shape[2]);
 
         ensure_buffer_shape(m_impl->alpha_buffer, output_width, output_height, 1);
-        ensure_buffer_shape(m_impl->foreground_buffer, output_width, output_height, 3);
 
         Image full_alpha = m_impl->alpha_buffer.view();
-        Image full_fg = m_impl->foreground_buffer.view();
         common::measure_stage(
             on_stage, "mlx_copy_outputs",
             [&]() {
                 std::memcpy(full_alpha.data.data(), alpha.data<float>(),
                             full_alpha.data.size_bytes());
-                std::memcpy(full_fg.data.data(), foreground.data<float>(),
-                            full_fg.data.size_bytes());
+                if (foreground.has_value()) {
+                    ensure_buffer_shape(m_impl->foreground_buffer, output_width, output_height, 3);
+                    Image full_fg = m_impl->foreground_buffer.view();
+                    std::memcpy(full_fg.data.data(), foreground->data<float>(),
+                                full_fg.data.size_bytes());
+                }
             },
             1);
 
@@ -275,9 +312,13 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
                                                                 m_impl->color_utils_state)
                                    : ColorUtils::resize(full_alpha, rgb.width, rgb.height);
         ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-        result.foreground = use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height,
-                                                                     m_impl->color_utils_state)
-                                        : ColorUtils::resize(full_fg, rgb.width, rgb.height);
+        if (foreground.has_value()) {
+            Image full_fg = m_impl->foreground_buffer.view();
+            result.foreground = use_lanczos
+                                    ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height,
+                                                                 m_impl->color_utils_state)
+                                    : ColorUtils::resize(full_fg, rgb.width, rgb.height);
+        }
         return result;
     } catch (const std::exception& error) {
         return Unexpected<Error>{Error{ErrorCode::InferenceFailed, "MLX bridge execution failed: " +
@@ -287,7 +328,7 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
 }
 
 Result<FrameResult> MlxSession::infer_tile(const Image& rgb_tile, const Image& hint_tile,
-                                           StageTimingCallback on_stage) {
+                                           bool output_alpha_only, StageTimingCallback on_stage) {
 #if !CORRIDORKEY_WITH_MLX
     (void)rgb_tile;
     (void)hint_tile;
@@ -338,24 +379,43 @@ Result<FrameResult> MlxSession::infer_tile(const Image& rgb_tile, const Image& h
                 return (*m_impl->imported_function)(args);
             },
             1);
-        if (outputs.size() < 2) {
-            return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
-                                           "MLX bridge returned fewer than two output tensors."}};
+        if (outputs.empty()) {
+            return Unexpected<Error>{
+                Error{ErrorCode::InferenceFailed, "MLX bridge returned no output tensors."}};
         }
 
         auto alpha = mlx::core::contiguous(outputs[0]);
-        auto foreground = mlx::core::contiguous(outputs[1]);
+        std::optional<mlx::core::array> foreground = std::nullopt;
+        if (!output_alpha_only) {
+            if (outputs.size() < 2) {
+                return Unexpected<Error>{
+                    Error{ErrorCode::InferenceFailed,
+                          "MLX bridge returned fewer than two output tensors."}};
+            }
+            foreground.emplace(mlx::core::contiguous(outputs[1]));
+        }
 
-        mlx::core::eval(alpha, foreground);
+        if (foreground.has_value()) {
+            mlx::core::eval(alpha, *foreground);
+        } else {
+            mlx::core::eval(alpha);
+        }
         alpha.wait();
-        foreground.wait();
+        if (foreground.has_value()) {
+            foreground->wait();
+        }
 
         const auto& alpha_shape = alpha.shape();
-        const auto& fg_shape = foreground.shape();
-        if (alpha_shape.size() != 4 || fg_shape.size() != 4 || alpha_shape[0] != 1 ||
-            fg_shape[0] != 1 || alpha_shape[3] != 1 || fg_shape[3] != 3) {
+        if (alpha_shape.size() != 4 || alpha_shape[0] != 1 || alpha_shape[3] != 1) {
             return Unexpected<Error>{
                 Error{ErrorCode::InferenceFailed, "MLX bridge returned unexpected tensor shapes."}};
+        }
+        if (foreground.has_value()) {
+            const auto& fg_shape = foreground->shape();
+            if (fg_shape.size() != 4 || fg_shape[0] != 1 || fg_shape[3] != 3) {
+                return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
+                                               "MLX bridge returned unexpected tensor shapes."}};
+            }
         }
 
         int out_h = static_cast<int>(alpha_shape[1]);
@@ -363,12 +423,14 @@ Result<FrameResult> MlxSession::infer_tile(const Image& rgb_tile, const Image& h
 
         FrameResult result;
         result.alpha = ImageBuffer(out_w, out_h, 1);
-        result.foreground = ImageBuffer(out_w, out_h, 3);
 
         std::memcpy(result.alpha.view().data.data(), alpha.data<float>(),
                     result.alpha.view().data.size_bytes());
-        std::memcpy(result.foreground.view().data.data(), foreground.data<float>(),
-                    result.foreground.view().data.size_bytes());
+        if (foreground.has_value()) {
+            result.foreground = ImageBuffer(out_w, out_h, 3);
+            std::memcpy(result.foreground.view().data.data(), foreground->data<float>(),
+                        result.foreground.view().data.size_bytes());
+        }
 
         return result;
     } catch (const std::exception& error) {
