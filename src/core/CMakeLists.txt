@@ -7,7 +7,6 @@ target_sources(corridorkey_core PRIVATE
     mlx_session.cpp
     mlx_probe.cpp
     torch_trt_session.cpp
-    windows_rtx_probe.cpp
 )
 
 if(MSVC AND CORRIDORKEY_WITH_TORCH_TENSORRT)

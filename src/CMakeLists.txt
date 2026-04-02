@@ -14,31 +14,10 @@ endif()
 corridorkey_apply_windows_common_compile_defs(corridorkey_core)
 
 # Private includes for internal implementation headers
-if(APPLE)
-    target_include_directories(corridorkey_core PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${FFMPEG_INCLUDE_DIRS}
-        "${CMAKE_SOURCE_DIR}/vendor/onnxruntime/include"
-    )
-else()
-    target_include_directories(corridorkey_core PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${FFMPEG_INCLUDE_DIRS}
-    )
-    if(CORRIDORKEY_ORT_INCLUDE_DIRS)
-        target_include_directories(corridorkey_core BEFORE PRIVATE
-            ${CORRIDORKEY_ORT_INCLUDE_DIRS}
-            "${CORRIDORKEY_ORT_INCLUDE_DIRS}/onnxruntime/core/session"
-        )
-    endif()
-    # CRITICAL: Override vcpkg's ONNX Runtime with vendor version
-    # For GCC: use -I flag which takes precedence over -isystem
-    if(NOT MSVC AND CORRIDORKEY_ORT_INCLUDE_DIRS)
-        target_compile_options(corridorkey_core PRIVATE
-            "-I${CORRIDORKEY_ORT_INCLUDE_DIRS}"
-        )
-    endif()
-endif()
+target_include_directories(corridorkey_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${FFMPEG_INCLUDE_DIRS}
+)
 
 # Strict compiler warnings (target-based, not global)
 if(MSVC)
@@ -57,7 +36,6 @@ target_link_libraries(corridorkey_core
         corridorkey_headers
         nlohmann_json::nlohmann_json
     PRIVATE
-        onnxruntime::onnxruntime
         OpenEXR::OpenEXR
         PNG::PNG
         ${FFMPEG_LIBRARIES}
@@ -131,25 +109,10 @@ corridorkey_apply_windows_common_compile_defs(corridorkey_core_ofx)
 get_target_property(_core_sources corridorkey_core SOURCES)
 target_sources(corridorkey_core_ofx PRIVATE ${_core_sources})
 
-if(APPLE)
-    target_include_directories(corridorkey_core_ofx PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${FFMPEG_INCLUDE_DIRS}
-        "${CMAKE_SOURCE_DIR}/vendor/onnxruntime/include"
-    )
-else()
-    target_include_directories(corridorkey_core_ofx PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${FFMPEG_INCLUDE_DIRS}
-        ${CORRIDORKEY_ORT_INCLUDE_DIRS}
-        "${CORRIDORKEY_ORT_INCLUDE_DIRS}/onnxruntime/core/session"
-    )
-    if(NOT MSVC AND CORRIDORKEY_ORT_INCLUDE_DIRS)
-        target_compile_options(corridorkey_core_ofx PRIVATE
-            "-I${CORRIDORKEY_ORT_INCLUDE_DIRS}"
-        )
-    endif()
-endif()
+target_include_directories(corridorkey_core_ofx PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${FFMPEG_INCLUDE_DIRS}
+)
 
 if(MSVC)
     target_compile_options(corridorkey_core_ofx PRIVATE /W4 /WX /permissive-)
@@ -166,7 +129,6 @@ target_link_libraries(corridorkey_core_ofx
         corridorkey_headers
         nlohmann_json::nlohmann_json
     PRIVATE
-        onnxruntime::onnxruntime
         OpenEXR::OpenEXR
         PNG::PNG
         ${FFMPEG_LIBRARIES}
@@ -211,25 +173,14 @@ if(BUILD_TESTING)
     get_target_property(_core_sources corridorkey_core SOURCES)
     target_sources(corridorkey_core_static PRIVATE ${_core_sources})
 
-    if(APPLE)
-        target_include_directories(corridorkey_core_static PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}
-            ${FFMPEG_INCLUDE_DIRS}
-            "${CMAKE_SOURCE_DIR}/vendor/onnxruntime/include"
-        )
-    else()
-        target_include_directories(corridorkey_core_static PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}
-            ${FFMPEG_INCLUDE_DIRS}
-            ${CORRIDORKEY_ORT_INCLUDE_DIRS}
-            "${CORRIDORKEY_ORT_INCLUDE_DIRS}/onnxruntime/core/session"
-        )
-    endif()
+    target_include_directories(corridorkey_core_static PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${FFMPEG_INCLUDE_DIRS}
+    )
 
     target_link_libraries(corridorkey_core_static
         PUBLIC
             corridorkey_headers
-            onnxruntime::onnxruntime
             nlohmann_json::nlohmann_json
         PRIVATE
             OpenEXR::OpenEXR

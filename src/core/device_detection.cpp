@@ -1,13 +1,14 @@
 #include <corridorkey/engine.hpp>
 
 #include "mlx_probe.hpp"
-#include "windows_rtx_probe.hpp"
+#include "torch_trt_session.hpp"
 
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
+#include <dxgi.h>
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -36,11 +37,53 @@ bool detect_apple_silicon() {
     return compiled_for_apple_silicon();
 }
 
+#if defined(_WIN32)
+struct WindowsGpuInfo {
+    std::string adapter_name;
+    int64_t dedicated_memory_mb = 0;
+    bool is_nvidia = false;
+};
+
+std::vector<WindowsGpuInfo> enumerate_dxgi_adapters() {
+    std::vector<WindowsGpuInfo> gpus;
+    IDXGIFactory1* factory = nullptr;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory)))) {
+        return gpus;
+    }
+
+    IDXGIAdapter1* adapter = nullptr;
+    for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+        DXGI_ADAPTER_DESC1 desc;
+        if (SUCCEEDED(adapter->GetDesc1(&desc))) {
+            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+                adapter->Release();
+                continue;
+            }
+            WindowsGpuInfo info;
+            int len =
+                WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, nullptr, 0, nullptr, nullptr);
+            if (len > 0) {
+                info.adapter_name.resize(len - 1);
+                WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, info.adapter_name.data(), len,
+                                    nullptr, nullptr);
+            }
+            info.dedicated_memory_mb =
+                static_cast<int64_t>(desc.DedicatedVideoMemory / (1024 * 1024));
+            info.is_nvidia = (desc.VendorId == 0x10DE);
+            gpus.push_back(std::move(info));
+        }
+        adapter->Release();
+    }
+    factory->Release();
+    return gpus;
+}
+#endif
+
 }  // namespace
 
 DeviceInfo auto_detect() {
     DeviceInfo device;
-    device.backend = Backend::CPU;  // Default fallback
+    device.backend = Backend::CPU;
     device.available_memory_mb = 0;
 
 #if defined(__APPLE__)
@@ -68,66 +111,26 @@ DeviceInfo auto_detect() {
         device.available_memory_mb = static_cast<int64_t>(mem / (1024 * 1024));
     }
 #elif defined(_WIN32)
-    auto gpus = core::list_windows_gpus();
+    auto gpus = enumerate_dxgi_adapters();
 
-    // Tier 1: NVIDIA RTX (Best Performance)
+    // Prefer NVIDIA GPU with Torch-TensorRT runtime available
     for (size_t i = 0; i < gpus.size(); ++i) {
-        const auto& gpu = gpus[i];
-        if (gpu.tensorrt_rtx_available) {
-            device.name = gpu.adapter_name;
+        if (gpus[i].is_nvidia && core::torch_tensorrt_runtime_available()) {
+            device.name = gpus[i].adapter_name;
             device.backend = Backend::TensorRT;
-            device.available_memory_mb = gpu.dedicated_memory_mb;
+            device.available_memory_mb = gpus[i].dedicated_memory_mb;
             device.device_index = static_cast<int>(i);
             return device;
         }
     }
 
-    // Tier 2: Windows ML (Modern Universal / NPU)
-    for (size_t i = 0; i < gpus.size(); ++i) {
-        const auto& gpu = gpus[i];
-        if (gpu.winml_available) {
-            device.name = gpu.adapter_name + " (Windows AI)";
-            device.backend = Backend::WindowsML;
-            device.available_memory_mb = gpu.dedicated_memory_mb;
-            device.device_index = static_cast<int>(i);
-            return device;
-        }
-    }
-
-    // Tier 3: Intel OpenVINO (NPU/iGPU)
-    for (size_t i = 0; i < gpus.size(); ++i) {
-        const auto& gpu = gpus[i];
-        if (gpu.openvino_available) {
-            device.name = gpu.adapter_name + " (OpenVINO)";
-            device.backend = Backend::OpenVINO;
-            device.available_memory_mb = gpu.dedicated_memory_mb;
-            device.device_index = static_cast<int>(i);
-            return device;
-        }
-    }
-
-    // Tier 4: NVIDIA GTX (CUDA Fallback)
-    for (size_t i = 0; i < gpus.size(); ++i) {
-        const auto& gpu = gpus[i];
-        if (gpu.cuda_available) {
-            device.name = gpu.adapter_name + " (CUDA)";
-            device.backend = Backend::CUDA;
-            device.available_memory_mb = gpu.dedicated_memory_mb;
-            device.device_index = static_cast<int>(i);
-            return device;
-        }
-    }
-
-    // Tier 5: AMD / Universal (DirectML Fallback)
-    for (size_t i = 0; i < gpus.size(); ++i) {
-        const auto& gpu = gpus[i];
-        if (gpu.directml_available) {
-            device.name = gpu.adapter_name + " (DirectML)";
-            device.backend = Backend::DirectML;
-            device.available_memory_mb = gpu.dedicated_memory_mb;
-            device.device_index = static_cast<int>(i);
-            return device;
-        }
+    // Fallback: first discrete GPU
+    if (!gpus.empty()) {
+        device.name = gpus[0].adapter_name;
+        device.backend = Backend::CPU;
+        device.available_memory_mb = gpus[0].dedicated_memory_mb;
+        device.device_index = 0;
+        return device;
     }
 
     // Last Resort: CPU
@@ -160,28 +163,12 @@ std::vector<DeviceInfo> list_devices() {
         devices.push_back(detected);
     }
 #elif defined(_WIN32)
-    auto gpus = core::list_windows_gpus();
+    auto gpus = enumerate_dxgi_adapters();
+    bool has_torch_trt = core::torch_tensorrt_runtime_available();
     for (size_t i = 0; i < gpus.size(); ++i) {
-        const auto& gpu = gpus[i];
-        if (gpu.tensorrt_rtx_available) {
-            devices.push_back({gpu.adapter_name + " (TensorRT)", gpu.dedicated_memory_mb,
+        if (gpus[i].is_nvidia && has_torch_trt) {
+            devices.push_back({gpus[i].adapter_name + " (TensorRT)", gpus[i].dedicated_memory_mb,
                                Backend::TensorRT, static_cast<int>(i)});
-        }
-        if (gpu.cuda_available) {
-            devices.push_back({gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb, Backend::CUDA,
-                               static_cast<int>(i)});
-        }
-        if (gpu.directml_available) {
-            devices.push_back({gpu.adapter_name + " (DirectML)", gpu.dedicated_memory_mb,
-                               Backend::DirectML, static_cast<int>(i)});
-        }
-        if (gpu.winml_available) {
-            devices.push_back({gpu.adapter_name + " (Windows AI)", gpu.dedicated_memory_mb,
-                               Backend::WindowsML, static_cast<int>(i)});
-        }
-        if (gpu.openvino_available) {
-            devices.push_back({gpu.adapter_name + " (OpenVINO)", gpu.dedicated_memory_mb,
-                               Backend::OpenVINO, static_cast<int>(i)});
         }
     }
     devices.push_back({"Generic CPU", 0, Backend::CPU, 0});
