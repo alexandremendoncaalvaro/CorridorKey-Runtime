@@ -388,6 +388,14 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Higher values produce better detail at the cost of speed. "
         "Resolutions: Draft (512), High (1024), Ultra (1536), Maximum (2048).",
         "setup_group");
+    define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
+                        kDefaultInputColorSpace, {"sRGB", "Linear", "Auto (Host Managed)"},
+                        "How CorridorKey should interpret the incoming source. Auto requests "
+                        "host-managed color using sRGB Texture or Linear Rec.709 (sRGB). "
+                        "Linear means Linear Rec.709 (sRGB), not an arbitrary project-linear "
+                        "space. If host-managed color is unavailable, Auto falls back to the "
+                        "manual Linear path.",
+                        "setup_group");
 
     // --- Group 4: Interior Detail (recover opaque source texture, not edge fixes) ---
     define_group_param(param_set, "interior_detail_group", "Interior Detail", true);
@@ -467,14 +475,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Pixel overlap between tiles for seam-safe blending. Larger values reduce "
                      "tile boundary artifacts at the cost of more work.",
                      "performance_group");
-    define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
-                        kDefaultInputColorSpace, {"sRGB", "Linear", "Auto (Host Managed)"},
-                        "How CorridorKey should interpret the incoming source. Auto requests "
-                        "host-managed color using sRGB Texture or Linear Rec.709 (sRGB). "
-                        "Linear means Linear Rec.709 (sRGB), not an arbitrary project-linear "
-                        "space. If host-managed color is unavailable, Auto falls back to the "
-                        "manual Linear path.",
-                        "performance_group");
 
     // --- Group 9: Advanced (subdivided by intent for expert tuning) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
