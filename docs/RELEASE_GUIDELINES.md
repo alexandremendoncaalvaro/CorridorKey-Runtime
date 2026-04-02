@@ -229,9 +229,9 @@ Model Hub** (`alexandrealvaro/CorridorKey`). The GitHub Release acts as the
 primary entry point, version tag, and changelog, but its download links must
 point to the Hugging Face file URL.
 
-**1. Upload to Hugging Face via CLI (`uvx` or `mise`):**
+**1. Upload to Hugging Face via CLI (`uvx` ou `mise`):**
 ```powershell
-uvx --from huggingface_hub hf upload alexandrealvaro/CorridorKey ./dist/CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe
+uvx --from huggingface_hub hf upload alexandrealvaro/CorridorKey ./dist/CorridorKey_Resolve_vX.Y.Z_Windows_RTX.zip releases/vX.Y.Z/CorridorKey_Resolve_vX.Y.Z_Windows_RTX.zip
 ```
 
 **2. Create the GitHub Release using the following template:**
@@ -256,21 +256,21 @@ uvx --from huggingface_hub hf upload alexandrealvaro/CorridorKey ./dist/Corridor
 > 📦 **Note on File Size:** Due to the large size of the optimized neural network models (TensorScript FP16) bundled with this software, our unified installers are securely hosted on Hugging Face to bypass GitHub size limits and maximize download speeds.
 
 ### Windows
-- **NVIDIA RTX 30 Series or newer:** [Download RTX Installer on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe)
-- **Windows DirectML track (experimental):** [Download DirectML Installer on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/CorridorKey_Resolve_vX.Y.Z_Windows_DirectML_Installer.exe)
+- **NVIDIA RTX 30 Series or newer:** [Download RTX `.zip` Archive on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/releases/vX.Y.Z/CorridorKey_Resolve_vX.Y.Z_Windows_RTX.zip)
+- **Windows DirectML track (experimental):** [Download DirectML `.zip` Archive on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/releases/vX.Y.Z/CorridorKey_Resolve_vX.Y.Z_Windows_DirectML.zip)
 - Do not describe the DirectML installer as official support for every AMD, Intel, or RTX 20 series GPU family. Refer readers to `help/SUPPORT_MATRIX.md` for the real support designation.
 
 ### macOS
 - Include this section only when the release contains a macOS installer.
-- **Apple Silicon (M-Series):** [Download Apple Silicon Installer on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg)
-
+- **Apple Silicon (M-Series):** [Download Apple Silicon `.pkg` on Hugging Face ➔](https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/releases/vX.Y.Z/CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg)
 
 ## Installation Instructions
 
 1. Close DaVinci Resolve if it is running.
-2. Run the downloaded installer.
-3. The installer automatically overwrites the previous version.
-4. Launch DaVinci Resolve and load the plugin from the OpenFX Library.
+2. Download and **Extract the `.zip` archive completely** (Important: do not run from inside the ZIP).
+3. Open the extracted folder and run the included `_Installer.exe`.
+4. The installer automatically registers the payload and overwrites the previous version.
+5. Launch DaVinci Resolve and load the plugin from the OpenFX Library. Library.
 
 ## Uninstallation
 To remove the plugin, go to **Windows Settings > Apps > Installed apps**, search
