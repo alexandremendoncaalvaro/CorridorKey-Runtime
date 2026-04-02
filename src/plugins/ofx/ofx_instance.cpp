@@ -422,24 +422,6 @@ std::string runtime_path_runtime_label_impl(const InstanceData& data) {
 }
 
 std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
-    if (data.last_render_work_origin == LastRenderWorkOrigin::None) {
-        return "No frame render recorded";
-    }
-
-    if (data.last_render_stage_timings.empty()) {
-        switch (data.last_render_work_origin) {
-            case LastRenderWorkOrigin::SharedCache:
-                return "Frame render unavailable | Shared cache";
-            case LastRenderWorkOrigin::InstanceCache:
-                return "Frame render unavailable | Instance cache";
-            case LastRenderWorkOrigin::BackendRender:
-                return "Frame render unavailable";
-            case LastRenderWorkOrigin::None:
-            default:
-                return "No frame render recorded";
-        }
-    }
-
     double total_ms = 0.0;
     const StageTiming* hottest_stage = nullptr;
     for (const auto& timing : data.last_render_stage_timings) {
@@ -449,7 +431,13 @@ std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
         }
     }
 
-    std::string label = "Frame render: " + format_duration_ms(total_ms);
+    const double last_ms = data.last_frame_ms > 0.0 ? data.last_frame_ms : total_ms;
+    if (last_ms <= 0.0) {
+        return "No frames processed";
+    }
+
+    const double avg_ms = data.avg_frame_ms > 0.0 ? data.avg_frame_ms : last_ms;
+    std::string label = format_duration_ms(last_ms) + " | Avg: " + format_duration_ms(avg_ms);
     switch (data.last_render_work_origin) {
         case LastRenderWorkOrigin::SharedCache:
             label += " | Shared cache";
@@ -667,6 +655,8 @@ void update_runtime_panel_values(InstanceData* data) {
         has_session = data->engine != nullptr;
     }
     const bool is_loading = !has_session && data->last_error.empty();
+    const bool has_recorded_frame_timing =
+        data->last_frame_ms > 0.0 || !data->last_render_stage_timings.empty();
 
     set_string_param_value(data->runtime_processing_param,
                            processing_backend_label(data->device.backend));
@@ -694,8 +684,9 @@ void update_runtime_panel_values(InstanceData* data) {
     set_string_param_value(data->runtime_session_param, runtime_session_runtime_label(*data));
     set_string_param_value(data->runtime_status_param,
                            is_loading ? "Loading..." : runtime_status_runtime_label(*data));
-    set_string_param_value(data->runtime_timings_param,
-                           is_loading ? "Loading..." : runtime_timings_runtime_label(*data));
+    set_string_param_value(data->runtime_timings_param, is_loading && !has_recorded_frame_timing
+                                                            ? "Loading..."
+                                                            : runtime_timings_runtime_label(*data));
     set_string_param_value(data->runtime_backend_work_param,
                            is_loading ? "Loading..." : runtime_backend_work_runtime_label(*data));
 }
@@ -1529,7 +1520,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             set_string_param_value(
                 data->runtime_status_param,
                 "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
-            set_string_param_value(data->runtime_timings_param, "Loading...");
+            set_string_param_value(data->runtime_timings_param,
+                                   runtime_timings_runtime_label(*data));
             auto prepare_result = data->runtime_client->prepare_session(
                 build_prepare_request(requested_device, selection, requested_quality_mode,
                                       allow_cpu_fallback),
@@ -1578,7 +1570,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             set_string_param_value(
                 data->runtime_status_param,
                 "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
-            set_string_param_value(data->runtime_timings_param, "Loading...");
+            set_string_param_value(data->runtime_timings_param,
+                                   runtime_timings_runtime_label(*data));
             auto engine_result = Engine::create(
                 selection.executable_model_path, requested_device,
                 [&](const StageTiming& timing) {
@@ -1744,7 +1737,7 @@ OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHan
         return kOfxStatReplyDefault;
     }
 
-    clear_instance_render_caches(data, true);
+    clear_instance_render_caches(data, false);
     flush_runtime_panel(data);
     log_message("begin_sequence_render", "Sequence render state reset.");
     return kOfxStatOK;

@@ -51,8 +51,9 @@ The always-visible fields are the fast triage view:
 - **Status** tells you whether the plugin is loading, rendering, warning, or
   reporting an error, and whether it is using a host-managed versus manual
   color path.
-- **Frame Render** tells you the real render time CorridorKey is currently
-  associating with the visible frame result.
+- **Last Frame** tells you the render time CorridorKey is associating with the
+  visible frame result plus the rolling average, and it stays visible until a
+  new frame is rendered.
 
 Open **Advanced Runtime Status** only when you need to diagnose why the current
 result looks the way it does. That closed-by-default view contains:

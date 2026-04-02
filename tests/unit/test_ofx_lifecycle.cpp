@@ -96,7 +96,8 @@ ImageBuffer filled_foreground() {
 
 }  // namespace
 
-TEST_CASE("begin and end sequence render reset per-instance caches", "[unit][ofx][regression]") {
+TEST_CASE("begin and end sequence render reset caches without dropping last frame timing",
+          "[unit][ofx][regression]") {
     InstanceData data{};
     data.cached_result.alpha = filled_alpha();
     data.cached_result.foreground = filled_foreground();
@@ -112,6 +113,11 @@ TEST_CASE("begin and end sequence render reset per-instance caches", "[unit][ofx
     data.last_frame_ms = 15.0;
     data.avg_frame_ms = 14.0;
     data.frame_time_samples = 3;
+    data.last_render_work_origin = LastRenderWorkOrigin::SharedCache;
+    data.last_render_stage_timings = {
+        corridorkey::StageTiming{"ort_run", 980.0, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs", 120.0, 1, 1},
+    };
 
     FakeEffectProps props{.instance_data = &data};
 
@@ -132,9 +138,13 @@ TEST_CASE("begin and end sequence render reset per-instance caches", "[unit][ofx
     CHECK_FALSE(data.cached_signature_valid);
     CHECK_FALSE(data.temporal_state_valid);
     CHECK(data.render_count == 0);
-    CHECK(data.last_frame_ms == 0.0);
-    CHECK(data.avg_frame_ms == 0.0);
-    CHECK(data.frame_time_samples == 0);
+    CHECK(data.last_frame_ms == Catch::Approx(15.0));
+    CHECK(data.avg_frame_ms == Catch::Approx(14.0));
+    CHECK(data.frame_time_samples == 3);
+    CHECK(data.last_render_work_origin == LastRenderWorkOrigin::SharedCache);
+    REQUIRE(data.last_render_stage_timings.size() == 2);
+    CHECK(data.last_render_stage_timings.front().name == "ort_run");
+    CHECK(data.last_render_stage_timings.front().total_ms == Catch::Approx(980.0));
 
     data.cached_result.alpha = filled_alpha();
     data.cached_result.foreground = filled_foreground();
@@ -145,6 +155,10 @@ TEST_CASE("begin and end sequence render reset per-instance caches", "[unit][ofx
     data.last_frame_ms = 22.0;
     data.avg_frame_ms = 18.0;
     data.frame_time_samples = 2;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    data.last_render_stage_timings = {
+        corridorkey::StageTiming{"ort_run", 1800.0, 1, 1},
+    };
 
     REQUIRE(end_sequence_render(reinterpret_cast<OfxImageEffectHandle>(&props), nullptr) ==
             kOfxStatOK);
@@ -153,6 +167,10 @@ TEST_CASE("begin and end sequence render reset per-instance caches", "[unit][ofx
     CHECK(data.last_frame_ms == 22.0);
     CHECK(data.avg_frame_ms == 18.0);
     CHECK(data.frame_time_samples == 2);
+    CHECK(data.last_render_work_origin == LastRenderWorkOrigin::BackendRender);
+    REQUIRE(data.last_render_stage_timings.size() == 1);
+    CHECK(data.last_render_stage_timings.front().name == "ort_run");
+    CHECK(data.last_render_stage_timings.front().total_ms == Catch::Approx(1800.0));
 
     g_suites.property = previous_property_suite;
     g_suites.image_effect = previous_image_suite;

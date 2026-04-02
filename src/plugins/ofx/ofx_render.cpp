@@ -112,12 +112,23 @@ void record_frame_timing(InstanceData* data, double elapsed_ms) {
     if (data == nullptr || elapsed_ms <= 0.0) {
         return;
     }
-    data->last_frame_ms = elapsed_ms;
+    double displayed_ms = elapsed_ms;
+    if (!data->last_render_stage_timings.empty()) {
+        double stage_total_ms = 0.0;
+        for (const auto& timing : data->last_render_stage_timings) {
+            stage_total_ms += timing.total_ms;
+        }
+        if (stage_total_ms > 0.0) {
+            displayed_ms = stage_total_ms;
+        }
+    }
+
+    data->last_frame_ms = displayed_ms;
     if (data->frame_time_samples == 0 || data->avg_frame_ms <= 0.0) {
-        data->avg_frame_ms = elapsed_ms;
+        data->avg_frame_ms = displayed_ms;
     } else {
         constexpr double kSmoothing = 0.2;
-        data->avg_frame_ms = (1.0 - kSmoothing) * data->avg_frame_ms + kSmoothing * elapsed_ms;
+        data->avg_frame_ms = (1.0 - kSmoothing) * data->avg_frame_ms + kSmoothing * displayed_ms;
     }
     ++data->frame_time_samples;
     data->runtime_panel_dirty = true;

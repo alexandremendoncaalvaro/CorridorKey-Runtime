@@ -119,6 +119,8 @@ TEST_CASE("runtime status omits frame timings when a dedicated timings field exi
           "[unit][ofx][regression]") {
     InstanceData data{};
     data.render_count = 4;
+    data.last_frame_ms = 1500.0;
+    data.avg_frame_ms = 1400.0;
     data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
     data.last_render_stage_timings = {
         corridorkey::StageTiming{"ort_run", 1200.0, 1, 1},
@@ -126,7 +128,7 @@ TEST_CASE("runtime status omits frame timings when a dedicated timings field exi
     };
 
     REQUIRE(runtime_status_runtime_label(data) == "Ready");
-    REQUIRE(runtime_timings_runtime_label(data) == "Frame render: 1.5 s | Hotspot: ort_run 1.2 s");
+    REQUIRE(runtime_timings_runtime_label(data) == "1.5 s | Avg: 1.4 s | Hotspot: ort_run 1.2 s");
 }
 
 TEST_CASE("runtime session label exposes dedicated versus shared sessions",
@@ -155,13 +157,15 @@ TEST_CASE("runtime status still prioritizes errors and warnings while timings st
     InstanceData data{};
     data.last_error = "TensorRT compile failed";
     data.last_warning = "Using 1024px fallback";
+    data.last_frame_ms = 1800.0;
+    data.avg_frame_ms = 1600.0;
     data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
     data.last_render_stage_timings = {
         corridorkey::StageTiming{"ort_run", 1800.0, 1, 1},
     };
 
     REQUIRE(runtime_status_runtime_label(data) == "Error: TensorRT compile failed");
-    REQUIRE(runtime_timings_runtime_label(data) == "Frame render: 1.8 s | Hotspot: ort_run 1.8 s");
+    REQUIRE(runtime_timings_runtime_label(data) == "1.8 s | Avg: 1.6 s | Hotspot: ort_run 1.8 s");
 
     data.last_error.clear();
     REQUIRE(runtime_status_runtime_label(data) == "Note: Using 1024px fallback");
@@ -170,6 +174,8 @@ TEST_CASE("runtime status still prioritizes errors and warnings while timings st
 TEST_CASE("runtime timings label exposes cache-backed renders explicitly",
           "[unit][ofx][regression]") {
     InstanceData data{};
+    data.last_frame_ms = 1100.0;
+    data.avg_frame_ms = 1000.0;
     data.last_render_stage_timings = {
         corridorkey::StageTiming{"ort_run", 980.0, 1, 1},
         corridorkey::StageTiming{"frame_extract_outputs", 120.0, 1, 1},
@@ -177,11 +183,21 @@ TEST_CASE("runtime timings label exposes cache-backed renders explicitly",
 
     data.last_render_work_origin = LastRenderWorkOrigin::SharedCache;
     REQUIRE(runtime_timings_runtime_label(data) ==
-            "Frame render: 1.1 s | Shared cache | Hotspot: ort_run 980.0 ms");
+            "1.1 s | Avg: 1.0 s | Shared cache | Hotspot: ort_run 980.0 ms");
 
     data.last_render_work_origin = LastRenderWorkOrigin::InstanceCache;
     REQUIRE(runtime_timings_runtime_label(data) ==
-            "Frame render: 1.1 s | Instance cache | Hotspot: ort_run 980.0 ms");
+            "1.1 s | Avg: 1.0 s | Instance cache | Hotspot: ort_run 980.0 ms");
+}
+
+TEST_CASE("runtime timings label falls back to preserved frame timing without stage metadata",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.last_frame_ms = 42.0;
+    data.avg_frame_ms = 38.0;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+
+    REQUIRE(runtime_timings_runtime_label(data) == "42.0 ms | Avg: 38.0 ms");
 }
 
 TEST_CASE("runtime backend work label summarizes backend renders and cache hits",

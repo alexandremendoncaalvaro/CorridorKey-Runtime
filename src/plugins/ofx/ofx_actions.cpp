@@ -310,9 +310,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "or render.",
         "runtime_group");
     define_runtime_status_param(
-        param_set, kParamRuntimeTimings, "Frame Render", "Initializing...",
-        "Shows the real backend render time for the last frame result, including cached reuse "
-        "when that timing metadata is available.",
+        param_set, kParamRuntimeTimings, "Last Frame", "No frames processed",
+        "Shows the last frame render time CorridorKey associates with the visible result, plus "
+        "the rolling average. This value persists across playback sequences until a new frame is "
+        "computed.",
         "runtime_group");
     define_runtime_status_param(
         param_set, kParamRuntimeBackendWork, "Backend Work", "Initializing...",
