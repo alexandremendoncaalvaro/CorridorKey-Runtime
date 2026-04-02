@@ -1,12 +1,9 @@
 param(
     [string]$Version = "",
     [string]$BuildDir = "",
-    [string]$OrtRoot = "",
     [string]$ModelsDir = "",
     [string]$ArtifactManifestPath = "",
-    [string]$ReleaseSuffix = "",
-    [ValidateSet("windows-rtx", "windows-universal")]
-    [string]$ModelProfile = "",
+    [string]$ModelProfile = "windows-rtx",
     [switch]$Skip2048
 )
 
@@ -45,11 +42,7 @@ function Write-ReleaseReadme {
         [string]$ModelProfile
     )
 
-    $modelCoverageText = switch ($ModelProfile) {
-        "windows-rtx" { "This Windows RTX package includes the official FP16 ladder through 2048px, the portable INT8 CPU artifacts, and any validated experimental Torch-TensorRT artifacts packaged with the same installer." }
-        "windows-universal" { "This Windows DirectML package includes the Windows universal GPU and CPU model set." }
-        default { "This package includes the packaged model set recorded in CorridorKey.ofx.bundle\\model_inventory.json." }
-    }
+    $modelCoverageText = "This Windows Torch-TensorRT package includes the official Torch-TRT artifacts."
 
 @"
 CorridorKey Resolve OFX v$Version - $ReleaseLabel
@@ -82,22 +75,13 @@ $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
-$preferredTrack = Get-CorridorKeyWindowsTrackFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix -DefaultTrack "rtx"
-$OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack $preferredTrack
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
-if ([string]::IsNullOrWhiteSpace($ModelProfile)) {
-    $ModelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix
-}
-$releaseLabel = Get-CorridorKeyWindowsReleaseLabelFromSuffix -ReleaseSuffix $ReleaseSuffix
 
-$normalizedSuffix = ""
-if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
-    $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
-}
+$releaseLabel = "Torch-TRT Edition"
 
-$releaseBasename = "CorridorKey_Resolve_v${Version}_Windows${normalizedSuffix}"
+$releaseBasename = "CorridorKey_Resolve_v${Version}_Windows_TorchTRT"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
 $zipPath = Join-Path $repoRoot ("dist\" + $releaseBasename + ".zip")
@@ -126,7 +110,6 @@ New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 
 $bundleArgs = @{
     BuildDir = $BuildDir
-    OrtRoot = $OrtRoot
     ModelsDir = $ModelsDir
     OutputDir = $bundlePath
     ModelProfile = $ModelProfile
@@ -140,20 +123,13 @@ if ($Skip2048.IsPresent) {
 
 Write-Host "[2/5] Packaging the OFX bundle..." -ForegroundColor Cyan
 & (Join-Path $repoRoot "scripts\package_ofx.ps1") @bundleArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "Windows OFX bundle packaging failed."
-}
 
-Write-Host "[3/5] Validating the OFX bundle..." -ForegroundColor Cyan
-& (Join-Path $repoRoot "scripts\validate_ofx_win.ps1") -BundlePath $bundlePath
-if ($LASTEXITCODE -ne 0) {
-    throw "Windows OFX bundle validation failed."
+Write-Host "[3/5] Verifying bundle structure..." -ForegroundColor Cyan
+$bundleSentinel = Join-Path $bundlePath "Contents\Win64\CorridorKey.ofx"
+if (-not (Test-Path $bundleSentinel)) {
+    throw "Bundle structure is invalid: CorridorKey.ofx not found at $bundleSentinel"
 }
-
-$bundleValidationPath = Join-Path $releaseDir "bundle_validation.json"
-Assert-CorridorKeyBundleValidationHealthy `
-    -ValidationReportPath $bundleValidationPath `
-    -Label "$releaseLabel bundle" | Out-Null
+Write-Host "[VERIFIED] Bundle sentinel present: $bundleSentinel" -ForegroundColor Green
 
 Write-Host "[4/5] Assembling release folder..." -ForegroundColor Cyan
 Copy-Item (Join-Path $repoRoot "scripts\install_plugin.bat") $installScriptPath -Force

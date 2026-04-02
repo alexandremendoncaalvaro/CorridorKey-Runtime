@@ -864,14 +864,12 @@ function Get-CorridorKeyPreparedModelList {
 }
 
 function Get-CorridorKeyWindowsRtxPromotedModelList {
+    # TorchTRT FP16 ladder only. INT8 and legacy .onnx are not packaged in the Windows RTX release.
     return @(
-        "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_1024.onnx",
-        "corridorkey_fp16_1536.onnx",
-        "corridorkey_fp16_2048.onnx",
-        "corridorkey_int8_512.onnx",
-        "corridorkey_int8_768.onnx",
-        "corridorkey_int8_1024.onnx"
+        "corridorkey_torchtrt_fp16_512.ts",
+        "corridorkey_torchtrt_fp16_1024.ts",
+        "corridorkey_torchtrt_fp16_1536.ts",
+        "corridorkey_torchtrt_fp16_2048.ts"
     )
 }
 

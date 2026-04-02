@@ -1,12 +1,9 @@
 param(
     [string]$BuildDir = "",
-    [string]$OrtRoot = "",
     [string]$ModelsDir = "",
     [string]$OutputDir = "",
     [string]$ArtifactManifestPath = "",
-    [ValidateSet("windows-rtx", "windows-universal")]
     [string]$ModelProfile = "windows-rtx",
-    [switch]$AllowUncertifiedTensorRtContexts,
     [switch]$Skip2048
 )
 
@@ -19,7 +16,6 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
-$OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack "rtx"
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
@@ -42,72 +38,6 @@ function Assert-FileExists {
     }
 }
 
-function Resolve-OrtDllPath {
-    param([string]$Root, [string]$Name)
-    $path1 = Join-Path $Root $Name
-    $path2 = Join-Path (Join-Path $Root "bin") $Name
-    $path3 = Join-Path (Join-Path $Root "lib") $Name
-    foreach ($candidate in @($path1, $path2, $path3)) {
-        if (Test-Path $candidate) {
-            return $candidate
-        }
-    }
-    return $null
-}
-
-function Copy-OrtDll {
-    param([string]$Root, [string]$Name, [string]$DestinationDir)
-    $resolved = Resolve-OrtDllPath -Root $Root -Name $Name
-    if (-not $resolved) {
-        throw "Required runtime DLL not found: $Name (searched under $Root)"
-    }
-    Copy-Item $resolved $DestinationDir -Force
-}
-
-function Copy-OrtDllIfPresent {
-    param([string]$Root, [string]$Name, [string]$DestinationDir)
-    $resolved = Resolve-OrtDllPath -Root $Root -Name $Name
-    if (-not $resolved) {
-        return $false
-    }
-    Copy-Item $resolved $DestinationDir -Force
-    return $true
-}
-
-function Resolve-OrtDllByPattern {
-    param([string]$Root, [string]$Pattern)
-
-    $searchRoots = @(
-        $Root,
-        (Join-Path $Root "bin"),
-        (Join-Path $Root "lib")
-    )
-
-    $matches = @()
-    foreach ($searchRoot in $searchRoots) {
-        if (-not (Test-Path $searchRoot)) {
-            continue
-        }
-        $matches += Get-ChildItem -Path $searchRoot -Filter $Pattern -File -ErrorAction SilentlyContinue
-    }
-
-    return $matches |
-        Sort-Object -Property Name -Descending |
-        Select-Object -First 1
-}
-
-function Copy-OrtDllByPattern {
-    param([string]$Root, [string]$Pattern, [string]$DestinationDir)
-
-    $resolved = Resolve-OrtDllByPattern -Root $Root -Pattern $Pattern
-    if ($null -eq $resolved) {
-        throw "Required runtime DLL not found matching pattern '$Pattern' (searched under $Root)"
-    }
-
-    Copy-Item $resolved.FullName $DestinationDir -Force
-    return $resolved.Name
-}
-
 function Copy-StagedRuntimeDlls {
     param(
         [string]$SourceDir,
@@ -124,167 +54,6 @@ function Copy-StagedRuntimeDlls {
         }
 }
 
-function Get-RuntimeCapabilitiesPayload {
-    param([string]$RuntimeDir)
-
-    $runtimeBinary = Join-Path $RuntimeDir "corridorkey.exe"
-    if (-not (Test-Path $runtimeBinary)) {
-        return $null
-    }
-
-    $previousModelsDir = if (Test-Path Env:CORRIDORKEY_MODELS_DIR) {
-        $env:CORRIDORKEY_MODELS_DIR
-    } else {
-        $null
-    }
-    $bundleModelsDir = Join-Path (Split-Path -Parent $RuntimeDir) "Resources\models"
-
-    Push-Location $RuntimeDir
-    try {
-        if (Test-Path $bundleModelsDir) {
-            $env:CORRIDORKEY_MODELS_DIR = [System.IO.Path]::GetFullPath($bundleModelsDir)
-        }
-        $json = & $runtimeBinary info --json 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
-            return $null
-        }
-
-        $parsed = $json | ConvertFrom-Json
-        if ($null -eq $parsed.capabilities) {
-            return $null
-        }
-
-        return $parsed.capabilities
-    } catch {
-        return $null
-    } finally {
-        if ($null -ne $previousModelsDir) {
-            $env:CORRIDORKEY_MODELS_DIR = $previousModelsDir
-        } else {
-            Remove-Item Env:CORRIDORKEY_MODELS_DIR -ErrorAction SilentlyContinue
-        }
-        Pop-Location
-    }
-}
-
-function Get-RuntimeSupportedBackends {
-    param([string]$RuntimeDir)
-
-    $capabilities = Get-RuntimeCapabilitiesPayload -RuntimeDir $RuntimeDir
-    if ($null -eq $capabilities -or $null -eq $capabilities.supported_backends) {
-        return @()
-    }
-
-    return @($capabilities.supported_backends)
-}
-
-function Get-RuntimeSupportedExecutionEngines {
-    param([string]$RuntimeDir)
-
-    $capabilities = Get-RuntimeCapabilitiesPayload -RuntimeDir $RuntimeDir
-    if ($null -eq $capabilities -or $null -eq $capabilities.supported_execution_engines) {
-        return @()
-    }
-
-    return @($capabilities.supported_execution_engines)
-}
-
-function Test-RuntimeBackendSupport {
-    param(
-        [string]$RuntimeDir,
-        [string]$RequiredBackend
-    )
-
-    $runtimeBinary = Join-Path $RuntimeDir "corridorkey.exe"
-    if (-not (Test-Path $runtimeBinary)) {
-        return $false
-    }
-
-    Push-Location $RuntimeDir
-    try {
-        $json = & $runtimeBinary info --json 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
-            return $false
-        }
-
-        $parsed = $json | ConvertFrom-Json
-        if ($null -eq $parsed.capabilities -or $null -eq $parsed.capabilities.supported_backends) {
-            return $false
-        }
-
-        return @($parsed.capabilities.supported_backends) -contains $RequiredBackend
-    } catch {
-        return $false
-    } finally {
-        Pop-Location
-    }
-}
-
-function Ensure-TensorRtCompiledContext {
-    param(
-        [string]$RuntimeDir,
-        [string]$ModelPath,
-        [string]$OutputPath
-    )
-
-    if (Test-Path $OutputPath) {
-        return
-    }
-
-    $runtimeBinary = Join-Path $RuntimeDir "corridorkey.exe"
-    if (-not (Test-Path $runtimeBinary)) {
-        throw "Cannot compile TensorRT context because $runtimeBinary was not found."
-    }
-
-    $envPathOld = $env:PATH
-    Push-Location $RuntimeDir
-    try {
-        $env:PATH = "$RuntimeDir;$envPathOld"
-        $json = & $runtimeBinary `
-            compile-context `
-            --model $ModelPath `
-            --output $OutputPath `
-            --device tensorrt `
-            --json 2>$null
-        $exitCode = $LASTEXITCODE
-        $parsed = $null
-        if (-not [string]::IsNullOrWhiteSpace($json)) {
-            try {
-                $parsed = $json | ConvertFrom-Json
-            } catch {
-                $parsed = $null
-            }
-        }
-
-        if ($exitCode -ne 0) {
-            if ($null -ne $parsed -and $parsed.PSObject.Properties.Match("error").Count -gt 0) {
-                throw [string]$parsed.error
-            }
-            throw "compile-context failed for $(Split-Path -Leaf $ModelPath)"
-        }
-
-        if ($null -eq $parsed) {
-            throw "compile-context did not return valid JSON for $(Split-Path -Leaf $ModelPath)"
-        }
-
-        if (-not $parsed.success) {
-            $errorMessage = if ($parsed.PSObject.Properties.Match("error").Count -gt 0) {
-                [string]$parsed.error
-            } else {
-                "compile-context returned success=false"
-            }
-            throw $errorMessage
-        }
-    } finally {
-        $env:PATH = $envPathOld
-        Pop-Location
-    }
-
-    if (-not (Test-Path $OutputPath)) {
-        throw "compile-context did not produce the expected output file: $OutputPath"
-    }
-}
-
 if (Test-Path $OutputDir) {
     Remove-Item $OutputDir -Recurse -Force
 }
@@ -298,247 +67,103 @@ Assert-FileExists -Path $runtimeServerBinary -Message "Runtime server binary not
 Copy-Item $pluginBinary $win64Dir -Force
 Copy-Item $cliBinary $win64Dir -Force
 Copy-Item $runtimeServerBinary $win64Dir -Force
-Copy-StagedRuntimeDlls -SourceDir (Split-Path -Parent $pluginBinary) -DestinationDir $win64Dir
-Copy-StagedRuntimeDlls -SourceDir (Split-Path -Parent $cliBinary) -DestinationDir $win64Dir
-Copy-StagedRuntimeDlls -SourceDir (Split-Path -Parent $runtimeServerBinary) -DestinationDir $win64Dir
 
-Write-Host "Staging ONNX Runtime core DLLs from $OrtRoot" -ForegroundColor Cyan
-Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
-Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
-Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir | Out-Null
 
-$isRtxRuntime = $OrtRoot -match "rtx"
+# Minimum DLLs required for Torch-TensorRT FP16 inference on NVIDIA RTX GPUs.
+# Builder resources (nvinfer_builder_resource_sm*.dll, cudnn_engines_*.dll) are
+# excluded — they are only needed during engine compilation, not at inference time.
+# onnxruntime.dll and its providers are also excluded: the Windows RTX release is
+# Torch-TRT exclusive.
+$kTorchTrtRequiredDlls = @(
+    # Core TorchTRT runtime
+    "torchtrt.dll",
+    # PyTorch core
+    "torch.dll",
+    "torch_cpu.dll",
+    "torch_cuda.dll",
+    "torch_global_deps.dll",
+    # C10 runtime
+    "c10.dll",
+    "c10_cuda.dll",
+    # TensorRT inference runtime (no builder resources)
+    "nvinfer_10.dll",
+    "nvinfer_plugin_10.dll",
+    # CUDA runtime
+    "cudart64_12.dll",
+    "cudart64_13.dll",
+    # cuBLAS
+    "cublas64_13.dll",
+    "cublasLt64_13.dll",
+    # cuDNN inference (ops only, not engines/precompiled)
+    "cudnn64_9.dll",
+    "cudnn_adv64_9.dll",
+    "cudnn_cnn64_9.dll",
+    "cudnn_graph64_9.dll",
+    "cudnn_heuristic64_9.dll",
+    "cudnn_ops64_9.dll",
+    # cuSPARSE, cuSOLVER required by Torch internals
+    "cusparse64_12.dll",
+    "cusolver64_12.dll",
+    # cuFFT required by some Torch ops
+    "cufft64_12.dll",
+    "cufftw64_12.dll",
+    # NVRTC for JIT kernels
+    "nvrtc64_130_0.dll",
+    "nvrtc-builtins64_130.dll",
+    "nvJitLink_130_0.dll",
+    # CUDA Profiling Tools Interface (implicitly required by torch_cpu.dll)
+    "cupti64_*.dll",
+    # OpenMP runtime (Torch CPU dependency)
+    "libiomp5md.dll",
+    # NVTX profiling (small, no-op stub in release)
+    "nvToolsExt64_1.dll",
+    # Caffe2 NVRTC wrapper
+    "caffe2_nvrtc.dll",
+    # TorchTRT Python/UV runtime deps
+    "torch_python.dll",
+    "uv.dll",
+    # PyTorch shared memory transport (required by torch_cpu.dll)
+    "shm.dll",
+    # zlib (I/O dep)
+    "zlibwapi.dll"
+)
 
-$copiedOptionalGpuProvider = $false
-foreach ($provider in @(
-        "onnxruntime_providers_winml.dll",
-        "onnxruntime_providers_openvino.dll"
-    )) {
-    if (Copy-OrtDllIfPresent -Root $OrtRoot -Name $provider -DestinationDir $win64Dir) {
-        Write-Host "Copied optional runtime DLL: $provider"
-        $copiedOptionalGpuProvider = $true
-    }
-}
-if (-not $copiedOptionalGpuProvider) {
-    # Check if DirectML is available even if no separate provider DLL exists
-    # (since it can be built into onnxruntime.dll in some packages)
-    $supportedBackends = Get-RuntimeSupportedBackends -RuntimeDir $win64Dir
-    $hasOptionalGpuRuntime = $supportedBackends -contains "dml" -or
-        $supportedBackends -contains "winml" -or
-        $supportedBackends -contains "openvino"
-    if (-not $hasOptionalGpuRuntime) {
-        if (Test-Path (Join-Path $win64Dir "DirectML.dll")) {
-             Write-Host "DirectML.dll is present, assuming DirectML support is built into onnxruntime.dll"
-             $hasOptionalGpuRuntime = $true
-        }
-    }
-
-    if (-not $hasOptionalGpuRuntime) {
-        if ($isRtxRuntime) {
-            Write-Host "RTX runtime intentionally omits DirectML/WinML/OpenVINO provider support." -ForegroundColor Cyan
-        } else {
-            Write-Host "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot." -ForegroundColor Cyan
-        }
+$srcDllDir = Split-Path -Parent $pluginBinary
+Write-Host "Staging Torch-TensorRT runtime DLLs (allowlist only)..." -ForegroundColor Cyan
+$copied = 0
+$skipped = 0
+foreach ($dllName in $kTorchTrtRequiredDlls) {
+    $srcPath = Join-Path $srcDllDir $dllName
+    if (Test-Path $srcPath) {
+        Copy-Item $srcPath $win64Dir -Force
+        $copied++
     } else {
-        Write-Host "Detected packaged optional GPU backend(s): $($supportedBackends -join ', ')"
-
-        # Validate the staged bundle with the staged DLL set, not the developer machine.
-        Write-Host "Validating packaged backends loadability..." -ForegroundColor Cyan
-        $cliPath = Join-Path $win64Dir "corridorkey.exe"
-        if (Test-Path $cliPath) {
-            $envPathOld = $env:PATH
-            try {
-                # Temporarily add staging dir to PATH so it finds the DLLs
-                $env:PATH = "$win64Dir;$envPathOld"
-                $requiredBackend = if ($isRtxRuntime) { "tensorrt" } else { "dml" }
-
-                if (Test-RuntimeBackendSupport -RuntimeDir $win64Dir -RequiredBackend $requiredBackend) {
-                    Write-Host "[VERIFIED] $requiredBackend backend is functional in the package." -ForegroundColor Green
-                } else {
-                    throw "CRITICAL: Backend validation failed! 'corridorkey info --json' does not report $requiredBackend as supported."
-                }
-            } finally {
-                $env:PATH = $envPathOld
-            }
-        }
+        Write-Host "  [SKIP] Not found in build output: $dllName" -ForegroundColor DarkGray
+        $skipped++
     }
 }
-
-$tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nv_tensorrt_rtx.dll"
-if (-not $tensorrtProvider) {
-    $tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nvtensorrtrtx.dll"
-}
-$cudaProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_cuda.dll"
-if ($tensorrtProvider) {
-    Copy-Item $tensorrtProvider $win64Dir -Force
-    $onnxParserDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_onnxparser_rtx_*.dll" -DestinationDir $win64Dir
-    $runtimeDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_rtx_*.dll" -DestinationDir $win64Dir
-    Write-Host "Copied TensorRT-RTX support DLLs: $onnxParserDll, $runtimeDll"
-}
-if ($cudaProvider) {
-    Copy-Item $cudaProvider $win64Dir -Force
-}
-
-$requiresCudaRuntime = ($null -ne $tensorrtProvider) -or ($null -ne $cudaProvider)
-if ($requiresCudaRuntime) {
-    $cudartCandidates = @()
-    $rootBin = Join-Path $OrtRoot "bin"
-    $rootLib = Join-Path $OrtRoot "lib"
-    foreach ($candidateDir in @($OrtRoot, $rootBin, $rootLib)) {
-        if (Test-Path $candidateDir) {
-            $cudartCandidates += Get-ChildItem -Path $candidateDir -Filter "cudart64_*.dll" -File -ErrorAction SilentlyContinue
-        }
-    }
-    if ($cudartCandidates.Count -eq 0) {
-        throw "Required CUDA runtime DLL not found (cudart64_*.dll)."
-    }
-    foreach ($candidate in $cudartCandidates) {
-        Copy-Item $candidate.FullName $win64Dir -Force
-    }
-} else {
-    Write-Host "Skipping CUDA runtime staging because no CUDA/TensorRT provider was found."
-}
-
-if ($null -ne $tensorrtProvider) {
-    Write-Host "Validating packaged TensorRT backend loadability..." -ForegroundColor Cyan
-    $envPathOld = $env:PATH
-    try {
-        $env:PATH = "$win64Dir;$envPathOld"
-        if (Test-RuntimeBackendSupport -RuntimeDir $win64Dir -RequiredBackend "tensorrt") {
-            Write-Host "[VERIFIED] tensorrt backend is functional in the package." -ForegroundColor Green
-        } else {
-            throw "CRITICAL: TensorRT backend validation failed! 'corridorkey info --json' does not report tensorrt as supported."
-        }
-    } finally {
-        $env:PATH = $envPathOld
-    }
-}
+Write-Host "  Copied $copied DLLs, skipped $skipped not-present entries." -ForegroundColor Cyan
 
 $targetModels = Get-CorridorKeyOfxBundleTargetModels -ModelProfile $ModelProfile
 if ($Skip2048.IsPresent) {
-    $targetModels = @($targetModels | Where-Object { $_ -ne "corridorkey_fp16_2048.onnx" })
+    $targetModels = @($targetModels | Where-Object { $_ -ne "corridorkey_torchtrt_fp16_2048.ts" })
 }
-$profileContract = Get-CorridorKeyModelProfileContract -ModelProfile $ModelProfile
+
 $modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
-$compiledContextModels = @()
-$expectedCompiledContextModels = Get-CorridorKeyExpectedCompiledContextModels `
-    -PresentModels $modelInventory.present_models `
-    -ModelProfile $ModelProfile
-$torchTensorRtArtifacts = @()
-$expectedTorchTensorRtArtifacts = Get-CorridorKeyExpectedTorchTensorRtArtifacts `
-    -PresentModels $modelInventory.present_models `
-    -ModelProfile $ModelProfile
-$strictCertifiedRtxPackaging = $profileContract.expects_compiled_context_models -and
-    (-not $AllowUncertifiedTensorRtContexts.IsPresent)
-$artifactManifest = $null
-
-if ($strictCertifiedRtxPackaging) {
-    if ([string]::IsNullOrWhiteSpace($ArtifactManifestPath)) {
-        $ArtifactManifestPath = Get-CorridorKeyWindowsRtxArtifactManifestPath -ModelsDir $ModelsDir
-    }
-
-    $artifactManifest = Assert-CorridorKeyWindowsRtxArtifactManifestHealthy `
-        -ArtifactsDir $ModelsDir `
-        -ExpectedModels $modelInventory.present_models `
-        -ExpectedCompiledContextModels $expectedCompiledContextModels `
-        -ArtifactManifestPath $ArtifactManifestPath `
-        -Label "$ModelProfile package source"
-}
 
 foreach ($model in $modelInventory.present_models) {
     $sourcePath = Join-Path $ModelsDir $model
     Copy-Item $sourcePath $resourcesDir -Force
-
-    $compiledContextName = ([System.IO.Path]::GetFileNameWithoutExtension($model)) + "_ctx.onnx"
-    $compiledContextPath = Join-Path $ModelsDir $compiledContextName
-    if (Test-Path $compiledContextPath) {
-        Copy-Item $compiledContextPath $resourcesDir -Force
-        $compiledContextModels += $compiledContextName
-    }
-}
-
-foreach ($torchArtifact in $expectedTorchTensorRtArtifacts) {
-    $sourcePath = Join-Path $ModelsDir $torchArtifact
-    if (-not (Test-Path $sourcePath)) {
-        continue
-    }
-
-    Copy-Item $sourcePath $resourcesDir -Force
-    $torchTensorRtArtifacts += $torchArtifact
-}
-
-if ($profileContract.expects_compiled_context_models -and -not $strictCertifiedRtxPackaging) {
-    foreach ($compiledContextName in $expectedCompiledContextModels) {
-        if ($compiledContextModels -contains $compiledContextName) {
-            continue
-        }
-
-        $modelName = $compiledContextName -replace '_ctx\.onnx$', '.onnx'
-        $stagedModelPath = Join-Path $resourcesDir $modelName
-        $stagedCompiledContextPath = Join-Path $resourcesDir $compiledContextName
-        Ensure-TensorRtCompiledContext `
-            -RuntimeDir $win64Dir `
-            -ModelPath $stagedModelPath `
-            -OutputPath $stagedCompiledContextPath
-        $compiledContextModels += $compiledContextName
-    }
-}
-
-$missingCompiledContextModels = @(
-    $expectedCompiledContextModels |
-        Where-Object { $compiledContextModels -notcontains $_ }
-)
-$missingTorchTensorRtArtifacts = @(
-    $expectedTorchTensorRtArtifacts |
-        Where-Object { $torchTensorRtArtifacts -notcontains $_ }
-)
-
-$certificationContractIssues = @()
-$certificationContractComplete = $false
-if ($strictCertifiedRtxPackaging) {
-    Copy-Item $ArtifactManifestPath $artifactManifestOutputPath -Force
-    $stagedManifest = Assert-CorridorKeyWindowsRtxArtifactManifestHealthy `
-        -ArtifactsDir $resourcesDir `
-        -ExpectedModels $modelInventory.present_models `
-        -ExpectedCompiledContextModels $expectedCompiledContextModels `
-        -ArtifactManifestPath $artifactManifestOutputPath `
-        -Label "$ModelProfile staged package"
-    $artifactManifest = $stagedManifest
-    $certificationContractComplete = $true
-} elseif ($profileContract.expects_compiled_context_models) {
-    $certificationContractIssues += "RTX packaging did not use a certified artifact manifest."
 }
 
 $inventoryPayload = [ordered]@{
-    package_type = $profileContract.package_type
-    model_profile = $profileContract.model_profile
-    bundle_track = $profileContract.bundle_track
-    release_label = $profileContract.release_label
-    optimization_profile_id = $profileContract.optimization_profile_id
-    optimization_profile_label = $profileContract.optimization_profile_label
-    backend_intent = $profileContract.backend_intent
-    fallback_policy = $profileContract.fallback_policy
-    warmup_policy = $profileContract.warmup_policy
-    certification_tier = $profileContract.certification_tier
-    unrestricted_quality_attempt = $profileContract.unrestricted_quality_attempt
+    package_type = "Windows Torch-TRT Release"
     models_dir = [System.IO.Path]::GetFullPath($ModelsDir)
     expected_models = @($modelInventory.expected_models)
     present_models = @($modelInventory.present_models)
     missing_models = @($modelInventory.missing_models)
     present_count = $modelInventory.present_count
     missing_count = $modelInventory.missing_count
-    compiled_context_models = @($compiledContextModels)
-    expected_compiled_context_models = @($expectedCompiledContextModels)
-    missing_compiled_context_models = @($missingCompiledContextModels)
-    compiled_context_complete = @($missingCompiledContextModels).Count -eq 0
-    torch_tensorrt_artifacts = @($torchTensorRtArtifacts)
-    expected_torch_tensorrt_artifacts = @($expectedTorchTensorRtArtifacts)
-    missing_torch_tensorrt_artifacts = @($missingTorchTensorRtArtifacts)
-    torch_tensorrt_artifact_complete = @($missingTorchTensorRtArtifacts).Count -eq 0
-    supported_execution_engines = @(Get-RuntimeSupportedExecutionEngines -RuntimeDir $win64Dir)
-    certification_manifest_present = $strictCertifiedRtxPackaging
-    certification_contract_complete = $certificationContractComplete
-    certification_contract_issues = @($certificationContractIssues)
 }
 Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
 
