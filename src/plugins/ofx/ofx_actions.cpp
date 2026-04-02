@@ -453,14 +453,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     // --- Group 8: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
-
-    define_choice_param(
-        param_set, kParamQuantizationMode, "Precision", kDefaultQuantizationMode,
-        {"FP16 (Official)", "INT8 (Experimental)"},
-        "Model precision. FP16 (Official) is the validated Windows RTX path. "
-        "INT8 (Experimental) remains part of the decision program and currently requires "
-        "Allow CPU Fallback on Windows GPU tracks.",
-        "performance_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process the full model output in overlapping tiles at source resolution. "
                       "Use this when lower quality modes lose too much detail and you accept a "
@@ -559,25 +551,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Maximum time in seconds to wait for model loading and bootstrap. "
                      "Increase if first-frame initialization times out.",
                      "advanced_runtime_group");
-    define_bool_param(
-        param_set, kParamAllowCpuFallback, "Allow CPU Fallback", 0,
-        "Opt in to CPU fallback when the requested Windows GPU path cannot satisfy the current "
-        "precision or backend request. INT8 on Windows currently uses this path.",
-        "advanced_runtime_group");
-    define_choice_param(
-        param_set, kParamExecutionEngine, "Engine", kExecutionEngineAuto,
-        {execution_engine_ui_label(kExecutionEngineAuto),
-         execution_engine_ui_label(kExecutionEngineOfficial),
-         execution_engine_ui_label(kExecutionEngineTorchTensorRt)},
-        "Execution engine policy for Windows RTX. Auto keeps the validated official path. "
-        "Torch-TensorRT is experimental and intended for side-by-side comparison.",
-        "advanced_runtime_group",
-#if defined(_WIN32)
-        true
-#else
-        false
-#endif
-    );
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;

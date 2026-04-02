@@ -9,7 +9,7 @@
 
 namespace corridorkey::ofx {
 
-// Quality mode choice indices
+// Quality mode choice indices — FP16 ladder only; no INT8/CPU Draft on Windows RTX.
 constexpr int kQualityAuto = 0;
 constexpr int kQualityPreview = 1;
 constexpr int kQualityHigh = 2;
@@ -188,38 +188,11 @@ inline bool input_color_runtime_mode_is_linear(InputColorRuntimeMode mode) {
            mode == InputColorRuntimeMode::AutoFallbackLinear;
 }
 
-// Quantization mode
+// Quantization: FP16 only on Windows RTX — INT8 is not supported.
 constexpr int kQuantizationFp16 = 0;
-constexpr int kQuantizationInt8 = 1;
 
-// Execution engine
-constexpr int kExecutionEngineAuto = 0;
-constexpr int kExecutionEngineOfficial = 1;
-constexpr int kExecutionEngineTorchTensorRt = 2;
-
-inline const char* execution_engine_ui_label(int choice) {
-    switch (choice) {
-        case kExecutionEngineOfficial:
-            return "ORT TensorRT (Official)";
-        case kExecutionEngineTorchTensorRt:
-            return "Torch-TensorRT (Experimental)";
-        case kExecutionEngineAuto:
-        default:
-            return "Auto (Official)";
-    }
-}
-
-inline ExecutionEngine execution_engine_from_choice(int choice) {
-    switch (choice) {
-        case kExecutionEngineOfficial:
-            return ExecutionEngine::Official;
-        case kExecutionEngineTorchTensorRt:
-            return ExecutionEngine::TorchTensorRt;
-        case kExecutionEngineAuto:
-        default:
-            return ExecutionEngine::Auto;
-    }
-}
+// Execution engine: TorchTensorRt only on Windows RTX — no ORT selector.
+constexpr int kExecutionEngineTorchTensorRt = 0;
 
 // Screen color
 constexpr int kScreenColorGreen = 0;

@@ -91,13 +91,7 @@ set_target_properties(corridorkey_ofx PROPERTIES
 )
 
 if(WIN32)
-    if(CORRIDORKEY_MSVC_DELAYIMP_LIB)
-        target_link_libraries(corridorkey_ofx PRIVATE "${CORRIDORKEY_MSVC_DELAYIMP_LIB}")
-    else()
-        target_link_libraries(corridorkey_ofx PRIVATE delayimp.lib)
-    endif()
     corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx)
-    set_property(TARGET corridorkey_ofx APPEND_STRING PROPERTY LINK_FLAGS " /DELAYLOAD:onnxruntime.dll")
 endif()
 
 if(WIN32)

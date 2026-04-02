@@ -253,31 +253,10 @@ inline bool should_abort_quality_fallback_after_compile_failure(
            selection.effective_resolution == selection.requested_resolution;
 }
 
-inline std::optional<std::string> unsupported_quantization_message(
-    Backend backend, int quantization_mode, bool allow_cpu_fallback = false) {
-    if (quantization_mode != kQuantizationInt8) {
-        return std::nullopt;
-    }
-
-    if ((backend == Backend::TensorRT || backend == Backend::CUDA) && !allow_cpu_fallback) {
-        return "INT8 (Experimental) is currently CPU-only on the Windows RTX track. "
-               "Enable Allow CPU Fallback or use FP16 (Official).";
-    }
-
-    if ((backend == Backend::DirectML || backend == Backend::WindowsML ||
-         backend == Backend::OpenVINO) &&
-        !allow_cpu_fallback) {
-        return "INT8 (Experimental) is not yet validated on the selected Windows GPU backend. "
-               "Enable Allow CPU Fallback or use FP16 (Official).";
-    }
-
-    return std::nullopt;
-}
+// Removed unsupported_quantization_message: INT8 is globally unsupported on Windows RTX.
 
 inline int clamp_quality_mode_for_cpu_backend(Backend backend, int quality_mode) {
-    if (backend == Backend::CPU) {
-        return kQualityPreview;
-    }
+    (void)backend;
     return quality_mode;
 }
 
@@ -322,20 +301,14 @@ inline std::filesystem::path artifact_path_for_backend(const std::filesystem::pa
         return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
     }
     if (backend == Backend::TensorRT || backend == Backend::CUDA) {
-        return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
+        return models_root / ("corridorkey_torchtrt_fp16_" + std::to_string(resolution) + ".ts");
     }
-    return models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
+    return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
 }
 
 inline app::ArtifactVariantPreference artifact_variant_preference(int quantization_mode) {
-    switch (quantization_mode) {
-        case kQuantizationFp16:
-            return app::ArtifactVariantPreference::FP16;
-        case kQuantizationInt8:
-            return app::ArtifactVariantPreference::Int8;
-        default:
-            return app::ArtifactVariantPreference::Auto;
-    }
+    (void)quantization_mode;
+    return app::ArtifactVariantPreference::FP16;
 }
 
 inline std::string format_artifact_filename_list(
