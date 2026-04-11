@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "../test_model_artifact_utils.hpp"
+
 #ifdef _WIN32
 #include <Aclapi.h>
 #include <Windows.h>
@@ -197,8 +199,9 @@ class ScopedWindowsDenyWrite {
 TEST_CASE("session creation falls back to writable cache root when configured cache is locked",
           "[integration][cache]") {
     const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
-    if (!std::filesystem::exists(model_path)) {
-        SKIP("Model not available");
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
     }
 
     const std::filesystem::path models_dir = std::filesystem::path(PROJECT_ROOT) / "models";

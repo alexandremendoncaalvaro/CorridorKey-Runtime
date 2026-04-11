@@ -755,9 +755,9 @@ RuntimeOptimizationProfile runtime_optimization_profile_for_device(
 
 ArtifactRuntimeState artifact_runtime_state_for_device(const ModelCatalogEntry& model,
                                                        const RuntimeCapabilities& capabilities,
-                                                       const DeviceInfo& device, bool present) {
+                                                       const DeviceInfo& device, bool usable) {
     ArtifactRuntimeState state;
-    state.present = present;
+    state.present = usable;
     state.packaged_for_active_track =
         capabilities.platform == "windows" ? model.packaged_for_windows : model.packaged_for_macos;
 
@@ -786,7 +786,8 @@ ArtifactRuntimeState artifact_runtime_state_for_device(const ModelCatalogEntry& 
     auto recommended_model = corridorkey::app::default_model_for_request(
         capabilities, device, corridorkey::app::default_preset_for_capabilities(capabilities));
     state.recommended_for_active_device =
-        recommended_model.has_value() && recommended_model->filename == model.filename;
+        usable && recommended_model.has_value() && recommended_model->filename == model.filename;
+    state.certified_for_active_device = usable && state.certified_for_active_device;
 
     if (!state.packaged_for_active_track) {
         state.state = "reference_only";

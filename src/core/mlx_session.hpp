@@ -19,10 +19,12 @@ class MlxSession {
     MlxSession& operator=(MlxSession&&) noexcept;
 
     [[nodiscard]] Result<FrameResult> infer(const Image& rgb, const Image& alpha_hint,
+                                            bool output_alpha_only = false,
                                             UpscaleMethod upscale_method = UpscaleMethod::Lanczos4,
                                             StageTimingCallback on_stage = nullptr);
 
     [[nodiscard]] Result<FrameResult> infer_tile(const Image& rgb_tile, const Image& hint_tile,
+                                                 bool output_alpha_only = false,
                                                  StageTimingCallback on_stage = nullptr);
 
     [[nodiscard]] int model_resolution() const;

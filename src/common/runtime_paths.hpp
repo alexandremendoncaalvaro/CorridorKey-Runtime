@@ -25,6 +25,16 @@
 
 namespace corridorkey::common {
 
+enum class ModelArtifactStatus : std::uint8_t { Missing, LfsPlaceholder, Invalid, Usable };
+
+struct ModelArtifactInspection {
+    ModelArtifactStatus status = ModelArtifactStatus::Missing;
+    bool found = false;
+    bool usable = false;
+    std::uintmax_t size_bytes = 0;
+    std::string detail = "";
+};
+
 namespace detail {
 
 inline std::uint64_t fnv1a_64(std::string_view text) {
@@ -107,6 +117,79 @@ inline void append_unique_path(std::vector<std::filesystem::path>& paths,
 }
 
 }  // namespace detail
+
+inline std::string model_artifact_status_to_string(ModelArtifactStatus status) {
+    switch (status) {
+        case ModelArtifactStatus::Missing:
+            return "missing";
+        case ModelArtifactStatus::LfsPlaceholder:
+            return "lfs_placeholder";
+        case ModelArtifactStatus::Invalid:
+            return "invalid";
+        case ModelArtifactStatus::Usable:
+            return "usable";
+    }
+    return "invalid";
+}
+
+inline bool looks_like_git_lfs_pointer(std::string_view contents) {
+    if (contents.find("version https://git-lfs.github.com/spec/v1") != 0) {
+        return false;
+    }
+
+    return contents.find("oid sha256:") != std::string_view::npos &&
+           contents.find("size ") != std::string_view::npos;
+}
+
+inline ModelArtifactInspection inspect_model_artifact(const std::filesystem::path& model_path) {
+    ModelArtifactInspection inspection;
+
+    std::error_code error;
+    inspection.found = std::filesystem::exists(model_path, error) && !error;
+    if (!inspection.found) {
+        inspection.status = ModelArtifactStatus::Missing;
+        inspection.detail = "Artifact not found: " + model_path.string();
+        return inspection;
+    }
+
+    inspection.size_bytes = std::filesystem::file_size(model_path, error);
+    if (error) {
+        inspection.status = ModelArtifactStatus::Invalid;
+        inspection.detail = "Failed to read artifact size: " + model_path.string();
+        return inspection;
+    }
+
+    if (inspection.size_bytes == 0) {
+        inspection.status = ModelArtifactStatus::Invalid;
+        inspection.detail = "Artifact is empty: " + model_path.string();
+        return inspection;
+    }
+
+    std::ifstream file(model_path, std::ios::binary);
+    if (!file.is_open()) {
+        inspection.status = ModelArtifactStatus::Invalid;
+        inspection.detail = "Failed to open artifact: " + model_path.string();
+        return inspection;
+    }
+
+    constexpr std::size_t kPointerProbeBytes = 512;
+    std::string header(static_cast<std::size_t>(
+                           std::min<std::uintmax_t>(inspection.size_bytes, kPointerProbeBytes)),
+                       '\0');
+    file.read(header.data(), static_cast<std::streamsize>(header.size()));
+    header.resize(static_cast<std::size_t>(file.gcount()));
+    if (looks_like_git_lfs_pointer(header)) {
+        inspection.status = ModelArtifactStatus::LfsPlaceholder;
+        inspection.detail =
+            "Artifact is a Git LFS pointer placeholder. Hydrate it before running the runtime: " +
+            model_path.string();
+        return inspection;
+    }
+
+    inspection.status = ModelArtifactStatus::Usable;
+    inspection.usable = true;
+    return inspection;
+}
 
 inline std::optional<std::string> environment_variable_copy(const char* name) {
 #if defined(_WIN32)

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "${REPO_ROOT}/scripts/model_artifact_checks.sh"
 
 # Load environment variables from .env if present
 if [ -f "${REPO_ROOT}/.env" ]; then
@@ -219,14 +220,14 @@ fi
 require_file "$PLUGIN_BINARY"
 require_file "$CLI_BINARY"
 require_file "$CORE_LIB"
-require_file "$CPU_BASELINE_MODEL"
-require_file "$MLX_REQUIRED_PACK"
-require_file "$MLX_BRIDGE_512"
-require_file "$MLX_BRIDGE_768"
-require_file "$MLX_BRIDGE_1024"
-require_file "$MLX_BRIDGE_1536"
+require_real_model_artifact "$CPU_BASELINE_MODEL" 50000000 "CPU baseline model"
+require_real_model_artifact "$MLX_REQUIRED_PACK" 300000000 "MLX model pack"
+require_real_model_artifact "$MLX_BRIDGE_512" 200000000 "MLX bridge 512"
+require_real_model_artifact "$MLX_BRIDGE_768" 200000000 "MLX bridge 768"
+require_real_model_artifact "$MLX_BRIDGE_1024" 200000000 "MLX bridge 1024"
+require_real_model_artifact "$MLX_BRIDGE_1536" 200000000 "MLX bridge 1536"
 if [ "$REQUIRE_MLX_2048" = "1" ]; then
-    require_file "$MLX_BRIDGE_2048"
+    require_real_model_artifact "$MLX_BRIDGE_2048" 200000000 "MLX bridge 2048"
 fi
 require_file "${PLUGINS_SCRIPTS_DIR}/Distribution.xml"
 require_file "${PLUGINS_SCRIPTS_DIR}/system/preinstall"
@@ -277,6 +278,10 @@ cp "$MLX_BRIDGE_1536" "$MODELS_DIR/"
 if [ "$REQUIRE_MLX_2048" = "1" ]; then
     cp "$MLX_BRIDGE_2048" "$MODELS_DIR/"
 fi
+
+write_macos_model_inventory "${RESOURCES_DIR}/model_inventory.json" "ofx_bundle" \
+    "macOS Apple Silicon" "apple_silicon" "$REQUIRE_MLX_2048"
+
 cat <<PLIST_EOF > "${BUNDLE_DIR}/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -348,6 +353,7 @@ clear_provenance_xattrs "$BUNDLE_DIR"
 echo "[5.5/7] Validating packaged binaries..."
 "$BIN_DIR/corridorkey" info --json > /dev/null
 "$BIN_DIR/corridorkey" doctor --json > /dev/null
+bash "${REPO_ROOT}/scripts/validate_ofx_mac.sh"
 
 echo "[6/7] Building installer package..."
 SYSTEM_ROOT="${WORK_DIR}/system_root"

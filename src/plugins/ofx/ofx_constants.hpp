@@ -125,6 +125,10 @@ inline bool output_mode_uses_linear_premultiplied_rgba(int output_mode) {
     return output_mode == kOutputProcessed || output_mode == kOutputFGMatte;
 }
 
+inline bool output_mode_requires_model_foreground(int output_mode) {
+    return output_mode != kOutputMatteOnly && output_mode != kOutputSourceMatte;
+}
+
 inline bool should_apply_srgb_to_output(int output_mode, bool host_managed, bool input_is_linear) {
     if (output_mode == kOutputMatteOnly) {
         return false;

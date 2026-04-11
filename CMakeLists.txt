@@ -185,6 +185,13 @@ if(APPLE)
         endif()
 
         if(NOT _corridorkey_mlx_package_dir STREQUAL "")
+            # find_package() persists <PackageName>_DIR in the cache, so an
+            # older build directory can keep resolving MLX from a developer
+            # virtualenv even after a portable bottle becomes available.
+            # Force the canonical package dir to keep all macOS builds aligned
+            # on the same portable dependency set.
+            set(MLX_DIR "${_corridorkey_mlx_package_dir}" CACHE PATH
+                "Resolved MLX CMake package directory" FORCE)
             list(APPEND CMAKE_PREFIX_PATH "${_corridorkey_mlx_package_dir}")
         endif()
 

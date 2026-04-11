@@ -26,7 +26,7 @@ success() {
 
 # 1. Sanitize Environment
 step "Sanitizing Environment"
-for dir in build/release-macos-portable dist; do
+for dir in build/release-macos-portable build/debug-macos-portable dist; do
     if [ -d "$dir" ]; then
         echo "Cleaning $dir..."
         rm -rf "$dir"
@@ -49,6 +49,11 @@ step "Building Project (Release Mode)"
 bash "$REPO_ROOT/scripts/build.sh" release-macos-portable
 success "Build completed successfully."
 
+# 2.5. Validate Debug Configure
+step "Validating Debug Configure (ASAN Preset)"
+cmake --preset debug-macos-portable
+success "Debug preset configured successfully."
+
 # 3. Quality Gate 1: Tests
 if [ "$SKIP_TESTS" = "0" ]; then
     step "Quality Gate: Running Automated Tests"
@@ -62,12 +67,17 @@ step "Quality Gate: Packaging CLI Bundle"
 bash "$REPO_ROOT/scripts/package_mac.sh"
 success "CLI bundle packaged and validated."
 
-# 5. Quality Gate 3: Package OFX
+# 5. Quality Gate 3: Validate CLI Release
+step "Quality Gate: Validating CLI Release Bundle"
+bash "$REPO_ROOT/scripts/validate_mac_release.sh"
+success "CLI release bundle validation completed."
+
+# 6. Quality Gate 4: Package OFX
 step "Quality Gate: Packaging OFX Installer"
 bash "$REPO_ROOT/scripts/package_ofx_mac.sh"
 success "OFX installer packaged and validated."
 
-# 6. Final Summary
+# 7. Final Summary
 step "Release is READY"
 echo ""
 echo "Artifacts:"
