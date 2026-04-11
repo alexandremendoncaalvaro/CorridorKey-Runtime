@@ -47,8 +47,9 @@ Display version policy for this track:
 - extract-output attribution checkpoint is `0.7.4-1`
 - runtime-panel timing correction checkpoint is `0.7.4-2`
 - direct-planar-resize checkpoint is `0.7.4-3`
-- current output-validation-fusion checkpoint is `0.7.4-4`
-- the next measured slice becomes `0.7.4-5`
+- output-validation-fusion checkpoint is `0.7.4-4`
+- current I/O-binding groundwork checkpoint is `0.7.4-5`
+- the next measured slice becomes `0.7.4-6`
 
 Recommended checkpoint labels for this track:
 
@@ -58,7 +59,7 @@ Recommended checkpoint labels for this track:
 - `phase_1_runtime_panel_timing_correction`
 - `phase_1_direct_planar_resize`
 - `phase_1_output_validation_fusion`
-- `phase_2_iobinding`
+- `phase_2_io_binding`
 - `phase_3_device_tensors`
 - `phase_4_gpu_prepare_inputs`
 - `phase_5_gpu_postprocess`
@@ -88,10 +89,10 @@ test result is recorded. Use this order:
 
 Current local checkpoint artifact set:
 
-- baseline installer:
-  `dist/optimization_checkpoints/pre_opt/CorridorKey_Resolve_v0.7.3_Windows_RTX_Installer.exe`
 - current optimized installer:
-  `dist/optimization_checkpoints/phase_1_output_validation_fusion/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+  `dist/optimization_checkpoints/phase_2_io_binding/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+- historical baseline installer:
+  recopy when needed because release packaging recreates `dist/`
 
 ## Recorded Checkpoints
 
@@ -426,6 +427,45 @@ path problem.
   keep this slice because it reduces steady-state hot-path diagnostic overhead
   without weakening failure diagnostics
 
+### `phase_2_io_binding`
+
+- Source state: current `perf/optimization` working tree with a narrow Windows
+  RTX I/O-binding path added on top of the output-validation-fusion slice
+- Display version label: `0.7.4-5`
+- Local test artifact path:
+  `dist/optimization_checkpoints/phase_2_io_binding/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_2_io_binding/`
+- Benchmark summary:
+  - packaged Windows RTX TensorRT workloads can now use a narrow bound path
+    while the previous unbound path remains the fallback
+  - input binding and output binding are explicit, with session-owned bound
+    output buffers reused across runs
+  - the harness can force or disable the feature through
+    `CORRIDORKEY_IO_BINDING` and `ofx_benchmark_harness --io-binding`
+  - benchmark JSON now includes additive `io_binding` metadata with
+    `requested_mode`, `eligible`, `active`, and `observed`
+  - repo-side `2048` RTX harness comparisons against the unbound path showed:
+    - average latency: `660.1 ms` -> `477.2 ms`
+    - `ort_run`: `413.0 ms` -> `412.8 ms`
+    - `frame_prepare_inputs`: `28.1 ms` -> `26.2 ms`
+    - `frame_extract_outputs`: `53.5 ms` -> `32.5 ms`
+  - repo-side `3840x2160` sequence comparisons against the unbound path showed:
+    - total duration: `23630.0 ms` -> `23660.7 ms`
+    - `sequence_infer_batch`: `1495.3 ms` -> `1509.0 ms`
+    - `batch_extract_outputs`: `377.2 ms` -> `367.3 ms`
+    - `batch_extract_outputs_tensor_materialize`: `18.3 ms` -> `18.0 ms`
+    - `batch_extract_outputs_resize`: `318.5 ms` -> `308.2 ms`
+    - `batch_extract_outputs_finalize`: `40.4 ms` -> `41.1 ms`
+- Manual OFX observations:
+  - pending local plugin comparison against `0.7.4-4`
+  - packaged CLI identity was verified after release packaging as
+    `{"base_version":"0.7.4","version":"0.7.4-5"}`
+- Keep or revise decision:
+  keep this slice as groundwork because it delivers a real single-frame
+  extract-path win and preserves a narrow fallback, but move the next slice
+  toward device-aware memory placement because sequence throughput stayed flat
+
 ### `phase_1_direct_planar_resize` vs `phase_1_output_validation_fusion`
 
 This comparison uses the same repo-side RTX `2048` harness with the same model
@@ -471,22 +511,39 @@ output-extract hot path, while `frame_extract_outputs_resize`,
 `frame_prepare_inputs`, and especially `ort_run` remain the largest remaining
 steady-state opportunities.
 
+### `phase_1_output_validation_fusion` vs `phase_2_io_binding`
+
+This comparison uses the same repo-side RTX harness family with the same
+TensorRT model artifact and explicit unbound versus auto-bound settings. The
+single-frame run shows a clear extract-path gain, while the sequence run shows
+that copy placement is still the limiting factor for broader throughput.
+
+- `2048` OFX-style harness average latency improved by about `27.7%`
+- `2048` `frame_extract_outputs` improved by about `39.3%`
+- `2048` `frame_prepare_inputs` improved by about `6.6%`
+- `2048` `ort_run` stayed effectively tied
+- `3840x2160` sequence total duration stayed effectively flat and slightly
+  higher by about `0.1%`
+- `3840x2160` `batch_extract_outputs` improved by about `2.6%`
+- `3840x2160` `batch_extract_outputs_resize` improved by about `3.2%`
+
+Current reading: the narrow I/O-binding slice is worth keeping because it
+proves there is still measurable host-side extract overhead to remove, but it
+also shows that the next material gain is unlikely to come from binding alone.
+The next checkpoint should attack device-visible outputs or pinned-host
+transfers before deeper TensorRT provider tuning.
+
 ## Why Installer Handling Must Stay Predictable
 
 Release packaging recreates `dist/`, so the local checkpoint folder must be
 restored after generating a new optimized installer if the baseline installer
 needs to remain available in the same workspace.
 
-- keep `dist/optimization_checkpoints/pre_opt/` as the preserved baseline
-- keep `dist/optimization_checkpoints/phase_1_extract_output_attribution/` as
-  the preserved attribution checkpoint
-- keep `dist/optimization_checkpoints/phase_1_runtime_panel_timing_correction/`
-  as the preserved runtime-panel checkpoint
-- keep `dist/optimization_checkpoints/phase_1_direct_planar_resize/` as the
-  preserved direct-planar-resize checkpoint
-- keep `dist/optimization_checkpoints/phase_1_output_validation_fusion/` as the
-  current optimized checkpoint
-- replace only the checkpoint currently under test when a new slice is built
+- keep the checkpoint currently under test restored after packaging
+- current restored optimized checkpoint:
+  `dist/optimization_checkpoints/phase_2_io_binding/`
+- recopy the baseline or earlier checkpoint installers when a direct local A/B
+  needs them in the same workspace
 
 ## Why The Update Procedure Must Be Short
 

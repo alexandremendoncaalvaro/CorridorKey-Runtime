@@ -40,9 +40,10 @@ tests can confirm the installed build without guesswork.
 - `0.7.4-1` is the extract-output attribution checkpoint
 - `0.7.4-2` is the runtime timing correction checkpoint
 - `0.7.4-3` is the direct-planar-resize checkpoint
-- `0.7.4-4` is the current output-validation-fusion checkpoint
+- `0.7.4-4` is the output-validation-fusion checkpoint
+- `0.7.4-5` is the current I/O-binding groundwork checkpoint
 - each new measured optimization slice increments the suffix:
-  `0.7.4-5`, `0.7.4-6`, `0.7.4-7`
+  `0.7.4-6`, `0.7.4-7`, `0.7.4-8`
 - the base semantic version remains `0.7.4` while the visible checkpoint label
   changes per slice
 - checkpoint comparison only counts when the installed build identity was
@@ -100,7 +101,7 @@ The following validations were completed against the current implementation.
 - [x] OFX benchmark harness smoke test with JSON output
 - [x] Windows release packaging through the canonical release script
 - [x] Local installer generation, bundle validation, and doctor validation
-- [x] Optimization checkpoint release generated as `0.7.4-4`
+- [x] Optimization checkpoint release generated as `0.7.4-5`
 - [x] Baseline and optimized installers were copied into
       `dist/optimization_checkpoints/` for sequential local A/B testing
 
@@ -200,6 +201,32 @@ whether that gain survives the full OFX path.
     then `frame_prepare_inputs`
   - the cold-start opportunity is still dominated by
     `ort_session_create` and `session_create_requested`
+- `0.7.4-5` adds a narrow Windows RTX I/O-binding path that keeps the existing
+  unbound path as the fallback and reuses session-owned bound output buffers
+- `0.7.4-5` benchmark JSON now reports additive I/O-binding metadata with
+  `requested_mode`, `eligible`, `active`, and `observed`
+- repo-side `2048` RTX harness comparisons between `0.7.4-4` unbound and
+  `0.7.4-5` auto-bound on the same workspace showed:
+  - average latency improved from about `660.1 ms` to `477.2 ms`
+  - `frame_extract_outputs` improved from about `53.5 ms` to `32.5 ms`
+  - `frame_prepare_inputs` improved from about `28.1 ms` to `26.2 ms`
+  - `ort_run` stayed effectively tied at about `413 ms`
+- repo-side `3840x2160` sequence comparisons between `0.7.4-4` unbound and
+  `0.7.4-5` auto-bound on the same workspace showed:
+  - total duration stayed effectively flat at about `23.63 s`
+  - `batch_extract_outputs` improved from about `377.2 ms` to `367.3 ms`
+  - `batch_extract_outputs_resize` improved from about `318.5 ms` to
+    `308.2 ms`
+  - `sequence_infer_batch` stayed effectively tied and slightly higher at
+    about `1495.3 ms` to `1509.0 ms`
+- current `0.7.4-5` status:
+  - installer, doctor report, bundle validation, and repo-side checkpoint JSON
+    are ready for the next local plugin comparison
+  - this slice produces a real single-frame extract-path gain but not yet a
+    broad sequence-throughput gain
+  - the next high-value work should attack memory placement and copy behavior
+    more directly through device tensors or pinned-host strategy before deeper
+    provider tuning
 - Ignore `CorridorHint` errors when they come from unrelated branch tests
 
 ## Why A Resume Map Saves Time
@@ -211,6 +238,7 @@ optimization slices. Inspect them before changing architecture again.
 - `src/core/ort_process_context.cpp`
 - `src/core/inference_session.hpp`
 - `src/core/inference_session.cpp`
+- `src/core/inference_session_metadata.hpp`
 - `src/core/engine.cpp`
 - `src/core/engine_internal.hpp`
 - `src/app/job_orchestrator.cpp`
@@ -241,7 +269,7 @@ Before recording a local result, verify the build in this order:
 The current expected visible identities are:
 
 - baseline installer: `0.7.3`
-- current optimization installer: `0.7.4-4`
+- current optimization installer: `0.7.4-5`
 
 ## Why The Next Tasks Are Ordered
 
@@ -298,13 +326,18 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 - [x] Generated the `0.7.4-4` installer and checkpoint artifacts for the next
       local comparison
 
-### Phase 2: I/O Binding Groundwork
+### Completed Slice: I/O Binding Groundwork
 
-- [ ] Design a narrow ORT I/O Binding path without removing the current path
-- [ ] Gate the first implementation to the Windows RTX path
-- [ ] Bind both input and output tensors explicitly
-- [ ] Keep lifetime, ownership, and shape handling explicit
-- [ ] Benchmark bound and unbound paths in frame and video workloads
+- [x] Designed a narrow ORT I/O Binding path without removing the current path
+- [x] Gated the first implementation to the Windows RTX path
+- [x] Bound both input and output tensors explicitly
+- [x] Kept lifetime, ownership, and shape handling explicit with
+      session-owned bound output buffers
+- [x] Benchmarked bound and unbound paths in frame and sequence workloads
+- [x] Added additive benchmark metadata so reports can distinguish requested,
+      eligible, active, and observed binding state
+- [x] Generated the `0.7.4-5` installer and checkpoint artifacts for the next
+      local comparison
 
 ### Phase 3: Device Tensors And Pinned-Host Strategy
 
