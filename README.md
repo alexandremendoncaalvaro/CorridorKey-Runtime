@@ -1,16 +1,55 @@
-# CorridorKey Runtime
-
-CorridorKey Runtime is a native C++ engine for neural green screen keying. It
-packages the CorridorKey model into a distributable, hardware-accelerated
-runtime with no Python dependency.
-
-The project delivers two user surfaces:
-
-- **CLI** (`corridorkey`) - a single-binary command-line tool for batch and
-  pipeline use.
-- **OFX Plugin** - an OpenFX plugin for DaVinci Resolve on Windows and macOS.
+# CorridorKey-Runtime
 
 ![CorridorKey OFX Plugin](./assets/ofx_example.gif)
+
+Native AI keying runtime and OFX plugin for **DaVinci Resolve**, built in collaboration with **Corridor Digital**.
+
+CorridorKey-Runtime provides two supported surfaces:
+- **DaVinci Resolve OFX plugin** for interactive keying inside Resolve
+- **CLI runtime** for local processing, diagnostics, and automation
+
+Current public builds support:
+- **Windows (NVIDIA RTX)**
+- **macOS (Apple Silicon)**
+
+## Quick Start
+
+- **Download the latest release:** [Releases](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases/latest)
+- **Check supported platforms:** [Support Matrix](./docs/user-help/support-matrix.md)
+- **Troubleshooting and setup help:** [User Help](./docs/user-help/)
+
+## What this project focuses on
+
+- Native local execution
+- Practical deployment for real-world workflows
+- Support for **NVIDIA RTX** and **Apple Silicon**
+- Stable surfaces for both **Resolve users** and **CLI/integration workflows**
+
+## Included surfaces
+
+### OFX plugin for DaVinci Resolve
+Use CorridorKey directly inside DaVinci Resolve through the OFX plugin.
+
+### CLI runtime
+Use the CLI for:
+- environment diagnostics
+- scripted processing
+- machine-readable JSON output
+- automation and integration workflows
+
+## Documentation
+
+### User Help
+- [Installation and Releases](./docs/user-help/installation-and-releases.md)
+- [Support Matrix](./docs/user-help/support-matrix.md)
+- [Troubleshooting](./docs/user-help/troubleshooting.md)
+- [CLI Usage](./docs/user-help/cli-usage.md)
+
+### Development Docs
+- [Architecture](./docs/dev/architecture.md)
+- [Packaging](./docs/dev/packaging.md)
+- [Testing](./docs/dev/testing.md)
+- [Contributing](./CONTRIBUTING.md)
 
 ## Installation
 
