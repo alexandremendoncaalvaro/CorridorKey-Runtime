@@ -57,6 +57,21 @@ compile_commands.json
 outputs/
 dist/
 *.zip
+build_output.txt
+.vscode/
+Testing/
+assets/video_samples/*.mp4
+package_output.txt
+test_output.txt
+test_unit_output.txt
+temp_mobile_sam.pt
+models/corridorkey_torchtrt_fp16_*.ts
+models/cutie_feature_extractor_fp16.onnx
+models/cutie_init_memory_fp16.onnx
+models/cutie_tracking_memory_fp16.onnx
+models/mobilesam_image_encoder_fp16.onnx
+models/mobilesam_prompt_decoder_fp16.onnx
+models/vitmatte_small_distinctions_646.onnx
 
 # OS
 .DS_Store
