@@ -103,6 +103,11 @@ nlohmann::json stage_timings_to_json(const std::vector<StageTiming>& timings) {
     return stage_timings;
 }
 
+bool has_stage(const std::vector<StageTiming>& timings, std::string_view name) {
+    return std::any_of(timings.begin(), timings.end(),
+                       [&](const StageTiming& timing) { return timing.name == name; });
+}
+
 nlohmann::json failure_json(const std::string& message) {
     return nlohmann::json{{"success", false}, {"error", message}};
 }
@@ -233,6 +238,7 @@ int main(int argc, char* argv[]) {
         std::accumulate(render_latencies_ms.begin(), render_latencies_ms.end(), 0.0);
     const double average_latency_ms =
         total_render_ms / static_cast<double>(render_latencies_ms.size());
+    const auto stage_timings = profiler.snapshot();
 
     nlohmann::json results;
     results["success"] = true;
@@ -255,6 +261,7 @@ int main(int argc, char* argv[]) {
     results["io_binding"]["active"] =
         core::should_enable_io_binding(options.model_path, effective_device.backend,
                                        options.io_binding_mode);
+    results["io_binding"]["observed"] = has_stage(stage_timings, "ort_io_binding_bind_inputs");
     results["warmup_runs"] = 0;
     results["steady_state_runs"] = options.iterations;
     results["benchmark_runs"] = options.iterations;
@@ -262,8 +269,8 @@ int main(int argc, char* argv[]) {
     results["fps"] =
         total_render_ms > 0.0 ? (1000.0 * static_cast<double>(options.iterations)) / total_render_ms
                               : 0.0;
-    results["stage_timings"] = stage_timings_to_json(profiler.snapshot());
-    results["phase_timings"] = summarize_stage_groups(profiler.snapshot());
+    results["stage_timings"] = stage_timings_to_json(stage_timings);
+    results["phase_timings"] = summarize_stage_groups(stage_timings);
     if (fallback.has_value()) {
         results["fallback"] = to_json(*fallback);
     }

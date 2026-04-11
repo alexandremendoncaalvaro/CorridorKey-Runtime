@@ -249,10 +249,16 @@ Result<std::vector<int64_t>> resolve_io_binding_shape(const std::vector<int64_t>
         return Unexpected(batch_res.error());
     }
     if (resolved[1] <= 0) {
-        return Unexpected(
-            Error{ErrorCode::HardwareNotSupported,
-                  "I/O binding channel count must be explicit for " + std::string(tensor_name) +
-                      "."});
+        if (tensor_name == core::k_corridorkey_alpha_output_name) {
+            resolved[1] = 1;
+        } else if (tensor_name == core::k_corridorkey_fg_output_name) {
+            resolved[1] = 3;
+        } else {
+            return Unexpected(
+                Error{ErrorCode::HardwareNotSupported,
+                      "I/O binding channel count must be explicit for " +
+                          std::string(tensor_name) + "."});
+        }
     }
     if (auto height_res = resolve_dimension(2, height, "height"); !height_res) {
         return Unexpected(height_res.error());
@@ -1606,9 +1612,15 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             common::measure_stage(
                 on_stage, "ort_run",
                 [&]() {
-                    bound_io_state->binding.ClearBoundInputs();
-                    bound_io_state->binding.BindInput(m_input_node_names_ptr[0], input_tensor);
-                    bound_io_state->binding.SynchronizeInputs();
+                    common::measure_stage(
+                        on_stage, "ort_io_binding_bind_inputs",
+                        [&]() {
+                            bound_io_state->binding.ClearBoundInputs();
+                            bound_io_state->binding.BindInput(m_input_node_names_ptr[0],
+                                                              input_tensor);
+                            bound_io_state->binding.SynchronizeInputs();
+                        },
+                        batch_size);
                     m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
                     bound_io_state->binding.SynchronizeOutputs();
                 },
@@ -1870,9 +1882,15 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             common::measure_stage(
                 on_stage, "ort_run",
                 [&]() {
-                    bound_io_state->binding.ClearBoundInputs();
-                    bound_io_state->binding.BindInput(m_input_node_names_ptr[0], input_tensor);
-                    bound_io_state->binding.SynchronizeInputs();
+                    common::measure_stage(
+                        on_stage, "ort_io_binding_bind_inputs",
+                        [&]() {
+                            bound_io_state->binding.ClearBoundInputs();
+                            bound_io_state->binding.BindInput(m_input_node_names_ptr[0],
+                                                              input_tensor);
+                            bound_io_state->binding.SynchronizeInputs();
+                        },
+                        1);
                     m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
                     bound_io_state->binding.SynchronizeOutputs();
                 },

@@ -229,12 +229,19 @@ std::string artifact_precision_to_string(const std::filesystem::path& model_path
     return "auto";
 }
 
-nlohmann::json io_binding_metadata(const std::filesystem::path& model_path, Backend backend) {
+bool has_stage_named(const std::vector<StageTiming>& timings, std::string_view name) {
+    return std::any_of(timings.begin(), timings.end(),
+                       [&](const StageTiming& timing) { return timing.name == name; });
+}
+
+nlohmann::json io_binding_metadata(const std::filesystem::path& model_path, Backend backend,
+                                   bool observed) {
     const auto mode = core::io_binding_mode_from_environment();
     nlohmann::json metadata;
     metadata["requested_mode"] = std::string(core::io_binding_mode_to_string(mode));
     metadata["eligible"] = core::supports_windows_rtx_io_binding(model_path, backend);
     metadata["active"] = core::should_enable_io_binding(model_path, backend, mode);
+    metadata["observed"] = observed;
     return metadata;
 }
 
@@ -1017,8 +1024,6 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["backend"] = backend_to_string(engine->current_device().backend);
         results["batch_size"] = params.batch_size;
         results["tiling_enabled"] = params.enable_tiling;
-        results["io_binding"] =
-            io_binding_metadata(request.model_path, engine->current_device().backend);
         results["execution_profile"] = to_json(
             runtime_optimization_profile_for_device(runtime_capabilities(),
                                                     engine->current_device()));
@@ -1036,6 +1041,9 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         for (const auto& timing : stage_timings) {
             results["stage_timings"].push_back(to_json(timing));
         }
+        results["io_binding"] = io_binding_metadata(
+            request.model_path, engine->current_device().backend,
+            has_stage_named(stage_timings, "ort_io_binding_bind_inputs"));
         results["phase_timings"] = summarize_stage_groups(stage_timings);
         if (engine->backend_fallback().has_value()) {
             results["fallback"] = to_json(*engine->backend_fallback());
@@ -1091,7 +1099,6 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     results["backend"] = backend_to_string(selected_backend);
     results["batch_size"] = benchmark_request.params.batch_size;
     results["tiling_enabled"] = benchmark_request.params.enable_tiling;
-    results["io_binding"] = io_binding_metadata(benchmark_request.model_path, selected_backend);
     results["warmup_runs"] = 0;
     DeviceInfo execution_device = benchmark_request.device;
     execution_device.name =
@@ -1114,6 +1121,9 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     for (const auto& timing : timings) {
         results["stage_timings"].push_back(to_json(timing));
     }
+    results["io_binding"] = io_binding_metadata(
+        benchmark_request.model_path, selected_backend,
+        has_stage_named(timings, "ort_io_binding_bind_inputs"));
     results["phase_timings"] = summarize_stage_groups(timings);
     if (fallback.has_value()) {
         results["fallback"] = to_json(*fallback);

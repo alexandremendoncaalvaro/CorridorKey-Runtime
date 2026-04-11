@@ -127,6 +127,7 @@ TEST_CASE("JobOrchestrator benchmark reports metadata and stage coverage",
         REQUIRE(report["io_binding"]["requested_mode"] == "auto");
         REQUIRE(report["io_binding"]["eligible"] == false);
         REQUIRE(report["io_binding"]["active"] == false);
+        REQUIRE(report["io_binding"]["observed"] == false);
         REQUIRE(report["warmup_runs"] == 2);
         REQUIRE(report["steady_state_runs"] == 5);
         REQUIRE(has_stage(report["stage_timings"], "ort_env_acquire"));
@@ -167,6 +168,7 @@ TEST_CASE("JobOrchestrator benchmark reports metadata and stage coverage",
         REQUIRE(report["io_binding"]["requested_mode"] == "auto");
         REQUIRE(report["io_binding"]["eligible"] == false);
         REQUIRE(report["io_binding"]["active"] == false);
+        REQUIRE(report["io_binding"]["observed"] == false);
         REQUIRE(report["effective_resolution"] == 512);
         REQUIRE(has_stage(report["stage_timings"], "sequence_read_input"));
         REQUIRE(has_stage(report["stage_timings"], "sequence_infer_batch"));
