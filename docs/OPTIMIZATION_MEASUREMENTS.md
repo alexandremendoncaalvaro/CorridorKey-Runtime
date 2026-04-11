@@ -402,7 +402,26 @@ path problem.
     - `frame_extract_outputs`: `134.9 ms` -> `54.2 ms`
     - `post_composite`: `46.8 ms` -> `50.1 ms`
 - Manual OFX observations:
-  - pending local plugin comparison against `pre_opt` and `0.7.4-3`
+  - installed build identity was confirmed by the versioned runtime log
+    filename `ofx_runtime_server_v0.7.4-4.log` and by the packaged CLI JSON
+    version report `{"base_version":"0.7.4","version":"0.7.4-4"}`
+  - sampled local OFX window at `Maximum (2048)` covered `14` steady-state
+    renders against the `3840x2160` output
+  - warm quality switching stayed cheap throughout the sampled block:
+    - repeated `quality_switch_total` samples stayed in the `0.5 ms` to
+      `0.7 ms` range with `outcome=reused_engine`
+  - median top-level stage timings in that window were:
+    - `frame_prepare_inputs`: `263.0 ms`
+    - `ort_run`: `383.7 ms`
+    - `frame_extract_outputs`: `358.0 ms`
+    - `post_composite`: `97.3 ms`
+  - estimated exclusive median total at the top-level stage boundary was about
+    `1102.0 ms`
+  - median internal extract-stage timings were:
+    - `frame_extract_outputs_tensor_materialize`: `18.1 ms`
+    - `frame_extract_outputs_resize`: `300.6 ms`
+    - `frame_extract_outputs_finalize`: `39.6 ms`
+  - no warnings or failures were present in the sampled block
 - Keep or revise decision:
   keep this slice because it reduces steady-state hot-path diagnostic overhead
   without weakening failure diagnostics
@@ -423,6 +442,34 @@ manual OFX comparison, but it is strong enough to guide the next slice.
 Current reading: the remaining steady-state render bottleneck has shifted even
 more clearly toward `ort_run`, with output resize/finalize still material and
 input preparation still worth pursuing after the next backend-focused slice.
+
+### `phase_1_direct_planar_resize` vs `phase_1_output_validation_fusion` manual OFX retest
+
+This comparison uses successive local plugin runs at `Maximum (2048)` on the
+same workstation and the same visible quality rung. It is stronger than casual
+observation because both runs were version-validated and sampled as repeated
+steady-state windows, but it is still directional until the corpus matrix is
+rerun.
+
+- steady-state `frame_prepare_inputs` improved by about `3.7%`
+- steady-state `frame_extract_outputs` improved by about `24.9%`
+- steady-state `frame_extract_outputs_tensor_materialize` improved by about
+  `69.7%`
+- steady-state `frame_extract_outputs_finalize` improved by about `67.4%`
+- steady-state `frame_extract_outputs_resize` was effectively flat and slightly
+  higher by about `1.3%`
+- steady-state `post_composite` improved by about `11.6%`
+- steady-state `ort_run` was lower by about `16.8%`, but that stage was not
+  targeted by this slice and should still be treated as workload variance until
+  the controlled corpus pass is rerun
+- estimated exclusive top-level total improved from about `1320.6 ms` in the
+  `0.7.4-3` manual window to about `1102.0 ms` in the newer `0.7.4-4` window
+
+Current reading: the manual OFX path now agrees with the harness direction.
+The diagnostic-scan fusion slice produced a real user-visible gain in the
+output-extract hot path, while `frame_extract_outputs_resize`,
+`frame_prepare_inputs`, and especially `ort_run` remain the largest remaining
+steady-state opportunities.
 
 ## Why Installer Handling Must Stay Predictable
 
