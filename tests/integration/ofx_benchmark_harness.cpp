@@ -14,6 +14,7 @@
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
 #include "common/stage_profiler.hpp"
+#include "core/inference_session_metadata.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -26,6 +27,7 @@ struct HarnessOptions {
     DeviceInfo device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
     int resolution = 512;
     int iterations = 5;
+    core::IoBindingMode io_binding_mode = core::IoBindingMode::Auto;
 };
 
 Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
@@ -67,6 +69,15 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
             }
             continue;
         }
+        if (argument == "--io-binding" && index + 1 < argc) {
+            const auto parsed = core::parse_io_binding_mode(argv[++index]);
+            if (!parsed.has_value()) {
+                return Unexpected(
+                    Error{ErrorCode::InvalidParameters, "Unsupported --io-binding value."});
+            }
+            options.io_binding_mode = *parsed;
+            continue;
+        }
 
         return Unexpected(
             Error{ErrorCode::InvalidParameters, "Unknown OFX harness argument: " + argument});
@@ -96,6 +107,14 @@ nlohmann::json failure_json(const std::string& message) {
     return nlohmann::json{{"success", false}, {"error", message}};
 }
 
+void apply_io_binding_environment(core::IoBindingMode mode) {
+#ifdef _WIN32
+    _putenv_s("CORRIDORKEY_IO_BINDING", std::string(core::io_binding_mode_to_string(mode)).c_str());
+#else
+    setenv("CORRIDORKEY_IO_BINDING", std::string(core::io_binding_mode_to_string(mode)).c_str(), 1);
+#endif
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -106,6 +125,7 @@ int main(int argc, char* argv[]) {
     }
 
     const HarnessOptions options = *options_res;
+    apply_io_binding_environment(options.io_binding_mode);
     const auto artifact = common::inspect_model_artifact(options.model_path);
     if (!artifact.found) {
         std::cout << failure_json("Model file not found: " + options.model_path.string()).dump(4)
@@ -228,6 +248,13 @@ int main(int argc, char* argv[]) {
     results["backend"] = backend_to_string(effective_device.backend);
     results["batch_size"] = 1;
     results["tiling_enabled"] = false;
+    results["io_binding"]["requested_mode"] =
+        std::string(core::io_binding_mode_to_string(options.io_binding_mode));
+    results["io_binding"]["eligible"] =
+        core::supports_windows_rtx_io_binding(options.model_path, effective_device.backend);
+    results["io_binding"]["active"] =
+        core::should_enable_io_binding(options.model_path, effective_device.backend,
+                                       options.io_binding_mode);
     results["warmup_runs"] = 0;
     results["steady_state_runs"] = options.iterations;
     results["benchmark_runs"] = options.iterations;

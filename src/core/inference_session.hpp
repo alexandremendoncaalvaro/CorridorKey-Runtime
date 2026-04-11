@@ -94,12 +94,19 @@ class InferenceSession {
     }
 
    private:
+    struct BoundIoState;
+
     explicit InferenceSession(DeviceInfo device);
 
     void configure_session_options(bool use_optimized_model_cache,
                                    const SessionCreateOptions& options,
                                    const std::filesystem::path& model_path);
     void extract_metadata(const std::filesystem::path& model_path);
+    [[nodiscard]] Result<Ort::Value> create_input_tensor(float* planar_data,
+                                                         std::size_t element_count,
+                                                         const std::vector<int64_t>& shape);
+    [[nodiscard]] Result<BoundIoState*> ensure_bound_io_state(
+        const std::vector<int64_t>& input_shape);
 
     /**
      * @brief Internal raw inference (no post-processing).
@@ -148,9 +155,13 @@ class InferenceSession {
     std::vector<const char*> m_input_node_names_ptr = {};
     std::vector<const char*> m_output_node_names_ptr = {};
     std::vector<std::vector<int64_t>> m_input_node_dims = {};
+    std::vector<std::vector<int64_t>> m_output_node_dims = {};
     ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+    std::vector<ONNXTensorElementDataType> m_output_element_types = {};
     std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
     std::shared_ptr<core::OrtProcessContext> m_ort_process_context = nullptr;
+    std::unique_ptr<BoundIoState> m_bound_io_state = nullptr;
+    bool m_io_binding_enabled = false;
 
     // Pre-allocated buffer pools (reused across run() calls)
     std::vector<ImageBuffer> m_resize_pool = {};

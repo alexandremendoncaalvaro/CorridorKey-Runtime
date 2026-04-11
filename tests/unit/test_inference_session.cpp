@@ -74,6 +74,30 @@ TEST_CASE("Packaged CorridorKey output contract selection", "[unit][inference]")
     }
 }
 
+TEST_CASE("I/O binding policy parsing and eligibility", "[unit][inference][regression]") {
+    REQUIRE(core::parse_io_binding_mode("auto") == std::optional(core::IoBindingMode::Auto));
+    REQUIRE(core::parse_io_binding_mode("ON") == std::optional(core::IoBindingMode::On));
+    REQUIRE(core::parse_io_binding_mode("0") == std::optional(core::IoBindingMode::Off));
+    REQUIRE_FALSE(core::parse_io_binding_mode("maybe").has_value());
+
+#if defined(_WIN32)
+    REQUIRE(core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx",
+                                                  Backend::TensorRT));
+    REQUIRE(core::should_enable_io_binding("models/corridorkey_fp16_1536.onnx",
+                                           Backend::TensorRT, core::IoBindingMode::Auto));
+    REQUIRE_FALSE(core::should_enable_io_binding("models/corridorkey_fp16_1536.onnx",
+                                                 Backend::TensorRT, core::IoBindingMode::Off));
+#else
+    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx",
+                                                        Backend::TensorRT));
+#endif
+
+    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_int8_512.onnx",
+                                                        Backend::TensorRT));
+    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx",
+                                                        Backend::CPU));
+}
+
 TEST_CASE("Model resolution inference from input shape", "[unit][inference][regression]") {
     REQUIRE(core::infer_model_resolution({1, 4, 1536, 1536}) == std::optional<int>(1536));
     REQUIRE(core::infer_model_resolution({-1, 4, 1024, 1024}) == std::optional<int>(1024));

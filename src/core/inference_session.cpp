@@ -91,6 +91,184 @@ namespace corridorkey {
 
 namespace {
 
+template <typename T>
+class AlignedTensorBuffer {
+   public:
+    AlignedTensorBuffer() = default;
+
+    explicit AlignedTensorBuffer(std::size_t element_count) {
+        resize(element_count);
+    }
+
+    ~AlignedTensorBuffer() {
+        release();
+    }
+
+    AlignedTensorBuffer(const AlignedTensorBuffer&) = delete;
+    AlignedTensorBuffer& operator=(const AlignedTensorBuffer&) = delete;
+
+    AlignedTensorBuffer(AlignedTensorBuffer&& other) noexcept
+        : m_size(other.m_size), m_data(other.m_data) {
+        other.m_size = 0;
+        other.m_data = nullptr;
+    }
+
+    AlignedTensorBuffer& operator=(AlignedTensorBuffer&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        release();
+        m_size = other.m_size;
+        m_data = other.m_data;
+        other.m_size = 0;
+        other.m_data = nullptr;
+        return *this;
+    }
+
+    void resize(std::size_t element_count) {
+        if (m_size == element_count && m_data != nullptr) {
+            return;
+        }
+
+        release();
+        if (element_count == 0) {
+            return;
+        }
+
+#ifdef _WIN32
+        m_data = static_cast<T*>(_aligned_malloc(element_count * sizeof(T), MEMORY_ALIGNMENT));
+#else
+        void* storage = nullptr;
+        if (posix_memalign(&storage, MEMORY_ALIGNMENT, element_count * sizeof(T)) == 0) {
+            m_data = static_cast<T*>(storage);
+        }
+#endif
+        if (m_data == nullptr) {
+            throw std::bad_alloc();
+        }
+        m_size = element_count;
+    }
+
+    [[nodiscard]] T* data() {
+        return m_data;
+    }
+
+    [[nodiscard]] const T* data() const {
+        return m_data;
+    }
+
+    [[nodiscard]] std::size_t size() const {
+        return m_size;
+    }
+
+   private:
+    void release() {
+        if (m_data == nullptr) {
+            return;
+        }
+#ifdef _WIN32
+        _aligned_free(m_data);
+#else
+        free(m_data);
+#endif
+        m_data = nullptr;
+        m_size = 0;
+    }
+
+    std::size_t m_size = 0;
+    T* m_data = nullptr;
+};
+
+struct BoundTensorStorage {
+    ONNXTensorElementDataType element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
+    std::vector<int64_t> shape = {};
+    AlignedTensorBuffer<float> fp32_storage = {};
+    AlignedTensorBuffer<Ort::Float16_t> fp16_storage = {};
+    Ort::Value tensor{nullptr};
+
+    [[nodiscard]] std::size_t element_count() const {
+        std::size_t count = 1;
+        for (const auto dim : shape) {
+            count *= static_cast<std::size_t>(dim);
+        }
+        return count;
+    }
+
+    [[nodiscard]] bool matches(ONNXTensorElementDataType candidate_type,
+                               const std::vector<int64_t>& candidate_shape) const {
+        return element_type == candidate_type && shape == candidate_shape && tensor != nullptr;
+    }
+
+    void reset(const Ort::MemoryInfo& memory_info, ONNXTensorElementDataType candidate_type,
+               const std::vector<int64_t>& candidate_shape) {
+        element_type = candidate_type;
+        shape = candidate_shape;
+        const std::size_t count = element_count();
+        if (candidate_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            fp16_storage.resize(count);
+            tensor = Ort::Value::CreateTensor<Ort::Float16_t>(
+                memory_info, fp16_storage.data(), count, shape.data(), shape.size());
+            return;
+        }
+
+        fp32_storage.resize(count);
+        tensor = Ort::Value::CreateTensor<float>(memory_info, fp32_storage.data(), count,
+                                                 shape.data(), shape.size());
+    }
+};
+
+Result<std::vector<int64_t>> resolve_io_binding_shape(const std::vector<int64_t>& shape_template,
+                                                      int64_t batch_size, int64_t height,
+                                                      int64_t width,
+                                                      std::string_view tensor_name) {
+    if (shape_template.size() != 4) {
+        return Unexpected(Error{
+            ErrorCode::HardwareNotSupported,
+            "I/O binding expects 4D tensors for " + std::string(tensor_name) + "."});
+    }
+
+    std::vector<int64_t> resolved = shape_template;
+    const auto resolve_dimension = [&](std::size_t index, int64_t expected,
+                                       std::string_view label) -> Result<void> {
+        if (resolved[index] < 0) {
+            resolved[index] = expected;
+            return {};
+        }
+        if (resolved[index] != expected) {
+            return Unexpected(Error{
+                ErrorCode::HardwareNotSupported,
+                "I/O binding shape mismatch for " + std::string(tensor_name) + " " +
+                    std::string(label) + ": expected " + std::to_string(expected) + ", got " +
+                    std::to_string(resolved[index]) + "."});
+        }
+        return {};
+    };
+
+    if (auto batch_res = resolve_dimension(0, batch_size, "batch"); !batch_res) {
+        return Unexpected(batch_res.error());
+    }
+    if (resolved[1] <= 0) {
+        return Unexpected(
+            Error{ErrorCode::HardwareNotSupported,
+                  "I/O binding channel count must be explicit for " + std::string(tensor_name) +
+                      "."});
+    }
+    if (auto height_res = resolve_dimension(2, height, "height"); !height_res) {
+        return Unexpected(height_res.error());
+    }
+    if (auto width_res = resolve_dimension(3, width, "width"); !width_res) {
+        return Unexpected(width_res.error());
+    }
+
+    return resolved;
+}
+
+bool supports_bound_tensor_type(ONNXTensorElementDataType element_type) {
+    return element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+           element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+}
+
 Result<void> validate_output_values(std::span<const float> values, std::string_view label) {
     const auto validation = core::validate_finite_values(values, label);
     if (!validation) {
@@ -464,6 +642,15 @@ void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weig
 
 }  // namespace
 
+struct InferenceSession::BoundIoState {
+    explicit BoundIoState(Ort::Session& session) : binding(session) {}
+
+    Ort::IoBinding binding{nullptr};
+    BoundTensorStorage alpha_output = {};
+    std::optional<BoundTensorStorage> fg_output = std::nullopt;
+    std::vector<int64_t> input_shape = {};
+};
+
 InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {
     // Default recommended resolution. High-level layers (App)
     // will typically override this via InferenceParams.
@@ -471,6 +658,98 @@ InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(devic
 }
 
 InferenceSession::~InferenceSession() = default;
+
+Result<Ort::Value> InferenceSession::create_input_tensor(float* planar_data,
+                                                         std::size_t element_count,
+                                                         const std::vector<int64_t>& shape) {
+    auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+    if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+        m_fp16_pool.resize(element_count);
+        for (std::size_t index = 0; index < element_count; ++index) {
+            m_fp16_pool[index] = Ort::Float16_t(planar_data[index]);
+        }
+        return Ort::Value::CreateTensor<Ort::Float16_t>(memory_info, m_fp16_pool.data(),
+                                                        element_count, shape.data(), shape.size());
+    }
+
+    if (m_input_element_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+        return Unexpected(Error{
+            ErrorCode::HardwareNotSupported,
+            "Unsupported model input type for I/O binding path: " +
+                std::to_string(m_input_element_type)});
+    }
+
+    return Ort::Value::CreateTensor<float>(memory_info, planar_data, element_count, shape.data(),
+                                           shape.size());
+}
+
+Result<InferenceSession::BoundIoState*> InferenceSession::ensure_bound_io_state(
+    const std::vector<int64_t>& input_shape) {
+    if (input_shape.size() != 4) {
+        return Unexpected(
+            Error{ErrorCode::HardwareNotSupported, "I/O binding requires a 4D input tensor."});
+    }
+
+    if (m_output_node_dims.empty() || m_output_element_types.empty()) {
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "I/O binding requires output metadata to be available."});
+    }
+
+    const bool has_foreground_output = m_output_node_names_ptr.size() > 1 &&
+                                       m_output_node_dims.size() > 1 &&
+                                       m_output_element_types.size() > 1;
+
+    if (m_bound_io_state != nullptr && m_bound_io_state->input_shape == input_shape &&
+        m_bound_io_state->fg_output.has_value() == has_foreground_output) {
+        return m_bound_io_state.get();
+    }
+
+    if (!supports_bound_tensor_type(m_output_element_types[0])) {
+        return Unexpected(Error{
+            ErrorCode::HardwareNotSupported,
+            "Unsupported alpha output type for I/O binding: " +
+                std::to_string(m_output_element_types[0])});
+    }
+    if (has_foreground_output && !supports_bound_tensor_type(m_output_element_types[1])) {
+        return Unexpected(Error{
+            ErrorCode::HardwareNotSupported,
+            "Unsupported foreground output type for I/O binding: " +
+                std::to_string(m_output_element_types[1])});
+    }
+
+    auto state = std::make_unique<BoundIoState>(m_session);
+    auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+    const auto batch_size = input_shape[0];
+    const auto model_height = input_shape[2];
+    const auto model_width = input_shape[3];
+
+    const auto alpha_shape_res = resolve_io_binding_shape(
+        m_output_node_dims[0], batch_size, model_height, model_width, m_output_node_names[0]);
+    if (!alpha_shape_res) {
+        return Unexpected(alpha_shape_res.error());
+    }
+
+    state->alpha_output.reset(memory_info, m_output_element_types[0], *alpha_shape_res);
+    state->binding.BindOutput(m_output_node_names_ptr[0], state->alpha_output.tensor);
+
+    if (has_foreground_output) {
+        const auto fg_shape_res = resolve_io_binding_shape(
+            m_output_node_dims[1], batch_size, model_height, model_width, m_output_node_names[1]);
+        if (!fg_shape_res) {
+            return Unexpected(fg_shape_res.error());
+        }
+
+        state->fg_output.emplace();
+        state->fg_output->reset(memory_info, m_output_element_types[1], *fg_shape_res);
+        state->binding.BindOutput(m_output_node_names_ptr[1], state->fg_output->tensor);
+    }
+
+    state->input_shape = input_shape;
+    m_bound_io_state = std::move(state);
+    return m_bound_io_state.get();
+}
 
 void InferenceSession::configure_session_options(bool use_optimized_model_cache,
                                                  const SessionCreateOptions& options,
@@ -612,17 +891,20 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
         model_path, m_device.backend,
         m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
+    size_t num_output_nodes = m_session.GetOutputCount();
+    for (size_t i = 0; i < num_output_nodes; ++i) {
+        auto output_type_info = m_session.GetOutputTypeInfo(i);
+        auto output_tensor_info = output_type_info.GetTensorTypeAndShapeInfo();
+        m_output_node_dims.push_back(output_tensor_info.GetShape());
+        m_output_element_types.push_back(output_tensor_info.GetElementType());
+    }
+
     if (use_packaged_output_contract) {
         debug_log("Using packaged CorridorKey output contract");
         m_output_node_names.emplace_back(core::k_corridorkey_alpha_output_name);
         m_output_node_names.emplace_back(core::k_corridorkey_fg_output_name);
     } else {
-        fprintf(stderr, "[InferenceSession] Getting output count\n");
-        size_t num_output_nodes = m_session.GetOutputCount();
-        fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
-
         for (size_t i = 0; i < num_output_nodes; i++) {
-            fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
             auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
             m_output_node_names.push_back(output_name_ptr.get());
         }
@@ -630,7 +912,14 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     for (const auto& name : m_output_node_names) {
         m_output_node_names_ptr.push_back(name.c_str());
     }
-    fprintf(stderr, "[InferenceSession] Metadata extraction complete\n");
+
+    m_io_binding_enabled = core::should_enable_io_binding(model_path, m_device.backend) &&
+                           m_input_node_dims.size() == 1 && !m_output_node_names_ptr.empty() &&
+                           m_output_node_dims.size() >= m_output_node_names_ptr.size() &&
+                           m_output_element_types.size() >= m_output_node_names_ptr.size();
+    if (m_io_binding_enabled) {
+        debug_log("I/O binding enabled for this session");
+    }
 }
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
@@ -1223,14 +1512,14 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
     }
 
     try {
-        Ort::MemoryInfo memory_info =
-            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         int target_res =
             params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
         size_t batch_size = rgbs.size();
 
         bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
-        std::vector<Ort::Value> input_tensors;
+        Ort::Value input_tensor{nullptr};
+        std::vector<Ort::Value> output_tensors;
+        BoundIoState* bound_io_state = nullptr;
 
         if (is_concatenated) {
             auto shape = m_input_node_dims[0];
@@ -1290,42 +1579,52 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 batch_size);
 
             std::vector<int64_t> effective_shape = {(int64_t)batch_size, 4, model_h, model_w};
+            auto input_tensor_res =
+                create_input_tensor(dst_base, total_planar_size, effective_shape);
+            if (!input_tensor_res) {
+                return Unexpected(input_tensor_res.error());
+            }
+            input_tensor = std::move(*input_tensor_res);
 
-            // Check if model expects FP16 input (required for TensorRT on Windows)
-            if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                debug_log("Creating FP16 input tensor [BATCH SIZE=" + std::to_string(batch_size) +
-                          "]");
-                m_fp16_pool.resize(total_planar_size);
-                for (size_t i = 0; i < total_planar_size; ++i) {
-                    m_fp16_pool[i] = Ort::Float16_t(dst_base[i]);
+            if (m_io_binding_enabled) {
+                auto bound_state_res = ensure_bound_io_state(effective_shape);
+                if (!bound_state_res) {
+                    debug_log("I/O binding disabled after setup failure: " +
+                              bound_state_res.error().message);
+                    m_io_binding_enabled = false;
+                    m_bound_io_state.reset();
+                } else {
+                    bound_io_state = *bound_state_res;
                 }
-                input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
-                    memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
-                    effective_shape.size()));
-            } else {
-                debug_log(
-                    "Creating FP32 input tensor (type: " + std::to_string(m_input_element_type) +
-                    ") [BATCH SIZE=" + std::to_string(batch_size) + "]");
-                input_tensors.push_back(Ort::Value::CreateTensor<float>(
-                    memory_info, dst_base, total_planar_size, effective_shape.data(),
-                    effective_shape.size()));
             }
         } else {
             return Unexpected(Error{ErrorCode::HardwareNotSupported,
                                     "Non-concatenated models not yet supported with batching"});
         }
 
-        auto output_tensors = common::measure_stage(
-            on_stage, "ort_run",
-            [&]() {
-                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
-                                     input_tensors.data(), input_tensors.size(),
-                                     m_output_node_names_ptr.data(),
-                                     m_output_node_names_ptr.size());
-            },
-            batch_size);
+        if (bound_io_state != nullptr) {
+            common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    bound_io_state->binding.ClearBoundInputs();
+                    bound_io_state->binding.BindInput(m_input_node_names_ptr[0], input_tensor);
+                    bound_io_state->binding.SynchronizeInputs();
+                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    bound_io_state->binding.SynchronizeOutputs();
+                },
+                batch_size);
+        } else {
+            output_tensors = common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                                         &input_tensor, 1, m_output_node_names_ptr.data(),
+                                         m_output_node_names_ptr.size());
+                },
+                batch_size);
+        }
 
-        if (output_tensors.empty()) {
+        if (bound_io_state == nullptr && output_tensors.empty()) {
             debug_log("Model produced no output tensors");
             return Unexpected(
                 Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
@@ -1344,17 +1643,27 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                 auto materialize_res = common::measure_stage(
                     on_stage, "batch_extract_outputs_tensor_materialize",
                     [&]() -> Result<void> {
+                        Ort::Value& alpha_tensor = bound_io_state != nullptr
+                                                      ? bound_io_state->alpha_output.tensor
+                                                      : output_tensors[0];
                         auto alpha_res = materialize_output_tensor(
-                            output_tensors[0], batch_size, m_device, m_recommended_resolution,
+                            alpha_tensor, batch_size, m_device, m_recommended_resolution,
                             "alpha_raw_output", "Alpha");
                         if (!alpha_res) {
                             return Unexpected(alpha_res.error());
                         }
                         alpha_output = std::move(*alpha_res);
 
-                        if (include_foreground && output_tensors.size() > 1) {
+                        Ort::Value* fg_tensor = nullptr;
+                        if (bound_io_state != nullptr && bound_io_state->fg_output.has_value()) {
+                            fg_tensor = &bound_io_state->fg_output->tensor;
+                        } else if (output_tensors.size() > 1) {
+                            fg_tensor = &output_tensors[1];
+                        }
+
+                        if (include_foreground && fg_tensor != nullptr) {
                             auto fg_res = materialize_output_tensor(
-                                output_tensors[1], batch_size, m_device, m_recommended_resolution,
+                                *fg_tensor, batch_size, m_device, m_recommended_resolution,
                                 "fg_raw_output", "FG");
                             if (!fg_res) {
                                 return Unexpected(fg_res.error());
@@ -1472,8 +1781,6 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
     }
 
     try {
-        Ort::MemoryInfo memory_info =
-            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         int target_res =
             params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
 
@@ -1538,33 +1845,50 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             },
             1);
 
-        std::vector<Ort::Value> input_tensors;
         std::vector<int64_t> effective_shape = {1, 4, model_h, model_w};
-        if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            m_fp16_pool.resize(total_planar_size);
-            for (size_t index = 0; index < total_planar_size; ++index) {
-                m_fp16_pool[index] = Ort::Float16_t(planar_ptr[index]);
+        auto input_tensor_res = create_input_tensor(planar_ptr, total_planar_size, effective_shape);
+        if (!input_tensor_res) {
+            return Unexpected(input_tensor_res.error());
+        }
+        Ort::Value input_tensor = std::move(*input_tensor_res);
+        std::vector<Ort::Value> output_tensors;
+        BoundIoState* bound_io_state = nullptr;
+
+        if (m_io_binding_enabled) {
+            auto bound_state_res = ensure_bound_io_state(effective_shape);
+            if (!bound_state_res) {
+                debug_log("I/O binding disabled after setup failure: " +
+                          bound_state_res.error().message);
+                m_io_binding_enabled = false;
+                m_bound_io_state.reset();
+            } else {
+                bound_io_state = *bound_state_res;
             }
-            input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
-                memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
-                effective_shape.size()));
-        } else {
-            input_tensors.push_back(
-                Ort::Value::CreateTensor<float>(memory_info, planar_ptr, total_planar_size,
-                                                effective_shape.data(), effective_shape.size()));
         }
 
-        auto output_tensors = common::measure_stage(
-            on_stage, "ort_run",
-            [&]() {
-                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
-                                     input_tensors.data(), input_tensors.size(),
-                                     m_output_node_names_ptr.data(),
-                                     m_output_node_names_ptr.size());
-            },
-            1);
+        if (bound_io_state != nullptr) {
+            common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    bound_io_state->binding.ClearBoundInputs();
+                    bound_io_state->binding.BindInput(m_input_node_names_ptr[0], input_tensor);
+                    bound_io_state->binding.SynchronizeInputs();
+                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    bound_io_state->binding.SynchronizeOutputs();
+                },
+                1);
+        } else {
+            output_tensors = common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                                         &input_tensor, 1, m_output_node_names_ptr.data(),
+                                         m_output_node_names_ptr.size());
+                },
+                1);
+        }
 
-        if (output_tensors.empty()) {
+        if (bound_io_state == nullptr && output_tensors.empty()) {
             return Unexpected(
                 Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
         }
@@ -1586,17 +1910,27 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 auto materialize_res = common::measure_stage(
                     on_stage, "frame_extract_outputs_tensor_materialize",
                     [&]() -> Result<void> {
+                        Ort::Value& alpha_tensor = bound_io_state != nullptr
+                                                      ? bound_io_state->alpha_output.tensor
+                                                      : output_tensors[0];
                         auto alpha_res = materialize_output_tensor(
-                            output_tensors[0], 1, m_device, m_recommended_resolution,
-                            "alpha_raw_output", "Alpha");
+                            alpha_tensor, 1, m_device, m_recommended_resolution, "alpha_raw_output",
+                            "Alpha");
                         if (!alpha_res) {
                             return Unexpected(alpha_res.error());
                         }
                         alpha_output = std::move(*alpha_res);
 
-                        if (include_foreground && output_tensors.size() > 1) {
+                        Ort::Value* fg_tensor = nullptr;
+                        if (bound_io_state != nullptr && bound_io_state->fg_output.has_value()) {
+                            fg_tensor = &bound_io_state->fg_output->tensor;
+                        } else if (output_tensors.size() > 1) {
+                            fg_tensor = &output_tensors[1];
+                        }
+
+                        if (include_foreground && fg_tensor != nullptr) {
                             auto fg_res = materialize_output_tensor(
-                                output_tensors[1], 1, m_device, m_recommended_resolution,
+                                *fg_tensor, 1, m_device, m_recommended_resolution,
                                 "fg_raw_output", "FG");
                             if (!fg_res) {
                                 return Unexpected(fg_res.error());

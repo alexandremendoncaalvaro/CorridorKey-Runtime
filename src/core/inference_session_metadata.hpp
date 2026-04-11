@@ -1,7 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <corridorkey/types.hpp>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -12,6 +14,12 @@ namespace corridorkey::core {
 
 inline constexpr std::string_view k_corridorkey_alpha_output_name = "alpha";
 inline constexpr std::string_view k_corridorkey_fg_output_name = "fg";
+
+enum class IoBindingMode : std::uint8_t {
+    Auto,
+    On,
+    Off,
+};
 
 inline std::optional<int> infer_model_resolution_from_path(
     const std::filesystem::path& model_path) {
@@ -49,6 +57,65 @@ inline bool should_use_packaged_corridorkey_output_contract(const std::filesyste
     (void)input_is_fp16;
     return false;
 #endif
+}
+
+inline std::optional<IoBindingMode> parse_io_binding_mode(std::string_view raw_mode) {
+    std::string normalized(raw_mode);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+    if (normalized == "auto") {
+        return IoBindingMode::Auto;
+    }
+    if (normalized == "on" || normalized == "enabled" || normalized == "true" ||
+        normalized == "1") {
+        return IoBindingMode::On;
+    }
+    if (normalized == "off" || normalized == "disabled" || normalized == "false" ||
+        normalized == "0") {
+        return IoBindingMode::Off;
+    }
+    return std::nullopt;
+}
+
+inline std::string_view io_binding_mode_to_string(IoBindingMode mode) {
+    switch (mode) {
+        case IoBindingMode::On:
+            return "on";
+        case IoBindingMode::Off:
+            return "off";
+        case IoBindingMode::Auto:
+        default:
+            return "auto";
+    }
+}
+
+inline IoBindingMode io_binding_mode_from_environment() {
+    if (const char* raw_mode = std::getenv("CORRIDORKEY_IO_BINDING"); raw_mode != nullptr) {
+        if (const auto parsed = parse_io_binding_mode(raw_mode); parsed.has_value()) {
+            return *parsed;
+        }
+    }
+    return IoBindingMode::Auto;
+}
+
+inline bool supports_windows_rtx_io_binding(const std::filesystem::path& model_path,
+                                            Backend backend) {
+#if defined(_WIN32)
+    return backend == Backend::TensorRT && packaged_corridorkey_fp16_resolution(model_path).has_value();
+#else
+    (void)model_path;
+    (void)backend;
+    return false;
+#endif
+}
+
+inline bool should_enable_io_binding(const std::filesystem::path& model_path, Backend backend,
+                                     IoBindingMode mode = io_binding_mode_from_environment()) {
+    if (mode == IoBindingMode::Off) {
+        return false;
+    }
+    return supports_windows_rtx_io_binding(model_path, backend);
 }
 
 inline std::optional<int> infer_model_resolution(const std::vector<int64_t>& input_shape) {

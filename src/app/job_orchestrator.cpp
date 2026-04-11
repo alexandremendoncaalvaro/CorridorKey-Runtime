@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "../core/engine_internal.hpp"
+#include "../core/inference_session_metadata.hpp"
 #include "../core/ort_process_context.hpp"
 #include "../frame_io/video_io.hpp"
 #include "common/hardware_telemetry.hpp"
@@ -226,6 +227,15 @@ std::string artifact_precision_to_string(const std::filesystem::path& model_path
         return "mlx";
     }
     return "auto";
+}
+
+nlohmann::json io_binding_metadata(const std::filesystem::path& model_path, Backend backend) {
+    const auto mode = core::io_binding_mode_from_environment();
+    nlohmann::json metadata;
+    metadata["requested_mode"] = std::string(core::io_binding_mode_to_string(mode));
+    metadata["eligible"] = core::supports_windows_rtx_io_binding(model_path, backend);
+    metadata["active"] = core::should_enable_io_binding(model_path, backend, mode);
+    return metadata;
 }
 
 void append_benchmark_artifact_metadata(nlohmann::json& results, const JobRequest& request,
@@ -1007,8 +1017,11 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["backend"] = backend_to_string(engine->current_device().backend);
         results["batch_size"] = params.batch_size;
         results["tiling_enabled"] = params.enable_tiling;
-        results["execution_profile"] = to_json(runtime_optimization_profile_for_device(
-            runtime_capabilities(), engine->current_device()));
+        results["io_binding"] =
+            io_binding_metadata(request.model_path, engine->current_device().backend);
+        results["execution_profile"] = to_json(
+            runtime_optimization_profile_for_device(runtime_capabilities(),
+                                                    engine->current_device()));
         append_benchmark_artifact_metadata(results, request, engine->current_device());
         results["warmup_runs"] = warmup_runs;
         results["benchmark_runs"] = benchmark_runs;
@@ -1078,6 +1091,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     results["backend"] = backend_to_string(selected_backend);
     results["batch_size"] = benchmark_request.params.batch_size;
     results["tiling_enabled"] = benchmark_request.params.enable_tiling;
+    results["io_binding"] = io_binding_metadata(benchmark_request.model_path, selected_backend);
     results["warmup_runs"] = 0;
     DeviceInfo execution_device = benchmark_request.device;
     execution_device.name =
