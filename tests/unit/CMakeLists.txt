@@ -21,6 +21,7 @@ add_executable(test_unit
     test_json_utils.cpp
     test_local_ipc.cpp
     test_model_artifacts.cpp
+    test_ort_process_context.cpp
     test_ofx_color_management.cpp
     test_ofx_image_utils.cpp
     test_ofx_lifecycle.cpp

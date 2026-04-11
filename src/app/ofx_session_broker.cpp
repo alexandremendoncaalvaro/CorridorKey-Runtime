@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "../core/engine_internal.hpp"
+#include "../core/ort_process_context.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../common/shared_memory_transport.hpp"
 #include "ofx_session_policy.hpp"
@@ -38,7 +40,9 @@ void append_timing(std::vector<StageTiming>& timings, const StageTiming& timing)
 
 }  // namespace
 
-OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options) : m_options(options) {}
+OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options)
+    : m_options(options),
+      m_ort_process_context(std::make_shared<corridorkey::core::OrtProcessContext>()) {}
 
 Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     const OfxRuntimePrepareSessionRequest& request) {
@@ -62,8 +66,9 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         append_timing(timings, timing);
     };
 
-    auto engine = Engine::create(request.model_path, request.requested_device, on_stage,
-                                 request.engine_options);
+    auto engine = corridorkey::core::EngineFactory::create_with_ort_process_context(
+        request.model_path, request.requested_device, m_ort_process_context, on_stage,
+        request.engine_options);
     if (!engine) {
         return Unexpected<Error>(engine.error());
     }

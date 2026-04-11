@@ -56,6 +56,8 @@ class CORRIDORKEY_API ColorUtils {
      */
     static ImageBuffer resize(Image image, int new_width, int new_height);
     static void resize_into(Image image, Image dst);
+    static void resize_from_planar_into(const float* src, int src_width, int src_height,
+                                        int src_channels, Image dst);
 
     /**
      * @brief Resize with Gaussian pre-filter for anti-aliased downscaling.
@@ -73,6 +75,8 @@ class CORRIDORKEY_API ColorUtils {
      */
     static ImageBuffer resize_lanczos(Image image, int new_width, int new_height, State& state);
     static void resize_lanczos_into(Image image, Image dst, State& state);
+    static void resize_lanczos_from_planar_into(const float* src, int src_width, int src_height,
+                                                int src_channels, Image dst, State& state);
 
     /**
      * @brief Apply separable Gaussian blur in-place.

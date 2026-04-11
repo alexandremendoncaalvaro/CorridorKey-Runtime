@@ -178,6 +178,7 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
 #if !CORRIDORKEY_WITH_MLX
     (void)rgb;
     (void)alpha_hint;
+    (void)output_alpha_only;
     (void)on_stage;
     return Unexpected<Error>{
         Error{ErrorCode::HardwareNotSupported,
@@ -332,6 +333,7 @@ Result<FrameResult> MlxSession::infer_tile(const Image& rgb_tile, const Image& h
 #if !CORRIDORKEY_WITH_MLX
     (void)rgb_tile;
     (void)hint_tile;
+    (void)output_alpha_only;
     (void)on_stage;
     return Unexpected<Error>{
         Error{ErrorCode::HardwareNotSupported,

@@ -2,11 +2,22 @@
 #include <catch2/catch_all.hpp>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 #include "common/srgb_lut.hpp"
 #include "post_process/color_utils.hpp"
 
 using namespace corridorkey;
+
+namespace {
+
+std::vector<float> planar_copy(Image image) {
+    std::vector<float> planar(image.data.size());
+    ColorUtils::to_planar(image, planar.data());
+    return planar;
+}
+
+}  // namespace
 
 TEST_CASE("ColorUtils::srgb_to_linear and linear_to_srgb roundtrip", "[unit][color]") {
     ImageBuffer buffer(1, 1, 1);
@@ -113,6 +124,44 @@ TEST_CASE("ColorUtils::resize_into matches resize output", "[unit][color][regres
     for (size_t index = 0; index < actual.view().data.size(); ++index) {
         REQUIRE(actual.view().data[index] ==
                 Catch::Approx(expected.view().data[index]).margin(0.0001f));
+    }
+}
+
+TEST_CASE("ColorUtils::resize_from_planar_into matches resize output",
+          "[unit][color][regression]") {
+    ImageBuffer source_buf(4, 3, 3);
+    Image source = source_buf.view();
+    for (int y_pos = 0; y_pos < source.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < source.width; ++x_pos) {
+            source(y_pos, x_pos, 0) = static_cast<float>(x_pos + y_pos) / 8.0f;
+            source(y_pos, x_pos, 1) = static_cast<float>((x_pos * 2) + y_pos) / 10.0f;
+            source(y_pos, x_pos, 2) = static_cast<float>(x_pos + (y_pos * 3)) / 12.0f;
+        }
+    }
+
+    const std::vector<float> planar = planar_copy(source);
+
+    SECTION("Resample to a different size") {
+        ImageBuffer expected = ColorUtils::resize(source, 7, 5);
+        ImageBuffer actual(7, 5, 3);
+        ColorUtils::resize_from_planar_into(planar.data(), source.width, source.height,
+                                            source.channels, actual.view());
+
+        for (size_t index = 0; index < actual.view().data.size(); ++index) {
+            REQUIRE(actual.view().data[index] ==
+                    Catch::Approx(expected.view().data[index]).margin(0.0001f));
+        }
+    }
+
+    SECTION("Identity resize matches source pixels") {
+        ImageBuffer actual(source.width, source.height, source.channels);
+        ColorUtils::resize_from_planar_into(planar.data(), source.width, source.height,
+                                            source.channels, actual.view());
+
+        for (size_t index = 0; index < actual.view().data.size(); ++index) {
+            REQUIRE(actual.view().data[index] ==
+                    Catch::Approx(source.data[index]).margin(0.0001f));
+        }
     }
 }
 
@@ -249,6 +298,29 @@ TEST_CASE("ColorUtils::resize_lanczos_into matches resize_lanczos output",
     ImageBuffer expected = ColorUtils::resize_lanczos(source, 6, 6, state);
     ImageBuffer actual(6, 6, 1);
     ColorUtils::resize_lanczos_into(source, actual.view(), state);
+
+    for (size_t index = 0; index < actual.view().data.size(); ++index) {
+        REQUIRE(actual.view().data[index] ==
+                Catch::Approx(expected.view().data[index]).margin(0.0001f));
+    }
+}
+
+TEST_CASE("ColorUtils::resize_lanczos_from_planar_into matches resize_lanczos output",
+          "[unit][color][regression]") {
+    ImageBuffer source_buf(4, 4, 1);
+    Image source = source_buf.view();
+    for (int y_pos = 0; y_pos < source.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < source.width; ++x_pos) {
+            source(y_pos, x_pos) = static_cast<float>((x_pos * 2) + y_pos) / 9.0f;
+        }
+    }
+
+    const std::vector<float> planar = planar_copy(source);
+    ColorUtils::State state;
+    ImageBuffer expected = ColorUtils::resize_lanczos(source, 6, 5, state);
+    ImageBuffer actual(6, 5, 1);
+    ColorUtils::resize_lanczos_from_planar_into(planar.data(), source.width, source.height,
+                                                source.channels, actual.view(), state);
 
     for (size_t index = 0; index < actual.view().data.size(); ++index) {
         REQUIRE(actual.view().data[index] ==

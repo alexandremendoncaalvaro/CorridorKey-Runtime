@@ -2,6 +2,7 @@ param(
     [string]$Version = "",
     [ValidateSet("rtx", "dml", "all")]
     [string]$Track = "rtx",
+    [string]$DisplayVersionLabel = "",
     [switch]$SkipTests,
     [switch]$CleanOnly
 )
@@ -84,7 +85,12 @@ try {
     $vcvars = Get-ChildItem -Path "C:\Program Files\Microsoft Visual Studio" -Filter vcvars64.bat -Recurse | Select-Object -First 1 -ExpandProperty FullName
     if (-not $vcvars) { throw "vcvars64.bat not found. MSVC environment required." }
 
-    & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --preset release -DCORRIDORKEY_WINDOWS_ORT_ROOT=`"$buildOrtRoot`" && cmake --build --preset release -j 8"
+    $displayVersionArg = "-DCORRIDORKEY_DISPLAY_VERSION_LABEL=$DisplayVersionLabel"
+    if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+        Write-Host "Using display version label: $DisplayVersionLabel" -ForegroundColor Yellow
+    }
+
+    & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --preset release -DCORRIDORKEY_WINDOWS_ORT_ROOT=`"$buildOrtRoot`" $displayVersionArg && cmake --build --preset release -j 8"
     if ($LASTEXITCODE -ne 0) { throw "Build failed." }
     Write-Success "Build completed successfully."
 

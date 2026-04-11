@@ -537,7 +537,7 @@ void print_benchmark_artifact_summary(const nlohmann::json& report) {
 
 void print_info() {
     auto info = JobOrchestrator::get_system_info();
-    std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n";
+    std::cout << "CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING << "\n";
     std::cout << "------------------------------------------\n";
     std::cout << "Detected Hardware Devices:\n";
 
@@ -626,7 +626,7 @@ int main(int argc, char* argv[]) {
 
     if (argc <= 1) {
         std::cout << "==========================================\n"
-                  << "      CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n"
+                  << "      CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING << "\n"
                   << "==========================================\n\n"
                   << "Quick start:\n\n"
                   << "1. Check the runtime:\n"
@@ -668,10 +668,12 @@ int main(int argc, char* argv[]) {
         if (result.count("version")) {
             if (use_json) {
                 std::cout << common::safe_json_dump(
-                                 nlohmann::json({{"version", CORRIDORKEY_VERSION_STRING}}))
+                                 nlohmann::json({{"version", CORRIDORKEY_DISPLAY_VERSION_STRING},
+                                                 {"base_version", CORRIDORKEY_VERSION_STRING}}))
                           << std::endl;
             } else {
-                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << std::endl;
+                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING
+                          << std::endl;
             }
             return 0;
         }

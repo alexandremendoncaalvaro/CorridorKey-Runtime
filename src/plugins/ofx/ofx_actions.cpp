@@ -195,12 +195,13 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
         return kOfxStatFailed;
     }
 
-    std::string long_label = std::string(kPluginLabel) + " v" + CORRIDORKEY_VERSION_STRING;
+    std::string long_label =
+        std::string(kPluginLabel) + " v" + CORRIDORKEY_DISPLAY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropShortLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropLongLabel, 0, long_label.c_str());
     std::string description =
-        std::string("CorridorKey AI green screen keyer v") + CORRIDORKEY_VERSION_STRING;
+        std::string("CorridorKey AI green screen keyer v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropPluginDescription, 0, description.c_str());
     g_suites.property->propSetString(props, kOfxImageEffectPluginPropGrouping, 0, kPluginGroup);
 
@@ -208,7 +209,8 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
                                         CORRIDORKEY_VERSION_PATCH};
     g_suites.property->propSetIntN(props, kOfxPropVersion, static_cast<int>(version_parts.size()),
                                    version_parts.data());
-    g_suites.property->propSetString(props, kOfxPropVersionLabel, 0, CORRIDORKEY_VERSION_STRING);
+    g_suites.property->propSetString(props, kOfxPropVersionLabel, 0,
+                                     CORRIDORKEY_DISPLAY_VERSION_STRING);
 
     g_suites.property->propSetString(props, kOfxImageEffectPropSupportedContexts, 0,
                                      kOfxImageEffectContextFilter);
@@ -277,7 +279,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     }
 
     // --- Group 1: Status (runtime diagnostics and current version at the top) ---
-    std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
+    std::string runtime_group_label =
+        std::string("CorridorKey v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
     define_runtime_status_param(

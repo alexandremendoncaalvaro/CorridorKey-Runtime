@@ -13,10 +13,19 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.7.3
+    VERSION 0.7.4
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
+
+set(CORRIDORKEY_DISPLAY_VERSION_LABEL "" CACHE STRING
+    "Optional user-facing build label for local optimization checkpoint builds")
+
+if(CORRIDORKEY_DISPLAY_VERSION_LABEL)
+    set(CORRIDORKEY_VERSION_DISPLAY_STRING "${CORRIDORKEY_DISPLAY_VERSION_LABEL}")
+else()
+    set(CORRIDORKEY_VERSION_DISPLAY_STRING "${PROJECT_VERSION}")
+endif()
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/corridorkey/version.hpp.in

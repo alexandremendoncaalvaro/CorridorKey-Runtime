@@ -3,6 +3,7 @@ param(
     [string]$CorridorKeyRepo = "",
     [string]$Checkpoint = "",
     [string]$BuildPreset = "release",
+    [string]$DisplayVersionLabel = "",
     [string]$Uv = ""
 )
 
@@ -257,7 +258,10 @@ Invoke-ExternalCommand -FilePath $uvPath -WorkingDirectory $toolDir -Arguments @
 Write-Host "[6/9] Building the Windows RTX runtime and plugin..." -ForegroundColor Cyan
 $env:CORRIDORKEY_WINDOWS_ORT_ROOT = $ortRoot
 Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\\build.ps1") `
-    -Arguments @("-Preset", $BuildPreset)
+    -Arguments @(
+        "-Preset", $BuildPreset,
+        "-DisplayVersionLabel", $DisplayVersionLabel
+    )
 
 if (-not (Test-Path $cliPath)) {
     throw "CLI binary not found after build: $cliPath"

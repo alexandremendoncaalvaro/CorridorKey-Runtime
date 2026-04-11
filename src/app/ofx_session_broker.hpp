@@ -9,6 +9,10 @@
 #include "../common/ofx_runtime_defaults.hpp"
 #include "ofx_runtime_protocol.hpp"
 
+namespace corridorkey::core {
+class OrtProcessContext;
+}
+
 namespace corridorkey::app {
 
 struct OfxSessionBrokerOptions {
@@ -43,6 +47,7 @@ class OfxSessionBroker {
 
     OfxSessionBrokerOptions m_options = {};
     std::unordered_map<std::string, SessionEntry> m_sessions = {};
+    std::shared_ptr<corridorkey::core::OrtProcessContext> m_ort_process_context = nullptr;
 };
 
 }  // namespace corridorkey::app

@@ -24,6 +24,7 @@
 
 #include <fstream>
 #include <mutex>
+#include <optional>
 
 #include "coarse_to_fine_policy.hpp"
 #include "common/parallel_for.hpp"
@@ -33,6 +34,7 @@
 #include "inference_output_validation.hpp"
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
+#include "ort_process_context.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
@@ -118,7 +120,87 @@ void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, 
     log_output_stats_if_enabled(device, recommended_resolution, image.data, label);
 }
 
+struct MaterializedOutputTensor {
+    std::vector<int64_t> shape = {};
+    std::vector<float> fp32_storage = {};
+    float* values = nullptr;
+    std::size_t image_stride = 0;
+
+    [[nodiscard]] std::span<const float> span(std::size_t image_count) const {
+        return std::span<const float>(values, image_stride * image_count);
+    }
+};
+
+Result<MaterializedOutputTensor> materialize_output_tensor(
+    Ort::Value& tensor, std::size_t image_count, DeviceInfo device, int recommended_resolution,
+    std::string_view raw_label, std::string_view debug_label) {
+    MaterializedOutputTensor output;
+
+    auto tensor_info = tensor.GetTensorTypeAndShapeInfo();
+    auto element_type = tensor_info.GetElementType();
+    output.shape = tensor_info.GetShape();
+    if (output.shape.size() < 4) {
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed,
+                  "Model output tensor for " + std::string(raw_label) + " did not expose NCHW."});
+    }
+
+    debug_log(std::string(debug_label) + " output element type: " +
+              std::to_string(static_cast<int>(element_type)));
+
+    output.image_stride = static_cast<std::size_t>(output.shape[1]) *
+                          static_cast<std::size_t>(output.shape[2]) *
+                          static_cast<std::size_t>(output.shape[3]);
+
+    if (element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+        debug_log("Converting " + std::string(debug_label) + " output from FP16 to FP32");
+        const Ort::Float16_t* fp16_values = tensor.GetTensorData<Ort::Float16_t>();
+        const std::size_t total_elements = image_count * output.image_stride;
+        output.fp32_storage.resize(total_elements);
+        for (std::size_t index = 0; index < total_elements; ++index) {
+            output.fp32_storage[index] = fp16_values[index].ToFloat();
+        }
+        output.values = output.fp32_storage.data();
+    } else {
+        output.values = tensor.GetTensorMutableData<float>();
+    }
+
+    const auto output_values = output.span(image_count);
+    log_output_stats_if_enabled(device, recommended_resolution, output_values, raw_label);
+    const auto validation = validate_output_values(output_values, raw_label);
+    if (!validation) {
+        return Unexpected(validation.error());
+    }
+
+    return output;
+}
+
+void resize_model_output(const float* source, int source_width, int source_height,
+                         int source_channels, Image destination, bool use_lanczos,
+                         ColorUtils::State& state) {
+    if (use_lanczos) {
+        ColorUtils::resize_lanczos_from_planar_into(source, source_width, source_height,
+                                                    source_channels, destination, state);
+        return;
+    }
+
+    ColorUtils::resize_from_planar_into(source, source_width, source_height, source_channels,
+                                        destination);
+}
+
+Result<void> finalize_output_image(DeviceInfo device, int recommended_resolution, Image image,
+                                   std::string_view label) {
+    log_output_stats_if_enabled(device, recommended_resolution, image, label);
+    const auto validation = validate_output_image(image, label);
+    if (!validation) {
+        return Unexpected(validation.error());
+    }
+
+    return {};
+}
+
 constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
+constexpr const char* kUseEnvAllocatorsConfig = "session.use_env_allocators";
 
 #ifdef _WIN32
 constexpr const char* kTensorRtRtxExecutionProvider = "NvTensorRTRTXExecutionProvider";
@@ -387,8 +469,11 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 #ifndef _WIN32
     (void)model_path;
 #endif
-    debug_log("Setting intra-op threads");
-    m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
+    debug_log("Configuring shared ORT thread pools and env allocators");
+    // Shared thread pools require per-session thread pools to be disabled. Pair that with
+    // `session.use_env_allocators=1` so every ORT session in the process reuses the env allocator.
+    m_session_options.DisablePerSessionThreads();
+    m_session_options.AddConfigEntry(kUseEnvAllocatorsConfig, "1");
 
     debug_log("Setting graph optimization level");
     if (use_optimized_model_cache) {
@@ -540,7 +625,8 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
 }
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
-    const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options) {
+    const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options,
+    StageTimingCallback on_stage) {
     fprintf(stderr, "[InferenceSession] Creating session for model: %s\n",
             model_path.string().c_str());
 
@@ -554,6 +640,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     }
 
     DeviceInfo requested_device = device;
+    auto ort_process_context = options.ort_process_context;
 
     try {
         fprintf(stderr, "[InferenceSession] Allocating InferenceSession object\n");
@@ -569,9 +656,11 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             return session_ptr;
         }
 
-        fprintf(stderr, "[InferenceSession] Creating ORT environment\n");
-        session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-        fprintf(stderr, "[InferenceSession] ORT environment created\n");
+        if (!ort_process_context) {
+            ort_process_context = std::make_shared<core::OrtProcessContext>();
+        }
+        session_ptr->m_ort_process_context = ort_process_context;
+
         std::filesystem::path session_model_path = model_path;
         std::optional<std::filesystem::path> optimized_model_path;
         bool using_optimized_model_cache = false;
@@ -599,33 +688,46 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             }
         }
 
-        fprintf(stderr, "[InferenceSession] Configuring session options\n");
-        session_ptr->configure_session_options(using_optimized_model_cache, options, model_path);
-        fprintf(stderr, "[InferenceSession] Session options configured\n");
+        auto* env = common::measure_stage(
+            on_stage, "ort_env_acquire",
+            [&]() { return &session_ptr->m_ort_process_context->acquire_env(options.log_severity); });
 
-        if (!using_optimized_model_cache && optimized_model_path.has_value()) {
-            fprintf(stderr, "[InferenceSession] Setting optimized model path\n");
+        auto configure_session_for_model =
+            [&](InferenceSession& session, const std::filesystem::path& runtime_model_path,
+                bool use_cached_model,
+                const std::optional<std::filesystem::path>& optimized_output_path) {
+                common::measure_stage(
+                    on_stage, "ort_session_options",
+                    [&]() {
+                        session.configure_session_options(use_cached_model, options, model_path);
+                        if (!use_cached_model && optimized_output_path.has_value()) {
 #ifdef _WIN32
-            session_ptr->m_session_options.SetOptimizedModelFilePath(
-                optimized_model_path->wstring().c_str());
+                            session.m_session_options.SetOptimizedModelFilePath(
+                                optimized_output_path->wstring().c_str());
 #else
-            session_ptr->m_session_options.SetOptimizedModelFilePath(optimized_model_path->c_str());
+                            session.m_session_options.SetOptimizedModelFilePath(
+                                optimized_output_path->c_str());
 #endif
-        }
+                        }
+                    });
 
-        fprintf(stderr, "[InferenceSession] Creating ONNX Runtime session from model: %s\n",
-                session_model_path.string().c_str());
+                common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-        session_ptr->m_session =
-            Ort::Session(session_ptr->m_env, session_model_path.wstring().c_str(),
-                         session_ptr->m_session_options);
+                    session.m_session =
+                        Ort::Session(*env, runtime_model_path.wstring().c_str(),
+                                     session.m_session_options);
 #else
-        session_ptr->m_session = Ort::Session(session_ptr->m_env, session_model_path.c_str(),
-                                              session_ptr->m_session_options);
+                    session.m_session =
+                        Ort::Session(*env, runtime_model_path.c_str(), session.m_session_options);
 #endif
-        fprintf(stderr, "[InferenceSession] ONNX Runtime session created successfully\n");
+                });
 
-        session_ptr->extract_metadata(model_path);
+                common::measure_stage(on_stage, "ort_metadata_extract",
+                                      [&]() { session.extract_metadata(model_path); });
+            };
+
+        configure_session_for_model(*session_ptr, session_model_path, using_optimized_model_cache,
+                                    optimized_model_path);
         fprintf(stderr, "[InferenceSession] Session created successfully\n");
         return session_ptr;
     } catch (const Ort::Exception& e) {
@@ -638,24 +740,36 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 try {
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
-                    session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-                    session_ptr->configure_session_options(false, options, model_path);
+                    session_ptr->m_ort_process_context = ort_process_context;
+                    auto* env = common::measure_stage(
+                        on_stage, "ort_env_acquire", [&]() {
+                            return &session_ptr->m_ort_process_context->acquire_env(
+                                options.log_severity);
+                        });
+                    common::measure_stage(
+                        on_stage, "ort_session_options",
+                        [&]() {
+                            session_ptr->configure_session_options(false, options, model_path);
 #ifdef _WIN32
-                    session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path->wstring().c_str());
+                            session_ptr->m_session_options.SetOptimizedModelFilePath(
+                                optimized_model_path->wstring().c_str());
 #else
-                    session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path->c_str());
+                            session_ptr->m_session_options.SetOptimizedModelFilePath(
+                                optimized_model_path->c_str());
 #endif
+                        });
+                    common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                    session_ptr->m_session =
-                        Ort::Session(session_ptr->m_env, model_path.wstring().c_str(),
-                                     session_ptr->m_session_options);
+                        session_ptr->m_session =
+                            Ort::Session(*env, model_path.wstring().c_str(),
+                                         session_ptr->m_session_options);
 #else
-                    session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(),
-                                                          session_ptr->m_session_options);
+                        session_ptr->m_session =
+                            Ort::Session(*env, model_path.c_str(), session_ptr->m_session_options);
 #endif
-                    session_ptr->extract_metadata(model_path);
+                    });
+                    common::measure_stage(on_stage, "ort_metadata_extract",
+                                          [&]() { session_ptr->extract_metadata(model_path); });
                     return session_ptr;
                 } catch (const Ort::Exception&) {
                     remove_cached_model(*optimized_model_path);
@@ -1210,131 +1324,123 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
         std::vector<FrameResult> batch_results(batch_size);
 
-        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-        auto alpha_type = alpha_info.GetElementType();
-        auto alpha_shape = alpha_info.GetShape();
-        debug_log("Alpha output element type: " + std::to_string(alpha_type) +
-                  " (FLOAT16 is 10, FLOAT is 1)");
-
-        size_t alpha_image_stride = alpha_shape[1] * alpha_shape[2] * alpha_shape[3];
-
-        float* alpha_ptr = nullptr;
-        std::vector<float> alpha_fp32_conv;
-
-        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            debug_log("Converting alpha output from FP16 to FP32");
-            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
-            size_t total_alpha_elements = batch_size * alpha_image_stride;
-            alpha_fp32_conv.resize(total_alpha_elements);
-            for (size_t i = 0; i < total_alpha_elements; ++i) {
-                alpha_fp32_conv[i] = alpha_fp16[i].ToFloat();
-            }
-            alpha_ptr = alpha_fp32_conv.data();
-        } else {
-            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
-        }
-
-        const size_t total_alpha_elements = batch_size * alpha_image_stride;
-        log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                    std::span<const float>(alpha_ptr, total_alpha_elements),
-                                    "alpha_raw_output");
-        auto alpha_validation = validate_output_values(
-            std::span<const float>(alpha_ptr, total_alpha_elements), "alpha_raw_output");
-        if (!alpha_validation) {
-            return Unexpected(alpha_validation.error());
-        }
-
-        float* fg_ptr = nullptr;
-        std::vector<float> fg_fp32_conv;
-        std::vector<int64_t> fg_shape;
-        size_t fg_image_stride = 0;
+        MaterializedOutputTensor alpha_output;
+        std::optional<MaterializedOutputTensor> fg_output;
         const bool include_foreground = !params.output_alpha_only;
 
-        if (include_foreground && output_tensors.size() > 1) {
-            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
-            auto fg_type = fg_info.GetElementType();
-            fg_shape = fg_info.GetShape();
-            fg_image_stride = fg_shape[1] * fg_shape[2] * fg_shape[3];
-            debug_log("FG output element type: " + std::to_string(fg_type));
-
-            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                debug_log("Converting FG output from FP16 to FP32");
-                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
-                size_t total_fg_elements = batch_size * fg_image_stride;
-                fg_fp32_conv.resize(total_fg_elements);
-                for (size_t i = 0; i < total_fg_elements; ++i) {
-                    fg_fp32_conv[i] = fg_fp16[i].ToFloat();
-                }
-                fg_ptr = fg_fp32_conv.data();
-            } else {
-                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
-            }
-
-            const size_t total_fg_elements = batch_size * fg_image_stride;
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        std::span<const float>(fg_ptr, total_fg_elements),
-                                        "fg_raw_output");
-            auto fg_validation = validate_output_values(
-                std::span<const float>(fg_ptr, total_fg_elements), "fg_raw_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
-        }
-
         debug_log("Extracting batch outputs...");
-        common::measure_stage(
+        auto batch_extract_res = common::measure_stage(
             on_stage, "batch_extract_outputs",
-            [&]() {
-                for (size_t b = 0; b < batch_size; ++b) {
-                    FrameResult& result = batch_results[b];
-                    bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+            [&]() -> Result<void> {
+                auto materialize_res = common::measure_stage(
+                    on_stage, "batch_extract_outputs_tensor_materialize",
+                    [&]() -> Result<void> {
+                        auto alpha_res = materialize_output_tensor(
+                            output_tensors[0], batch_size, m_device, m_recommended_resolution,
+                            "alpha_raw_output", "Alpha");
+                        if (!alpha_res) {
+                            return Unexpected(alpha_res.error());
+                        }
+                        alpha_output = std::move(*alpha_res);
 
-                    ImageBuffer model_alpha((int)alpha_shape[3], (int)alpha_shape[2],
-                                            (int)alpha_shape[1]);
-                    ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride),
-                                            model_alpha.view());
+                        if (include_foreground && output_tensors.size() > 1) {
+                            auto fg_res = materialize_output_tensor(
+                                output_tensors[1], batch_size, m_device, m_recommended_resolution,
+                                "fg_raw_output", "FG");
+                            if (!fg_res) {
+                                return Unexpected(fg_res.error());
+                            }
+                            fg_output = std::move(*fg_res);
+                        }
 
-                    result.alpha =
-                        use_lanczos
-                            ? ColorUtils::resize_lanczos(model_alpha.view(), rgbs[b].width,
-                                                         rgbs[b].height, m_color_utils_state)
-                            : ColorUtils::resize(model_alpha.view(), rgbs[b].width, rgbs[b].height);
-                    ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-
-                    if (fg_ptr != nullptr) {
-                        ImageBuffer model_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
-                        ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), model_fg.view());
-
-                        result.foreground =
-                            use_lanczos
-                                ? ColorUtils::resize_lanczos(model_fg.view(), rgbs[b].width,
-                                                             rgbs[b].height, m_color_utils_state)
-                                : ColorUtils::resize(model_fg.view(), rgbs[b].width,
-                                                     rgbs[b].height);
-                    }
+                        return {};
+                    },
+                    batch_size);
+                if (!materialize_res) {
+                    return Unexpected(materialize_res.error());
                 }
+
+                const bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+                auto resize_res = common::measure_stage(
+                    on_stage, "batch_extract_outputs_resize",
+                    [&]() -> Result<void> {
+                        const auto alpha_width = static_cast<int>(alpha_output.shape[3]);
+                        const auto alpha_height = static_cast<int>(alpha_output.shape[2]);
+                        const auto alpha_channels = static_cast<int>(alpha_output.shape[1]);
+                        const bool include_batch_foreground = fg_output.has_value();
+                        const auto fg_width =
+                            include_batch_foreground ? static_cast<int>(fg_output->shape[3]) : 0;
+                        const auto fg_height =
+                            include_batch_foreground ? static_cast<int>(fg_output->shape[2]) : 0;
+                        const auto fg_channels =
+                            include_batch_foreground ? static_cast<int>(fg_output->shape[1]) : 0;
+
+                        for (std::size_t batch_index = 0; batch_index < batch_size; ++batch_index) {
+                            FrameResult& result = batch_results[batch_index];
+                            result.alpha =
+                                ImageBuffer(rgbs[batch_index].width, rgbs[batch_index].height, 1);
+                            resize_model_output(
+                                alpha_output.values + (batch_index * alpha_output.image_stride),
+                                alpha_width, alpha_height, alpha_channels, result.alpha.view(),
+                                use_lanczos, m_color_utils_state);
+
+                            if (include_batch_foreground) {
+                                result.foreground = ImageBuffer(rgbs[batch_index].width,
+                                                                rgbs[batch_index].height, 3);
+                                resize_model_output(
+                                    fg_output->values + (batch_index * fg_output->image_stride),
+                                    fg_width, fg_height, fg_channels,
+                                    result.foreground.view(), use_lanczos,
+                                    m_color_utils_state);
+                            }
+                        }
+
+                        return {};
+                    },
+                    batch_size);
+                if (!resize_res) {
+                    return Unexpected(resize_res.error());
+                }
+
+                auto finalize_res = common::measure_stage(
+                    on_stage, "batch_extract_outputs_finalize",
+                    [&]() -> Result<void> {
+                        for (std::size_t batch_index = 0; batch_index < batch_results.size();
+                             ++batch_index) {
+                            ColorUtils::clamp_image(batch_results[batch_index].alpha.view(), 0.0F,
+                                                    1.0F);
+
+                            auto alpha_final_res =
+                                finalize_output_image(m_device, m_recommended_resolution,
+                                                      batch_results[batch_index].alpha.view(),
+                                                      "alpha_resized_output");
+                            if (!alpha_final_res) {
+                                return Unexpected(alpha_final_res.error());
+                            }
+
+                            if (!batch_results[batch_index].foreground.view().empty()) {
+                                auto fg_final_res = finalize_output_image(
+                                    m_device, m_recommended_resolution,
+                                    batch_results[batch_index].foreground.view(),
+                                    "fg_resized_output");
+                                if (!fg_final_res) {
+                                    return Unexpected(fg_final_res.error());
+                                }
+                            }
+                        }
+
+                        return {};
+                    },
+                    batch_size);
+                if (!finalize_res) {
+                    return Unexpected(finalize_res.error());
+                }
+
+                return {};
             },
             batch_size);
-
-        for (size_t batch_index = 0; batch_index < batch_results.size(); ++batch_index) {
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        batch_results[batch_index].alpha.view(),
-                                        "alpha_resized_output");
-            auto alpha_resized_validation = validate_output_image(
-                batch_results[batch_index].alpha.view(), "alpha_resized_output");
-            if (!alpha_resized_validation) {
-                return Unexpected(alpha_resized_validation.error());
-            }
-            if (!batch_results[batch_index].foreground.view().empty()) {
-                log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                            batch_results[batch_index].foreground.view(),
-                                            "fg_resized_output");
-                auto fg_validation = validate_output_image(
-                    batch_results[batch_index].foreground.view(), "fg_resized_output");
-                if (!fg_validation) {
-                    return Unexpected(fg_validation.error());
-                }
-            }
+        if (!batch_extract_res) {
+            return Unexpected(batch_extract_res.error());
         }
 
         return batch_results;
@@ -1454,120 +1560,106 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
         }
 
-        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-        auto alpha_type = alpha_info.GetElementType();
-        auto alpha_shape = alpha_info.GetShape();
-        size_t alpha_image_stride = static_cast<size_t>(alpha_shape[1]) *
-                                    static_cast<size_t>(alpha_shape[2]) *
-                                    static_cast<size_t>(alpha_shape[3]);
-
-        float* alpha_ptr = nullptr;
-        std::vector<float> alpha_fp32_conv;
-        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
-            alpha_fp32_conv.resize(alpha_image_stride);
-            for (size_t index = 0; index < alpha_image_stride; ++index) {
-                alpha_fp32_conv[index] = alpha_fp16[index].ToFloat();
-            }
-            alpha_ptr = alpha_fp32_conv.data();
-        } else {
-            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
-        }
-
-        log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                    std::span<const float>(alpha_ptr, alpha_image_stride),
-                                    "alpha_raw_output");
-        auto alpha_validation = validate_output_values(
-            std::span<const float>(alpha_ptr, alpha_image_stride), "alpha_raw_output");
-        if (!alpha_validation) {
-            return Unexpected(alpha_validation.error());
-        }
-
-        float* fg_ptr = nullptr;
-        std::vector<float> fg_fp32_conv;
-        std::vector<int64_t> fg_shape;
-        size_t fg_image_stride = 0;
+        MaterializedOutputTensor alpha_output;
+        std::optional<MaterializedOutputTensor> fg_output;
         const bool include_foreground = !params.output_alpha_only;
-
-        if (include_foreground && output_tensors.size() > 1) {
-            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
-            auto fg_type = fg_info.GetElementType();
-            fg_shape = fg_info.GetShape();
-            fg_image_stride = static_cast<size_t>(fg_shape[1]) * static_cast<size_t>(fg_shape[2]) *
-                              static_cast<size_t>(fg_shape[3]);
-            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
-                fg_fp32_conv.resize(fg_image_stride);
-                for (size_t index = 0; index < fg_image_stride; ++index) {
-                    fg_fp32_conv[index] = fg_fp16[index].ToFloat();
-                }
-                fg_ptr = fg_fp32_conv.data();
-            } else {
-                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
-            }
-
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        std::span<const float>(fg_ptr, fg_image_stride),
-                                        "fg_raw_output");
-            auto fg_validation = validate_output_values(
-                std::span<const float>(fg_ptr, fg_image_stride), "fg_raw_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
-        }
 
         FrameResult result;
         result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        if (fg_ptr != nullptr) {
+        if (include_foreground && output_tensors.size() > 1) {
             result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
         }
 
         bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
-        Image model_alpha = ensure_resize_buffer(2, static_cast<int>(alpha_shape[3]),
-                                                 static_cast<int>(alpha_shape[2]),
-                                                 static_cast<int>(alpha_shape[1]));
-        common::measure_stage(
+        auto extract_res = common::measure_stage(
             on_stage, "frame_extract_outputs",
-            [&]() {
-                ColorUtils::from_planar(alpha_ptr, model_alpha);
-                if (use_lanczos) {
-                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
-                                                    m_color_utils_state);
-                } else {
-                    ColorUtils::resize_into(model_alpha, result.alpha.view());
-                }
-                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+            [&]() -> Result<void> {
+                auto materialize_res = common::measure_stage(
+                    on_stage, "frame_extract_outputs_tensor_materialize",
+                    [&]() -> Result<void> {
+                        auto alpha_res = materialize_output_tensor(
+                            output_tensors[0], 1, m_device, m_recommended_resolution,
+                            "alpha_raw_output", "Alpha");
+                        if (!alpha_res) {
+                            return Unexpected(alpha_res.error());
+                        }
+                        alpha_output = std::move(*alpha_res);
 
-                if (fg_ptr != nullptr) {
-                    Image model_fg = ensure_resize_buffer(3, static_cast<int>(fg_shape[3]),
-                                                          static_cast<int>(fg_shape[2]),
-                                                          static_cast<int>(fg_shape[1]));
-                    ColorUtils::from_planar(fg_ptr, model_fg);
-                    if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
-                                                        m_color_utils_state);
-                    } else {
-                        ColorUtils::resize_into(model_fg, result.foreground.view());
-                    }
+                        if (include_foreground && output_tensors.size() > 1) {
+                            auto fg_res = materialize_output_tensor(
+                                output_tensors[1], 1, m_device, m_recommended_resolution,
+                                "fg_raw_output", "FG");
+                            if (!fg_res) {
+                                return Unexpected(fg_res.error());
+                            }
+                            fg_output = std::move(*fg_res);
+                        }
+
+                        return {};
+                    },
+                    1);
+                if (!materialize_res) {
+                    return Unexpected(materialize_res.error());
                 }
+
+                auto resize_res = common::measure_stage(
+                    on_stage, "frame_extract_outputs_resize",
+                    [&]() -> Result<void> {
+                        resize_model_output(alpha_output.values,
+                                            static_cast<int>(alpha_output.shape[3]),
+                                            static_cast<int>(alpha_output.shape[2]),
+                                            static_cast<int>(alpha_output.shape[1]),
+                                            result.alpha.view(), use_lanczos,
+                                            m_color_utils_state);
+
+                        if (fg_output.has_value()) {
+                            resize_model_output(
+                                fg_output->values, static_cast<int>(fg_output->shape[3]),
+                                static_cast<int>(fg_output->shape[2]),
+                                static_cast<int>(fg_output->shape[1]), result.foreground.view(),
+                                use_lanczos, m_color_utils_state);
+                        }
+
+                        return {};
+                    },
+                    1);
+                if (!resize_res) {
+                    return Unexpected(resize_res.error());
+                }
+
+                auto finalize_res = common::measure_stage(
+                    on_stage, "frame_extract_outputs_finalize",
+                    [&]() -> Result<void> {
+                        ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+                        auto alpha_final_res =
+                            finalize_output_image(m_device, m_recommended_resolution,
+                                                  result.alpha.view(), "alpha_resized_output");
+                        if (!alpha_final_res) {
+                            return Unexpected(alpha_final_res.error());
+                        }
+
+                        if (!result.foreground.view().empty()) {
+                            auto fg_final_res =
+                                finalize_output_image(m_device, m_recommended_resolution,
+                                                      result.foreground.view(),
+                                                      "fg_resized_output");
+                            if (!fg_final_res) {
+                                return Unexpected(fg_final_res.error());
+                            }
+                        }
+
+                        return {};
+                    },
+                    1);
+                if (!finalize_res) {
+                    return Unexpected(finalize_res.error());
+                }
+
+                return {};
             },
             1);
-
-        log_output_stats_if_enabled(m_device, m_recommended_resolution, result.alpha.view(),
-                                    "alpha_resized_output");
-        auto alpha_resized_validation =
-            validate_output_image(result.alpha.view(), "alpha_resized_output");
-        if (!alpha_resized_validation) {
-            return Unexpected(alpha_resized_validation.error());
-        }
-        if (!result.foreground.view().empty()) {
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        result.foreground.view(), "fg_resized_output");
-            auto fg_validation =
-                validate_output_image(result.foreground.view(), "fg_resized_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
+        if (!extract_res) {
+            return Unexpected(extract_res.error());
         }
 
         return result;

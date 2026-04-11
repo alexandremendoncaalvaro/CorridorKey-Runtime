@@ -29,6 +29,10 @@ TEST_CASE("Engine warmup happens on first processing call", "[integration][engin
                        [&](const StageTiming& timing) { create_timings.push_back(timing); });
     REQUIRE(create_res.has_value());
     REQUIRE_FALSE(has_stage(create_timings, "engine_warmup"));
+    REQUIRE(has_stage(create_timings, "ort_env_acquire"));
+    REQUIRE(has_stage(create_timings, "ort_session_options"));
+    REQUIRE(has_stage(create_timings, "ort_session_create"));
+    REQUIRE(has_stage(create_timings, "ort_metadata_extract"));
 
     ImageBuffer rgb_buf(32, 32, 3);
     ImageBuffer hint_buf(32, 32, 1);
@@ -42,5 +46,10 @@ TEST_CASE("Engine warmup happens on first processing call", "[integration][engin
                             [&](const StageTiming& timing) { run_timings.push_back(timing); });
     REQUIRE(run_res.has_value());
     REQUIRE(has_stage(run_timings, "engine_warmup"));
+    REQUIRE(has_stage(run_timings, "frame_prepare_inputs"));
     REQUIRE(has_stage(run_timings, "ort_run"));
+    REQUIRE(has_stage(run_timings, "frame_extract_outputs"));
+    REQUIRE(has_stage(run_timings, "frame_extract_outputs_tensor_materialize"));
+    REQUIRE(has_stage(run_timings, "frame_extract_outputs_resize"));
+    REQUIRE(has_stage(run_timings, "frame_extract_outputs_finalize"));
 }

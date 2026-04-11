@@ -48,3 +48,29 @@ endif()
 
 add_test(NAME integration_tests COMMAND test_integration)
 set_tests_properties(integration_tests PROPERTIES LABELS "integration")
+
+add_executable(ofx_benchmark_harness
+    ofx_benchmark_harness.cpp
+)
+
+corridorkey_apply_windows_common_compile_defs(ofx_benchmark_harness)
+
+target_link_libraries(ofx_benchmark_harness
+    PRIVATE
+        corridorkey_core_static
+        nlohmann_json::nlohmann_json
+)
+
+target_include_directories(ofx_benchmark_harness PRIVATE ${PROJECT_SOURCE_DIR}/vendor/openfx/include)
+
+target_compile_definitions(ofx_benchmark_harness PRIVATE
+    PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
+)
+
+corridorkey_stage_ort_runtime(ofx_benchmark_harness)
+
+if(NOT MSVC)
+    target_compile_options(ofx_benchmark_harness PRIVATE -Wall -Wextra -Wpedantic -Werror)
+else()
+    target_compile_options(ofx_benchmark_harness PRIVATE /W4 /WX /permissive-)
+endif()

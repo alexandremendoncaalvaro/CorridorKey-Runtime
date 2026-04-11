@@ -8,6 +8,10 @@
 
 namespace corridorkey {
 
+namespace core {
+struct EngineFactory;
+}
+
 /**
  * @brief Detect the best available hardware device.
  */
@@ -178,6 +182,7 @@ class CORRIDORKEY_API Engine {
    private:
     // Private constructor used by the factory method
     Engine();
+    friend struct core::EngineFactory;
 
     class Impl;
     std::unique_ptr<Impl> m_impl;

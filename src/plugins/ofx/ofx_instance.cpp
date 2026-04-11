@@ -7,6 +7,7 @@
 #include <new>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "app/runtime_contracts.hpp"
@@ -422,17 +423,76 @@ std::string runtime_path_runtime_label_impl(const InstanceData& data) {
     }
 }
 
-std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
+bool is_nested_stage_name(std::string_view stage_name, std::string_view candidate_parent_name) {
+    return stage_name.size() > candidate_parent_name.size() + 1 &&
+           stage_name.compare(0, candidate_parent_name.size(), candidate_parent_name) == 0 &&
+           stage_name[candidate_parent_name.size()] == '_';
+}
+
+bool stage_has_parent(const std::vector<StageTiming>& timings, std::size_t stage_index) {
+    const auto& stage_name = timings[stage_index].name;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (index == stage_index) {
+            continue;
+        }
+        if (is_nested_stage_name(stage_name, timings[index].name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool stage_has_children(const std::vector<StageTiming>& timings, std::size_t stage_index) {
+    const auto& stage_name = timings[stage_index].name;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (index == stage_index) {
+            continue;
+        }
+        if (is_nested_stage_name(timings[index].name, stage_name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+double exclusive_stage_total_ms(const std::vector<StageTiming>& timings) {
     double total_ms = 0.0;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (stage_has_parent(timings, index)) {
+            continue;
+        }
+        total_ms += timings[index].total_ms;
+    }
+    return total_ms;
+}
+
+const StageTiming* hottest_actionable_stage(const std::vector<StageTiming>& timings) {
     const StageTiming* hottest_stage = nullptr;
-    for (const auto& timing : data.last_render_stage_timings) {
-        total_ms += timing.total_ms;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (stage_has_children(timings, index)) {
+            continue;
+        }
+        if (hottest_stage == nullptr || timings[index].total_ms > hottest_stage->total_ms) {
+            hottest_stage = &timings[index];
+        }
+    }
+
+    if (hottest_stage != nullptr) {
+        return hottest_stage;
+    }
+
+    for (const auto& timing : timings) {
         if (hottest_stage == nullptr || timing.total_ms > hottest_stage->total_ms) {
             hottest_stage = &timing;
         }
     }
+    return hottest_stage;
+}
 
-    const double last_ms = data.last_frame_ms > 0.0 ? data.last_frame_ms : total_ms;
+std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
+    const double backend_total_ms = exclusive_stage_total_ms(data.last_render_stage_timings);
+    const StageTiming* hottest_stage = hottest_actionable_stage(data.last_render_stage_timings);
+    const double last_ms = data.last_frame_ms > 0.0 ? data.last_frame_ms : backend_total_ms;
     if (last_ms <= 0.0) {
         return "No frames processed";
     }

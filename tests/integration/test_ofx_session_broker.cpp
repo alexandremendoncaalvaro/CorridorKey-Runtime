@@ -1,4 +1,5 @@
 #include <catch2/catch_all.hpp>
+#include <algorithm>
 #include <filesystem>
 
 #include "../test_model_artifact_utils.hpp"
@@ -6,6 +7,15 @@
 
 using namespace corridorkey;
 using namespace corridorkey::app;
+
+namespace {
+
+bool has_stage(const std::vector<StageTiming>& timings, const std::string& name) {
+    return std::any_of(timings.begin(), timings.end(),
+                       [&](const StageTiming& timing) { return timing.name == name; });
+}
+
+}  // namespace
 
 TEST_CASE("OFX session broker reuses sessions for the same executable model",
           "[integration][ofx][runtime][regression]") {
@@ -32,6 +42,8 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     REQUIRE(first_prepare.has_value());
     CHECK_FALSE(first_prepare->session.reused_existing_session);
     CHECK(first_prepare->session.artifact_name == model_path.filename().string());
+    CHECK(has_stage(first_prepare->timings, "ort_env_acquire"));
+    CHECK(has_stage(first_prepare->timings, "ort_session_create"));
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 1);
 
@@ -51,6 +63,7 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     CHECK(second_prepare->session.requested_resolution == first_request.requested_resolution);
     CHECK(second_prepare->session.effective_resolution == first_request.effective_resolution);
     CHECK(second_prepare->session.ref_count == 2);
+    CHECK(second_prepare->timings.empty());
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 1);
 

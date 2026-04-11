@@ -6,6 +6,8 @@
 #include <corridorkey/version.hpp>
 #include <optional>
 
+#include "../core/engine_internal.hpp"
+#include "../core/ort_process_context.hpp"
 #include "../frame_io/video_io.hpp"
 #include "common/hardware_telemetry.hpp"
 #include "common/runtime_paths.hpp"
@@ -409,8 +411,10 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     if (!started_res) return Unexpected(started_res.error());
 
     // 1. Create Engine
+    auto ort_process_context = std::make_shared<corridorkey::core::OrtProcessContext>();
     auto engine_res = profiler.measure("engine_create", [&]() {
-        return Engine::create(req.model_path, req.device, stage_callback);
+        return corridorkey::core::EngineFactory::create_with_ort_process_context(
+            req.model_path, req.device, ort_process_context, stage_callback);
     });
     if (!engine_res) {
         auto failed_event = JobEvent{
@@ -676,7 +680,8 @@ bool JobOrchestrator::is_video_file(const std::filesystem::path& p) {
 
 nlohmann::json JobOrchestrator::get_system_info() {
     nlohmann::json info;
-    info["version"] = CORRIDORKEY_VERSION_STRING;
+    info["version"] = CORRIDORKEY_DISPLAY_VERSION_STRING;
+    info["base_version"] = CORRIDORKEY_VERSION_STRING;
     auto capabilities = runtime_capabilities();
     info["capabilities"] = to_json(capabilities);
 
@@ -910,8 +915,10 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         common::StageProfiler profiler;
         auto stage_callback = [&](const StageTiming& timing) { profiler.record(timing); };
 
+        auto ort_process_context = std::make_shared<corridorkey::core::OrtProcessContext>();
         auto engine_res = profiler.measure("engine_create", [&]() {
-            return Engine::create(request.model_path, request.device, stage_callback);
+            return corridorkey::core::EngineFactory::create_with_ort_process_context(
+                request.model_path, request.device, ort_process_context, stage_callback);
         });
         if (!engine_res) {
             results["error"] = engine_res.error().message;
@@ -998,11 +1005,14 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["requested_device"] = request.device.name;
         results["device"] = engine->current_device().name;
         results["backend"] = backend_to_string(engine->current_device().backend);
+        results["batch_size"] = params.batch_size;
+        results["tiling_enabled"] = params.enable_tiling;
         results["execution_profile"] = to_json(runtime_optimization_profile_for_device(
             runtime_capabilities(), engine->current_device()));
         append_benchmark_artifact_metadata(results, request, engine->current_device());
         results["warmup_runs"] = warmup_runs;
         results["benchmark_runs"] = benchmark_runs;
+        results["steady_state_runs"] = benchmark_runs;
         results["cold_latency_ms"] = cold_latency_ms;
         results["avg_latency_ms"] = total_ms / benchmark_runs;
         results["fps"] = total_ms > 0.0 ? (1000.0 * benchmark_runs) / total_ms : 0.0;
@@ -1066,6 +1076,9 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     results["requested_device"] = benchmark_request.device.name;
     results["device"] = selected_device_name;
     results["backend"] = backend_to_string(selected_backend);
+    results["batch_size"] = benchmark_request.params.batch_size;
+    results["tiling_enabled"] = benchmark_request.params.enable_tiling;
+    results["warmup_runs"] = 0;
     DeviceInfo execution_device = benchmark_request.device;
     execution_device.name =
         selected_device_name.empty() ? execution_device.name : selected_device_name;
@@ -1077,8 +1090,11 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     results["total_duration_ms"] = total_ms;
     if (units > 0) {
         results["processed_units"] = units;
+        results["steady_state_runs"] = units;
         results["throughput_units_per_second"] = total_ms > 0.0 ? (1000.0 * units) / total_ms : 0.0;
         results["avg_unit_latency_ms"] = total_ms / static_cast<double>(units);
+    } else {
+        results["steady_state_runs"] = 0;
     }
     results["stage_timings"] = nlohmann::json::array();
     for (const auto& timing : timings) {

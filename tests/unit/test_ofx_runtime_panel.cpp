@@ -190,6 +190,66 @@ TEST_CASE("runtime timings label exposes cache-backed renders explicitly",
             "1.1 s | Avg: 1.0 s | Instance cache | Hotspot: ort_run 980.0 ms");
 }
 
+TEST_CASE("runtime timings prefer wall time over nested stage totals",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.last_frame_ms = 3458.6;
+    data.avg_frame_ms = 3400.0;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    data.last_render_stage_timings = {
+        corridorkey::StageTiming{"frame_prepare_inputs", 298.6, 1, 1},
+        corridorkey::StageTiming{"ort_run", 376.3, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs_tensor_materialize", 59.2, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs_resize", 2495.0, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs_finalize", 122.5, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs", 2676.7, 1, 1},
+        corridorkey::StageTiming{"post_despill", 4.0, 1, 1},
+        corridorkey::StageTiming{"post_premultiply", 12.7, 1, 1},
+        corridorkey::StageTiming{"post_composite", 90.4, 1, 1},
+    };
+
+    REQUIRE(runtime_timings_runtime_label(data) ==
+            "3.5 s | Avg: 3.4 s | Hotspot: frame_extract_outputs_resize 2.5 s");
+}
+
+TEST_CASE("runtime timings fallback excludes nested timing double count",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    data.last_render_stage_timings = {
+        corridorkey::StageTiming{"frame_prepare_inputs", 298.6, 1, 1},
+        corridorkey::StageTiming{"ort_run", 376.3, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs_tensor_materialize", 59.2, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs_resize", 2495.0, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs_finalize", 122.5, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs", 2676.7, 1, 1},
+        corridorkey::StageTiming{"post_despill", 4.0, 1, 1},
+        corridorkey::StageTiming{"post_premultiply", 12.7, 1, 1},
+        corridorkey::StageTiming{"post_composite", 90.4, 1, 1},
+    };
+
+    REQUIRE(runtime_timings_runtime_label(data) ==
+            "3.5 s | Avg: 3.5 s | Hotspot: frame_extract_outputs_resize 2.5 s");
+}
+
+TEST_CASE("record frame timing keeps cache-hit wall time", "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.last_render_stage_timings = {
+        corridorkey::StageTiming{"ort_run", 376.3, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs_resize", 2495.0, 1, 1},
+        corridorkey::StageTiming{"frame_extract_outputs", 2676.7, 1, 1},
+    };
+
+    record_frame_timing(&data, 92.0, LastRenderWorkOrigin::SharedCache);
+
+    CHECK(data.last_frame_ms == Catch::Approx(92.0));
+    CHECK(data.avg_frame_ms == Catch::Approx(92.0));
+    CHECK(data.frame_time_samples == 1);
+    CHECK(data.last_render_work_origin == LastRenderWorkOrigin::SharedCache);
+    REQUIRE(runtime_timings_runtime_label(data) ==
+            "92.0 ms | Avg: 92.0 ms | Shared cache | Hotspot: frame_extract_outputs_resize 2.5 s");
+}
+
 TEST_CASE("runtime timings label falls back to preserved frame timing without stage metadata",
           "[unit][ofx][regression]") {
     InstanceData data{};

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <corridorkey/frame_io.hpp>
 #include <filesystem>
@@ -24,6 +25,13 @@ std::filesystem::path create_dummy_frame(const std::filesystem::path& dir, int i
     auto res = frame_io::write_frame(path, view);
     REQUIRE(res.has_value());
     return path;
+}
+
+bool has_stage(const nlohmann::json& timings, const std::string& name) {
+    return timings.is_array() &&
+           std::any_of(timings.begin(), timings.end(), [&](const auto& timing) {
+               return timing.is_object() && timing.value("name", std::string()) == name;
+           });
 }
 }  // namespace
 
@@ -93,4 +101,73 @@ TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[inte
 
     // Cleanup
     std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("JobOrchestrator benchmark reports metadata and stage coverage",
+          "[integration][app][runtime][regression]") {
+    auto model_path = std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    SECTION("synthetic benchmark surfaces session and steady-state timings") {
+        JobRequest request;
+        request.model_path = model_path;
+        request.device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+        request.params.target_resolution = 512;
+        request.params.batch_size = 1;
+        request.params.enable_tiling = false;
+
+        auto report = JobOrchestrator::run_benchmark(request);
+        REQUIRE_FALSE(report.contains("error"));
+        REQUIRE(report["mode"] == "synthetic");
+        REQUIRE(report["batch_size"] == 1);
+        REQUIRE(report["tiling_enabled"] == false);
+        REQUIRE(report["warmup_runs"] == 2);
+        REQUIRE(report["steady_state_runs"] == 5);
+        REQUIRE(has_stage(report["stage_timings"], "ort_env_acquire"));
+        REQUIRE(has_stage(report["stage_timings"], "ort_session_options"));
+        REQUIRE(has_stage(report["stage_timings"], "ort_session_create"));
+        REQUIRE(has_stage(report["stage_timings"], "ort_metadata_extract"));
+        REQUIRE(has_stage(report["stage_timings"], "frame_prepare_inputs"));
+        REQUIRE(has_stage(report["stage_timings"], "ort_run"));
+        REQUIRE(has_stage(report["stage_timings"], "frame_extract_outputs"));
+        REQUIRE(has_stage(report["stage_timings"], "frame_extract_outputs_tensor_materialize"));
+        REQUIRE(has_stage(report["stage_timings"], "frame_extract_outputs_resize"));
+        REQUIRE(has_stage(report["stage_timings"], "frame_extract_outputs_finalize"));
+    }
+
+    SECTION("workload benchmark reports sequence stages and additive metadata") {
+        auto tmp_dir =
+            std::filesystem::temp_directory_path() / "corridorkey_benchmark_orchestrator_test";
+        std::filesystem::remove_all(tmp_dir);
+        std::filesystem::create_directories(tmp_dir);
+        create_dummy_frame(tmp_dir, 1, 64, 64);
+        create_dummy_frame(tmp_dir, 2, 64, 64);
+
+        JobRequest request;
+        request.input_path = tmp_dir;
+        request.model_path = model_path;
+        request.device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+        request.params.target_resolution = 512;
+        request.params.batch_size = 2;
+        request.params.enable_tiling = false;
+
+        auto report = JobOrchestrator::run_benchmark(request);
+        std::filesystem::remove_all(tmp_dir);
+
+        REQUIRE_FALSE(report.contains("error"));
+        REQUIRE(report["mode"] == "workload");
+        REQUIRE(report["batch_size"] == 2);
+        REQUIRE(report["tiling_enabled"] == false);
+        REQUIRE(report["effective_resolution"] == 512);
+        REQUIRE(has_stage(report["stage_timings"], "sequence_read_input"));
+        REQUIRE(has_stage(report["stage_timings"], "sequence_infer_batch"));
+        REQUIRE(has_stage(report["stage_timings"], "sequence_write_output"));
+        REQUIRE(has_stage(report["stage_timings"], "batch_extract_outputs"));
+        REQUIRE(has_stage(report["stage_timings"], "batch_extract_outputs_tensor_materialize"));
+        REQUIRE(has_stage(report["stage_timings"], "batch_extract_outputs_resize"));
+        REQUIRE(has_stage(report["stage_timings"], "batch_extract_outputs_finalize"));
+    }
 }

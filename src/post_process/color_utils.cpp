@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 
+#include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
 
 namespace corridorkey {
@@ -15,6 +16,64 @@ float default_resized_channel_value(int channel, int total_channels) {
         return 1.0F;
     }
     return 0.0F;
+}
+
+void fill_default_channels(Image dst, int y_begin, int y_end, int begin_channel) {
+    if (begin_channel >= dst.channels) {
+        return;
+    }
+
+    for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+            for (int channel = begin_channel; channel < dst.channels; ++channel) {
+                dst(y_pos, x_pos, channel) = default_resized_channel_value(channel, dst.channels);
+            }
+        }
+    }
+}
+
+void prepare_bilinear_axis(int src_size, int dst_size, std::vector<int>& lower_indices,
+                           std::vector<int>& upper_indices, std::vector<float>& weights) {
+    lower_indices.resize(static_cast<size_t>(dst_size));
+    upper_indices.resize(static_cast<size_t>(dst_size));
+    weights.resize(static_cast<size_t>(dst_size));
+
+    const float scale = static_cast<float>(src_size) / static_cast<float>(dst_size);
+    for (int dst_index = 0; dst_index < dst_size; ++dst_index) {
+        const float src_pos = (static_cast<float>(dst_index) + 0.5F) * scale - 0.5F;
+        const int lower = std::max(0, static_cast<int>(std::floor(src_pos)));
+        const int upper = std::min(lower + 1, src_size - 1);
+        lower_indices[static_cast<size_t>(dst_index)] = lower;
+        upper_indices[static_cast<size_t>(dst_index)] = upper;
+        weights[static_cast<size_t>(dst_index)] = src_pos - static_cast<float>(lower);
+    }
+}
+
+void copy_from_planar_into(const float* src, int src_width, int src_height, int src_channels,
+                           Image dst) {
+    if (src == nullptr || dst.empty() || src_width <= 0 || src_height <= 0 || src_channels <= 0) {
+        return;
+    }
+
+    const int common_channels = std::min(src_channels, dst.channels);
+    if (common_channels <= 0 || src_width != dst.width || src_height != dst.height) {
+        return;
+    }
+
+    const size_t plane_stride = static_cast<size_t>(src_width) * static_cast<size_t>(src_height);
+    common::parallel_for_rows(dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const size_t row_offset = static_cast<size_t>(y_pos) * static_cast<size_t>(src_width);
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                const size_t pixel_offset = row_offset + static_cast<size_t>(x_pos);
+                for (int channel = 0; channel < common_channels; ++channel) {
+                    const float* plane = src + (static_cast<size_t>(channel) * plane_stride);
+                    dst(y_pos, x_pos, channel) = plane[pixel_offset];
+                }
+            }
+        }
+        fill_default_channels(dst, y_begin, y_end, common_channels);
+    });
 }
 
 void resize_bilinear_into(Image image, Image dst) {
@@ -31,34 +90,90 @@ void resize_bilinear_into(Image image, Image dst) {
     const float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
     const float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
 
-    for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
-        const float src_y = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
-        const int y0 = std::max(0, static_cast<int>(std::floor(src_y)));
-        const int y1 = std::min(y0 + 1, image.height - 1);
-        const float d_y = src_y - static_cast<float>(y0);
+    common::parallel_for_rows(dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const float src_y = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
+            const int y0 = std::max(0, static_cast<int>(std::floor(src_y)));
+            const int y1 = std::min(y0 + 1, image.height - 1);
+            const float d_y = src_y - static_cast<float>(y0);
 
-        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-            const float src_x = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
-            const int x0 = std::max(0, static_cast<int>(std::floor(src_x)));
-            const int x1 = std::min(x0 + 1, image.width - 1);
-            const float d_x = src_x - static_cast<float>(x0);
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                const float src_x = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
+                const int x0 = std::max(0, static_cast<int>(std::floor(src_x)));
+                const int x1 = std::min(x0 + 1, image.width - 1);
+                const float d_x = src_x - static_cast<float>(x0);
 
-            for (int channel = 0; channel < common_channels; ++channel) {
-                const float v00 = image(y0, x0, channel);
-                const float v10 = image(y0, x1, channel);
-                const float v01 = image(y1, x0, channel);
-                const float v11 = image(y1, x1, channel);
+                for (int channel = 0; channel < common_channels; ++channel) {
+                    const float v00 = image(y0, x0, channel);
+                    const float v10 = image(y0, x1, channel);
+                    const float v01 = image(y1, x0, channel);
+                    const float v11 = image(y1, x1, channel);
 
-                const float val_y0 = v00 * (1.0F - d_x) + v10 * d_x;
-                const float val_y1 = v01 * (1.0F - d_x) + v11 * d_x;
-                dst(y_pos, x_pos, channel) = val_y0 * (1.0F - d_y) + val_y1 * d_y;
-            }
-
-            for (int channel = common_channels; channel < dst.channels; ++channel) {
-                dst(y_pos, x_pos, channel) = default_resized_channel_value(channel, dst.channels);
+                    const float val_y0 = v00 * (1.0F - d_x) + v10 * d_x;
+                    const float val_y1 = v01 * (1.0F - d_x) + v11 * d_x;
+                    dst(y_pos, x_pos, channel) = val_y0 * (1.0F - d_y) + val_y1 * d_y;
+                }
             }
         }
+        fill_default_channels(dst, y_begin, y_end, common_channels);
+    });
+}
+
+void resize_bilinear_from_planar_into(const float* src, int src_width, int src_height,
+                                      int src_channels, Image dst) {
+    if (src == nullptr || dst.empty() || src_width <= 0 || src_height <= 0 || src_channels <= 0 ||
+        dst.width <= 0 || dst.height <= 0) {
+        return;
     }
+
+    const int common_channels = std::min(src_channels, dst.channels);
+    if (common_channels <= 0) {
+        return;
+    }
+
+    if (src_width == dst.width && src_height == dst.height) {
+        copy_from_planar_into(src, src_width, src_height, src_channels, dst);
+        return;
+    }
+
+    std::vector<int> x0_map;
+    std::vector<int> x1_map;
+    std::vector<int> y0_map;
+    std::vector<int> y1_map;
+    std::vector<float> dx_map;
+    std::vector<float> dy_map;
+    prepare_bilinear_axis(src_width, dst.width, x0_map, x1_map, dx_map);
+    prepare_bilinear_axis(src_height, dst.height, y0_map, y1_map, dy_map);
+
+    const size_t plane_stride = static_cast<size_t>(src_width) * static_cast<size_t>(src_height);
+    common::parallel_for_rows(dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const int y0 = y0_map[static_cast<size_t>(y_pos)];
+            const int y1 = y1_map[static_cast<size_t>(y_pos)];
+            const float d_y = dy_map[static_cast<size_t>(y_pos)];
+            const size_t row0 = static_cast<size_t>(y0) * static_cast<size_t>(src_width);
+            const size_t row1 = static_cast<size_t>(y1) * static_cast<size_t>(src_width);
+
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                const int x0 = x0_map[static_cast<size_t>(x_pos)];
+                const int x1 = x1_map[static_cast<size_t>(x_pos)];
+                const float d_x = dx_map[static_cast<size_t>(x_pos)];
+
+                for (int channel = 0; channel < common_channels; ++channel) {
+                    const float* plane = src + (static_cast<size_t>(channel) * plane_stride);
+                    const float v00 = plane[row0 + static_cast<size_t>(x0)];
+                    const float v10 = plane[row0 + static_cast<size_t>(x1)];
+                    const float v01 = plane[row1 + static_cast<size_t>(x0)];
+                    const float v11 = plane[row1 + static_cast<size_t>(x1)];
+
+                    const float val_y0 = v00 * (1.0F - d_x) + v10 * d_x;
+                    const float val_y1 = v01 * (1.0F - d_x) + v11 * d_x;
+                    dst(y_pos, x_pos, channel) = val_y0 * (1.0F - d_y) + val_y1 * d_y;
+                }
+            }
+        }
+        fill_default_channels(dst, y_begin, y_end, common_channels);
+    });
 }
 
 constexpr int kLanczosA = 4;
@@ -93,71 +208,167 @@ void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) 
     const float scale_x = static_cast<float>(image.width) / static_cast<float>(dst.width);
     const float scale_y = static_cast<float>(image.height) / static_cast<float>(dst.height);
 
-    size_t h_size = static_cast<size_t>(dst.width) * image.height * common_channels;
+    size_t h_size = static_cast<size_t>(dst.width) * static_cast<size_t>(image.height) *
+                    static_cast<size_t>(common_channels);
     state.resize_lanczos_h.resize(h_size);
     Image h_view = {dst.width, image.height, common_channels, state.resize_lanczos_h};
 
-    for (int y_pos = 0; y_pos < image.height; ++y_pos) {
-        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-            const float center = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
-            const int i_start = static_cast<int>(std::floor(center - kLanczosA + 1));
-            const int i_end = static_cast<int>(std::floor(center + kLanczosA));
+    common::parallel_for_rows(image.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                const float center = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
+                const int i_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+                const int i_end = static_cast<int>(std::floor(center + kLanczosA));
 
-            float weight_sum = 0.0F;
-            for (int channel = 0; channel < common_channels; ++channel) {
-                h_view(y_pos, x_pos, channel) = 0.0F;
-            }
-
-            for (int i = i_start; i <= i_end; ++i) {
-                const int src_i = reflect_101(i, image.width);
-                const float weight = lanczos_kernel(static_cast<float>(i) - center);
-                weight_sum += weight;
+                float weight_sum = 0.0F;
                 for (int channel = 0; channel < common_channels; ++channel) {
-                    h_view(y_pos, x_pos, channel) += image(y_pos, src_i, channel) * weight;
+                    h_view(y_pos, x_pos, channel) = 0.0F;
                 }
-            }
 
-            if (weight_sum > 0.0F) {
-                const float inv_weight = 1.0F / weight_sum;
-                for (int channel = 0; channel < common_channels; ++channel) {
-                    h_view(y_pos, x_pos, channel) *= inv_weight;
+                for (int i = i_start; i <= i_end; ++i) {
+                    const int src_i = reflect_101(i, image.width);
+                    const float weight = lanczos_kernel(static_cast<float>(i) - center);
+                    weight_sum += weight;
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        h_view(y_pos, x_pos, channel) += image(y_pos, src_i, channel) * weight;
+                    }
+                }
+
+                if (weight_sum > 0.0F) {
+                    const float inv_weight = 1.0F / weight_sum;
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        h_view(y_pos, x_pos, channel) *= inv_weight;
+                    }
                 }
             }
         }
-    }
+    });
 
-    for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
-        const float center = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
-        const int j_start = static_cast<int>(std::floor(center - kLanczosA + 1));
-        const int j_end = static_cast<int>(std::floor(center + kLanczosA));
+    common::parallel_for_rows(dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const float center = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
+            const int j_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+            const int j_end = static_cast<int>(std::floor(center + kLanczosA));
 
-        for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-            float weight_sum = 0.0F;
-            for (int channel = 0; channel < common_channels; ++channel) {
-                dst(y_pos, x_pos, channel) = 0.0F;
-            }
-
-            for (int j = j_start; j <= j_end; ++j) {
-                const int src_j = reflect_101(j, h_view.height);
-                const float weight = lanczos_kernel(static_cast<float>(j) - center);
-                weight_sum += weight;
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                float weight_sum = 0.0F;
                 for (int channel = 0; channel < common_channels; ++channel) {
-                    dst(y_pos, x_pos, channel) += h_view(src_j, x_pos, channel) * weight;
+                    dst(y_pos, x_pos, channel) = 0.0F;
                 }
-            }
 
-            if (weight_sum > 0.0F) {
-                const float inv_weight = 1.0F / weight_sum;
-                for (int channel = 0; channel < common_channels; ++channel) {
-                    dst(y_pos, x_pos, channel) *= inv_weight;
+                for (int j = j_start; j <= j_end; ++j) {
+                    const int src_j = reflect_101(j, h_view.height);
+                    const float weight = lanczos_kernel(static_cast<float>(j) - center);
+                    weight_sum += weight;
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        dst(y_pos, x_pos, channel) += h_view(src_j, x_pos, channel) * weight;
+                    }
                 }
-            }
 
-            for (int channel = common_channels; channel < dst.channels; ++channel) {
-                dst(y_pos, x_pos, channel) = default_resized_channel_value(channel, dst.channels);
+                if (weight_sum > 0.0F) {
+                    const float inv_weight = 1.0F / weight_sum;
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        dst(y_pos, x_pos, channel) *= inv_weight;
+                    }
+                }
             }
         }
+        fill_default_channels(dst, y_begin, y_end, common_channels);
+    });
+}
+
+void resize_lanczos_from_planar_into_impl(const float* src, int src_width, int src_height,
+                                          int src_channels, Image dst,
+                                          ColorUtils::State& state) {
+    if (src == nullptr || dst.empty() || src_width <= 0 || src_height <= 0 || src_channels <= 0 ||
+        dst.width <= 0 || dst.height <= 0) {
+        return;
     }
+
+    const int common_channels = std::min(src_channels, dst.channels);
+    if (common_channels <= 0) {
+        return;
+    }
+
+    if (src_width == dst.width && src_height == dst.height) {
+        copy_from_planar_into(src, src_width, src_height, src_channels, dst);
+        return;
+    }
+
+    const float scale_x = static_cast<float>(src_width) / static_cast<float>(dst.width);
+    const float scale_y = static_cast<float>(src_height) / static_cast<float>(dst.height);
+    const size_t plane_stride = static_cast<size_t>(src_width) * static_cast<size_t>(src_height);
+
+    size_t h_size = static_cast<size_t>(dst.width) * static_cast<size_t>(src_height) *
+                    static_cast<size_t>(common_channels);
+    state.resize_lanczos_h.resize(h_size);
+    Image h_view = {dst.width, src_height, common_channels, state.resize_lanczos_h};
+
+    common::parallel_for_rows(src_height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const size_t row_offset = static_cast<size_t>(y_pos) * static_cast<size_t>(src_width);
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                const float center = (static_cast<float>(x_pos) + 0.5F) * scale_x - 0.5F;
+                const int i_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+                const int i_end = static_cast<int>(std::floor(center + kLanczosA));
+
+                float weight_sum = 0.0F;
+                for (int channel = 0; channel < common_channels; ++channel) {
+                    h_view(y_pos, x_pos, channel) = 0.0F;
+                }
+
+                for (int i = i_start; i <= i_end; ++i) {
+                    const int src_i = reflect_101(i, src_width);
+                    const float weight = lanczos_kernel(static_cast<float>(i) - center);
+                    weight_sum += weight;
+                    const size_t pixel_offset = row_offset + static_cast<size_t>(src_i);
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        const float* plane = src + (static_cast<size_t>(channel) * plane_stride);
+                        h_view(y_pos, x_pos, channel) += plane[pixel_offset] * weight;
+                    }
+                }
+
+                if (weight_sum > 0.0F) {
+                    const float inv_weight = 1.0F / weight_sum;
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        h_view(y_pos, x_pos, channel) *= inv_weight;
+                    }
+                }
+            }
+        }
+    });
+
+    common::parallel_for_rows(dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const float center = (static_cast<float>(y_pos) + 0.5F) * scale_y - 0.5F;
+            const int j_start = static_cast<int>(std::floor(center - kLanczosA + 1));
+            const int j_end = static_cast<int>(std::floor(center + kLanczosA));
+
+            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                float weight_sum = 0.0F;
+                for (int channel = 0; channel < common_channels; ++channel) {
+                    dst(y_pos, x_pos, channel) = 0.0F;
+                }
+
+                for (int j = j_start; j <= j_end; ++j) {
+                    const int src_j = reflect_101(j, h_view.height);
+                    const float weight = lanczos_kernel(static_cast<float>(j) - center);
+                    weight_sum += weight;
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        dst(y_pos, x_pos, channel) += h_view(src_j, x_pos, channel) * weight;
+                    }
+                }
+
+                if (weight_sum > 0.0F) {
+                    const float inv_weight = 1.0F / weight_sum;
+                    for (int channel = 0; channel < common_channels; ++channel) {
+                        dst(y_pos, x_pos, channel) *= inv_weight;
+                    }
+                }
+            }
+        }
+        fill_default_channels(dst, y_begin, y_end, common_channels);
+    });
 }
 
 }  // namespace
@@ -235,6 +446,11 @@ ImageBuffer ColorUtils::resize(Image image, int new_width, int new_height) {
 
 void ColorUtils::resize_into(Image image, Image dst) {
     resize_bilinear_into(image, dst);
+}
+
+void ColorUtils::resize_from_planar_into(const float* src, int src_width, int src_height,
+                                         int src_channels, Image dst) {
+    resize_bilinear_from_planar_into(src, src_width, src_height, src_channels, dst);
 }
 
 void ColorUtils::gaussian_blur(Image image, float sigma, State& state) {
@@ -327,6 +543,11 @@ ImageBuffer ColorUtils::resize_lanczos(Image image, int new_width, int new_heigh
 
 void ColorUtils::resize_lanczos_into(Image image, Image dst, State& state) {
     resize_lanczos_into_impl(image, dst, state);
+}
+
+void ColorUtils::resize_lanczos_from_planar_into(const float* src, int src_width, int src_height,
+                                                 int src_channels, Image dst, State& state) {
+    resize_lanczos_from_planar_into_impl(src, src_width, src_height, src_channels, dst, state);
 }
 
 void ColorUtils::clamp_image(Image image, float min_val, float max_val) {

@@ -44,11 +44,13 @@ namespace corridorkey {
 
 namespace core {
 class MlxSession;
+class OrtProcessContext;
 }
 
 struct SessionCreateOptions {
     bool disable_cpu_ep_fallback = false;
     OrtLoggingLevel log_severity = ORT_LOGGING_LEVEL_ERROR;
+    std::shared_ptr<core::OrtProcessContext> ort_process_context = nullptr;
 };
 
 /**
@@ -59,7 +61,8 @@ class InferenceSession {
    public:
     static Result<std::unique_ptr<InferenceSession>> create(const std::filesystem::path& model_path,
                                                             DeviceInfo device,
-                                                            SessionCreateOptions options = {});
+                                                            SessionCreateOptions options = {},
+                                                            StageTimingCallback on_stage = nullptr);
 
     ~InferenceSession();
 
@@ -136,8 +139,6 @@ class InferenceSession {
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 
-    // Ort handles (RAII)
-    Ort::Env m_env{nullptr};
     Ort::Session m_session{nullptr};
     Ort::SessionOptions m_session_options;
 
@@ -149,6 +150,7 @@ class InferenceSession {
     std::vector<std::vector<int64_t>> m_input_node_dims = {};
     ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
+    std::shared_ptr<core::OrtProcessContext> m_ort_process_context = nullptr;
 
     // Pre-allocated buffer pools (reused across run() calls)
     std::vector<ImageBuffer> m_resize_pool = {};
