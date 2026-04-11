@@ -39,9 +39,10 @@ tests can confirm the installed build without guesswork.
 - `0.7.4-0` is the shared-ORT checkpoint
 - `0.7.4-1` is the extract-output attribution checkpoint
 - `0.7.4-2` is the runtime timing correction checkpoint
-- `0.7.4-3` is the current direct-planar-resize checkpoint
+- `0.7.4-3` is the direct-planar-resize checkpoint
+- `0.7.4-4` is the current output-validation-fusion checkpoint
 - each new measured optimization slice increments the suffix:
-  `0.7.4-4`, `0.7.4-5`, `0.7.4-6`
+  `0.7.4-5`, `0.7.4-6`, `0.7.4-7`
 - the base semantic version remains `0.7.4` while the visible checkpoint label
   changes per slice
 - checkpoint comparison only counts when the installed build identity was
@@ -99,7 +100,7 @@ The following validations were completed against the current implementation.
 - [x] OFX benchmark harness smoke test with JSON output
 - [x] Windows release packaging through the canonical release script
 - [x] Local installer generation, bundle validation, and doctor validation
-- [x] Optimization checkpoint release generated as `0.7.4-3`
+- [x] Optimization checkpoint release generated as `0.7.4-4`
 - [x] Baseline and optimized installers were copied into
       `dist/optimization_checkpoints/` for sequential local A/B testing
 
@@ -139,6 +140,16 @@ whether that gain survives the full OFX path.
     `8.9 ms`
 - after `0.7.4-3`, the synthetic bottleneck shifts away from resize and back
   toward `ort_run` plus the remaining CPU-side preparation/extract work
+- `0.7.4-4` fuses output-stat logging and finite-value validation into a
+  single scan for the TensorRT high-resolution diagnostic path
+- repo-side `2048` RTX harness comparisons between `0.7.4-3` and `0.7.4-4`
+  on the same workspace showed:
+  - average latency improved from about `1211.7 ms` to `1055.3 ms`
+  - `frame_extract_outputs_tensor_materialize` improved from about `60.4 ms`
+    to `20.5 ms`
+  - `frame_extract_outputs_finalize` improved from about `66.8 ms` to
+    `26.4 ms`
+  - `frame_extract_outputs` improved from about `134.9 ms` to `54.2 ms`
 - the first manual A/B between `0.7.3` and `0.7.4-0` did not show a speed gain
 - the latest `0.7.4-0` local retest was confirmed by versioned runtime log and
   installed-bundle hash match
@@ -179,6 +190,16 @@ whether that gain survives the full OFX path.
     the remaining host-side extract work
   - current cold-start opportunity remains dominated by `ort_session_create`
     and `session_create_requested`
+- current `0.7.4-4` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - repo-side `2048` RTX harness now shows a second clear gain after the
+    direct-planar-resize slice
+  - the remaining steady-state render opportunity is now led by `ort_run`,
+    then the still-material resize/finalize work inside `frame_extract_outputs`,
+    then `frame_prepare_inputs`
+  - the cold-start opportunity is still dominated by
+    `ort_session_create` and `session_create_requested`
 - Ignore `CorridorHint` errors when they come from unrelated branch tests
 
 ## Why A Resume Map Saves Time
@@ -220,7 +241,7 @@ Before recording a local result, verify the build in this order:
 The current expected visible identities are:
 
 - baseline installer: `0.7.3`
-- current optimization installer: `0.7.4-3`
+- current optimization installer: `0.7.4-4`
 
 ## Why The Next Tasks Are Ordered
 
@@ -264,6 +285,17 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 - [x] Added unit regression coverage proving the direct-planar paths match the
       previous resize results
 - [x] Generated the `0.7.4-3` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: Output Validation Fusion
+
+- [x] Fused TensorRT high-resolution output-stat collection and finite-value
+      validation into one scan per buffer instead of two
+- [x] Kept the same validation behavior and diagnostic payload on failure while
+      reducing steady-state hot-path overhead on successful frames
+- [x] Added unit coverage for the new analysis helper used by the fused path
+- [x] Measured the slice on the repo-side RTX `2048` harness before packaging
+- [x] Generated the `0.7.4-4` installer and checkpoint artifacts for the next
       local comparison
 
 ### Phase 2: I/O Binding Groundwork

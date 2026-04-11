@@ -97,12 +97,16 @@ TEST_CASE("Output validation rejects non-finite model output", "[unit][inference
     SECTION("Finite values pass with correct stats") {
         const std::vector<float> values = {0.0F, 0.5F, 1.0F};
         const auto stats = core::compute_numeric_stats(values);
+        const auto analysis = core::analyze_finite_values(values, "alpha_raw_output");
 
         REQUIRE(stats.total_count == 3);
         REQUIRE(stats.finite_count == 3);
         REQUIRE(stats.min_value == Catch::Approx(0.0F));
         REQUIRE(stats.max_value == Catch::Approx(1.0F));
         REQUIRE(stats.mean_value == Catch::Approx(0.5));
+        REQUIRE(analysis.has_value());
+        REQUIRE(core::all_values_finite(*analysis));
+        REQUIRE(analysis->mean_value == Catch::Approx(0.5));
 
         auto validation = core::validate_finite_values(values, "alpha_raw_output");
         REQUIRE(validation.has_value());
@@ -115,12 +119,15 @@ TEST_CASE("Output validation rejects non-finite model output", "[unit][inference
             std::numeric_limits<float>::infinity(),
         };
         const auto stats = core::compute_numeric_stats(values);
+        const auto analysis = core::analyze_finite_values(values, "alpha_raw_output");
 
         REQUIRE(stats.total_count == 3);
         REQUIRE(stats.finite_count == 1);
         REQUIRE(stats.min_value == Catch::Approx(0.25F));
         REQUIRE(stats.max_value == Catch::Approx(0.25F));
         REQUIRE(stats.mean_value == Catch::Approx(0.25));
+        REQUIRE_FALSE(analysis.has_value());
+        REQUIRE(analysis.error().message.find("finite=1") != std::string::npos);
 
         auto validation = core::validate_finite_values(values, "alpha_raw_output");
         REQUIRE_FALSE(validation.has_value());

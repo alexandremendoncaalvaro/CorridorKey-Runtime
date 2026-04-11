@@ -107,17 +107,8 @@ Result<void> validate_output_image(Image image, std::string_view label) {
     return validation;
 }
 
-void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution,
-                                 std::span<const float> values, std::string_view label) {
-    if (device.backend != Backend::TensorRT || recommended_resolution <= 1024) {
-        return;
-    }
-    debug_log(core::format_numeric_stats(label, core::compute_numeric_stats(values)));
-}
-
-void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, Image image,
-                                 std::string_view label) {
-    log_output_stats_if_enabled(device, recommended_resolution, image.data, label);
+bool should_log_output_stats(DeviceInfo device, int recommended_resolution) {
+    return device.backend == Backend::TensorRT && recommended_resolution > 1024;
 }
 
 struct MaterializedOutputTensor {
@@ -166,7 +157,16 @@ Result<MaterializedOutputTensor> materialize_output_tensor(
     }
 
     const auto output_values = output.span(image_count);
-    log_output_stats_if_enabled(device, recommended_resolution, output_values, raw_label);
+    if (should_log_output_stats(device, recommended_resolution)) {
+        const auto analysis = core::analyze_finite_values(output_values, raw_label);
+        if (!analysis) {
+            debug_log(analysis.error().message);
+            return Unexpected(analysis.error());
+        }
+        debug_log(core::format_numeric_stats(raw_label, *analysis));
+        return output;
+    }
+
     const auto validation = validate_output_values(output_values, raw_label);
     if (!validation) {
         return Unexpected(validation.error());
@@ -190,7 +190,16 @@ void resize_model_output(const float* source, int source_width, int source_heigh
 
 Result<void> finalize_output_image(DeviceInfo device, int recommended_resolution, Image image,
                                    std::string_view label) {
-    log_output_stats_if_enabled(device, recommended_resolution, image, label);
+    if (should_log_output_stats(device, recommended_resolution)) {
+        const auto analysis = core::analyze_finite_values(image.data, label);
+        if (!analysis) {
+            debug_log(analysis.error().message);
+            return Unexpected(analysis.error());
+        }
+        debug_log(core::format_numeric_stats(label, *analysis));
+        return {};
+    }
+
     const auto validation = validate_output_image(image, label);
     if (!validation) {
         return Unexpected(validation.error());

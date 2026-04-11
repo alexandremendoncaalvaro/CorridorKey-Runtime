@@ -46,8 +46,9 @@ Display version policy for this track:
 - shared-ORT checkpoint is `0.7.4-0`
 - extract-output attribution checkpoint is `0.7.4-1`
 - runtime-panel timing correction checkpoint is `0.7.4-2`
-- current direct-planar-resize checkpoint is `0.7.4-3`
-- the next measured slice becomes `0.7.4-4`
+- direct-planar-resize checkpoint is `0.7.4-3`
+- current output-validation-fusion checkpoint is `0.7.4-4`
+- the next measured slice becomes `0.7.4-5`
 
 Recommended checkpoint labels for this track:
 
@@ -56,6 +57,7 @@ Recommended checkpoint labels for this track:
 - `phase_1_extract_output_attribution`
 - `phase_1_runtime_panel_timing_correction`
 - `phase_1_direct_planar_resize`
+- `phase_1_output_validation_fusion`
 - `phase_2_iobinding`
 - `phase_3_device_tensors`
 - `phase_4_gpu_prepare_inputs`
@@ -89,7 +91,7 @@ Current local checkpoint artifact set:
 - baseline installer:
   `dist/optimization_checkpoints/pre_opt/CorridorKey_Resolve_v0.7.3_Windows_RTX_Installer.exe`
 - current optimized installer:
-  `dist/optimization_checkpoints/phase_1_direct_planar_resize/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+  `dist/optimization_checkpoints/phase_1_output_validation_fusion/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
 
 ## Recorded Checkpoints
 
@@ -377,6 +379,51 @@ opportunity shifts toward reducing `ort_run` variance and shrinking the remainin
 host-side extract and prepare work, while startup cost remains a separate cold
 path problem.
 
+### `phase_1_output_validation_fusion`
+
+- Source state: current `perf/optimization` working tree with the TensorRT
+  high-resolution output diagnostic path fused so successful frames no longer
+  scan the same buffers twice for stats and finite-value validation
+- Display version label: `0.7.4-4`
+- Local test artifact path:
+  `dist/optimization_checkpoints/phase_1_output_validation_fusion/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+- Corpus output root: pending full corpus capture
+- Benchmark summary:
+  - raw-output and final-output TensorRT diagnostic paths now use one scan per
+    buffer instead of separate scan passes for numeric stats and finite-value
+    validation
+  - repo-side RTX `2048` harness comparisons against `0.7.4-3` showed:
+    - average latency: `1211.7 ms` -> `1055.3 ms`
+    - `frame_prepare_inputs`: `31.8 ms` -> `29.2 ms`
+    - `ort_run`: `873.4 ms` -> `781.6 ms`
+    - `frame_extract_outputs_tensor_materialize`: `60.4 ms` -> `20.5 ms`
+    - `frame_extract_outputs_resize`: `7.8 ms` -> `7.4 ms`
+    - `frame_extract_outputs_finalize`: `66.8 ms` -> `26.4 ms`
+    - `frame_extract_outputs`: `134.9 ms` -> `54.2 ms`
+    - `post_composite`: `46.8 ms` -> `50.1 ms`
+- Manual OFX observations:
+  - pending local plugin comparison against `pre_opt` and `0.7.4-3`
+- Keep or revise decision:
+  keep this slice because it reduces steady-state hot-path diagnostic overhead
+  without weakening failure diagnostics
+
+### `phase_1_direct_planar_resize` vs `phase_1_output_validation_fusion`
+
+This comparison uses the same repo-side RTX `2048` harness with the same model
+artifact and requested resolution. It is still not a substitute for the next
+manual OFX comparison, but it is strong enough to guide the next slice.
+
+- average latency improved by about `12.9%`
+- `frame_extract_outputs_tensor_materialize` improved by about `66.1%`
+- `frame_extract_outputs_finalize` improved by about `60.5%`
+- `frame_extract_outputs` improved by about `59.8%`
+- `frame_prepare_inputs` improved by about `7.9%`
+- `post_composite` was higher by about `7.1%`
+
+Current reading: the remaining steady-state render bottleneck has shifted even
+more clearly toward `ort_run`, with output resize/finalize still material and
+input preparation still worth pursuing after the next backend-focused slice.
+
 ## Why Installer Handling Must Stay Predictable
 
 Release packaging recreates `dist/`, so the local checkpoint folder must be
@@ -389,6 +436,8 @@ needs to remain available in the same workspace.
 - keep `dist/optimization_checkpoints/phase_1_runtime_panel_timing_correction/`
   as the preserved runtime-panel checkpoint
 - keep `dist/optimization_checkpoints/phase_1_direct_planar_resize/` as the
+  preserved direct-planar-resize checkpoint
+- keep `dist/optimization_checkpoints/phase_1_output_validation_fusion/` as the
   current optimized checkpoint
 - replace only the checkpoint currently under test when a new slice is built
 
