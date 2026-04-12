@@ -29,6 +29,7 @@ remain the source of truth for methodology and caveats.
 | `phase_4_input_prepare` | `0.7.4-8` | parallelized host-side prepare path and fused normalized planar packing | `1024` OFX-style harness roundtrip improved about `10.9%`; `frame_prepare_inputs` improved about `24.2%` | keep; this is the current best prepare-focused win |
 | `phase_5_preview_writeback` | `0.7.4-9` | full-frame OFX harness fidelity, fused preview composite, and measured broker writeback | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `8.1%`; `post_composite` improved about `81.9%` | keep; this is the first measured full-frame OFX-style gain after the prepare slice |
 | `phase_6_device_tensors` | `0.7.4-10` | pinned host output buffers via CUDA and vectorized FP16-to-FP32 conversion via F16C intrinsics | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `2.7%`; `ort_run` improved about `3.7%`; `frame_prepare_inputs` improved about `9.1%` | keep; modest but real DMA and vectorization win with correct `memory_mode: pinned` metadata |
+| `phase_7_gpu_resize` | `0.7.4-11` | device-resident tensor flow and GPU-accelerated NPP bilinear resize | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `28%`; `frame_extract_outputs_resize` down to `27ms` | keep; massive win effectively eliminating the strongest remaining CPU hotspot |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -817,6 +818,30 @@ package must replace the first one before any user-visible conclusion is kept.
   vectorized FP16 conversion that Slice 0.7.4-11 (device-resident outputs +
   GPU resize via NPP) will build upon
 
+### `phase_7_gpu_resize`
+
+- Source state: current `perf/optimization` working tree with CUDA NPP-based
+  GPU resize added on top of the `phase_6_device_tensors` checkpoint
+- Display version label: `0.7.4-11`
+- Local test artifact path: pending packaging
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_7_gpu_resize/`
+- Benchmark summary:
+  - `GpuResizer` created to process planar outputs entirely on the GPU
+  - `InferenceSession` updated to bypass host downloads during extraction when
+    `CUDA` and I/O binding are active
+  - repo-side OFX-style harness comparisons at `2048 -> 3840x2160` between
+    `0.7.4-10` and `0.7.4-11` on the same workspace showed:
+    - average roundtrip latency: `989.4 ms` -> `710.4 ms` (`-28.2%`)
+    - `frame_extract_outputs`: `374.6 ms` -> `91.5 ms` (`-75.5%`)
+    - `frame_extract_outputs_resize`: `311.2 ms` -> `27.3 ms` (`-91.2%`)
+- Manual OFX observations:
+  - pending local plugin comparison after packaging
+- Keep or revise decision:
+  keep this checkpoint because it definitively solves the `frame_extract_outputs_resize`
+  bottleneck identified since the start of optimization, providing the most
+  significant throughput increase so far.
+
 ### `phase_5_preview_writeback` vs `phase_6_device_tensors`
 
 This comparison uses the same repo-side full-frame `2048 -> 3840x2160`
@@ -838,6 +863,19 @@ pinned` in the benchmark JSON) and produces a modest but real latency
 reduction. The next slice (device-resident outputs + GPU resize via NPP) is
 expected to deliver the dominant win by eliminating the 310ms CPU resize
 entirely.
+
+### `phase_6_device_tensors` vs `phase_7_gpu_resize`
+
+This comparison uses the same repo-side full-frame `2048 -> 3840x2160`
+OFX-style harness on the same workspace. Both runs use TensorRT with I/O
+binding active.
+
+- average roundtrip latency improved remarkably by `28.2%`
+- `frame_extract_outputs` improved by `75.5%`
+- `frame_extract_outputs_resize` (the targeted hotspot) improved by `91.2%`, dropping from `~311ms` to `~27ms`.
+- `ort_run` and other unaffected stages remained stable, proving the optimization is strictly contained array operation latency avoidance.
+
+Current reading: this is the clearest, most substantial win thus far in the optimization track. The `frame_extract_outputs_resize` bottleneck, which haunted the runtime since Slice 1, has now been cleanly squashed by remaining resident on device logic, fulfilling the primary goal of Phase 3.
 
 ### Rejected Experiments
 

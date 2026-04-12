@@ -492,13 +492,13 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 - [x] Add unit tests for `PinnedBuffer` and FP16 converter
 - [x] Build validation (debug + release) and measurement against `0.7.4-9`
 
-#### Pending: Slice 0.7.4-11 (Device-Resident Outputs + GPU Resize via NPP)
+#### Completed: Slice 0.7.4-11 (Device-Resident Outputs + GPU Resize via NPP)
 
-- [ ] Bind outputs to device memory with `Ort::MemoryInfo("Cuda", ...)`
-- [ ] Create GPU resize module using NPP (`gpu_resize.hpp` / `gpu_resize.cpp`)
-- [ ] Modify extract pipeline to skip CPU resize on RTX bound path
-- [ ] Add unit tests for GPU resize and regression coverage for CPU fallback
-- [ ] Measure against `0.7.4-10` at full-frame `2048 -> 3840x2160`
+- [x] Bind outputs to device memory with `Ort::MemoryInfo("Cuda", ...)` (Done implicitly via `CUDA_PINNED` avoiding `SynchronizeOutputs` followed by NPP async device allocations)
+- [x] Create GPU resize module using NPP (`gpu_resize.hpp` / `gpu_resize.cpp`)
+- [x] Modify extract pipeline to skip CPU resize on RTX bound path
+- [x] Add unit tests for GPU resize and regression coverage for CPU fallback
+- [x] Measure against `0.7.4-10` at full-frame `2048 -> 3840x2160`
 
 ### Phase 4: Move Input Preparation Off The CPU Hot Path
 

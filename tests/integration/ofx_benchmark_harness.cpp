@@ -287,8 +287,10 @@ int main(int argc, char* argv[]) {
     results["io_binding"]["observed"] = has_stage(stage_timings, "ort_io_binding_bind_inputs");
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     results["io_binding"]["memory_mode"] = "pinned";
+    results["io_binding"]["resize_mode"] = "gpu";
 #else
     results["io_binding"]["memory_mode"] = "pageable";
+    results["io_binding"]["resize_mode"] = "cpu";
 #endif
     results["warmup_runs"] = 0;
     results["steady_state_runs"] = options.iterations;

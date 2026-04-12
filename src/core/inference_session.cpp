@@ -2003,12 +2003,30 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 auto resize_res = common::measure_stage(
                     on_stage, "frame_extract_outputs_resize",
                     [&]() -> Result<void> {
-                        resize_model_outputs(
-                            result.alpha.view(), result.foreground.view(), alpha_output.values,
-                            fg_output.has_value() ? fg_output->values : nullptr,
-                            static_cast<int>(alpha_output.shape[3]),
-                            static_cast<int>(alpha_output.shape[2]), use_lanczos,
-                            m_color_utils_state);
+                        bool gpu_resized = false;
+                        if (bound_io_state != nullptr && m_gpu_resizer.available()) {
+                            auto gpu_res = m_gpu_resizer.resize_planar_outputs(
+                                alpha_output.values,
+                                fg_output.has_value() ? fg_output->values : nullptr,
+                                static_cast<int>(alpha_output.shape[3]),
+                                static_cast<int>(alpha_output.shape[2]),
+                                result.alpha.view(),
+                                result.foreground.view());
+                            if (gpu_res) {
+                                gpu_resized = true;
+                            } else {
+                                debug_log("GPU resize failed, falling back to CPU: " + gpu_res.error().message);
+                            }
+                        }
+
+                        if (!gpu_resized) {
+                            resize_model_outputs(
+                                result.alpha.view(), result.foreground.view(), alpha_output.values,
+                                fg_output.has_value() ? fg_output->values : nullptr,
+                                static_cast<int>(alpha_output.shape[3]),
+                                static_cast<int>(alpha_output.shape[2]), use_lanczos,
+                                m_color_utils_state);
+                        }
 
                         return {};
                     },
