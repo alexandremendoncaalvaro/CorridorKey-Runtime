@@ -44,6 +44,14 @@
 #include "tile_blend.hpp"
 
 namespace {
+
+constexpr std::array<float, 3> kCorridorKeyRgbMean = {0.485F, 0.456F, 0.406F};
+constexpr std::array<float, 3> kCorridorKeyRgbInvStddev = {
+    1.0F / 0.229F,
+    1.0F / 0.224F,
+    1.0F / 0.225F,
+};
+
 void debug_log(const std::string& message) {
 #ifdef _WIN32
     char* local_app_data = nullptr;
@@ -1571,7 +1579,6 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
             float* dst_base = m_planar_pool[0].view().data.data();
             size_t image_stride = 4 * model_h * model_w;
-            size_t channel_stride = model_h * model_w;
 
             common::measure_stage(
                 on_stage, "batch_prepare_inputs",
@@ -1599,18 +1606,9 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                         ColorUtils::resize_area_into(alpha_hints[b], cur_hint, m_color_utils_state);
                         float* dst = dst_base + (b * image_stride);
 
-                        for (int y = 0; y < model_h; ++y) {
-                            for (int x = 0; x < model_w; ++x) {
-                                size_t idx = y * model_w + x;
-                                dst[0 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
-                                dst[1 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
-                                dst[2 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
-                                dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
-                            }
-                        }
+                        ColorUtils::pack_normalized_rgb_and_hint_to_planar(
+                            cur_rgb, cur_hint, dst, kCorridorKeyRgbMean,
+                            kCorridorKeyRgbInvStddev);
                     }
                 },
                 batch_size);
@@ -1864,18 +1862,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
                 ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
 
-                for (int y = 0; y < model_h; ++y) {
-                    for (int x = 0; x < model_w; ++x) {
-                        size_t idx = static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
-                        planar_ptr[0 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 0) - 0.485f) / 0.229f;
-                        planar_ptr[1 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 1) - 0.456f) / 0.224f;
-                        planar_ptr[2 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 2) - 0.406f) / 0.225f;
-                        planar_ptr[3 * channel_stride + idx] = prepared_hint(y, x, 0);
-                    }
-                }
+                ColorUtils::pack_normalized_rgb_and_hint_to_planar(
+                    prepared_rgb, prepared_hint, planar_ptr, kCorridorKeyRgbMean,
+                    kCorridorKeyRgbInvStddev);
             },
             1);
 

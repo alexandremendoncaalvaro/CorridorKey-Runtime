@@ -557,36 +557,41 @@ void ColorUtils::gaussian_blur(Image image, float sigma, State& state) {
     size_t buf_size = static_cast<size_t>(w) * h * channels;
     state.blur_temp.resize(buf_size);
 
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            for (int c = 0; c < channels; ++c) {
-                float acc = image(y, x, c) * state.blur_weights[0];
-                for (int dx = 1; dx <= kernel; ++dx) {
-                    int xl = std::max(x - dx, 0);
-                    int xr = std::min(x + dx, w - 1);
-                    acc += (image(y, xl, c) + image(y, xr, c)) * state.blur_weights[dx];
+    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = 0; x < w; ++x) {
+                for (int c = 0; c < channels; ++c) {
+                    float acc = image(y, x, c) * state.blur_weights[0];
+                    for (int dx = 1; dx <= kernel; ++dx) {
+                        int xl = std::max(x - dx, 0);
+                        int xr = std::min(x + dx, w - 1);
+                        acc += (image(y, xl, c) + image(y, xr, c)) * state.blur_weights[dx];
+                    }
+                    state.blur_temp[(static_cast<size_t>(y) * w + x) * channels + c] = acc;
                 }
-                state.blur_temp[(static_cast<size_t>(y) * w + x) * channels + c] = acc;
             }
         }
-    }
+    });
 
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            for (int c = 0; c < channels; ++c) {
-                size_t idx = (static_cast<size_t>(y) * w + x) * channels + c;
-                float acc = state.blur_temp[idx] * state.blur_weights[0];
-                for (int dy = 1; dy <= kernel; ++dy) {
-                    int yt = std::max(y - dy, 0);
-                    int yb = std::min(y + dy, h - 1);
-                    acc += (state.blur_temp[(static_cast<size_t>(yt) * w + x) * channels + c] +
-                            state.blur_temp[(static_cast<size_t>(yb) * w + x) * channels + c]) *
-                           state.blur_weights[dy];
+    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = 0; x < w; ++x) {
+                for (int c = 0; c < channels; ++c) {
+                    size_t idx = (static_cast<size_t>(y) * w + x) * channels + c;
+                    float acc = state.blur_temp[idx] * state.blur_weights[0];
+                    for (int dy = 1; dy <= kernel; ++dy) {
+                        int yt = std::max(y - dy, 0);
+                        int yb = std::min(y + dy, h - 1);
+                        acc +=
+                            (state.blur_temp[(static_cast<size_t>(yt) * w + x) * channels + c] +
+                             state.blur_temp[(static_cast<size_t>(yb) * w + x) * channels + c]) *
+                            state.blur_weights[dy];
+                    }
+                    image(y, x, c) = acc;
                 }
-                image(y, x, c) = acc;
             }
         }
-    }
+    });
 }
 
 ImageBuffer ColorUtils::resize_area(Image image, int new_width, int new_height, State& state) {
@@ -643,14 +648,41 @@ void ColorUtils::to_planar(Image src, float* dst) {
     const int channels = src.channels;
     const size_t channel_stride = static_cast<size_t>(height) * width;
 
-    for (int channel = 0; channel < channels; ++channel) {
-        for (int y_pos = 0; y_pos < height; ++y_pos) {
-            for (int x_pos = 0; x_pos < width; ++x_pos) {
-                dst[static_cast<size_t>(channel) * channel_stride +
-                    (static_cast<size_t>(y_pos) * width + x_pos)] = src(y_pos, x_pos, channel);
+    common::parallel_for_rows(height, [&](int y_begin, int y_end) {
+        for (int channel = 0; channel < channels; ++channel) {
+            const size_t plane_offset = static_cast<size_t>(channel) * channel_stride;
+            for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+                const size_t row_offset = static_cast<size_t>(y_pos) * width;
+                for (int x_pos = 0; x_pos < width; ++x_pos) {
+                    dst[plane_offset + row_offset + static_cast<size_t>(x_pos)] =
+                        src(y_pos, x_pos, channel);
+                }
             }
         }
+    });
+}
+
+void ColorUtils::pack_normalized_rgb_and_hint_to_planar(
+    Image rgb, Image hint, float* dst, const std::array<float, 3>& mean,
+    const std::array<float, 3>& inv_stddev) {
+    if (dst == nullptr || rgb.empty() || hint.empty() || rgb.width != hint.width ||
+        rgb.height != hint.height || rgb.channels < 3 || hint.channels < 1) {
+        return;
     }
+
+    const size_t channel_stride = static_cast<size_t>(rgb.width) * static_cast<size_t>(rgb.height);
+    common::parallel_for_rows(rgb.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const size_t row_offset = static_cast<size_t>(y_pos) * static_cast<size_t>(rgb.width);
+            for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
+                const size_t idx = row_offset + static_cast<size_t>(x_pos);
+                dst[0 * channel_stride + idx] = (rgb(y_pos, x_pos, 0) - mean[0]) * inv_stddev[0];
+                dst[1 * channel_stride + idx] = (rgb(y_pos, x_pos, 1) - mean[1]) * inv_stddev[1];
+                dst[2 * channel_stride + idx] = (rgb(y_pos, x_pos, 2) - mean[2]) * inv_stddev[2];
+                dst[3 * channel_stride + idx] = hint(y_pos, x_pos, 0);
+            }
+        }
+    });
 }
 
 void ColorUtils::from_planar(const float* src, Image dst) {
@@ -659,14 +691,18 @@ void ColorUtils::from_planar(const float* src, Image dst) {
     const int channels = dst.channels;
     const size_t channel_stride = static_cast<size_t>(height) * width;
 
-    for (int channel = 0; channel < channels; ++channel) {
-        for (int y_pos = 0; y_pos < height; ++y_pos) {
-            for (int x_pos = 0; x_pos < width; ++x_pos) {
-                dst(y_pos, x_pos, channel) = src[static_cast<size_t>(channel) * channel_stride +
-                                                 (static_cast<size_t>(y_pos) * width + x_pos)];
+    common::parallel_for_rows(height, [&](int y_begin, int y_end) {
+        for (int channel = 0; channel < channels; ++channel) {
+            const size_t plane_offset = static_cast<size_t>(channel) * channel_stride;
+            for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+                const size_t row_offset = static_cast<size_t>(y_pos) * width;
+                for (int x_pos = 0; x_pos < width; ++x_pos) {
+                    dst(y_pos, x_pos, channel) =
+                        src[plane_offset + row_offset + static_cast<size_t>(x_pos)];
+                }
             }
         }
-    }
+    });
 }
 
 void ColorUtils::srgb_to_linear(Image image) {

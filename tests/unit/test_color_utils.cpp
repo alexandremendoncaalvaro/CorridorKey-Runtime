@@ -203,6 +203,61 @@ TEST_CASE("ColorUtils::resize_alpha_fg_from_planar_into matches separate resizes
     }
 }
 
+TEST_CASE("ColorUtils::pack_normalized_rgb_and_hint_to_planar matches manual packing",
+          "[unit][color][regression]") {
+    ImageBuffer rgb_buf(2, 2, 3);
+    Image rgb = rgb_buf.view();
+    ImageBuffer hint_buf(2, 2, 1);
+    Image hint = hint_buf.view();
+
+    rgb(0, 0, 0) = 0.1F;
+    rgb(0, 0, 1) = 0.2F;
+    rgb(0, 0, 2) = 0.3F;
+    rgb(0, 1, 0) = 0.4F;
+    rgb(0, 1, 1) = 0.5F;
+    rgb(0, 1, 2) = 0.6F;
+    rgb(1, 0, 0) = 0.7F;
+    rgb(1, 0, 1) = 0.8F;
+    rgb(1, 0, 2) = 0.9F;
+    rgb(1, 1, 0) = 0.2F;
+    rgb(1, 1, 1) = 0.3F;
+    rgb(1, 1, 2) = 0.4F;
+
+    hint(0, 0, 0) = 0.9F;
+    hint(0, 1, 0) = 0.7F;
+    hint(1, 0, 0) = 0.5F;
+    hint(1, 1, 0) = 0.3F;
+
+    constexpr std::array<float, 3> mean = {0.485F, 0.456F, 0.406F};
+    constexpr std::array<float, 3> inv_stddev = {
+        1.0F / 0.229F,
+        1.0F / 0.224F,
+        1.0F / 0.225F,
+    };
+
+    std::vector<float> actual(16, 0.0F);
+    std::vector<float> expected(16, 0.0F);
+
+    ColorUtils::pack_normalized_rgb_and_hint_to_planar(rgb, hint, actual.data(), mean,
+                                                       inv_stddev);
+
+    const size_t channel_stride = 4;
+    for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
+            const size_t idx = static_cast<size_t>(y_pos) * static_cast<size_t>(rgb.width) +
+                               static_cast<size_t>(x_pos);
+            expected[0 * channel_stride + idx] = (rgb(y_pos, x_pos, 0) - mean[0]) * inv_stddev[0];
+            expected[1 * channel_stride + idx] = (rgb(y_pos, x_pos, 1) - mean[1]) * inv_stddev[1];
+            expected[2 * channel_stride + idx] = (rgb(y_pos, x_pos, 2) - mean[2]) * inv_stddev[2];
+            expected[3 * channel_stride + idx] = hint(y_pos, x_pos, 0);
+        }
+    }
+
+    for (size_t index = 0; index < actual.size(); ++index) {
+        REQUIRE(actual[index] == Catch::Approx(expected[index]).margin(0.0001F));
+    }
+}
+
 TEST_CASE("ColorUtils::resize_area_into safely drops alpha for RGB model inputs",
           "[unit][color][regression]") {
     ImageBuffer rgba_source_buf(2, 2, 4);
