@@ -49,8 +49,9 @@ Display version policy for this track:
 - direct-planar-resize checkpoint is `0.7.4-3`
 - output-validation-fusion checkpoint is `0.7.4-4`
 - I/O-binding groundwork checkpoint is `0.7.4-5`
-- current I/O-binding regression-fix checkpoint is `0.7.4-6`
-- the next measured slice becomes `0.7.4-7`
+- I/O-binding regression-fix checkpoint is `0.7.4-6`
+- current host-postprocess checkpoint is `0.7.4-7`
+- the next measured slice becomes `0.7.4-8`
 
 Recommended checkpoint labels for this track:
 
@@ -62,6 +63,7 @@ Recommended checkpoint labels for this track:
 - `phase_1_output_validation_fusion`
 - `phase_2_io_binding`
 - `phase_2_io_binding_fix`
+- `phase_3_host_postprocess`
 - `phase_3_device_tensors`
 - `phase_4_gpu_prepare_inputs`
 - `phase_5_gpu_postprocess`
@@ -92,7 +94,7 @@ test result is recorded. Use this order:
 Current local checkpoint artifact set:
 
 - current optimized installer:
-  `dist/optimization_checkpoints/phase_2_io_binding_fix/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+  `dist/optimization_checkpoints/phase_3_host_postprocess/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
 - historical baseline installer:
   recopy when needed because release packaging recreates `dist/`
 
@@ -581,6 +583,93 @@ This is a correctness comparison, not a performance comparison. The purpose of
 Current reading: Phase 2 remains directionally promising, but the corrected
 package must replace the first one before any user-visible conclusion is kept.
 
+### `phase_3_host_postprocess`
+
+- Source state: current `perf/optimization` working tree with OFX selector
+  wording cleanup, `Draft (512)` as the real default quality, fixed bootstrap
+  alignment for that default, fused host-side planar output resize, and
+  parallelized OFX writeback loops
+- Display version label: `0.7.4-7`
+- Local test artifact path:
+  `dist/optimization_checkpoints/phase_3_host_postprocess/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_3_host_postprocess/`
+- Benchmark summary:
+  - selector choices now expose `Recommended`, `Host Managed`, and `Packaged`
+    instead of visible `Auto` labels where the product-facing panel still used
+    them
+  - OFX instance bootstrap now honors the selected fixed preview rung instead
+    of silently starting from the Windows RTX balanced preset
+  - `ColorUtils` now offers a fused bilinear resize path for planar alpha plus
+    foreground output data, and `InferenceSession` uses that path in both frame
+    and batch extract flows
+  - OFX writeback, channel-swap, and foreground linearization loops now run in
+    row-parallel form
+  - saved checkpoint artifacts:
+    - `ofx_harness_2048.json`
+    - `ofx_harness_512.json`
+    - `video_2048.json`
+    - `video_512.json`
+    - `bundle_validation.json`
+    - `doctor_report.json`
+  - current sequential `3840x2160` workload totals on the same workspace:
+    - `2048`: `123852.6 ms`
+    - `512`: `148378.9 ms`
+  - current sequential `3840x2160` workload stage totals on the same workspace:
+    - `2048`
+      - `batch_prepare_inputs`: `30099.4 ms`
+      - `ort_run`: `33493.3 ms`
+      - `batch_extract_outputs_resize`: `26503.0 ms`
+      - `post_source_passthrough`: `15174.2 ms`
+      - `post_composite`: `8478.4 ms`
+    - `512`
+      - `batch_prepare_inputs`: `89194.5 ms`
+      - `ort_run`: `8303.3 ms`
+      - `batch_extract_outputs_resize`: `19461.4 ms`
+      - `post_source_passthrough`: `15338.7 ms`
+      - `post_composite`: `8119.9 ms`
+  - current OFX-style harness absolutes on the same workspace:
+    - `2048` average latency: `826.0 ms`
+    - `512` average latency: `77.9 ms`
+- Manual OFX observations:
+  - pending the next local plugin comparison with the packaged `0.7.4-7`
+    installer
+  - expected visible identity check for the next manual run:
+    panel or packaged CLI must show `0.7.4-7`
+- Keep or revise decision:
+  keep this checkpoint for the agreed default-quality UX change and for manual
+  OFX validation, but do not claim a repo-side throughput win from the saved
+  corpus runs alone
+
+### `phase_2_io_binding_fix` vs `phase_3_host_postprocess`
+
+This comparison uses the saved sequential repo-side workload reruns and should
+be read as a checkpointing result, not as proof that the OFX-visible wall time
+failed to improve. The added OFX writeback parallelism is not represented in
+the CLI workload timings.
+
+- `2048` `3840x2160` workload total duration increased by about `1.2%`
+- `512` `3840x2160` workload total duration increased by about `1.2%`
+- `2048` stayed dominated by the same three host-visible blocks:
+  `ort_run`, `batch_prepare_inputs`, and `batch_extract_outputs_resize`
+- `512` stayed dominated by full-frame host work, especially
+  `batch_prepare_inputs`, even though `ort_run` was much lower than `2048`
+- current checkpoint data explains why `512` and `2048` look closer than the
+  model rung alone suggests:
+  - `512` reduces `ort_run` sharply, but it does not remove full-frame
+    `batch_prepare_inputs`, `batch_extract_outputs_resize`,
+    `post_source_passthrough`, or `post_composite`
+  - the current narrow I/O-binding path is only enabled for packaged FP16
+    TensorRT resolutions at `1536` and above, so the `2048` path benefits from
+    a lower-copy output contract that `512` does not currently use
+
+Current reading: this slice is worth keeping as the correct product-default and
+manual-test package, but the next real performance slice should target the
+full-frame prepare path and the low-copy data path together. The strongest
+remaining candidate is still the planned device-tensor or pinned-host work,
+especially if it can be extended to the lower fixed quality rungs instead of
+only the current high-resolution bound path.
+
 ## Why Installer Handling Must Stay Predictable
 
 Release packaging recreates `dist/`, so the local checkpoint folder must be
@@ -589,7 +678,7 @@ needs to remain available in the same workspace.
 
 - keep the checkpoint currently under test restored after packaging
 - current restored optimized checkpoint:
-  `dist/optimization_checkpoints/phase_2_io_binding_fix/`
+  `dist/optimization_checkpoints/phase_3_host_postprocess/`
 - recopy the baseline or earlier checkpoint installers when a direct local A/B
   needs them in the same workspace
 

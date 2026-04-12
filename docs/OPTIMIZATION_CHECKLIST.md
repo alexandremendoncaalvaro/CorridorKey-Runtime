@@ -42,7 +42,8 @@ tests can confirm the installed build without guesswork.
 - `0.7.4-3` is the direct-planar-resize checkpoint
 - `0.7.4-4` is the output-validation-fusion checkpoint
 - `0.7.4-5` is the initial I/O-binding groundwork checkpoint
-- `0.7.4-6` is the current I/O-binding regression-fix checkpoint
+- `0.7.4-6` is the I/O-binding regression-fix checkpoint
+- `0.7.4-7` is the host-postprocess and OFX-default-alignment checkpoint
 - each new measured optimization slice increments the suffix:
   `0.7.4-7`, `0.7.4-8`, `0.7.4-9`
 - the base semantic version remains `0.7.4` while the visible checkpoint label
@@ -102,7 +103,7 @@ The following validations were completed against the current implementation.
 - [x] OFX benchmark harness smoke test with JSON output
 - [x] Windows release packaging through the canonical release script
 - [x] Local installer generation, bundle validation, and doctor validation
-- [x] Optimization checkpoint release generated as `0.7.4-6`
+- [x] Optimization checkpoint release generated as `0.7.4-7`
 - [x] Baseline and optimized installers were copied into
       `dist/optimization_checkpoints/` for sequential local A/B testing
 
@@ -230,13 +231,25 @@ whether that gain survives the full OFX path.
   silhouette
 - `0.7.4-6` also aligns the packaged output contract by output name instead of
   trusting raw output index order when binding named outputs
-- current `0.7.4-6` status:
-  - installer, doctor report, and bundle validation are the correct artifacts
-    for the next local plugin comparison
-  - this checkpoint is a correctness replacement for `0.7.4-5`, not a new
-    performance claim
-  - the next high-value optimization work is still Phase 3 device tensors and
-    pinned-host strategy after this corrected checkpoint is manually validated
+- `0.7.4-7` removes visible `Auto` wording from OFX selector choices that were
+  still presented as selectable modes and makes `Draft (512)` the real default
+  quality from the initial bootstrap path onward
+- `0.7.4-7` also adds a fused bilinear resize path for planar alpha and
+  foreground outputs plus parallel row execution for the OFX writeback and
+  foreground linearization loops
+- repo-side sequential `3840x2160` workload reruns between `0.7.4-6` and
+  `0.7.4-7` stayed effectively flat to slightly worse:
+  - `2048` total duration moved from about `122.3 s` to `123.9 s`
+  - `512` total duration moved from about `146.7 s` to `148.4 s`
+- current `0.7.4-7` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - the quality default and visible selector language now match the agreed
+    checkpoint policy
+  - the repo-side corpus does not justify a broad speedup claim for this slice
+  - the next high-value optimization work should focus on the still-dominant
+    full-frame host path in `batch_prepare_inputs` and on extending the
+    lower-copy output path beyond the current high-resolution bound path
 - Ignore `CorridorHint` errors when they come from unrelated branch tests
 
 ## Why A Resume Map Saves Time
