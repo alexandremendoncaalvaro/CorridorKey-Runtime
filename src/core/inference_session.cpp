@@ -898,21 +898,35 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
         model_path, m_device.backend,
         m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
     size_t num_output_nodes = m_session.GetOutputCount();
+    std::vector<std::string> discovered_output_names;
+    std::vector<std::vector<int64_t>> discovered_output_dims;
+    std::vector<ONNXTensorElementDataType> discovered_output_element_types;
+    discovered_output_names.reserve(num_output_nodes);
+    discovered_output_dims.reserve(num_output_nodes);
+    discovered_output_element_types.reserve(num_output_nodes);
     for (size_t i = 0; i < num_output_nodes; ++i) {
+        auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
         auto output_type_info = m_session.GetOutputTypeInfo(i);
         auto output_tensor_info = output_type_info.GetTensorTypeAndShapeInfo();
-        m_output_node_dims.push_back(output_tensor_info.GetShape());
-        m_output_element_types.push_back(output_tensor_info.GetElementType());
+        discovered_output_names.push_back(output_name_ptr.get());
+        discovered_output_dims.push_back(output_tensor_info.GetShape());
+        discovered_output_element_types.push_back(output_tensor_info.GetElementType());
     }
 
     if (use_packaged_output_contract) {
         debug_log("Using packaged CorridorKey output contract");
-        m_output_node_names.emplace_back(core::k_corridorkey_alpha_output_name);
-        m_output_node_names.emplace_back(core::k_corridorkey_fg_output_name);
+        const auto ordered_indices =
+            core::packaged_corridorkey_output_indices(discovered_output_names);
+        for (const auto index : ordered_indices) {
+            m_output_node_names.push_back(discovered_output_names[index]);
+            m_output_node_dims.push_back(discovered_output_dims[index]);
+            m_output_element_types.push_back(discovered_output_element_types[index]);
+        }
     } else {
-        for (size_t i = 0; i < num_output_nodes; i++) {
-            auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
-            m_output_node_names.push_back(output_name_ptr.get());
+        for (size_t i = 0; i < num_output_nodes; ++i) {
+            m_output_node_names.push_back(discovered_output_names[i]);
+            m_output_node_dims.push_back(discovered_output_dims[i]);
+            m_output_element_types.push_back(discovered_output_element_types[i]);
         }
     }
     for (const auto& name : m_output_node_names) {
@@ -1914,10 +1928,14 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         MaterializedOutputTensor alpha_output;
         std::optional<MaterializedOutputTensor> fg_output;
         const bool include_foreground = !params.output_alpha_only;
+        const bool has_foreground_output =
+            core::should_allocate_foreground_buffer(params.output_alpha_only, output_tensors.size(),
+                                                    bound_io_state != nullptr &&
+                                                        bound_io_state->fg_output.has_value());
 
         FrameResult result;
         result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        if (include_foreground && output_tensors.size() > 1) {
+        if (has_foreground_output) {
             result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
         }
 

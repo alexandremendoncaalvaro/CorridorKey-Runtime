@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -116,6 +117,29 @@ inline bool should_enable_io_binding(const std::filesystem::path& model_path, Ba
         return false;
     }
     return supports_windows_rtx_io_binding(model_path, backend);
+}
+
+inline std::vector<std::size_t> packaged_corridorkey_output_indices(
+    const std::vector<std::string>& output_names) {
+    std::vector<std::size_t> indices(output_names.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    const auto alpha_it =
+        std::find(output_names.begin(), output_names.end(), k_corridorkey_alpha_output_name);
+    const auto fg_it =
+        std::find(output_names.begin(), output_names.end(), k_corridorkey_fg_output_name);
+    if (alpha_it == output_names.end() || fg_it == output_names.end()) {
+        return indices;
+    }
+
+    return {static_cast<std::size_t>(std::distance(output_names.begin(), alpha_it)),
+            static_cast<std::size_t>(std::distance(output_names.begin(), fg_it))};
+}
+
+inline bool should_allocate_foreground_buffer(bool output_alpha_only,
+                                              std::size_t output_tensor_count,
+                                              bool bound_fg_available) {
+    return !output_alpha_only && (bound_fg_available || output_tensor_count > 1);
 }
 
 inline std::optional<int> infer_model_resolution(const std::vector<int64_t>& input_shape) {

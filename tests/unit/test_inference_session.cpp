@@ -98,6 +98,24 @@ TEST_CASE("I/O binding policy parsing and eligibility", "[unit][inference][regre
                                                         Backend::CPU));
 }
 
+TEST_CASE("Packaged output order follows named outputs instead of raw indices",
+          "[unit][inference][regression]") {
+    CHECK(core::packaged_corridorkey_output_indices({"alpha", "fg"}) ==
+          std::vector<std::size_t>{0, 1});
+    CHECK(core::packaged_corridorkey_output_indices({"fg", "alpha"}) ==
+          std::vector<std::size_t>{1, 0});
+    CHECK(core::packaged_corridorkey_output_indices({"output0", "output1"}) ==
+          std::vector<std::size_t>{0, 1});
+}
+
+TEST_CASE("Foreground allocation follows bound and unbound output availability",
+          "[unit][inference][regression]") {
+    CHECK(core::should_allocate_foreground_buffer(false, 2, false));
+    CHECK(core::should_allocate_foreground_buffer(false, 0, true));
+    CHECK_FALSE(core::should_allocate_foreground_buffer(false, 0, false));
+    CHECK_FALSE(core::should_allocate_foreground_buffer(true, 2, true));
+}
+
 TEST_CASE("Model resolution inference from input shape", "[unit][inference][regression]") {
     REQUIRE(core::infer_model_resolution({1, 4, 1536, 1536}) == std::optional<int>(1536));
     REQUIRE(core::infer_model_resolution({-1, 4, 1024, 1024}) == std::optional<int>(1024));
