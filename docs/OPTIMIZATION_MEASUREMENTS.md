@@ -8,6 +8,39 @@ against a stable baseline instead of relying on memory or one-off tests.
 
 Use this file together with [OPTIMIZATION_CHECKLIST.md](./OPTIMIZATION_CHECKLIST.md).
 
+## TL;DR
+
+This table is the fast reading path for the optimization track. It summarizes
+the strongest measured outcome of each checkpoint and the current decision about
+whether that slice was worth keeping. The detailed sections later in this file
+remain the source of truth for methodology and caveats.
+
+| Checkpoint | Version | Main change | Strongest recorded gain | Current reading |
+| --- | --- | --- | --- | --- |
+| `pre_opt` | `0.7.3` | baseline reference | baseline only | keep as the control |
+| `phase_0_1_shared_ort` | `0.7.4-0` | shared ORT env, global pools, env allocators, richer timings | architecture and measurement improved, but no clear OFX throughput win | keep for structure, not for speed claims |
+| `phase_1_extract_output_attribution` | `0.7.4-1` | split extract path into sub-stages | converted a monolith into actionable hotspots | keep for visibility |
+| `phase_1_runtime_panel_timing_correction` | `0.7.4-2` | fixed `Last Frame` wall-time semantics | removed panel double counting | keep for trustworthiness |
+| `phase_1_direct_planar_resize` | `0.7.4-3` | removed extra planar-to-interleaved resize path | RTX `512` harness average latency improved about `36.7%` | first clear throughput win |
+| `phase_1_output_validation_fusion` | `0.7.4-4` | fused TensorRT diagnostic scans | RTX `2048` harness average latency improved about `12.9%` | keep |
+| `phase_2_io_binding` | `0.7.4-5` | narrow low-copy bound path for packaged TensorRT outputs | RTX `2048` harness average latency improved about `27.7%` | promising, but first package had a blocking correctness bug |
+| `phase_2_io_binding_fix` | `0.7.4-6` | fixed bound foreground correctness and output ordering | correctness replacement for `0.7.4-5` | keep as the valid Phase 2 base |
+| `phase_3_host_postprocess` | `0.7.4-7` | default-quality cleanup and host-side output/writeback work | no broad corpus speedup claim justified | keep for product correctness, not for speed claims |
+| `phase_4_input_prepare` | `0.7.4-8` | parallelized host-side prepare path and fused normalized planar packing | `1024` OFX-style harness roundtrip improved about `10.9%`; `frame_prepare_inputs` improved about `24.2%` | keep; this is the current best prepare-focused win |
+
+Latest real OFX sample from the current packaged line:
+
+| Sample | Version | Quality | `frame_prepare_inputs` | `ort_run` | `frame_extract_outputs` | `frame_extract_outputs_resize` | `post_composite` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| most recent local plugin log | `0.7.4-8` | `Maximum (2048)` | `83.3 ms` | `372.2 ms` | `344.0 ms` | `287.7 ms` | `97.5 ms` |
+
+Current headline:
+
+- the `prepare_inputs` slice worked
+- the next real hotspot is back to `ort_run` plus the resize-heavy extract path
+- the most promising next move is to extend the lower-copy bound path to the
+  `1024` rung that the RTX 3080 actually uses as its safe ceiling
+
 ## Why The Matrix Must Stay Stable
 
 The same workloads must be reused across checkpoints so gains and regressions
