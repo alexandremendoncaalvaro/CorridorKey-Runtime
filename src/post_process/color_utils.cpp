@@ -493,6 +493,41 @@ void ColorUtils::composite_over_checker(Image rgba) {
     }
 }
 
+void ColorUtils::composite_premultiplied_over_checker_to_srgb(Image premultiplied_rgba,
+                                                              Image dst) {
+    if (premultiplied_rgba.empty() || dst.empty() || premultiplied_rgba.width != dst.width ||
+        premultiplied_rgba.height != dst.height || premultiplied_rgba.channels < 4 ||
+        dst.channels < 4) {
+        return;
+    }
+
+    const SrgbLut& lut = SrgbLut::instance();
+    const float bg_dark = lut.to_linear(0.15F);
+    const float bg_light = lut.to_linear(0.55F);
+
+    common::parallel_for_rows(premultiplied_rgba.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            for (int x_pos = 0; x_pos < premultiplied_rgba.width; ++x_pos) {
+                const float alpha = premultiplied_rgba(y_pos, x_pos, 3);
+                const float background =
+                    ((y_pos / 16) + (x_pos / 16)) % 2 == 0 ? bg_dark : bg_light;
+                const float inv_alpha = 1.0F - alpha;
+
+                dst(y_pos, x_pos, 0) =
+                    lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 0) * alpha +
+                                background * inv_alpha);
+                dst(y_pos, x_pos, 1) =
+                    lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 1) * alpha +
+                                background * inv_alpha);
+                dst(y_pos, x_pos, 2) =
+                    lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 2) * alpha +
+                                background * inv_alpha);
+                dst(y_pos, x_pos, 3) = 1.0F;
+            }
+        }
+    });
+}
+
 void ColorUtils::generate_rough_matte(Image rgb, Image alpha_hint) {
     const int height = rgb.height;
     const int width = rgb.width;

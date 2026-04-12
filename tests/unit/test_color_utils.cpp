@@ -127,6 +127,34 @@ TEST_CASE("ColorUtils::resize_into matches resize output", "[unit][color][regres
     }
 }
 
+TEST_CASE("ColorUtils::composite_premultiplied_over_checker_to_srgb matches legacy pipeline",
+          "[unit][color][regression]") {
+    ImageBuffer processed_buf(4, 4, 4);
+    Image processed = processed_buf.view();
+
+    for (int y_pos = 0; y_pos < processed.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < processed.width; ++x_pos) {
+            processed(y_pos, x_pos, 0) = static_cast<float>(x_pos + 1) / 10.0F;
+            processed(y_pos, x_pos, 1) = static_cast<float>(y_pos + 2) / 10.0F;
+            processed(y_pos, x_pos, 2) = static_cast<float>(x_pos + y_pos + 3) / 12.0F;
+            processed(y_pos, x_pos, 3) = static_cast<float>((x_pos + y_pos) % 4) / 3.0F;
+        }
+    }
+
+    ImageBuffer legacy_buf(4, 4, 4);
+    std::copy(processed.data.begin(), processed.data.end(), legacy_buf.view().data.begin());
+    ColorUtils::composite_over_checker(legacy_buf.view());
+    ColorUtils::linear_to_srgb(legacy_buf.view());
+
+    ImageBuffer fused_buf(4, 4, 4);
+    ColorUtils::composite_premultiplied_over_checker_to_srgb(processed, fused_buf.view());
+
+    for (size_t index = 0; index < fused_buf.view().data.size(); ++index) {
+        REQUIRE(fused_buf.view().data[index] ==
+                Catch::Approx(legacy_buf.view().data[index]).margin(0.0001F));
+    }
+}
+
 TEST_CASE("ColorUtils::resize_from_planar_into matches resize output",
           "[unit][color][regression]") {
     ImageBuffer source_buf(4, 3, 3);

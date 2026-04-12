@@ -44,6 +44,7 @@ class CORRIDORKEY_API ColorUtils {
      * Useful for preview generation.
      */
     static void composite_over_checker(Image rgba);
+    static void composite_premultiplied_over_checker_to_srgb(Image premultiplied_rgba, Image dst);
 
     /**
      * @brief Generate a rough alpha guide using a simple green-key fallback.

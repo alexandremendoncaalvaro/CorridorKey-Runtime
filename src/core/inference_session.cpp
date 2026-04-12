@@ -1431,9 +1431,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     common::measure_stage(
         on_stage, "post_composite",
         [&]() {
-            std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
-            ColorUtils::composite_over_checker(comp);
-            ColorUtils::linear_to_srgb(comp);
+            ColorUtils::composite_premultiplied_over_checker_to_srgb(proc, comp);
         },
         1);
 }
