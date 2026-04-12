@@ -48,8 +48,9 @@ Display version policy for this track:
 - runtime-panel timing correction checkpoint is `0.7.4-2`
 - direct-planar-resize checkpoint is `0.7.4-3`
 - output-validation-fusion checkpoint is `0.7.4-4`
-- current I/O-binding groundwork checkpoint is `0.7.4-5`
-- the next measured slice becomes `0.7.4-6`
+- I/O-binding groundwork checkpoint is `0.7.4-5`
+- current I/O-binding regression-fix checkpoint is `0.7.4-6`
+- the next measured slice becomes `0.7.4-7`
 
 Recommended checkpoint labels for this track:
 
@@ -60,6 +61,7 @@ Recommended checkpoint labels for this track:
 - `phase_1_direct_planar_resize`
 - `phase_1_output_validation_fusion`
 - `phase_2_io_binding`
+- `phase_2_io_binding_fix`
 - `phase_3_device_tensors`
 - `phase_4_gpu_prepare_inputs`
 - `phase_5_gpu_postprocess`
@@ -90,7 +92,7 @@ test result is recorded. Use this order:
 Current local checkpoint artifact set:
 
 - current optimized installer:
-  `dist/optimization_checkpoints/phase_2_io_binding/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+  `dist/optimization_checkpoints/phase_2_io_binding_fix/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
 - historical baseline installer:
   recopy when needed because release packaging recreates `dist/`
 
@@ -466,6 +468,35 @@ path problem.
   extract-path win and preserves a narrow fallback, but move the next slice
   toward device-aware memory placement because sequence throughput stayed flat
 
+### `phase_2_io_binding_fix`
+
+- Source state: current `perf/optimization` working tree with the I/O-binding
+  foreground regression fixed on top of the Phase 2 groundwork slice
+- Display version label: `0.7.4-6`
+- Local test artifact path:
+  `dist/optimization_checkpoints/phase_2_io_binding_fix/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+- Corpus output root:
+  no new corpus capture yet; this checkpoint exists to replace the broken
+  `0.7.4-5` package for manual validation
+- Benchmark summary:
+  - the bound single-frame path now allocates foreground output buffers when
+    the bound `fg` tensor is present
+  - packaged-output metadata now aligns output names, shapes, and element types
+    by discovered output name instead of raw index order
+  - the existing `0.7.4-5` performance measurements remain the reference for
+    this slice because `0.7.4-6` is a correctness replacement, not a new
+    optimization claim
+  - debug and release builds passed after the fix
+  - `ctest --preset unit` and `ctest --preset integration` passed after the fix
+- Manual OFX observations:
+  - pending local plugin comparison against the broken `0.7.4-5` package
+  - a one-frame in-repo OFX-style harness run with `--io-binding on` confirmed
+    active observed binding and produced non-zero finite `fg_raw_output` and
+    `fg_resized_output` stats in the runtime log
+- Keep or revise decision:
+  keep this checkpoint as the only valid package for Phase 2 manual testing and
+  do not use `0.7.4-5` for further OFX comparison
+
 ### `phase_1_direct_planar_resize` vs `phase_1_output_validation_fusion`
 
 This comparison uses the same repo-side RTX `2048` harness with the same model
@@ -533,6 +564,23 @@ also shows that the next material gain is unlikely to come from binding alone.
 The next checkpoint should attack device-visible outputs or pinned-host
 transfers before deeper TensorRT provider tuning.
 
+### `phase_2_io_binding` vs `phase_2_io_binding_fix`
+
+This is a correctness comparison, not a performance comparison. The purpose of
+`0.7.4-6` is to replace a broken manual-test package without changing the Phase
+2 optimization claim.
+
+- `0.7.4-5` is no longer a valid manual OFX checkpoint because the bound
+  single-frame path could return a black silhouette instead of a populated
+  foreground result
+- `0.7.4-6` restores the bound foreground output contract and keeps the same
+  Phase 2 measurement story
+- the next performance comparison should use `0.7.4-6` as the starting point,
+  not `0.7.4-5`
+
+Current reading: Phase 2 remains directionally promising, but the corrected
+package must replace the first one before any user-visible conclusion is kept.
+
 ## Why Installer Handling Must Stay Predictable
 
 Release packaging recreates `dist/`, so the local checkpoint folder must be
@@ -541,7 +589,7 @@ needs to remain available in the same workspace.
 
 - keep the checkpoint currently under test restored after packaging
 - current restored optimized checkpoint:
-  `dist/optimization_checkpoints/phase_2_io_binding/`
+  `dist/optimization_checkpoints/phase_2_io_binding_fix/`
 - recopy the baseline or earlier checkpoint installers when a direct local A/B
   needs them in the same workspace
 

@@ -41,9 +41,10 @@ tests can confirm the installed build without guesswork.
 - `0.7.4-2` is the runtime timing correction checkpoint
 - `0.7.4-3` is the direct-planar-resize checkpoint
 - `0.7.4-4` is the output-validation-fusion checkpoint
-- `0.7.4-5` is the current I/O-binding groundwork checkpoint
+- `0.7.4-5` is the initial I/O-binding groundwork checkpoint
+- `0.7.4-6` is the current I/O-binding regression-fix checkpoint
 - each new measured optimization slice increments the suffix:
-  `0.7.4-6`, `0.7.4-7`, `0.7.4-8`
+  `0.7.4-7`, `0.7.4-8`, `0.7.4-9`
 - the base semantic version remains `0.7.4` while the visible checkpoint label
   changes per slice
 - checkpoint comparison only counts when the installed build identity was
@@ -101,7 +102,7 @@ The following validations were completed against the current implementation.
 - [x] OFX benchmark harness smoke test with JSON output
 - [x] Windows release packaging through the canonical release script
 - [x] Local installer generation, bundle validation, and doctor validation
-- [x] Optimization checkpoint release generated as `0.7.4-5`
+- [x] Optimization checkpoint release generated as `0.7.4-6`
 - [x] Baseline and optimized installers were copied into
       `dist/optimization_checkpoints/` for sequential local A/B testing
 
@@ -220,13 +221,22 @@ whether that gain survives the full OFX path.
   - `sequence_infer_batch` stayed effectively tied and slightly higher at
     about `1495.3 ms` to `1509.0 ms`
 - current `0.7.4-5` status:
-  - installer, doctor report, bundle validation, and repo-side checkpoint JSON
-    are ready for the next local plugin comparison
-  - this slice produces a real single-frame extract-path gain but not yet a
-    broad sequence-throughput gain
-  - the next high-value work should attack memory placement and copy behavior
-    more directly through device tensors or pinned-host strategy before deeper
-    provider tuning
+  - repo-side measurement remains worth keeping because it shows a real
+    single-frame extract-path gain even though sequence throughput stayed flat
+  - the first packaged build exposed an OFX-visible foreground regression that
+    must be treated as a blocker before Phase 3
+- `0.7.4-6` fixes the bound single-frame foreground path so the OFX-visible
+  result keeps a populated foreground image instead of collapsing to a black
+  silhouette
+- `0.7.4-6` also aligns the packaged output contract by output name instead of
+  trusting raw output index order when binding named outputs
+- current `0.7.4-6` status:
+  - installer, doctor report, and bundle validation are the correct artifacts
+    for the next local plugin comparison
+  - this checkpoint is a correctness replacement for `0.7.4-5`, not a new
+    performance claim
+  - the next high-value optimization work is still Phase 3 device tensors and
+    pinned-host strategy after this corrected checkpoint is manually validated
 - Ignore `CorridorHint` errors when they come from unrelated branch tests
 
 ## Why A Resume Map Saves Time
@@ -269,7 +279,7 @@ Before recording a local result, verify the build in this order:
 The current expected visible identities are:
 
 - baseline installer: `0.7.3`
-- current optimization installer: `0.7.4-5`
+- current optimization installer: `0.7.4-6`
 
 ## Why The Next Tasks Are Ordered
 
@@ -337,6 +347,18 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 - [x] Added additive benchmark metadata so reports can distinguish requested,
       eligible, active, and observed binding state
 - [x] Generated the `0.7.4-5` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: I/O Binding Regression Fix
+
+- [x] Restored foreground buffer allocation on the bound single-frame path so
+      the OFX-visible result keeps a valid foreground image
+- [x] Reordered packaged output metadata by discovered output name so bound
+      names, shapes, and element types stay aligned
+- [x] Added unit regression coverage for output-order mapping and bound
+      foreground-allocation decisions
+- [x] Rebuilt and revalidated debug and release outputs before packaging
+- [x] Generated the `0.7.4-6` installer and checkpoint artifacts for the next
       local comparison
 
 ### Phase 3: Device Tensors And Pinned-Host Strategy
