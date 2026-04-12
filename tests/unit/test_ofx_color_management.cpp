@@ -496,8 +496,7 @@ TEST_CASE("describe_in_context places recover original details in interior detai
     CHECK(prop_strings(gamma_props, kOfxParamPropHint).front().find("Values above 1.0 brighten") !=
           std::string::npos);
     CHECK(prop_strings(input_color_props, kOfxParamPropChoiceOption).size() == 3);
-    CHECK(prop_strings(input_color_props, kOfxParamPropChoiceOption).at(2) ==
-          "Auto (Host Managed)");
+    CHECK(prop_strings(input_color_props, kOfxParamPropChoiceOption).at(2) == "Host Managed");
     CHECK(prop_ints(input_color_props, kOfxParamPropDefault).front() == kDefaultInputColorSpace);
 }
 
@@ -514,11 +513,12 @@ TEST_CASE("describe_in_context exposes the current public quality ladder",
         descriptor.param_set.params.at(kParamCoarseResolutionOverride)->props;
 
     CHECK(prop_strings(quality_props, kOfxParamPropChoiceOption) ==
-          std::vector<std::string>{"Auto", "Draft (512)", "High (1024)", "Ultra (1536)",
+          std::vector<std::string>{"Recommended", "Draft (512)", "High (1024)",
+                                   "Ultra (1536)",
                                    "Maximum (2048)"});
-    CHECK(prop_ints(quality_props, kOfxParamPropDefault).front() == kQualityAuto);
+    CHECK(prop_ints(quality_props, kOfxParamPropDefault).front() == kQualityPreview);
     CHECK(prop_strings(coarse_resolution_props, kOfxParamPropChoiceOption) ==
-          std::vector<std::string>{"Automatic", "512", "1024", "1536", "2048"});
+          std::vector<std::string>{"Recommended", "512", "1024", "1536", "2048"});
 }
 
 TEST_CASE("describe_in_context keeps runtime first and help second with advanced diagnostics gated",

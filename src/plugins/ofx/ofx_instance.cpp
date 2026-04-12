@@ -859,14 +859,15 @@ std::filesystem::path resolve_models_root() {
 }
 
 app::OfxRuntimePrepareSessionRequest build_prepare_request(
-    const BootstrapEngineCandidate& candidate, bool allow_cpu_fallback = false) {
+    const BootstrapEngineCandidate& candidate, int requested_quality_mode,
+    bool allow_cpu_fallback = false) {
     app::OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = "bootstrap";
     request.model_path = candidate.executable_model_path;
     request.artifact_name = candidate.requested_model_path.filename().string();
     request.requested_device = candidate.device;
     request.engine_options = ofx_engine_options(candidate.device, allow_cpu_fallback);
-    request.requested_quality_mode = kQualityAuto;
+    request.requested_quality_mode = requested_quality_mode;
     request.requested_resolution = candidate.requested_resolution;
     request.effective_resolution = candidate.effective_resolution;
     return request;
@@ -1143,7 +1144,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     data->runtime_capabilities = capabilities;
     log_message("create_instance", std::string("Platform: ") + capabilities.platform);
 
-    int initial_quality_mode = kQualityAuto;
+    int initial_quality_mode = kQualityPreview;
     if (data->quality_mode_param != nullptr) {
         g_suites.parameter->paramGetValue(data->quality_mode_param, &initial_quality_mode);
     }
@@ -1178,8 +1179,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatOK;
     }
 
-    auto bootstrap_candidates =
-        build_bootstrap_candidates(capabilities, detected_device, data->models_root);
+    auto bootstrap_candidates = build_bootstrap_candidates(
+        capabilities, detected_device, data->models_root, initial_quality_mode);
     if (bootstrap_candidates.empty()) {
         log_message("create_instance", "No compatible model artifacts found for OFX bootstrap.");
         post_message(kOfxMessageError, "No compatible model artifacts found for this device.",
@@ -1209,7 +1210,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         std::optional<BackendFallbackInfo> fallback = std::nullopt;
         if (data->use_runtime_server && data->runtime_client != nullptr) {
             auto prepare_result = data->runtime_client->prepare_session(
-                build_prepare_request(candidate, bootstrap_allow_cpu_fallback),
+                build_prepare_request(candidate, initial_quality_mode, bootstrap_allow_cpu_fallback),
                 [&](const StageTiming& timing) {
                     log_stage_timing("create_instance", kBootstrapPhase, candidate.device,
                                      candidate.executable_model_path,
@@ -1305,7 +1306,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         data->cached_result_valid = false;
         data->cached_signature = 0;
         data->cached_signature_valid = false;
-        data->active_quality_mode = kQualityAuto;
+        data->active_quality_mode = initial_quality_mode;
         data->requested_resolution = candidate.requested_resolution;
         data->active_resolution = candidate.effective_resolution;
         data->cpu_quality_guardrail_active = false;

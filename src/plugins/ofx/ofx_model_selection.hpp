@@ -511,9 +511,16 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     return *candidates;
 }
 
+inline std::optional<QualityArtifactSelection> select_quality_artifact(
+    const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
+    int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
+    QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
+
 inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
     const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
-    const std::filesystem::path& models_root) {
+    const std::filesystem::path& models_root, int quality_mode = kQualityAuto,
+    int quantization_mode = kDefaultQuantizationMode) {
     std::vector<BootstrapEngineCandidate> candidates;
 
     auto append_unique = [&](BootstrapEngineCandidate candidate) {
@@ -530,6 +537,17 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
         }
     };
 
+    auto append_quality_candidate = [&](const DeviceInfo& device) {
+        auto selection = select_quality_artifact(models_root, device.backend, quality_mode, 0, 0,
+                                                 quantization_mode, device.available_memory_mb);
+        if (!selection.has_value()) {
+            return;
+        }
+
+        append_unique({device, selection->executable_model_path, selection->executable_model_path,
+                       selection->requested_resolution, selection->effective_resolution});
+    };
+
 #if defined(__APPLE__)
     if (capabilities.platform == "macos" && capabilities.apple_silicon &&
         capabilities.mlx_probe_available && has_mlx_bootstrap_artifacts(models_root)) {
@@ -541,6 +559,15 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
 #else
     (void)capabilities;
 #endif
+
+    if (is_fixed_quality_mode(quality_mode)) {
+        append_quality_candidate(detected_device);
+        if (detected_device.backend != Backend::CPU) {
+            append_quality_candidate(
+                DeviceInfo{"Generic CPU", detected_device.available_memory_mb, Backend::CPU});
+        }
+        return candidates;
+    }
 
     auto preset = app::default_preset_for_capabilities(capabilities);
     auto append_default_candidate = [&](const DeviceInfo& device) {
@@ -581,9 +608,9 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
 
 inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
-    int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
-    QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
+    int input_height, int quantization_mode, std::int64_t available_memory_mb,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt) {
     auto candidates =
         quality_artifact_candidates(models_root, backend, quality_mode, input_width, input_height,
                                     quantization_mode, available_memory_mb, fallback_mode,

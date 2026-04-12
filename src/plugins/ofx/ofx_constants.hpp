@@ -27,7 +27,7 @@ inline const char* quality_mode_ui_label(int quality_mode) {
         case kQualityMaximum:
             return "Maximum (2048)";
         default:
-            return "Auto";
+            return "Recommended";
     }
 }
 
@@ -42,7 +42,7 @@ inline const char* quality_fallback_mode_ui_label(int choice) {
         case kQualityFallbackCoarseToFine:
             return "Coarse to Fine";
         default:
-            return "Auto";
+            return "Recommended";
     }
 }
 
@@ -68,7 +68,7 @@ inline const char* refinement_mode_ui_label(int choice) {
         case kRefinementTiled:
             return "Tiled";
         default:
-            return "Auto";
+            return "Packaged";
     }
 }
 

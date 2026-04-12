@@ -383,22 +383,22 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "the keyer treats blue screens like green screens.",
                         "setup_group");
     define_choice_param(
-        param_set, kParamQualityMode, "Quality", kQualityAuto,
+        param_set, kParamQualityMode, "Quality", kQualityPreview,
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
          quality_mode_ui_label(kQualityHigh), quality_mode_ui_label(kQualityUltra),
          quality_mode_ui_label(kQualityMaximum)},
-        "Inference quality. Auto is the default and selects from the current public ladder "
-        "based on input size and the runtime safe quality ceiling for the active hardware tier. "
-        "Higher values produce better detail at the cost of speed. "
-        "Resolutions: Draft (512), High (1024), Ultra (1536), Maximum (2048).",
+        "Inference quality. Draft (512) is the default. Recommended follows the current public "
+        "ladder based on input size and the runtime safe quality ceiling for the active hardware "
+        "tier. Higher values produce better detail at the cost of speed. Resolutions: Draft "
+        "(512), High (1024), Ultra (1536), Maximum (2048).",
         "setup_group");
     define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
-                        kDefaultInputColorSpace, {"sRGB", "Linear", "Auto (Host Managed)"},
-                        "How CorridorKey should interpret the incoming source. Auto requests "
-                        "host-managed color using sRGB Texture or Linear Rec.709 (sRGB). "
-                        "Linear means Linear Rec.709 (sRGB), not an arbitrary project-linear "
-                        "space. If host-managed color is unavailable, Auto falls back to the "
-                        "manual Linear path.",
+                        kDefaultInputColorSpace, {"sRGB", "Linear", "Host Managed"},
+                        "How CorridorKey should interpret the incoming source. Host Managed "
+                        "requests host-managed color using sRGB Texture or Linear Rec.709 "
+                        "(sRGB). Linear means Linear Rec.709 (sRGB), not an arbitrary "
+                        "project-linear space. If host-managed color is unavailable, CorridorKey "
+                        "falls back to the manual Linear path.",
                         "setup_group");
 
     // --- Group 4: Interior Detail (recover opaque source texture, not edge fixes) ---
@@ -535,18 +535,18 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         {quality_fallback_mode_ui_label(kQualityFallbackAuto),
          quality_fallback_mode_ui_label(kQualityFallbackDirect),
          quality_fallback_mode_ui_label(kQualityFallbackCoarseToFine)},
-        "Advanced diagnostics override. Auto chooses the safest runtime path. Direct disables "
-        "coarse-to-fine. Coarse to Fine forces the fallback path.",
+        "Advanced diagnostics override. Recommended chooses the safest runtime path. Direct "
+        "disables coarse-to-fine. Coarse to Fine forces the fallback path.",
         "advanced_processing_group");
     define_choice_param(
         param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,
         {refinement_mode_ui_label(kRefinementAuto), refinement_mode_ui_label(kRefinementFullFrame),
          refinement_mode_ui_label(kRefinementTiled)},
         "Advanced diagnostics override for validated refinement strategy "
-        "artifacts. Current packaged ONNX artifacts only support Auto.",
+        "artifacts. Current packaged ONNX artifacts only support Packaged.",
         "advanced_processing_group", false);
     define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
-                        kCoarseResolutionAutomatic, {"Automatic", "512", "1024", "1536", "2048"},
+                        kCoarseResolutionAutomatic, {"Recommended", "512", "1024", "1536", "2048"},
                         "Advanced diagnostics override for the coarse artifact resolution.",
                         "advanced_processing_group");
 

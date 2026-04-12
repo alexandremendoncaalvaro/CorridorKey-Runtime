@@ -173,6 +173,25 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
+TEST_CASE("ofx bootstrap honors fixed preview quality on windows tensorRT",
+          "[unit][ofx][regression]") {
+    TempDirGuard temp_dir("corridorkey-ofx-bootstrap-preview");
+    touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
+
+    auto candidates = build_bootstrap_candidates(
+        windows_capabilities(), DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
+        temp_dir.path(), kQualityPreview);
+
+    REQUIRE_FALSE(candidates.empty());
+    REQUIRE(candidates.front().device.backend == Backend::TensorRT);
+    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_512.onnx");
+    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_512.onnx");
+    REQUIRE(candidates.front().requested_resolution == 512);
+    REQUIRE(candidates.front().effective_resolution == 512);
+}
+
 TEST_CASE("fixed windows tensorRT ultra and maximum resolve exact packaged models",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-exact-high-end");
@@ -198,7 +217,7 @@ TEST_CASE("fixed windows tensorRT ultra and maximum resolve exact packaged model
 }
 
 TEST_CASE("ofx quality mode labels expose fixed resolutions in the UI", "[unit][ofx][regression]") {
-    REQUIRE(std::string(quality_mode_ui_label(kQualityAuto)) == "Auto");
+    REQUIRE(std::string(quality_mode_ui_label(kQualityAuto)) == "Recommended");
     REQUIRE(std::string(quality_mode_ui_label(kQualityPreview)) == "Draft (512)");
     REQUIRE(std::string(quality_mode_ui_label(kQualityHigh)) == "High (1024)");
     REQUIRE(std::string(quality_mode_ui_label(kQualityUltra)) == "Ultra (1536)");

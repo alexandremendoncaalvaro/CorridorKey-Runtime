@@ -100,7 +100,7 @@ struct OfxSuites {
 };
 
 struct RuntimePanelState {
-    int requested_quality_mode = kQualityAuto;
+    int requested_quality_mode = kQualityPreview;
     int requested_resolution = 0;
     int effective_resolution = 0;
     int safe_quality_ceiling_resolution = 0;
@@ -182,7 +182,7 @@ struct InstanceData {
     DeviceInfo device = {};
     DeviceInfo preferred_device = {};
     RuntimeCapabilities runtime_capabilities = {};
-    int active_quality_mode = kQualityAuto;
+    int active_quality_mode = kQualityPreview;
     int requested_resolution = 0;
     int active_resolution = 0;
     bool cpu_quality_guardrail_active = false;
