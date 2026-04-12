@@ -31,6 +31,7 @@
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
+#include "core/gpu_prep.hpp"
 #include "core/gpu_resize.hpp"
 
 #ifdef __APPLE__
@@ -179,6 +180,7 @@ class InferenceSession {
     ColorUtils::State m_color_utils_state = {};
     AlphaEdgeState m_alpha_edge_state = {};
 
+    core::GpuInputPrep m_gpu_prep;
     core::GpuResizer m_gpu_resizer;
 };
 

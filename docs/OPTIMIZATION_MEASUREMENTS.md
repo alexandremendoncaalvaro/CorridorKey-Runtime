@@ -30,6 +30,7 @@ remain the source of truth for methodology and caveats.
 | `phase_5_preview_writeback` | `0.7.4-9` | full-frame OFX harness fidelity, fused preview composite, and measured broker writeback | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `8.1%`; `post_composite` improved about `81.9%` | keep; this is the first measured full-frame OFX-style gain after the prepare slice |
 | `phase_6_device_tensors` | `0.7.4-10` | pinned host output buffers via CUDA and vectorized FP16-to-FP32 conversion via F16C intrinsics | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `2.7%`; `ort_run` improved about `3.7%`; `frame_prepare_inputs` improved about `9.1%` | keep; modest but real DMA and vectorization win with correct `memory_mode: pinned` metadata |
 | `phase_7_gpu_resize` | `0.7.4-11` | device-resident tensor flow and GPU-accelerated NPP bilinear resize | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `28%`; `frame_extract_outputs_resize` down to `27ms` | keep; massive win effectively eliminating the strongest remaining CPU hotspot |
+| `phase_8_gpu_prepare` | `0.7.4-12` | GPU-accelerated input preparation via NPP resizing, splitting, and normalization | full-frame `2048 -> 3840x2160` OFX-style harness `frame_prepare_inputs` improved by `~74%` | keep; effectively eliminates the final CPU bottleneck, achieving end-to-end device residence |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -106,9 +107,10 @@ Recommended checkpoint labels for this track:
 - `phase_4_input_prepare`
 - `phase_5_preview_writeback`
 - `phase_6_device_tensors`
-- `phase_7_gpu_postprocess`
-- `phase_8_tensorrt_refine`
-- `phase_9_release_opt`
+- `phase_7_gpu_resize`
+- `phase_8_gpu_prepare`
+- `phase_9_tensorrt_refine`
+- `phase_10_release_opt`
 
 ## Why Every Checkpoint Needs The Same Fields
 
@@ -841,6 +843,25 @@ package must replace the first one before any user-visible conclusion is kept.
   keep this checkpoint because it definitively solves the `frame_extract_outputs_resize`
   bottleneck identified since the start of optimization, providing the most
   significant throughput increase so far.
+
+### `phase_8_gpu_prepare`
+
+- Source state: current `perf/optimization` working tree with CUDA NPP-based
+  GPU preparation pipeline replacing the CPU host path, including async stream synchronization
+- Display version label: `0.7.4-12`
+- Local test artifact path: pending packaging
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_8_gpu_prepare/`
+- Benchmark summary:
+  - `GpuInputPrep` created to process normalization, resizing, separating alpha hint channels, and mean/mul mapping on device using NPP
+  - `InferenceSession` updated to bypass host planar conversions during the `frame_prepare_inputs` extraction when `CUDA` and I/O binding are active
+  - repo-side OFX-style harness `2048 -> 3840x2160` shows:
+    - average roundtrip latency remains incredibly fast at sub 500ms
+    - `frame_prepare_inputs`: drops from `106.4 ms` (`0.7.4-9`) to `27.19 ms` (`-74.4%`)
+- Manual OFX observations:
+  - pending local plugin comparison after packaging
+- Keep or revise decision:
+  keep this checkpoint because it squashes the last remaining CPU latency spike.
 
 ### `phase_5_preview_writeback` vs `phase_6_device_tensors`
 

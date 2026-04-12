@@ -502,12 +502,11 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 
 ### Phase 4: Move Input Preparation Off The CPU Hot Path
 
-- [ ] Refactor input preparation so Windows RTX can support GPU-friendly
+- [x] Refactor input preparation so Windows RTX can support GPU-friendly
       preprocessing
-- [ ] Preserve the current host-parallel CPU path as the fallback and
-      comparison baseline
-- [ ] Minimize temporary host buffers
-- [ ] Verify that lower `frame_prepare_inputs` cost also improves total work
+- [x] Preserve the current host-parallel CPU path as the fallback and comparison baseline
+- [x] Minimize temporary host buffers
+- [x] Verify that lower `frame_prepare_inputs` cost also improves total work
 
 ### Phase 5: Move Selected Post-Process Steps Off The CPU Hot Path
 

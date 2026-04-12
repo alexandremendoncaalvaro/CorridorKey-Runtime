@@ -1881,6 +1881,18 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         common::measure_stage(
             on_stage, "frame_prepare_inputs",
             [&]() {
+                if (m_io_binding_enabled && m_gpu_prep.available()) {
+                    auto gpu_res = m_gpu_prep.prepare_inputs(
+                        rgb, alpha_hint, planar_ptr,
+                        static_cast<int>(model_w), static_cast<int>(model_h),
+                        kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
+                    if (gpu_res.has_value()) {
+                        return;
+                    }
+                    debug_log("GPU prep failed, falling back to CPU: " +
+                              gpu_res.error().message);
+                }
+
                 ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
                 ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
 

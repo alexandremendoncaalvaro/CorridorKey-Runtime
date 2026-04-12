@@ -45,6 +45,7 @@ add_executable(test_unit
     test_tile_blend.cpp
     test_windows_rtx_probe.cpp
     test_warmup_policy.cpp
+    test_gpu_prep.cpp
     test_gpu_resize.cpp
 )
 
