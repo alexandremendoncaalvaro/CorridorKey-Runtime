@@ -50,8 +50,9 @@ Display version policy for this track:
 - output-validation-fusion checkpoint is `0.7.4-4`
 - I/O-binding groundwork checkpoint is `0.7.4-5`
 - I/O-binding regression-fix checkpoint is `0.7.4-6`
-- current host-postprocess checkpoint is `0.7.4-7`
-- the next measured slice becomes `0.7.4-8`
+- host-postprocess checkpoint is `0.7.4-7`
+- current input-prepare checkpoint is `0.7.4-8`
+- the next measured slice becomes `0.7.4-9`
 
 Recommended checkpoint labels for this track:
 
@@ -64,11 +65,11 @@ Recommended checkpoint labels for this track:
 - `phase_2_io_binding`
 - `phase_2_io_binding_fix`
 - `phase_3_host_postprocess`
-- `phase_3_device_tensors`
-- `phase_4_gpu_prepare_inputs`
-- `phase_5_gpu_postprocess`
-- `phase_6_tensorrt_refine`
-- `phase_7_release_opt`
+- `phase_4_input_prepare`
+- `phase_5_device_tensors`
+- `phase_6_gpu_postprocess`
+- `phase_7_tensorrt_refine`
+- `phase_8_release_opt`
 
 ## Why Every Checkpoint Needs The Same Fields
 
@@ -94,7 +95,7 @@ test result is recorded. Use this order:
 Current local checkpoint artifact set:
 
 - current optimized installer:
-  `dist/optimization_checkpoints/phase_3_host_postprocess/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+  `dist/optimization_checkpoints/phase_4_input_prepare/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
 - historical baseline installer:
   recopy when needed because release packaging recreates `dist/`
 
@@ -641,6 +642,56 @@ package must replace the first one before any user-visible conclusion is kept.
   OFX validation, but do not claim a repo-side throughput win from the saved
   corpus runs alone
 
+### `phase_4_input_prepare`
+
+- Source state: current `perf/optimization` working tree with the host-side
+  input-preparation hot path tightened on top of the `phase_3_host_postprocess`
+  checkpoint
+- Display version label: `0.7.4-8`
+- Local test artifact path:
+  `dist/optimization_checkpoints/phase_4_input_prepare/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_4_input_prepare/`
+- Benchmark summary:
+  - `ColorUtils::gaussian_blur` now runs both passes through the shared
+    row-parallel worker path
+  - `ColorUtils` now owns a reusable helper for normalized RGB-plus-hint planar
+    packing, and both frame and batch prepare paths use it instead of repeated
+    manual loops
+  - `ColorUtils::to_planar` and `ColorUtils::from_planar` now also use the
+    shared row-parallel path
+  - saved checkpoint artifacts:
+    - `ofx_harness_1024_before.json`
+    - `ofx_harness_1024_after.json`
+    - `ofx_harness_1024_compare.txt`
+    - `bundle_validation.json`
+    - `doctor_report.json`
+  - repo-side OFX-style harness comparisons at `1024` on the same workspace
+    showed:
+    - average latency: `192.5 ms` -> `171.6 ms`
+    - `frame_prepare_inputs`: `7.735 ms` -> `5.865 ms`
+    - `ort_run`: `99.744 ms` -> `97.298 ms`
+    - `frame_extract_outputs`: `14.982 ms` -> `13.370 ms`
+    - `frame_extract_outputs_resize`: `3.712 ms` -> `3.376 ms`
+    - `frame_extract_outputs_finalize`: `5.521 ms` -> `4.588 ms`
+    - `post_source_passthrough`: `19.607 ms` -> `6.917 ms`
+- Manual OFX observations:
+  - the triggering real OFX sample from `0.7.4-7` at `High (1024)` still
+    showed the same host-heavy direction that motivated this slice:
+    - `frame_prepare_inputs`: `445.689 ms`
+    - `ort_run`: `203.924 ms`
+    - `frame_extract_outputs`: `268.612 ms`
+    - `frame_extract_outputs_resize`: `222.201 ms`
+    - `post_composite`: `89.590 ms`
+  - packaged and built CLI identity were both verified as
+    `CorridorKey Runtime v0.7.4-8`
+  - the next manual plugin comparison should confirm whether the measured
+    prepare-path win survives the full host application path
+- Keep or revise decision:
+  keep this checkpoint because it produces a measured repo-side gain on the
+  same `1024` rung that the latest real OFX log exposed as the next bottleneck,
+  while preserving the existing contracts and diagnostics
+
 ### `phase_2_io_binding_fix` vs `phase_3_host_postprocess`
 
 This comparison uses the saved sequential repo-side workload reruns and should
@@ -670,6 +721,26 @@ remaining candidate is still the planned device-tensor or pinned-host work,
 especially if it can be extended to the lower fixed quality rungs instead of
 only the current high-resolution bound path.
 
+### `phase_3_host_postprocess` vs `phase_4_input_prepare`
+
+This comparison uses the saved repo-side OFX-style harness at `1024`, which is
+the same rung the latest real plugin log exposed as prepare-dominated. It is
+still not the same as the user-facing Resolve path, but it is strong enough to
+justify the next packaged checkpoint.
+
+- average roundtrip latency improved by about `10.9%`
+- `frame_prepare_inputs` improved by about `24.2%`
+- `frame_extract_outputs` improved by about `10.8%`
+- `frame_extract_outputs_resize` improved by about `9.0%`
+- `frame_extract_outputs_finalize` improved by about `16.9%`
+- `ort_run` improved slightly by about `2.5%`
+- `post_composite` was effectively flat and slightly higher by about `2.1%`
+
+Current reading: this slice does what it was supposed to do. The remaining
+real opportunity is no longer basic host-side loop structure; it is the
+lower-copy output and memory-placement path, especially for the quality rungs
+that still do not benefit from the narrow bound-output contract.
+
 ## Why Installer Handling Must Stay Predictable
 
 Release packaging recreates `dist/`, so the local checkpoint folder must be
@@ -678,7 +749,7 @@ needs to remain available in the same workspace.
 
 - keep the checkpoint currently under test restored after packaging
 - current restored optimized checkpoint:
-  `dist/optimization_checkpoints/phase_3_host_postprocess/`
+  `dist/optimization_checkpoints/phase_4_input_prepare/`
 - recopy the baseline or earlier checkpoint installers when a direct local A/B
   needs them in the same workspace
 

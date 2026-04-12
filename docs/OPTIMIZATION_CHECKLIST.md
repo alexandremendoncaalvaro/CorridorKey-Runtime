@@ -44,8 +44,9 @@ tests can confirm the installed build without guesswork.
 - `0.7.4-5` is the initial I/O-binding groundwork checkpoint
 - `0.7.4-6` is the I/O-binding regression-fix checkpoint
 - `0.7.4-7` is the host-postprocess and OFX-default-alignment checkpoint
+- `0.7.4-8` is the host-input-preparation checkpoint
 - each new measured optimization slice increments the suffix:
-  `0.7.4-7`, `0.7.4-8`, `0.7.4-9`
+  `0.7.4-8`, `0.7.4-9`, `0.7.4-10`
 - the base semantic version remains `0.7.4` while the visible checkpoint label
   changes per slice
 - checkpoint comparison only counts when the installed build identity was
@@ -103,7 +104,7 @@ The following validations were completed against the current implementation.
 - [x] OFX benchmark harness smoke test with JSON output
 - [x] Windows release packaging through the canonical release script
 - [x] Local installer generation, bundle validation, and doctor validation
-- [x] Optimization checkpoint release generated as `0.7.4-7`
+- [x] Optimization checkpoint release generated as `0.7.4-8`
 - [x] Baseline and optimized installers were copied into
       `dist/optimization_checkpoints/` for sequential local A/B testing
 
@@ -111,15 +112,20 @@ The following validations were completed against the current implementation.
 
 The next step should follow the newest measured bottleneck, not the oldest
 intuition. The current repo-side harness now shows a real gain from attacking
-the extract path directly, so the next manual plugin comparison can test
-whether that gain survives the full OFX path.
+the current host-side hot path directly, so the next manual plugin comparison
+can test whether that gain survives the full OFX path.
 
 - Shared cache reuse and engine reuse are active in the tested OFX flow
 - TensorRT path stayed healthy during the sampled runtime-server session
-- `frame_prepare_inputs` is material but not dominant in the sampled OFX run
-- `ort_run` is material but not dominant in the sampled OFX run
-- `frame_extract_outputs` was the dominant measured cost that motivated the
-  last performance slice
+- the latest sampled real OFX `0.7.4-7` run at `High (1024)` shifted the
+  dominant hot path toward `frame_prepare_inputs` and resize-heavy extract work:
+  - `frame_prepare_inputs`: `445.7 ms`
+  - `ort_run`: `203.9 ms`
+  - `frame_extract_outputs`: `268.6 ms`
+  - `frame_extract_outputs_resize`: `222.2 ms`
+  - `post_composite`: `89.6 ms`
+- the newest slice therefore targets host-side input preparation before trying
+  another backend-only optimization
 - `0.7.4-1` now splits `frame_extract_outputs` and `batch_extract_outputs` into
   conservative sub-stages without removing the parent stage names
 - repo-side synthetic benchmark smoke now shows `frame_extract_outputs_resize`
@@ -250,6 +256,26 @@ whether that gain survives the full OFX path.
   - the next high-value optimization work should focus on the still-dominant
     full-frame host path in `batch_prepare_inputs` and on extending the
     lower-copy output path beyond the current high-resolution bound path
+- `0.7.4-8` parallelizes the hottest remaining host-side input-preparation work
+  by moving Gaussian blur passes and normalized RGB-plus-hint planar packing to
+  the shared row-parallel path already used elsewhere in the runtime
+- repo-side OFX-harness comparisons at `1024` between `0.7.4-7` and `0.7.4-8`
+  on the same workspace showed:
+  - average roundtrip latency improved from about `192.5 ms` to `171.6 ms`
+  - `frame_prepare_inputs` improved from about `7.7 ms` to `5.9 ms`
+  - `ort_run` improved slightly from about `99.7 ms` to `97.3 ms`
+  - `frame_extract_outputs` improved from about `15.0 ms` to `13.4 ms`
+  - `frame_extract_outputs_resize` improved from about `3.7 ms` to `3.4 ms`
+  - `frame_extract_outputs_finalize` improved from about `5.5 ms` to `4.6 ms`
+- current `0.7.4-8` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - packaged and built CLI identity both report `0.7.4-8`
+  - this is the first prepare-focused slice with a measured repo-side gain at
+    the same `1024` rung that the latest real OFX log exposed as the bottleneck
+  - the next high-value opportunity is still the lower-copy output contract and
+    device-visible memory placement, especially where the current bound path
+    does not yet cover lower fixed quality rungs
 - Ignore `CorridorHint` errors when they come from unrelated branch tests
 
 ## Why A Resume Map Saves Time
@@ -292,7 +318,7 @@ Before recording a local result, verify the build in this order:
 The current expected visible identities are:
 
 - baseline installer: `0.7.3`
-- current optimization installer: `0.7.4-6`
+- current optimization installer: `0.7.4-8`
 
 ## Why The Next Tasks Are Ordered
 
@@ -374,6 +400,21 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 - [x] Generated the `0.7.4-6` installer and checkpoint artifacts for the next
       local comparison
 
+### Completed Slice: Host Input Preparation
+
+- [x] Parallelized the hottest remaining host-side Gaussian blur passes with the
+      existing shared row-parallel helper
+- [x] Replaced duplicated manual RGB normalization and hint packing loops with a
+      single reusable planar-pack helper in `ColorUtils`
+- [x] Updated both frame and batch prepare paths to use the new helper without
+      changing the benchmark stage names or the public API
+- [x] Added unit regression coverage proving the fused pack helper matches the
+      previous manual packing contract
+- [x] Measured the slice against the saved `1024` OFX-style harness baseline
+      before packaging
+- [x] Generated the `0.7.4-8` installer and checkpoint artifacts for the next
+      local comparison
+
 ### Phase 3: Device Tensors And Pinned-Host Strategy
 
 - [ ] Introduce explicit device-aware memory placement where needed
@@ -387,7 +428,8 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 
 - [ ] Refactor input preparation so Windows RTX can support GPU-friendly
       preprocessing
-- [ ] Preserve the current CPU path as the fallback and comparison baseline
+- [ ] Preserve the current host-parallel CPU path as the fallback and
+      comparison baseline
 - [ ] Minimize temporary host buffers
 - [ ] Verify that lower `frame_prepare_inputs` cost also improves total work
 
