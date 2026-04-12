@@ -67,6 +67,11 @@ target_compile_definitions(ofx_benchmark_harness PRIVATE
     PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
 )
 
+if(CORRIDORKEY_HAS_CUDA)
+    target_compile_definitions(ofx_benchmark_harness PRIVATE CORRIDORKEY_HAS_CUDA=1)
+    target_link_libraries(ofx_benchmark_harness PRIVATE CUDA::cudart_static)
+endif()
+
 corridorkey_stage_ort_runtime(ofx_benchmark_harness)
 
 if(NOT MSVC)

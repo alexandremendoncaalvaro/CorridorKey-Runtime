@@ -27,10 +27,12 @@
 #include <optional>
 
 #include "coarse_to_fine_policy.hpp"
+#include "common/fp16_convert.hpp"
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
+#include "core/pinned_buffer.hpp"
 #include "inference_output_validation.hpp"
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
@@ -193,6 +195,9 @@ struct BoundTensorStorage {
     std::vector<int64_t> shape = {};
     AlignedTensorBuffer<float> fp32_storage = {};
     AlignedTensorBuffer<Ort::Float16_t> fp16_storage = {};
+    core::PinnedBuffer<float> fp32_pinned = {};
+    core::PinnedBuffer<Ort::Float16_t> fp16_pinned = {};
+    bool uses_pinned = false;
     Ort::Value tensor{nullptr};
 
     [[nodiscard]] std::size_t element_count() const {
@@ -214,15 +219,33 @@ struct BoundTensorStorage {
         shape = candidate_shape;
         const std::size_t count = element_count();
         if (candidate_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            fp16_storage.resize(count);
-            tensor = Ort::Value::CreateTensor<Ort::Float16_t>(
-                memory_info, fp16_storage.data(), count, shape.data(), shape.size());
+            auto pinned = core::PinnedBuffer<Ort::Float16_t>::try_allocate(count);
+            if (pinned.has_value()) {
+                fp16_pinned = std::move(*pinned);
+                uses_pinned = true;
+                tensor = Ort::Value::CreateTensor<Ort::Float16_t>(
+                    memory_info, fp16_pinned.data(), count, shape.data(), shape.size());
+            } else {
+                fp16_storage.resize(count);
+                uses_pinned = false;
+                tensor = Ort::Value::CreateTensor<Ort::Float16_t>(
+                    memory_info, fp16_storage.data(), count, shape.data(), shape.size());
+            }
             return;
         }
 
-        fp32_storage.resize(count);
-        tensor = Ort::Value::CreateTensor<float>(memory_info, fp32_storage.data(), count,
-                                                 shape.data(), shape.size());
+        auto pinned = core::PinnedBuffer<float>::try_allocate(count);
+        if (pinned.has_value()) {
+            fp32_pinned = std::move(*pinned);
+            uses_pinned = true;
+            tensor = Ort::Value::CreateTensor<float>(memory_info, fp32_pinned.data(), count,
+                                                     shape.data(), shape.size());
+        } else {
+            fp32_storage.resize(count);
+            uses_pinned = false;
+            tensor = Ort::Value::CreateTensor<float>(memory_info, fp32_storage.data(), count,
+                                                     shape.data(), shape.size());
+        }
     }
 };
 
@@ -340,9 +363,10 @@ Result<MaterializedOutputTensor> materialize_output_tensor(
         const Ort::Float16_t* fp16_values = tensor.GetTensorData<Ort::Float16_t>();
         const std::size_t total_elements = image_count * output.image_stride;
         output.fp32_storage.resize(total_elements);
-        for (std::size_t index = 0; index < total_elements; ++index) {
-            output.fp32_storage[index] = fp16_values[index].ToFloat();
-        }
+        common::convert_fp16_to_fp32(
+            reinterpret_cast<const uint16_t*>(fp16_values),
+            output.fp32_storage.data(),
+            total_elements);
         output.values = output.fp32_storage.data();
     } else {
         output.values = tensor.GetTensorMutableData<float>();

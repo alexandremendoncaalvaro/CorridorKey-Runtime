@@ -38,6 +38,8 @@ add_executable(test_unit
     test_session_cache_policy.cpp
     test_session_policy.cpp
     test_source_passthrough.cpp
+    test_fp16_convert.cpp
+    test_pinned_buffer.cpp
     test_stage_profiler.cpp
     test_ofx_stubs.cpp
     test_tile_blend.cpp

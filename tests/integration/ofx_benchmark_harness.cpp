@@ -285,6 +285,11 @@ int main(int argc, char* argv[]) {
         core::should_enable_io_binding(options.model_path, effective_device.backend,
                                        options.io_binding_mode);
     results["io_binding"]["observed"] = has_stage(stage_timings, "ort_io_binding_bind_inputs");
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+    results["io_binding"]["memory_mode"] = "pinned";
+#else
+    results["io_binding"]["memory_mode"] = "pageable";
+#endif
     results["warmup_runs"] = 0;
     results["steady_state_runs"] = options.iterations;
     results["benchmark_runs"] = options.iterations;
