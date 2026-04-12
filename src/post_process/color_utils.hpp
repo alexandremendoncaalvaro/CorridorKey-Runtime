@@ -58,6 +58,9 @@ class CORRIDORKEY_API ColorUtils {
     static void resize_into(Image image, Image dst);
     static void resize_from_planar_into(const float* src, int src_width, int src_height,
                                         int src_channels, Image dst);
+    static void resize_alpha_fg_from_planar_into(const float* alpha_src, const float* fg_src,
+                                                 int src_width, int src_height, Image alpha_dst,
+                                                 Image fg_dst);
 
     /**
      * @brief Resize with Gaussian pre-filter for anti-aliased downscaling.

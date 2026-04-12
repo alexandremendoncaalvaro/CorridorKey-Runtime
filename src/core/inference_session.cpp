@@ -372,6 +372,23 @@ void resize_model_output(const float* source, int source_width, int source_heigh
                                         destination);
 }
 
+void resize_model_outputs(Image alpha_destination, Image fg_destination, const float* alpha_source,
+                          const float* fg_source, int source_width, int source_height,
+                          bool use_lanczos, ColorUtils::State& state) {
+    if (use_lanczos || fg_source == nullptr || fg_destination.empty()) {
+        resize_model_output(alpha_source, source_width, source_height, 1, alpha_destination,
+                            use_lanczos, state);
+        if (fg_source != nullptr && !fg_destination.empty()) {
+            resize_model_output(fg_source, source_width, source_height, 3, fg_destination,
+                                use_lanczos, state);
+        }
+        return;
+    }
+
+    ColorUtils::resize_alpha_fg_from_planar_into(alpha_source, fg_source, source_width,
+                                                 source_height, alpha_destination, fg_destination);
+}
+
 Result<void> finalize_output_image(DeviceInfo device, int recommended_resolution, Image image,
                                    std::string_view label) {
     if (should_log_output_stats(device, recommended_resolution)) {
@@ -1710,33 +1727,24 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                     [&]() -> Result<void> {
                         const auto alpha_width = static_cast<int>(alpha_output.shape[3]);
                         const auto alpha_height = static_cast<int>(alpha_output.shape[2]);
-                        const auto alpha_channels = static_cast<int>(alpha_output.shape[1]);
                         const bool include_batch_foreground = fg_output.has_value();
-                        const auto fg_width =
-                            include_batch_foreground ? static_cast<int>(fg_output->shape[3]) : 0;
-                        const auto fg_height =
-                            include_batch_foreground ? static_cast<int>(fg_output->shape[2]) : 0;
-                        const auto fg_channels =
-                            include_batch_foreground ? static_cast<int>(fg_output->shape[1]) : 0;
 
                         for (std::size_t batch_index = 0; batch_index < batch_size; ++batch_index) {
                             FrameResult& result = batch_results[batch_index];
                             result.alpha =
                                 ImageBuffer(rgbs[batch_index].width, rgbs[batch_index].height, 1);
-                            resize_model_output(
-                                alpha_output.values + (batch_index * alpha_output.image_stride),
-                                alpha_width, alpha_height, alpha_channels, result.alpha.view(),
-                                use_lanczos, m_color_utils_state);
-
                             if (include_batch_foreground) {
                                 result.foreground = ImageBuffer(rgbs[batch_index].width,
                                                                 rgbs[batch_index].height, 3);
-                                resize_model_output(
-                                    fg_output->values + (batch_index * fg_output->image_stride),
-                                    fg_width, fg_height, fg_channels,
-                                    result.foreground.view(), use_lanczos,
-                                    m_color_utils_state);
                             }
+
+                            resize_model_outputs(
+                                result.alpha.view(), result.foreground.view(),
+                                alpha_output.values + (batch_index * alpha_output.image_stride),
+                                include_batch_foreground
+                                    ? fg_output->values + (batch_index * fg_output->image_stride)
+                                    : nullptr,
+                                alpha_width, alpha_height, use_lanczos, m_color_utils_state);
                         }
 
                         return {};
@@ -1984,20 +1992,12 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 auto resize_res = common::measure_stage(
                     on_stage, "frame_extract_outputs_resize",
                     [&]() -> Result<void> {
-                        resize_model_output(alpha_output.values,
-                                            static_cast<int>(alpha_output.shape[3]),
-                                            static_cast<int>(alpha_output.shape[2]),
-                                            static_cast<int>(alpha_output.shape[1]),
-                                            result.alpha.view(), use_lanczos,
-                                            m_color_utils_state);
-
-                        if (fg_output.has_value()) {
-                            resize_model_output(
-                                fg_output->values, static_cast<int>(fg_output->shape[3]),
-                                static_cast<int>(fg_output->shape[2]),
-                                static_cast<int>(fg_output->shape[1]), result.foreground.view(),
-                                use_lanczos, m_color_utils_state);
-                        }
+                        resize_model_outputs(
+                            result.alpha.view(), result.foreground.view(), alpha_output.values,
+                            fg_output.has_value() ? fg_output->values : nullptr,
+                            static_cast<int>(alpha_output.shape[3]),
+                            static_cast<int>(alpha_output.shape[2]), use_lanczos,
+                            m_color_utils_state);
 
                         return {};
                     },

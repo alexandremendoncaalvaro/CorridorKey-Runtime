@@ -176,6 +176,80 @@ void resize_bilinear_from_planar_into(const float* src, int src_width, int src_h
     });
 }
 
+void resize_bilinear_alpha_fg_from_planar_into(const float* alpha_src, const float* fg_src,
+                                               int src_width, int src_height, Image alpha_dst,
+                                               Image fg_dst) {
+    if (alpha_src == nullptr || fg_src == nullptr || alpha_dst.empty() || fg_dst.empty() ||
+        src_width <= 0 || src_height <= 0 || alpha_dst.channels != 1 || fg_dst.channels != 3 ||
+        alpha_dst.width != fg_dst.width || alpha_dst.height != fg_dst.height) {
+        return;
+    }
+
+    const size_t plane_stride = static_cast<size_t>(src_width) * static_cast<size_t>(src_height);
+    if (src_width == alpha_dst.width && src_height == alpha_dst.height) {
+        common::parallel_for_rows(alpha_dst.height, [&](int y_begin, int y_end) {
+            for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+                const size_t row_offset =
+                    static_cast<size_t>(y_pos) * static_cast<size_t>(src_width);
+                for (int x_pos = 0; x_pos < alpha_dst.width; ++x_pos) {
+                    const size_t pixel_offset = row_offset + static_cast<size_t>(x_pos);
+                    alpha_dst(y_pos, x_pos, 0) = alpha_src[pixel_offset];
+                    for (int channel = 0; channel < 3; ++channel) {
+                        const float* fg_plane =
+                            fg_src + (static_cast<size_t>(channel) * plane_stride);
+                        fg_dst(y_pos, x_pos, channel) = fg_plane[pixel_offset];
+                    }
+                }
+            }
+        });
+        return;
+    }
+
+    std::vector<int> x0_map;
+    std::vector<int> x1_map;
+    std::vector<int> y0_map;
+    std::vector<int> y1_map;
+    std::vector<float> dx_map;
+    std::vector<float> dy_map;
+    prepare_bilinear_axis(src_width, alpha_dst.width, x0_map, x1_map, dx_map);
+    prepare_bilinear_axis(src_height, alpha_dst.height, y0_map, y1_map, dy_map);
+
+    common::parallel_for_rows(alpha_dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const int y0 = y0_map[static_cast<size_t>(y_pos)];
+            const int y1 = y1_map[static_cast<size_t>(y_pos)];
+            const float d_y = dy_map[static_cast<size_t>(y_pos)];
+            const size_t row0 = static_cast<size_t>(y0) * static_cast<size_t>(src_width);
+            const size_t row1 = static_cast<size_t>(y1) * static_cast<size_t>(src_width);
+
+            for (int x_pos = 0; x_pos < alpha_dst.width; ++x_pos) {
+                const int x0 = x0_map[static_cast<size_t>(x_pos)];
+                const int x1 = x1_map[static_cast<size_t>(x_pos)];
+                const float d_x = dx_map[static_cast<size_t>(x_pos)];
+
+                const float alpha_v00 = alpha_src[row0 + static_cast<size_t>(x0)];
+                const float alpha_v10 = alpha_src[row0 + static_cast<size_t>(x1)];
+                const float alpha_v01 = alpha_src[row1 + static_cast<size_t>(x0)];
+                const float alpha_v11 = alpha_src[row1 + static_cast<size_t>(x1)];
+                const float alpha_y0 = alpha_v00 * (1.0F - d_x) + alpha_v10 * d_x;
+                const float alpha_y1 = alpha_v01 * (1.0F - d_x) + alpha_v11 * d_x;
+                alpha_dst(y_pos, x_pos, 0) = alpha_y0 * (1.0F - d_y) + alpha_y1 * d_y;
+
+                for (int channel = 0; channel < 3; ++channel) {
+                    const float* fg_plane = fg_src + (static_cast<size_t>(channel) * plane_stride);
+                    const float fg_v00 = fg_plane[row0 + static_cast<size_t>(x0)];
+                    const float fg_v10 = fg_plane[row0 + static_cast<size_t>(x1)];
+                    const float fg_v01 = fg_plane[row1 + static_cast<size_t>(x0)];
+                    const float fg_v11 = fg_plane[row1 + static_cast<size_t>(x1)];
+                    const float fg_y0 = fg_v00 * (1.0F - d_x) + fg_v10 * d_x;
+                    const float fg_y1 = fg_v01 * (1.0F - d_x) + fg_v11 * d_x;
+                    fg_dst(y_pos, x_pos, channel) = fg_y0 * (1.0F - d_y) + fg_y1 * d_y;
+                }
+            }
+        }
+    });
+}
+
 constexpr int kLanczosA = 4;
 constexpr float kPi = 3.14159265358979323846F;
 
@@ -451,6 +525,13 @@ void ColorUtils::resize_into(Image image, Image dst) {
 void ColorUtils::resize_from_planar_into(const float* src, int src_width, int src_height,
                                          int src_channels, Image dst) {
     resize_bilinear_from_planar_into(src, src_width, src_height, src_channels, dst);
+}
+
+void ColorUtils::resize_alpha_fg_from_planar_into(const float* alpha_src, const float* fg_src,
+                                                  int src_width, int src_height, Image alpha_dst,
+                                                  Image fg_dst) {
+    resize_bilinear_alpha_fg_from_planar_into(alpha_src, fg_src, src_width, src_height, alpha_dst,
+                                              fg_dst);
 }
 
 void ColorUtils::gaussian_blur(Image image, float sigma, State& state) {

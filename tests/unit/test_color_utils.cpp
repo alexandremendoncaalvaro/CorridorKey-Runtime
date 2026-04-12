@@ -165,6 +165,44 @@ TEST_CASE("ColorUtils::resize_from_planar_into matches resize output",
     }
 }
 
+TEST_CASE("ColorUtils::resize_alpha_fg_from_planar_into matches separate resizes",
+          "[unit][color][regression]") {
+    ImageBuffer alpha_source_buf(4, 3, 1);
+    Image alpha_source = alpha_source_buf.view();
+    ImageBuffer fg_source_buf(4, 3, 3);
+    Image fg_source = fg_source_buf.view();
+
+    for (int y_pos = 0; y_pos < alpha_source.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < alpha_source.width; ++x_pos) {
+            alpha_source(y_pos, x_pos, 0) = static_cast<float>(x_pos + y_pos) / 6.0f;
+            fg_source(y_pos, x_pos, 0) = static_cast<float>((x_pos * 2) + y_pos) / 9.0f;
+            fg_source(y_pos, x_pos, 1) = static_cast<float>(x_pos + (y_pos * 2)) / 10.0f;
+            fg_source(y_pos, x_pos, 2) = static_cast<float>((x_pos * 3) + y_pos) / 12.0f;
+        }
+    }
+
+    const std::vector<float> alpha_planar = planar_copy(alpha_source);
+    const std::vector<float> fg_planar = planar_copy(fg_source);
+
+    ImageBuffer expected_alpha = ColorUtils::resize(alpha_source, 7, 5);
+    ImageBuffer expected_fg = ColorUtils::resize(fg_source, 7, 5);
+    ImageBuffer actual_alpha(7, 5, 1);
+    ImageBuffer actual_fg(7, 5, 3);
+
+    ColorUtils::resize_alpha_fg_from_planar_into(alpha_planar.data(), fg_planar.data(),
+                                                 alpha_source.width, alpha_source.height,
+                                                 actual_alpha.view(), actual_fg.view());
+
+    for (size_t index = 0; index < actual_alpha.view().data.size(); ++index) {
+        REQUIRE(actual_alpha.view().data[index] ==
+                Catch::Approx(expected_alpha.view().data[index]).margin(0.0001f));
+    }
+    for (size_t index = 0; index < actual_fg.view().data.size(); ++index) {
+        REQUIRE(actual_fg.view().data[index] ==
+                Catch::Approx(expected_fg.view().data[index]).margin(0.0001f));
+    }
+}
+
 TEST_CASE("ColorUtils::resize_area_into safely drops alpha for RGB model inputs",
           "[unit][color][regression]") {
     ImageBuffer rgba_source_buf(2, 2, 4);
