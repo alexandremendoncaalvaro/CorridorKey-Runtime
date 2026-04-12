@@ -46,8 +46,9 @@ tests can confirm the installed build without guesswork.
 - `0.7.4-7` is the host-postprocess and OFX-default-alignment checkpoint
 - `0.7.4-8` is the host-input-preparation checkpoint
 - `0.7.4-9` is the preview/writeback full-frame checkpoint
+- `0.7.4-10` is the pinned-host and FP16 vectorization checkpoint
 - each new measured optimization slice increments the suffix:
-  `0.7.4-9`, `0.7.4-10`, `0.7.4-11`
+  `0.7.4-10`, `0.7.4-11`, `0.7.4-12`
 - the base semantic version remains `0.7.4` while the visible checkpoint label
   changes per slice
 - checkpoint comparison only counts when the installed build identity was
@@ -105,7 +106,7 @@ The following validations were completed against the current implementation.
 - [x] OFX benchmark harness smoke test with JSON output
 - [x] Windows release packaging through the canonical release script
 - [x] Local installer generation, bundle validation, and doctor validation
-- [x] Optimization checkpoint release generated as `0.7.4-9`
+- [x] Optimization checkpoint release generated as `0.7.4-10`
 - [x] Baseline and optimized installers were copied into
       `dist/optimization_checkpoints/` for sequential local A/B testing
 
@@ -301,6 +302,22 @@ can test whether that gain survives the full OFX path.
     maintained-path gain
   - caching bilinear resize maps across frames did not improve throughput and
     was discarded
+- `0.7.4-10` adds CUDA Toolkit integration with `find_package(CUDAToolkit)`,
+  a `PinnedBuffer<T>` RAII class for pinned host memory via `cudaMallocHost`,
+  vectorized FP16-to-FP32 conversion using AVX2 F16C intrinsics, and
+  `memory_mode` metadata in benchmark JSON
+- repo-side full-frame OFX-harness comparisons at `2048 -> 3840x2160` between
+  `0.7.4-9` and `0.7.4-10` on the same workspace showed:
+  - average latency improved from about `1017.2 ms` to `989.4 ms`
+  - `ort_run` total improved from about `2125.7 ms` to `2046.9 ms`
+  - `frame_prepare_inputs` total improved from about `532.4 ms` to `484.0 ms`
+  - `post_composite` improved from about `84.8 ms` to `63.9 ms`
+- current `0.7.4-10` status:
+  - unit tests for `PinnedBuffer` and FP16 converter passing
+  - integration tests passing with no regressions
+  - benchmark JSON now reports `memory_mode: "pinned"` when CUDA is available
+  - the next high-value opportunity is Slice 0.7.4-11: device-resident outputs
+    and GPU resize via NPP to eliminate the 310ms CPU resize path
 - Ignore `CorridorHint` errors when they come from unrelated branch tests
 
 ## Why A Resume Map Saves Time
@@ -328,6 +345,10 @@ optimization slices. Inspect them before changing architecture again.
 - `tests/integration/test_job_orchestrator.cpp`
 - `tests/integration/test_ofx_session_broker.cpp`
 - `tests/integration/ofx_benchmark_harness.cpp`
+- `src/core/pinned_buffer.hpp`
+- `src/common/fp16_convert.hpp`
+- `tests/unit/test_pinned_buffer.cpp`
+- `tests/unit/test_fp16_convert.cpp`
 
 ## Why Build Identity Must Be Verified Before Testing
 
@@ -343,7 +364,7 @@ Before recording a local result, verify the build in this order:
 The current expected visible identities are:
 
 - baseline installer: `0.7.3`
-- current optimization installer: `0.7.4-9`
+- current optimization installer: `0.7.4-10`
 
 ## Why The Next Tasks Are Ordered
 
@@ -458,12 +479,26 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 
 ### Phase 3: Device Tensors And Pinned-Host Strategy
 
-- [ ] Introduce explicit device-aware memory placement where needed
-- [ ] Add a pinned-host output path when the consumer still requires host
-      visibility
-- [ ] Keep synchronization explicit and documented
-- [ ] Only evaluate reduced provider synchronization after the bound path is
-      proven correct and measurable
+#### Completed: Slice 0.7.4-10 (Pinned Host + FP16 Vectorization)
+
+- [x] CMake: add `find_package(CUDAToolkit)` gated to Windows RTX vendor path;
+      link `CUDA::cudart_static` to `corridorkey_core` target only
+- [x] Create `PinnedBuffer<T>` RAII class using `cudaMallocHost` / `cudaFreeHost`
+      with `std::optional` factory fallback to `AlignedTensorBuffer`
+- [x] Integrate pinned buffers into `BoundTensorStorage::reset()` on RTX path
+- [x] Create vectorized FP16-to-FP32 converter using F16C intrinsics in
+      `src/common/fp16_convert.hpp`
+- [x] Add `memory_mode` metadata to benchmark JSON output
+- [x] Add unit tests for `PinnedBuffer` and FP16 converter
+- [x] Build validation (debug + release) and measurement against `0.7.4-9`
+
+#### Pending: Slice 0.7.4-11 (Device-Resident Outputs + GPU Resize via NPP)
+
+- [ ] Bind outputs to device memory with `Ort::MemoryInfo("Cuda", ...)`
+- [ ] Create GPU resize module using NPP (`gpu_resize.hpp` / `gpu_resize.cpp`)
+- [ ] Modify extract pipeline to skip CPU resize on RTX bound path
+- [ ] Add unit tests for GPU resize and regression coverage for CPU fallback
+- [ ] Measure against `0.7.4-10` at full-frame `2048 -> 3840x2160`
 
 ### Phase 4: Move Input Preparation Off The CPU Hot Path
 

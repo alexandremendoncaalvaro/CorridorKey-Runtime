@@ -28,6 +28,7 @@ remain the source of truth for methodology and caveats.
 | `phase_3_host_postprocess` | `0.7.4-7` | default-quality cleanup and host-side output/writeback work | no broad corpus speedup claim justified | keep for product correctness, not for speed claims |
 | `phase_4_input_prepare` | `0.7.4-8` | parallelized host-side prepare path and fused normalized planar packing | `1024` OFX-style harness roundtrip improved about `10.9%`; `frame_prepare_inputs` improved about `24.2%` | keep; this is the current best prepare-focused win |
 | `phase_5_preview_writeback` | `0.7.4-9` | full-frame OFX harness fidelity, fused preview composite, and measured broker writeback | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `8.1%`; `post_composite` improved about `81.9%` | keep; this is the first measured full-frame OFX-style gain after the prepare slice |
+| `phase_6_device_tensors` | `0.7.4-10` | pinned host output buffers via CUDA and vectorized FP16-to-FP32 conversion via F16C intrinsics | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `2.7%`; `ort_run` improved about `3.7%`; `frame_prepare_inputs` improved about `9.1%` | keep; modest but real DMA and vectorization win with correct `memory_mode: pinned` metadata |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -87,7 +88,8 @@ Display version policy for this track:
 - I/O-binding regression-fix checkpoint is `0.7.4-6`
 - host-postprocess checkpoint is `0.7.4-7`
 - current preview/writeback checkpoint is `0.7.4-9`
-- the next measured slice becomes `0.7.4-10`
+- pinned-host and FP16 vectorization checkpoint is `0.7.4-10`
+- the next measured slice becomes `0.7.4-11`
 
 Recommended checkpoint labels for this track:
 
@@ -773,6 +775,69 @@ package must replace the first one before any user-visible conclusion is kept.
   keep this checkpoint because it produces a measurable full-frame OFX-style
   latency win while preserving existing output semantics and surfacing the
   broker writeback cost explicitly
+
+### `phase_6_device_tensors`
+
+- Source state: current `perf/optimization` working tree with CUDA pinned host
+  output buffers and vectorized FP16-to-FP32 conversion added on top of the
+  `phase_5_preview_writeback` checkpoint
+- Display version label: `0.7.4-10`
+- Local test artifact path: pending packaging
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_6_device_tensors/`
+- Benchmark summary:
+  - CMake now detects CUDA Toolkit and sets `CORRIDORKEY_HAS_CUDA` when the
+    Windows RTX vendor path is present
+  - `PinnedBuffer<T>` provides RAII pinned host memory via `cudaMallocHost` /
+    `cudaFreeHost` with fallback to `AlignedTensorBuffer` when CUDA is
+    unavailable
+  - `convert_fp16_to_fp32` uses AVX2 F16C intrinsics to process 8 values per
+    iteration with a scalar tail loop
+  - `BoundTensorStorage::reset()` uses pinned buffers on the RTX bound path
+  - benchmark JSON now reports `memory_mode: "pinned"` or `"pageable"`
+  - saved checkpoint artifacts:
+    - `ofx_harness_2048_fullframe_before.json`
+    - `ofx_harness_2048_fullframe_after.json`
+    - `bench_run.log`
+  - repo-side OFX-style harness comparisons at `2048 -> 3840x2160` between
+    `0.7.4-9` and `0.7.4-10` on the same workspace showed:
+    - average latency: `1017.2 ms` -> `989.4 ms` (`-2.7%`)
+    - `ort_run`: `2125.7 ms` -> `2046.9 ms` total (`-3.7%`)
+    - `frame_prepare_inputs`: `532.4 ms` -> `484.0 ms` total (`-9.1%`)
+    - `frame_extract_outputs_tensor_materialize`: `105.1 ms` -> `103.6 ms`
+      total (`-1.5%`)
+    - `post_composite`: `84.8 ms` -> `63.9 ms` total (`-24.6%`)
+    - `ort_io_binding_bind_inputs`: `40.4 ms` -> `37.8 ms` total (`-6.2%`)
+  - unit tests added for `PinnedBuffer` and FP16 converter; all passing
+  - integration tests passing with no regressions
+- Manual OFX observations:
+  - pending local plugin comparison after packaging
+- Keep or revise decision:
+  keep this checkpoint because it introduces the pinned memory path and
+  vectorized FP16 conversion that Slice 0.7.4-11 (device-resident outputs +
+  GPU resize via NPP) will build upon
+
+### `phase_5_preview_writeback` vs `phase_6_device_tensors`
+
+This comparison uses the same repo-side full-frame `2048 -> 3840x2160`
+OFX-style harness on the same workspace. Both runs use TensorRT with I/O
+binding active and the same model artifact.
+
+- average roundtrip latency improved by about `2.7%`
+- `ort_run` total improved by about `3.7%`, consistent with DMA to pinned
+  memory reducing `SynchronizeOutputs` cost
+- `frame_prepare_inputs` total improved by about `9.1%`
+- `post_composite` improved by about `24.6%` (run variance benefit)
+- `frame_extract_outputs_resize` was effectively flat and slightly higher by
+  about `2.6%`
+- `frame_extract_outputs` was effectively flat and slightly higher by about
+  `2.0%`
+
+Current reading: the pinned host path is confirmed active (`memory_mode:
+pinned` in the benchmark JSON) and produces a modest but real latency
+reduction. The next slice (device-resident outputs + GPU resize via NPP) is
+expected to deliver the dominant win by eliminating the 310ms CPU resize
+entirely.
 
 ### Rejected Experiments
 
