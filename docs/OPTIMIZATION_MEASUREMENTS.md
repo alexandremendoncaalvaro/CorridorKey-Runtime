@@ -27,8 +27,9 @@ remain the source of truth for methodology and caveats.
 | `phase_2_io_binding_fix` | `0.7.4-6` | fixed bound foreground correctness and output ordering | correctness replacement for `0.7.4-5` | keep as the valid Phase 2 base |
 | `phase_3_host_postprocess` | `0.7.4-7` | default-quality cleanup and host-side output/writeback work | no broad corpus speedup claim justified | keep for product correctness, not for speed claims |
 | `phase_4_input_prepare` | `0.7.4-8` | parallelized host-side prepare path and fused normalized planar packing | `1024` OFX-style harness roundtrip improved about `10.9%`; `frame_prepare_inputs` improved about `24.2%` | keep; this is the current best prepare-focused win |
+| `phase_5_preview_writeback` | `0.7.4-9` | full-frame OFX harness fidelity, fused preview composite, and measured broker writeback | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `8.1%`; `post_composite` improved about `81.9%` | keep; this is the first measured full-frame OFX-style gain after the prepare slice |
 
-Latest real OFX sample from the current packaged line:
+Latest real OFX sample currently recorded in the workspace:
 
 | Sample | Version | Quality | `frame_prepare_inputs` | `ort_run` | `frame_extract_outputs` | `frame_extract_outputs_resize` | `post_composite` |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -37,9 +38,10 @@ Latest real OFX sample from the current packaged line:
 Current headline:
 
 - the `prepare_inputs` slice worked
+- the `preview_writeback` slice also worked on the full-frame OFX-style harness
 - the next real hotspot is back to `ort_run` plus the resize-heavy extract path
-- the most promising next move is to extend the lower-copy bound path to the
-  `1024` rung that the RTX 3080 actually uses as its safe ceiling
+- the attempted lower-rung bound-path expansion and resize-map caching did not
+  justify themselves and were discarded instead of being carried forward
 
 ## Why The Matrix Must Stay Stable
 
@@ -84,8 +86,8 @@ Display version policy for this track:
 - I/O-binding groundwork checkpoint is `0.7.4-5`
 - I/O-binding regression-fix checkpoint is `0.7.4-6`
 - host-postprocess checkpoint is `0.7.4-7`
-- current input-prepare checkpoint is `0.7.4-8`
-- the next measured slice becomes `0.7.4-9`
+- current preview/writeback checkpoint is `0.7.4-9`
+- the next measured slice becomes `0.7.4-10`
 
 Recommended checkpoint labels for this track:
 
@@ -99,10 +101,11 @@ Recommended checkpoint labels for this track:
 - `phase_2_io_binding_fix`
 - `phase_3_host_postprocess`
 - `phase_4_input_prepare`
-- `phase_5_device_tensors`
-- `phase_6_gpu_postprocess`
-- `phase_7_tensorrt_refine`
-- `phase_8_release_opt`
+- `phase_5_preview_writeback`
+- `phase_6_device_tensors`
+- `phase_7_gpu_postprocess`
+- `phase_8_tensorrt_refine`
+- `phase_9_release_opt`
 
 ## Why Every Checkpoint Needs The Same Fields
 
@@ -128,7 +131,7 @@ test result is recorded. Use this order:
 Current local checkpoint artifact set:
 
 - current optimized installer:
-  `dist/optimization_checkpoints/phase_4_input_prepare/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+  `dist/optimization_checkpoints/phase_5_preview_writeback/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
 - historical baseline installer:
   recopy when needed because release packaging recreates `dist/`
 
@@ -724,6 +727,59 @@ package must replace the first one before any user-visible conclusion is kept.
   keep this checkpoint because it produces a measured repo-side gain on the
   same `1024` rung that the latest real OFX log exposed as the next bottleneck,
   while preserving the existing contracts and diagnostics
+
+### `phase_5_preview_writeback`
+
+- Source state: current `perf/optimization` working tree with a full-frame
+  OFX-style benchmark path, fused preview compositing, and explicit broker
+  writeback timing on top of the `phase_4_input_prepare` checkpoint
+- Display version label: `0.7.4-9`
+- Local test artifact path:
+  `dist/optimization_checkpoints/phase_5_preview_writeback/CorridorKey_Resolve_v0.7.4_Windows_RTX_Installer.exe`
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_5_preview_writeback/`
+- Benchmark summary:
+  - `tests/integration/ofx_benchmark_harness.cpp` now accepts explicit
+    `frame_width` and `frame_height`, so repo-side runs can match the
+    user-facing `3840x2160` OFX path instead of forcing square frames
+  - `ColorUtils` now has a fused preview path that produces the checker
+    composite directly to display sRGB without the extra copy and separate
+    full-frame conversion pass
+  - `OfxSessionBroker::render_frame()` now records `ofx_broker_writeback` and
+    copies shared-frame outputs through the shared row-parallel worker path
+  - saved checkpoint artifacts:
+    - `ofx_harness_2048_fullframe_before.json`
+    - `ofx_harness_2048_fullframe_after.json`
+    - `compare_2048_fullframe.txt`
+    - `bundle_validation.json`
+    - `doctor_report.json`
+  - repo-side OFX-style harness comparisons at `2048 -> 3840x2160` on the same
+    workspace showed:
+    - average latency: `1106.320 ms` -> `1017.204 ms`
+    - `post_composite`: `93.431 ms` -> `16.956 ms`
+    - `frame_extract_outputs_resize`: `316.826 ms` -> `311.273 ms`
+    - `frame_extract_outputs`: `378.737 ms` -> `374.657 ms`
+    - `frame_prepare_inputs`: `107.898 ms` -> `106.482 ms`
+    - `ort_run`: `426.055 ms` -> `425.133 ms`
+    - `ofx_broker_writeback`: now visible at about `10.886 ms` average
+- Manual OFX observations:
+  - the newest real plugin sample still available in the workspace is the
+    `0.7.4-8` run at `Maximum (2048)`, so the next manual comparison should be
+    against that baseline after installing `0.7.4-9`
+  - packaged CLI identity was verified as `CorridorKey Runtime v0.7.4-9`
+  - the full-frame repo-side gain came mostly from deleting redundant host-side
+    preview work, not from changing `ort_run`
+- Keep or revise decision:
+  keep this checkpoint because it produces a measurable full-frame OFX-style
+  latency win while preserving existing output semantics and surfacing the
+  broker writeback cost explicitly
+
+### Rejected Experiments
+
+- extending the bound-output path to the lower `1024` rung did not produce a
+  meaningful repo-side gain and was not kept
+- caching bilinear resize maps across frames did not improve the maintained
+  path and was discarded after measurement
 
 ### `phase_2_io_binding_fix` vs `phase_3_host_postprocess`
 

@@ -45,8 +45,9 @@ tests can confirm the installed build without guesswork.
 - `0.7.4-6` is the I/O-binding regression-fix checkpoint
 - `0.7.4-7` is the host-postprocess and OFX-default-alignment checkpoint
 - `0.7.4-8` is the host-input-preparation checkpoint
+- `0.7.4-9` is the preview/writeback full-frame checkpoint
 - each new measured optimization slice increments the suffix:
-  `0.7.4-8`, `0.7.4-9`, `0.7.4-10`
+  `0.7.4-9`, `0.7.4-10`, `0.7.4-11`
 - the base semantic version remains `0.7.4` while the visible checkpoint label
   changes per slice
 - checkpoint comparison only counts when the installed build identity was
@@ -104,7 +105,7 @@ The following validations were completed against the current implementation.
 - [x] OFX benchmark harness smoke test with JSON output
 - [x] Windows release packaging through the canonical release script
 - [x] Local installer generation, bundle validation, and doctor validation
-- [x] Optimization checkpoint release generated as `0.7.4-8`
+- [x] Optimization checkpoint release generated as `0.7.4-9`
 - [x] Baseline and optimized installers were copied into
       `dist/optimization_checkpoints/` for sequential local A/B testing
 
@@ -273,9 +274,33 @@ can test whether that gain survives the full OFX path.
   - packaged and built CLI identity both report `0.7.4-8`
   - this is the first prepare-focused slice with a measured repo-side gain at
     the same `1024` rung that the latest real OFX log exposed as the bottleneck
-  - the next high-value opportunity is still the lower-copy output contract and
-    device-visible memory placement, especially where the current bound path
-    does not yet cover lower fixed quality rungs
+  - the next high-value opportunity is still the full-frame render path after
+    the prepare win, especially the extract and preview work visible in OFX
+- `0.7.4-9` adds a full-frame `2048 -> 3840x2160` OFX-style benchmark path,
+  fuses the preview composite to remove redundant host passes, and records the
+  broker writeback cost explicitly
+- repo-side full-frame OFX-harness comparisons between `0.7.4-8` and `0.7.4-9`
+  on the same workspace showed:
+  - average roundtrip latency improved from about `1106.3 ms` to `1017.2 ms`
+  - `post_composite` improved from about `93.4 ms` to `17.0 ms`
+  - `frame_extract_outputs_resize` improved from about `316.8 ms` to
+    `311.3 ms`
+  - `frame_extract_outputs` improved from about `378.7 ms` to `374.7 ms`
+  - `frame_prepare_inputs` improved slightly from about `107.9 ms` to
+    `106.5 ms`
+  - `ort_run` stayed effectively tied at about `426.1 ms` to `425.1 ms`
+  - `ofx_broker_writeback` is now visible at about `10.9 ms`
+- current `0.7.4-9` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - packaged CLI identity reports `CorridorKey Runtime v0.7.4-9`
+  - the next high-value opportunity is still `ort_run` and the resize-heavy
+    extract path, not the preview path that this slice just reduced
+- rejected and not kept:
+  - extending the lower-rung bound path to `1024` did not produce a meaningful
+    maintained-path gain
+  - caching bilinear resize maps across frames did not improve throughput and
+    was discarded
 - Ignore `CorridorHint` errors when they come from unrelated branch tests
 
 ## Why A Resume Map Saves Time
@@ -318,7 +343,7 @@ Before recording a local result, verify the build in this order:
 The current expected visible identities are:
 
 - baseline installer: `0.7.3`
-- current optimization installer: `0.7.4-8`
+- current optimization installer: `0.7.4-9`
 
 ## Why The Next Tasks Are Ordered
 
@@ -413,6 +438,22 @@ basic measurement or lifetime mistakes. Do not skip ahead.
 - [x] Measured the slice against the saved `1024` OFX-style harness baseline
       before packaging
 - [x] Generated the `0.7.4-8` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: Preview Composite And Broker Writeback
+
+- [x] Extended the OFX-style harness so it can match real full-frame render
+      size instead of forcing a square transport
+- [x] Fused the preview composite path so checker compositing and display sRGB
+      conversion no longer require an extra full-frame copy plus a separate
+      conversion pass
+- [x] Kept preview output semantics identical to the historical path and added
+      regression coverage proving parity
+- [x] Added explicit `ofx_broker_writeback` timing and moved broker shared-frame
+      copies onto the shared row-parallel worker path
+- [x] Measured the slice against the saved full-frame `2048 -> 3840x2160`
+      OFX-style harness baseline before packaging
+- [x] Generated the `0.7.4-9` installer and checkpoint artifacts for the next
       local comparison
 
 ### Phase 3: Device Tensors And Pinned-Host Strategy
