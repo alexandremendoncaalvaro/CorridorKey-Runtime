@@ -1,10 +1,6 @@
 # CorridorKey-Runtime
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=Y3Dfw969itU&t=866s">
-    <img src="./assets/sam-mobile.png" alt="Watch de Video" style="width:100%;">
-  </a>
-</div>
 
+![CorridorKey OFX Plugin](./assets/ofx_example.gif)
 
 Native AI keying runtime and OFX plugin for **DaVinci Resolve**, built in collaboration with **Corridor Digital**.
 
@@ -37,7 +33,7 @@ Current public builds support:
 
 Use CorridorKey directly inside DaVinci Resolve through the OFX plugin.
 
-![CorridorKey OFX Plugin](./assets/ofx_example.gif)
+
 
 ### CLI runtime
 
