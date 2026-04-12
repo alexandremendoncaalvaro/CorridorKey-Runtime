@@ -26,6 +26,8 @@ struct HarnessOptions {
                                        "corridorkey_int8_512.onnx";
     DeviceInfo device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
     int resolution = 512;
+    int frame_width = 0;
+    int frame_height = 0;
     int iterations = 5;
     core::IoBindingMode io_binding_mode = core::IoBindingMode::Auto;
 };
@@ -41,6 +43,14 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
         }
         if (argument == "--resolution" && index + 1 < argc) {
             options.resolution = std::atoi(argv[++index]);
+            continue;
+        }
+        if (argument == "--frame-width" && index + 1 < argc) {
+            options.frame_width = std::atoi(argv[++index]);
+            continue;
+        }
+        if (argument == "--frame-height" && index + 1 < argc) {
+            options.frame_height = std::atoi(argv[++index]);
             continue;
         }
         if (argument == "--iterations" && index + 1 < argc) {
@@ -87,9 +97,19 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
         return Unexpected(Error{ErrorCode::InvalidParameters,
                                 "Resolution must be greater than zero."});
     }
+    if (options.frame_width < 0 || options.frame_height < 0) {
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Frame dimensions must be zero or positive."});
+    }
     if (options.iterations <= 0) {
         return Unexpected(Error{ErrorCode::InvalidParameters,
                                 "Iterations must be greater than zero."});
+    }
+    if (options.frame_width == 0) {
+        options.frame_width = options.resolution;
+    }
+    if (options.frame_height == 0) {
+        options.frame_height = options.resolution;
     }
 
     return options;
@@ -147,7 +167,8 @@ int main(int argc, char* argv[]) {
     std::filesystem::remove(transport_path, cleanup_error);
 
     auto transport_res =
-        common::SharedFrameTransport::create(transport_path, options.resolution, options.resolution);
+        common::SharedFrameTransport::create(transport_path, options.frame_width,
+                                             options.frame_height);
     if (!transport_res) {
         std::cout << failure_json(transport_res.error().message).dump(4) << std::endl;
         return 1;
@@ -196,8 +217,8 @@ int main(int argc, char* argv[]) {
         OfxRuntimeRenderFrameRequest render_request;
         render_request.session_id = session_id;
         render_request.shared_frame_path = transport_path;
-        render_request.width = options.resolution;
-        render_request.height = options.resolution;
+        render_request.width = options.frame_width;
+        render_request.height = options.frame_height;
         render_request.render_index = static_cast<std::uint64_t>(iteration);
         render_request.params.target_resolution = options.resolution;
 
@@ -247,6 +268,8 @@ int main(int argc, char* argv[]) {
     results["artifact"] = options.model_path.filename().string();
     results["artifact_path"] = options.model_path.string();
     results["resolution"] = options.resolution;
+    results["frame_width"] = options.frame_width;
+    results["frame_height"] = options.frame_height;
     results["requested_resolution"] = options.resolution;
     results["effective_resolution"] = options.resolution;
     results["requested_device"] = options.device.name;
