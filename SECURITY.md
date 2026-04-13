@@ -7,7 +7,7 @@ it responsibly. **Do not open a public GitHub issue.**
 
 ### How to Report
 
-Send an email to **alexandre.alvaro@gmail.com** with:
+Send an email to **alexandre.alvaro@hotmail.com** with:
 
 1. A description of the vulnerability
 2. Steps to reproduce the issue
