@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions and Discussions
-    url: https://github.com/corridorkey/corridorkey-runtime/discussions
+    url: https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/discussions
     about: Ask questions, share workflows, or discuss ideas before opening an issue.
   - name: Security Vulnerability
-    url: https://github.com/corridorkey/corridorkey-runtime/security/policy
+    url: https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/security/policy
     about: Report security vulnerabilities through our security policy, not here.
