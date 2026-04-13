@@ -33,6 +33,13 @@ jobs:
         with:
           vcpkgGitCommitId: 1e199d32ad53aab1defda61ce41c380302e3f95c
 
+      - name: Fetch ONNX Runtime (macOS)
+        run: |
+          mkdir -p vendor/onnxruntime
+          curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
+          tar -xzf ort.tgz --strip-components=1 -C vendor/onnxruntime
+          rm ort.tgz
+
       - name: Configure CMake
         run: cmake --preset debug-macos-portable
         env:
