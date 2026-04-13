@@ -58,7 +58,7 @@ jobs:
           vcpkgGitCommitId: 1e199d32ad53aab1defda61ce41c380302e3f95c
 
       - name: Fetch ONNX Runtime (DirectML)
-        run: ./scripts/sync_onnxruntime_directml.ps1 -Version 1.18.0
+        run: ./scripts/sync_onnxruntime_directml.ps1 -Version 1.23.0
         shell: pwsh
 
       - name: Configure CMake
