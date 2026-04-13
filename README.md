@@ -17,8 +17,8 @@ Current public builds support:
 ## Quick Start
 
 - **Download the latest release:** [Releases](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases/latest)
-- **Check supported platforms:** [Support Matrix](./docs/user-help/support-matrix.md)
-- **Troubleshooting and setup help:** [User Help](./docs/user-help/)
+- **Check supported platforms:** [Support Matrix](./help/SUPPORT_MATRIX.md)
+- **Troubleshooting and setup help:** [User Help](./help/)
 
 ## What this project focuses on
 
@@ -48,16 +48,18 @@ Use the CLI for:
 
 ### User Help
 
-- [Installation and Releases](./docs/user-help/installation-and-releases.md)
-- [Support Matrix](./docs/user-help/support-matrix.md)
-- [Troubleshooting](./docs/user-help/troubleshooting.md)
-- [CLI Usage](./docs/user-help/cli-usage.md)
+- [OFX Panel Guide](./help/OFX_PANEL_GUIDE.md)
+- [DaVinci Resolve Tutorials](./help/OFX_RESOLVE_TUTORIALS.md)
+- [Support Matrix](./help/SUPPORT_MATRIX.md)
+- [Troubleshooting](./help/TROUBLESHOOTING.md)
 
 ### Development Docs
 
-- [Architecture](./docs/dev/architecture.md)
-- [Packaging](./docs/dev/packaging.md)
-- [Testing](./docs/dev/testing.md)
+- [Architecture](./docs/ARCHITECTURE.md)
+- [Frontend](./docs/FRONTEND.md)
+- [Guidelines](./docs/GUIDELINES.md)
+- [Release Guidelines](./docs/RELEASE_GUIDELINES.md)
+- [Spec](./docs/SPEC.md)
 - [Contributing](./CONTRIBUTING.md)
 
 ## Installation
@@ -67,7 +69,7 @@ Pre-packaged releases are available on the
 page. Download the package that matches your platform and product track.
 
 For supported hardware configurations and explicit support status per platform,
-see [Support Matrix](./docs/user-help/support-matrix.md).
+see [Support Matrix](./help/SUPPORT_MATRIX.md).
 
 ### OFX Plugin - macOS (Apple Silicon)
 
@@ -98,7 +100,7 @@ see [Support Matrix](./docs/user-help/support-matrix.md).
    may take 10-30 seconds.
 
 For plugin discovery issues, version mismatches, or unsupported hardware
-behavior, see [Troubleshooting](./docs/user-help/troubleshooting.md).
+behavior, see [Troubleshooting](./help/TROUBLESHOOTING.md).
 
 ### CLI
 

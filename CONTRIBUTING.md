@@ -240,6 +240,32 @@ CorridorKey-Runtime/
   vendor/               Curated third-party SDKs and runtime payloads
 ```
 
+## Developer Certificate of Origin (DCO)
+
+All contributions must include a DCO sign-off. This certifies that you have the
+right to submit the code under the project's license (CC BY-NC-SA 4.0).
+
+Add the sign-off to every commit:
+
+```bash
+git commit -s -m "feat: add my new feature"
+```
+
+This appends a `Signed-off-by: Your Name <your@email.com>` line to the commit
+message, using the name and email from your git config. The sign-off is checked
+automatically on pull requests.
+
+If you forget, you can amend the last commit:
+
+```bash
+git commit --amend -s --no-edit
+```
+
+## Code of Conduct
+
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+By participating, you agree to uphold a welcoming and respectful community.
+
 ## Getting Help
 
 - Open an issue for bugs or feature requests

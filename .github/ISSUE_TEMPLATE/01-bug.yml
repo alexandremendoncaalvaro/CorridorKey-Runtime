@@ -1,0 +1,203 @@
+name: Bug Report
+description: Something is not working as expected
+labels: ["bug"]
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug.
+
+        **Tip:** Most of the system information we need can be collected
+        automatically by running these two commands in your terminal:
+
+        ```
+        corridorkey --version
+        corridorkey doctor --json
+        ```
+
+        Copy-paste the output into the fields below and you are halfway done.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+      placeholder: |
+        When I run inference on a 4K EXR sequence, the output has green
+        artifacts in the alpha channel.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: |
+        Exact steps to trigger the bug. Include the full command you ran or
+        describe the UI actions. The more specific you are, the faster we
+        can fix it.
+      placeholder: |
+        1. Run `corridorkey --model int8 --input sequence_0001.exr --output out/`
+        2. Open the output frame in Nuke / DaVinci Resolve
+        3. Inspect the alpha channel -- green artifacts visible in hair regions
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What happens instead? Include any error messages you see in the terminal.
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## System Information
+
+        Run `corridorkey info --json` to get most of the details below
+        automatically. If you cannot run the command, fill in what you know.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS Version
+      description: |
+        macOS: Apple menu > About This Mac.
+        Windows: Settings > System > About.
+        Linux: `cat /etc/os-release`
+      placeholder: "macOS 15.4 / Windows 11 24H2 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: GPU / Accelerator
+      description: |
+        macOS: Apple menu > About This Mac (chip name).
+        Windows: Task Manager > Performance > GPU.
+        Linux: `nvidia-smi` or `lspci | grep VGA`.
+      options:
+        - Apple Silicon (M1)
+        - Apple Silicon (M2)
+        - Apple Silicon (M3)
+        - Apple Silicon (M4)
+        - NVIDIA RTX 30-series
+        - NVIDIA RTX 40-series
+        - NVIDIA RTX 50-series
+        - AMD (discrete)
+        - Intel Arc
+        - CPU only
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: gpu-detail
+    attributes:
+      label: GPU Model and VRAM
+      description: "Example: Mac Mini M4 Pro 48 GB, RTX 4090 24 GB"
+      placeholder: RTX 4090 24 GB
+
+  - type: dropdown
+    id: execution-provider
+    attributes:
+      label: Execution Provider
+      description: |
+        This is shown in the runtime startup log or in the output of
+        `corridorkey info --json` under the active device section.
+      multiple: true
+      options:
+        - CoreML
+        - MLX
+        - CUDA
+        - TensorRT
+        - DirectML
+        - OpenVINO
+        - CPU
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: ck-version
+    attributes:
+      label: CorridorKey Runtime Version
+      description: "Run `corridorkey --version` in your terminal and paste the output."
+      placeholder: "0.7.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: model-variant
+    attributes:
+      label: Model Variant
+      description: |
+        This appears in the filename of the model you are using
+        (e.g. corridorkey_**fp16**_1024.onnx) or in the startup log.
+      options:
+        - int8
+        - fp16
+        - fp32
+        - MLX
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor Output
+      description: |
+        Run `corridorkey doctor --json` and paste the full output here.
+        This collects hardware, model, and backend status in one step.
+      render: json
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Error Output
+      description: |
+        Paste any error messages or stack traces from the terminal.
+        This field is automatically formatted as code.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Screenshots, sample input files, or anything else that helps.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I included my CorridorKey version above.
+          required: true
