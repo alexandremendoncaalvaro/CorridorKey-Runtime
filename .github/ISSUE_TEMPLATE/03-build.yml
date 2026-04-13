@@ -1,0 +1,124 @@
+name: Build Issue
+description: Compilation, CMake, or dependency failure
+labels: ["build"]
+title: "[Build] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for CMake configuration errors, compiler failures,
+        vcpkg dependency issues, or anything that prevents a successful build.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What build error are you hitting?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: |
+        The exact commands you ran, starting from a clean clone.
+        Include the CMake preset if you used one.
+      placeholder: |
+        git clone https://github.com/corridorkey/corridorkey-runtime.git
+        cd corridorkey-runtime
+        cmake --preset release-macos
+        cmake --build --preset release-macos
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Error Output
+      description: |
+        Paste the relevant compiler or CMake error from your terminal.
+        This field is automatically formatted as code.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS Version
+      description: |
+        macOS: Apple menu > About This Mac.
+        Windows: Settings > System > About.
+        Linux: `cat /etc/os-release`
+      placeholder: "macOS 15.4 / Windows 11 24H2 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: compiler
+    attributes:
+      label: Compiler and Version
+      description: |
+        macOS: `clang --version`.
+        Windows: Visual Studio version or `cl` output.
+        Linux: `gcc --version` or `clang --version`.
+      placeholder: "Apple Clang 16.0 / GCC 14.1 / MSVC 19.40"
+    validations:
+      required: true
+
+  - type: input
+    id: cmake-version
+    attributes:
+      label: CMake Version
+      description: "Run `cmake --version` in your terminal."
+      placeholder: "3.30.2"
+    validations:
+      required: true
+
+  - type: input
+    id: preset
+    attributes:
+      label: CMake Preset Used
+      description: |
+        The preset name from CMakePresets.json that you passed to
+        `cmake --preset <name>`. Leave blank if you did not use a preset.
+      placeholder: "release-macos / debug / release-lto"
+
+  - type: input
+    id: ck-version
+    attributes:
+      label: CorridorKey Version or Commit
+      description: "Git tag or commit SHA (`git describe --tags --always`)."
+      placeholder: "v0.7.4 or abc1234"
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: |
+        Anything non-standard about your setup: custom vcpkg overlays,
+        non-default toolchain, relevant environment variables, etc.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I tried a clean build (removed the build directory) before reporting.
+          required: true

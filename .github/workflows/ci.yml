@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: Check Formatting
+        run: |
+          find src include tests -name "*.cpp" -o -name "*.hpp" | xargs clang-format --dry-run --Werror
+
+  build-mac:
+    name: Build & Test (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 1e199d32ad53aab1defda61ce41c380302e3f95c
+
+      - name: Configure CMake
+        run: cmake --preset debug-macos-portable
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
+
+      - name: Build
+        run: cmake --build --preset debug-macos-portable
+
+      - name: Run Tests
+        run: ctest --test-dir build/debug-macos-portable --output-on-failure --label-regex unit
+
+  build-windows:
+    name: Build & Test (Windows)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 1e199d32ad53aab1defda61ce41c380302e3f95c
+
+      - name: Fetch ONNX Runtime (DirectML)
+        run: ./scripts/sync_onnxruntime_directml.ps1 -Version 1.18.0
+        shell: pwsh
+
+      - name: Configure CMake
+        run: cmake --preset debug -DCORRIDORKEY_WINDOWS_ORT_ROOT="${{ github.workspace }}/vendor/onnxruntime-windows-dml"
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
+
+      - name: Build
+        run: cmake --build --preset debug
+
+      - name: Run Tests
+        run: ctest --test-dir build/debug --output-on-failure --label-regex unit

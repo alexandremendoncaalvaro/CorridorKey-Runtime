@@ -1,0 +1,197 @@
+name: Performance Issue
+description: Report slow inference, high memory usage, or a performance regression
+labels: ["performance"]
+title: "[Perf] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for performance regressions, unexpectedly slow
+        inference, or high memory usage.
+
+        **Tip:** Run these commands and paste the output in the fields below:
+
+        ```
+        corridorkey --version
+        corridorkey doctor --json
+        ```
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What performance problem are you observing?
+      placeholder: |
+        Inference time doubled after upgrading from 0.7.3 to 0.7.4 on the
+        same hardware and model.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: The exact command or workflow you are running.
+      placeholder: |
+        1. Run `corridorkey --model fp16 --input 4k_sequence/ --output out/`
+        2. Observe per-frame timing in the terminal output
+    validations:
+      required: true
+
+  - type: textarea
+    id: timing
+    attributes:
+      label: Timing / Measurements
+      description: |
+        Concrete numbers help us prioritize. Include per-frame time, total
+        time, peak memory, or GPU utilization. Before/after comparisons
+        across versions are especially valuable.
+      placeholder: |
+        v0.7.3: ~45 ms/frame (4K fp16, RTX 4090)
+        v0.7.4: ~92 ms/frame (same hardware, same model)
+      render: shell
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## System Information
+
+        Run `corridorkey info --json` to collect most details automatically.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS Version
+      description: |
+        macOS: Apple menu > About This Mac.
+        Windows: Settings > System > About.
+        Linux: `cat /etc/os-release`
+      placeholder: "macOS 15.4 / Windows 11 24H2 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: GPU / Accelerator
+      description: |
+        macOS: Apple menu > About This Mac.
+        Windows: Task Manager > Performance > GPU.
+        Linux: `nvidia-smi` or `lspci | grep VGA`.
+      options:
+        - Apple Silicon (M1)
+        - Apple Silicon (M2)
+        - Apple Silicon (M3)
+        - Apple Silicon (M4)
+        - NVIDIA RTX 30-series
+        - NVIDIA RTX 40-series
+        - NVIDIA RTX 50-series
+        - AMD (discrete)
+        - Intel Arc
+        - CPU only
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: gpu-detail
+    attributes:
+      label: GPU Model and VRAM
+      description: "Example: Mac Mini M4 Pro 48 GB, RTX 4090 24 GB"
+      placeholder: RTX 4090 24 GB
+
+  - type: dropdown
+    id: execution-provider
+    attributes:
+      label: Execution Provider
+      description: |
+        Shown in the runtime startup log or in `corridorkey info --json`.
+      multiple: true
+      options:
+        - CoreML
+        - MLX
+        - CUDA
+        - TensorRT
+        - DirectML
+        - OpenVINO
+        - CPU
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: ck-version
+    attributes:
+      label: CorridorKey Runtime Version
+      description: "Run `corridorkey --version` and paste the output."
+      placeholder: "0.7.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: model-variant
+    attributes:
+      label: Model Variant
+      description: |
+        Visible in the model filename (e.g. corridorkey_**fp16**_1024.onnx)
+        or in the startup log.
+      options:
+        - int8
+        - fp16
+        - fp32
+        - MLX
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: resolution
+    attributes:
+      label: Input Resolution
+      description: "The resolution of your input frames (e.g. 3840x2160)."
+      placeholder: "3840x2160"
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor Output
+      description: |
+        Run `corridorkey doctor --json` and paste the full output.
+      render: json
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Profiling Output
+      description: Terminal output, timing logs, or profiling data.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I included timing numbers or measurements above.
+          required: true
