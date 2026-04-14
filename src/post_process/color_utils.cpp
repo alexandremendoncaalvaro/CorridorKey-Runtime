@@ -669,9 +669,11 @@ void ColorUtils::resize_lanczos_from_planar_into(const float* src, int src_width
 }
 
 void ColorUtils::clamp_image(Image image, float min_val, float max_val) {
-    for (auto& v : image.data) {
-        v = std::clamp(v, min_val, max_val);
+    if (image.empty()) {
+        return;
     }
+    common::accelerate_vclip(image.data.data(), 1, &min_val, &max_val, image.data.data(), 1,
+                             image.data.size());
 }
 
 void ColorUtils::to_planar(Image src, float* dst) {
@@ -685,9 +687,11 @@ void ColorUtils::to_planar(Image src, float* dst) {
             const size_t plane_offset = static_cast<size_t>(channel) * channel_stride;
             for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
                 const size_t row_offset = static_cast<size_t>(y_pos) * width;
+                const float* src_row = &src(y_pos, 0, channel);
+                float* dst_row = &dst[plane_offset + row_offset];
+                // Copy with stride to handle interleaved to planar
                 for (int x_pos = 0; x_pos < width; ++x_pos) {
-                    dst[plane_offset + row_offset + static_cast<size_t>(x_pos)] =
-                        src(y_pos, x_pos, channel);
+                    dst_row[x_pos] = src_row[x_pos * channels];
                 }
             }
         }
@@ -702,17 +706,25 @@ void ColorUtils::pack_normalized_rgb_and_hint_to_planar(Image rgb, Image hint, f
         return;
     }
 
-    const size_t channel_stride = static_cast<size_t>(rgb.width) * static_cast<size_t>(rgb.height);
-    common::parallel_for_rows(rgb.height, [&](int y_begin, int y_end) {
+    const int width = rgb.width;
+    const int height = rgb.height;
+    const size_t channel_stride = static_cast<size_t>(width) * height;
+
+    common::parallel_for_rows(height, [&](int y_begin, int y_end) {
         for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
-            const size_t row_offset = static_cast<size_t>(y_pos) * static_cast<size_t>(rgb.width);
-            for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
-                const size_t idx = row_offset + static_cast<size_t>(x_pos);
-                dst[0 * channel_stride + idx] = (rgb(y_pos, x_pos, 0) - mean[0]) * inv_stddev[0];
-                dst[1 * channel_stride + idx] = (rgb(y_pos, x_pos, 1) - mean[1]) * inv_stddev[1];
-                dst[2 * channel_stride + idx] = (rgb(y_pos, x_pos, 2) - mean[2]) * inv_stddev[2];
-                dst[3 * channel_stride + idx] = hint(y_pos, x_pos, 0);
+            const size_t row_offset = static_cast<size_t>(y_pos) * width;
+            for (int channel = 0; channel < 3; ++channel) {
+                float* dst_plane = dst + (channel * channel_stride) + row_offset;
+                const float* src_pixel = &rgb(y_pos, 0, channel);
+
+                for (int x_pos = 0; x_pos < width; ++x_pos) {
+                    dst_plane[x_pos] = (src_pixel[x_pos * 3] - mean[channel]) * inv_stddev[channel];
+                }
             }
+            // Copy hint (single channel)
+            float* dst_hint = dst + (3 * channel_stride) + row_offset;
+            const float* src_hint = &hint(y_pos, 0, 0);
+            std::copy(src_hint, src_hint + width, dst_hint);
         }
     });
 }

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <vector>
 
+#include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
 
 namespace corridorkey {
@@ -15,12 +16,16 @@ void alpha_levels(Image alpha, float black_point, float white_point) {
     if (range <= 0.0f) range = 1.0f;
     float inv_range = 1.0f / range;
 
+    const float low = 0.0f;
+    const float high = 1.0f;
+
     common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
+            float* row_ptr = &alpha(y, 0, 0);
             for (int x = 0; x < alpha.width; ++x) {
-                float val = (alpha(y, x) - black_point) * inv_range;
-                alpha(y, x) = std::clamp(val, 0.0f, 1.0f);
+                row_ptr[x] = (row_ptr[x] - black_point) * inv_range;
             }
+            common::accelerate_vclip(row_ptr, 1, &low, &high, row_ptr, 1, alpha.width);
         }
     });
 }
