@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 
+#include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
 #include "ofx_frame_cache.hpp"
@@ -971,6 +972,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         Image fg_linear_local = inference.foreground.view();
         if (temporal_smoothing > 0.0) {
             const float blend = static_cast<float>(std::clamp(temporal_smoothing, 0.0, 1.0));
+            const float inv_blend = 1.0f - blend;
             const bool size_mismatch = !data->temporal_state_valid ||
                                        data->temporal_width != width ||
                                        data->temporal_height != height;
@@ -984,36 +986,35 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             Image prev_alpha = data->temporal_alpha.view();
             Image prev_foreground = data->temporal_foreground.view();
             if (size_mismatch || !data->temporal_state_valid) {
-                for (int y = 0; y < height; ++y) {
-                    for (int x = 0; x < width; ++x) {
-                        prev_alpha(y, x) = alpha_view_local(y, x);
-                        if (!params.output_alpha_only) {
-                            for (int c = 0; c < 3; ++c) {
-                                prev_foreground(y, x, c) = fg_linear_local(y, x, c);
-                            }
-                        }
-                    }
+                std::copy(alpha_view_local.data.begin(), alpha_view_local.data.end(),
+                          prev_alpha.data.begin());
+                if (!params.output_alpha_only) {
+                    std::copy(fg_linear_local.data.begin(), fg_linear_local.data.end(),
+                              prev_foreground.data.begin());
                 }
                 data->temporal_state_valid = true;
             } else {
-                for (int y = 0; y < height; ++y) {
-                    for (int x = 0; x < width; ++x) {
-                        const float a_prev = prev_alpha(y, x);
-                        const float a_cur = alpha_view_local(y, x);
-                        const float a_out = a_cur * (1.0f - blend) + a_prev * blend;
-                        alpha_view_local(y, x) = a_out;
-                        prev_alpha(y, x) = a_out;
+                // Blend alpha channel using vDSP if possible or fast parallel loop
+                common::parallel_for_rows(height, [&](int y_begin, int y_end) {
+                    for (int y = y_begin; y < y_end; ++y) {
+                        float* cur_a = &alpha_view_local(y, 0, 0);
+                        float* prv_a = &prev_alpha(y, 0, 0);
+                        for (int x = 0; x < width; ++x) {
+                            float a_out = cur_a[x] * inv_blend + prv_a[x] * blend;
+                            cur_a[x] = a_out;
+                            prv_a[x] = a_out;
+                        }
                         if (!params.output_alpha_only) {
-                            for (int c = 0; c < 3; ++c) {
-                                const float fg_prev = prev_foreground(y, x, c);
-                                const float fg_cur = fg_linear_local(y, x, c);
-                                const float fg_out = fg_cur * (1.0f - blend) + fg_prev * blend;
-                                fg_linear_local(y, x, c) = fg_out;
-                                prev_foreground(y, x, c) = fg_out;
+                            float* cur_fg = &fg_linear_local(y, 0, 0);
+                            float* prv_fg = &prev_foreground(y, 0, 0);
+                            for (int x = 0; x < width * 3; ++x) {
+                                float fg_out = cur_fg[x] * inv_blend + prv_fg[x] * blend;
+                                cur_fg[x] = fg_out;
+                                prv_fg[x] = fg_out;
                             }
                         }
                     }
-                }
+                });
             }
             data->temporal_time = time;
         } else {
