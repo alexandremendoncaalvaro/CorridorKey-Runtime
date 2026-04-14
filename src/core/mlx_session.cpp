@@ -6,6 +6,7 @@
 #include <optional>
 #include <regex>
 
+#include "common/accelerate_utils.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/stage_profiler.hpp"
 #include "post_process/color_utils.hpp"
@@ -418,6 +419,9 @@ Result<FrameResult> MlxSession::infer_tile(const Image& rgb_tile, const Image& h
                                                "MLX bridge returned unexpected tensor shapes."}};
             }
         }
+
+        int out_h = static_cast<int>(alpha_shape[1]);
+        int out_w = static_cast<int>(alpha_shape[2]);
 
         FrameResult result;
         result.alpha = ImageBuffer(out_w, out_h, 1);
