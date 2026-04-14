@@ -4,10 +4,13 @@
 #include <cstdint>
 #include <cstring>
 
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #if defined(_MSC_VER)
 #include <immintrin.h>
 #else
 #include <x86intrin.h>
+#endif
+#define CORRIDORKEY_HAS_X86_INTRINSICS 1
 #endif
 
 namespace corridorkey::common {
@@ -15,12 +18,14 @@ namespace corridorkey::common {
 inline void convert_fp16_to_fp32(const uint16_t* src, float* dst, std::size_t count) {
     std::size_t index = 0;
 
+#if defined(CORRIDORKEY_HAS_X86_INTRINSICS)
 #if defined(__F16C__) || (defined(_MSC_VER) && defined(__AVX2__)) || defined(_MSC_VER)
     for (; index + 8 <= count; index += 8) {
         __m128i half_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + index));
         __m256 float_vec = _mm256_cvtph_ps(half_vec);
         _mm256_storeu_ps(dst + index, float_vec);
     }
+#endif
 #endif
 
     for (; index < count; ++index) {
