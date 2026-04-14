@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 
+#include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
 
@@ -447,13 +448,15 @@ void resize_lanczos_from_planar_into_impl(const float* src, int src_width, int s
 }  // namespace
 
 void ColorUtils::premultiply(Image rgb, Image alpha) {
-    for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {
-        for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
-            const float alpha_val = alpha(y_pos, x_pos, 0);
-            rgb(y_pos, x_pos, 0) *= alpha_val;
-            rgb(y_pos, x_pos, 1) *= alpha_val;
-            rgb(y_pos, x_pos, 2) *= alpha_val;
-        }
+    if (rgb.empty() || alpha.empty() || rgb.width != alpha.width || rgb.height != alpha.height) {
+        return;
+    }
+
+    const int pixels = rgb.width * rgb.height;
+    // Interleaved RGB (stride 3) multiplied by single-channel alpha (stride alpha.channels)
+    for (int channel = 0; channel < 3; ++channel) {
+        common::accelerate_vmul(&rgb(0, 0, channel), 3, &alpha(0, 0, 0), alpha.channels,
+                                &rgb(0, 0, channel), 3, pixels);
     }
 }
 
