@@ -268,8 +268,7 @@ std::string runtime_backend_work_runtime_label(const InstanceData& data);
 std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data);
 std::string runtime_guide_source_runtime_label(const InstanceData& data);
 std::string runtime_path_runtime_label(const InstanceData& data);
-void record_frame_timing(InstanceData* data, double elapsed_ms,
-                         LastRenderWorkOrigin work_origin);
+void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOrigin work_origin);
 Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
                                                   bool hint_from_clip,
                                                   AlphaHintPolicy alpha_hint_policy);

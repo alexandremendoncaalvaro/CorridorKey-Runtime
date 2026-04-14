@@ -187,8 +187,7 @@ TEST_CASE("ColorUtils::resize_from_planar_into matches resize output",
                                             source.channels, actual.view());
 
         for (size_t index = 0; index < actual.view().data.size(); ++index) {
-            REQUIRE(actual.view().data[index] ==
-                    Catch::Approx(source.data[index]).margin(0.0001f));
+            REQUIRE(actual.view().data[index] == Catch::Approx(source.data[index]).margin(0.0001f));
         }
     }
 }
@@ -266,8 +265,7 @@ TEST_CASE("ColorUtils::pack_normalized_rgb_and_hint_to_planar matches manual pac
     std::vector<float> actual(16, 0.0F);
     std::vector<float> expected(16, 0.0F);
 
-    ColorUtils::pack_normalized_rgb_and_hint_to_planar(rgb, hint, actual.data(), mean,
-                                                       inv_stddev);
+    ColorUtils::pack_normalized_rgb_and_hint_to_planar(rgb, hint, actual.data(), mean, inv_stddev);
 
     const size_t channel_stride = 4;
     for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {

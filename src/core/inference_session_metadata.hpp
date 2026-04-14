@@ -5,8 +5,8 @@
 #include <corridorkey/types.hpp>
 #include <cstdlib>
 #include <filesystem>
-#include <optional>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -103,7 +103,8 @@ inline IoBindingMode io_binding_mode_from_environment() {
 inline bool supports_windows_rtx_io_binding(const std::filesystem::path& model_path,
                                             Backend backend) {
 #if defined(_WIN32)
-    return backend == Backend::TensorRT && packaged_corridorkey_fp16_resolution(model_path).has_value();
+    return backend == Backend::TensorRT &&
+           packaged_corridorkey_fp16_resolution(model_path).has_value();
 #else
     (void)model_path;
     (void)backend;

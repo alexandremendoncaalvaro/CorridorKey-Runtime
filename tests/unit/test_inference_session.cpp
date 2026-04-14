@@ -83,8 +83,8 @@ TEST_CASE("I/O binding policy parsing and eligibility", "[unit][inference][regre
 #if defined(_WIN32)
     REQUIRE(core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx",
                                                   Backend::TensorRT));
-    REQUIRE(core::should_enable_io_binding("models/corridorkey_fp16_1536.onnx",
-                                           Backend::TensorRT, core::IoBindingMode::Auto));
+    REQUIRE(core::should_enable_io_binding("models/corridorkey_fp16_1536.onnx", Backend::TensorRT,
+                                           core::IoBindingMode::Auto));
     REQUIRE_FALSE(core::should_enable_io_binding("models/corridorkey_fp16_1536.onnx",
                                                  Backend::TensorRT, core::IoBindingMode::Off));
 #else
@@ -94,8 +94,8 @@ TEST_CASE("I/O binding policy parsing and eligibility", "[unit][inference][regre
 
     REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_int8_512.onnx",
                                                         Backend::TensorRT));
-    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx",
-                                                        Backend::CPU));
+    REQUIRE_FALSE(
+        core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx", Backend::CPU));
 }
 
 TEST_CASE("Packaged output order follows named outputs instead of raw indices",

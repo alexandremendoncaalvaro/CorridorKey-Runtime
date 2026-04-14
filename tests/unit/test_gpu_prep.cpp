@@ -1,9 +1,8 @@
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-
-#include <array>
-#include <vector>
 #include <cmath>
+#include <vector>
 
 #include "core/gpu_prep.hpp"
 #include "post_process/color_utils.hpp"
@@ -53,8 +52,8 @@ TEST_CASE("GpuInputPrep Correctness vs CPU reference", "[unit][core]") {
 
     // GPU path
     std::vector<float> gpu_planar(total_planar, 0.0f);
-    auto res = prep.prepare_inputs(rgb, hint, gpu_planar.data(),
-                                   model_w, model_h, mean, inv_stddev);
+    auto res =
+        prep.prepare_inputs(rgb, hint, gpu_planar.data(), model_w, model_h, mean, inv_stddev);
     REQUIRE(res.has_value());
 
     // CPU reference
@@ -66,9 +65,8 @@ TEST_CASE("GpuInputPrep Correctness vs CPU reference", "[unit][core]") {
     ColorUtils::resize_area_into(hint, cpu_hint_buf.view(), state);
 
     std::vector<float> cpu_planar(total_planar, 0.0f);
-    ColorUtils::pack_normalized_rgb_and_hint_to_planar(
-        cpu_rgb_buf.view(), cpu_hint_buf.view(),
-        cpu_planar.data(), mean, inv_stddev);
+    ColorUtils::pack_normalized_rgb_and_hint_to_planar(cpu_rgb_buf.view(), cpu_hint_buf.view(),
+                                                       cpu_planar.data(), mean, inv_stddev);
 
     // Compare with tolerance for different resize implementations
     double max_diff = 0.0;

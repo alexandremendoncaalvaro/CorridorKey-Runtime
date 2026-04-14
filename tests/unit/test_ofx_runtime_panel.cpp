@@ -190,8 +190,7 @@ TEST_CASE("runtime timings label exposes cache-backed renders explicitly",
             "1.1 s | Avg: 1.0 s | Instance cache | Hotspot: ort_run 980.0 ms");
 }
 
-TEST_CASE("runtime timings prefer wall time over nested stage totals",
-          "[unit][ofx][regression]") {
+TEST_CASE("runtime timings prefer wall time over nested stage totals", "[unit][ofx][regression]") {
     InstanceData data{};
     data.last_frame_ms = 3458.6;
     data.avg_frame_ms = 3400.0;

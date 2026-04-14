@@ -47,7 +47,7 @@ struct GpuResizeState {
         if (dst_alpha_dev) cudaFree(dst_alpha_dev);
         if (dst_fg_planar_dev) cudaFree(dst_fg_planar_dev);
         if (dst_fg_interleaved_dev) cudaFree(dst_fg_interleaved_dev);
-        
+
         src_alpha_dev = nullptr;
         src_fg_dev = nullptr;
         dst_alpha_dev = nullptr;
@@ -71,9 +71,12 @@ struct GpuResizeState {
         if (cudaMalloc(&dst_alpha_dev, dst_pixels * sizeof(float)) != cudaSuccess) return false;
 
         if (has_fg) {
-            if (cudaMalloc(&src_fg_dev, 3 * src_pixels * sizeof(float)) != cudaSuccess) return false;
-            if (cudaMalloc(&dst_fg_planar_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess) return false;
-            if (cudaMalloc(&dst_fg_interleaved_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess) return false;
+            if (cudaMalloc(&src_fg_dev, 3 * src_pixels * sizeof(float)) != cudaSuccess)
+                return false;
+            if (cudaMalloc(&dst_fg_planar_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess)
+                return false;
+            if (cudaMalloc(&dst_fg_interleaved_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess)
+                return false;
         }
 
         current_src_width = src_w;
@@ -108,19 +111,19 @@ bool GpuResizer::available() const {
 #endif
 }
 
-Result<void> GpuResizer::resize_planar_outputs(
-    const float* src_alpha, const float* src_fg,
-    int src_width, int src_height,
-    Image dst_alpha, Image dst_fg) {
-
+Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const float* src_fg,
+                                               int src_width, int src_height, Image dst_alpha,
+                                               Image dst_fg) {
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     if (!available()) {
         return Unexpected(Error{ErrorCode::HardwareNotSupported, "GPU resize is not available"});
     }
 
     const bool has_fg = (src_fg != nullptr && !dst_fg.empty());
-    if (!m_state->ensure_buffers(src_width, src_height, dst_alpha.width, dst_alpha.height, has_fg)) {
-        return Unexpected(Error{ErrorCode::InferenceFailed, "Failed to allocate GPU resize buffers"});
+    if (!m_state->ensure_buffers(src_width, src_height, dst_alpha.width, dst_alpha.height,
+                                 has_fg)) {
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to allocate GPU resize buffers"});
     }
 
     nppSetStream(m_state->stream);
@@ -129,70 +132,60 @@ Result<void> GpuResizer::resize_planar_outputs(
     const size_t dst_pixels = static_cast<size_t>(dst_alpha.width) * dst_alpha.height;
 
     // 1. Upload alpha
-    cudaMemcpyAsync(m_state->src_alpha_dev, src_alpha, src_pixels * sizeof(float), cudaMemcpyHostToDevice, m_state->stream);
-    
+    cudaMemcpyAsync(m_state->src_alpha_dev, src_alpha, src_pixels * sizeof(float),
+                    cudaMemcpyHostToDevice, m_state->stream);
+
     // 2. Resize alpha
     NppiSize src_size = {src_width, src_height};
     NppiRect src_roi = {0, 0, src_width, src_height};
     NppiSize dst_size = {dst_alpha.width, dst_alpha.height};
     NppiRect dst_roi = {0, 0, dst_alpha.width, dst_alpha.height};
 
-    NppStatus status = nppiResize_32f_C1R(
-        m_state->src_alpha_dev, src_width * sizeof(float),
-        src_size, src_roi,
-        m_state->dst_alpha_dev, dst_alpha.width * sizeof(float),
-        dst_size, dst_roi,
-        NPPI_INTER_LINEAR
-    );
+    NppStatus status =
+        nppiResize_32f_C1R(m_state->src_alpha_dev, src_width * sizeof(float), src_size, src_roi,
+                           m_state->dst_alpha_dev, dst_alpha.width * sizeof(float), dst_size,
+                           dst_roi, NPPI_INTER_LINEAR);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed, "NPP alpha resize failed"});
     }
 
     // 3. Download alpha
-    cudaMemcpyAsync(dst_alpha.data.data(), m_state->dst_alpha_dev, dst_pixels * sizeof(float), cudaMemcpyDeviceToHost, m_state->stream);
+    cudaMemcpyAsync(dst_alpha.data.data(), m_state->dst_alpha_dev, dst_pixels * sizeof(float),
+                    cudaMemcpyDeviceToHost, m_state->stream);
 
     if (has_fg) {
         // Upload foreground (3 planar channels)
-        cudaMemcpyAsync(m_state->src_fg_dev, src_fg, 3 * src_pixels * sizeof(float), cudaMemcpyHostToDevice, m_state->stream);
+        cudaMemcpyAsync(m_state->src_fg_dev, src_fg, 3 * src_pixels * sizeof(float),
+                        cudaMemcpyHostToDevice, m_state->stream);
 
         // Resize foreground (planar)
-        const Npp32f* src_ptrs[3] = {
-            m_state->src_fg_dev,
-            m_state->src_fg_dev + src_pixels,
-            m_state->src_fg_dev + 2 * src_pixels
-        };
-        Npp32f* dst_ptrs[3] = {
-            m_state->dst_fg_planar_dev,
-            m_state->dst_fg_planar_dev + dst_pixels,
-            m_state->dst_fg_planar_dev + 2 * dst_pixels
-        };
+        const Npp32f* src_ptrs[3] = {m_state->src_fg_dev, m_state->src_fg_dev + src_pixels,
+                                     m_state->src_fg_dev + 2 * src_pixels};
+        Npp32f* dst_ptrs[3] = {m_state->dst_fg_planar_dev, m_state->dst_fg_planar_dev + dst_pixels,
+                               m_state->dst_fg_planar_dev + 2 * dst_pixels};
 
-        status = nppiResize_32f_P3R(
-            src_ptrs, src_width * sizeof(float),
-            src_size, src_roi,
-            dst_ptrs, dst_alpha.width * sizeof(float),
-            dst_size, dst_roi,
-            NPPI_INTER_LINEAR
-        );
+        status = nppiResize_32f_P3R(src_ptrs, src_width * sizeof(float), src_size, src_roi,
+                                    dst_ptrs, dst_alpha.width * sizeof(float), dst_size, dst_roi,
+                                    NPPI_INTER_LINEAR);
 
         if (status != NPP_SUCCESS) {
             return Unexpected(Error{ErrorCode::InferenceFailed, "NPP foreground resize failed"});
         }
 
         // Interleave planar RGB to HWC
-        status = nppiCopy_32f_P3C3R(
-            (const Npp32f**)dst_ptrs, dst_alpha.width * sizeof(float),
-            m_state->dst_fg_interleaved_dev, dst_alpha.width * 3 * sizeof(float),
-            dst_size
-        );
+        status = nppiCopy_32f_P3C3R((const Npp32f**)dst_ptrs, dst_alpha.width * sizeof(float),
+                                    m_state->dst_fg_interleaved_dev,
+                                    dst_alpha.width * 3 * sizeof(float), dst_size);
 
         if (status != NPP_SUCCESS) {
-            return Unexpected(Error{ErrorCode::InferenceFailed, "NPP foreground interleave failed"});
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed, "NPP foreground interleave failed"});
         }
 
         // Download foreground interleaved
-        cudaMemcpyAsync(dst_fg.data.data(), m_state->dst_fg_interleaved_dev, dst_pixels * 3 * sizeof(float), cudaMemcpyDeviceToHost, m_state->stream);
+        cudaMemcpyAsync(dst_fg.data.data(), m_state->dst_fg_interleaved_dev,
+                        dst_pixels * 3 * sizeof(float), cudaMemcpyDeviceToHost, m_state->stream);
     }
 
     // Synchronize stream since we're giving host data back directly
@@ -209,7 +202,8 @@ Result<void> GpuResizer::resize_planar_outputs(
     (void)src_height;
     (void)dst_alpha;
     (void)dst_fg;
-    return Unexpected(Error{ErrorCode::HardwareNotSupported, "CorridorKey was built without CUDA support"});
+    return Unexpected(
+        Error{ErrorCode::HardwareNotSupported, "CorridorKey was built without CUDA support"});
 #endif
 }
 

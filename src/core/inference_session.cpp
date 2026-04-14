@@ -251,12 +251,11 @@ struct BoundTensorStorage {
 
 Result<std::vector<int64_t>> resolve_io_binding_shape(const std::vector<int64_t>& shape_template,
                                                       int64_t batch_size, int64_t height,
-                                                      int64_t width,
-                                                      std::string_view tensor_name) {
+                                                      int64_t width, std::string_view tensor_name) {
     if (shape_template.size() != 4) {
-        return Unexpected(Error{
-            ErrorCode::HardwareNotSupported,
-            "I/O binding expects 4D tensors for " + std::string(tensor_name) + "."});
+        return Unexpected(
+            Error{ErrorCode::HardwareNotSupported,
+                  "I/O binding expects 4D tensors for " + std::string(tensor_name) + "."});
     }
 
     std::vector<int64_t> resolved = shape_template;
@@ -267,11 +266,11 @@ Result<std::vector<int64_t>> resolve_io_binding_shape(const std::vector<int64_t>
             return {};
         }
         if (resolved[index] != expected) {
-            return Unexpected(Error{
-                ErrorCode::HardwareNotSupported,
-                "I/O binding shape mismatch for " + std::string(tensor_name) + " " +
-                    std::string(label) + ": expected " + std::to_string(expected) + ", got " +
-                    std::to_string(resolved[index]) + "."});
+            return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                    "I/O binding shape mismatch for " + std::string(tensor_name) +
+                                        " " + std::string(label) + ": expected " +
+                                        std::to_string(expected) + ", got " +
+                                        std::to_string(resolved[index]) + "."});
         }
         return {};
     };
@@ -285,10 +284,9 @@ Result<std::vector<int64_t>> resolve_io_binding_shape(const std::vector<int64_t>
         } else if (tensor_name == core::k_corridorkey_fg_output_name) {
             resolved[1] = 3;
         } else {
-            return Unexpected(
-                Error{ErrorCode::HardwareNotSupported,
-                      "I/O binding channel count must be explicit for " +
-                          std::string(tensor_name) + "."});
+            return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                    "I/O binding channel count must be explicit for " +
+                                        std::string(tensor_name) + "."});
         }
     }
     if (auto height_res = resolve_dimension(2, height, "height"); !height_res) {
@@ -351,8 +349,8 @@ Result<MaterializedOutputTensor> materialize_output_tensor(
                   "Model output tensor for " + std::string(raw_label) + " did not expose NCHW."});
     }
 
-    debug_log(std::string(debug_label) + " output element type: " +
-              std::to_string(static_cast<int>(element_type)));
+    debug_log(std::string(debug_label) +
+              " output element type: " + std::to_string(static_cast<int>(element_type)));
 
     output.image_stride = static_cast<std::size_t>(output.shape[1]) *
                           static_cast<std::size_t>(output.shape[2]) *
@@ -363,10 +361,8 @@ Result<MaterializedOutputTensor> materialize_output_tensor(
         const Ort::Float16_t* fp16_values = tensor.GetTensorData<Ort::Float16_t>();
         const std::size_t total_elements = image_count * output.image_stride;
         output.fp32_storage.resize(total_elements);
-        common::convert_fp16_to_fp32(
-            reinterpret_cast<const uint16_t*>(fp16_values),
-            output.fp32_storage.data(),
-            total_elements);
+        common::convert_fp16_to_fp32(reinterpret_cast<const uint16_t*>(fp16_values),
+                                     output.fp32_storage.data(), total_elements);
         output.values = output.fp32_storage.data();
     } else {
         output.values = tensor.GetTensorMutableData<float>();
@@ -729,10 +725,9 @@ Result<Ort::Value> InferenceSession::create_input_tensor(float* planar_data,
     }
 
     if (m_input_element_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
-        return Unexpected(Error{
-            ErrorCode::HardwareNotSupported,
-            "Unsupported model input type for I/O binding path: " +
-                std::to_string(m_input_element_type)});
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "Unsupported model input type for I/O binding path: " +
+                                    std::to_string(m_input_element_type)});
     }
 
     return Ort::Value::CreateTensor<float>(memory_info, planar_data, element_count, shape.data(),
@@ -761,16 +756,14 @@ Result<InferenceSession::BoundIoState*> InferenceSession::ensure_bound_io_state(
     }
 
     if (!supports_bound_tensor_type(m_output_element_types[0])) {
-        return Unexpected(Error{
-            ErrorCode::HardwareNotSupported,
-            "Unsupported alpha output type for I/O binding: " +
-                std::to_string(m_output_element_types[0])});
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "Unsupported alpha output type for I/O binding: " +
+                                    std::to_string(m_output_element_types[0])});
     }
     if (has_foreground_output && !supports_bound_tensor_type(m_output_element_types[1])) {
-        return Unexpected(Error{
-            ErrorCode::HardwareNotSupported,
-            "Unsupported foreground output type for I/O binding: " +
-                std::to_string(m_output_element_types[1])});
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "Unsupported foreground output type for I/O binding: " +
+                                    std::to_string(m_output_element_types[1])});
     }
 
     auto state = std::make_unique<BoundIoState>(m_session);
@@ -1055,34 +1048,31 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             }
         }
 
-        auto* env = common::measure_stage(
-            on_stage, "ort_env_acquire",
-            [&]() { return &session_ptr->m_ort_process_context->acquire_env(options.log_severity); });
+        auto* env = common::measure_stage(on_stage, "ort_env_acquire", [&]() {
+            return &session_ptr->m_ort_process_context->acquire_env(options.log_severity);
+        });
 
         auto configure_session_for_model =
             [&](InferenceSession& session, const std::filesystem::path& runtime_model_path,
                 bool use_cached_model,
                 const std::optional<std::filesystem::path>& optimized_output_path) {
-                common::measure_stage(
-                    on_stage, "ort_session_options",
-                    [&]() {
-                        session.configure_session_options(use_cached_model, options, model_path);
-                        if (!use_cached_model && optimized_output_path.has_value()) {
+                common::measure_stage(on_stage, "ort_session_options", [&]() {
+                    session.configure_session_options(use_cached_model, options, model_path);
+                    if (!use_cached_model && optimized_output_path.has_value()) {
 #ifdef _WIN32
-                            session.m_session_options.SetOptimizedModelFilePath(
-                                optimized_output_path->wstring().c_str());
+                        session.m_session_options.SetOptimizedModelFilePath(
+                            optimized_output_path->wstring().c_str());
 #else
                             session.m_session_options.SetOptimizedModelFilePath(
                                 optimized_output_path->c_str());
 #endif
-                        }
-                    });
+                    }
+                });
 
                 common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                    session.m_session =
-                        Ort::Session(*env, runtime_model_path.wstring().c_str(),
-                                     session.m_session_options);
+                    session.m_session = Ort::Session(*env, runtime_model_path.wstring().c_str(),
+                                                     session.m_session_options);
 #else
                     session.m_session =
                         Ort::Session(*env, runtime_model_path.c_str(), session.m_session_options);
@@ -1108,28 +1098,24 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
                     session_ptr->m_ort_process_context = ort_process_context;
-                    auto* env = common::measure_stage(
-                        on_stage, "ort_env_acquire", [&]() {
-                            return &session_ptr->m_ort_process_context->acquire_env(
-                                options.log_severity);
-                        });
-                    common::measure_stage(
-                        on_stage, "ort_session_options",
-                        [&]() {
-                            session_ptr->configure_session_options(false, options, model_path);
+                    auto* env = common::measure_stage(on_stage, "ort_env_acquire", [&]() {
+                        return &session_ptr->m_ort_process_context->acquire_env(
+                            options.log_severity);
+                    });
+                    common::measure_stage(on_stage, "ort_session_options", [&]() {
+                        session_ptr->configure_session_options(false, options, model_path);
 #ifdef _WIN32
-                            session_ptr->m_session_options.SetOptimizedModelFilePath(
-                                optimized_model_path->wstring().c_str());
+                        session_ptr->m_session_options.SetOptimizedModelFilePath(
+                            optimized_model_path->wstring().c_str());
 #else
                             session_ptr->m_session_options.SetOptimizedModelFilePath(
                                 optimized_model_path->c_str());
 #endif
-                        });
+                    });
                     common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                        session_ptr->m_session =
-                            Ort::Session(*env, model_path.wstring().c_str(),
-                                         session_ptr->m_session_options);
+                        session_ptr->m_session = Ort::Session(*env, model_path.wstring().c_str(),
+                                                              session_ptr->m_session_options);
 #else
                         session_ptr->m_session =
                             Ort::Session(*env, model_path.c_str(), session_ptr->m_session_options);
@@ -1454,10 +1440,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     Image comp = result.composite.view();
     common::measure_stage(
         on_stage, "post_composite",
-        [&]() {
-            ColorUtils::composite_premultiplied_over_checker_to_srgb(proc, comp);
-        },
-        1);
+        [&]() { ColorUtils::composite_premultiplied_over_checker_to_srgb(proc, comp); }, 1);
 }
 
 Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& alpha_hint,
@@ -1629,8 +1612,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                         float* dst = dst_base + (b * image_stride);
 
                         ColorUtils::pack_normalized_rgb_and_hint_to_planar(
-                            cur_rgb, cur_hint, dst, kCorridorKeyRgbMean,
-                            kCorridorKeyRgbInvStddev);
+                            cur_rgb, cur_hint, dst, kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
                     }
                 },
                 batch_size);
@@ -1707,8 +1689,8 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                     on_stage, "batch_extract_outputs_tensor_materialize",
                     [&]() -> Result<void> {
                         Ort::Value& alpha_tensor = bound_io_state != nullptr
-                                                      ? bound_io_state->alpha_output.tensor
-                                                      : output_tensors[0];
+                                                       ? bound_io_state->alpha_output.tensor
+                                                       : output_tensors[0];
                         auto alpha_res = materialize_output_tensor(
                             alpha_tensor, batch_size, m_device, m_recommended_resolution,
                             "alpha_raw_output", "Alpha");
@@ -1782,10 +1764,9 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                             ColorUtils::clamp_image(batch_results[batch_index].alpha.view(), 0.0F,
                                                     1.0F);
 
-                            auto alpha_final_res =
-                                finalize_output_image(m_device, m_recommended_resolution,
-                                                      batch_results[batch_index].alpha.view(),
-                                                      "alpha_resized_output");
+                            auto alpha_final_res = finalize_output_image(
+                                m_device, m_recommended_resolution,
+                                batch_results[batch_index].alpha.view(), "alpha_resized_output");
                             if (!alpha_final_res) {
                                 return Unexpected(alpha_final_res.error());
                             }
@@ -1883,22 +1864,20 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             [&]() {
                 if (m_io_binding_enabled && m_gpu_prep.available()) {
                     auto gpu_res = m_gpu_prep.prepare_inputs(
-                        rgb, alpha_hint, planar_ptr,
-                        static_cast<int>(model_w), static_cast<int>(model_h),
-                        kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
+                        rgb, alpha_hint, planar_ptr, static_cast<int>(model_w),
+                        static_cast<int>(model_h), kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
                     if (gpu_res.has_value()) {
                         return;
                     }
-                    debug_log("GPU prep failed, falling back to CPU: " +
-                              gpu_res.error().message);
+                    debug_log("GPU prep failed, falling back to CPU: " + gpu_res.error().message);
                 }
 
                 ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
                 ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
 
-                ColorUtils::pack_normalized_rgb_and_hint_to_planar(
-                    prepared_rgb, prepared_hint, planar_ptr, kCorridorKeyRgbMean,
-                    kCorridorKeyRgbInvStddev);
+                ColorUtils::pack_normalized_rgb_and_hint_to_planar(prepared_rgb, prepared_hint,
+                                                                   planar_ptr, kCorridorKeyRgbMean,
+                                                                   kCorridorKeyRgbInvStddev);
             },
             1);
 
@@ -1959,10 +1938,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         MaterializedOutputTensor alpha_output;
         std::optional<MaterializedOutputTensor> fg_output;
         const bool include_foreground = !params.output_alpha_only;
-        const bool has_foreground_output =
-            core::should_allocate_foreground_buffer(params.output_alpha_only, output_tensors.size(),
-                                                    bound_io_state != nullptr &&
-                                                        bound_io_state->fg_output.has_value());
+        const bool has_foreground_output = core::should_allocate_foreground_buffer(
+            params.output_alpha_only, output_tensors.size(),
+            bound_io_state != nullptr && bound_io_state->fg_output.has_value());
 
         FrameResult result;
         result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
@@ -1978,11 +1956,11 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                     on_stage, "frame_extract_outputs_tensor_materialize",
                     [&]() -> Result<void> {
                         Ort::Value& alpha_tensor = bound_io_state != nullptr
-                                                      ? bound_io_state->alpha_output.tensor
-                                                      : output_tensors[0];
-                        auto alpha_res = materialize_output_tensor(
-                            alpha_tensor, 1, m_device, m_recommended_resolution, "alpha_raw_output",
-                            "Alpha");
+                                                       ? bound_io_state->alpha_output.tensor
+                                                       : output_tensors[0];
+                        auto alpha_res = materialize_output_tensor(alpha_tensor, 1, m_device,
+                                                                   m_recommended_resolution,
+                                                                   "alpha_raw_output", "Alpha");
                         if (!alpha_res) {
                             return Unexpected(alpha_res.error());
                         }
@@ -1996,9 +1974,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                         }
 
                         if (include_foreground && fg_tensor != nullptr) {
-                            auto fg_res = materialize_output_tensor(
-                                *fg_tensor, 1, m_device, m_recommended_resolution,
-                                "fg_raw_output", "FG");
+                            auto fg_res = materialize_output_tensor(*fg_tensor, 1, m_device,
+                                                                    m_recommended_resolution,
+                                                                    "fg_raw_output", "FG");
                             if (!fg_res) {
                                 return Unexpected(fg_res.error());
                             }
@@ -2021,13 +1999,13 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                                 alpha_output.values,
                                 fg_output.has_value() ? fg_output->values : nullptr,
                                 static_cast<int>(alpha_output.shape[3]),
-                                static_cast<int>(alpha_output.shape[2]),
-                                result.alpha.view(),
+                                static_cast<int>(alpha_output.shape[2]), result.alpha.view(),
                                 result.foreground.view());
                             if (gpu_res) {
                                 gpu_resized = true;
                             } else {
-                                debug_log("GPU resize failed, falling back to CPU: " + gpu_res.error().message);
+                                debug_log("GPU resize failed, falling back to CPU: " +
+                                          gpu_res.error().message);
                             }
                         }
 
@@ -2059,10 +2037,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                         }
 
                         if (!result.foreground.view().empty()) {
-                            auto fg_final_res =
-                                finalize_output_image(m_device, m_recommended_resolution,
-                                                      result.foreground.view(),
-                                                      "fg_resized_output");
+                            auto fg_final_res = finalize_output_image(
+                                m_device, m_recommended_resolution, result.foreground.view(),
+                                "fg_resized_output");
                             if (!fg_final_res) {
                                 return Unexpected(fg_final_res.error());
                             }

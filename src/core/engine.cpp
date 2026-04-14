@@ -192,9 +192,9 @@ Result<std::unique_ptr<Engine>> core::EngineFactory::create_with_ort_process_con
     auto engine = std::unique_ptr<Engine>(new Engine());
     engine->m_impl->model_path = model_path;
     engine->m_impl->create_options = options;
-    engine->m_impl->ort_process_context =
-        ort_process_context ? std::move(ort_process_context)
-                            : std::make_shared<core::OrtProcessContext>();
+    engine->m_impl->ort_process_context = ort_process_context
+                                              ? std::move(ort_process_context)
+                                              : std::make_shared<core::OrtProcessContext>();
 
     DeviceInfo requested_device =
         device.backend == Backend::Auto ? resolve_auto_device_for_model(model_path) : device;

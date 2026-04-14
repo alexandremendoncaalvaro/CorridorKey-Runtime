@@ -22,8 +22,7 @@ class PinnedBuffer {
     PinnedBuffer(const PinnedBuffer&) = delete;
     PinnedBuffer& operator=(const PinnedBuffer&) = delete;
 
-    PinnedBuffer(PinnedBuffer&& other) noexcept
-        : m_size(other.m_size), m_data(other.m_data) {
+    PinnedBuffer(PinnedBuffer&& other) noexcept : m_size(other.m_size), m_data(other.m_data) {
         other.m_size = 0;
         other.m_data = nullptr;
     }

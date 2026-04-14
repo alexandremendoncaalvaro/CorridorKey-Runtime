@@ -1179,8 +1179,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatOK;
     }
 
-    auto bootstrap_candidates = build_bootstrap_candidates(
-        capabilities, detected_device, data->models_root, initial_quality_mode);
+    auto bootstrap_candidates = build_bootstrap_candidates(capabilities, detected_device,
+                                                           data->models_root, initial_quality_mode);
     if (bootstrap_candidates.empty()) {
         log_message("create_instance", "No compatible model artifacts found for OFX bootstrap.");
         post_message(kOfxMessageError, "No compatible model artifacts found for this device.",
@@ -1210,7 +1210,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         std::optional<BackendFallbackInfo> fallback = std::nullopt;
         if (data->use_runtime_server && data->runtime_client != nullptr) {
             auto prepare_result = data->runtime_client->prepare_session(
-                build_prepare_request(candidate, initial_quality_mode, bootstrap_allow_cpu_fallback),
+                build_prepare_request(candidate, initial_quality_mode,
+                                      bootstrap_allow_cpu_fallback),
                 [&](const StageTiming& timing) {
                     log_stage_timing("create_instance", kBootstrapPhase, candidate.device,
                                      candidate.executable_model_path,

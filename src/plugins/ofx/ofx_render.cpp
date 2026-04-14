@@ -290,8 +290,8 @@ void write_matte_output(const Image& alpha, void* dst_data, int row_bytes, const
                        static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
             for (int x = 0; x < alpha.width; ++x) {
                 float a = alpha(y, x);
-                write_rgba_pixel(a, a, a, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float,
-                                 is_byte, false, lut);
+                write_rgba_pixel(a, a, a, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 false, lut);
             }
         }
     });
@@ -309,8 +309,8 @@ void write_foreground_output(const Image& fg_linear, void* dst_data, int row_byt
                 float r = fg_linear(y, x, 0);
                 float g = fg_linear(y, x, 1);
                 float b = fg_linear(y, x, 2);
-                write_rgba_pixel(r, g, b, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float,
-                                 is_byte, apply_srgb, lut);
+                write_rgba_pixel(r, g, b, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 apply_srgb, lut);
             }
         }
     });
@@ -330,8 +330,8 @@ void write_processed_output(const Image& fg_linear, const Image& alpha, void* ds
                 float r = fg_linear(y, x, 0) * a;
                 float g = fg_linear(y, x, 1) * a;
                 float b = fg_linear(y, x, 2) * a;
-                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float,
-                                 is_byte, apply_srgb, lut);
+                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 apply_srgb, lut);
             }
         }
     });
@@ -351,8 +351,8 @@ void write_source_matte_output(const Image& rgb_srgb, const Image& alpha, void* 
                 float r = lut.to_linear(rgb_srgb(y, x, 0)) * a;
                 float g = lut.to_linear(rgb_srgb(y, x, 1)) * a;
                 float b = lut.to_linear(rgb_srgb(y, x, 2)) * a;
-                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float,
-                                 is_byte, apply_srgb, lut);
+                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 apply_srgb, lut);
             }
         }
     });

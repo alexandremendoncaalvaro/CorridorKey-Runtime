@@ -195,8 +195,7 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
         return kOfxStatFailed;
     }
 
-    std::string long_label =
-        std::string(kPluginLabel) + " v" + CORRIDORKEY_DISPLAY_VERSION_STRING;
+    std::string long_label = std::string(kPluginLabel) + " v" + CORRIDORKEY_DISPLAY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropShortLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropLongLabel, 0, long_label.c_str());

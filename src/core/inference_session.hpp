@@ -28,11 +28,11 @@
 #endif
 #endif
 
+#include "core/gpu_prep.hpp"
+#include "core/gpu_resize.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
-#include "core/gpu_prep.hpp"
-#include "core/gpu_resize.hpp"
 
 #ifdef __APPLE__
 #if __has_include(<onnxruntime/coreml_provider_factory.h>)
@@ -47,7 +47,7 @@ namespace corridorkey {
 namespace core {
 class MlxSession;
 class OrtProcessContext;
-}
+}  // namespace core
 
 struct SessionCreateOptions {
     bool disable_cpu_ep_fallback = false;

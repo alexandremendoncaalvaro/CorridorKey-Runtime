@@ -22,8 +22,8 @@ using namespace corridorkey::app;
 namespace {
 
 struct HarnessOptions {
-    std::filesystem::path model_path = std::filesystem::path(PROJECT_ROOT) / "models" /
-                                       "corridorkey_int8_512.onnx";
+    std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
     DeviceInfo device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
     int resolution = 512;
     int frame_width = 0;
@@ -94,16 +94,16 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
     }
 
     if (options.resolution <= 0) {
-        return Unexpected(Error{ErrorCode::InvalidParameters,
-                                "Resolution must be greater than zero."});
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Resolution must be greater than zero."});
     }
     if (options.frame_width < 0 || options.frame_height < 0) {
         return Unexpected(
             Error{ErrorCode::InvalidParameters, "Frame dimensions must be zero or positive."});
     }
     if (options.iterations <= 0) {
-        return Unexpected(Error{ErrorCode::InvalidParameters,
-                                "Iterations must be greater than zero."});
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Iterations must be greater than zero."});
     }
     if (options.frame_width == 0) {
         options.frame_width = options.resolution;
@@ -166,9 +166,8 @@ int main(int argc, char* argv[]) {
     std::error_code cleanup_error;
     std::filesystem::remove(transport_path, cleanup_error);
 
-    auto transport_res =
-        common::SharedFrameTransport::create(transport_path, options.frame_width,
-                                             options.frame_height);
+    auto transport_res = common::SharedFrameTransport::create(transport_path, options.frame_width,
+                                                              options.frame_height);
     if (!transport_res) {
         std::cout << failure_json(transport_res.error().message).dump(4) << std::endl;
         return 1;
@@ -281,9 +280,8 @@ int main(int argc, char* argv[]) {
         std::string(core::io_binding_mode_to_string(options.io_binding_mode));
     results["io_binding"]["eligible"] =
         core::supports_windows_rtx_io_binding(options.model_path, effective_device.backend);
-    results["io_binding"]["active"] =
-        core::should_enable_io_binding(options.model_path, effective_device.backend,
-                                       options.io_binding_mode);
+    results["io_binding"]["active"] = core::should_enable_io_binding(
+        options.model_path, effective_device.backend, options.io_binding_mode);
     results["io_binding"]["observed"] = has_stage(stage_timings, "ort_io_binding_bind_inputs");
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     results["io_binding"]["memory_mode"] = "pinned";
@@ -296,9 +294,9 @@ int main(int argc, char* argv[]) {
     results["steady_state_runs"] = options.iterations;
     results["benchmark_runs"] = options.iterations;
     results["avg_latency_ms"] = average_latency_ms;
-    results["fps"] =
-        total_render_ms > 0.0 ? (1000.0 * static_cast<double>(options.iterations)) / total_render_ms
-                              : 0.0;
+    results["fps"] = total_render_ms > 0.0
+                         ? (1000.0 * static_cast<double>(options.iterations)) / total_render_ms
+                         : 0.0;
     results["stage_timings"] = stage_timings_to_json(stage_timings);
     results["phase_timings"] = summarize_stage_groups(stage_timings);
     if (fallback.has_value()) {

@@ -352,8 +352,7 @@ void resize_lanczos_into_impl(Image image, Image dst, ColorUtils::State& state) 
 }
 
 void resize_lanczos_from_planar_into_impl(const float* src, int src_width, int src_height,
-                                          int src_channels, Image dst,
-                                          ColorUtils::State& state) {
+                                          int src_channels, Image dst, ColorUtils::State& state) {
     if (src == nullptr || dst.empty() || src_width <= 0 || src_height <= 0 || src_channels <= 0 ||
         dst.width <= 0 || dst.height <= 0) {
         return;
@@ -493,8 +492,7 @@ void ColorUtils::composite_over_checker(Image rgba) {
     }
 }
 
-void ColorUtils::composite_premultiplied_over_checker_to_srgb(Image premultiplied_rgba,
-                                                              Image dst) {
+void ColorUtils::composite_premultiplied_over_checker_to_srgb(Image premultiplied_rgba, Image dst) {
     if (premultiplied_rgba.empty() || dst.empty() || premultiplied_rgba.width != dst.width ||
         premultiplied_rgba.height != dst.height || premultiplied_rgba.channels < 4 ||
         dst.channels < 4) {
@@ -513,15 +511,12 @@ void ColorUtils::composite_premultiplied_over_checker_to_srgb(Image premultiplie
                     ((y_pos / 16) + (x_pos / 16)) % 2 == 0 ? bg_dark : bg_light;
                 const float inv_alpha = 1.0F - alpha;
 
-                dst(y_pos, x_pos, 0) =
-                    lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 0) * alpha +
-                                background * inv_alpha);
-                dst(y_pos, x_pos, 1) =
-                    lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 1) * alpha +
-                                background * inv_alpha);
-                dst(y_pos, x_pos, 2) =
-                    lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 2) * alpha +
-                                background * inv_alpha);
+                dst(y_pos, x_pos, 0) = lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 0) * alpha +
+                                                   background * inv_alpha);
+                dst(y_pos, x_pos, 1) = lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 1) * alpha +
+                                                   background * inv_alpha);
+                dst(y_pos, x_pos, 2) = lut.to_srgb(premultiplied_rgba(y_pos, x_pos, 2) * alpha +
+                                                   background * inv_alpha);
                 dst(y_pos, x_pos, 3) = 1.0F;
             }
         }
@@ -617,10 +612,9 @@ void ColorUtils::gaussian_blur(Image image, float sigma, State& state) {
                     for (int dy = 1; dy <= kernel; ++dy) {
                         int yt = std::max(y - dy, 0);
                         int yb = std::min(y + dy, h - 1);
-                        acc +=
-                            (state.blur_temp[(static_cast<size_t>(yt) * w + x) * channels + c] +
-                             state.blur_temp[(static_cast<size_t>(yb) * w + x) * channels + c]) *
-                            state.blur_weights[dy];
+                        acc += (state.blur_temp[(static_cast<size_t>(yt) * w + x) * channels + c] +
+                                state.blur_temp[(static_cast<size_t>(yb) * w + x) * channels + c]) *
+                               state.blur_weights[dy];
                     }
                     image(y, x, c) = acc;
                 }
@@ -697,9 +691,9 @@ void ColorUtils::to_planar(Image src, float* dst) {
     });
 }
 
-void ColorUtils::pack_normalized_rgb_and_hint_to_planar(
-    Image rgb, Image hint, float* dst, const std::array<float, 3>& mean,
-    const std::array<float, 3>& inv_stddev) {
+void ColorUtils::pack_normalized_rgb_and_hint_to_planar(Image rgb, Image hint, float* dst,
+                                                        const std::array<float, 3>& mean,
+                                                        const std::array<float, 3>& inv_stddev) {
     if (dst == nullptr || rgb.empty() || hint.empty() || rgb.width != hint.width ||
         rgb.height != hint.height || rgb.channels < 3 || hint.channels < 1) {
         return;

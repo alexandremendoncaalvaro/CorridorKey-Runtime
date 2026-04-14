@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-
 #include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
 
@@ -101,9 +100,9 @@ class CORRIDORKEY_API ColorUtils {
      * Uses 64x64 tiling for cache efficiency.
      */
     static void to_planar(Image src, float* dst);
-    static void pack_normalized_rgb_and_hint_to_planar(
-        Image rgb, Image hint, float* dst, const std::array<float, 3>& mean,
-        const std::array<float, 3>& inv_stddev);
+    static void pack_normalized_rgb_and_hint_to_planar(Image rgb, Image hint, float* dst,
+                                                       const std::array<float, 3>& mean,
+                                                       const std::array<float, 3>& inv_stddev);
 
     /**
      * @brief Convert planar NCHW data to interleaved HWC data.

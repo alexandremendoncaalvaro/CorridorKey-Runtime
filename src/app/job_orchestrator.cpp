@@ -1024,9 +1024,8 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         results["backend"] = backend_to_string(engine->current_device().backend);
         results["batch_size"] = params.batch_size;
         results["tiling_enabled"] = params.enable_tiling;
-        results["execution_profile"] = to_json(
-            runtime_optimization_profile_for_device(runtime_capabilities(),
-                                                    engine->current_device()));
+        results["execution_profile"] = to_json(runtime_optimization_profile_for_device(
+            runtime_capabilities(), engine->current_device()));
         append_benchmark_artifact_metadata(results, request, engine->current_device());
         results["warmup_runs"] = warmup_runs;
         results["benchmark_runs"] = benchmark_runs;
@@ -1041,9 +1040,9 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         for (const auto& timing : stage_timings) {
             results["stage_timings"].push_back(to_json(timing));
         }
-        results["io_binding"] = io_binding_metadata(
-            request.model_path, engine->current_device().backend,
-            has_stage_named(stage_timings, "ort_io_binding_bind_inputs"));
+        results["io_binding"] =
+            io_binding_metadata(request.model_path, engine->current_device().backend,
+                                has_stage_named(stage_timings, "ort_io_binding_bind_inputs"));
         results["phase_timings"] = summarize_stage_groups(stage_timings);
         if (engine->backend_fallback().has_value()) {
             results["fallback"] = to_json(*engine->backend_fallback());
@@ -1121,9 +1120,9 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
     for (const auto& timing : timings) {
         results["stage_timings"].push_back(to_json(timing));
     }
-    results["io_binding"] = io_binding_metadata(
-        benchmark_request.model_path, selected_backend,
-        has_stage_named(timings, "ort_io_binding_bind_inputs"));
+    results["io_binding"] =
+        io_binding_metadata(benchmark_request.model_path, selected_backend,
+                            has_stage_named(timings, "ort_io_binding_bind_inputs"));
     results["phase_timings"] = summarize_stage_groups(timings);
     if (fallback.has_value()) {
         results["fallback"] = to_json(*fallback);

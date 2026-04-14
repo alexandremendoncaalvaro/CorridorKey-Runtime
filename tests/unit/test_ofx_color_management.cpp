@@ -513,8 +513,7 @@ TEST_CASE("describe_in_context exposes the current public quality ladder",
         descriptor.param_set.params.at(kParamCoarseResolutionOverride)->props;
 
     CHECK(prop_strings(quality_props, kOfxParamPropChoiceOption) ==
-          std::vector<std::string>{"Recommended", "Draft (512)", "High (1024)",
-                                   "Ultra (1536)",
+          std::vector<std::string>{"Recommended", "Draft (512)", "High (1024)", "Ultra (1536)",
                                    "Maximum (2048)"});
     CHECK(prop_ints(quality_props, kOfxParamPropDefault).front() == kQualityPreview);
     CHECK(prop_strings(coarse_resolution_props, kOfxParamPropChoiceOption) ==

@@ -1,6 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-
 #include <vector>
 
 #include "core/gpu_resize.hpp"
@@ -33,9 +32,9 @@ TEST_CASE("GpuResizer Correctness vs CPU reference", "[unit][core]") {
         for (int x = 0; x < src_w; ++x) {
             float val = static_cast<float>(x) / src_w;
             alpha_src[y * src_w + x] = val;
-            fg_src[y * src_w + x] = val; // R
-            fg_src[src_w * src_h + y * src_w + x] = 1.0f - val; // G
-            fg_src[2 * src_w * src_h + y * src_w + x] = 0.5f; // B
+            fg_src[y * src_w + x] = val;                         // R
+            fg_src[src_w * src_h + y * src_w + x] = 1.0f - val;  // G
+            fg_src[2 * src_w * src_h + y * src_w + x] = 0.5f;    // B
         }
     }
 
@@ -44,20 +43,15 @@ TEST_CASE("GpuResizer Correctness vs CPU reference", "[unit][core]") {
     ImageBuffer cpu_alpha(dst_w, dst_h, 1);
     ImageBuffer cpu_fg(dst_w, dst_h, 3);
 
-    auto res = resizer.resize_planar_outputs(
-        alpha_src.data(), fg_src.data(),
-        src_w, src_h,
-        gpu_alpha.view(), gpu_fg.view()
-    );
+    auto res = resizer.resize_planar_outputs(alpha_src.data(), fg_src.data(), src_w, src_h,
+                                             gpu_alpha.view(), gpu_fg.view());
 
     REQUIRE(res.has_value());
 
     // Compute CPU reference
     ColorUtils::State state;
-    ColorUtils::resize_alpha_fg_from_planar_into(
-        alpha_src.data(), fg_src.data(),
-        src_w, src_h, cpu_alpha.view(), cpu_fg.view()
-    );
+    ColorUtils::resize_alpha_fg_from_planar_into(alpha_src.data(), fg_src.data(), src_w, src_h,
+                                                 cpu_alpha.view(), cpu_fg.view());
 
     // Compare
     double max_diff = 0.0;
