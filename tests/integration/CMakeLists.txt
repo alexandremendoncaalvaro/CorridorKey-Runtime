@@ -17,6 +17,7 @@ add_executable(test_integration
     test_png_roundtrip.cpp
     test_video_roundtrip.cpp
     test_post_process_chain.cpp
+    test_screen_color_canonicalization.cpp
     test_shared_memory_transport.cpp
     test_windows_gpu_detection.cpp
     test_engine_warmup.cpp

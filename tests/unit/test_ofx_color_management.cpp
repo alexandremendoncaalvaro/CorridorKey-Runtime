@@ -520,6 +520,31 @@ TEST_CASE("describe_in_context exposes the current public quality ladder",
           std::vector<std::string>{"Recommended", "512", "1024", "1536", "2048"});
 }
 
+TEST_CASE("describe_in_context makes blue-screen canonicalization explicit in OFX copy",
+          "[unit][ofx][regression]") {
+    SuiteScope suites;
+    FakeEffect descriptor;
+
+    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor)) == kOfxStatOK);
+    REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                                kOfxImageEffectContextFilter) == kOfxStatOK);
+
+    const auto& screen_color_props = descriptor.param_set.params.at(kParamScreenColor)->props;
+    const auto& despill_props = descriptor.param_set.params.at(kParamDespillStrength)->props;
+    const auto& spill_method_props = descriptor.param_set.params.at(kParamSpillMethod)->props;
+
+    CHECK(prop_strings(descriptor.props, kOfxPropPluginDescription).front().find(
+              "chroma screen keyer") != std::string::npos);
+    CHECK(prop_strings(screen_color_props, kOfxParamPropHint).front().find(
+              "internal green domain") != std::string::npos);
+    CHECK(prop_strings(screen_color_props, kOfxParamPropHint).front().find(
+              "restored before color outputs") != std::string::npos);
+    CHECK(prop_strings(despill_props, kOfxParamPropHint).front().find(
+              "selected screen color") != std::string::npos);
+    CHECK(prop_strings(spill_method_props, kOfxParamPropHint).front().find(
+              "two non-screen channels") != std::string::npos);
+}
+
 TEST_CASE("describe_in_context keeps runtime first and help second with advanced diagnostics gated",
           "[unit][ofx][regression]") {
     SuiteScope suites;

@@ -15,6 +15,7 @@
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
 #include "ofx_runtime_client.hpp"
+#include "ofx_screen_color.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
@@ -226,19 +227,6 @@ class RenderScope {
     InstanceData* m_data = nullptr;
 };
 
-void swap_green_blue(Image image) {
-    if (image.channels < 3) {
-        return;
-    }
-    common::parallel_for_rows(image.height, [&](int y_begin, int y_end) {
-        for (int y = y_begin; y < y_end; ++y) {
-            for (int x = 0; x < image.width; ++x) {
-                std::swap(image(y, x, 1), image(y, x, 2));
-            }
-        }
-    });
-}
-
 void write_rgba_pixel(float r, float g, float b, float a, unsigned char* dst, bool is_float,
                       bool is_byte, bool apply_srgb, const SrgbLut& lut) {
     if (is_float) {
@@ -386,7 +374,7 @@ struct InferenceResult {
 InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
                                           const SharedCacheKey& shared_key, const Image& rgb_view,
                                           const Image& hint_view, const InferenceParams& params,
-                                          bool swap_screen, int width, int height,
+                                          ScreenColorMode screen_color_mode, int width, int height,
                                           const SrgbLut& lut, void* source_data, void* output_data,
                                           int source_row_bytes, int output_row_bytes,
                                           const std::string& source_depth) {
@@ -491,9 +479,7 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
             }
         });
 
-        if (swap_screen) {
-            swap_green_blue(fg_linear_local);
-        }
+        restore_from_green_domain(fg_linear_local, screen_color_mode);
     }
 
     alpha_buf = std::move(result->alpha);
@@ -746,10 +732,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
     }
 
-    const bool swap_screen = screen_color == kScreenColorBlue;
-    if (swap_screen) {
-        swap_green_blue(rgb_view);
-    }
+    const ScreenColorMode screen_color_mode = screen_color_mode_from_choice(screen_color);
+    canonicalize_to_green_domain(rgb_view, screen_color_mode);
     if (!ensure_engine_for_quality(
             data, quality_mode, width, height, quantization_mode,
             quality_fallback_mode_from_choice(quality_fallback_mode),
@@ -937,8 +921,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                                         path_hash(data->model_path), screen_color};
 
         auto inference = resolve_inference_buffers(
-            data, instance, shared_key, rgb_view, hint_view, params, swap_screen, width, height,
-            lut, source_data, output_data, source_row_bytes, output_row_bytes, source_depth);
+            data, instance, shared_key, rgb_view, hint_view, params, screen_color_mode, width,
+            height, lut, source_data, output_data, source_row_bytes, output_row_bytes,
+            source_depth);
 
         if (inference.outcome == InferenceOutcome::kBypass) {
             return kOfxStatOK;
@@ -1044,9 +1029,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         fg_linear = data->cached_result.foreground.view();
     }
 
-    if (swap_screen) {
-        swap_green_blue(rgb_view);
-    }
+    restore_from_green_domain(rgb_view, screen_color_mode);
 
     const bool apply_srgb =
         should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);

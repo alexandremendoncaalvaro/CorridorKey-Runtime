@@ -27,6 +27,7 @@ add_executable(test_unit
     test_ofx_lifecycle.cpp
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
+    test_ofx_screen_color.cpp
     test_ofx_runtime_client.cpp
     test_ofx_runtime_panel.cpp
     test_ofx_runtime_protocol.cpp
@@ -76,4 +77,7 @@ else()
 endif()
 
 add_test(NAME unit_tests COMMAND test_unit)
-set_tests_properties(unit_tests PROPERTIES LABELS "unit")
+set_tests_properties(unit_tests PROPERTIES
+    LABELS "unit"
+    ENVIRONMENT "CUDA_LAUNCH_BLOCKING=1"
+)

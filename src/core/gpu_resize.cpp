@@ -6,6 +6,8 @@
 #include <nppi.h>
 #endif
 
+#include "post_process/color_utils.hpp"
+
 namespace corridorkey::core {
 
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
@@ -15,7 +17,6 @@ struct GpuResizeState {
     float* src_fg_dev = nullptr;
     float* dst_alpha_dev = nullptr;
     float* dst_fg_planar_dev = nullptr;
-    float* dst_fg_interleaved_dev = nullptr;
 
     int current_src_width = 0;
     int current_src_height = 0;
@@ -46,13 +47,11 @@ struct GpuResizeState {
         if (src_fg_dev) cudaFree(src_fg_dev);
         if (dst_alpha_dev) cudaFree(dst_alpha_dev);
         if (dst_fg_planar_dev) cudaFree(dst_fg_planar_dev);
-        if (dst_fg_interleaved_dev) cudaFree(dst_fg_interleaved_dev);
 
         src_alpha_dev = nullptr;
         src_fg_dev = nullptr;
         dst_alpha_dev = nullptr;
         dst_fg_planar_dev = nullptr;
-        dst_fg_interleaved_dev = nullptr;
     }
 
     bool ensure_buffers(int src_w, int src_h, int dst_w, int dst_h, bool has_fg) {
@@ -74,8 +73,6 @@ struct GpuResizeState {
             if (cudaMalloc(&src_fg_dev, 3 * src_pixels * sizeof(float)) != cudaSuccess)
                 return false;
             if (cudaMalloc(&dst_fg_planar_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess)
-                return false;
-            if (cudaMalloc(&dst_fg_interleaved_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess)
                 return false;
         }
 
@@ -119,7 +116,17 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
         return Unexpected(Error{ErrorCode::HardwareNotSupported, "GPU resize is not available"});
     }
 
+    if (src_alpha == nullptr || dst_alpha.empty() || src_width <= 0 || src_height <= 0 ||
+        dst_alpha.width <= 0 || dst_alpha.height <= 0 || dst_alpha.channels != 1) {
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Invalid alpha buffers for GPU resize"});
+    }
+
     const bool has_fg = (src_fg != nullptr && !dst_fg.empty());
+    if (has_fg && dst_fg.channels != 3) {
+        return Unexpected(
+            Error{ErrorCode::InvalidParameters, "Foreground GPU resize expects RGB output"});
+    }
     if (!m_state->ensure_buffers(src_width, src_height, dst_alpha.width, dst_alpha.height,
                                  has_fg)) {
         return Unexpected(
@@ -132,8 +139,12 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
     const size_t dst_pixels = static_cast<size_t>(dst_alpha.width) * dst_alpha.height;
 
     // 1. Upload alpha
-    cudaMemcpyAsync(m_state->src_alpha_dev, src_alpha, src_pixels * sizeof(float),
-                    cudaMemcpyHostToDevice, m_state->stream);
+    cudaError_t cuda_err =
+        cudaMemcpyAsync(m_state->src_alpha_dev, src_alpha, src_pixels * sizeof(float),
+                        cudaMemcpyHostToDevice, m_state->stream);
+    if (cuda_err != cudaSuccess) {
+        return Unexpected(Error{ErrorCode::InferenceFailed, "Failed to upload alpha to GPU"});
+    }
 
     // 2. Resize alpha
     NppiSize src_size = {src_width, src_height};
@@ -147,49 +158,76 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
                            dst_roi, NPPI_INTER_LINEAR);
 
     if (status != NPP_SUCCESS) {
-        return Unexpected(Error{ErrorCode::InferenceFailed, "NPP alpha resize failed"});
+        return Unexpected(Error{ErrorCode::InferenceFailed,
+                                "NPP alpha resize failed with status " +
+                                    std::to_string(status)});
     }
 
     // 3. Download alpha
-    cudaMemcpyAsync(dst_alpha.data.data(), m_state->dst_alpha_dev, dst_pixels * sizeof(float),
-                    cudaMemcpyDeviceToHost, m_state->stream);
+    cuda_err = cudaMemcpyAsync(dst_alpha.data.data(), m_state->dst_alpha_dev,
+                               dst_pixels * sizeof(float), cudaMemcpyDeviceToHost,
+                               m_state->stream);
+    if (cuda_err != cudaSuccess) {
+        return Unexpected(Error{ErrorCode::InferenceFailed,
+                                "Failed to download resized alpha from GPU"});
+    }
 
     if (has_fg) {
+        ImageBuffer resized_fg_planar_host(dst_alpha.width, dst_alpha.height, 3);
+        Image resized_fg_planar_host_view = resized_fg_planar_host.view();
+        if (resized_fg_planar_host_view.empty()) {
+            return Unexpected(Error{ErrorCode::InferenceFailed,
+                                    "Failed to allocate host foreground resize buffer"});
+        }
+
         // Upload foreground (3 planar channels)
-        cudaMemcpyAsync(m_state->src_fg_dev, src_fg, 3 * src_pixels * sizeof(float),
-                        cudaMemcpyHostToDevice, m_state->stream);
-
-        // Resize foreground (planar)
-        const Npp32f* src_ptrs[3] = {m_state->src_fg_dev, m_state->src_fg_dev + src_pixels,
-                                     m_state->src_fg_dev + 2 * src_pixels};
-        Npp32f* dst_ptrs[3] = {m_state->dst_fg_planar_dev, m_state->dst_fg_planar_dev + dst_pixels,
-                               m_state->dst_fg_planar_dev + 2 * dst_pixels};
-
-        status = nppiResize_32f_P3R(src_ptrs, src_width * sizeof(float), src_size, src_roi,
-                                    dst_ptrs, dst_alpha.width * sizeof(float), dst_size, dst_roi,
-                                    NPPI_INTER_LINEAR);
-
-        if (status != NPP_SUCCESS) {
-            return Unexpected(Error{ErrorCode::InferenceFailed, "NPP foreground resize failed"});
-        }
-
-        // Interleave planar RGB to HWC
-        status = nppiCopy_32f_P3C3R((const Npp32f**)dst_ptrs, dst_alpha.width * sizeof(float),
-                                    m_state->dst_fg_interleaved_dev,
-                                    dst_alpha.width * 3 * sizeof(float), dst_size);
-
-        if (status != NPP_SUCCESS) {
+        cuda_err = cudaMemcpyAsync(m_state->src_fg_dev, src_fg, 3 * src_pixels * sizeof(float),
+                                   cudaMemcpyHostToDevice, m_state->stream);
+        if (cuda_err != cudaSuccess) {
             return Unexpected(
-                Error{ErrorCode::InferenceFailed, "NPP foreground interleave failed"});
+                Error{ErrorCode::InferenceFailed, "Failed to upload foreground to GPU"});
         }
 
-        // Download foreground interleaved
-        cudaMemcpyAsync(dst_fg.data.data(), m_state->dst_fg_interleaved_dev,
-                        dst_pixels * 3 * sizeof(float), cudaMemcpyDeviceToHost, m_state->stream);
+        const float* src_fg_planes[3] = {m_state->src_fg_dev, m_state->src_fg_dev + src_pixels,
+                                         m_state->src_fg_dev + 2 * src_pixels};
+        float* dst_fg_planes[3] = {m_state->dst_fg_planar_dev,
+                                   m_state->dst_fg_planar_dev + dst_pixels,
+                                   m_state->dst_fg_planar_dev + 2 * dst_pixels};
+        const int plane_step = dst_alpha.width * static_cast<int>(sizeof(float));
+
+        for (int channel = 0; channel < 3; ++channel) {
+            status = nppiResize_32f_C1R(src_fg_planes[channel], src_width * sizeof(float), src_size,
+                                        src_roi, dst_fg_planes[channel], plane_step, dst_size,
+                                        dst_roi, NPPI_INTER_LINEAR);
+
+            if (status != NPP_SUCCESS) {
+                return Unexpected(Error{ErrorCode::InferenceFailed,
+                                        "NPP foreground resize failed on channel " +
+                                            std::to_string(channel) + " with status " +
+                                            std::to_string(status)});
+            }
+        }
+
+        cuda_err = cudaMemcpyAsync(resized_fg_planar_host_view.data.data(), m_state->dst_fg_planar_dev,
+                                   dst_pixels * 3 * sizeof(float), cudaMemcpyDeviceToHost,
+                                   m_state->stream);
+        if (cuda_err != cudaSuccess) {
+            return Unexpected(Error{ErrorCode::InferenceFailed,
+                                    "Failed to download resized foreground from GPU"});
+        }
+
+        cuda_err = cudaStreamSynchronize(m_state->stream);
+        if (cuda_err != cudaSuccess) {
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed, "GPU foreground resize synchronization failed"});
+        }
+
+        ColorUtils::from_planar(resized_fg_planar_host_view.data.data(), dst_fg);
+        return {};
     }
 
     // Synchronize stream since we're giving host data back directly
-    cudaError_t cuda_err = cudaStreamSynchronize(m_state->stream);
+    cuda_err = cudaStreamSynchronize(m_state->stream);
     if (cuda_err != cudaSuccess) {
         return Unexpected(Error{ErrorCode::InferenceFailed, "GPU resize synchronization failed"});
     }
