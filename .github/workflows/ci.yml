@@ -40,6 +40,9 @@ jobs:
           tar -xzf ort.tgz --strip-components=1 -C vendor/onnxruntime
           rm ort.tgz
 
+      - name: Fetch OpenFX SDK
+        run: git clone https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
+
       - name: Configure CMake
         run: cmake --preset debug-macos-portable
         env:
@@ -67,6 +70,9 @@ jobs:
       - name: Fetch ONNX Runtime (DirectML)
         run: ./scripts/sync_onnxruntime_directml.ps1 -Version 1.23.0
         shell: pwsh
+
+      - name: Fetch OpenFX SDK
+        run: git clone https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
 
       - name: Configure CMake
         run: cmake --preset debug -DCORRIDORKEY_WINDOWS_ORT_ROOT="${{ github.workspace }}/vendor/onnxruntime-windows-dml"
