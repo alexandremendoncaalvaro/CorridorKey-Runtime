@@ -44,8 +44,8 @@ TEST_CASE("measure_stage reports failing stages before rethrow", "[unit][runtime
     std::vector<StageTiming> timings;
 
     REQUIRE_THROWS_AS(
-        measure_stage([&](const StageTiming& timing) { timings.push_back(timing); }, "failing_stage",
-                      []() -> void { throw std::runtime_error("boom"); }),
+        measure_stage([&](const StageTiming& timing) { timings.push_back(timing); },
+                      "failing_stage", []() -> void { throw std::runtime_error("boom"); }),
         std::runtime_error);
 
     REQUIRE(timings.size() == 1);
