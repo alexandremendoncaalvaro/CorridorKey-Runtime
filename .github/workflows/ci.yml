@@ -126,6 +126,18 @@ jobs:
         with:
           lfs: false
 
+      # Windows-2022 runners have C:\mingw64\bin on PATH. Without this step,
+      # the outer `cmake --preset debug` probes MinGW's g++ first, the MSVC
+      # variable stays unset, and the `if(WIN32 AND MSVC)` block in
+      # CMakeLists.txt never defines corridorkey_apply_windows_x64_link_dirs.
+      # This was previously masked by earlier ncrypt failures during vcpkg
+      # install; now that ncrypt is resolved, the outer probe runs and picks
+      # the wrong compiler.
+      - name: Setup MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Export GitHub Actions cache env
         uses: actions/github-script@v7
         with:
