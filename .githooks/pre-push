@@ -6,6 +6,19 @@ cd "$REPO_ROOT"
 
 echo "--- Pre-push Quality Gate ---"
 
+# 0. Format check — same command CI runs. Failing locally costs ~5 seconds;
+# failing on CI costs a runner slot and developer feedback time. See
+# .github/workflows/ci.yml:format job.
+if command -v clang-format >/dev/null 2>&1; then
+    echo "Checking clang-format compliance..."
+    # shellcheck disable=SC2038
+    find src include tests \( -name "*.cpp" -o -name "*.hpp" \) -print0 \
+        | xargs -0 clang-format --dry-run --Werror
+else
+    echo "WARNING: clang-format not installed; skipping format check."
+    echo "         Install via 'pip install clang-format==18.1.8' or LLVM."
+fi
+
 if [ "$(uname -s)" = "Darwin" ]; then
     BUILD_PRESET="release-macos-portable"
     BUILD_DIR="build/release-macos-portable"
