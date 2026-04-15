@@ -378,10 +378,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
                         {"Green", "Blue"},
-                        "Select the dominant screen color. Blue input is canonicalized into "
-                        "CorridorKey's internal green domain for rough matte fallback, "
-                        "inference, Recover Original Details, and despill, then restored before "
-                        "color outputs.",
+                        "Select the dominant screen color. Blue input is normalized into "
+                        "CorridorKey's internal green domain using a screen-aware color mapping "
+                        "before rough matte fallback, inference, Recover Original Details, and "
+                        "despill, then restored before color outputs.",
                         "setup_group");
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityPreview,
@@ -444,8 +444,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
                         "Strength of spill suppression for the selected screen color on "
-                        "foreground edges. Blue mode applies the same cleanup after "
-                        "canonicalization into the internal green domain.",
+                        "foreground edges. Blue mode applies the same cleanup after screen-aware "
+                        "normalization into the internal green domain.",
                         "edge_spill_group");
 
     // --- Group 7: Output ---
@@ -523,10 +523,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_matte_group");
     define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
                         {"Average", "Double Limit", "Neutral"},
-                        "How removed spill color is replaced after screen-color "
-                        "canonicalization. Average redistributes across the two non-screen "
-                        "channels. Double Limit uses the stronger non-screen channel. Neutral "
-                        "replaces with gray to avoid color shifts.",
+                        "How removed spill color is replaced after screen-aware screen-color "
+                        "normalization. Average redistributes across the two non-screen channels. "
+                        "Double Limit uses the stronger non-screen channel. Neutral replaces with "
+                        "gray to avoid color shifts.",
                         "advanced_processing_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},

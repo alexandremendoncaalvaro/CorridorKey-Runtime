@@ -374,8 +374,9 @@ struct InferenceResult {
 InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
                                           const SharedCacheKey& shared_key, const Image& rgb_view,
                                           const Image& hint_view, const InferenceParams& params,
-                                          ScreenColorMode screen_color_mode, int width, int height,
-                                          const SrgbLut& lut, void* source_data, void* output_data,
+                                          const ScreenColorTransform& screen_color_transform,
+                                          int width, int height, const SrgbLut& lut,
+                                          void* source_data, void* output_data,
                                           int source_row_bytes, int output_row_bytes,
                                           const std::string& source_depth) {
     ImageBuffer alpha_buf;
@@ -466,7 +467,9 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     }
 
     if (!params.output_alpha_only) {
-        const Image fg_srgb_view = result->foreground.view();
+        Image fg_srgb_view = result->foreground.view();
+        restore_from_green_domain(fg_srgb_view, screen_color_transform);
+
         fg_linear_buf = ImageBuffer(width, height, 3);
         Image fg_linear_local = fg_linear_buf.view();
         common::parallel_for_rows(height, [&](int y_begin, int y_end) {
@@ -478,8 +481,6 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                 }
             }
         });
-
-        restore_from_green_domain(fg_linear_local, screen_color_mode);
     }
 
     alpha_buf = std::move(result->alpha);
@@ -733,7 +734,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     const ScreenColorMode screen_color_mode = screen_color_mode_from_choice(screen_color);
-    canonicalize_to_green_domain(rgb_view, screen_color_mode);
+    const ScreenColorTransform screen_color_transform =
+        make_screen_color_transform(rgb_view, screen_color_mode);
+    canonicalize_to_green_domain(rgb_view, screen_color_transform);
     if (!ensure_engine_for_quality(
             data, quality_mode, width, height, quantization_mode,
             quality_fallback_mode_from_choice(quality_fallback_mode),
@@ -921,7 +924,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                                         path_hash(data->model_path), screen_color};
 
         auto inference = resolve_inference_buffers(
-            data, instance, shared_key, rgb_view, hint_view, params, screen_color_mode, width,
+            data, instance, shared_key, rgb_view, hint_view, params, screen_color_transform, width,
             height, lut, source_data, output_data, source_row_bytes, output_row_bytes,
             source_depth);
 
@@ -1029,7 +1032,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         fg_linear = data->cached_result.foreground.view();
     }
 
-    restore_from_green_domain(rgb_view, screen_color_mode);
+    restore_from_green_domain(rgb_view, screen_color_transform);
 
     const bool apply_srgb =
         should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);

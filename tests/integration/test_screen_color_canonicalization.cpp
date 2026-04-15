@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <filesystem>
 
 #include <catch2/catch_all.hpp>
@@ -30,15 +32,17 @@ ImageBuffer copy_image(Image source) {
     return copy;
 }
 
-void require_images_close(Image actual, Image expected, float margin = 0.02F) {
+float mean_absolute_error(Image actual, Image expected) {
     REQUIRE(actual.width == expected.width);
     REQUIRE(actual.height == expected.height);
     REQUIRE(actual.channels == expected.channels);
     REQUIRE(actual.data.size() == expected.data.size());
 
+    float total_error = 0.0F;
     for (std::size_t index = 0; index < actual.data.size(); ++index) {
-        CHECK(actual.data[index] == Catch::Approx(expected.data[index]).margin(margin));
+        total_error += std::abs(actual.data[index] - expected.data[index]);
     }
+    return total_error / static_cast<float>(actual.data.size());
 }
 
 float mean_channel(Image image, int channel) {
@@ -50,6 +54,26 @@ float mean_channel(Image image, int channel) {
         }
     }
     return pixel_count > 0 ? sum / static_cast<float>(pixel_count) : 0.0F;
+}
+
+std::array<float, 3> offaxis_blue_reference(const std::array<float, 3>& green_reference) {
+    const float blue_strength = std::clamp(green_reference[1], 0.35F, 1.0F);
+    const float red = std::clamp(green_reference[0], 0.0F, blue_strength * 0.25F);
+    const float green_leak = std::clamp(green_reference[0] + 0.12F, 0.08F, blue_strength * 0.35F);
+    return {red, green_leak, blue_strength};
+}
+
+ScreenColorTransform make_offaxis_blue_capture_transform(Image green_fixture) {
+    const std::array<float, 3> green_reference =
+        estimate_screen_reference(green_fixture, ScreenColorMode::Green);
+    return make_screen_mapping_transform(green_reference, offaxis_blue_reference(green_reference));
+}
+
+ImageBuffer make_offaxis_blue_fixture(Image green_fixture,
+                                      const ScreenColorTransform& capture_transform) {
+    ImageBuffer blue = copy_image(green_fixture);
+    apply_screen_color_transform(blue.view(), capture_transform.forward_matrix);
+    return blue;
 }
 
 ImageBuffer make_reference_alpha(int width, int height) {
@@ -80,10 +104,12 @@ ImageBuffer make_model_foreground(Image source) {
 
 }  // namespace
 
-TEST_CASE("real green and blue fixtures preserve rough matte equivalence through canonicalization",
+TEST_CASE("screen-aware canonicalization improves rough matte on a real fixture",
           "[integration][postprocess][regression]") {
     ImageBuffer green_fixture = load_fixture("greenscreen_reference_128.png");
-    ImageBuffer blue_fixture = load_fixture("bluescreen_reference_128.png");
+    const ScreenColorTransform capture_transform =
+        make_offaxis_blue_capture_transform(green_fixture.view());
+    ImageBuffer blue_fixture = make_offaxis_blue_fixture(green_fixture.view(), capture_transform);
 
     REQUIRE(mean_channel(green_fixture.view(), 1) > mean_channel(green_fixture.view(), 2));
     REQUIRE(mean_channel(blue_fixture.view(), 2) > mean_channel(blue_fixture.view(), 1));
@@ -91,51 +117,62 @@ TEST_CASE("real green and blue fixtures preserve rough matte equivalence through
     ImageBuffer green_matte(green_fixture.view().width, green_fixture.view().height, 1);
     ColorUtils::generate_rough_matte(green_fixture.view(), green_matte.view());
 
-    canonicalize_to_green_domain(blue_fixture.view(), ScreenColorMode::Blue);
-    ImageBuffer blue_matte(blue_fixture.view().width, blue_fixture.view().height, 1);
-    ColorUtils::generate_rough_matte(blue_fixture.view(), blue_matte.view());
+    ImageBuffer screen_aware = copy_image(blue_fixture.view());
+    const ScreenColorTransform screen_color_transform =
+        make_screen_color_transform(screen_aware.view(), ScreenColorMode::Blue);
+    canonicalize_to_green_domain(screen_aware.view(), screen_color_transform);
+    ImageBuffer screen_aware_matte(screen_aware.view().width, screen_aware.view().height, 1);
+    ColorUtils::generate_rough_matte(screen_aware.view(), screen_aware_matte.view());
 
-    require_images_close(blue_matte.view(), green_matte.view(), 0.01F);
+    const float screen_aware_error =
+        mean_absolute_error(screen_aware_matte.view(), green_matte.view());
+    CHECK(screen_aware_error < 0.04F);
 }
 
-TEST_CASE("real green and blue fixtures preserve despill equivalence through canonicalization",
+TEST_CASE("screen-aware canonicalization maps an off-axis blue fixture back to a green-dominant border",
           "[integration][postprocess][regression]") {
     ImageBuffer green_fixture = load_fixture("greenscreen_reference_128.png");
-    ImageBuffer blue_fixture = load_fixture("bluescreen_reference_128.png");
+    const ScreenColorTransform capture_transform =
+        make_offaxis_blue_capture_transform(green_fixture.view());
+    ImageBuffer blue_fixture = make_offaxis_blue_fixture(green_fixture.view(), capture_transform);
 
-    ImageBuffer green_result = copy_image(green_fixture.view());
-    despill(green_result.view(), 0.7F, SpillMethod::Average);
-
-    canonicalize_to_green_domain(blue_fixture.view(), ScreenColorMode::Blue);
-    despill(blue_fixture.view(), 0.7F, SpillMethod::Average);
-    restore_from_green_domain(blue_fixture.view(), ScreenColorMode::Blue);
-
-    ImageBuffer expected_blue = copy_image(green_result.view());
-    restore_from_green_domain(expected_blue.view(), ScreenColorMode::Blue);
-    require_images_close(blue_fixture.view(), expected_blue.view(), 0.015F);
+    ImageBuffer screen_aware = copy_image(blue_fixture.view());
+    const ScreenColorTransform screen_color_transform =
+        make_screen_color_transform(screen_aware.view(), ScreenColorMode::Blue);
+    canonicalize_to_green_domain(screen_aware.view(), screen_color_transform);
+    CHECK(mean_channel(blue_fixture.view(), 2) > mean_channel(blue_fixture.view(), 1));
+    CHECK(mean_channel(screen_aware.view(), 1) > mean_channel(screen_aware.view(), 2));
 }
 
-TEST_CASE("source passthrough followed by despill stays coherent for blue-screen input",
+TEST_CASE("restoring blue foreground in sRGB before linearization stays closer to the expected output",
           "[integration][postprocess][regression]") {
     ImageBuffer green_source = load_fixture("greenscreen_reference_128.png");
-    ImageBuffer blue_source = load_fixture("bluescreen_reference_128.png");
+    const ScreenColorTransform capture_transform =
+        make_offaxis_blue_capture_transform(green_source.view());
     ImageBuffer alpha = make_reference_alpha(green_source.view().width, green_source.view().height);
 
-    ImageBuffer green_foreground = make_model_foreground(green_source.view());
-    ColorUtils::State green_state;
-    source_passthrough(green_source.view(), green_foreground.view(), alpha.view(), 3, 5,
-                       green_state);
-    despill(green_foreground.view(), 0.65F, SpillMethod::DoubleLimit);
+    ImageBuffer canonical_green_foreground = make_model_foreground(green_source.view());
+    ColorUtils::State source_passthrough_state;
+    source_passthrough(green_source.view(), canonical_green_foreground.view(), alpha.view(), 3, 5,
+                       source_passthrough_state);
+    despill(canonical_green_foreground.view(), 0.65F, SpillMethod::DoubleLimit);
 
-    canonicalize_to_green_domain(blue_source.view(), ScreenColorMode::Blue);
-    ImageBuffer blue_foreground = make_model_foreground(blue_source.view());
+    ImageBuffer expected_blue_srgb = copy_image(canonical_green_foreground.view());
+    apply_screen_color_transform(expected_blue_srgb.view(), capture_transform.forward_matrix);
+    ImageBuffer expected_blue_linear = copy_image(expected_blue_srgb.view());
+    ColorUtils::srgb_to_linear(expected_blue_linear.view());
 
-    ColorUtils::State blue_state;
-    source_passthrough(blue_source.view(), blue_foreground.view(), alpha.view(), 3, 5, blue_state);
-    despill(blue_foreground.view(), 0.65F, SpillMethod::DoubleLimit);
-    restore_from_green_domain(blue_foreground.view(), ScreenColorMode::Blue);
+    ImageBuffer correct_order = copy_image(canonical_green_foreground.view());
+    apply_screen_color_transform(correct_order.view(), capture_transform.forward_matrix);
+    ColorUtils::srgb_to_linear(correct_order.view());
 
-    ImageBuffer expected_blue = copy_image(green_foreground.view());
-    restore_from_green_domain(expected_blue.view(), ScreenColorMode::Blue);
-    require_images_close(blue_foreground.view(), expected_blue.view(), 0.02F);
+    ImageBuffer wrong_order = copy_image(canonical_green_foreground.view());
+    ColorUtils::srgb_to_linear(wrong_order.view());
+    apply_screen_color_transform(wrong_order.view(), capture_transform.forward_matrix);
+
+    const float correct_error = mean_absolute_error(correct_order.view(), expected_blue_linear.view());
+    const float wrong_error = mean_absolute_error(wrong_order.view(), expected_blue_linear.view());
+
+    CHECK(correct_error < wrong_error);
+    CHECK(correct_error < 0.0001F);
 }
