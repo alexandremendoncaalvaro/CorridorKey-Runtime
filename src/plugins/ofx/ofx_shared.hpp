@@ -174,8 +174,13 @@ struct InstanceData {
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
     OfxParamHandle allow_cpu_fallback_param = nullptr;
-    std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
-    std::unique_ptr<Engine> engine = nullptr;
+    // No in-class = nullptr initializers for the unique_ptr members below:
+    // clang/libc++ instantiates ~unique_ptr<T>() at the NSDMI site, which then
+    // requires complete OfxRuntimeClient / Engine and fails with "sizeof to an
+    // incomplete type" in TUs that don't include their full definitions.
+    // unique_ptr default-constructs to nullptr already.
+    std::unique_ptr<OfxRuntimeClient> runtime_client;
+    std::unique_ptr<Engine> engine;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     std::filesystem::path runtime_server_path = {};
