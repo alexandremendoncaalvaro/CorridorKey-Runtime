@@ -68,14 +68,22 @@ jobs:
         id: cache-ort-mac
         uses: actions/cache@v4
         with:
-          path: vendor/onnxruntime
-          key: ort-macos-arm64-1.18.0
+          # Cache only the payload the tarball provides (lib/). The repo tracks
+          # vendor/onnxruntime/include/ at a pinned version (currently 1.24.3);
+          # caching the whole directory would restore a stale include/ tree on
+          # top of a newer checkout.
+          path: vendor/onnxruntime/lib
+          key: ort-macos-arm64-1.24.3
 
       - name: Fetch ONNX Runtime (macOS)
         if: steps.cache-ort-mac.outputs.cache-hit != 'true'
         run: |
+          # Version must track vendor/onnxruntime/VERSION_NUMBER (headers are
+          # committed to the repo). Mismatched headers vs runtime manifest as
+          # a SIGSEGV at first API call, not a link error, because the C++
+          # wrapper resolves new API slots through GetApi() at runtime.
           mkdir -p vendor/onnxruntime
-          curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
+          curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.24.3/onnxruntime-osx-arm64-1.24.3.tgz
           tar -xzf ort.tgz --strip-components=1 -C vendor/onnxruntime
           rm ort.tgz
 
