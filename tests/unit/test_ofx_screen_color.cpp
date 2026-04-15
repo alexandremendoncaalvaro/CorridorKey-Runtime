@@ -1,8 +1,7 @@
 #include <algorithm>
 #include <array>
-#include <cmath>
-
 #include <catch2/catch_all.hpp>
+#include <cmath>
 
 #include "plugins/ofx/ofx_screen_color.hpp"
 #include "post_process/color_utils.hpp"
@@ -131,8 +130,8 @@ TEST_CASE("screen color helpers preserve anchors and roundtrip blue input",
 
         const ScreenColorTransform transform =
             make_screen_color_transform(blue.view(), ScreenColorMode::Blue);
-        const std::array<float, 3> target = canonical_green_reference_from_blue(
-            synthetic_offaxis_blue_reference());
+        const std::array<float, 3> target =
+            canonical_green_reference_from_blue(synthetic_offaxis_blue_reference());
 
         canonicalize_to_green_domain(blue.view(), transform);
 

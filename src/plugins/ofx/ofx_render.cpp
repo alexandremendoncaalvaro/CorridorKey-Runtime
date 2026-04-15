@@ -923,10 +923,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
                                         path_hash(data->model_path), screen_color};
 
-        auto inference = resolve_inference_buffers(
-            data, instance, shared_key, rgb_view, hint_view, params, screen_color_transform, width,
-            height, lut, source_data, output_data, source_row_bytes, output_row_bytes,
-            source_depth);
+        auto inference = resolve_inference_buffers(data, instance, shared_key, rgb_view, hint_view,
+                                                   params, screen_color_transform, width, height,
+                                                   lut, source_data, output_data, source_row_bytes,
+                                                   output_row_bytes, source_depth);
 
         if (inference.outcome == InferenceOutcome::kBypass) {
             return kOfxStatOK;

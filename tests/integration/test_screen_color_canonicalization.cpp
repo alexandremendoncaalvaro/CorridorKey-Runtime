@@ -1,10 +1,9 @@
 #include <algorithm>
 #include <array>
-#include <cmath>
-#include <filesystem>
-
 #include <catch2/catch_all.hpp>
+#include <cmath>
 #include <corridorkey/frame_io.hpp>
+#include <filesystem>
 
 #include "plugins/ofx/ofx_screen_color.hpp"
 #include "post_process/color_utils.hpp"
@@ -81,8 +80,8 @@ ImageBuffer make_reference_alpha(int width, int height) {
     Image view = alpha.view();
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            const bool interior = x > width / 4 && x < (width * 3) / 4 && y > height / 5 &&
-                                  y < (height * 4) / 5;
+            const bool interior =
+                x > width / 4 && x < (width * 3) / 4 && y > height / 5 && y < (height * 4) / 5;
             view(y, x, 0) = interior ? 1.0F : 0.35F;
         }
     }
@@ -129,8 +128,9 @@ TEST_CASE("screen-aware canonicalization improves rough matte on a real fixture"
     CHECK(screen_aware_error < 0.04F);
 }
 
-TEST_CASE("screen-aware canonicalization maps an off-axis blue fixture back to a green-dominant border",
-          "[integration][postprocess][regression]") {
+TEST_CASE(
+    "screen-aware canonicalization maps an off-axis blue fixture back to a green-dominant border",
+    "[integration][postprocess][regression]") {
     ImageBuffer green_fixture = load_fixture("greenscreen_reference_128.png");
     const ScreenColorTransform capture_transform =
         make_offaxis_blue_capture_transform(green_fixture.view());
@@ -144,8 +144,9 @@ TEST_CASE("screen-aware canonicalization maps an off-axis blue fixture back to a
     CHECK(mean_channel(screen_aware.view(), 1) > mean_channel(screen_aware.view(), 2));
 }
 
-TEST_CASE("restoring blue foreground in sRGB before linearization stays closer to the expected output",
-          "[integration][postprocess][regression]") {
+TEST_CASE(
+    "restoring blue foreground in sRGB before linearization stays closer to the expected output",
+    "[integration][postprocess][regression]") {
     ImageBuffer green_source = load_fixture("greenscreen_reference_128.png");
     const ScreenColorTransform capture_transform =
         make_offaxis_blue_capture_transform(green_source.view());
@@ -170,7 +171,8 @@ TEST_CASE("restoring blue foreground in sRGB before linearization stays closer t
     ColorUtils::srgb_to_linear(wrong_order.view());
     apply_screen_color_transform(wrong_order.view(), capture_transform.forward_matrix);
 
-    const float correct_error = mean_absolute_error(correct_order.view(), expected_blue_linear.view());
+    const float correct_error =
+        mean_absolute_error(correct_order.view(), expected_blue_linear.view());
     const float wrong_error = mean_absolute_error(wrong_order.view(), expected_blue_linear.view());
 
     CHECK(correct_error < wrong_error);

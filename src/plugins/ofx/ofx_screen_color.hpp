@@ -20,16 +20,13 @@ struct ScreenColorTransform {
     ScreenColorMode mode = ScreenColorMode::Green;
     std::array<float, 3> estimated_screen = {0.08F, 0.84F, 0.08F};
     std::array<float, 3> canonical_screen = {0.08F, 0.84F, 0.08F};
-    std::array<float, 9> forward_matrix = {1.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-                                           0.0F, 0.0F, 0.0F, 1.0F};
-    std::array<float, 9> inverse_matrix = {1.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-                                           0.0F, 0.0F, 0.0F, 1.0F};
+    std::array<float, 9> forward_matrix = {1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+    std::array<float, 9> inverse_matrix = {1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
     bool is_identity = true;
 };
 
 inline ScreenColorMode screen_color_mode_from_choice(int screen_color_choice) {
-    return screen_color_choice == kScreenColorBlue ? ScreenColorMode::Blue
-                                                   : ScreenColorMode::Green;
+    return screen_color_choice == kScreenColorBlue ? ScreenColorMode::Blue : ScreenColorMode::Green;
 }
 
 inline bool screen_color_requires_green_domain_canonicalization(ScreenColorMode mode) {
@@ -152,13 +149,11 @@ inline std::array<float, 3> estimate_screen_reference(Image image, ScreenColorMo
                 const float blue = safe_channel(image(y, x, 2));
                 const std::array<float, 3> pixel = {red, green, blue};
                 const float selected = pixel[static_cast<std::size_t>(selected_channel)];
-                const float other_max =
-                    std::max(pixel[static_cast<std::size_t>(other_a)],
-                             pixel[static_cast<std::size_t>(other_b)]);
-                const float other_avg =
-                    (pixel[static_cast<std::size_t>(other_a)] +
-                     pixel[static_cast<std::size_t>(other_b)]) *
-                    0.5F;
+                const float other_max = std::max(pixel[static_cast<std::size_t>(other_a)],
+                                                 pixel[static_cast<std::size_t>(other_b)]);
+                const float other_avg = (pixel[static_cast<std::size_t>(other_a)] +
+                                         pixel[static_cast<std::size_t>(other_b)]) *
+                                        0.5F;
                 const float dominance = selected - other_max;
                 const float separation = selected - other_avg;
                 if (selected < 0.08F || dominance <= 0.0F || separation <= 0.0F) {
@@ -187,9 +182,8 @@ inline std::array<float, 3> estimate_screen_reference(Image image, ScreenColorMo
     std::array<float, 3> estimate = {weighted_sum[0] / total_weight, weighted_sum[1] / total_weight,
                                      weighted_sum[2] / total_weight};
     const float selected = estimate[static_cast<std::size_t>(selected_channel)];
-    const float other_max =
-        std::max(estimate[static_cast<std::size_t>(other_a)],
-                 estimate[static_cast<std::size_t>(other_b)]);
+    const float other_max = std::max(estimate[static_cast<std::size_t>(other_a)],
+                                     estimate[static_cast<std::size_t>(other_b)]);
     if (selected <= other_max + 0.02F) {
         return fallback;
     }
@@ -216,7 +210,8 @@ inline ScreenColorTransform make_screen_mapping_transform(
         transform.forward_matrix = legacy_green_blue_swap_matrix();
         transform.inverse_matrix = legacy_green_blue_swap_matrix();
         transform.estimated_screen = default_screen_reference(ScreenColorMode::Blue);
-        transform.canonical_screen = canonical_green_reference_from_blue(transform.estimated_screen);
+        transform.canonical_screen =
+            canonical_green_reference_from_blue(transform.estimated_screen);
         return transform;
     }
 
@@ -225,7 +220,8 @@ inline ScreenColorTransform make_screen_mapping_transform(
         transform.forward_matrix = legacy_green_blue_swap_matrix();
         transform.inverse_matrix = legacy_green_blue_swap_matrix();
         transform.estimated_screen = default_screen_reference(ScreenColorMode::Blue);
-        transform.canonical_screen = canonical_green_reference_from_blue(transform.estimated_screen);
+        transform.canonical_screen =
+            canonical_green_reference_from_blue(transform.estimated_screen);
     }
     return transform;
 }
@@ -244,7 +240,8 @@ inline ScreenColorTransform make_screen_color_transform(Image image, ScreenColor
     }
 
     return make_screen_mapping_transform(
-        transform.estimated_screen, canonical_green_reference_from_blue(transform.estimated_screen));
+        transform.estimated_screen,
+        canonical_green_reference_from_blue(transform.estimated_screen));
 }
 
 inline void swap_green_blue_channels(Image image) {
@@ -272,12 +269,12 @@ inline void apply_screen_color_transform(Image image, const std::array<float, 9>
                 const float red = image(y, x, 0);
                 const float green = image(y, x, 1);
                 const float blue = image(y, x, 2);
-                image(y, x, 0) = safe_channel(matrix[0] * red + matrix[1] * green +
-                                              matrix[2] * blue);
-                image(y, x, 1) = safe_channel(matrix[3] * red + matrix[4] * green +
-                                              matrix[5] * blue);
-                image(y, x, 2) = safe_channel(matrix[6] * red + matrix[7] * green +
-                                              matrix[8] * blue);
+                image(y, x, 0) =
+                    safe_channel(matrix[0] * red + matrix[1] * green + matrix[2] * blue);
+                image(y, x, 1) =
+                    safe_channel(matrix[3] * red + matrix[4] * green + matrix[5] * blue);
+                image(y, x, 2) =
+                    safe_channel(matrix[6] * red + matrix[7] * green + matrix[8] * blue);
             }
         }
     });

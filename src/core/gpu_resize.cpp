@@ -159,17 +159,15 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
-                                "NPP alpha resize failed with status " +
-                                    std::to_string(status)});
+                                "NPP alpha resize failed with status " + std::to_string(status)});
     }
 
     // 3. Download alpha
     cuda_err = cudaMemcpyAsync(dst_alpha.data.data(), m_state->dst_alpha_dev,
-                               dst_pixels * sizeof(float), cudaMemcpyDeviceToHost,
-                               m_state->stream);
+                               dst_pixels * sizeof(float), cudaMemcpyDeviceToHost, m_state->stream);
     if (cuda_err != cudaSuccess) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                "Failed to download resized alpha from GPU"});
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to download resized alpha from GPU"});
     }
 
     if (has_fg) {
@@ -208,9 +206,9 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
             }
         }
 
-        cuda_err = cudaMemcpyAsync(resized_fg_planar_host_view.data.data(), m_state->dst_fg_planar_dev,
-                                   dst_pixels * 3 * sizeof(float), cudaMemcpyDeviceToHost,
-                                   m_state->stream);
+        cuda_err = cudaMemcpyAsync(resized_fg_planar_host_view.data.data(),
+                                   m_state->dst_fg_planar_dev, dst_pixels * 3 * sizeof(float),
+                                   cudaMemcpyDeviceToHost, m_state->stream);
         if (cuda_err != cudaSuccess) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
                                     "Failed to download resized foreground from GPU"});
