@@ -308,6 +308,27 @@ endif()
 
 find_package(OpenEXR REQUIRED)
 find_package(PNG REQUIRED)
+
+# vcpkg's generated FindFFMPEG.cmake calls find_library(... NAMES ncrypt ...)
+# for Windows schannel TLS support. On hosted MSVC runners the Windows SDK 'um'
+# directory is not always discoverable by CMake's find_library at configure
+# time, so this lookup fails with
+#   "Could not find FFMPEG_DEPENDENCY_ncrypt_RELEASE".
+# ncrypt.lib is a Windows system library that the MSVC linker resolves from the
+# default library search path, so we pre-populate the cache with the bare name.
+# find_library respects a pre-set cache entry and will not re-search. The link
+# line then receives "ncrypt.lib", which the linker finds via the SDK path.
+if(WIN32)
+    if(NOT FFMPEG_DEPENDENCY_ncrypt_RELEASE)
+        set(FFMPEG_DEPENDENCY_ncrypt_RELEASE "ncrypt"
+            CACHE FILEPATH "Windows SDK ncrypt (resolved by linker)" FORCE)
+    endif()
+    if(NOT FFMPEG_DEPENDENCY_ncrypt_DEBUG)
+        set(FFMPEG_DEPENDENCY_ncrypt_DEBUG "ncrypt"
+            CACHE FILEPATH "Windows SDK ncrypt (resolved by linker)" FORCE)
+    endif()
+endif()
+
 find_package(FFMPEG REQUIRED)
 find_package(cxxopts REQUIRED)
 find_package(cpr CONFIG REQUIRED)
