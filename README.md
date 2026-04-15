@@ -19,6 +19,7 @@ Current public builds support:
 - **Download the latest release:** [Releases](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases/latest)
 - **Check supported platforms:** [Support Matrix](./help/SUPPORT_MATRIX.md)
 - **Troubleshooting and setup help:** [User Help](./help/)
+- **Watch a community tutorial:** [Tutorial by Heiko (@hethfilms)](https://youtu.be/VMcIk2jnQfg?si=IuitekQanKyDR4S-)
 
 ## What this project focuses on
 
@@ -140,6 +141,10 @@ corridorkey process input.mp4 output.mp4 --alpha-hint hint.mp4
 
 Append `--json` to any command to receive NDJSON event streams for pipeline
 integration.
+
+## Community Tutorials
+
+- **Tutorial by Heiko (@hethfilms):** practical walkthrough of the CorridorKey Resolve OFX plugin, including installation and real professoonal workflow usage. [Watch here](https://youtu.be/VMcIk2jnQfg?si=IuitekQanKyDR4S-)
 
 ## Building from Source
 
