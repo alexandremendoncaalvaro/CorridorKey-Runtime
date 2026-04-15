@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# Cancel any superseded runs on the same ref. A fresh push on a PR branch
+# cancels the previous in-flight run so runner time is not wasted on work
+# that is already obsolete.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   format:
     name: Format Check
@@ -23,28 +30,73 @@ jobs:
   build-mac:
     name: Build & Test (macOS)
     runs-on: macos-14
+    # Gate on the cheap format check. A 15-second format failure should not
+    # trigger a ~60-minute macOS build.
+    needs: format
+    env:
+      # Route vcpkg binary cache through the GitHub Actions cache backend so
+      # dependencies (OpenEXR, FFmpeg, Boost, ONNX Runtime, ...) are built once
+      # and restored from cache on subsequent runs. Turns a ~30+ minute cold
+      # install into a ~1-2 minute cached restore.
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: false
+
+      - name: Export GitHub Actions cache env
+        # lukka/run-vcpkg reads ACTIONS_CACHE_URL and ACTIONS_RUNTIME_TOKEN
+        # from the environment to talk to the x-gha cache backend; they are
+        # present in the job runtime but not always exported to child
+        # processes. This step makes them visible to subsequent steps.
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: 1e199d32ad53aab1defda61ce41c380302e3f95c
 
+      - name: Cache ONNX Runtime (macOS)
+        id: cache-ort-mac
+        uses: actions/cache@v4
+        with:
+          path: vendor/onnxruntime
+          key: ort-macos-arm64-1.18.0
+
       - name: Fetch ONNX Runtime (macOS)
+        if: steps.cache-ort-mac.outputs.cache-hit != 'true'
         run: |
           mkdir -p vendor/onnxruntime
           curl -L -o ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
           tar -xzf ort.tgz --strip-components=1 -C vendor/onnxruntime
           rm ort.tgz
 
+      - name: Cache OpenFX SDK
+        id: cache-openfx-mac
+        uses: actions/cache@v4
+        with:
+          path: vendor/openfx
+          # The key is static because we pin to the SDK's default branch via
+          # shallow clone below. Bump the suffix to invalidate if the pin moves.
+          key: openfx-sdk-v1
+
       - name: Fetch OpenFX SDK
-        run: git clone https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
+        if: steps.cache-openfx-mac.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
 
       - name: Configure CMake
-        run: cmake --preset debug-macos-portable
+        run: |
+          cmake --preset debug-macos-portable \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
         env:
           VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
 
@@ -57,25 +109,60 @@ jobs:
   build-windows:
     name: Build & Test (Windows)
     runs-on: windows-2022
+    needs: format
+    env:
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: false
+
+      - name: Export GitHub Actions cache env
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: 1e199d32ad53aab1defda61ce41c380302e3f95c
 
+      - name: Cache ONNX Runtime (Windows DirectML)
+        id: cache-ort-win
+        uses: actions/cache@v4
+        with:
+          path: vendor/onnxruntime-windows-dml
+          key: ort-windows-dml-1.23.0
+
       - name: Fetch ONNX Runtime (DirectML)
+        if: steps.cache-ort-win.outputs.cache-hit != 'true'
         run: ./scripts/sync_onnxruntime_directml.ps1 -Version 1.23.0
         shell: pwsh
 
+      - name: Cache OpenFX SDK
+        id: cache-openfx-win
+        uses: actions/cache@v4
+        with:
+          path: vendor/openfx
+          key: openfx-sdk-v1
+
       - name: Fetch OpenFX SDK
-        run: git clone https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
+        if: steps.cache-openfx-win.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
 
       - name: Configure CMake
-        run: cmake --preset debug -DCORRIDORKEY_WINDOWS_ORT_ROOT="${{ github.workspace }}/vendor/onnxruntime-windows-dml"
+        run: |
+          cmake --preset debug `
+            -DCORRIDORKEY_WINDOWS_ORT_ROOT="${{ github.workspace }}/vendor/onnxruntime-windows-dml" `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        shell: pwsh
         env:
           VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
 
