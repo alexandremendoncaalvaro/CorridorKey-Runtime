@@ -17,6 +17,11 @@
 
 namespace corridorkey::core {
 
+#if CORRIDORKEY_WITH_MLX
+
+// These helpers are only used from the CORRIDORKEY_WITH_MLX=1 path below.
+// Guarding the entire anonymous namespace here avoids -Wunused-function errors
+// on builds that stub out the MLX backend (e.g. macOS CI portable preset).
 namespace {
 
 std::optional<int> bridge_resolution_from_filename(const std::filesystem::path& path) {
@@ -108,6 +113,8 @@ void ensure_buffer_shape(ImageBuffer& buffer, int width, int height, int channel
 }
 
 }  // namespace
+
+#endif  // CORRIDORKEY_WITH_MLX
 
 class MlxSession::Impl {
    public:
