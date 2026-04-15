@@ -71,8 +71,12 @@ class InferenceSession {
     // Disable copy, allow move
     InferenceSession(const InferenceSession&) = delete;
     InferenceSession& operator=(const InferenceSession&) = delete;
-    InferenceSession(InferenceSession&&) noexcept = default;
-    InferenceSession& operator=(InferenceSession&&) noexcept = default;
+    // Move ops are defined out-of-line in the .cpp so that the compiler sees
+    // complete types for MlxSession and BoundIoState (both forward-declared
+    // here). Keeping them defaulted in the header caused incomplete-type errors
+    // for consumers that hold std::unique_ptr<InferenceSession>.
+    InferenceSession(InferenceSession&&) noexcept;
+    InferenceSession& operator=(InferenceSession&&) noexcept;
 
     /**
      * @brief Run inference on a frame.

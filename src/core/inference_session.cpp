@@ -709,6 +709,8 @@ InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(devic
 }
 
 InferenceSession::~InferenceSession() = default;
+InferenceSession::InferenceSession(InferenceSession&&) noexcept = default;
+InferenceSession& InferenceSession::operator=(InferenceSession&&) noexcept = default;
 
 Result<Ort::Value> InferenceSession::create_input_tensor(float* planar_data,
                                                          std::size_t element_count,
