@@ -164,9 +164,13 @@ class InferenceSession {
     std::vector<std::vector<int64_t>> m_output_node_dims = {};
     ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     std::vector<ONNXTensorElementDataType> m_output_element_types = {};
-    std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
+    // No in-class = nullptr initializers for the unique_ptr members below:
+    // clang/libc++ instantiates ~unique_ptr<T>() at the NSDMI site, which then
+    // requires complete MlxSession / BoundIoState and fails with "sizeof to an
+    // incomplete type". unique_ptr default-constructs to nullptr already.
+    std::unique_ptr<core::MlxSession> m_mlx_session;
     std::shared_ptr<core::OrtProcessContext> m_ort_process_context = nullptr;
-    std::unique_ptr<BoundIoState> m_bound_io_state = nullptr;
+    std::unique_ptr<BoundIoState> m_bound_io_state;
     bool m_io_binding_enabled = false;
 
     // Pre-allocated buffer pools (reused across run() calls)
