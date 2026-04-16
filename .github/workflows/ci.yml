@@ -177,11 +177,15 @@ jobs:
         run: git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
 
       - name: Configure CMake
+        # Embedded (/Z7) debug info avoids shared .pdb files, which cause
+        # fatal error C1041 when ninja + sccache run parallel cl.exe workers
+        # that race on the same .pdb lock.
         run: |
           cmake --preset debug `
             -DCORRIDORKEY_WINDOWS_ORT_ROOT="${{ github.workspace }}/vendor/onnxruntime-windows-dml" `
             -DCMAKE_C_COMPILER_LAUNCHER=sccache `
-            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
         shell: pwsh
         env:
           VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
