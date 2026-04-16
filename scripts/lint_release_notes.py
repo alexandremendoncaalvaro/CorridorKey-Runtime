@@ -74,7 +74,7 @@ ASSET_FILENAME_PATTERN = re.compile(
     r"""
     \b                                  # word boundary
     CorridorKey[_\-][\w\.\-]+           # project prefix
-    \.(?:exe|zip|dmg|pkg|msi|tar\.gz|tgz|tar)   # known extensions
+    \.(?:exe|zip|dmg|pkg|msi|tar\.gz|tgz|tar|deb|rpm)   # known extensions
     \b
     """,
     re.IGNORECASE | re.VERBOSE,

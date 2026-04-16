@@ -219,9 +219,11 @@ Before filing a bug report, collect the following:
 2. **Runtime log.** The runtime writes a log file during operation:
    - macOS: `~/Library/Logs/CorridorKey/`
    - Windows: `%LOCALAPPDATA%\CorridorKey\Logs\`
+   - Linux: `/tmp/corridorkey-logs/`
 3. **Resolve OFX log** (if the issue is plugin-specific):
    - macOS: `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/logs/`
    - Windows: `%AppData%\Blackmagic Design\DaVinci Resolve\logs\`
+   - Linux: `~/.local/share/DaVinciResolve/logs/`
 4. **System information.** OS version, GPU model, driver version, Resolve
    version, and which installer package was used.
 
