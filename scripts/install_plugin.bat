@@ -88,6 +88,16 @@ if exist "%DstPath%" rmdir /s /q "%DstPath%"
 echo Copying new plugin bundle to OFX system directory...
 xcopy "%SrcPath%" "%DstPath%" /E /I /H /Y /Q
 
+echo Registering CorridorKey CLI on system PATH...
+if exist "%DstPath%\Contents\Win64\update_path.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%DstPath%\Contents\Win64\update_path.ps1" -Mode Install
+    if errorlevel 1 (
+        echo WARNING: PATH registration reported a non-zero exit code. The plugin is installed, but corridorkey.exe may not be available system-wide until you add "%DstPath%\Contents\Win64" to PATH manually.
+    )
+) else (
+    echo WARNING: update_path.ps1 not found in bundle. Skipping system PATH registration.
+)
+
 echo Starting DaVinci Resolve...
 if exist "C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe" (
     start "" "C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe"

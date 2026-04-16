@@ -69,11 +69,65 @@ Recommended install path:
 
 Installer behavior:
 - This installer replaces any existing CorridorKey Windows OFX installation before copying the new bundle.
+- The CorridorKey CLI (corridorkey.exe) directory is registered on the system PATH, so `corridorkey` is available from any terminal after installation. Open a new shell to pick up the change.
+- Uninstalling restores the previous system PATH.
 
 Manual fallback path:
 1. Run install_plugin.bat as Administrator from this folder.
 2. Start DaVinci Resolve after installation finishes.
 "@ | Set-Content -Path $Path -Encoding ASCII
+}
+
+function Write-PathUpdateScript {
+    param(
+        [string]$BundlePath
+    )
+
+    $targetDir = Join-Path $BundlePath "Contents\Win64"
+    if (-not (Test-Path $targetDir)) {
+        throw "Bundle Win64 directory not found at $targetDir. Packaging step must run before writing update_path.ps1."
+    }
+
+    $targetPath = Join-Path $targetDir "update_path.ps1"
+    $content = @'
+param(
+    [ValidateSet("Install", "Uninstall")]
+    [string]$Mode = "Install"
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+# The directory holding this script is the directory we want on PATH.
+# For CorridorKey installs that is <bundle>\Contents\Win64 which contains
+# corridorkey.exe alongside its ONNX Runtime / TensorRT DLLs.
+$binDir = $PSScriptRoot
+
+$current = [Environment]::GetEnvironmentVariable("Path", "Machine")
+if ($null -eq $current) { $current = "" }
+
+# Drop empty entries and any previous registration of our directory (case-insensitive).
+$entries = @(
+    $current -split ';' | Where-Object {
+        $_ -and ($_.Trim().TrimEnd('\') -ine $binDir.TrimEnd('\'))
+    }
+)
+
+if ($Mode -eq "Install") {
+    $entries += $binDir
+}
+
+$newPath = ($entries -join ';').Trim(';')
+
+# SetEnvironmentVariable on "Machine" scope broadcasts WM_SETTINGCHANGE so new
+# shells pick up the change immediately. Existing shells must be reopened.
+[Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
+
+Write-Host "CorridorKey CLI PATH $Mode complete: $binDir"
+'@
+
+    Set-Content -Path $targetPath -Value $content -Encoding ASCII
+    Write-Host "Wrote CLI PATH helper: $targetPath" -ForegroundColor Gray
 }
 
 $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
@@ -137,6 +191,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Windows OFX bundle packaging failed."
 }
 
+Write-PathUpdateScript -BundlePath $bundlePath
+
 Write-Host "[3/5] Validating the OFX bundle..." -ForegroundColor Cyan
 & (Join-Path $repoRoot "scripts\validate_ofx_win.ps1") -BundlePath $bundlePath
 if ($LASTEXITCODE -ne 0) {
@@ -192,6 +248,14 @@ Section "Install"
   SetOutPath "`${PLUGIN_DEST}"
   File /r "`${PLUGIN_SOURCE}\*"
 
+  DetailPrint "Registering CorridorKey CLI on system PATH..."
+  nsExec::ExecToStack 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`${PLUGIN_DEST}\Contents\Win64\update_path.ps1" -Mode Install'
+  Pop `$0
+  Pop `$1
+  StrCmp `$0 "0" path_install_ok 0
+    DetailPrint "Warning: PATH registration exited with code `$0. Details: `$1"
+  path_install_ok:
+
   DetailPrint "Writing uninstaller..."
   SetOutPath "`$INSTDIR"
   WriteUninstaller "`$INSTDIR\Uninstall CorridorKey Resolve OFX.exe"
@@ -217,6 +281,15 @@ SectionEnd
 
 Section "Uninstall"
   SetRegView 64
+
+  DetailPrint "Unregistering CorridorKey CLI from system PATH..."
+  nsExec::ExecToStack 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`${PLUGIN_DEST}\Contents\Win64\update_path.ps1" -Mode Uninstall'
+  Pop `$0
+  Pop `$1
+  StrCmp `$0 "0" path_uninstall_ok 0
+    DetailPrint "Warning: PATH unregistration exited with code `$0. Details: `$1"
+  path_uninstall_ok:
+
   DetailPrint "Removing CorridorKey OFX bundle..."
   RMDir /r "`${PLUGIN_DEST}"
 
