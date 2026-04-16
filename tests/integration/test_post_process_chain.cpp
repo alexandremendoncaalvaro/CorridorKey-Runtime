@@ -67,21 +67,20 @@ TEST_CASE("Full post-process chain matching original Python pipeline",
         REQUIRE(proc(3, x, 0) < proc(0, x, 0));
     }
 
-    // 4. Composite on checker in linear space
+    // 4. Composite the premultiplied linear result directly to display sRGB
+    ImageBuffer legacy_comp_buf(4, 4, 4);
+    Image legacy_comp = legacy_comp_buf.view();
+    std::copy(proc.data.begin(), proc.data.end(), legacy_comp.data.begin());
+    ColorUtils::composite_over_checker(legacy_comp);
+    ColorUtils::linear_to_srgb(legacy_comp);
+
     ImageBuffer comp_buf(4, 4, 4);
     Image comp = comp_buf.view();
-    std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
-    ColorUtils::composite_over_checker(comp);
+    ColorUtils::composite_premultiplied_over_checker_to_srgb(proc, comp);
 
-    // After composite, alpha should be 1.0
-    for (int y = 0; y < 4; ++y) {
-        for (int x = 0; x < 4; ++x) {
-            REQUIRE(comp(y, x, 3) == Catch::Approx(1.0f));
-        }
+    for (size_t index = 0; index < comp.data.size(); ++index) {
+        REQUIRE(comp.data[index] == Catch::Approx(legacy_comp.data[index]).margin(0.0001f));
     }
-
-    // 5. Convert composite to sRGB for display
-    ColorUtils::linear_to_srgb(comp);
 
     // All values should be in valid sRGB range [0, 1]
     for (size_t i = 0; i < comp.data.size(); ++i) {

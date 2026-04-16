@@ -74,6 +74,48 @@ TEST_CASE("Packaged CorridorKey output contract selection", "[unit][inference]")
     }
 }
 
+TEST_CASE("I/O binding policy parsing and eligibility", "[unit][inference][regression]") {
+    REQUIRE(core::parse_io_binding_mode("auto") == std::optional(core::IoBindingMode::Auto));
+    REQUIRE(core::parse_io_binding_mode("ON") == std::optional(core::IoBindingMode::On));
+    REQUIRE(core::parse_io_binding_mode("0") == std::optional(core::IoBindingMode::Off));
+    REQUIRE_FALSE(core::parse_io_binding_mode("maybe").has_value());
+
+#if defined(_WIN32)
+    REQUIRE(core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx",
+                                                  Backend::TensorRT));
+    REQUIRE(core::should_enable_io_binding("models/corridorkey_fp16_1536.onnx", Backend::TensorRT,
+                                           core::IoBindingMode::Auto));
+    REQUIRE_FALSE(core::should_enable_io_binding("models/corridorkey_fp16_1536.onnx",
+                                                 Backend::TensorRT, core::IoBindingMode::Off));
+#else
+    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx",
+                                                        Backend::TensorRT));
+#endif
+
+    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_int8_512.onnx",
+                                                        Backend::TensorRT));
+    REQUIRE_FALSE(
+        core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx", Backend::CPU));
+}
+
+TEST_CASE("Packaged output order follows named outputs instead of raw indices",
+          "[unit][inference][regression]") {
+    CHECK(core::packaged_corridorkey_output_indices({"alpha", "fg"}) ==
+          std::vector<std::size_t>{0, 1});
+    CHECK(core::packaged_corridorkey_output_indices({"fg", "alpha"}) ==
+          std::vector<std::size_t>{1, 0});
+    CHECK(core::packaged_corridorkey_output_indices({"output0", "output1"}) ==
+          std::vector<std::size_t>{0, 1});
+}
+
+TEST_CASE("Foreground allocation follows bound and unbound output availability",
+          "[unit][inference][regression]") {
+    CHECK(core::should_allocate_foreground_buffer(false, 2, false));
+    CHECK(core::should_allocate_foreground_buffer(false, 0, true));
+    CHECK_FALSE(core::should_allocate_foreground_buffer(false, 0, false));
+    CHECK_FALSE(core::should_allocate_foreground_buffer(true, 2, true));
+}
+
 TEST_CASE("Model resolution inference from input shape", "[unit][inference][regression]") {
     REQUIRE(core::infer_model_resolution({1, 4, 1536, 1536}) == std::optional<int>(1536));
     REQUIRE(core::infer_model_resolution({-1, 4, 1024, 1024}) == std::optional<int>(1024));
@@ -97,12 +139,16 @@ TEST_CASE("Output validation rejects non-finite model output", "[unit][inference
     SECTION("Finite values pass with correct stats") {
         const std::vector<float> values = {0.0F, 0.5F, 1.0F};
         const auto stats = core::compute_numeric_stats(values);
+        const auto analysis = core::analyze_finite_values(values, "alpha_raw_output");
 
         REQUIRE(stats.total_count == 3);
         REQUIRE(stats.finite_count == 3);
         REQUIRE(stats.min_value == Catch::Approx(0.0F));
         REQUIRE(stats.max_value == Catch::Approx(1.0F));
         REQUIRE(stats.mean_value == Catch::Approx(0.5));
+        REQUIRE(analysis.has_value());
+        REQUIRE(core::all_values_finite(*analysis));
+        REQUIRE(analysis->mean_value == Catch::Approx(0.5));
 
         auto validation = core::validate_finite_values(values, "alpha_raw_output");
         REQUIRE(validation.has_value());
@@ -115,12 +161,15 @@ TEST_CASE("Output validation rejects non-finite model output", "[unit][inference
             std::numeric_limits<float>::infinity(),
         };
         const auto stats = core::compute_numeric_stats(values);
+        const auto analysis = core::analyze_finite_values(values, "alpha_raw_output");
 
         REQUIRE(stats.total_count == 3);
         REQUIRE(stats.finite_count == 1);
         REQUIRE(stats.min_value == Catch::Approx(0.25F));
         REQUIRE(stats.max_value == Catch::Approx(0.25F));
         REQUIRE(stats.mean_value == Catch::Approx(0.25));
+        REQUIRE_FALSE(analysis.has_value());
+        REQUIRE(analysis.error().message.find("finite=1") != std::string::npos);
 
         auto validation = core::validate_finite_values(values, "alpha_raw_output");
         REQUIRE_FALSE(validation.has_value());

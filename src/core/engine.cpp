@@ -11,8 +11,10 @@
 #include "../frame_io/video_io.hpp"
 #include "../post_process/color_utils.hpp"
 #include "common/stage_profiler.hpp"
+#include "engine_internal.hpp"
 #include "inference_session.hpp"
 #include "mlx_probe.hpp"
+#include "ort_process_context.hpp"
 #include "warmup_policy.hpp"
 
 namespace corridorkey {
@@ -24,6 +26,7 @@ class Engine::Impl {
     std::optional<DeviceInfo> cpu_fallback_device;
     std::optional<BackendFallbackInfo> fallback_info;
     EngineCreateOptions create_options = {};
+    std::shared_ptr<core::OrtProcessContext> ort_process_context = nullptr;
     std::mutex warmup_mutex;
     std::optional<int> last_warmup_resolution;
     std::optional<Error> warmup_error;
@@ -41,7 +44,10 @@ class Engine::Impl {
         }
 
         Backend failed_backend = session->device().backend;
-        auto fallback_res = InferenceSession::create(model_path, *cpu_fallback_device);
+        SessionCreateOptions session_options;
+        session_options.ort_process_context = ort_process_context;
+        auto fallback_res =
+            InferenceSession::create(model_path, *cpu_fallback_device, session_options);
         if (!fallback_res) {
             return Unexpected(fallback_res.error());
         }
@@ -175,9 +181,20 @@ Engine& Engine::operator=(Engine&&) noexcept = default;
 Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& model_path,
                                                DeviceInfo device, StageTimingCallback on_stage,
                                                EngineCreateOptions options) {
+    return core::EngineFactory::create_with_ort_process_context(
+        model_path, device, std::make_shared<core::OrtProcessContext>(), on_stage, options);
+}
+
+Result<std::unique_ptr<Engine>> core::EngineFactory::create_with_ort_process_context(
+    const std::filesystem::path& model_path, DeviceInfo device,
+    std::shared_ptr<core::OrtProcessContext> ort_process_context, StageTimingCallback on_stage,
+    EngineCreateOptions options) {
     auto engine = std::unique_ptr<Engine>(new Engine());
     engine->m_impl->model_path = model_path;
     engine->m_impl->create_options = options;
+    engine->m_impl->ort_process_context = ort_process_context
+                                              ? std::move(ort_process_context)
+                                              : std::make_shared<core::OrtProcessContext>();
 
     DeviceInfo requested_device =
         device.backend == Backend::Auto ? resolve_auto_device_for_model(model_path) : device;
@@ -187,13 +204,17 @@ Result<std::unique_ptr<Engine>> Engine::create(const std::filesystem::path& mode
 
     SessionCreateOptions session_options;
     session_options.disable_cpu_ep_fallback = options.disable_cpu_ep_fallback;
+    session_options.ort_process_context = engine->m_impl->ort_process_context;
 
     auto session_res = common::measure_stage(on_stage, "session_create_requested", [&]() {
-        return InferenceSession::create(model_path, requested_device, session_options);
+        return InferenceSession::create(model_path, requested_device, session_options, on_stage);
     });
     if (!session_res && engine->m_impl->cpu_fallback_device.has_value()) {
+        SessionCreateOptions fallback_options;
+        fallback_options.ort_process_context = engine->m_impl->ort_process_context;
         auto fallback_res = common::measure_stage(on_stage, "session_create_cpu_fallback", [&]() {
-            return InferenceSession::create(model_path, *engine->m_impl->cpu_fallback_device);
+            return InferenceSession::create(model_path, *engine->m_impl->cpu_fallback_device,
+                                            fallback_options, on_stage);
         });
         if (!fallback_res) {
             return Unexpected(session_res.error());

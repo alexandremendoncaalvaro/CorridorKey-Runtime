@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <corridorkey/api_export.hpp>
 #include <corridorkey/types.hpp>
 
@@ -42,6 +43,7 @@ class CORRIDORKEY_API ColorUtils {
      * Useful for preview generation.
      */
     static void composite_over_checker(Image rgba);
+    static void composite_premultiplied_over_checker_to_srgb(Image premultiplied_rgba, Image dst);
 
     /**
      * @brief Generate a rough alpha guide using a simple green-key fallback.
@@ -56,6 +58,11 @@ class CORRIDORKEY_API ColorUtils {
      */
     static ImageBuffer resize(Image image, int new_width, int new_height);
     static void resize_into(Image image, Image dst);
+    static void resize_from_planar_into(const float* src, int src_width, int src_height,
+                                        int src_channels, Image dst);
+    static void resize_alpha_fg_from_planar_into(const float* alpha_src, const float* fg_src,
+                                                 int src_width, int src_height, Image alpha_dst,
+                                                 Image fg_dst);
 
     /**
      * @brief Resize with Gaussian pre-filter for anti-aliased downscaling.
@@ -73,6 +80,8 @@ class CORRIDORKEY_API ColorUtils {
      */
     static ImageBuffer resize_lanczos(Image image, int new_width, int new_height, State& state);
     static void resize_lanczos_into(Image image, Image dst, State& state);
+    static void resize_lanczos_from_planar_into(const float* src, int src_width, int src_height,
+                                                int src_channels, Image dst, State& state);
 
     /**
      * @brief Apply separable Gaussian blur in-place.
@@ -91,6 +100,9 @@ class CORRIDORKEY_API ColorUtils {
      * Uses 64x64 tiling for cache efficiency.
      */
     static void to_planar(Image src, float* dst);
+    static void pack_normalized_rgb_and_hint_to_planar(Image rgb, Image hint, float* dst,
+                                                       const std::array<float, 3>& mean,
+                                                       const std::array<float, 3>& inv_stddev);
 
     /**
      * @brief Convert planar NCHW data to interleaved HWC data.

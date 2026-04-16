@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CLI_PATH="${CORRIDORKEY_CLI:-build/release/src/cli/corridorkey}"
+OFX_BENCHMARK_HARNESS="${CORRIDORKEY_OFX_BENCHMARK_HARNESS:-build/release/tests/integration/ofx_benchmark_harness}"
 OUTPUT_ROOT="${CORRIDORKEY_OUTPUT_ROOT:-build/runtime_corpus}"
 MODE="${CORRIDORKEY_CORPUS_PROFILE:-baseline}"
 DEVICE="${CORRIDORKEY_DEVICE:-auto}"
@@ -31,9 +32,10 @@ log_command() {
     printf '%s\n' "$*" >> "$COMMAND_LOG"
 }
 
-run_capture() {
-    local artifact_path="$1"
-    shift
+run_tool_capture() {
+    local executable="$1"
+    local artifact_path="$2"
+    shift 2
 
     mkdir -p "$(dirname "$artifact_path")"
     if [ "$SKIP_EXISTING" = "1" ] && [ -f "$artifact_path" ]; then
@@ -41,22 +43,20 @@ run_capture() {
         return
     fi
 
-    log_command "$CLI_PATH $*"
-    "$CLI_PATH" "$@" > "$artifact_path"
+    log_command "$executable $*"
+    "$executable" "$@" > "$artifact_path"
+}
+
+run_capture() {
+    local artifact_path="$1"
+    shift
+    run_tool_capture "$CLI_PATH" "$artifact_path" "$@"
 }
 
 run_case_process() {
     local ndjson_path="$1"
     shift
-
-    mkdir -p "$(dirname "$ndjson_path")"
-    if [ "$SKIP_EXISTING" = "1" ] && [ -f "$ndjson_path" ]; then
-        echo "Skipping existing artifact: $ndjson_path"
-        return
-    fi
-
-    log_command "$CLI_PATH $*"
-    "$CLI_PATH" "$@" > "$ndjson_path"
+    run_tool_capture "$CLI_PATH" "$ndjson_path" "$@"
 }
 
 prepare_sequence_subset() {
@@ -96,6 +96,10 @@ run_common_artifacts() {
     run_capture "${OUTPUT_ROOT}/benchmark_synthetic_cpu_512.json" benchmark --json -m "$MODEL_CPU_BASELINE" -d cpu
     run_capture "${OUTPUT_ROOT}/benchmark_synthetic_primary.json" benchmark --json \
         -m "$PRIMARY_SYNTHETIC_MODEL" -d "$PRIMARY_DEVICE"
+    if [ -x "$OFX_BENCHMARK_HARNESS" ]; then
+        run_tool_capture "$OFX_BENCHMARK_HARNESS" "${OUTPUT_ROOT}/benchmark_ofx_primary.json" \
+            --model "$PRIMARY_SYNTHETIC_MODEL" --device "$PRIMARY_DEVICE"
+    fi
 }
 
 run_smoke_cases() {

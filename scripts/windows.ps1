@@ -8,6 +8,7 @@ param(
     [string]$CorridorKeyRepo = "",
     [ValidateSet("rtx", "dml", "all")]
     [string]$Track = "all",
+    [string]$DisplayVersionLabel = "",
     [string[]]$ForwardArguments = @()
 )
 
@@ -74,6 +75,9 @@ if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
 
 Write-Host "[windows] Task: $Task" -ForegroundColor Cyan
 Write-Host "[windows] Version: $resolvedVersion" -ForegroundColor Cyan
+if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+    Write-Host "[windows] Display version label: $DisplayVersionLabel" -ForegroundColor Cyan
+}
 if ($Task -in @("package-ofx", "package-runtime", "release")) {
     Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
 }
@@ -88,7 +92,8 @@ switch ($Task) {
             throw "Task 'build' does not accept additional arguments. Use -Preset only."
         }
 
-        Invoke-CorridorKeyScript -ScriptName "build.ps1" -Arguments @("-Preset", $Preset)
+        $arguments = @("-Preset", $Preset, "-DisplayVersionLabel", $DisplayVersionLabel)
+        Invoke-CorridorKeyScript -ScriptName "build.ps1" -Arguments $arguments
         break
     }
     "prepare-rtx" {
@@ -109,7 +114,8 @@ switch ($Task) {
     "certify-rtx-artifacts" {
         $arguments = @(
             "-Version", $resolvedVersion,
-            "-BuildPreset", $Preset
+            "-BuildPreset", $Preset,
+            "-DisplayVersionLabel", $DisplayVersionLabel
         ) + $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "certify_windows_rtx_artifacts.ps1" -Arguments $arguments
         break
@@ -139,12 +145,20 @@ switch ($Task) {
         break
     }
     "release" {
-        $arguments = @("-Version", $resolvedVersion, "-Track", $resolvedTrack) + $additionalArguments
+        $arguments = @(
+            "-Version", $resolvedVersion,
+            "-Track", $resolvedTrack,
+            "-DisplayVersionLabel", $DisplayVersionLabel
+        ) + $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments
         break
     }
     "regen-rtx-release" {
-        $arguments = @("-Version", $resolvedVersion, "-BuildPreset", $Preset)
+        $arguments = @(
+            "-Version", $resolvedVersion,
+            "-BuildPreset", $Preset,
+            "-DisplayVersionLabel", $DisplayVersionLabel
+        )
         if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
             $arguments += @("-Checkpoint", $Checkpoint)
         }

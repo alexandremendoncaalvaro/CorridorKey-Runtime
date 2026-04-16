@@ -7,6 +7,7 @@ param(
     [string]$OutputModelsDir = "",
     [ValidateSet("windows-rtx")]
     [string]$ModelProfile = "windows-rtx",
+    [string]$DisplayVersionLabel = "",
     [switch]$Skip2048
 )
 
@@ -97,7 +98,10 @@ $validationReportPath = Join-Path $OutputModelsDir "windows_rtx_validation_repor
 
 if (-not (Test-Path $cliPath)) {
     Write-Host "[certify-rtx-artifacts] Runtime CLI not found. Building $BuildPreset first..." -ForegroundColor Cyan
-    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\build.ps1") -Arguments @("-Preset", $BuildPreset)
+    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\build.ps1") -Arguments @(
+        "-Preset", $BuildPreset,
+        "-DisplayVersionLabel", $DisplayVersionLabel
+    )
 }
 
 if (-not (Test-Path $cliPath)) {

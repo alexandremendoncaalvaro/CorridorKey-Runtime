@@ -1,6 +1,7 @@
 param(
     [ValidateSet("debug", "release", "release-lto")]
-    [string]$Preset = "release"
+    [string]$Preset = "release",
+    [string]$DisplayVersionLabel = ""
 )
 
 Set-StrictMode -Version Latest
@@ -49,6 +50,11 @@ if ($isWindowsHost) {
     $env:CORRIDORKEY_WINDOWS_ORT_ROOT = $windowsOrtRoot
     $configureArgs += "-DCORRIDORKEY_WINDOWS_ORT_ROOT=$windowsOrtRoot"
     Write-Host "[build] Using curated Windows ONNX Runtime: $windowsOrtRoot" -ForegroundColor Yellow
+}
+
+$configureArgs += "-DCORRIDORKEY_DISPLAY_VERSION_LABEL=$DisplayVersionLabel"
+if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+    Write-Host "[build] Using display version label: $DisplayVersionLabel" -ForegroundColor Yellow
 }
 
 Write-Host "[build] Configuring preset: $Preset" -ForegroundColor Cyan

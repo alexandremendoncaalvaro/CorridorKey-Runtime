@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "../common/parallel_for.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../common/shared_memory_transport.hpp"
+#include "../common/stage_profiler.hpp"
+#include "../core/engine_internal.hpp"
+#include "../core/ort_process_context.hpp"
 #include "ofx_session_policy.hpp"
 
 namespace corridorkey::app {
@@ -36,9 +40,38 @@ void append_timing(std::vector<StageTiming>& timings, const StageTiming& timing)
     timings.push_back(timing);
 }
 
+void copy_image_rows(Image source, Image destination) {
+    if (source.empty() || destination.empty()) {
+        return;
+    }
+
+    const size_t copy_size = std::min(source.data.size(), destination.data.size());
+    if (copy_size == 0) {
+        return;
+    }
+
+    if (source.width != destination.width || source.height != destination.height ||
+        source.channels != destination.channels) {
+        std::copy_n(source.data.begin(), copy_size, destination.data.begin());
+        return;
+    }
+
+    const size_t row_size =
+        static_cast<size_t>(source.width) * static_cast<size_t>(source.channels);
+    common::parallel_for_rows(source.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const size_t offset = static_cast<size_t>(y_pos) * row_size;
+            std::copy_n(source.data.begin() + static_cast<std::ptrdiff_t>(offset), row_size,
+                        destination.data.begin() + static_cast<std::ptrdiff_t>(offset));
+        }
+    });
+}
+
 }  // namespace
 
-OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options) : m_options(options) {}
+OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options)
+    : m_options(options),
+      m_ort_process_context(std::make_shared<corridorkey::core::OrtProcessContext>()) {}
 
 Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     const OfxRuntimePrepareSessionRequest& request) {
@@ -62,8 +95,9 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         append_timing(timings, timing);
     };
 
-    auto engine = Engine::create(request.model_path, request.requested_device, on_stage,
-                                 request.engine_options);
+    auto engine = corridorkey::core::EngineFactory::create_with_ort_process_context(
+        request.model_path, request.requested_device, m_ort_process_context, on_stage,
+        request.engine_options);
     if (!engine) {
         return Unexpected<Error>(engine.error());
     }
@@ -121,12 +155,16 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
     auto alpha = transport->alpha_view();
     auto foreground = transport->foreground_view();
     auto result_alpha = result->alpha.const_view();
-    std::copy(result_alpha.data.begin(), result_alpha.data.end(), alpha.data.begin());
-    if (!request.params.output_alpha_only) {
-        auto result_foreground = result->foreground.const_view();
-        std::copy(result_foreground.data.begin(), result_foreground.data.end(),
-                  foreground.data.begin());
-    }
+    common::measure_stage(
+        on_stage, "ofx_broker_writeback",
+        [&]() {
+            copy_image_rows(result_alpha, alpha);
+            if (!request.params.output_alpha_only) {
+                auto result_foreground = result->foreground.const_view();
+                copy_image_rows(result_foreground, foreground);
+            }
+        },
+        1);
 
     refresh_engine_snapshot(session->second.snapshot, *session->second.engine);
     session->second.last_used_at = now();

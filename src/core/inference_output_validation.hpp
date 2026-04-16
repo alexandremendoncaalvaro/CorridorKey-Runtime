@@ -19,6 +19,10 @@ struct NumericStats {
     double mean_value = 0.0;
 };
 
+inline bool all_values_finite(const NumericStats& stats) {
+    return stats.finite_count == stats.total_count;
+}
+
 inline NumericStats compute_numeric_stats(std::span<const float> values) {
     NumericStats stats;
     stats.total_count = values.size();
@@ -57,16 +61,26 @@ inline std::string format_numeric_stats(std::string_view label, const NumericSta
     return stream.str();
 }
 
-inline Result<void> validate_finite_values(std::span<const float> values, std::string_view label) {
+inline Result<NumericStats> analyze_finite_values(std::span<const float> values,
+                                                  std::string_view label) {
     const NumericStats stats = compute_numeric_stats(values);
-    if (stats.finite_count == stats.total_count) {
-        return {};
+    if (all_values_finite(stats)) {
+        return stats;
     }
 
     return Unexpected(Error{
         ErrorCode::InferenceFailed,
         "Model output contains non-finite values. " + format_numeric_stats(label, stats),
     });
+}
+
+inline Result<void> validate_finite_values(std::span<const float> values, std::string_view label) {
+    const auto analysis = analyze_finite_values(values, label);
+    if (analysis) {
+        return {};
+    }
+
+    return Unexpected(analysis.error());
 }
 
 inline Result<void> validate_finite_image(Image image, std::string_view label) {

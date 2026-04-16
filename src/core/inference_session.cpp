@@ -24,15 +24,19 @@
 
 #include <fstream>
 #include <mutex>
+#include <optional>
 
 #include "coarse_to_fine_policy.hpp"
+#include "common/fp16_convert.hpp"
 #include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
+#include "core/pinned_buffer.hpp"
 #include "inference_output_validation.hpp"
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
+#include "ort_process_context.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
 #include "post_process/despill.hpp"
@@ -42,6 +46,14 @@
 #include "tile_blend.hpp"
 
 namespace {
+
+constexpr std::array<float, 3> kCorridorKeyRgbMean = {0.485F, 0.456F, 0.406F};
+constexpr std::array<float, 3> kCorridorKeyRgbInvStddev = {
+    1.0F / 0.229F,
+    1.0F / 0.224F,
+    1.0F / 0.225F,
+};
+
 void debug_log(const std::string& message) {
 #ifdef _WIN32
     char* local_app_data = nullptr;
@@ -89,6 +101,209 @@ namespace corridorkey {
 
 namespace {
 
+template <typename T>
+class AlignedTensorBuffer {
+   public:
+    AlignedTensorBuffer() = default;
+
+    explicit AlignedTensorBuffer(std::size_t element_count) {
+        resize(element_count);
+    }
+
+    ~AlignedTensorBuffer() {
+        release();
+    }
+
+    AlignedTensorBuffer(const AlignedTensorBuffer&) = delete;
+    AlignedTensorBuffer& operator=(const AlignedTensorBuffer&) = delete;
+
+    AlignedTensorBuffer(AlignedTensorBuffer&& other) noexcept
+        : m_size(other.m_size), m_data(other.m_data) {
+        other.m_size = 0;
+        other.m_data = nullptr;
+    }
+
+    AlignedTensorBuffer& operator=(AlignedTensorBuffer&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        release();
+        m_size = other.m_size;
+        m_data = other.m_data;
+        other.m_size = 0;
+        other.m_data = nullptr;
+        return *this;
+    }
+
+    void resize(std::size_t element_count) {
+        if (m_size == element_count && m_data != nullptr) {
+            return;
+        }
+
+        release();
+        if (element_count == 0) {
+            return;
+        }
+
+#ifdef _WIN32
+        m_data = static_cast<T*>(_aligned_malloc(element_count * sizeof(T), MEMORY_ALIGNMENT));
+#else
+        void* storage = nullptr;
+        if (posix_memalign(&storage, MEMORY_ALIGNMENT, element_count * sizeof(T)) == 0) {
+            m_data = static_cast<T*>(storage);
+        }
+#endif
+        if (m_data == nullptr) {
+            throw std::bad_alloc();
+        }
+        m_size = element_count;
+    }
+
+    [[nodiscard]] T* data() {
+        return m_data;
+    }
+
+    [[nodiscard]] const T* data() const {
+        return m_data;
+    }
+
+    [[nodiscard]] std::size_t size() const {
+        return m_size;
+    }
+
+   private:
+    void release() {
+        if (m_data == nullptr) {
+            return;
+        }
+#ifdef _WIN32
+        _aligned_free(m_data);
+#else
+        free(m_data);
+#endif
+        m_data = nullptr;
+        m_size = 0;
+    }
+
+    std::size_t m_size = 0;
+    T* m_data = nullptr;
+};
+
+struct BoundTensorStorage {
+    ONNXTensorElementDataType element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
+    std::vector<int64_t> shape = {};
+    AlignedTensorBuffer<float> fp32_storage = {};
+    AlignedTensorBuffer<Ort::Float16_t> fp16_storage = {};
+    core::PinnedBuffer<float> fp32_pinned = {};
+    core::PinnedBuffer<Ort::Float16_t> fp16_pinned = {};
+    bool uses_pinned = false;
+    Ort::Value tensor{nullptr};
+
+    [[nodiscard]] std::size_t element_count() const {
+        std::size_t count = 1;
+        for (const auto dim : shape) {
+            count *= static_cast<std::size_t>(dim);
+        }
+        return count;
+    }
+
+    [[nodiscard]] bool matches(ONNXTensorElementDataType candidate_type,
+                               const std::vector<int64_t>& candidate_shape) const {
+        return element_type == candidate_type && shape == candidate_shape && tensor != nullptr;
+    }
+
+    void reset(const Ort::MemoryInfo& memory_info, ONNXTensorElementDataType candidate_type,
+               const std::vector<int64_t>& candidate_shape) {
+        element_type = candidate_type;
+        shape = candidate_shape;
+        const std::size_t count = element_count();
+        if (candidate_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+            auto pinned = core::PinnedBuffer<Ort::Float16_t>::try_allocate(count);
+            if (pinned.has_value()) {
+                fp16_pinned = std::move(*pinned);
+                uses_pinned = true;
+                tensor = Ort::Value::CreateTensor<Ort::Float16_t>(
+                    memory_info, fp16_pinned.data(), count, shape.data(), shape.size());
+            } else {
+                fp16_storage.resize(count);
+                uses_pinned = false;
+                tensor = Ort::Value::CreateTensor<Ort::Float16_t>(
+                    memory_info, fp16_storage.data(), count, shape.data(), shape.size());
+            }
+            return;
+        }
+
+        auto pinned = core::PinnedBuffer<float>::try_allocate(count);
+        if (pinned.has_value()) {
+            fp32_pinned = std::move(*pinned);
+            uses_pinned = true;
+            tensor = Ort::Value::CreateTensor<float>(memory_info, fp32_pinned.data(), count,
+                                                     shape.data(), shape.size());
+        } else {
+            fp32_storage.resize(count);
+            uses_pinned = false;
+            tensor = Ort::Value::CreateTensor<float>(memory_info, fp32_storage.data(), count,
+                                                     shape.data(), shape.size());
+        }
+    }
+};
+
+Result<std::vector<int64_t>> resolve_io_binding_shape(const std::vector<int64_t>& shape_template,
+                                                      int64_t batch_size, int64_t height,
+                                                      int64_t width, std::string_view tensor_name) {
+    if (shape_template.size() != 4) {
+        return Unexpected(
+            Error{ErrorCode::HardwareNotSupported,
+                  "I/O binding expects 4D tensors for " + std::string(tensor_name) + "."});
+    }
+
+    std::vector<int64_t> resolved = shape_template;
+    const auto resolve_dimension = [&](std::size_t index, int64_t expected,
+                                       std::string_view label) -> Result<void> {
+        if (resolved[index] < 0) {
+            resolved[index] = expected;
+            return {};
+        }
+        if (resolved[index] != expected) {
+            return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                    "I/O binding shape mismatch for " + std::string(tensor_name) +
+                                        " " + std::string(label) + ": expected " +
+                                        std::to_string(expected) + ", got " +
+                                        std::to_string(resolved[index]) + "."});
+        }
+        return {};
+    };
+
+    if (auto batch_res = resolve_dimension(0, batch_size, "batch"); !batch_res) {
+        return Unexpected(batch_res.error());
+    }
+    if (resolved[1] <= 0) {
+        if (tensor_name == core::k_corridorkey_alpha_output_name) {
+            resolved[1] = 1;
+        } else if (tensor_name == core::k_corridorkey_fg_output_name) {
+            resolved[1] = 3;
+        } else {
+            return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                    "I/O binding channel count must be explicit for " +
+                                        std::string(tensor_name) + "."});
+        }
+    }
+    if (auto height_res = resolve_dimension(2, height, "height"); !height_res) {
+        return Unexpected(height_res.error());
+    }
+    if (auto width_res = resolve_dimension(3, width, "width"); !width_res) {
+        return Unexpected(width_res.error());
+    }
+
+    return resolved;
+}
+
+bool supports_bound_tensor_type(ONNXTensorElementDataType element_type) {
+    return element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+           element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+}
+
 Result<void> validate_output_values(std::span<const float> values, std::string_view label) {
     const auto validation = core::validate_finite_values(values, label);
     if (!validation) {
@@ -105,20 +320,125 @@ Result<void> validate_output_image(Image image, std::string_view label) {
     return validation;
 }
 
-void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution,
-                                 std::span<const float> values, std::string_view label) {
-    if (device.backend != Backend::TensorRT || recommended_resolution <= 1024) {
-        return;
-    }
-    debug_log(core::format_numeric_stats(label, core::compute_numeric_stats(values)));
+bool should_log_output_stats(DeviceInfo device, int recommended_resolution) {
+    return device.backend == Backend::TensorRT && recommended_resolution > 1024;
 }
 
-void log_output_stats_if_enabled(DeviceInfo device, int recommended_resolution, Image image,
-                                 std::string_view label) {
-    log_output_stats_if_enabled(device, recommended_resolution, image.data, label);
+struct MaterializedOutputTensor {
+    std::vector<int64_t> shape = {};
+    std::vector<float> fp32_storage = {};
+    float* values = nullptr;
+    std::size_t image_stride = 0;
+
+    [[nodiscard]] std::span<const float> span(std::size_t image_count) const {
+        return std::span<const float>(values, image_stride * image_count);
+    }
+};
+
+Result<MaterializedOutputTensor> materialize_output_tensor(
+    Ort::Value& tensor, std::size_t image_count, DeviceInfo device, int recommended_resolution,
+    std::string_view raw_label, std::string_view debug_label) {
+    MaterializedOutputTensor output;
+
+    auto tensor_info = tensor.GetTensorTypeAndShapeInfo();
+    auto element_type = tensor_info.GetElementType();
+    output.shape = tensor_info.GetShape();
+    if (output.shape.size() < 4) {
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed,
+                  "Model output tensor for " + std::string(raw_label) + " did not expose NCHW."});
+    }
+
+    debug_log(std::string(debug_label) +
+              " output element type: " + std::to_string(static_cast<int>(element_type)));
+
+    output.image_stride = static_cast<std::size_t>(output.shape[1]) *
+                          static_cast<std::size_t>(output.shape[2]) *
+                          static_cast<std::size_t>(output.shape[3]);
+
+    if (element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+        debug_log("Converting " + std::string(debug_label) + " output from FP16 to FP32");
+        const Ort::Float16_t* fp16_values = tensor.GetTensorData<Ort::Float16_t>();
+        const std::size_t total_elements = image_count * output.image_stride;
+        output.fp32_storage.resize(total_elements);
+        common::convert_fp16_to_fp32(reinterpret_cast<const uint16_t*>(fp16_values),
+                                     output.fp32_storage.data(), total_elements);
+        output.values = output.fp32_storage.data();
+    } else {
+        output.values = tensor.GetTensorMutableData<float>();
+    }
+
+    const auto output_values = output.span(image_count);
+    if (should_log_output_stats(device, recommended_resolution)) {
+        const auto analysis = core::analyze_finite_values(output_values, raw_label);
+        if (!analysis) {
+            debug_log(analysis.error().message);
+            return Unexpected(analysis.error());
+        }
+        debug_log(core::format_numeric_stats(raw_label, *analysis));
+        return output;
+    }
+
+    const auto validation = validate_output_values(output_values, raw_label);
+    if (!validation) {
+        return Unexpected(validation.error());
+    }
+
+    return output;
+}
+
+void resize_model_output(const float* source, int source_width, int source_height,
+                         int source_channels, Image destination, bool use_lanczos,
+                         ColorUtils::State& state) {
+    if (use_lanczos) {
+        ColorUtils::resize_lanczos_from_planar_into(source, source_width, source_height,
+                                                    source_channels, destination, state);
+        return;
+    }
+
+    ColorUtils::resize_from_planar_into(source, source_width, source_height, source_channels,
+                                        destination);
+}
+
+void resize_model_outputs(Image alpha_destination, Image fg_destination, const float* alpha_source,
+                          const float* fg_source, int source_width, int source_height,
+                          bool use_lanczos, ColorUtils::State& state) {
+    if (use_lanczos || fg_source == nullptr || fg_destination.empty()) {
+        resize_model_output(alpha_source, source_width, source_height, 1, alpha_destination,
+                            use_lanczos, state);
+        if (fg_source != nullptr && !fg_destination.empty()) {
+            resize_model_output(fg_source, source_width, source_height, 3, fg_destination,
+                                use_lanczos, state);
+        }
+        return;
+    }
+
+    ColorUtils::resize_alpha_fg_from_planar_into(alpha_source, fg_source, source_width,
+                                                 source_height, alpha_destination, fg_destination);
+}
+
+Result<void> finalize_output_image(DeviceInfo device, int recommended_resolution, Image image,
+                                   std::string_view label) {
+    if (should_log_output_stats(device, recommended_resolution)) {
+        const auto analysis = core::analyze_finite_values(image.data, label);
+        if (!analysis) {
+            debug_log(analysis.error().message);
+            return Unexpected(analysis.error());
+        }
+        debug_log(core::format_numeric_stats(label, *analysis));
+        return {};
+    }
+
+    const auto validation = validate_output_image(image, label);
+    if (!validation) {
+        return Unexpected(validation.error());
+    }
+
+    return {};
 }
 
 constexpr const char* kDisableCpuEpFallbackConfig = "session.disable_cpu_ep_fallback";
+constexpr const char* kUseEnvAllocatorsConfig = "session.use_env_allocators";
 
 #ifdef _WIN32
 constexpr const char* kTensorRtRtxExecutionProvider = "NvTensorRTRTXExecutionProvider";
@@ -373,6 +693,15 @@ void normalize_accumulators(Image acc_alpha, Image acc_fg, const Image& acc_weig
 
 }  // namespace
 
+struct InferenceSession::BoundIoState {
+    explicit BoundIoState(Ort::Session& session) : binding(session) {}
+
+    Ort::IoBinding binding{nullptr};
+    BoundTensorStorage alpha_output = {};
+    std::optional<BoundTensorStorage> fg_output = std::nullopt;
+    std::vector<int64_t> input_shape = {};
+};
+
 InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(device)) {
     // Default recommended resolution. High-level layers (App)
     // will typically override this via InferenceParams.
@@ -380,6 +709,97 @@ InferenceSession::InferenceSession(DeviceInfo device) : m_device(std::move(devic
 }
 
 InferenceSession::~InferenceSession() = default;
+InferenceSession::InferenceSession(InferenceSession&&) noexcept = default;
+InferenceSession& InferenceSession::operator=(InferenceSession&&) noexcept = default;
+
+Result<Ort::Value> InferenceSession::create_input_tensor(float* planar_data,
+                                                         std::size_t element_count,
+                                                         const std::vector<int64_t>& shape) {
+    auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+    if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+        m_fp16_pool.resize(element_count);
+        for (std::size_t index = 0; index < element_count; ++index) {
+            m_fp16_pool[index] = Ort::Float16_t(planar_data[index]);
+        }
+        return Ort::Value::CreateTensor<Ort::Float16_t>(memory_info, m_fp16_pool.data(),
+                                                        element_count, shape.data(), shape.size());
+    }
+
+    if (m_input_element_type != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "Unsupported model input type for I/O binding path: " +
+                                    std::to_string(m_input_element_type)});
+    }
+
+    return Ort::Value::CreateTensor<float>(memory_info, planar_data, element_count, shape.data(),
+                                           shape.size());
+}
+
+Result<InferenceSession::BoundIoState*> InferenceSession::ensure_bound_io_state(
+    const std::vector<int64_t>& input_shape) {
+    if (input_shape.size() != 4) {
+        return Unexpected(
+            Error{ErrorCode::HardwareNotSupported, "I/O binding requires a 4D input tensor."});
+    }
+
+    if (m_output_node_dims.empty() || m_output_element_types.empty()) {
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "I/O binding requires output metadata to be available."});
+    }
+
+    const bool has_foreground_output = m_output_node_names_ptr.size() > 1 &&
+                                       m_output_node_dims.size() > 1 &&
+                                       m_output_element_types.size() > 1;
+
+    if (m_bound_io_state != nullptr && m_bound_io_state->input_shape == input_shape &&
+        m_bound_io_state->fg_output.has_value() == has_foreground_output) {
+        return m_bound_io_state.get();
+    }
+
+    if (!supports_bound_tensor_type(m_output_element_types[0])) {
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "Unsupported alpha output type for I/O binding: " +
+                                    std::to_string(m_output_element_types[0])});
+    }
+    if (has_foreground_output && !supports_bound_tensor_type(m_output_element_types[1])) {
+        return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                "Unsupported foreground output type for I/O binding: " +
+                                    std::to_string(m_output_element_types[1])});
+    }
+
+    auto state = std::make_unique<BoundIoState>(m_session);
+    auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+    const auto batch_size = input_shape[0];
+    const auto model_height = input_shape[2];
+    const auto model_width = input_shape[3];
+
+    const auto alpha_shape_res = resolve_io_binding_shape(
+        m_output_node_dims[0], batch_size, model_height, model_width, m_output_node_names[0]);
+    if (!alpha_shape_res) {
+        return Unexpected(alpha_shape_res.error());
+    }
+
+    state->alpha_output.reset(memory_info, m_output_element_types[0], *alpha_shape_res);
+    state->binding.BindOutput(m_output_node_names_ptr[0], state->alpha_output.tensor);
+
+    if (has_foreground_output) {
+        const auto fg_shape_res = resolve_io_binding_shape(
+            m_output_node_dims[1], batch_size, model_height, model_width, m_output_node_names[1]);
+        if (!fg_shape_res) {
+            return Unexpected(fg_shape_res.error());
+        }
+
+        state->fg_output.emplace();
+        state->fg_output->reset(memory_info, m_output_element_types[1], *fg_shape_res);
+        state->binding.BindOutput(m_output_node_names_ptr[1], state->fg_output->tensor);
+    }
+
+    state->input_shape = input_shape;
+    m_bound_io_state = std::move(state);
+    return m_bound_io_state.get();
+}
 
 void InferenceSession::configure_session_options(bool use_optimized_model_cache,
                                                  const SessionCreateOptions& options,
@@ -387,8 +807,11 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 #ifndef _WIN32
     (void)model_path;
 #endif
-    debug_log("Setting intra-op threads");
-    m_session_options.SetIntraOpNumThreads(core::intra_op_threads_for_backend(m_device.backend));
+    debug_log("Configuring shared ORT thread pools and env allocators");
+    // Shared thread pools require per-session thread pools to be disabled. Pair that with
+    // `session.use_env_allocators=1` so every ORT session in the process reuses the env allocator.
+    m_session_options.DisablePerSessionThreads();
+    m_session_options.AddConfigEntry(kUseEnvAllocatorsConfig, "1");
 
     debug_log("Setting graph optimization level");
     if (use_optimized_model_cache) {
@@ -518,29 +941,54 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
         model_path, m_device.backend,
         m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
+    size_t num_output_nodes = m_session.GetOutputCount();
+    std::vector<std::string> discovered_output_names;
+    std::vector<std::vector<int64_t>> discovered_output_dims;
+    std::vector<ONNXTensorElementDataType> discovered_output_element_types;
+    discovered_output_names.reserve(num_output_nodes);
+    discovered_output_dims.reserve(num_output_nodes);
+    discovered_output_element_types.reserve(num_output_nodes);
+    for (size_t i = 0; i < num_output_nodes; ++i) {
+        auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
+        auto output_type_info = m_session.GetOutputTypeInfo(i);
+        auto output_tensor_info = output_type_info.GetTensorTypeAndShapeInfo();
+        discovered_output_names.push_back(output_name_ptr.get());
+        discovered_output_dims.push_back(output_tensor_info.GetShape());
+        discovered_output_element_types.push_back(output_tensor_info.GetElementType());
+    }
+
     if (use_packaged_output_contract) {
         debug_log("Using packaged CorridorKey output contract");
-        m_output_node_names.emplace_back(core::k_corridorkey_alpha_output_name);
-        m_output_node_names.emplace_back(core::k_corridorkey_fg_output_name);
+        const auto ordered_indices =
+            core::packaged_corridorkey_output_indices(discovered_output_names);
+        for (const auto index : ordered_indices) {
+            m_output_node_names.push_back(discovered_output_names[index]);
+            m_output_node_dims.push_back(discovered_output_dims[index]);
+            m_output_element_types.push_back(discovered_output_element_types[index]);
+        }
     } else {
-        fprintf(stderr, "[InferenceSession] Getting output count\n");
-        size_t num_output_nodes = m_session.GetOutputCount();
-        fprintf(stderr, "[InferenceSession] Model has %zu outputs\n", num_output_nodes);
-
-        for (size_t i = 0; i < num_output_nodes; i++) {
-            fprintf(stderr, "[InferenceSession] Processing output %zu\n", i);
-            auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
-            m_output_node_names.push_back(output_name_ptr.get());
+        for (size_t i = 0; i < num_output_nodes; ++i) {
+            m_output_node_names.push_back(discovered_output_names[i]);
+            m_output_node_dims.push_back(discovered_output_dims[i]);
+            m_output_element_types.push_back(discovered_output_element_types[i]);
         }
     }
     for (const auto& name : m_output_node_names) {
         m_output_node_names_ptr.push_back(name.c_str());
     }
-    fprintf(stderr, "[InferenceSession] Metadata extraction complete\n");
+
+    m_io_binding_enabled = core::should_enable_io_binding(model_path, m_device.backend) &&
+                           m_input_node_dims.size() == 1 && !m_output_node_names_ptr.empty() &&
+                           m_output_node_dims.size() >= m_output_node_names_ptr.size() &&
+                           m_output_element_types.size() >= m_output_node_names_ptr.size();
+    if (m_io_binding_enabled) {
+        debug_log("I/O binding enabled for this session");
+    }
 }
 
 Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
-    const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options) {
+    const std::filesystem::path& model_path, DeviceInfo device, SessionCreateOptions options,
+    StageTimingCallback on_stage) {
     fprintf(stderr, "[InferenceSession] Creating session for model: %s\n",
             model_path.string().c_str());
 
@@ -554,6 +1002,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
     }
 
     DeviceInfo requested_device = device;
+    auto ort_process_context = options.ort_process_context;
 
     try {
         fprintf(stderr, "[InferenceSession] Allocating InferenceSession object\n");
@@ -569,9 +1018,11 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             return session_ptr;
         }
 
-        fprintf(stderr, "[InferenceSession] Creating ORT environment\n");
-        session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-        fprintf(stderr, "[InferenceSession] ORT environment created\n");
+        if (!ort_process_context) {
+            ort_process_context = std::make_shared<core::OrtProcessContext>();
+        }
+        session_ptr->m_ort_process_context = ort_process_context;
+
         std::filesystem::path session_model_path = model_path;
         std::optional<std::filesystem::path> optimized_model_path;
         bool using_optimized_model_cache = false;
@@ -599,33 +1050,43 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             }
         }
 
-        fprintf(stderr, "[InferenceSession] Configuring session options\n");
-        session_ptr->configure_session_options(using_optimized_model_cache, options, model_path);
-        fprintf(stderr, "[InferenceSession] Session options configured\n");
+        auto* env = common::measure_stage(on_stage, "ort_env_acquire", [&]() {
+            return &session_ptr->m_ort_process_context->acquire_env(options.log_severity);
+        });
 
-        if (!using_optimized_model_cache && optimized_model_path.has_value()) {
-            fprintf(stderr, "[InferenceSession] Setting optimized model path\n");
+        auto configure_session_for_model =
+            [&](InferenceSession& session, const std::filesystem::path& runtime_model_path,
+                bool use_cached_model,
+                const std::optional<std::filesystem::path>& optimized_output_path) {
+                common::measure_stage(on_stage, "ort_session_options", [&]() {
+                    session.configure_session_options(use_cached_model, options, model_path);
+                    if (!use_cached_model && optimized_output_path.has_value()) {
 #ifdef _WIN32
-            session_ptr->m_session_options.SetOptimizedModelFilePath(
-                optimized_model_path->wstring().c_str());
+                        session.m_session_options.SetOptimizedModelFilePath(
+                            optimized_output_path->wstring().c_str());
 #else
-            session_ptr->m_session_options.SetOptimizedModelFilePath(optimized_model_path->c_str());
+                            session.m_session_options.SetOptimizedModelFilePath(
+                                optimized_output_path->c_str());
 #endif
-        }
+                    }
+                });
 
-        fprintf(stderr, "[InferenceSession] Creating ONNX Runtime session from model: %s\n",
-                session_model_path.string().c_str());
+                common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-        session_ptr->m_session =
-            Ort::Session(session_ptr->m_env, session_model_path.wstring().c_str(),
-                         session_ptr->m_session_options);
+                    session.m_session = Ort::Session(*env, runtime_model_path.wstring().c_str(),
+                                                     session.m_session_options);
 #else
-        session_ptr->m_session = Ort::Session(session_ptr->m_env, session_model_path.c_str(),
-                                              session_ptr->m_session_options);
+                    session.m_session =
+                        Ort::Session(*env, runtime_model_path.c_str(), session.m_session_options);
 #endif
-        fprintf(stderr, "[InferenceSession] ONNX Runtime session created successfully\n");
+                });
 
-        session_ptr->extract_metadata(model_path);
+                common::measure_stage(on_stage, "ort_metadata_extract",
+                                      [&]() { session.extract_metadata(model_path); });
+            };
+
+        configure_session_for_model(*session_ptr, session_model_path, using_optimized_model_cache,
+                                    optimized_model_path);
         fprintf(stderr, "[InferenceSession] Session created successfully\n");
         return session_ptr;
     } catch (const Ort::Exception& e) {
@@ -638,24 +1099,32 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 try {
                     auto session_ptr =
                         std::unique_ptr<InferenceSession>(new InferenceSession(requested_device));
-                    session_ptr->m_env = Ort::Env(options.log_severity, "CorridorKey");
-                    session_ptr->configure_session_options(false, options, model_path);
+                    session_ptr->m_ort_process_context = ort_process_context;
+                    auto* env = common::measure_stage(on_stage, "ort_env_acquire", [&]() {
+                        return &session_ptr->m_ort_process_context->acquire_env(
+                            options.log_severity);
+                    });
+                    common::measure_stage(on_stage, "ort_session_options", [&]() {
+                        session_ptr->configure_session_options(false, options, model_path);
 #ifdef _WIN32
-                    session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path->wstring().c_str());
+                        session_ptr->m_session_options.SetOptimizedModelFilePath(
+                            optimized_model_path->wstring().c_str());
 #else
-                    session_ptr->m_session_options.SetOptimizedModelFilePath(
-                        optimized_model_path->c_str());
+                            session_ptr->m_session_options.SetOptimizedModelFilePath(
+                                optimized_model_path->c_str());
 #endif
+                    });
+                    common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                    session_ptr->m_session =
-                        Ort::Session(session_ptr->m_env, model_path.wstring().c_str(),
-                                     session_ptr->m_session_options);
+                        session_ptr->m_session = Ort::Session(*env, model_path.wstring().c_str(),
+                                                              session_ptr->m_session_options);
 #else
-                    session_ptr->m_session = Ort::Session(session_ptr->m_env, model_path.c_str(),
-                                                          session_ptr->m_session_options);
+                        session_ptr->m_session =
+                            Ort::Session(*env, model_path.c_str(), session_ptr->m_session_options);
 #endif
-                    session_ptr->extract_metadata(model_path);
+                    });
+                    common::measure_stage(on_stage, "ort_metadata_extract",
+                                          [&]() { session_ptr->extract_metadata(model_path); });
                     return session_ptr;
                 } catch (const Ort::Exception&) {
                     remove_cached_model(*optimized_model_path);
@@ -973,12 +1442,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     Image comp = result.composite.view();
     common::measure_stage(
         on_stage, "post_composite",
-        [&]() {
-            std::copy(proc.data.begin(), proc.data.end(), comp.data.begin());
-            ColorUtils::composite_over_checker(comp);
-            ColorUtils::linear_to_srgb(comp);
-        },
-        1);
+        [&]() { ColorUtils::composite_premultiplied_over_checker_to_srgb(proc, comp); }, 1);
 }
 
 Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& alpha_hint,
@@ -1100,14 +1564,14 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
     }
 
     try {
-        Ort::MemoryInfo memory_info =
-            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         int target_res =
             params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
         size_t batch_size = rgbs.size();
 
         bool is_concatenated = (m_input_node_dims.size() == 1 && m_input_node_dims[0][1] == 4);
-        std::vector<Ort::Value> input_tensors;
+        Ort::Value input_tensor{nullptr};
+        std::vector<Ort::Value> output_tensors;
+        BoundIoState* bound_io_state = nullptr;
 
         if (is_concatenated) {
             auto shape = m_input_node_dims[0];
@@ -1122,7 +1586,6 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
             float* dst_base = m_planar_pool[0].view().data.data();
             size_t image_stride = 4 * model_h * model_w;
-            size_t channel_stride = model_h * model_w;
 
             common::measure_stage(
                 on_stage, "batch_prepare_inputs",
@@ -1150,59 +1613,65 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                         ColorUtils::resize_area_into(alpha_hints[b], cur_hint, m_color_utils_state);
                         float* dst = dst_base + (b * image_stride);
 
-                        for (int y = 0; y < model_h; ++y) {
-                            for (int x = 0; x < model_w; ++x) {
-                                size_t idx = y * model_w + x;
-                                dst[0 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 0) - 0.485f) / 0.229f;
-                                dst[1 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 1) - 0.456f) / 0.224f;
-                                dst[2 * channel_stride + idx] =
-                                    (cur_rgb(y, x, 2) - 0.406f) / 0.225f;
-                                dst[3 * channel_stride + idx] = cur_hint(y, x, 0);
-                            }
-                        }
+                        ColorUtils::pack_normalized_rgb_and_hint_to_planar(
+                            cur_rgb, cur_hint, dst, kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
                     }
                 },
                 batch_size);
 
             std::vector<int64_t> effective_shape = {(int64_t)batch_size, 4, model_h, model_w};
+            auto input_tensor_res =
+                create_input_tensor(dst_base, total_planar_size, effective_shape);
+            if (!input_tensor_res) {
+                return Unexpected(input_tensor_res.error());
+            }
+            input_tensor = std::move(*input_tensor_res);
 
-            // Check if model expects FP16 input (required for TensorRT on Windows)
-            if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                debug_log("Creating FP16 input tensor [BATCH SIZE=" + std::to_string(batch_size) +
-                          "]");
-                m_fp16_pool.resize(total_planar_size);
-                for (size_t i = 0; i < total_planar_size; ++i) {
-                    m_fp16_pool[i] = Ort::Float16_t(dst_base[i]);
+            if (m_io_binding_enabled) {
+                auto bound_state_res = ensure_bound_io_state(effective_shape);
+                if (!bound_state_res) {
+                    debug_log("I/O binding disabled after setup failure: " +
+                              bound_state_res.error().message);
+                    m_io_binding_enabled = false;
+                    m_bound_io_state.reset();
+                } else {
+                    bound_io_state = *bound_state_res;
                 }
-                input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
-                    memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
-                    effective_shape.size()));
-            } else {
-                debug_log(
-                    "Creating FP32 input tensor (type: " + std::to_string(m_input_element_type) +
-                    ") [BATCH SIZE=" + std::to_string(batch_size) + "]");
-                input_tensors.push_back(Ort::Value::CreateTensor<float>(
-                    memory_info, dst_base, total_planar_size, effective_shape.data(),
-                    effective_shape.size()));
             }
         } else {
             return Unexpected(Error{ErrorCode::HardwareNotSupported,
                                     "Non-concatenated models not yet supported with batching"});
         }
 
-        auto output_tensors = common::measure_stage(
-            on_stage, "ort_run",
-            [&]() {
-                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
-                                     input_tensors.data(), input_tensors.size(),
-                                     m_output_node_names_ptr.data(),
-                                     m_output_node_names_ptr.size());
-            },
-            batch_size);
+        if (bound_io_state != nullptr) {
+            common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    common::measure_stage(
+                        on_stage, "ort_io_binding_bind_inputs",
+                        [&]() {
+                            bound_io_state->binding.ClearBoundInputs();
+                            bound_io_state->binding.BindInput(m_input_node_names_ptr[0],
+                                                              input_tensor);
+                            bound_io_state->binding.SynchronizeInputs();
+                        },
+                        batch_size);
+                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    bound_io_state->binding.SynchronizeOutputs();
+                },
+                batch_size);
+        } else {
+            output_tensors = common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                                         &input_tensor, 1, m_output_node_names_ptr.data(),
+                                         m_output_node_names_ptr.size());
+                },
+                batch_size);
+        }
 
-        if (output_tensors.empty()) {
+        if (bound_io_state == nullptr && output_tensors.empty()) {
             debug_log("Model produced no output tensors");
             return Unexpected(
                 Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
@@ -1210,131 +1679,123 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
         std::vector<FrameResult> batch_results(batch_size);
 
-        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-        auto alpha_type = alpha_info.GetElementType();
-        auto alpha_shape = alpha_info.GetShape();
-        debug_log("Alpha output element type: " + std::to_string(alpha_type) +
-                  " (FLOAT16 is 10, FLOAT is 1)");
-
-        size_t alpha_image_stride = alpha_shape[1] * alpha_shape[2] * alpha_shape[3];
-
-        float* alpha_ptr = nullptr;
-        std::vector<float> alpha_fp32_conv;
-
-        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            debug_log("Converting alpha output from FP16 to FP32");
-            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
-            size_t total_alpha_elements = batch_size * alpha_image_stride;
-            alpha_fp32_conv.resize(total_alpha_elements);
-            for (size_t i = 0; i < total_alpha_elements; ++i) {
-                alpha_fp32_conv[i] = alpha_fp16[i].ToFloat();
-            }
-            alpha_ptr = alpha_fp32_conv.data();
-        } else {
-            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
-        }
-
-        const size_t total_alpha_elements = batch_size * alpha_image_stride;
-        log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                    std::span<const float>(alpha_ptr, total_alpha_elements),
-                                    "alpha_raw_output");
-        auto alpha_validation = validate_output_values(
-            std::span<const float>(alpha_ptr, total_alpha_elements), "alpha_raw_output");
-        if (!alpha_validation) {
-            return Unexpected(alpha_validation.error());
-        }
-
-        float* fg_ptr = nullptr;
-        std::vector<float> fg_fp32_conv;
-        std::vector<int64_t> fg_shape;
-        size_t fg_image_stride = 0;
+        MaterializedOutputTensor alpha_output;
+        std::optional<MaterializedOutputTensor> fg_output;
         const bool include_foreground = !params.output_alpha_only;
 
-        if (include_foreground && output_tensors.size() > 1) {
-            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
-            auto fg_type = fg_info.GetElementType();
-            fg_shape = fg_info.GetShape();
-            fg_image_stride = fg_shape[1] * fg_shape[2] * fg_shape[3];
-            debug_log("FG output element type: " + std::to_string(fg_type));
-
-            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                debug_log("Converting FG output from FP16 to FP32");
-                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
-                size_t total_fg_elements = batch_size * fg_image_stride;
-                fg_fp32_conv.resize(total_fg_elements);
-                for (size_t i = 0; i < total_fg_elements; ++i) {
-                    fg_fp32_conv[i] = fg_fp16[i].ToFloat();
-                }
-                fg_ptr = fg_fp32_conv.data();
-            } else {
-                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
-            }
-
-            const size_t total_fg_elements = batch_size * fg_image_stride;
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        std::span<const float>(fg_ptr, total_fg_elements),
-                                        "fg_raw_output");
-            auto fg_validation = validate_output_values(
-                std::span<const float>(fg_ptr, total_fg_elements), "fg_raw_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
-        }
-
         debug_log("Extracting batch outputs...");
-        common::measure_stage(
+        auto batch_extract_res = common::measure_stage(
             on_stage, "batch_extract_outputs",
-            [&]() {
-                for (size_t b = 0; b < batch_size; ++b) {
-                    FrameResult& result = batch_results[b];
-                    bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+            [&]() -> Result<void> {
+                auto materialize_res = common::measure_stage(
+                    on_stage, "batch_extract_outputs_tensor_materialize",
+                    [&]() -> Result<void> {
+                        Ort::Value& alpha_tensor = bound_io_state != nullptr
+                                                       ? bound_io_state->alpha_output.tensor
+                                                       : output_tensors[0];
+                        auto alpha_res = materialize_output_tensor(
+                            alpha_tensor, batch_size, m_device, m_recommended_resolution,
+                            "alpha_raw_output", "Alpha");
+                        if (!alpha_res) {
+                            return Unexpected(alpha_res.error());
+                        }
+                        alpha_output = std::move(*alpha_res);
 
-                    ImageBuffer model_alpha((int)alpha_shape[3], (int)alpha_shape[2],
-                                            (int)alpha_shape[1]);
-                    ColorUtils::from_planar(alpha_ptr + (b * alpha_image_stride),
-                                            model_alpha.view());
+                        Ort::Value* fg_tensor = nullptr;
+                        if (bound_io_state != nullptr && bound_io_state->fg_output.has_value()) {
+                            fg_tensor = &bound_io_state->fg_output->tensor;
+                        } else if (output_tensors.size() > 1) {
+                            fg_tensor = &output_tensors[1];
+                        }
 
-                    result.alpha =
-                        use_lanczos
-                            ? ColorUtils::resize_lanczos(model_alpha.view(), rgbs[b].width,
-                                                         rgbs[b].height, m_color_utils_state)
-                            : ColorUtils::resize(model_alpha.view(), rgbs[b].width, rgbs[b].height);
-                    ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+                        if (include_foreground && fg_tensor != nullptr) {
+                            auto fg_res = materialize_output_tensor(
+                                *fg_tensor, batch_size, m_device, m_recommended_resolution,
+                                "fg_raw_output", "FG");
+                            if (!fg_res) {
+                                return Unexpected(fg_res.error());
+                            }
+                            fg_output = std::move(*fg_res);
+                        }
 
-                    if (fg_ptr != nullptr) {
-                        ImageBuffer model_fg((int)fg_shape[3], (int)fg_shape[2], (int)fg_shape[1]);
-                        ColorUtils::from_planar(fg_ptr + (b * fg_image_stride), model_fg.view());
-
-                        result.foreground =
-                            use_lanczos
-                                ? ColorUtils::resize_lanczos(model_fg.view(), rgbs[b].width,
-                                                             rgbs[b].height, m_color_utils_state)
-                                : ColorUtils::resize(model_fg.view(), rgbs[b].width,
-                                                     rgbs[b].height);
-                    }
+                        return {};
+                    },
+                    batch_size);
+                if (!materialize_res) {
+                    return Unexpected(materialize_res.error());
                 }
+
+                const bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+                auto resize_res = common::measure_stage(
+                    on_stage, "batch_extract_outputs_resize",
+                    [&]() -> Result<void> {
+                        const auto alpha_width = static_cast<int>(alpha_output.shape[3]);
+                        const auto alpha_height = static_cast<int>(alpha_output.shape[2]);
+                        const bool include_batch_foreground = fg_output.has_value();
+
+                        for (std::size_t batch_index = 0; batch_index < batch_size; ++batch_index) {
+                            FrameResult& result = batch_results[batch_index];
+                            result.alpha =
+                                ImageBuffer(rgbs[batch_index].width, rgbs[batch_index].height, 1);
+                            if (include_batch_foreground) {
+                                result.foreground = ImageBuffer(rgbs[batch_index].width,
+                                                                rgbs[batch_index].height, 3);
+                            }
+
+                            resize_model_outputs(
+                                result.alpha.view(), result.foreground.view(),
+                                alpha_output.values + (batch_index * alpha_output.image_stride),
+                                include_batch_foreground
+                                    ? fg_output->values + (batch_index * fg_output->image_stride)
+                                    : nullptr,
+                                alpha_width, alpha_height, use_lanczos, m_color_utils_state);
+                        }
+
+                        return {};
+                    },
+                    batch_size);
+                if (!resize_res) {
+                    return Unexpected(resize_res.error());
+                }
+
+                auto finalize_res = common::measure_stage(
+                    on_stage, "batch_extract_outputs_finalize",
+                    [&]() -> Result<void> {
+                        for (std::size_t batch_index = 0; batch_index < batch_results.size();
+                             ++batch_index) {
+                            ColorUtils::clamp_image(batch_results[batch_index].alpha.view(), 0.0F,
+                                                    1.0F);
+
+                            auto alpha_final_res = finalize_output_image(
+                                m_device, m_recommended_resolution,
+                                batch_results[batch_index].alpha.view(), "alpha_resized_output");
+                            if (!alpha_final_res) {
+                                return Unexpected(alpha_final_res.error());
+                            }
+
+                            if (!batch_results[batch_index].foreground.view().empty()) {
+                                auto fg_final_res = finalize_output_image(
+                                    m_device, m_recommended_resolution,
+                                    batch_results[batch_index].foreground.view(),
+                                    "fg_resized_output");
+                                if (!fg_final_res) {
+                                    return Unexpected(fg_final_res.error());
+                                }
+                            }
+                        }
+
+                        return {};
+                    },
+                    batch_size);
+                if (!finalize_res) {
+                    return Unexpected(finalize_res.error());
+                }
+
+                return {};
             },
             batch_size);
-
-        for (size_t batch_index = 0; batch_index < batch_results.size(); ++batch_index) {
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        batch_results[batch_index].alpha.view(),
-                                        "alpha_resized_output");
-            auto alpha_resized_validation = validate_output_image(
-                batch_results[batch_index].alpha.view(), "alpha_resized_output");
-            if (!alpha_resized_validation) {
-                return Unexpected(alpha_resized_validation.error());
-            }
-            if (!batch_results[batch_index].foreground.view().empty()) {
-                log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                            batch_results[batch_index].foreground.view(),
-                                            "fg_resized_output");
-                auto fg_validation = validate_output_image(
-                    batch_results[batch_index].foreground.view(), "fg_resized_output");
-                if (!fg_validation) {
-                    return Unexpected(fg_validation.error());
-                }
-            }
+        if (!batch_extract_res) {
+            return Unexpected(batch_extract_res.error());
         }
 
         return batch_results;
@@ -1357,8 +1818,6 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
     }
 
     try {
-        Ort::MemoryInfo memory_info =
-            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         int target_res =
             params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
 
@@ -1405,169 +1864,201 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         common::measure_stage(
             on_stage, "frame_prepare_inputs",
             [&]() {
+                if (m_io_binding_enabled && m_gpu_prep.available()) {
+                    auto gpu_res = m_gpu_prep.prepare_inputs(
+                        rgb, alpha_hint, planar_ptr, static_cast<int>(model_w),
+                        static_cast<int>(model_h), kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
+                    if (gpu_res.has_value()) {
+                        return;
+                    }
+                    debug_log("GPU prep failed, falling back to CPU: " + gpu_res.error().message);
+                }
+
                 ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
                 ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
 
-                for (int y = 0; y < model_h; ++y) {
-                    for (int x = 0; x < model_w; ++x) {
-                        size_t idx = static_cast<size_t>(y) * static_cast<size_t>(model_w) + x;
-                        planar_ptr[0 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 0) - 0.485f) / 0.229f;
-                        planar_ptr[1 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 1) - 0.456f) / 0.224f;
-                        planar_ptr[2 * channel_stride + idx] =
-                            (prepared_rgb(y, x, 2) - 0.406f) / 0.225f;
-                        planar_ptr[3 * channel_stride + idx] = prepared_hint(y, x, 0);
-                    }
-                }
+                ColorUtils::pack_normalized_rgb_and_hint_to_planar(prepared_rgb, prepared_hint,
+                                                                   planar_ptr, kCorridorKeyRgbMean,
+                                                                   kCorridorKeyRgbInvStddev);
             },
             1);
 
-        std::vector<Ort::Value> input_tensors;
         std::vector<int64_t> effective_shape = {1, 4, model_h, model_w};
-        if (m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            m_fp16_pool.resize(total_planar_size);
-            for (size_t index = 0; index < total_planar_size; ++index) {
-                m_fp16_pool[index] = Ort::Float16_t(planar_ptr[index]);
+        auto input_tensor_res = create_input_tensor(planar_ptr, total_planar_size, effective_shape);
+        if (!input_tensor_res) {
+            return Unexpected(input_tensor_res.error());
+        }
+        Ort::Value input_tensor = std::move(*input_tensor_res);
+        std::vector<Ort::Value> output_tensors;
+        BoundIoState* bound_io_state = nullptr;
+
+        if (m_io_binding_enabled) {
+            auto bound_state_res = ensure_bound_io_state(effective_shape);
+            if (!bound_state_res) {
+                debug_log("I/O binding disabled after setup failure: " +
+                          bound_state_res.error().message);
+                m_io_binding_enabled = false;
+                m_bound_io_state.reset();
+            } else {
+                bound_io_state = *bound_state_res;
             }
-            input_tensors.push_back(Ort::Value::CreateTensor<Ort::Float16_t>(
-                memory_info, m_fp16_pool.data(), total_planar_size, effective_shape.data(),
-                effective_shape.size()));
-        } else {
-            input_tensors.push_back(
-                Ort::Value::CreateTensor<float>(memory_info, planar_ptr, total_planar_size,
-                                                effective_shape.data(), effective_shape.size()));
         }
 
-        auto output_tensors = common::measure_stage(
-            on_stage, "ort_run",
-            [&]() {
-                return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
-                                     input_tensors.data(), input_tensors.size(),
-                                     m_output_node_names_ptr.data(),
-                                     m_output_node_names_ptr.size());
-            },
-            1);
+        if (bound_io_state != nullptr) {
+            common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    common::measure_stage(
+                        on_stage, "ort_io_binding_bind_inputs",
+                        [&]() {
+                            bound_io_state->binding.ClearBoundInputs();
+                            bound_io_state->binding.BindInput(m_input_node_names_ptr[0],
+                                                              input_tensor);
+                            bound_io_state->binding.SynchronizeInputs();
+                        },
+                        1);
+                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    bound_io_state->binding.SynchronizeOutputs();
+                },
+                1);
+        } else {
+            output_tensors = common::measure_stage(
+                on_stage, "ort_run",
+                [&]() {
+                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                                         &input_tensor, 1, m_output_node_names_ptr.data(),
+                                         m_output_node_names_ptr.size());
+                },
+                1);
+        }
 
-        if (output_tensors.empty()) {
+        if (bound_io_state == nullptr && output_tensors.empty()) {
             return Unexpected(
                 Error{ErrorCode::InferenceFailed, "Model produced no output tensors"});
         }
 
-        auto alpha_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-        auto alpha_type = alpha_info.GetElementType();
-        auto alpha_shape = alpha_info.GetShape();
-        size_t alpha_image_stride = static_cast<size_t>(alpha_shape[1]) *
-                                    static_cast<size_t>(alpha_shape[2]) *
-                                    static_cast<size_t>(alpha_shape[3]);
-
-        float* alpha_ptr = nullptr;
-        std::vector<float> alpha_fp32_conv;
-        if (alpha_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-            const Ort::Float16_t* alpha_fp16 = output_tensors[0].GetTensorData<Ort::Float16_t>();
-            alpha_fp32_conv.resize(alpha_image_stride);
-            for (size_t index = 0; index < alpha_image_stride; ++index) {
-                alpha_fp32_conv[index] = alpha_fp16[index].ToFloat();
-            }
-            alpha_ptr = alpha_fp32_conv.data();
-        } else {
-            alpha_ptr = output_tensors[0].GetTensorMutableData<float>();
-        }
-
-        log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                    std::span<const float>(alpha_ptr, alpha_image_stride),
-                                    "alpha_raw_output");
-        auto alpha_validation = validate_output_values(
-            std::span<const float>(alpha_ptr, alpha_image_stride), "alpha_raw_output");
-        if (!alpha_validation) {
-            return Unexpected(alpha_validation.error());
-        }
-
-        float* fg_ptr = nullptr;
-        std::vector<float> fg_fp32_conv;
-        std::vector<int64_t> fg_shape;
-        size_t fg_image_stride = 0;
+        MaterializedOutputTensor alpha_output;
+        std::optional<MaterializedOutputTensor> fg_output;
         const bool include_foreground = !params.output_alpha_only;
-
-        if (include_foreground && output_tensors.size() > 1) {
-            auto fg_info = output_tensors[1].GetTensorTypeAndShapeInfo();
-            auto fg_type = fg_info.GetElementType();
-            fg_shape = fg_info.GetShape();
-            fg_image_stride = static_cast<size_t>(fg_shape[1]) * static_cast<size_t>(fg_shape[2]) *
-                              static_cast<size_t>(fg_shape[3]);
-            if (fg_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
-                const Ort::Float16_t* fg_fp16 = output_tensors[1].GetTensorData<Ort::Float16_t>();
-                fg_fp32_conv.resize(fg_image_stride);
-                for (size_t index = 0; index < fg_image_stride; ++index) {
-                    fg_fp32_conv[index] = fg_fp16[index].ToFloat();
-                }
-                fg_ptr = fg_fp32_conv.data();
-            } else {
-                fg_ptr = output_tensors[1].GetTensorMutableData<float>();
-            }
-
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        std::span<const float>(fg_ptr, fg_image_stride),
-                                        "fg_raw_output");
-            auto fg_validation = validate_output_values(
-                std::span<const float>(fg_ptr, fg_image_stride), "fg_raw_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
-        }
+        const bool has_foreground_output = core::should_allocate_foreground_buffer(
+            params.output_alpha_only, output_tensors.size(),
+            bound_io_state != nullptr && bound_io_state->fg_output.has_value());
 
         FrameResult result;
         result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        if (fg_ptr != nullptr) {
+        if (has_foreground_output) {
             result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
         }
 
         bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
-        Image model_alpha = ensure_resize_buffer(2, static_cast<int>(alpha_shape[3]),
-                                                 static_cast<int>(alpha_shape[2]),
-                                                 static_cast<int>(alpha_shape[1]));
-        common::measure_stage(
+        auto extract_res = common::measure_stage(
             on_stage, "frame_extract_outputs",
-            [&]() {
-                ColorUtils::from_planar(alpha_ptr, model_alpha);
-                if (use_lanczos) {
-                    ColorUtils::resize_lanczos_into(model_alpha, result.alpha.view(),
-                                                    m_color_utils_state);
-                } else {
-                    ColorUtils::resize_into(model_alpha, result.alpha.view());
-                }
-                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+            [&]() -> Result<void> {
+                auto materialize_res = common::measure_stage(
+                    on_stage, "frame_extract_outputs_tensor_materialize",
+                    [&]() -> Result<void> {
+                        Ort::Value& alpha_tensor = bound_io_state != nullptr
+                                                       ? bound_io_state->alpha_output.tensor
+                                                       : output_tensors[0];
+                        auto alpha_res = materialize_output_tensor(alpha_tensor, 1, m_device,
+                                                                   m_recommended_resolution,
+                                                                   "alpha_raw_output", "Alpha");
+                        if (!alpha_res) {
+                            return Unexpected(alpha_res.error());
+                        }
+                        alpha_output = std::move(*alpha_res);
 
-                if (fg_ptr != nullptr) {
-                    Image model_fg = ensure_resize_buffer(3, static_cast<int>(fg_shape[3]),
-                                                          static_cast<int>(fg_shape[2]),
-                                                          static_cast<int>(fg_shape[1]));
-                    ColorUtils::from_planar(fg_ptr, model_fg);
-                    if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(model_fg, result.foreground.view(),
-                                                        m_color_utils_state);
-                    } else {
-                        ColorUtils::resize_into(model_fg, result.foreground.view());
-                    }
+                        Ort::Value* fg_tensor = nullptr;
+                        if (bound_io_state != nullptr && bound_io_state->fg_output.has_value()) {
+                            fg_tensor = &bound_io_state->fg_output->tensor;
+                        } else if (output_tensors.size() > 1) {
+                            fg_tensor = &output_tensors[1];
+                        }
+
+                        if (include_foreground && fg_tensor != nullptr) {
+                            auto fg_res = materialize_output_tensor(*fg_tensor, 1, m_device,
+                                                                    m_recommended_resolution,
+                                                                    "fg_raw_output", "FG");
+                            if (!fg_res) {
+                                return Unexpected(fg_res.error());
+                            }
+                            fg_output = std::move(*fg_res);
+                        }
+
+                        return {};
+                    },
+                    1);
+                if (!materialize_res) {
+                    return Unexpected(materialize_res.error());
                 }
+
+                auto resize_res = common::measure_stage(
+                    on_stage, "frame_extract_outputs_resize",
+                    [&]() -> Result<void> {
+                        bool gpu_resized = false;
+                        if (bound_io_state != nullptr && m_gpu_resizer.available()) {
+                            auto gpu_res = m_gpu_resizer.resize_planar_outputs(
+                                alpha_output.values,
+                                fg_output.has_value() ? fg_output->values : nullptr,
+                                static_cast<int>(alpha_output.shape[3]),
+                                static_cast<int>(alpha_output.shape[2]), result.alpha.view(),
+                                result.foreground.view());
+                            if (gpu_res) {
+                                gpu_resized = true;
+                            } else {
+                                debug_log("GPU resize failed, falling back to CPU: " +
+                                          gpu_res.error().message);
+                            }
+                        }
+
+                        if (!gpu_resized) {
+                            resize_model_outputs(
+                                result.alpha.view(), result.foreground.view(), alpha_output.values,
+                                fg_output.has_value() ? fg_output->values : nullptr,
+                                static_cast<int>(alpha_output.shape[3]),
+                                static_cast<int>(alpha_output.shape[2]), use_lanczos,
+                                m_color_utils_state);
+                        }
+
+                        return {};
+                    },
+                    1);
+                if (!resize_res) {
+                    return Unexpected(resize_res.error());
+                }
+
+                auto finalize_res = common::measure_stage(
+                    on_stage, "frame_extract_outputs_finalize",
+                    [&]() -> Result<void> {
+                        ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+                        auto alpha_final_res =
+                            finalize_output_image(m_device, m_recommended_resolution,
+                                                  result.alpha.view(), "alpha_resized_output");
+                        if (!alpha_final_res) {
+                            return Unexpected(alpha_final_res.error());
+                        }
+
+                        if (!result.foreground.view().empty()) {
+                            auto fg_final_res = finalize_output_image(
+                                m_device, m_recommended_resolution, result.foreground.view(),
+                                "fg_resized_output");
+                            if (!fg_final_res) {
+                                return Unexpected(fg_final_res.error());
+                            }
+                        }
+
+                        return {};
+                    },
+                    1);
+                if (!finalize_res) {
+                    return Unexpected(finalize_res.error());
+                }
+
+                return {};
             },
             1);
-
-        log_output_stats_if_enabled(m_device, m_recommended_resolution, result.alpha.view(),
-                                    "alpha_resized_output");
-        auto alpha_resized_validation =
-            validate_output_image(result.alpha.view(), "alpha_resized_output");
-        if (!alpha_resized_validation) {
-            return Unexpected(alpha_resized_validation.error());
-        }
-        if (!result.foreground.view().empty()) {
-            log_output_stats_if_enabled(m_device, m_recommended_resolution,
-                                        result.foreground.view(), "fg_resized_output");
-            auto fg_validation =
-                validate_output_image(result.foreground.view(), "fg_resized_output");
-            if (!fg_validation) {
-                return Unexpected(fg_validation.error());
-            }
+        if (!extract_res) {
+            return Unexpected(extract_res.error());
         }
 
         return result;

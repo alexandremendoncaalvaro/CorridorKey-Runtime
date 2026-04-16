@@ -64,13 +64,17 @@ target_link_libraries(corridorkey_core
 )
 
 if(APPLE)
-    target_link_libraries(corridorkey_core PRIVATE "-framework CoreML" "-framework Foundation")
+    target_link_libraries(corridorkey_core PRIVATE "-framework CoreML" "-framework Foundation" "-framework Accelerate")
     target_link_options(corridorkey_core PRIVATE "-Wl,-no_warn_duplicate_libraries")
 endif()
 
 if(WIN32)
-    target_link_libraries(corridorkey_core PRIVATE dxgi ws2_32)
+    target_link_libraries(corridorkey_core PRIVATE dxgi ws2_32 ncrypt)
     corridorkey_apply_windows_x64_link_dirs(corridorkey_core)
+    if(CORRIDORKEY_HAS_CUDA)
+        target_link_libraries(corridorkey_core PRIVATE CUDA::cudart_static CUDA::nppc CUDA::nppig CUDA::nppidei CUDA::nppial)
+        target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_HAS_CUDA=1)
+    endif()
 endif()
 
 if(APPLE AND MLX_FOUND)
@@ -142,12 +146,16 @@ if(BUILD_TESTING)
     )
 
     if(APPLE)
-        target_link_libraries(corridorkey_core_static PRIVATE "-framework CoreML" "-framework Foundation")
+        target_link_libraries(corridorkey_core_static PRIVATE "-framework CoreML" "-framework Foundation" "-framework Accelerate")
     endif()
 
     if(WIN32)
-        target_link_libraries(corridorkey_core_static PRIVATE dxgi ws2_32)
+        target_link_libraries(corridorkey_core_static PRIVATE dxgi ws2_32 ncrypt)
         corridorkey_apply_windows_x64_link_dirs(corridorkey_core_static)
+        if(CORRIDORKEY_HAS_CUDA)
+            target_link_libraries(corridorkey_core_static PRIVATE CUDA::cudart_static CUDA::nppc CUDA::nppig CUDA::nppidei CUDA::nppial)
+            target_compile_definitions(corridorkey_core_static PRIVATE CORRIDORKEY_HAS_CUDA=1)
+        endif()
     endif()
 
     if(APPLE AND MLX_FOUND)

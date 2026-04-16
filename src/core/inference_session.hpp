@@ -28,6 +28,8 @@
 #endif
 #endif
 
+#include "core/gpu_prep.hpp"
+#include "core/gpu_resize.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
@@ -44,11 +46,13 @@ namespace corridorkey {
 
 namespace core {
 class MlxSession;
-}
+class OrtProcessContext;
+}  // namespace core
 
 struct SessionCreateOptions {
     bool disable_cpu_ep_fallback = false;
     OrtLoggingLevel log_severity = ORT_LOGGING_LEVEL_ERROR;
+    std::shared_ptr<core::OrtProcessContext> ort_process_context = nullptr;
 };
 
 /**
@@ -59,15 +63,20 @@ class InferenceSession {
    public:
     static Result<std::unique_ptr<InferenceSession>> create(const std::filesystem::path& model_path,
                                                             DeviceInfo device,
-                                                            SessionCreateOptions options = {});
+                                                            SessionCreateOptions options = {},
+                                                            StageTimingCallback on_stage = nullptr);
 
     ~InferenceSession();
 
     // Disable copy, allow move
     InferenceSession(const InferenceSession&) = delete;
     InferenceSession& operator=(const InferenceSession&) = delete;
-    InferenceSession(InferenceSession&&) noexcept = default;
-    InferenceSession& operator=(InferenceSession&&) noexcept = default;
+    // Move ops are defined out-of-line in the .cpp so that the compiler sees
+    // complete types for MlxSession and BoundIoState (both forward-declared
+    // here). Keeping them defaulted in the header caused incomplete-type errors
+    // for consumers that hold std::unique_ptr<InferenceSession>.
+    InferenceSession(InferenceSession&&) noexcept;
+    InferenceSession& operator=(InferenceSession&&) noexcept;
 
     /**
      * @brief Run inference on a frame.
@@ -91,12 +100,19 @@ class InferenceSession {
     }
 
    private:
+    struct BoundIoState;
+
     explicit InferenceSession(DeviceInfo device);
 
     void configure_session_options(bool use_optimized_model_cache,
                                    const SessionCreateOptions& options,
                                    const std::filesystem::path& model_path);
     void extract_metadata(const std::filesystem::path& model_path);
+    [[nodiscard]] Result<Ort::Value> create_input_tensor(float* planar_data,
+                                                         std::size_t element_count,
+                                                         const std::vector<int64_t>& shape);
+    [[nodiscard]] Result<BoundIoState*> ensure_bound_io_state(
+        const std::vector<int64_t>& input_shape);
 
     /**
      * @brief Internal raw inference (no post-processing).
@@ -136,8 +152,6 @@ class InferenceSession {
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 
-    // Ort handles (RAII)
-    Ort::Env m_env{nullptr};
     Ort::Session m_session{nullptr};
     Ort::SessionOptions m_session_options;
 
@@ -147,8 +161,17 @@ class InferenceSession {
     std::vector<const char*> m_input_node_names_ptr = {};
     std::vector<const char*> m_output_node_names_ptr = {};
     std::vector<std::vector<int64_t>> m_input_node_dims = {};
+    std::vector<std::vector<int64_t>> m_output_node_dims = {};
     ONNXTensorElementDataType m_input_element_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
-    std::unique_ptr<core::MlxSession> m_mlx_session = nullptr;
+    std::vector<ONNXTensorElementDataType> m_output_element_types = {};
+    // No in-class = nullptr initializers for the unique_ptr members below:
+    // clang/libc++ instantiates ~unique_ptr<T>() at the NSDMI site, which then
+    // requires complete MlxSession / BoundIoState and fails with "sizeof to an
+    // incomplete type". unique_ptr default-constructs to nullptr already.
+    std::unique_ptr<core::MlxSession> m_mlx_session;
+    std::shared_ptr<core::OrtProcessContext> m_ort_process_context = nullptr;
+    std::unique_ptr<BoundIoState> m_bound_io_state;
+    bool m_io_binding_enabled = false;
 
     // Pre-allocated buffer pools (reused across run() calls)
     std::vector<ImageBuffer> m_resize_pool = {};
@@ -164,6 +187,9 @@ class InferenceSession {
     DespeckleState m_despeckle_state = {};
     ColorUtils::State m_color_utils_state = {};
     AlphaEdgeState m_alpha_edge_state = {};
+
+    core::GpuInputPrep m_gpu_prep;
+    core::GpuResizer m_gpu_resizer;
 };
 
 }  // namespace corridorkey

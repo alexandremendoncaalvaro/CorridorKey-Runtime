@@ -37,14 +37,26 @@ class StageProfiler {
         auto start = std::chrono::steady_clock::now();
 
         if constexpr (std::is_void_v<std::invoke_result_t<Function>>) {
-            std::forward<Function>(function)();
+            try {
+                std::forward<Function>(function)();
+            } catch (...) {
+                auto end = std::chrono::steady_clock::now();
+                record(name, elapsed_ms(start, end), work_units);
+                throw;
+            }
             auto end = std::chrono::steady_clock::now();
             record(name, elapsed_ms(start, end), work_units);
         } else {
-            auto result = std::forward<Function>(function)();
-            auto end = std::chrono::steady_clock::now();
-            record(name, elapsed_ms(start, end), work_units);
-            return result;
+            try {
+                auto result = std::forward<Function>(function)();
+                auto end = std::chrono::steady_clock::now();
+                record(name, elapsed_ms(start, end), work_units);
+                return result;
+            } catch (...) {
+                auto end = std::chrono::steady_clock::now();
+                record(name, elapsed_ms(start, end), work_units);
+                throw;
+            }
         }
     }
 
@@ -69,7 +81,20 @@ decltype(auto) measure_stage(const StageTimingCallback& callback, std::string_vi
     auto start = std::chrono::steady_clock::now();
 
     if constexpr (std::is_void_v<std::invoke_result_t<Function>>) {
-        std::forward<Function>(function)();
+        try {
+            std::forward<Function>(function)();
+        } catch (...) {
+            auto end = std::chrono::steady_clock::now();
+            if (callback) {
+                callback(StageTiming{
+                    std::string(name),
+                    std::chrono::duration<double, std::milli>(end - start).count(),
+                    1,
+                    work_units,
+                });
+            }
+            throw;
+        }
         auto end = std::chrono::steady_clock::now();
         if (callback) {
             callback(StageTiming{
@@ -80,17 +105,30 @@ decltype(auto) measure_stage(const StageTimingCallback& callback, std::string_vi
             });
         }
     } else {
-        auto result = std::forward<Function>(function)();
-        auto end = std::chrono::steady_clock::now();
-        if (callback) {
-            callback(StageTiming{
-                std::string(name),
-                std::chrono::duration<double, std::milli>(end - start).count(),
-                1,
-                work_units,
-            });
+        try {
+            auto result = std::forward<Function>(function)();
+            auto end = std::chrono::steady_clock::now();
+            if (callback) {
+                callback(StageTiming{
+                    std::string(name),
+                    std::chrono::duration<double, std::milli>(end - start).count(),
+                    1,
+                    work_units,
+                });
+            }
+            return result;
+        } catch (...) {
+            auto end = std::chrono::steady_clock::now();
+            if (callback) {
+                callback(StageTiming{
+                    std::string(name),
+                    std::chrono::duration<double, std::milli>(end - start).count(),
+                    1,
+                    work_units,
+                });
+            }
+            throw;
         }
-        return result;
     }
 }
 

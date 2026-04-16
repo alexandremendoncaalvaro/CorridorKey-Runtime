@@ -24,6 +24,11 @@ def fmt_delta(before: float, after: float) -> str:
 
 
 def print_summary(before: dict, after: dict) -> None:
+    for key in ("mode", "backend", "batch_size", "tiling_enabled", "requested_resolution", "effective_resolution"):
+        if key not in before or key not in after:
+            continue
+        print(f"{key}: {before[key]} -> {after[key]}")
+
     for key in ("cold_latency_ms", "avg_latency_ms", "total_duration_ms"):
         if key not in before or key not in after:
             continue

@@ -7,12 +7,15 @@
 #include <optional>
 #include <string>
 
+#include "common/accelerate_utils.hpp"
+#include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
 #include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
 #include "ofx_runtime_client.hpp"
+#include "ofx_screen_color.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
@@ -106,40 +109,6 @@ void log_render_event(std::string_view event, std::string_view phase,
         message += " detail=" + std::string(detail);
     }
     log_message("render", message);
-}
-
-void record_frame_timing(InstanceData* data, double elapsed_ms) {
-    if (data == nullptr || elapsed_ms <= 0.0) {
-        return;
-    }
-    double displayed_ms = elapsed_ms;
-    if (!data->last_render_stage_timings.empty()) {
-        double stage_total_ms = 0.0;
-        for (const auto& timing : data->last_render_stage_timings) {
-            stage_total_ms += timing.total_ms;
-        }
-        if (stage_total_ms > 0.0) {
-            displayed_ms = stage_total_ms;
-        }
-    }
-
-    data->last_frame_ms = displayed_ms;
-    if (data->frame_time_samples == 0 || data->avg_frame_ms <= 0.0) {
-        data->avg_frame_ms = displayed_ms;
-    } else {
-        constexpr double kSmoothing = 0.2;
-        data->avg_frame_ms = (1.0 - kSmoothing) * data->avg_frame_ms + kSmoothing * displayed_ms;
-    }
-    ++data->frame_time_samples;
-    data->runtime_panel_dirty = true;
-}
-
-void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOrigin work_origin) {
-    if (data == nullptr) {
-        return;
-    }
-    data->last_render_work_origin = work_origin;
-    record_frame_timing(data, elapsed_ms);
 }
 
 void set_runtime_error(InstanceData* data, const std::string& message,
@@ -258,17 +227,6 @@ class RenderScope {
     InstanceData* m_data = nullptr;
 };
 
-void swap_green_blue(Image image) {
-    if (image.channels < 3) {
-        return;
-    }
-    for (int y = 0; y < image.height; ++y) {
-        for (int x = 0; x < image.width; ++x) {
-            std::swap(image(y, x, 1), image(y, x, 2));
-        }
-    }
-}
-
 void write_rgba_pixel(float r, float g, float b, float a, unsigned char* dst, bool is_float,
                       bool is_byte, bool apply_srgb, const SrgbLut& lut) {
     if (is_float) {
@@ -315,32 +273,36 @@ void write_matte_output(const Image& alpha, void* dst_data, int row_bytes, const
                         const SrgbLut& lut) {
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
-    for (int y = 0; y < alpha.height; ++y) {
-        auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
-        for (int x = 0; x < alpha.width; ++x) {
-            float a = alpha(y, x);
-            write_rgba_pixel(a, a, a, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                             false, lut);
+    common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            for (int x = 0; x < alpha.width; ++x) {
+                float a = alpha(y, x);
+                write_rgba_pixel(a, a, a, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 false, lut);
+            }
         }
-    }
+    });
 }
 
 void write_foreground_output(const Image& fg_linear, void* dst_data, int row_bytes,
                              const std::string& depth, bool apply_srgb, const SrgbLut& lut) {
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
-    for (int y = 0; y < fg_linear.height; ++y) {
-        auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
-        for (int x = 0; x < fg_linear.width; ++x) {
-            float r = fg_linear(y, x, 0);
-            float g = fg_linear(y, x, 1);
-            float b = fg_linear(y, x, 2);
-            write_rgba_pixel(r, g, b, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                             apply_srgb, lut);
+    common::parallel_for_rows(fg_linear.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            for (int x = 0; x < fg_linear.width; ++x) {
+                float r = fg_linear(y, x, 0);
+                float g = fg_linear(y, x, 1);
+                float b = fg_linear(y, x, 2);
+                write_rgba_pixel(r, g, b, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 apply_srgb, lut);
+            }
         }
-    }
+    });
 }
 
 void write_processed_output(const Image& fg_linear, const Image& alpha, void* dst_data,
@@ -348,18 +310,20 @@ void write_processed_output(const Image& fg_linear, const Image& alpha, void* ds
                             const SrgbLut& lut) {
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
-    for (int y = 0; y < fg_linear.height; ++y) {
-        auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
-        for (int x = 0; x < fg_linear.width; ++x) {
-            float a = alpha(y, x);
-            float r = fg_linear(y, x, 0) * a;
-            float g = fg_linear(y, x, 1) * a;
-            float b = fg_linear(y, x, 2) * a;
-            write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                             apply_srgb, lut);
+    common::parallel_for_rows(fg_linear.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            for (int x = 0; x < fg_linear.width; ++x) {
+                float a = alpha(y, x);
+                float r = fg_linear(y, x, 0) * a;
+                float g = fg_linear(y, x, 1) * a;
+                float b = fg_linear(y, x, 2) * a;
+                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 apply_srgb, lut);
+            }
         }
-    }
+    });
 }
 
 void write_source_matte_output(const Image& rgb_srgb, const Image& alpha, void* dst_data,
@@ -367,18 +331,20 @@ void write_source_matte_output(const Image& rgb_srgb, const Image& alpha, void* 
                                const SrgbLut& lut) {
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
-    for (int y = 0; y < rgb_srgb.height; ++y) {
-        auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                   static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
-        for (int x = 0; x < rgb_srgb.width; ++x) {
-            float a = alpha(y, x);
-            float r = lut.to_linear(rgb_srgb(y, x, 0)) * a;
-            float g = lut.to_linear(rgb_srgb(y, x, 1)) * a;
-            float b = lut.to_linear(rgb_srgb(y, x, 2)) * a;
-            write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                             apply_srgb, lut);
+    common::parallel_for_rows(rgb_srgb.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            auto row = reinterpret_cast<unsigned char*>(dst_data) +
+                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            for (int x = 0; x < rgb_srgb.width; ++x) {
+                float a = alpha(y, x);
+                float r = lut.to_linear(rgb_srgb(y, x, 0)) * a;
+                float g = lut.to_linear(rgb_srgb(y, x, 1)) * a;
+                float b = lut.to_linear(rgb_srgb(y, x, 2)) * a;
+                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
+                                 apply_srgb, lut);
+            }
         }
-    }
+    });
 }
 
 void bypass_with_source(const void* source_data, void* output_data, int width, int height,
@@ -408,8 +374,9 @@ struct InferenceResult {
 InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
                                           const SharedCacheKey& shared_key, const Image& rgb_view,
                                           const Image& hint_view, const InferenceParams& params,
-                                          bool swap_screen, int width, int height,
-                                          const SrgbLut& lut, void* source_data, void* output_data,
+                                          const ScreenColorTransform& screen_color_transform,
+                                          int width, int height, const SrgbLut& lut,
+                                          void* source_data, void* output_data,
                                           int source_row_bytes, int output_row_bytes,
                                           const std::string& source_depth) {
     ImageBuffer alpha_buf;
@@ -500,20 +467,20 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     }
 
     if (!params.output_alpha_only) {
-        const Image fg_srgb_view = result->foreground.view();
+        Image fg_srgb_view = result->foreground.view();
+        restore_from_green_domain(fg_srgb_view, screen_color_transform);
+
         fg_linear_buf = ImageBuffer(width, height, 3);
         Image fg_linear_local = fg_linear_buf.view();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
-                fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
-                fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
+        common::parallel_for_rows(height, [&](int y_begin, int y_end) {
+            for (int y = y_begin; y < y_end; ++y) {
+                for (int x = 0; x < width; ++x) {
+                    fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
+                    fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
+                    fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
+                }
             }
-        }
-
-        if (swap_screen) {
-            swap_green_blue(fg_linear_local);
-        }
+        });
     }
 
     alpha_buf = std::move(result->alpha);
@@ -528,6 +495,23 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
 }
 
 }  // namespace
+
+void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOrigin work_origin) {
+    if (data == nullptr || elapsed_ms <= 0.0) {
+        return;
+    }
+
+    data->last_render_work_origin = work_origin;
+    data->last_frame_ms = elapsed_ms;
+    if (data->frame_time_samples == 0 || data->avg_frame_ms <= 0.0) {
+        data->avg_frame_ms = elapsed_ms;
+    } else {
+        constexpr double kSmoothing = 0.2;
+        data->avg_frame_ms = (1.0 - kSmoothing) * data->avg_frame_ms + kSmoothing * elapsed_ms;
+    }
+    ++data->frame_time_samples;
+    data->runtime_panel_dirty = true;
+}
 
 Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
                                                   bool hint_from_clip,
@@ -641,7 +625,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         return kOfxStatFailed;
     }
 
-    int quality_mode = kQualityAuto;
+    int quality_mode = kQualityPreview;
     int quality_fallback_mode = kQualityFallbackAuto;
     int output_mode = kOutputProcessed;
     int refinement_mode = kRefinementAuto;
@@ -749,10 +733,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
     }
 
-    const bool swap_screen = screen_color == kScreenColorBlue;
-    if (swap_screen) {
-        swap_green_blue(rgb_view);
-    }
+    const ScreenColorMode screen_color_mode = screen_color_mode_from_choice(screen_color);
+    const ScreenColorTransform screen_color_transform =
+        make_screen_color_transform(rgb_view, screen_color_mode);
+    canonicalize_to_green_domain(rgb_view, screen_color_transform);
     if (!ensure_engine_for_quality(
             data, quality_mode, width, height, quantization_mode,
             quality_fallback_mode_from_choice(quality_fallback_mode),
@@ -939,9 +923,10 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
                                         path_hash(data->model_path), screen_color};
 
-        auto inference = resolve_inference_buffers(
-            data, instance, shared_key, rgb_view, hint_view, params, swap_screen, width, height,
-            lut, source_data, output_data, source_row_bytes, output_row_bytes, source_depth);
+        auto inference = resolve_inference_buffers(data, instance, shared_key, rgb_view, hint_view,
+                                                   params, screen_color_transform, width, height,
+                                                   lut, source_data, output_data, source_row_bytes,
+                                                   output_row_bytes, source_depth);
 
         if (inference.outcome == InferenceOutcome::kBypass) {
             return kOfxStatOK;
@@ -975,6 +960,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         Image fg_linear_local = inference.foreground.view();
         if (temporal_smoothing > 0.0) {
             const float blend = static_cast<float>(std::clamp(temporal_smoothing, 0.0, 1.0));
+            const float inv_blend = 1.0f - blend;
             const bool size_mismatch = !data->temporal_state_valid ||
                                        data->temporal_width != width ||
                                        data->temporal_height != height;
@@ -988,36 +974,35 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             Image prev_alpha = data->temporal_alpha.view();
             Image prev_foreground = data->temporal_foreground.view();
             if (size_mismatch || !data->temporal_state_valid) {
-                for (int y = 0; y < height; ++y) {
-                    for (int x = 0; x < width; ++x) {
-                        prev_alpha(y, x) = alpha_view_local(y, x);
-                        if (!params.output_alpha_only) {
-                            for (int c = 0; c < 3; ++c) {
-                                prev_foreground(y, x, c) = fg_linear_local(y, x, c);
-                            }
-                        }
-                    }
+                std::copy(alpha_view_local.data.begin(), alpha_view_local.data.end(),
+                          prev_alpha.data.begin());
+                if (!params.output_alpha_only) {
+                    std::copy(fg_linear_local.data.begin(), fg_linear_local.data.end(),
+                              prev_foreground.data.begin());
                 }
                 data->temporal_state_valid = true;
             } else {
-                for (int y = 0; y < height; ++y) {
-                    for (int x = 0; x < width; ++x) {
-                        const float a_prev = prev_alpha(y, x);
-                        const float a_cur = alpha_view_local(y, x);
-                        const float a_out = a_cur * (1.0f - blend) + a_prev * blend;
-                        alpha_view_local(y, x) = a_out;
-                        prev_alpha(y, x) = a_out;
+                // Blend alpha channel using vDSP if possible or fast parallel loop
+                common::parallel_for_rows(height, [&](int y_begin, int y_end) {
+                    for (int y = y_begin; y < y_end; ++y) {
+                        float* cur_a = &alpha_view_local(y, 0, 0);
+                        float* prv_a = &prev_alpha(y, 0, 0);
+                        for (int x = 0; x < width; ++x) {
+                            float a_out = cur_a[x] * inv_blend + prv_a[x] * blend;
+                            cur_a[x] = a_out;
+                            prv_a[x] = a_out;
+                        }
                         if (!params.output_alpha_only) {
-                            for (int c = 0; c < 3; ++c) {
-                                const float fg_prev = prev_foreground(y, x, c);
-                                const float fg_cur = fg_linear_local(y, x, c);
-                                const float fg_out = fg_cur * (1.0f - blend) + fg_prev * blend;
-                                fg_linear_local(y, x, c) = fg_out;
-                                prev_foreground(y, x, c) = fg_out;
+                            float* cur_fg = &fg_linear_local(y, 0, 0);
+                            float* prv_fg = &prev_foreground(y, 0, 0);
+                            for (int x = 0; x < width * 3; ++x) {
+                                float fg_out = cur_fg[x] * inv_blend + prv_fg[x] * blend;
+                                cur_fg[x] = fg_out;
+                                prv_fg[x] = fg_out;
                             }
                         }
                     }
-                }
+                });
             }
             data->temporal_time = time;
         } else {
@@ -1047,9 +1032,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         fg_linear = data->cached_result.foreground.view();
     }
 
-    if (swap_screen) {
-        swap_green_blue(rgb_view);
-    }
+    restore_from_green_domain(rgb_view, screen_color_transform);
 
     const bool apply_srgb =
         should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);

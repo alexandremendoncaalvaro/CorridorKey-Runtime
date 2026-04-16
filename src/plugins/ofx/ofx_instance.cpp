@@ -7,6 +7,7 @@
 #include <new>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "app/runtime_contracts.hpp"
@@ -422,17 +423,76 @@ std::string runtime_path_runtime_label_impl(const InstanceData& data) {
     }
 }
 
-std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
+bool is_nested_stage_name(std::string_view stage_name, std::string_view candidate_parent_name) {
+    return stage_name.size() > candidate_parent_name.size() + 1 &&
+           stage_name.compare(0, candidate_parent_name.size(), candidate_parent_name) == 0 &&
+           stage_name[candidate_parent_name.size()] == '_';
+}
+
+bool stage_has_parent(const std::vector<StageTiming>& timings, std::size_t stage_index) {
+    const auto& stage_name = timings[stage_index].name;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (index == stage_index) {
+            continue;
+        }
+        if (is_nested_stage_name(stage_name, timings[index].name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool stage_has_children(const std::vector<StageTiming>& timings, std::size_t stage_index) {
+    const auto& stage_name = timings[stage_index].name;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (index == stage_index) {
+            continue;
+        }
+        if (is_nested_stage_name(timings[index].name, stage_name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+double exclusive_stage_total_ms(const std::vector<StageTiming>& timings) {
     double total_ms = 0.0;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (stage_has_parent(timings, index)) {
+            continue;
+        }
+        total_ms += timings[index].total_ms;
+    }
+    return total_ms;
+}
+
+const StageTiming* hottest_actionable_stage(const std::vector<StageTiming>& timings) {
     const StageTiming* hottest_stage = nullptr;
-    for (const auto& timing : data.last_render_stage_timings) {
-        total_ms += timing.total_ms;
+    for (std::size_t index = 0; index < timings.size(); ++index) {
+        if (stage_has_children(timings, index)) {
+            continue;
+        }
+        if (hottest_stage == nullptr || timings[index].total_ms > hottest_stage->total_ms) {
+            hottest_stage = &timings[index];
+        }
+    }
+
+    if (hottest_stage != nullptr) {
+        return hottest_stage;
+    }
+
+    for (const auto& timing : timings) {
         if (hottest_stage == nullptr || timing.total_ms > hottest_stage->total_ms) {
             hottest_stage = &timing;
         }
     }
+    return hottest_stage;
+}
 
-    const double last_ms = data.last_frame_ms > 0.0 ? data.last_frame_ms : total_ms;
+std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
+    const double backend_total_ms = exclusive_stage_total_ms(data.last_render_stage_timings);
+    const StageTiming* hottest_stage = hottest_actionable_stage(data.last_render_stage_timings);
+    const double last_ms = data.last_frame_ms > 0.0 ? data.last_frame_ms : backend_total_ms;
     if (last_ms <= 0.0) {
         return "No frames processed";
     }
@@ -799,14 +859,15 @@ std::filesystem::path resolve_models_root() {
 }
 
 app::OfxRuntimePrepareSessionRequest build_prepare_request(
-    const BootstrapEngineCandidate& candidate, bool allow_cpu_fallback = false) {
+    const BootstrapEngineCandidate& candidate, int requested_quality_mode,
+    bool allow_cpu_fallback = false) {
     app::OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = "bootstrap";
     request.model_path = candidate.executable_model_path;
     request.artifact_name = candidate.requested_model_path.filename().string();
     request.requested_device = candidate.device;
     request.engine_options = ofx_engine_options(candidate.device, allow_cpu_fallback);
-    request.requested_quality_mode = kQualityAuto;
+    request.requested_quality_mode = requested_quality_mode;
     request.requested_resolution = candidate.requested_resolution;
     request.effective_resolution = candidate.effective_resolution;
     return request;
@@ -1083,7 +1144,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     data->runtime_capabilities = capabilities;
     log_message("create_instance", std::string("Platform: ") + capabilities.platform);
 
-    int initial_quality_mode = kQualityAuto;
+    int initial_quality_mode = kQualityPreview;
     if (data->quality_mode_param != nullptr) {
         g_suites.parameter->paramGetValue(data->quality_mode_param, &initial_quality_mode);
     }
@@ -1118,8 +1179,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatOK;
     }
 
-    auto bootstrap_candidates =
-        build_bootstrap_candidates(capabilities, detected_device, data->models_root);
+    auto bootstrap_candidates = build_bootstrap_candidates(capabilities, detected_device,
+                                                           data->models_root, initial_quality_mode);
     if (bootstrap_candidates.empty()) {
         log_message("create_instance", "No compatible model artifacts found for OFX bootstrap.");
         post_message(kOfxMessageError, "No compatible model artifacts found for this device.",
@@ -1149,7 +1210,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         std::optional<BackendFallbackInfo> fallback = std::nullopt;
         if (data->use_runtime_server && data->runtime_client != nullptr) {
             auto prepare_result = data->runtime_client->prepare_session(
-                build_prepare_request(candidate, bootstrap_allow_cpu_fallback),
+                build_prepare_request(candidate, initial_quality_mode,
+                                      bootstrap_allow_cpu_fallback),
                 [&](const StageTiming& timing) {
                     log_stage_timing("create_instance", kBootstrapPhase, candidate.device,
                                      candidate.executable_model_path,
@@ -1245,7 +1307,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         data->cached_result_valid = false;
         data->cached_signature = 0;
         data->cached_signature_valid = false;
-        data->active_quality_mode = kQualityAuto;
+        data->active_quality_mode = initial_quality_mode;
         data->requested_resolution = candidate.requested_resolution;
         data->active_resolution = candidate.effective_resolution;
         data->cpu_quality_guardrail_active = false;

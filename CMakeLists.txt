@@ -13,10 +13,19 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.7.3
+    VERSION 0.7.4
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
+
+set(CORRIDORKEY_DISPLAY_VERSION_LABEL "" CACHE STRING
+    "Optional user-facing build label for local optimization checkpoint builds")
+
+if(CORRIDORKEY_DISPLAY_VERSION_LABEL)
+    set(CORRIDORKEY_VERSION_DISPLAY_STRING "${CORRIDORKEY_DISPLAY_VERSION_LABEL}")
+else()
+    set(CORRIDORKEY_VERSION_DISPLAY_STRING "${PROJECT_VERSION}")
+endif()
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/corridorkey/version.hpp.in
@@ -286,8 +295,40 @@ else()
     endif()
 endif()
 
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-windows-rtx")
+    find_package(CUDAToolkit QUIET)
+    if(CUDAToolkit_FOUND)
+        message(STATUS "CUDA Toolkit ${CUDAToolkit_VERSION} found — pinned-host and NPP paths available")
+        set(CORRIDORKEY_HAS_CUDA TRUE)
+    else()
+        message(STATUS "CUDA Toolkit not found — pinned-host and NPP paths disabled")
+        set(CORRIDORKEY_HAS_CUDA FALSE)
+    endif()
+endif()
+
 find_package(OpenEXR REQUIRED)
 find_package(PNG REQUIRED)
+
+# vcpkg's generated FindFFMPEG.cmake calls find_library(... NAMES ncrypt ...)
+# for Windows schannel TLS support. On hosted MSVC runners the Windows SDK 'um'
+# directory is not always discoverable by CMake's find_library at configure
+# time, so this lookup fails with
+#   "Could not find FFMPEG_DEPENDENCY_ncrypt_RELEASE".
+# ncrypt.lib is a Windows system library that the MSVC linker resolves from the
+# default library search path, so we pre-populate the cache with the bare name.
+# find_library respects a pre-set cache entry and will not re-search. The link
+# line then receives "ncrypt.lib", which the linker finds via the SDK path.
+if(WIN32)
+    if(NOT FFMPEG_DEPENDENCY_ncrypt_RELEASE)
+        set(FFMPEG_DEPENDENCY_ncrypt_RELEASE "ncrypt"
+            CACHE FILEPATH "Windows SDK ncrypt (resolved by linker)" FORCE)
+    endif()
+    if(NOT FFMPEG_DEPENDENCY_ncrypt_DEBUG)
+        set(FFMPEG_DEPENDENCY_ncrypt_DEBUG "ncrypt"
+            CACHE FILEPATH "Windows SDK ncrypt (resolved by linker)" FORCE)
+    endif()
+endif()
+
 find_package(FFMPEG REQUIRED)
 find_package(cxxopts REQUIRED)
 find_package(cpr CONFIG REQUIRED)

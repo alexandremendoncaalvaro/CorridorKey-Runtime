@@ -100,7 +100,7 @@ struct OfxSuites {
 };
 
 struct RuntimePanelState {
-    int requested_quality_mode = kQualityAuto;
+    int requested_quality_mode = kQualityPreview;
     int requested_resolution = 0;
     int effective_resolution = 0;
     int safe_quality_ceiling_resolution = 0;
@@ -174,15 +174,20 @@ struct InstanceData {
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
     OfxParamHandle allow_cpu_fallback_param = nullptr;
-    std::unique_ptr<OfxRuntimeClient> runtime_client = nullptr;
-    std::unique_ptr<Engine> engine = nullptr;
+    // No in-class = nullptr initializers for the unique_ptr members below:
+    // clang/libc++ instantiates ~unique_ptr<T>() at the NSDMI site, which then
+    // requires complete OfxRuntimeClient / Engine and fails with "sizeof to an
+    // incomplete type" in TUs that don't include their full definitions.
+    // unique_ptr default-constructs to nullptr already.
+    std::unique_ptr<OfxRuntimeClient> runtime_client;
+    std::unique_ptr<Engine> engine;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     std::filesystem::path runtime_server_path = {};
     DeviceInfo device = {};
     DeviceInfo preferred_device = {};
     RuntimeCapabilities runtime_capabilities = {};
-    int active_quality_mode = kQualityAuto;
+    int active_quality_mode = kQualityPreview;
     int requested_resolution = 0;
     int active_resolution = 0;
     bool cpu_quality_guardrail_active = false;
@@ -268,6 +273,7 @@ std::string runtime_backend_work_runtime_label(const InstanceData& data);
 std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data);
 std::string runtime_guide_source_runtime_label(const InstanceData& data);
 std::string runtime_path_runtime_label(const InstanceData& data);
+void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOrigin work_origin);
 Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
                                                   bool hint_from_clip,
                                                   AlphaHintPolicy alpha_hint_policy);

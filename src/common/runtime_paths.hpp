@@ -100,7 +100,7 @@ inline std::string portable_model_fingerprint(const std::filesystem::path& model
     // such as optimization profiles) automatically invalidates stale cached engines.
     auto key = model_path.filename().string() + "|" + std::to_string(file_size) + "|" +
                std::to_string(ticks) + "|" + backend_token(backend) + "|" +
-               std::string(CORRIDORKEY_VERSION_STRING);
+               std::string(CORRIDORKEY_DISPLAY_VERSION_STRING);
     return std::to_string(fnv1a_64(key));
 }
 
@@ -376,7 +376,8 @@ inline std::filesystem::path ofx_runtime_root() {
         override_path.has_value()) {
         return std::filesystem::path(*override_path);
     }
-    return default_cache_root() / "ofx_runtime" / ("v" + std::string(CORRIDORKEY_VERSION_STRING));
+    return default_cache_root() / "ofx_runtime" /
+           ("v" + std::string(CORRIDORKEY_DISPLAY_VERSION_STRING));
 }
 
 inline std::filesystem::path ofx_runtime_shared_frames_root() {
@@ -389,7 +390,7 @@ inline std::filesystem::path ofx_runtime_server_log_path() {
         return std::filesystem::path(*override_path);
     }
     return default_logs_root() /
-           ("ofx_runtime_server_v" + std::string(CORRIDORKEY_VERSION_STRING) + ".log");
+           ("ofx_runtime_server_v" + std::string(CORRIDORKEY_DISPLAY_VERSION_STRING) + ".log");
 }
 
 inline std::uint16_t default_ofx_runtime_port() {

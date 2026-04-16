@@ -195,12 +195,12 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
         return kOfxStatFailed;
     }
 
-    std::string long_label = std::string(kPluginLabel) + " v" + CORRIDORKEY_VERSION_STRING;
+    std::string long_label = std::string(kPluginLabel) + " v" + CORRIDORKEY_DISPLAY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropShortLabel, 0, kPluginLabel);
     g_suites.property->propSetString(props, kOfxPropLongLabel, 0, long_label.c_str());
     std::string description =
-        std::string("CorridorKey AI green screen keyer v") + CORRIDORKEY_VERSION_STRING;
+        std::string("CorridorKey AI chroma screen keyer v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropPluginDescription, 0, description.c_str());
     g_suites.property->propSetString(props, kOfxImageEffectPluginPropGrouping, 0, kPluginGroup);
 
@@ -208,7 +208,8 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
                                         CORRIDORKEY_VERSION_PATCH};
     g_suites.property->propSetIntN(props, kOfxPropVersion, static_cast<int>(version_parts.size()),
                                    version_parts.data());
-    g_suites.property->propSetString(props, kOfxPropVersionLabel, 0, CORRIDORKEY_VERSION_STRING);
+    g_suites.property->propSetString(props, kOfxPropVersionLabel, 0,
+                                     CORRIDORKEY_DISPLAY_VERSION_STRING);
 
     g_suites.property->propSetString(props, kOfxImageEffectPropSupportedContexts, 0,
                                      kOfxImageEffectContextFilter);
@@ -277,7 +278,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     }
 
     // --- Group 1: Status (runtime diagnostics and current version at the top) ---
-    std::string runtime_group_label = std::string("CorridorKey v") + CORRIDORKEY_VERSION_STRING;
+    std::string runtime_group_label =
+        std::string("CorridorKey v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
     define_runtime_status_param(
@@ -376,26 +378,28 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
                         {"Green", "Blue"},
-                        "Select the dominant screen color. Blue swaps channels internally so "
-                        "the keyer treats blue screens like green screens.",
+                        "Select the dominant screen color. Blue input is normalized into "
+                        "CorridorKey's internal green domain using a screen-aware color mapping "
+                        "before rough matte fallback, inference, Recover Original Details, and "
+                        "despill, then restored before color outputs.",
                         "setup_group");
     define_choice_param(
-        param_set, kParamQualityMode, "Quality", kQualityAuto,
+        param_set, kParamQualityMode, "Quality", kQualityPreview,
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
          quality_mode_ui_label(kQualityHigh), quality_mode_ui_label(kQualityUltra),
          quality_mode_ui_label(kQualityMaximum)},
-        "Inference quality. Auto is the default and selects from the current public ladder "
-        "based on input size and the runtime safe quality ceiling for the active hardware tier. "
-        "Higher values produce better detail at the cost of speed. "
-        "Resolutions: Draft (512), High (1024), Ultra (1536), Maximum (2048).",
+        "Inference quality. Draft (512) is the default. Recommended follows the current public "
+        "ladder based on input size and the runtime safe quality ceiling for the active hardware "
+        "tier. Higher values produce better detail at the cost of speed. Resolutions: Draft "
+        "(512), High (1024), Ultra (1536), Maximum (2048).",
         "setup_group");
     define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
-                        kDefaultInputColorSpace, {"sRGB", "Linear", "Auto (Host Managed)"},
-                        "How CorridorKey should interpret the incoming source. Auto requests "
-                        "host-managed color using sRGB Texture or Linear Rec.709 (sRGB). "
-                        "Linear means Linear Rec.709 (sRGB), not an arbitrary project-linear "
-                        "space. If host-managed color is unavailable, Auto falls back to the "
-                        "manual Linear path.",
+                        kDefaultInputColorSpace, {"sRGB", "Linear", "Host Managed"},
+                        "How CorridorKey should interpret the incoming source. Host Managed "
+                        "requests host-managed color using sRGB Texture or Linear Rec.709 "
+                        "(sRGB). Linear means Linear Rec.709 (sRGB), not an arbitrary "
+                        "project-linear space. If host-managed color is unavailable, CorridorKey "
+                        "falls back to the manual Linear path.",
                         "setup_group");
 
     // --- Group 4: Interior Detail (recover opaque source texture, not edge fixes) ---
@@ -439,7 +443,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "edge_spill_group", "Edge & Spill", true);
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
-                        "Strength of screen color spill suppression on foreground edges.",
+                        "Strength of spill suppression for the selected screen color on "
+                        "foreground edges. Blue mode applies the same cleanup after screen-aware "
+                        "normalization into the internal green domain.",
                         "edge_spill_group");
 
     // --- Group 7: Output ---
@@ -517,9 +523,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_matte_group");
     define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
                         {"Average", "Double Limit", "Neutral"},
-                        "How removed spill color is replaced. Average redistributes to "
-                        "red and blue. Double Limit uses the stronger neighbor channel. "
-                        "Neutral replaces with gray to avoid color shifts.",
+                        "How removed spill color is replaced after screen-aware screen-color "
+                        "normalization. Average redistributes across the two non-screen channels. "
+                        "Double Limit uses the stronger non-screen channel. Neutral replaces with "
+                        "gray to avoid color shifts.",
                         "advanced_processing_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},
@@ -532,18 +539,18 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         {quality_fallback_mode_ui_label(kQualityFallbackAuto),
          quality_fallback_mode_ui_label(kQualityFallbackDirect),
          quality_fallback_mode_ui_label(kQualityFallbackCoarseToFine)},
-        "Advanced diagnostics override. Auto chooses the safest runtime path. Direct disables "
-        "coarse-to-fine. Coarse to Fine forces the fallback path.",
+        "Advanced diagnostics override. Recommended chooses the safest runtime path. Direct "
+        "disables coarse-to-fine. Coarse to Fine forces the fallback path.",
         "advanced_processing_group");
     define_choice_param(
         param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,
         {refinement_mode_ui_label(kRefinementAuto), refinement_mode_ui_label(kRefinementFullFrame),
          refinement_mode_ui_label(kRefinementTiled)},
         "Advanced diagnostics override for validated refinement strategy "
-        "artifacts. Current packaged ONNX artifacts only support Auto.",
+        "artifacts. Current packaged ONNX artifacts only support Packaged.",
         "advanced_processing_group", false);
     define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
-                        kCoarseResolutionAutomatic, {"Automatic", "512", "1024", "1536", "2048"},
+                        kCoarseResolutionAutomatic, {"Recommended", "512", "1024", "1536", "2048"},
                         "Advanced diagnostics override for the coarse artifact resolution.",
                         "advanced_processing_group");
 

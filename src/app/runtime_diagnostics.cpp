@@ -14,6 +14,7 @@
 
 #include "../core/inference_session.hpp"
 #include "../core/mlx_probe.hpp"
+#include "../core/ort_process_context.hpp"
 #include "../core/windows_rtx_probe.hpp"
 #include "../frame_io/video_io.hpp"
 #include "common/runtime_paths.hpp"
@@ -316,10 +317,12 @@ nlohmann::json probe_windows_backend_execution(const std::filesystem::path& mode
         return json;
     }
 
-    auto session =
-        InferenceSession::create(model_path, device,
-                                 SessionCreateOptions{.disable_cpu_ep_fallback = true,
-                                                      .log_severity = ORT_LOGGING_LEVEL_FATAL});
+    auto ort_process_context = std::make_shared<corridorkey::core::OrtProcessContext>();
+    SessionCreateOptions session_options;
+    session_options.disable_cpu_ep_fallback = true;
+    session_options.log_severity = ORT_LOGGING_LEVEL_FATAL;
+    session_options.ort_process_context = ort_process_context;
+    auto session = InferenceSession::create(model_path, device, session_options);
     if (!session) {
         json["error"] = session.error().message;
         return json;
@@ -726,6 +729,7 @@ std::vector<std::string> expected_packaged_models_for_platform(
     }
 
     std::vector<std::string> expected_models;
+
     for (const auto& model : model_catalog()) {
         const bool packaged_for_current_platform =
             windows_platform ? model.packaged_for_windows : model.packaged_for_macos;
@@ -1191,6 +1195,7 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
 
     bool all_packaged_models_supported = true;
     bool any_packaged_model_usable = false;
+    auto ort_process_context = std::make_shared<corridorkey::core::OrtProcessContext>();
 
     for (const auto& model : model_catalog()) {
         if (!model.packaged_for_macos || model.artifact_family != "onnx") {
@@ -1214,10 +1219,11 @@ nlohmann::json inspect_coreml_execution_provider(const std::filesystem::path& mo
             continue;
         }
 
-        auto probe_res = InferenceSession::create(
-            model_path, probe_device,
-            SessionCreateOptions{.disable_cpu_ep_fallback = true,
-                                 .log_severity = ORT_LOGGING_LEVEL_WARNING});
+        SessionCreateOptions session_options;
+        session_options.disable_cpu_ep_fallback = true;
+        session_options.log_severity = ORT_LOGGING_LEVEL_WARNING;
+        session_options.ort_process_context = ort_process_context;
+        auto probe_res = InferenceSession::create(model_path, probe_device, session_options);
         entry["full_graph_supported"] = probe_res.has_value();
         if (!probe_res) {
             entry["error"] = probe_res.error().message;

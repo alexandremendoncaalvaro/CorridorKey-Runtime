@@ -21,11 +21,13 @@ add_executable(test_unit
     test_json_utils.cpp
     test_local_ipc.cpp
     test_model_artifacts.cpp
+    test_ort_process_context.cpp
     test_ofx_color_management.cpp
     test_ofx_image_utils.cpp
     test_ofx_lifecycle.cpp
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
+    test_ofx_screen_color.cpp
     test_ofx_runtime_client.cpp
     test_ofx_runtime_panel.cpp
     test_ofx_runtime_protocol.cpp
@@ -37,11 +39,15 @@ add_executable(test_unit
     test_session_cache_policy.cpp
     test_session_policy.cpp
     test_source_passthrough.cpp
+    test_fp16_convert.cpp
+    test_pinned_buffer.cpp
     test_stage_profiler.cpp
     test_ofx_stubs.cpp
     test_tile_blend.cpp
     test_windows_rtx_probe.cpp
     test_warmup_policy.cpp
+    test_gpu_prep.cpp
+    test_gpu_resize.cpp
 )
 
 corridorkey_apply_windows_common_compile_defs(test_unit)
@@ -71,4 +77,7 @@ else()
 endif()
 
 add_test(NAME unit_tests COMMAND test_unit)
-set_tests_properties(unit_tests PROPERTIES LABELS "unit")
+set_tests_properties(unit_tests PROPERTIES
+    LABELS "unit"
+    ENVIRONMENT "CUDA_LAUNCH_BLOCKING=1"
+)
