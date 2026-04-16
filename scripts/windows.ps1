@@ -147,9 +147,12 @@ switch ($Task) {
     "release" {
         $arguments = @(
             "-Version", $resolvedVersion,
-            "-Track", $resolvedTrack,
-            "-DisplayVersionLabel", $DisplayVersionLabel
-        ) + $additionalArguments
+            "-Track", $resolvedTrack
+        )
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments
         break
     }

@@ -356,7 +356,7 @@ try {
     $doctorStdoutPath = Join-Path $env:TEMP ("corridorkey_validate_stdout_" + [System.Guid]::NewGuid().ToString("N") + ".txt")
     $doctorStderrPath = Join-Path $env:TEMP ("corridorkey_validate_stderr_" + [System.Guid]::NewGuid().ToString("N") + ".txt")
     try {
-        $doctorCommand = 'set "CORRIDORKEY_MODELS_DIR={0}" && cd /d "{1}" && corridorkey.exe doctor --json > "{2}" 2> "{3}"' -f `
+        $doctorCommand = 'set "CORRIDORKEY_MODELS_DIR={0}" && cd /d "{1}" && .\corridorkey.exe doctor --json > "{2}" 2> "{3}"' -f `
             $resourcesDir, $win64Dir, $doctorStdoutPath, $doctorStderrPath
         & $env:ComSpec /v:on /d /c $doctorCommand | Out-Null
         $doctorExitCode = $LASTEXITCODE
