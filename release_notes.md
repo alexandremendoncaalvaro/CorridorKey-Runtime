@@ -1,6 +1,6 @@
 ## Overview
 
-v0.7.5 delivers the comprehensive runtime optimization track for Windows RTX and Apple Silicon, migrating the heaviest host-side (CPU) bottlenecks to fully device-resident GPU streams (CUDA, NPP, ONNX Runtime I/O Binding on Windows; Apple Accelerate on macOS). End-to-end processing for full-frame 4K workflows has improved radically, cutting individual module latencies by 70% to 90%. This release also adds blue-screen keying support, a hardened CI/CD pipeline, and several stability fixes.
+v0.7.5 delivers the comprehensive runtime optimization track for Windows RTX and Apple Silicon, migrating the heaviest host-side (CPU) bottlenecks to fully device-resident GPU streams (CUDA, NPP, ONNX Runtime I/O Binding on Windows; Apple Accelerate on macOS). End-to-end processing for full-frame 4K workflows has improved radically, cutting individual module latencies by 70% to 90%. This release also adds blue-screen keying support, a system-wide CLI on Windows, a hardened CI/CD pipeline, and several stability fixes. The Windows RTX assets ship first; macOS Apple Silicon assets follow in an update to this same release.
 
 ## Changelog
 
@@ -15,6 +15,7 @@ v0.7.5 delivers the comprehensive runtime optimization track for Windows RTX and
 - **Global ORT Thread Pooling Context:** ONNX Runtime context ownership relocated to a cross-plugin shared `OrtProcessContext`, disabling expensive per-session thread limitations and enabling `use_env_allocators=1`, halving multi-instance RAM and bootstrap costs.
 - **Blue-Screen Keying:** Canonicalized OFX flow now supports blue-screen chroma key in addition to green-screen.
 - **Granular Execution Metrics:** Dense, non-destructive stage timers (`tensor_materialize`, `resize`, `finalize`, `ofx_broker_writeback`) and metadata tracing (active memory modes, warmups) in benchmarking JSON logs.
+- **System-Wide CLI (Windows):** The Windows installer now registers the CorridorKey bundle's `Contents\Win64\` directory on the machine `PATH`, so `corridorkey.exe` is callable from any terminal after install. The bundled `install_plugin.bat` manual path mirrors the same behavior. Uninstall cleanly removes the entry.
 - **CI/CD Pipeline:** Automated format checks, macOS + Windows build and unit test gates, vcpkg binary caching, compiler caching (sccache), concurrency control, and fail-fast job gating.
 - **Release Validation Pipeline:** Artifact smoke tests and release-notes linter that block releases with phantom assets or out-of-scope backend claims.
 
@@ -37,26 +38,16 @@ v0.7.5 delivers the comprehensive runtime optimization track for Windows RTX and
 ### Windows
 - **NVIDIA RTX 30 Series or newer:** Download `CorridorKey_Resolve_v0.7.5_Windows_RTX_Installer.exe` or `CorridorKey_Resolve_v0.7.5_Windows_RTX.zip`.
 
-### macOS
-- **Apple Silicon (M1 or newer):** Download `CorridorKey_Resolve_v0.7.5_macOS_AppleSilicon.pkg` or `CorridorKey_Resolve_v0.7.5_macOS_AppleSilicon.dmg`.
-
 ## Installation Instructions
 
 ### Windows
 1. Close DaVinci Resolve if it is running.
-2. Run the downloaded installer (or extract the zip to the OFX plugin directory).
-3. The installer automatically overwrites the previous version.
-4. Launch DaVinci Resolve and load the plugin from the OpenFX Library.
-
-### macOS
-1. Close DaVinci Resolve if it is running.
-2. Open the `.pkg` installer (or mount the `.dmg` and drag CorridorKey to the OFX plugin directory).
-3. Launch DaVinci Resolve and load the plugin from the OpenFX Library.
+2. Run the downloaded installer (or extract the zip and run `install_plugin.bat` as Administrator).
+3. The installer automatically overwrites the previous version and registers `corridorkey.exe` on the system `PATH`.
+4. Open a new terminal to pick up the PATH change.
+5. Launch DaVinci Resolve and load the plugin from the OpenFX Library.
 
 ## Uninstallation
 
 ### Windows
-Go to **Windows Settings > Apps > Installed apps**, search for "CorridorKey Resolve OFX", and click Uninstall.
-
-### macOS
-Delete the CorridorKey bundle from `/Library/OFX/Plugins/`.
+Go to **Windows Settings > Apps > Installed apps**, search for "CorridorKey Resolve OFX", and click Uninstall. The uninstaller removes the bundle and restores the previous system `PATH`.
