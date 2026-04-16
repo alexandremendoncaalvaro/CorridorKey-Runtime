@@ -30,6 +30,7 @@ claim by itself.
 | Resolve Version | OFX Plugin Support |
 |-----------------|-------------------|
 | DaVinci Resolve 20 | Officially supported |
+| DaVinci Resolve 20 on Linux (Studio only) | Experimental |
 | DaVinci Resolve 19 | Best-effort |
 | DaVinci Resolve 18 | Best-effort - known plugin discovery and loading issues exist; behavior is not equivalent to Resolve 20 |
 | DaVinci Resolve 17 and earlier | Unsupported |
@@ -106,6 +107,48 @@ conditions on your specific hardware before processing begins.
 
 ---
 
+## Linux - Platform and Hardware Support
+
+Linux support is an experimental product track. It packages the same FP16
+model ladder shipped by the Windows RTX track, but switches the inference
+backend to the ONNX Runtime CUDA Execution Provider via a curated Microsoft
+prebuilt (`onnxruntime-linux-x64-gpu`). The TensorRT RTX Execution Provider is
+not yet built for Linux and is tracked for a future release.
+
+| Hardware | Backend | Support |
+|----------|---------|---------|
+| NVIDIA Ampere (RTX 30 series) | CUDA EP via ONNX Runtime | Experimental |
+| NVIDIA Ada Lovelace (RTX 40 series) | CUDA EP via ONNX Runtime | Experimental |
+| NVIDIA Blackwell (RTX 50 series) | CUDA EP via ONNX Runtime | Experimental |
+| NVIDIA RTX 20 series (Turing) | CUDA EP via ONNX Runtime | Experimental |
+| AMD GPU | none | Unsupported - no ROCm product track is packaged |
+| Intel GPU | none | Unsupported - no OneAPI product track is packaged |
+| CPU (AVX2+) | ONNX CPU | Best-effort fallback path for CLI and tolerant workflows |
+
+Linux packaging emits three artifacts from the same validated bundle:
+
+- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz` - universal portable archive
+  with `install.sh` and `uninstall.sh` helpers.
+- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb` - Debian package for Ubuntu
+  22.04 LTS and Ubuntu 24.04 LTS.
+- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm` - RPM package for Rocky Linux 9
+  and RHEL 9.
+
+All three wrappers install the same bundle at
+`/usr/OFX/Plugins/CorridorKey.ofx.bundle/` and register `corridorkey` on the
+system `PATH` through `/usr/local/bin/corridorkey`.
+
+**NVIDIA driver requirement:** Linux installs require a proprietary NVIDIA
+driver of version 555 or newer. The CUDA Toolkit itself does not need to be
+installed on the host; the packaged runtime ships the CUDA user-mode runtime
+libraries next to the plugin binaries.
+
+**CI coverage gap:** Linux builds run on hosted Ubuntu runners without GPU
+access. GPU-side validation is not currently covered by automated CI. This is
+the primary reason the Linux track is designated Experimental.
+
+---
+
 ## OS Version Requirements
 
 | OS | Minimum Version |
@@ -113,6 +156,9 @@ conditions on your specific hardware before processing begins.
 | macOS | 14.0 (Sonoma) for official support; 13.x for best-effort |
 | Windows | Windows 11 for officially supported paths |
 | Windows 10 | Best-effort - not systematically tested |
+| Rocky Linux / RHEL | 9.x - Experimental (matches Blackmagic Design's own Resolve Studio 20 host target) |
+| Ubuntu LTS | 22.04 and 24.04 - Experimental |
+| Other Linux distributions | Unsupported - builds may work via the `.tar.gz` archive but are not validated |
 
 ---
 

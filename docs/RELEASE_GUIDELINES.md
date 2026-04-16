@@ -50,6 +50,22 @@ packaging scripts internally.
 - `CorridorKey_Resolve_vX.Y.Z_Windows_RTX.zip`
 - `CorridorKey_Resolve_vX.Y.Z_Windows_DirectML.zip`
 
+### Linux Installers and Archives
+
+Linux is an experimental product track. Packaging emits three wrappers around
+the same validated `CorridorKey.ofx.bundle` payload, one per distribution
+family, so each user installs through the idiomatic package manager of the
+host distribution.
+
+- Universal portable archive: `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz`
+- Debian package (Ubuntu 22.04 / 24.04 LTS): `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb`
+- RPM package (Rocky Linux / RHEL 9): `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm`
+
+All three artifacts share the same embedded `CorridorKey.ofx.bundle`,
+`bundle_validation.json`, and model inventory. The wrappers differ only in how
+they install the bundle under `/usr/OFX/Plugins/` and how they manage the
+`/usr/local/bin/corridorkey` symlink.
+
 ## 3. Build and Packaging Process
 
 Releases must be built through the canonical repo wrapper so version
@@ -199,6 +215,11 @@ officially supported hardware family.
   not be published by default or described as official support for all AMD,
   Intel, or RTX 20 series hardware.
 - Apple Silicon is the official macOS track.
+- The `Linux RTX` artifacts (`.tar.gz`, `.deb`, `.rpm`) are experimental.
+  Release copy must state the Experimental designation and must not imply
+  parity with the Windows RTX track. All three Linux artifacts share the
+  same validated bundle and are part of the same experimental track; they
+  differ only as distribution wrappers.
 - Do not turn a backend name into a broad hardware promise. When in doubt,
   point users to `help/SUPPORT_MATRIX.md`.
 
@@ -211,13 +232,18 @@ and artifact type quickly.
 
 - Windows only: `CorridorKey Resolve OFX vX.Y.Z (Windows)`
 - macOS only: `CorridorKey Resolve OFX vX.Y.Z (macOS) - Apple Silicon`
+- Linux only: `CorridorKey Resolve OFX vX.Y.Z (Linux)`
 - Windows and macOS: `CorridorKey Resolve OFX vX.Y.Z (Windows & macOS)`
+- Windows and Linux: `CorridorKey Resolve OFX vX.Y.Z (Windows & Linux)`
+- Windows, macOS, and Linux: `CorridorKey Resolve OFX vX.Y.Z (Windows, macOS & Linux)`
 
 ### CorridorKey Runtime
 
 - Windows only: `CorridorKey Runtime vX.Y.Z (Windows)`
 - macOS only: `CorridorKey Runtime vX.Y.Z (macOS)`
+- Linux only: `CorridorKey Runtime vX.Y.Z (Linux)`
 - Windows and macOS: `CorridorKey Runtime vX.Y.Z (Windows & macOS)`
+- Windows, macOS, and Linux: `CorridorKey Runtime vX.Y.Z (Windows, macOS & Linux)`
 
 Use the following release description template:
 
@@ -246,6 +272,13 @@ Use the following release description template:
 ### macOS
 - Include this section only when the release contains a macOS installer.
 - **Apple Silicon (M-Series):** Download `CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg`.
+
+### Linux
+- Include this section only when the release contains a Linux artifact.
+- **Ubuntu 22.04 / 24.04 LTS (experimental):** Download `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb`.
+- **Rocky Linux / RHEL 9 (experimental):** Download `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm`.
+- **Other Linux distributions (experimental, unvalidated):** Download `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz`.
+- Do not describe the Linux artifacts as official support. Refer readers to `help/SUPPORT_MATRIX.md` for the real support designation. A proprietary NVIDIA driver 555 or newer is required; the CUDA Toolkit is not required.
 
 ## Installation Instructions
 

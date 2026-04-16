@@ -124,6 +124,10 @@ Current backend-specific rules:
 - A manual **Windows RTX** quality selection can still attempt `Ultra (1536)`
   or `Maximum (2048)` above the current safe ceiling, but you must confirm the
   actual result in the runtime panel.
+- **Linux RTX (experimental)** mirrors the Windows RTX ladder through the
+  CUDA Execution Provider on NVIDIA RTX 30 series and newer. Resolve on
+  Linux is Studio only. The `corridorkey` CLI is installed system-wide via
+  `/usr/local/bin/corridorkey`.
 - **DirectML** currently tops out at a `1024px` safe quality ceiling, so
   `Ultra (1536)` and `Maximum (2048)` will not hold on that path.
 - **CPU** is clamped to **Draft (512)**.

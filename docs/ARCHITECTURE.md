@@ -30,10 +30,10 @@ plugin).
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
    through MLX and Windows RTX through ONNX Runtime TensorRT RTX EP on NVIDIA
-   RTX 30 series and newer. Windows DirectML is an explicit experimental
-   product track. Other provider hooks present in the core runtime do not
-   become support claims unless they are packaged and validated. See
-   [Support Matrix](../help/SUPPORT_MATRIX.md).
+   RTX 30 series and newer. Windows DirectML and Linux RTX (CUDA EP via ONNX
+   Runtime) are explicit experimental product tracks. Other provider hooks
+   present in the core runtime do not become support claims unless they are
+   packaged and validated. See [Support Matrix](../help/SUPPORT_MATRIX.md).
 5. **Shared Runtime, Curated Artifacts.** The runtime contract is stable
    across product tracks. Model artifacts and backend adapters may differ by
    platform when required for predictable performance.
@@ -47,9 +47,9 @@ plugin).
 The engine, math, and I/O capabilities.
 
 - **Inference:** Backend adapters and session management for the official MLX
-  and TensorRT RTX EP product tracks, the experimental DirectML track, and
-  other internal provider hooks used for diagnostics, bring-up, or future
-  packaging work.
+  and TensorRT RTX EP product tracks, the experimental DirectML and Linux
+  CUDA EP tracks, and other internal provider hooks used for diagnostics,
+  bring-up, or future packaging work.
 - **Hardware:** Device detection and provider selection.
 - **Video Pipeline:** FFmpeg integration for direct memory processing.
 - **Math:** Color space conversion, despill, despeckle algorithms.

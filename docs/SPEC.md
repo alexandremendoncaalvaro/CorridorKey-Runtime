@@ -96,9 +96,10 @@ The current official product tracks are:
 - Windows RTX via ONNX Runtime TensorRT RTX EP on NVIDIA RTX 30 series and
   newer
 
-The current experimental product track is:
+The current experimental product tracks are:
 
 - Windows DirectML
+- Linux RTX via ONNX Runtime CUDA EP on NVIDIA RTX 30 series and newer
 
 Additional provider hooks may exist in the core runtime for diagnostics,
 bring-up, or future tracks. Those hooks are not support claims by themselves.
@@ -151,9 +152,10 @@ processing begins.
   - MLX for the official Apple Silicon track
   - TensorRT RTX EP for the official Windows RTX track
   - DirectML for the experimental Windows DirectML track
+  - CUDA EP via ONNX Runtime for the experimental Linux RTX track
   - ONNX CPU fallback for tolerant workflows
 - CLI surface with stable JSON and NDJSON output contracts
-- OFX plugin for DaVinci Resolve 20 on Apple Silicon and Windows
+- OFX plugin for DaVinci Resolve 20 on Apple Silicon, Windows, and Linux
 - Alpha hint ingestion and rough-matte fallback generation
 - OFX runtime/status reporting for guide source, safe quality ceiling, and the
   actual runtime path used for the last render

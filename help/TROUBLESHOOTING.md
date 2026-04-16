@@ -8,7 +8,7 @@ For support status by platform, hardware, and Resolve version, see
 [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md).
 
 Command note:
-- Use `corridorkey` in source builds and macOS bundles
+- Use `corridorkey` in source builds, macOS bundles, and Linux installs
 - Use `ck-engine.exe` in the Windows portable runtime bundle
 
 ---
@@ -31,12 +31,17 @@ installation.
 4. On Windows, confirm the installer was run as Administrator. The OFX plugin
    directory (`C:\Program Files\Common Files\OFX\Plugins`) requires elevated
    permissions to write.
-5. Open DaVinci Resolve preferences and navigate to the OpenFX plug-ins section
+5. On Linux, confirm the installer was run with `sudo`. The OFX plugin
+   directory (`/usr/OFX/Plugins/`) requires root permissions to write.
+   Resolve on Linux is Studio only; the free Resolve edition does not load
+   OFX plugins on Linux.
+6. Open DaVinci Resolve preferences and navigate to the OpenFX plug-ins section
    to verify that the standard OFX scan path is enabled.
-6. Restart DaVinci Resolve to trigger a fresh OFX scan.
-7. Check the Resolve log for OFX load errors:
+7. Restart DaVinci Resolve to trigger a fresh OFX scan.
+8. Check the Resolve log for OFX load errors:
    - macOS: `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/logs/`
    - Windows: `%AppData%\Blackmagic Design\DaVinci Resolve\logs\`
+   - Linux: `~/.local/share/DaVinciResolve/logs/`
 
 ---
 
