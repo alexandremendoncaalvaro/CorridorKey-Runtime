@@ -1,3 +1,14 @@
+# Enforce LF line endings on POSIX shell scripts and CMake configuration files
+# so they stay executable on Linux/macOS hosts when checked out on Windows.
+*.sh text eol=lf
+*.bash text eol=lf
+scripts/vcpkg-triplets/*.cmake text eol=lf
+
+# Keep Windows-native scripts as CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 assets/video_samples/*.mp4 filter=lfs diff=lfs merge=lfs -text
 assets/image_samples/**/*.png filter=lfs diff=lfs merge=lfs -text
 assets/image_samples/**/*.jpg filter=lfs diff=lfs merge=lfs -text
