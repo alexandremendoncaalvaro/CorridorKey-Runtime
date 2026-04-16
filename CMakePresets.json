@@ -87,6 +87,42 @@
             "cacheVariables": {
                 "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON"
             }
+        },
+        {
+            "name": "linux-portable",
+            "displayName": "Linux Portable Base",
+            "description": "Base configuration for portable Linux release builds",
+            "hidden": true,
+            "inherits": "default",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "environment": {
+                "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/scripts/vcpkg-triplets"
+            },
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "corridorkey-x64-linux"
+            }
+        },
+        {
+            "name": "release-linux-portable",
+            "displayName": "Release Linux Portable",
+            "description": "Release build with portable Linux rpath and CUDA EP support",
+            "inherits": [
+                "release",
+                "linux-portable"
+            ]
+        },
+        {
+            "name": "debug-linux-portable",
+            "displayName": "Debug Linux Portable",
+            "description": "Debug build with portable Linux rpath and ASAN",
+            "inherits": [
+                "debug",
+                "linux-portable"
+            ]
         }
     ],
     "buildPresets": [
@@ -109,6 +145,14 @@
         {
             "name": "release-lto",
             "configurePreset": "release-lto"
+        },
+        {
+            "name": "release-linux-portable",
+            "configurePreset": "release-linux-portable"
+        },
+        {
+            "name": "debug-linux-portable",
+            "configurePreset": "debug-linux-portable"
         }
     ],
     "testPresets": [

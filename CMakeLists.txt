@@ -289,6 +289,35 @@ else()
             message(FATAL_ERROR
                 "Windows builds require a curated ONNX Runtime root. Set CORRIDORKEY_WINDOWS_ORT_ROOT or stage vendor/onnxruntime-windows-rtx or vendor/onnxruntime-windows-dml.")
         endif()
+    elseif(UNIX AND NOT APPLE)
+        set(_corridorkey_linux_ort_root "${CORRIDORKEY_LINUX_ORT_ROOT}")
+        if(_corridorkey_linux_ort_root STREQUAL "" AND
+           EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-linux-cuda")
+            set(_corridorkey_linux_ort_root
+                "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-linux-cuda")
+        endif()
+
+        if(NOT _corridorkey_linux_ort_root STREQUAL "")
+            set(_corridorkey_linux_ort_include "${_corridorkey_linux_ort_root}/include")
+            set(_corridorkey_linux_ort_lib
+                "${_corridorkey_linux_ort_root}/lib/libonnxruntime.so")
+            if(EXISTS "${_corridorkey_linux_ort_include}" AND
+               EXISTS "${_corridorkey_linux_ort_lib}")
+                add_library(onnxruntime::onnxruntime SHARED IMPORTED)
+                set_target_properties(onnxruntime::onnxruntime PROPERTIES
+                    IMPORTED_LOCATION "${_corridorkey_linux_ort_lib}"
+                )
+                set(CORRIDORKEY_ORT_INCLUDE_DIRS "${_corridorkey_linux_ort_include}")
+                set(CORRIDORKEY_ORT_RUNTIME_DIR "${_corridorkey_linux_ort_root}/lib")
+                message(STATUS "Using curated Linux ONNX Runtime at: ${_corridorkey_linux_ort_root}")
+            else()
+                message(FATAL_ERROR
+                    "Configured CORRIDORKEY_LINUX_ORT_ROOT is missing include or lib/libonnxruntime.so: ${_corridorkey_linux_ort_root}")
+            endif()
+        else()
+            find_package(onnxruntime REQUIRED)
+            set(CORRIDORKEY_ORT_INCLUDE_DIRS ${onnxruntime_INCLUDE_DIRS})
+        endif()
     else()
         find_package(onnxruntime REQUIRED)
         set(CORRIDORKEY_ORT_INCLUDE_DIRS ${onnxruntime_INCLUDE_DIRS})
