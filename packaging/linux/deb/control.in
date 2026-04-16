@@ -1,0 +1,14 @@
+Package: corridorkey-resolve-ofx
+Version: @VERSION@
+Section: video
+Priority: optional
+Architecture: amd64
+Maintainer: Alexandre Mendonca Alvaro <alex@corridorkey.io>
+Homepage: https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime
+Description: CorridorKey OpenFX plugin for DaVinci Resolve Studio (experimental Linux RTX track).
+ CorridorKey is a chroma-key OpenFX plugin that accelerates real-time
+ green- and blue-screen keying on NVIDIA RTX GPUs. This package installs
+ the plugin under /usr/OFX/Plugins/ and exposes the corridorkey CLI on
+ PATH via /usr/local/bin. DaVinci Resolve Studio 20 is required; the free
+ Resolve edition does not load OpenFX plugins on Linux. A proprietary
+ NVIDIA driver 555 or newer is required.

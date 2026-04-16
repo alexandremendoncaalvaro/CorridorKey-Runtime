@@ -3,6 +3,10 @@
 *.sh text eol=lf
 *.bash text eol=lf
 scripts/vcpkg-triplets/*.cmake text eol=lf
+packaging/linux/deb/control.in text eol=lf
+packaging/linux/deb/postinst text eol=lf
+packaging/linux/deb/prerm text eol=lf
+packaging/linux/rpm/*.spec.in text eol=lf
 
 # Keep Windows-native scripts as CRLF.
 *.ps1 text eol=crlf

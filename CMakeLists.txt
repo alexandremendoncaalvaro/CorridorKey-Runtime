@@ -85,7 +85,9 @@ set(CORRIDORKEY_MLX_CMAKE_DIR "" CACHE PATH "Optional MLX CMake package director
 set(CORRIDORKEY_MLX_PYTHON "" CACHE FILEPATH "Optional Python interpreter used to discover MLX")
 set(CORRIDORKEY_WINDOWS_ORT_ROOT "" CACHE PATH
     "Curated Windows ONNX Runtime root (vendor/onnxruntime-windows-rtx or vendor/onnxruntime-windows-dml)")
-set(CORRIDORKEY_ORT_RUNTIME_DIR "" CACHE INTERNAL "Resolved ONNX Runtime DLL directory")
+set(CORRIDORKEY_LINUX_ORT_ROOT "" CACHE PATH
+    "Curated Linux ONNX Runtime root (vendor/onnxruntime-linux-cuda)")
+set(CORRIDORKEY_ORT_RUNTIME_DIR "" CACHE INTERNAL "Resolved ONNX Runtime runtime library directory")
 
 # --- Project Rules & Standards ---
 

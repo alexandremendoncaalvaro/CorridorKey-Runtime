@@ -207,6 +207,100 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  build-artifact-linux:
+    name: Build Artifact (Linux)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-22.04
+    env:
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config curl ca-certificates \
+            libx11-dev libxext-dev libgl1-mesa-dev
+
+      - name: Export GitHub Actions cache env
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 1e199d32ad53aab1defda61ce41c380302e3f95c
+
+      - name: Cache curated Linux ONNX Runtime
+        id: cache-ort-linux
+        uses: actions/cache@v4
+        with:
+          path: vendor/onnxruntime-linux-cuda
+          key: ort-linux-cuda-1.23.0
+
+      - name: Fetch curated Linux ONNX Runtime (CUDA EP)
+        if: steps.cache-ort-linux.outputs.cache-hit != 'true'
+        run: bash scripts/sync_onnxruntime_linux_cuda.sh
+
+      - name: Cache OpenFX SDK
+        id: cache-openfx-linux
+        uses: actions/cache@v4
+        with:
+          path: vendor/openfx
+          key: openfx-sdk-v1
+
+      - name: Fetch OpenFX SDK
+        if: steps.cache-openfx-linux.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx vendor/openfx
+
+      - name: Read version
+        id: version
+        run: |
+          v=$(awk '/^project\(/, /\)/' CMakeLists.txt \
+              | grep -E 'VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' \
+              | head -n 1 | awk '{print $2}')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Configure and build
+        run: |
+          cmake --preset release-linux-portable \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          cmake --build --preset release-linux-portable
+        env:
+          VCPKG_ROOT: ${{ env.VCPKG_ROOT }}
+
+      - name: Package (tarball only on CI, deb/rpm require host tooling)
+        run: |
+          bash scripts/package_ofx_installer_linux.sh \
+            --version ${{ steps.version.outputs.version }} \
+            --skip-deb --skip-rpm
+
+      - name: Generate asset manifest
+        run: |
+          cd dist
+          find . -maxdepth 2 -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \) \
+            -exec basename {} \; | sort -u > asset_manifest.txt
+          echo "--- packaged Linux assets ---"
+          cat asset_manifest.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: |
+            dist/*.tar.gz
+            dist/asset_manifest.txt
+          if-no-files-found: error
+          retention-days: 14
+
   smoke-mac:
     name: Smoke (macOS clean-room)
     needs: build-artifact-mac
@@ -278,9 +372,41 @@ jobs:
           }
         shell: pwsh
 
+  smoke-linux:
+    name: Smoke (Linux clean-room)
+    needs: build-artifact-linux
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Fetch only the smoke script
+        run: |
+          mkdir -p smoke
+          curl -L -o smoke/smoke_extract_and_run.sh \
+            "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/smoke_extract_and_run.sh"
+          chmod +x smoke/smoke_extract_and_run.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-linux
+          path: artifacts
+
+      - name: Run smoke against every packaged artifact
+        run: |
+          shopt -s nullglob
+          found=0
+          for asset in artifacts/*.tar.gz; do
+            found=1
+            echo "::group::smoke $(basename "$asset")"
+            ./smoke/smoke_extract_and_run.sh "$asset"
+            echo "::endgroup::"
+          done
+          if [ "$found" = "0" ]; then
+            echo "error: no packaged Linux artifacts to smoke" >&2
+            exit 1
+          fi
+
   lint-release-notes:
     name: Lint Release Notes
-    needs: [build-artifact-mac, build-artifact-windows]
+    needs: [build-artifact-mac, build-artifact-windows, build-artifact-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -295,9 +421,14 @@ jobs:
           name: dist-windows
           path: dist-windows
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-linux
+          path: dist-linux
+
       - name: Combine asset manifests
         run: |
-          cat dist-mac/asset_manifest.txt dist-windows/asset_manifest.txt \
+          cat dist-mac/asset_manifest.txt dist-windows/asset_manifest.txt dist-linux/asset_manifest.txt \
             | sort -u > combined_manifest.txt
           echo "--- combined release asset manifest ---"
           cat combined_manifest.txt

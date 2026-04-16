@@ -164,4 +164,46 @@ if(WIN32)
             COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
         )
     endif()
+elseif(UNIX AND NOT APPLE)
+    # Linux OFX bundle layout per the OpenFX portable bundle spec. Resolve's
+    # plugin loader follows the same Contents/<arch>/ convention the macOS
+    # bundle uses. We co-locate the CLI (corridorkey) next to the plugin so
+    # the runtime-server subcommand and doctor both resolve without PATH.
+    add_dependencies(corridorkey_ofx corridorkey_cli)
+
+    # $ORIGIN keeps the loader rooted at the plugin file, so libonnxruntime.so
+    # and libcorridorkey_core.so picked up from the same Contents/Linux-x86_64/
+    # directory regardless of the host's /etc/ld.so.conf or LD_LIBRARY_PATH.
+    set_target_properties(corridorkey_ofx PROPERTIES
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH ON
+    )
+    set_target_properties(corridorkey_cli PROPERTIES
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH ON
+    )
+
+    set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey.ofx.bundle")
+    set(_ofx_bundle_contents_dir "${_ofx_bundle_dir}/Contents/Linux-x86_64")
+
+    # Shared objects shipped inside the bundle. The curated
+    # onnxruntime-linux-cuda drop already contains libonnxruntime.so plus the
+    # CUDA runtime .so files; packaging scripts copy the remainder of that
+    # lib directory alongside the plugin.
+    add_custom_command(TARGET corridorkey_ofx POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_contents_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_contents_dir}/"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_contents_dir}/"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_core>" "${_ofx_bundle_contents_dir}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
+        COMMENT "Staging Linux OFX bundle skeleton at ${_ofx_bundle_dir}..."
+    )
+
+    if(CORRIDORKEY_ORT_RUNTIME_DIR AND EXISTS "${CORRIDORKEY_ORT_RUNTIME_DIR}")
+        add_custom_command(TARGET corridorkey_ofx POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_contents_dir}/"
+            COMMENT "Copying curated ONNX Runtime libraries into the Linux bundle..."
+        )
+    endif()
 endif()

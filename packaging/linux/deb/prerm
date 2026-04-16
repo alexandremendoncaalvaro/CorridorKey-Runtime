@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -e
+
+# Remove the CorridorKey CLI symlink only if it still points to our bundle.
+# This avoids clobbering a user-placed /usr/local/bin/corridorkey that was
+# pointed somewhere else after install.
+SYMLINK="/usr/local/bin/corridorkey"
+if [ -L "$SYMLINK" ]; then
+    target="$(readlink -f "$SYMLINK" || true)"
+    case "$target" in
+        /usr/OFX/Plugins/CorridorKey.ofx.bundle/*)
+            rm -f "$SYMLINK"
+            ;;
+    esac
+fi
+
+exit 0

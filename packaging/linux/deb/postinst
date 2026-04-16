@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -e
+
+# Register the CorridorKey CLI on PATH via a symlink under /usr/local/bin.
+# /usr/local/bin ships on the default PATH of every major Linux distribution,
+# which keeps the Linux install experience aligned with the Windows installer
+# that registers Contents\Win64\ on the machine PATH.
+BUNDLE_DIR="/usr/OFX/Plugins/CorridorKey.ofx.bundle"
+CLI_PATH="$BUNDLE_DIR/Contents/Linux-x86_64/corridorkey"
+
+if [ -x "$CLI_PATH" ]; then
+    ln -snf "$CLI_PATH" /usr/local/bin/corridorkey
+fi
+
+exit 0
