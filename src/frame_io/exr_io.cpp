@@ -35,7 +35,7 @@ Result<ImageBuffer> read_exr(const std::filesystem::path& path) {
             dst[3] = static_cast<float>(p.a);
         }
 
-        return std::move(buffer);
+        return buffer;
     } catch (const std::exception& e) {
         return Unexpected(
             Error{ErrorCode::IoError, std::string("Failed to read EXR: ") + e.what()});

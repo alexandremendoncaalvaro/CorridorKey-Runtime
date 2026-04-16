@@ -69,7 +69,46 @@ STAGE_DIR="$DIST_DIR/$RELEASE_NAME"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 
-# Copy the validated bundle payload unchanged.
+# Write the packaged-model inventory contract next to the staged bundle. The
+# doctor subcommand loads this file via packaged_model_inventory_candidates()
+# to confirm the bundle ships the full expected model set and to emit the
+# runtime profile that downstream diagnostics (bundle.healthy, model_profile,
+# backend_intent) key off of. The expected_models list matches the Windows
+# RTX catalog because Linux RTX reuses the same .onnx ladder through the
+# ONNX Runtime CUDA EP; unlike Windows RTX, there are no precompiled
+# TensorRT contexts to track.
+MODEL_INVENTORY_PATH="$BUNDLE_SRC/model_inventory.json"
+cat > "$MODEL_INVENTORY_PATH" <<INVENTORY
+{
+    "package_type": "linux_rtx_ofx_bundle",
+    "model_profile": "linux-rtx",
+    "bundle_track": "rtx",
+    "release_label": "v${VERSION}-linux-rtx",
+    "optimization_profile_id": "linux-rtx-cuda",
+    "optimization_profile_label": "Linux RTX (CUDA Execution Provider)",
+    "backend_intent": "cuda",
+    "fallback_policy": "experimental_gpu_then_cpu_tolerant_workflows",
+    "warmup_policy": "provider_specific_session_warmup",
+    "certification_tier": "experimental",
+    "unrestricted_quality_attempt": false,
+    "models_dir": "Contents/Resources/models",
+    "expected_models": [
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_1024.onnx",
+        "corridorkey_fp16_1536.onnx",
+        "corridorkey_fp16_2048.onnx",
+        "corridorkey_int8_512.onnx",
+        "corridorkey_int8_768.onnx",
+        "corridorkey_int8_1024.onnx"
+    ],
+    "expected_compiled_context_models": [],
+    "compiled_context_models": [],
+    "missing_compiled_context_models": [],
+    "compiled_context_complete": true
+}
+INVENTORY
+
+# Copy the validated bundle payload unchanged (with model_inventory.json now staged).
 cp -R "$BUNDLE_SRC" "$STAGE_DIR/"
 
 # Tarball install/uninstall helpers. The Debian postinst and the RPM %post

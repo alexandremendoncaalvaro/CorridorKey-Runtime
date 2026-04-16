@@ -38,4 +38,19 @@ if(WIN32)
             $<TARGET_FILE_DIR:corridorkey_cli>
         COMMAND_EXPAND_LISTS
     )
+elseif(UNIX AND NOT APPLE)
+    # Make the OFX plugin wait on the CLI so the Linux bundle's POST_BUILD
+    # stage (in src/plugins/ofx/CMakeLists.txt) can copy corridorkey next to
+    # the plugin. Set the CLI's RPATH to $ORIGIN so that, once staged inside
+    # the bundle's Contents/Linux-x86_64/, it resolves libcorridorkey_core.so
+    # and libonnxruntime.so from the same directory regardless of
+    # LD_LIBRARY_PATH. These statements live here (not in the ofx subdir)
+    # because the cli target is added after src/ in the top-level CMakeLists.
+    if(TARGET corridorkey_ofx)
+        add_dependencies(corridorkey_ofx corridorkey_cli)
+    endif()
+    set_target_properties(corridorkey_cli PROPERTIES
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH ON
+    )
 endif()

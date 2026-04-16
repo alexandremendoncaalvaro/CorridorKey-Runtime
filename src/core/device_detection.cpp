@@ -19,8 +19,9 @@ namespace corridorkey {
 
 namespace {
 
+#if defined(__APPLE__)
 bool compiled_for_apple_silicon() {
-#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+#if defined(__aarch64__) || defined(__arm64__)
     return true;
 #else
     return false;
@@ -28,15 +29,14 @@ bool compiled_for_apple_silicon() {
 }
 
 bool detect_apple_silicon() {
-#if defined(__APPLE__)
     int is_arm64 = 0;
     size_t arm64_size = sizeof(is_arm64);
     if (sysctlbyname("hw.optional.arm64", &is_arm64, &arm64_size, NULL, 0) == 0) {
         return is_arm64 == 1;
     }
-#endif
     return compiled_for_apple_silicon();
 }
+#endif
 
 }  // namespace
 

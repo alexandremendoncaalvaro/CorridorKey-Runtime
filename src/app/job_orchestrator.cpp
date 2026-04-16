@@ -184,6 +184,9 @@ std::string normalize_optimization_profile_for_comparison(std::string profile) {
         profile == "windows-rtx") {
         return "windows-rtx";
     }
+    if (profile == "linux-rtx-cuda" || profile == "linux-rtx") {
+        return "linux-rtx";
+    }
     return profile;
 }
 
@@ -827,7 +830,10 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
     const auto [any_packaged_windows_model, packaged_windows_models_present] =
         windows_packaged_model_presence(report, report["models"]);
     bool validated_models_present = true;
-    if (platform == "windows") {
+    if (platform == "windows" || platform == "linux") {
+        // Linux RTX ships the same ONNX ladder as the Windows RTX track and uses
+        // the same packaged_for_windows catalog flag to enumerate the artifacts
+        // the bundle is expected to carry, so the presence check is identical.
         validated_models_present = !any_packaged_windows_model || packaged_windows_models_present;
     } else {
         for (const auto& entry : report["models"]) {

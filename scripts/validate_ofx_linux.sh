@@ -52,7 +52,9 @@ if [[ ! -d "$MODELS_DIR" ]]; then
 fi
 
 echo "[validate] running '$CLI_BIN doctor --json'..."
-if doctor_output="$("$CLI_BIN" doctor --json --models-dir "$MODELS_DIR" 2>&1)"; then
+# 'corridorkey doctor' resolves the bundled models directory automatically via
+# its sibling packaging layout; the CLI does not accept a --models-dir flag.
+if doctor_output="$("$CLI_BIN" doctor --json 2>&1)"; then
     :
 else
     echo "$doctor_output" >&2
@@ -64,8 +66,10 @@ if command -v python3 >/dev/null 2>&1; then
     if ! echo "$doctor_output" | python3 -c "
 import sys, json
 report = json.load(sys.stdin)
-if not report.get('healthy', False):
-    print('doctor reports healthy=false', file=sys.stderr)
+# The CLI reports per-subsystem health under 'summary.healthy'; there is no
+# top-level 'healthy' flag. Match what the Windows validator and CI key off.
+if not report.get('summary', {}).get('healthy', False):
+    print('doctor reports summary.healthy=false', file=sys.stderr)
     sys.exit(2)
 "; then
         echo "$doctor_output"

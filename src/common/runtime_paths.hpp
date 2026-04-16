@@ -248,6 +248,16 @@ inline std::filesystem::path default_models_root() {
         auto executable_dir = executable_path->parent_path();
         std::error_code error;
 
+        // OpenFX bundle layout (Windows, Linux, macOS): the CLI lives in
+        // Contents/<platform>/ and the models live in
+        // Contents/Resources/models as a peer. This has to be probed before
+        // Contents/models to match the Resolve bundle convention.
+        auto ofx_bundle_candidate = executable_dir.parent_path() / "Resources" / "models";
+        if (std::filesystem::exists(ofx_bundle_candidate, error) && !error) {
+            return ofx_bundle_candidate;
+        }
+        error.clear();
+
         auto packaged_candidate = executable_dir.parent_path() / "models";
         if (std::filesystem::exists(packaged_candidate, error) && !error) {
             return packaged_candidate;

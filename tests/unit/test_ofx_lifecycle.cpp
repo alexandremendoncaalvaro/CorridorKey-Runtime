@@ -236,7 +236,7 @@ TEST_CASE("purge caches clears shared and instance caches", "[unit][ofx][regress
 
 TEST_CASE("get regions of interest propagates the requested ROI to source clips",
           "[unit][ofx][regression]") {
-    FakeRoiProps in_args{.roi = {10.0, 20.0, 110.0, 220.0}};
+    FakeRoiProps in_args{.roi = {10.0, 20.0, 110.0, 220.0}, .clip_rois = {}};
     FakeRoiProps out_args{};
 
     OfxPropertySuiteV1 property_suite{};

@@ -1,7 +1,9 @@
 #include "ofx_frame_cache.hpp"
 
 #include <cstring>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 
 namespace corridorkey::ofx {
 

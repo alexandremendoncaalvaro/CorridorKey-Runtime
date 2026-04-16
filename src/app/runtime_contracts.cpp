@@ -714,6 +714,19 @@ RuntimeOptimizationProfile runtime_optimization_profile_for_device(
         return profile;
     }
 
+    if (capabilities.platform == "linux" &&
+        (device.backend == Backend::CUDA || device.backend == Backend::TensorRT)) {
+        profile.id = "linux-rtx-cuda";
+        profile.label = "Linux RTX (CUDA Execution Provider)";
+        profile.intended_track = "linux_rtx";
+        profile.backend_intent = "cuda";
+        profile.fallback_policy = "experimental_gpu_then_cpu_tolerant_workflows";
+        profile.warmup_policy = "provider_specific_session_warmup";
+        profile.certification_tier = "experimental";
+        profile.unrestricted_quality_attempt = false;
+        return profile;
+    }
+
     if (capabilities.platform == "windows" &&
         (device.backend == Backend::DirectML || device.backend == Backend::WindowsML ||
          device.backend == Backend::OpenVINO)) {

@@ -18,6 +18,8 @@ extern char** environ;
 #include <windows.h>
 #else
 #include <signal.h>
+#include <spawn.h>
+extern char** environ;
 #endif
 
 namespace corridorkey::ofx {

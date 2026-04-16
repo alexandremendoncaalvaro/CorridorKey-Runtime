@@ -656,7 +656,9 @@ int main(int argc, char* argv[]) {
             FILE* suppressed_stderr = nullptr;
             freopen_s(&suppressed_stderr, "NUL", "a", stderr);
 #else
-            std::freopen("/dev/null", "a", stderr);
+            // Quietly absorb the FILE* because --stderr-off is best-effort.
+            FILE* suppressed_stderr = std::freopen("/dev/null", "a", stderr);
+            (void)suppressed_stderr;
 #endif
         }
 
@@ -1097,7 +1099,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            auto progress = [](float p, const std::string& status) -> bool {
+            ProgressCallback progress = [](float p, const std::string& status) -> bool {
                 {
                     int bar_width = 50;
                     auto filled = static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));

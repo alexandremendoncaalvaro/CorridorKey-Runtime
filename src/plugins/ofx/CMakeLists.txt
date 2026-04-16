@@ -169,16 +169,14 @@ elseif(UNIX AND NOT APPLE)
     # plugin loader follows the same Contents/<arch>/ convention the macOS
     # bundle uses. We co-locate the CLI (corridorkey) next to the plugin so
     # the runtime-server subcommand and doctor both resolve without PATH.
-    add_dependencies(corridorkey_ofx corridorkey_cli)
+    # NOTE: add_dependencies(corridorkey_ofx corridorkey_cli) and the CLI's
+    # INSTALL_RPATH are set from src/cli/CMakeLists.txt because the cli target
+    # is added after src/ in the top-level CMakeLists.txt.
 
     # $ORIGIN keeps the loader rooted at the plugin file, so libonnxruntime.so
     # and libcorridorkey_core.so picked up from the same Contents/Linux-x86_64/
     # directory regardless of the host's /etc/ld.so.conf or LD_LIBRARY_PATH.
     set_target_properties(corridorkey_ofx PROPERTIES
-        INSTALL_RPATH "$ORIGIN"
-        BUILD_WITH_INSTALL_RPATH ON
-    )
-    set_target_properties(corridorkey_cli PROPERTIES
         INSTALL_RPATH "$ORIGIN"
         BUILD_WITH_INSTALL_RPATH ON
     )
@@ -206,4 +204,43 @@ elseif(UNIX AND NOT APPLE)
             COMMENT "Copying curated ONNX Runtime libraries into the Linux bundle..."
         )
     endif()
+
+    # Stage ffmpeg .so files from vcpkg_installed (ffmpeg is built dynamic on
+    # this triplet because its yasm-assembled MMX/SSE modules emit non-PIC
+    # relocations that fail to link into libcorridorkey_core.so). The $ORIGIN
+    # rpath on the plugin and CLI resolves them from the same bundle dir.
+    set(_ofx_vcpkg_lib_dir "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/lib")
+    if(EXISTS "${_ofx_vcpkg_lib_dir}")
+        file(GLOB _ofx_vcpkg_shared_objs
+            "${_ofx_vcpkg_lib_dir}/libav*.so*"
+            "${_ofx_vcpkg_lib_dir}/libsw*.so*")
+        if(_ofx_vcpkg_shared_objs)
+            add_custom_command(TARGET corridorkey_ofx POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy ${_ofx_vcpkg_shared_objs} "${_ofx_bundle_contents_dir}/"
+                COMMENT "Copying ffmpeg shared libraries into the Linux bundle..."
+            )
+        endif()
+    endif()
+
+    # Rewrite DT_RUNPATH on the bundle copy of libcorridorkey_core.so from the
+    # absolute build-tree paths CMake bakes in at link time to $ORIGIN so the
+    # loader resolves its ffmpeg / onnxruntime siblings from the bundle on any
+    # end-user machine. CMake's INSTALL_RPATH=$ORIGIN is unusable here because
+    # $ORIGIN is not expanded at link time, so downstream targets that link
+    # against corridorkey_core could not resolve its transitive deps during
+    # their own link step. patchelf rewrites the RUNPATH after all linking is
+    # done, so the build-time rpath stays intact and the shipped copy is clean.
+    find_program(CORRIDORKEY_PATCHELF patchelf)
+    if(NOT CORRIDORKEY_PATCHELF)
+        message(FATAL_ERROR
+            "patchelf is required to stage the Linux OFX bundle with a portable "
+            "$ORIGIN rpath on libcorridorkey_core.so. Install it with "
+            "'sudo apt install patchelf' (Debian/Ubuntu) or the distro equivalent.")
+    endif()
+    add_custom_command(TARGET corridorkey_ofx POST_BUILD
+        COMMAND ${CORRIDORKEY_PATCHELF} --set-rpath "\$ORIGIN"
+            "${_ofx_bundle_contents_dir}/$<TARGET_FILE_NAME:corridorkey_core>"
+        COMMENT "Rewriting libcorridorkey_core.so RUNPATH to \$ORIGIN..."
+        VERBATIM
+    )
 endif()

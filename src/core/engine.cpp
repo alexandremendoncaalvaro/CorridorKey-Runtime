@@ -126,12 +126,14 @@ class Engine::Impl {
 
 namespace {
 
+#if defined(__APPLE__)
 bool is_mlx_artifact(const std::filesystem::path& model_path) {
     auto extension = model_path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return extension == ".safetensors" || extension == ".mlxfn";
 }
+#endif
 
 DeviceInfo resolve_auto_device_for_model(const std::filesystem::path& model_path) {
 #if defined(__APPLE__)
@@ -165,6 +167,8 @@ std::optional<DeviceInfo> build_cpu_fallback_device(const DeviceInfo& device) {
         device.backend == Backend::WindowsML || device.backend == Backend::OpenVINO) {
         return DeviceInfo{"Generic CPU", 0, Backend::CPU};
     }
+#else
+    (void)device;
 #endif
     return std::nullopt;
 }

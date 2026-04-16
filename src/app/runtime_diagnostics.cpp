@@ -804,6 +804,28 @@ BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_di
         return layout;
     }
 
+    if (executable_dir.filename() == "Linux-x86_64" &&
+        executable_dir.parent_path().filename() == "Contents") {
+        auto contents_dir = executable_dir.parent_path();
+        layout.root = contents_dir.parent_path();
+        layout.expected_models_dir = contents_dir / "Resources" / "models";
+        layout.readme_path = layout.root / "README.txt";
+        layout.smoke_test_path = layout.root / "smoke_test.sh";
+
+        std::error_code error;
+        const bool cli_present =
+            std::filesystem::exists(executable_dir / "corridorkey", error) && !error;
+        error.clear();
+        const bool plugin_present =
+            std::filesystem::exists(executable_dir / "CorridorKey.ofx", error) && !error;
+        error.clear();
+        const bool models_present =
+            std::filesystem::exists(layout.expected_models_dir, error) && !error;
+        layout.kind = "linux_ofx";
+        layout.packaged_layout_detected = cli_present && plugin_present && models_present;
+        return layout;
+    }
+
     layout.root =
         executable_dir.filename() == "bin" ? executable_dir.parent_path() : executable_dir;
     layout.expected_models_dir = layout.root / "models";
@@ -895,8 +917,10 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
             return reference.find(
 #if defined(_WIN32)
                        "corridorkey_core.dll"
-#else
+#elif defined(__APPLE__)
                        "libcorridorkey_core.dylib"
+#else
+                       "libcorridorkey_core.so"
 #endif
                        ) != std::string::npos;
         });
@@ -939,8 +963,11 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     auto compiled_context_models = nlohmann::json::array();
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
-    const auto expected_packaged_models =
-        expected_packaged_models_for_platform(models_dir, layout.kind == "windows_ofx");
+    // Linux RTX ships the same ORT/.onnx model set as Windows RTX, so the
+    // packaged-models expectation uses the windows_platform catalog entries
+    // for both layouts.
+    const auto expected_packaged_models = expected_packaged_models_for_platform(
+        models_dir, layout.kind == "windows_ofx" || layout.kind == "linux_ofx");
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_ready = !expected_packaged_models.empty();
@@ -987,6 +1014,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     }
 
     const bool windows_ofx_layout = layout.kind == "windows_ofx";
+    const bool linux_ofx_layout = layout.kind == "linux_ofx";
     const bool packaged_layout_detected = layout.packaged_layout_detected;
     const bool windows_rtx_bundle =
         !tensorrt_provider_libraries.empty() || !tensorrt_rtx_core_libraries.empty() ||
@@ -1123,6 +1151,18 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                           json["model_inventory_contract_complete"].get<bool>() &&
                           compiled_contexts_ready && runtime_backend_bundle_ready &&
                           (windows_ofx_layout || core_library.has_value());
+    } else if (linux_ofx_layout) {
+        // Linux RTX bundle uses ONNX Runtime CUDA EP loading .onnx models
+        // directly. There are no precompiled TensorRT contexts to validate
+        // (unlike Windows RTX), and MLX is Apple-only. The bundle is healthy
+        // when the layout is correct, the core + runtime .so files are
+        // present, the CLI references the core library, the core library
+        // references libonnxruntime, and the packaged model set matches the
+        // inventory contract.
+        json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
+                          runtime_reference_found && core_library.has_value() &&
+                          core_reference_found && packaged_models_ready &&
+                          json["model_inventory_contract_complete"].get<bool>();
     } else {
         json["healthy"] = packaged_layout_detected && runtime_library.has_value() &&
                           runtime_reference_found && core_library.has_value() &&
