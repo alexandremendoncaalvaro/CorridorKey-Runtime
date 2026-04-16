@@ -535,6 +535,40 @@ std::vector<std::string> dependency_references(const std::filesystem::path& exec
         }
         references.push_back(line);
     }
+#elif defined(__linux__)
+    auto command = std::string("/usr/bin/ldd ") + shell_escape(executable_path) + " 2>&1";
+    auto output = run_command_capture(command);
+    std::stringstream stream(output.output);
+    std::string line;
+    while (std::getline(stream, line)) {
+        line = trim_copy(line);
+        if (line.empty()) {
+            continue;
+        }
+        // Expected ldd line shapes:
+        //   libfoo.so.1 => /path/to/libfoo.so.1 (0x...)
+        //   linux-vdso.so.1 (0x...)
+        //   /lib64/ld-linux-x86-64.so.2 (0x...)
+        auto arrow = line.find(" => ");
+        if (arrow != std::string::npos) {
+            auto remainder = trim_copy(line.substr(arrow + 4));
+            auto open_paren = remainder.find(" (");
+            if (open_paren != std::string::npos) {
+                remainder = remainder.substr(0, open_paren);
+            }
+            if (!remainder.empty() && remainder != "not found") {
+                references.push_back(remainder);
+            }
+            continue;
+        }
+        auto open_paren = line.find(" (");
+        if (open_paren != std::string::npos) {
+            auto remainder = line.substr(0, open_paren);
+            if (!remainder.empty()) {
+                references.push_back(remainder);
+            }
+        }
+    }
 #else
     (void)executable_path;
 #endif
@@ -848,8 +882,10 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     auto core_library = find_exact_library(executable_dir,
 #if defined(_WIN32)
                                            "corridorkey_core.dll"
-#else
+#elif defined(__APPLE__)
                                            "libcorridorkey_core.dylib"
+#else
+                                           "libcorridorkey_core.so"
 #endif
     );
     auto mlx_library = find_exact_library(executable_dir, "libmlx.dylib");

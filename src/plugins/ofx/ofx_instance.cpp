@@ -27,6 +27,13 @@
 #elif defined(_WIN32)
 #include <shellapi.h>
 #include <windows.h>
+#elif defined(__linux__)
+#include <dlfcn.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+extern char** environ;
 #endif
 
 namespace corridorkey::ofx {
@@ -52,6 +59,13 @@ bool open_external_url(const std::string& url) {
                           nullptr};
     pid_t pid = 0;
     return posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, argv, *_NSGetEnviron()) == 0;
+#elif defined(__linux__)
+    // xdg-open is the freedesktop.org standard URL opener on Linux. It is
+    // resolved from PATH because its concrete location varies across
+    // distributions (often /usr/bin, sometimes /usr/local/bin).
+    char* const argv[] = {const_cast<char*>("xdg-open"), const_cast<char*>(url.c_str()), nullptr};
+    pid_t pid = 0;
+    return posix_spawnp(&pid, "xdg-open", nullptr, nullptr, argv, environ) == 0;
 #else
     (void)url;
     return false;
@@ -823,7 +837,7 @@ std::optional<std::filesystem::path> plugin_module_path() {
     }
     buffer.resize(length);
     return std::filesystem::path(buffer);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__linux__)
     Dl_info info{};
     if (dladdr(reinterpret_cast<void*>(&plugin_module_path), &info) == 0 ||
         info.dli_fname == nullptr) {

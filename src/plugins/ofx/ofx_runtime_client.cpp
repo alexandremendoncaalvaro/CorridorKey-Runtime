@@ -144,6 +144,13 @@ std::filesystem::path resolve_ofx_runtime_server_binary(
 #if defined(_WIN32)
     auto win64_dir = plugin_module_path.parent_path();
     return win64_dir / "corridorkey_ofx_runtime_server.exe";
+#elif defined(__linux__)
+    // Linux OFX bundle layout places the plugin binary and the CLI side by
+    // side under Contents/Linux-x86_64/, per the OpenFX portable bundle
+    // convention. The CLI exposes an `ofx-runtime-server` subcommand so we
+    // do not ship a separate server binary.
+    auto linux_dir = plugin_module_path.parent_path();
+    return linux_dir / "corridorkey";
 #else
     auto bundle_root = plugin_module_path.parent_path().parent_path();
     return bundle_root / "Resources" / "bin" / "corridorkey";

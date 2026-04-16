@@ -1,5 +1,6 @@
 #include <corridorkey/engine.hpp>
 
+#include "linux_cuda_probe.hpp"
 #include "mlx_probe.hpp"
 #include "windows_rtx_probe.hpp"
 
@@ -10,6 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <sys/sysinfo.h>
 #include <unistd.h>
 #endif
 
@@ -138,7 +140,19 @@ DeviceInfo auto_detect() {
     device.backend = Backend::CPU;
     device.available_memory_mb = static_cast<int64_t>(status.ullTotalPhys / (1024 * 1024));
 #else
-    device.name = "Linux/Generic Device";
+    auto linux_gpus = core::list_linux_gpus();
+    for (size_t i = 0; i < linux_gpus.size(); ++i) {
+        const auto& gpu = linux_gpus[i];
+        if (gpu.cuda_available) {
+            device.name = gpu.adapter_name + " (CUDA)";
+            device.backend = Backend::CUDA;
+            device.available_memory_mb = gpu.dedicated_memory_mb;
+            device.device_index = static_cast<int>(i);
+            return device;
+        }
+    }
+
+    device.name = "Linux CPU Baseline";
     device.backend = Backend::CPU;
     long pages = sysconf(_SC_PHYS_PAGES);
     long page_size = sysconf(_SC_PAGE_SIZE);
@@ -185,6 +199,16 @@ std::vector<DeviceInfo> list_devices() {
         }
     }
     devices.push_back({"Generic CPU", 0, Backend::CPU, 0});
+#elif defined(__linux__)
+    auto linux_gpus = core::list_linux_gpus();
+    for (size_t i = 0; i < linux_gpus.size(); ++i) {
+        const auto& gpu = linux_gpus[i];
+        if (gpu.cuda_available) {
+            devices.push_back({gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb,
+                               Backend::CUDA, static_cast<int>(i)});
+        }
+    }
+    devices.push_back({"Linux CPU Baseline", 0, Backend::CPU, 0});
 #else
     devices.push_back(auto_detect());
 #endif
