@@ -99,17 +99,35 @@ class Engine::Impl {
             return {};
         }
 
-        ImageBuffer warm_rgb(64, 64, 3);
-        ImageBuffer warm_hint(64, 64, 1);
-        std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
-        std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
+        // Warm up with buffers sized to the actual bridge resolution the runtime will
+        // hit in production. MLX JIT-compiles kernels for the first shape it sees, so a
+        // 64x64 dummy wastes the opportunity and forces recompilation on the first real
+        // frame. Clamp upward to at least 64 to keep the stage harmless when the
+        // resolution is not known yet.
+        const int warm_res = std::max(warmup_workload_resolution, 64);
+        ImageBuffer warm_rgb;
+        ImageBuffer warm_hint;
+        common::measure_stage(
+            on_stage, "engine_warmup_alloc",
+            [&]() {
+                warm_rgb = ImageBuffer(warm_res, warm_res, 3);
+                warm_hint = ImageBuffer(warm_res, warm_res, 1);
+                std::fill(warm_rgb.view().data.begin(), warm_rgb.view().data.end(), 0.0f);
+                std::fill(warm_hint.view().data.begin(), warm_hint.view().data.end(), 0.0f);
+            },
+            1);
 
         InferenceParams warm_params;
         warm_params.target_resolution = desired_resolution;
 
+        // engine_warmup_first_run captures the first-frame cost including any JIT compilation
+        // the backend performs on the target shape. The legacy aggregate stage "engine_warmup"
+        // is preserved for compatibility with older analyzers that key on that name.
         auto warmup_frame = common::measure_stage(on_stage, "engine_warmup", [&]() {
-            return run_with_cpu_fallback<FrameResult>("warmup", [&]() {
-                return session->run(warm_rgb.view(), warm_hint.view(), warm_params, on_stage);
+            return common::measure_stage(on_stage, "engine_warmup_first_run", [&]() {
+                return run_with_cpu_fallback<FrameResult>("warmup", [&]() {
+                    return session->run(warm_rgb.view(), warm_hint.view(), warm_params, on_stage);
+                });
             });
         });
 

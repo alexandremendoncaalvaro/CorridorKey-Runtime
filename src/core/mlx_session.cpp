@@ -140,15 +140,19 @@ MlxSession::MlxSession(MlxSession&&) noexcept = default;
 MlxSession& MlxSession::operator=(MlxSession&&) noexcept = default;
 
 Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::path& model_path,
-                                                       const DeviceInfo& device) {
+                                                       const DeviceInfo& device,
+                                                       StageTimingCallback on_stage) {
 #if !CORRIDORKEY_WITH_MLX
     (void)model_path;
     (void)device;
+    (void)on_stage;
     return Unexpected<Error>{
         Error{ErrorCode::HardwareNotSupported,
               "MLX backend is not linked in this build. Reconfigure CMake with MLX available."}};
 #else
-    auto executable_artifact_res = resolve_executable_artifact(model_path, device);
+    auto executable_artifact_res = common::measure_stage(
+        on_stage, "mlx_artifact_resolve",
+        [&]() { return resolve_executable_artifact(model_path, device); }, 1);
     if (!executable_artifact_res) {
         return Unexpected(executable_artifact_res.error());
     }
@@ -156,20 +160,34 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
     try {
         auto session = std::unique_ptr<MlxSession>(new MlxSession());
         session->m_impl->model_resolution = resolved_model_resolution(*executable_artifact_res);
-        session->m_impl->input_buffer =
-            ImageBuffer(session->m_impl->model_resolution, session->m_impl->model_resolution, 4);
-        session->m_impl->alpha_buffer =
-            ImageBuffer(session->m_impl->model_resolution, session->m_impl->model_resolution, 1);
-        session->m_impl->foreground_buffer =
-            ImageBuffer(session->m_impl->model_resolution, session->m_impl->model_resolution, 3);
-        session->m_impl->imported_function.emplace(
-            mlx::core::import_function(executable_artifact_res->string()));
-        std::function<std::vector<mlx::core::array>(const mlx::core::Args&)> imported_callable =
-            [imported = *session->m_impl->imported_function](const mlx::core::Args& args) {
-                return imported(args);
-            };
-        session->m_impl->compiled_function.emplace(
-            mlx::core::compile(std::move(imported_callable), false));
+        common::measure_stage(
+            on_stage, "mlx_buffer_alloc",
+            [&]() {
+                session->m_impl->input_buffer = ImageBuffer(session->m_impl->model_resolution,
+                                                            session->m_impl->model_resolution, 4);
+                session->m_impl->alpha_buffer = ImageBuffer(session->m_impl->model_resolution,
+                                                            session->m_impl->model_resolution, 1);
+                session->m_impl->foreground_buffer = ImageBuffer(
+                    session->m_impl->model_resolution, session->m_impl->model_resolution, 3);
+            },
+            1);
+        common::measure_stage(
+            on_stage, "mlx_bridge_import",
+            [&]() {
+                session->m_impl->imported_function.emplace(
+                    mlx::core::import_function(executable_artifact_res->string()));
+            },
+            1);
+        common::measure_stage(
+            on_stage, "mlx_jit_compile",
+            [&]() {
+                std::function<std::vector<mlx::core::array>(const mlx::core::Args&)>
+                    imported_callable = [imported = *session->m_impl->imported_function](
+                                            const mlx::core::Args& args) { return imported(args); };
+                session->m_impl->compiled_function.emplace(
+                    mlx::core::compile(std::move(imported_callable), false));
+            },
+            1);
         return session;
     } catch (const std::exception& error) {
         return Unexpected<Error>{
