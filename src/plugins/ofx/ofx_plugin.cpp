@@ -64,7 +64,15 @@ OfxStatus on_load() {
 static OfxStatus plugin_main_entry(const char* action, const void* handle,
                                    OfxPropertySetHandle in_args, OfxPropertySetHandle out_args) {
     try {
-        if (action != nullptr && std::strcmp(action, kOfxImageEffectActionRender) != 0) {
+        // Suppress high-frequency bookkeeping actions from the log. Render fires
+        // per frame; BeginInstanceChanged/EndInstanceChanged fire as wrappers
+        // around every parameter touch in the UI. The signal lives in the
+        // InstanceChanged payload itself (which specific parameter changed) and
+        // in the lifecycle events surrounding them. The aggregate dispatch spam
+        // made the log unusable for performance triage.
+        if (action != nullptr && std::strcmp(action, kOfxImageEffectActionRender) != 0 &&
+            std::strcmp(action, kOfxActionBeginInstanceChanged) != 0 &&
+            std::strcmp(action, kOfxActionEndInstanceChanged) != 0) {
             log_message("plugin_main_entry", action);
         }
         if (std::strcmp(action, kOfxActionLoad) == 0) {
