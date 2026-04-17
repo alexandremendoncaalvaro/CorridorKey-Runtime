@@ -87,6 +87,82 @@ TEST_CASE("VideoReader and VideoWriter roundtrip", "[integration][video]") {
         }
     }
 
+#if defined(__APPLE__)
+    SECTION("macOS prefers ProRes 4444 via VideoToolbox for .mov lossless") {
+        // When the VideoToolbox ProRes encoder is present in the FFmpeg build the
+        // default lossless encoder for .mov must be prores_videotoolbox: it runs on
+        // the Media Engine instead of the CPU and stays mathematically lossless
+        // for alpha. Builds that do not ship prores_videotoolbox fall back to
+        // qtrle or png, so this test is guarded on the encoder's availability.
+        if (is_videotoolbox_encoder_available("prores_videotoolbox")) {
+            auto encoder = default_video_encoder_for_path("prores_probe.mov");
+            REQUIRE(encoder == "prores_videotoolbox");
+
+            auto candidates = available_video_encoders_for_path("prores_probe.mov");
+            REQUIRE(!candidates.empty());
+            REQUIRE(candidates.front() == "prores_videotoolbox");
+        }
+    }
+
+    SECTION("ProRes 4444 roundtrip preserves RGB content above 8-bit tolerance") {
+        if (!is_videotoolbox_encoder_available("prores_videotoolbox")) {
+            SUCCEED("prores_videotoolbox not available in this build");
+            return;
+        }
+
+        const std::filesystem::path prores_video = "test_prores_roundtrip.mov";
+        {
+            VideoOutputOptions output_options;
+            output_options.mode = VideoOutputMode::Lossless;
+            VideoFrameFormat input_format;
+            input_format.bits_per_component = 10;
+            auto writer_res =
+                VideoWriter::open(prores_video, w, h, fps, input_format, output_options);
+            REQUIRE(writer_res.has_value());
+            auto writer = std::move(*writer_res);
+
+            ImageBuffer frame(w, h, 3);
+            for (int i = 0; i < num_frames; ++i) {
+                float r = static_cast<float>(i) / num_frames;
+                for (size_t j = 0; j < frame.view().data.size(); j += 3) {
+                    frame.view().data[j] = r;
+                    frame.view().data[j + 1] = 0.5f;
+                    frame.view().data[j + 2] = 1.0f - r;
+                }
+                auto write_res = writer->write_frame(frame.view());
+                REQUIRE(write_res.has_value());
+            }
+            auto finalize_res = writer->finalize();
+            REQUIRE(finalize_res.has_value());
+        }
+
+        REQUIRE(std::filesystem::exists(prores_video));
+        REQUIRE(std::filesystem::file_size(prores_video) > 0);
+
+        {
+            auto reader_res = VideoReader::open(prores_video);
+            REQUIRE(reader_res.has_value());
+            auto reader = std::move(*reader_res);
+            REQUIRE(reader->width() == w);
+            REQUIRE(reader->height() == h);
+
+            for (int i = 0; i < num_frames; ++i) {
+                auto frame_res = reader->read_next_frame();
+                REQUIRE(frame_res.has_value());
+                auto frame = std::move(*frame_res);
+                REQUIRE_FALSE(frame.buffer.view().empty());
+                float expected_r = static_cast<float>(i) / num_frames;
+                // ProRes 4444 uses 10-bit 4:4:4 chroma so the roundtrip is well
+                // below the 8-bit tolerance used for the default lossless path.
+                REQUIRE(frame.buffer.view()(h / 2, w / 2, 0) ==
+                        Catch::Approx(expected_r).margin(2.0f / 1023.0f));
+            }
+        }
+
+        std::filesystem::remove(prores_video);
+    }
+#endif
+
     SECTION("Writer preserves provided timestamps") {
         {
             VideoOutputOptions output_options;

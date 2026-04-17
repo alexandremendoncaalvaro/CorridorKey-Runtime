@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace corridorkey {
@@ -116,6 +117,19 @@ class CORRIDORKEY_API VideoWriter {
  * @brief Detect whether the current FFmpeg build can use VideoToolbox H.264 encoding.
  */
 CORRIDORKEY_API bool is_videotoolbox_available();
+
+/**
+ * @brief Detect whether a specific VideoToolbox encoder is available in the current build.
+ *
+ * Useful for distinguishing between the ProRes, H.264, and HEVC hardware encoders on
+ * macOS when choosing explicit codecs from the CLI or diagnostic layers.
+ *
+ * @param codec_name FFmpeg encoder name, such as `prores_videotoolbox`,
+ *                   `h264_videotoolbox`, or `hevc_videotoolbox`.
+ * @return true when the encoder exists in the linked FFmpeg build and the current
+ *         platform supports VideoToolbox; false otherwise.
+ */
+CORRIDORKEY_API bool is_videotoolbox_encoder_available(std::string_view codec_name);
 
 /**
  * @brief Resolve a full output plan based on container, encoder availability, and policy.

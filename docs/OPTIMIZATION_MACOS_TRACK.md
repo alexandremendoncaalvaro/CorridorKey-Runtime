@@ -86,6 +86,7 @@ gitignored; the prose summary in this document is the committed record.
 | --- | --- | --- | --- | --- |
 | `baseline` | `0.7.5` | shipped telemetry and packaging | baseline only | see the baseline section |
 | `pipeline_baseline` | `0.7.5-1` | branch-local baseline under the new track | baseline only | fresh measurement after branch rename |
+| `hw_prores_encoder` | `0.7.5-2` | ProRes 4444 via VideoToolbox as default lossless encoder for `.mov` | 4K real workload `video_encode_frame` dropped from about 156 ms to 95.6 ms per frame (about 39 percent), peak RSS was unchanged | keep; full-pipeline end-to-end improved by 24 ms per frame because swscale now pays the BGRA to ayuv64le conversion that the VT encoder needs, and the win is amplified once the preprocessing slices remove that CPU conversion |
 
 ## Baseline (`0.7.5-1`)
 
@@ -136,6 +137,28 @@ Recorded on the same hardware with
 
 The encode stage alone accounts for 21% of the per-frame budget and is
 the largest single target for slice `0.7.5-2`.
+
+## Slice `0.7.5-2` Result (Hardware ProRes Encoder)
+
+Same hardware and input as the baseline. The FFmpeg build available in
+`build/release-macos-portable` includes `prores_videotoolbox`, so the
+lossless encoder selection for `.mov` now returns it ahead of `qtrle`
+and `png` on Apple builds.
+
+| Metric | Baseline `0.7.5-1` | Slice `0.7.5-2` | Delta |
+| --- | --- | --- | --- |
+| Encode per frame (`video_encode_frame`) | about 156 ms | 95.6 ms | about minus 60 ms (minus 39 percent) |
+| Total per frame (`video_infer_batch`) | about 730 ms | 706 ms | about minus 24 ms (minus 3 percent) |
+| Peak RSS | about 2.0 GB | about 2.0 GB | unchanged |
+| End-to-end FPS | about 1.37 | 1.42 | plus about 0.05 |
+
+The encode stage moved to the Media Engine as designed. The residual
+encode cost is the CPU-side BGRA to ayuv64le conversion that FFmpeg
+`swscale` does to feed the VT encoder the YUVA 4:4:4 16-bit format it
+requires. A later slice that makes the entire output path zero-copy
+through Metal textures and IOSurface-backed CVPixelBuffers will remove
+that conversion and push the encode closer to 15 to 25 ms per frame on
+the Media Engine.
 
 ## Plan Summary
 

@@ -59,12 +59,18 @@ struct AvDeleter {
     }
 };
 
-bool is_videotoolbox_available() {
+bool is_videotoolbox_encoder_available(std::string_view codec_name) {
 #if defined(__APPLE__)
-    return encoder_exists("h264_videotoolbox");
+    std::string name(codec_name);
+    return encoder_exists(name.c_str());
 #else
+    (void)codec_name;
     return false;
 #endif
+}
+
+bool is_videotoolbox_available() {
+    return is_videotoolbox_encoder_available("h264_videotoolbox");
 }
 
 Result<VideoOutputPlan> resolve_video_output_plan(const std::filesystem::path& output_path,
@@ -670,7 +676,27 @@ std::vector<AVPixelFormat> supported_formats_for_codec(const AVCodec* codec) {
     if (config_result >= 0 && config_values != nullptr && config_count > 0) {
         auto pixel_formats = static_cast<const AVPixelFormat*>(config_values);
         formats.assign(pixel_formats, pixel_formats + config_count);
-        return formats;
+    }
+
+    if (!formats.empty() && codec->name != nullptr) {
+        // The VideoToolbox ProRes encoder advertises AV_PIX_FMT_BGRA but silently
+        // fails to negotiate a color range for it on macOS, surfacing as
+        // `Could not get pixel format for color format 'bgra'` at encoder open
+        // time. Apple's ProRes hardware path expects YUV 4:4:4 ingestion, so we
+        // remove BGRA from the advertised list and let the pixel-format chooser
+        // pick ayuv64le (16-bit YUV 4:4:4 + alpha) which maps cleanly onto
+        // ProRes 4444. The same guard filters AV_PIX_FMT_VIDEOTOOLBOX_VLD
+        // because it requires a hardware-surface input that the CPU-side writer
+        // path cannot produce.
+        std::string_view codec_name(codec->name);
+        if (codec_name == "prores_videotoolbox") {
+            formats.erase(std::remove_if(formats.begin(), formats.end(),
+                                         [](AVPixelFormat format) {
+                                             return format == AV_PIX_FMT_BGRA ||
+                                                    format == AV_PIX_FMT_VIDEOTOOLBOX;
+                                         }),
+                          formats.end());
+        }
     }
 
     return formats;
@@ -809,7 +835,19 @@ std::optional<PixelFormatCandidate> choose_balanced_pixel_format(
 
 std::vector<std::string> lossless_encoders_for_container(const std::string& extension) {
     if (extension == ".mov") {
+        // ProRes 4444 via the VideoToolbox Media Engine is mathematically lossless
+        // for alpha and encodes 4K at roughly 15-25 ms per frame on M3/M4 base and
+        // all M-series Pro/Max/Ultra. It replaces the CPU-only qtrle path that was
+        // the largest single cost in the macOS baseline (about 156 ms per frame).
+        // The software prores_ks encoder is avoided here because macOS 14.4 can
+        // misinterpret its files as opaque when alpha is present. On Apple builds
+        // we expose ProRes first, then fall back to qtrle and png; on other
+        // platforms we keep the existing list.
+#if defined(__APPLE__)
+        return {"prores_videotoolbox", "qtrle", "png"};
+#else
         return {"png", "qtrle"};
+#endif
     }
     if (extension == ".mkv") {
         return {"ffv1", "utvideo"};
@@ -825,7 +863,15 @@ std::vector<std::string> lossless_encoders_for_container(const std::string& exte
 
 std::vector<std::string> balanced_encoders_for_container(const std::string& extension) {
     if (extension == ".mp4" || extension == ".mov" || extension == ".mkv" || extension == ".avi") {
+        // On Apple builds hevc_videotoolbox comes first because HEVC is now fully
+        // hardware-accelerated on every M-series chip and the resulting files are
+        // smaller than the equivalent H.264 at the same visual quality. Non-Apple
+        // builds keep the original priority order.
+#if defined(__APPLE__)
+        return {"hevc_videotoolbox", "h264_videotoolbox", "libx264rgb", "libx264", "h264", "mpeg4"};
+#else
         return {"libx264rgb", "libx264", "h264_videotoolbox", "h264", "mpeg4"};
+#endif
     }
     return {"libx264rgb", "libx264", "h264_videotoolbox", "h264", "mpeg4"};
 }
