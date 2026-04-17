@@ -26,6 +26,8 @@ nlohmann::json metrics_to_json(const common::SystemMetrics& m) {
     nlohmann::json j;
     j["ram_usage_mb"] = m.ram_usage_mb;
     j["cpu_usage_percent"] = m.cpu_usage_percent;
+    j["peak_ram_mb"] = m.peak_ram_mb;
+    j["system_wired_mb"] = m.system_wired_mb;
     return j;
 }
 
@@ -1050,6 +1052,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
             io_binding_metadata(request.model_path, engine->current_device().backend,
                                 has_stage_named(stage_timings, "ort_io_binding_bind_inputs"));
         results["phase_timings"] = summarize_stage_groups(stage_timings);
+        results["system_metrics"] = metrics_to_json(common::get_current_metrics());
         if (engine->backend_fallback().has_value()) {
             results["fallback"] = to_json(*engine->backend_fallback());
         }
@@ -1130,6 +1133,7 @@ nlohmann::json JobOrchestrator::run_benchmark(const JobRequest& request) {
         io_binding_metadata(benchmark_request.model_path, selected_backend,
                             has_stage_named(timings, "ort_io_binding_bind_inputs"));
     results["phase_timings"] = summarize_stage_groups(timings);
+    results["system_metrics"] = metrics_to_json(common::get_current_metrics());
     if (fallback.has_value()) {
         results["fallback"] = to_json(*fallback);
     }
