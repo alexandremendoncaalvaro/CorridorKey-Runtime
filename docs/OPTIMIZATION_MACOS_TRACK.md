@@ -23,10 +23,12 @@ Neural Engine, MetalFX for preview upscale, and an async three-stage
 pipeline for decode-infer-encode overlap.
 
 - Active feature branch: `perf/macos-optimization`
-- Baseline display version: `0.7.5`
-- Checkpoint display versions: `0.7.5-X` for the pipeline track,
-  `0.7.7-X` for the Core ML / ANE track, `0.7.8-X` for OFX Metal and
-  MetalFX integration, `0.8.0-X` for model-level adaptation
+- Baseline semantic version: `0.7.5` (already shipped)
+- Every optimization checkpoint carries the label `0.7.5-N`. This mirrors
+  the Windows RTX track in Git history, where slices
+  `0.7.4-3` through `0.7.4-12` all shared the base version and only the
+  trailing ordinal moved. Because this track ships no new feature
+  surface, the `0.7.5` base does not advance.
 - Cross-platform surface stability: the OFX panel, CLI flags, and preset
   catalog stay identical across macOS, Windows, and Linux. Implementation
   diverges freely between platforms.
@@ -38,10 +40,15 @@ pipeline for decode-infer-encode overlap.
 
 ## Why The Checkpoint Version Contract Must Be Explicit
 
-- `0.7.5` is the telemetry and packaging baseline (shipped)
-- `0.7.5` is the pipeline track patch line. Individual slice labels:
+The Mac optimization work is a single linear sequence of slices under the
+shipped `0.7.5` base. The sequence crosses multiple technical tracks but
+the numbering stays flat so the Git history, the release bundle file
+names, and the runtime-server log filenames all stay consistent.
+
+Track A — Apple-native pipeline (GPU-resident and async):
   - `0.7.5-1` baseline checkpoint
   - `0.7.5-2` hardware ProRes encoder default
+  - `0.7.5-2b` diagnostic log enrichment (duration, stages, session lifecycle)
   - `0.7.5-3` IOSurface-backed frame pool
   - `0.7.5-4` VideoToolbox hardware decoder
   - `0.7.5-5` fused Metal preprocessing kernel
@@ -50,13 +57,24 @@ pipeline for decode-infer-encode overlap.
   - `0.7.5-8` async three-stage pipeline
   - `0.7.5-9` MLX zero-copy input via `MTLBuffer`
   - `0.7.5-10` SKU-aware runtime defaults
-  - `0.7.5-11` v0.7.5 release
-- `0.7.7` is the Core ML / ANE track patch line
-- `0.7.8` is the Resolve integration track (OFX Metal + MetalFX preview)
-- `0.8.0` is the model-level adaptation (ANE surgery, distillation, W4A16)
 
-The base semantic version advances when a release tag lands. Between
-releases only the slice suffix moves.
+Track B — Core ML / Apple Neural Engine:
+  - `0.7.5-11` Core ML MLProgram export tooling
+  - `0.7.5-12` `CoreMLSession` with ANE-targeted inference
+  - `0.7.5-13` ANE residency diagnosis and optional W8A8 quantization
+
+Track C — Resolve-native integration:
+  - `0.7.5-14` OFX Metal render path
+  - `0.7.5-15` MetalFX preview upscaler
+
+Track D — Model-level Apple Silicon adaptation:
+  - `0.7.5-16` ANE structural surgery
+  - `0.7.5-17` knowledge distillation to ANE-native student
+  - `0.7.5-18` palettization (W4A16) and activation quantization
+
+The base semantic version advances only when a release tag adds a
+feature surface. All of the above is optimization of behavior that
+already shipped, so only the slice suffix moves.
 
 ## Why Measurement Comes First
 
