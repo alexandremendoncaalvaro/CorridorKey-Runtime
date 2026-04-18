@@ -9,13 +9,13 @@
 
 using namespace corridorkey;
 
-TEST_CASE("GpuInputPrep Availability", "[unit][core]") {
+TEST_CASE("GpuInputPrep Availability", "[e2e][gpu]") {
     core::GpuInputPrep prep;
     bool avail = prep.available();
     SUCCEED("Queried availability: " + std::to_string(avail));
 }
 
-TEST_CASE("GpuInputPrep Correctness vs CPU reference", "[unit][core]") {
+TEST_CASE("GpuInputPrep Correctness vs CPU reference", "[e2e][gpu]") {
     core::GpuInputPrep prep;
     if (!prep.available()) {
         SKIP("GPU input prep not available on this host");

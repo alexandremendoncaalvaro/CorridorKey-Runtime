@@ -96,7 +96,7 @@ try {
 
     if (-not $SkipTests) {
         Write-Step "Quality Gate: Running Automated Tests"
-        & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --build --preset release --target test_unit test_regression && cd build/release && ctest --output-on-failure"
+        & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --build --preset release --target test_unit test_regression test_gpu && cd build/release && ctest --output-on-failure"
         if ($LASTEXITCODE -ne 0) { throw "Tests failed." }
         Write-Success "All tests passed."
     }
