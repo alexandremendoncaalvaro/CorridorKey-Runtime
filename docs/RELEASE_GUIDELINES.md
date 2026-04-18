@@ -72,6 +72,46 @@ Releases must be built through the canonical repo wrapper so version
 synchronization, packaged runtime selection, artifact naming, and validation
 stay consistent.
 
+### Windows Prerequisites (Install Once)
+
+The canonical Windows pipeline assumes every tool below is on disk and
+discoverable before any `scripts\windows.ps1` invocation. Missing any of
+them turns the pipeline into a dependency puzzle that cannot be solved
+from inside the scripts themselves.
+
+| Tool | Expected location / detection | Notes |
+|---|---|---|
+| Git | on `PATH` | needed for source fetches (bootstrap clones ONNX Runtime) |
+| Visual Studio 2022 | Community, Pro, or Enterprise with the "Desktop development with C++" workload and the Windows 10/11 SDK | `vcvars64.bat` must be locatable under `C:\Program Files\Microsoft Visual Studio\2022\*` |
+| CUDA Toolkit 12.8 | default location `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8` | or pass `-CudaHome <path>` through `-ForwardArguments` |
+| TensorRT-RTX SDK | staged at `vendor\TensorRT-RTX\` (or pass `-TensorRtRtxHome`) | proprietary NVIDIA download, not committed; required to build the TRT RTX execution provider |
+| vcpkg | `C:\tools\vcpkg` with `VCPKG_ROOT` pointing at it | pinned baseline is in `vcpkg-configuration.json`; every shell that calls the pipeline must export `VCPKG_ROOT` |
+| Python 3.11+ with `uv` | `uv.exe` on `PATH` or explicit `-Uv <path>` | needed for model export and ORT python tooling; install once via `python -m pip install --user uv` |
+
+If any row above is not satisfied, stop and fix it. Do not invent
+workarounds from outside the canonical pipeline; they will diverge from
+what the pipeline produces and from what users install.
+
+### Windows First-Time Bootstrap
+
+A fresh clone or a machine where `vendor\onnxruntime-windows-rtx\` is
+missing needs the curated RTX runtime built locally. This happens
+**once** per machine; subsequent releases reuse the staged runtime.
+
+```powershell
+scripts\windows.ps1 -Task prepare-rtx -Version X.Y.Z `
+    -ForwardArguments '-BootstrapOrtSource','-Uv','<path-to-uv.exe>','-SkipModelPreparation'
+```
+
+- `-BootstrapOrtSource` clones ONNX Runtime into `vendor\onnxruntime-src\`
+  at the ref pinned in `rtx_build_contract.ort_source_ref` (reproducible).
+- `-Uv` points at the installed `uv.exe` when it is not on `PATH`.
+- `-SkipModelPreparation` skips ONNX export when the model ladder at
+  `models\*.onnx` is already staged. Drop it only when the ladder needs
+  to be regenerated from the checkpoint.
+- The task refuses to finish if the TensorRT-RTX SDK is not staged —
+  that is the step most commonly forgotten and it cannot be auto-fetched.
+
 ### Windows Build Steps
 
 Windows has two curated runtime roots and one canonical release entrypoint:
@@ -148,6 +188,57 @@ packaging flow now requires:
 If that manifest is absent or does not match the packaged RTX artifacts,
 packaging fails intentionally. This prevents the project from generating a new
 installer from stale or manually copied RTX models.
+
+### Windows Anti-Patterns
+
+Every one of the workarounds below has produced a regression in
+production. They are listed here so contributors (human or AI) stop
+reinventing them.
+
+- **Do not call `scripts\build.ps1`, `scripts\prepare_windows_rtx_release.ps1`,
+  or `scripts\release_pipeline_windows.ps1` directly.** They are internal
+  delegates. Always go through `scripts\windows.ps1 -Task ...`. Direct
+  calls skip version-metadata sync, track resolution, and validation
+  that the wrapper applies.
+- **Do not create git worktrees that shadow `vendor\`.** A worktree
+  inherits a tracked `vendor\` with `.gitkeep` stubs, and running `git
+  worktree remove --force` on a worktree containing a Windows junction
+  into the main `vendor\` has, in practice, followed the junction and
+  erased the real binaries. If a second working copy is needed, use
+  `git worktree add -B <branch> <path>` without touching `vendor\` and
+  stage the curated runtimes separately for that worktree.
+- **Do not skip the quality gate on the release pipeline.** Running
+  `scripts\windows.ps1 -Task release` with `-SkipTests` forwarded through
+  `-ForwardArguments` is a debug convenience only. Any build intended
+  for a user — even an internal pre-release — must pass the quality
+  gate.
+- **Do not touch the render hot path without measuring.** Any change
+  under `src/plugins/ofx/`, `src/core/inference_session.cpp`,
+  `src/core/engine.cpp`, `src/core/gpu_prep.cpp`, `src/core/gpu_resize.cpp`,
+  or `src/post_process/` must be measured against the
+  `phase_8_gpu_prepare` baseline recorded in
+  `docs/OPTIMIZATION_MEASUREMENTS.md`. Use `scripts/run_corpus.sh` then
+  `scripts/compare_benchmarks.py`; reject the change if
+  `avg_latency_ms` or `ort_run` regresses by more than 10%.
+
+### Windows Release Label Policy
+
+`-DisplayVersionLabel` is the one mechanism that plumbs a human-readable
+version string into every user-visible surface. It flows through CMake
+into `include/corridorkey/version.hpp` (`CORRIDORKEY_DISPLAY_VERSION_STRING`),
+which the OFX panel, the `corridorkey --version` CLI, and the runtime
+log filename all read. Use it for every pre-release build so the person
+installing the artifact can identify which build they are running.
+
+```powershell
+scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-5
+```
+
+After the pipeline finishes, rename the three generated `dist\` artifacts
+to carry the same suffix (manifest bundle, zip archive, installer exe).
+Public releases drop the suffix: `CMakeLists.txt` `VERSION` is
+authoritative, the display label is omitted, and artifact names match
+the version exactly.
 
 Use the following commands according to the state you have:
 
