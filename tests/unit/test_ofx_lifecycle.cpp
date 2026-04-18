@@ -375,6 +375,74 @@ TEST_CASE("sequence render is a no-op for progress when the host omits the suite
     g_suites.property = previous_property_suite;
 }
 
+TEST_CASE("end_sequence_render preserves last-frame timing across render cycles",
+          "[unit][ofx][regression]") {
+    // Regression guard for v0.7.5-2: end_sequence_render must NOT release the
+    // runtime session. Resolve fires begin/end sequence around every preview
+    // render; tearing the session down forces a TensorRT re-prepare per frame
+    // and produces ~4x slowdowns plus a panel stuck at "Loading...". Session
+    // lifetime belongs to the OFX instance (destroy_instance) and to the
+    // broker's idle timeout, not to the render loop.
+    //
+    // Without a mock OfxRuntimeClient we cannot observe session_ref_count
+    // directly, but we can assert that timing data recorded on InstanceData
+    // survives multiple begin/end cycles and that progressStart / progressEnd
+    // pair cleanly on every cycle without leaking across them.
+    g_fake_progress_calls = {};
+
+    InstanceData data{};
+    data.last_frame_ms = 42.0;
+    data.avg_frame_ms = 40.0;
+    data.frame_time_samples = 3;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    data.last_render_stage_timings = {
+        corridorkey::StageTiming{"ort_run", 900.0, 1, 1},
+    };
+
+    FakeEffectProps props{.instance_data = &data};
+
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxProgressSuiteV1 progress_suite{};
+    progress_suite.progressStart = fake_progress_start;
+    progress_suite.progressUpdate = fake_progress_update;
+    progress_suite.progressEnd = fake_progress_end;
+
+    auto* previous_property_suite = g_suites.property;
+    auto* previous_image_suite = g_suites.image_effect;
+    auto* previous_progress_suite = g_suites.progress;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.progress = &progress_suite;
+
+    auto handle = reinterpret_cast<OfxImageEffectHandle>(&props);
+
+    REQUIRE(begin_sequence_render(handle, nullptr) == kOfxStatOK);
+    REQUIRE(end_sequence_render(handle, nullptr) == kOfxStatOK);
+    CHECK(data.last_frame_ms == Catch::Approx(42.0));
+    CHECK(data.avg_frame_ms == Catch::Approx(40.0));
+    CHECK(data.frame_time_samples == 3);
+    CHECK(data.last_render_work_origin == LastRenderWorkOrigin::BackendRender);
+    REQUIRE(data.last_render_stage_timings.size() == 1);
+    CHECK(data.last_render_stage_timings.front().total_ms == Catch::Approx(900.0));
+
+    REQUIRE(begin_sequence_render(handle, nullptr) == kOfxStatOK);
+    REQUIRE(end_sequence_render(handle, nullptr) == kOfxStatOK);
+    CHECK(data.last_frame_ms == Catch::Approx(42.0));
+    CHECK(data.last_render_work_origin == LastRenderWorkOrigin::BackendRender);
+
+    CHECK(g_fake_progress_calls.start == 2);
+    CHECK(g_fake_progress_calls.end == 2);
+    CHECK_FALSE(data.progress_active);
+
+    g_suites.progress = previous_progress_suite;
+    g_suites.image_effect = previous_image_suite;
+    g_suites.property = previous_property_suite;
+}
+
 TEST_CASE("destroy_instance ends lingering progress display defensively",
           "[unit][ofx][regression]") {
     g_fake_progress_calls = {};

@@ -1853,30 +1853,19 @@ OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandl
 
     clear_instance_render_caches(data, false);
 
-    // progressEnd must be called to pair progressStart so the host closes its
-    // spinner (OpenFX 1.4 ofxProgress.h: "Signal that we are finished with the
-    // progress meter"). Call before release_session because the spec forbids
-    // progress calls after End.
+    // Pair progressStart with progressEnd so the host closes its spinner
+    // (OpenFX 1.4 ofxProgress.h: "Signal that we are finished with the
+    // progress meter"). The session itself stays alive across sequences:
+    // Resolve fires begin/end sequence around every preview render, so
+    // releasing the runtime session here forces a TensorRT re-prepare per
+    // frame. Idle cleanup is handled by OfxSessionBroker::cleanup_idle_sessions
+    // and by the OfxRuntimeClient destructor at destroy_instance.
     if (data->progress_active && g_suites.progress != nullptr &&
         g_suites.progress->progressEnd != nullptr) {
         g_suites.progress->progressEnd(instance);
     }
     data->progress_active = false;
 
-    // End-of-sequence is the only deterministic hook the host gives us to drop
-    // the out-of-process session so the child server can release GPU memory
-    // and pinned host buffers. Without this, Resolve keeps the node flagged
-    // as busy because the server process stays alive holding resources.
-    if (data->use_runtime_server && data->runtime_client != nullptr &&
-        data->runtime_client->has_session()) {
-        auto release_result = data->runtime_client->release_session();
-        if (!release_result) {
-            log_message("end_sequence_render",
-                        "release_session_failed detail=" + release_result.error().message);
-        }
-    }
-
-    sync_runtime_panel_session_state_impl(data);
     flush_runtime_panel(data);
     log_message("end_sequence_render", "Sequence render caches cleared.");
     return kOfxStatOK;
