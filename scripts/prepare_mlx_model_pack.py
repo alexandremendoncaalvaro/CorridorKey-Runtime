@@ -11,6 +11,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_CHECKPOINT = REPO_ROOT / "models" / "CorridorKey.pth"
 DEFAULT_BRIDGE_RESOLUTIONS = "512,768,1024,1536,2048"
 
+# Primary artifact host. Hugging Face handles large model files with no budget
+# ceiling and cleaner version history than a GitHub Release, so the default
+# download path goes there first. The GitHub Release fallback stays wired so
+# existing machines without a Hugging Face account continue to work.
+DEFAULT_HF_MODEL_REPO = "alexandrealvaro/corridorkey-models"
+DEFAULT_HF_REVISION = "main"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -31,6 +38,19 @@ def parse_args() -> argparse.Namespace:
         "--tag",
         default="v1.0.0",
         help="GitHub release tag to download when no local weights or checkpoint is provided.",
+    )
+    parser.add_argument(
+        "--hf-repo",
+        default=DEFAULT_HF_MODEL_REPO,
+        help=(
+            "Hugging Face model repo that hosts the weights pack. Pass an empty string "
+            "to disable the Hugging Face source and fall back to the GitHub Release path."
+        ),
+    )
+    parser.add_argument(
+        "--hf-revision",
+        default=DEFAULT_HF_REVISION,
+        help="Git revision (branch, tag, or commit SHA) to pull from the Hugging Face repo.",
     )
     parser.add_argument(
         "--checkpoint",
@@ -86,6 +106,56 @@ def default_checkpoint_path() -> Path | None:
     if CANONICAL_CHECKPOINT.exists():
         return CANONICAL_CHECKPOINT
     return None
+
+
+def download_from_huggingface(
+    repo_id: str,
+    filename: str,
+    local_path: Path,
+    revision: str,
+    force: bool,
+) -> Path | None:
+    """Fetch a file from a Hugging Face model repo into ``local_path``.
+
+    Returns the final path on success, ``None`` when the huggingface_hub
+    library is missing or the download fails. Failure is logged but not
+    raised so the caller can transparently fall back to the GitHub Release
+    path without breaking older setups.
+    """
+    if not repo_id:
+        return None
+    if local_path.exists() and not force:
+        return local_path
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        print(
+            "[warn] huggingface_hub not installed; skipping Hugging Face source. "
+            "Install with `.venv-macos-mlx/bin/python -m pip install huggingface_hub` "
+            "or rely on the GitHub Release fallback.",
+            flush=True,
+        )
+        return None
+    try:
+        downloaded = hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            revision=revision,
+            local_dir=str(local_path.parent),
+        )
+    except Exception as error:  # noqa: BLE001 -- fall-through is intentional
+        print(
+            f"[warn] hugging face download failed for {repo_id}/{filename}: "
+            f"{type(error).__name__}: {error}",
+            flush=True,
+        )
+        return None
+    source_path = Path(downloaded)
+    if source_path.resolve() == local_path.resolve():
+        return local_path
+    ensure_parent(local_path)
+    shutil.copy2(source_path, local_path)
+    return local_path
 
 
 def export_bridge(weights_path: Path, export_path: Path, export_size: int) -> None:
@@ -144,14 +214,29 @@ def main() -> int:
             weights_path = weights_target
         source = "canonical_checkpoint" if checkpoint_path == CANONICAL_CHECKPOINT else "converted_checkpoint"
     else:
-        weights_path = download_weights(
-            tag=args.tag,
-            asset_name=args.asset_name,
-            out=output_dir,
+        # Prefer Hugging Face when the repo is reachable; fall back to the
+        # GitHub Release channel only if the HF hop fails (offline machine,
+        # missing huggingface_hub package, or user explicitly passed
+        # --hf-repo "" to opt out).
+        hf_path = download_from_huggingface(
+            repo_id=args.hf_repo,
+            filename=args.asset_name,
+            local_path=weights_target,
+            revision=args.hf_revision,
             force=args.force,
-            verify=not args.skip_verify,
         )
-        source = "official_release"
+        if hf_path is not None:
+            weights_path = hf_path
+            source = "huggingface"
+        else:
+            weights_path = download_weights(
+                tag=args.tag,
+                asset_name=args.asset_name,
+                out=output_dir,
+                force=args.force,
+                verify=not args.skip_verify,
+            )
+            source = "github_release"
 
     result = {
         "weights_path": str(weights_path.resolve()),
@@ -164,8 +249,25 @@ def main() -> int:
         bridge_exports = []
         for resolution in parse_bridge_resolutions(args.bridge_resolutions):
             export_path = output_dir / f"{weights_path.stem}_bridge_{resolution}.mlxfn"
+            bridge_source = "local_cache"
             if not export_path.exists() or args.force:
-                export_bridge(weights_path, export_path, resolution)
+                # Prefer the pre-built bridge from Hugging Face before re-running
+                # the MLX exporter. MLX compile for 1536/2048 takes minutes and
+                # is deterministic from the same weights, so downloading the
+                # published artifact saves significant bring-up time on every
+                # new checkout.
+                hf_path = download_from_huggingface(
+                    repo_id=args.hf_repo,
+                    filename=export_path.name,
+                    local_path=export_path,
+                    revision=args.hf_revision,
+                    force=args.force,
+                )
+                if hf_path is not None:
+                    bridge_source = "huggingface"
+                else:
+                    export_bridge(weights_path, export_path, resolution)
+                    bridge_source = "exported_locally"
             if not export_path.exists():
                 raise FileNotFoundError(
                     f"Expected MLX bridge export was not created: {export_path}"
@@ -174,6 +276,7 @@ def main() -> int:
                 {
                     "path": str(export_path.resolve()),
                     "resolution": resolution,
+                    "source": bridge_source,
                 }
             )
         result["bridge_exports"] = bridge_exports
