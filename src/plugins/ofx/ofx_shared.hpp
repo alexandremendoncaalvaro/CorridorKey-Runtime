@@ -12,6 +12,7 @@
 #include "ofxImageEffect.h"
 #include "ofxMessage.h"
 #include "ofxParam.h"
+#include "ofxProgress.h"
 #include "ofxProperty.h"
 #include "ofx_constants.hpp"
 #include "ofx_model_selection.hpp"
@@ -97,6 +98,7 @@ struct OfxSuites {
     const OfxImageEffectSuiteV1* image_effect = nullptr;
     const OfxParameterSuiteV1* parameter = nullptr;
     const OfxMessageSuiteV2* message = nullptr;
+    const OfxProgressSuiteV1* progress = nullptr;
 };
 
 struct RuntimePanelState {
@@ -210,6 +212,14 @@ struct InstanceData {
     bool in_render = false;
     bool runtime_panel_dirty = false;
     bool quantization_error_active = false;
+
+    // OfxProgressSuiteV1 lifecycle tracking. progress_active is flipped to true
+    // only after a successful progressStart so the paired progressEnd call
+    // matches the spec precondition (no currently ongoing progress display).
+    bool progress_active = false;
+    double sequence_frame_start = 0.0;
+    double sequence_frame_end = 0.0;
+    double sequence_frame_step = 1.0;
 
     FrameResult cached_result = {};
     bool cached_result_valid = false;

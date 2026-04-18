@@ -1808,13 +1808,38 @@ void flush_runtime_panel(InstanceData* data) {
     }
 }
 
-OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle /*in_args*/) {
+OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args) {
     InstanceData* data = get_instance_data(instance);
     if (data == nullptr) {
         return kOfxStatReplyDefault;
     }
 
     clear_instance_render_caches(data, false);
+
+    data->sequence_frame_start = 0.0;
+    data->sequence_frame_end = 0.0;
+    data->sequence_frame_step = 1.0;
+    if (in_args != nullptr && g_suites.property != nullptr) {
+        double frame_range[2] = {0.0, 0.0};
+        if (g_suites.property->propGetDoubleN(in_args, kOfxImageEffectPropFrameRange, 2,
+                                              frame_range) == kOfxStatOK) {
+            data->sequence_frame_start = frame_range[0];
+            data->sequence_frame_end = frame_range[1];
+        }
+        double step = 1.0;
+        if (g_suites.property->propGetDouble(in_args, kOfxImageEffectPropFrameStep, 0, &step) ==
+            kOfxStatOK) {
+            data->sequence_frame_step = step > 0.0 ? step : 1.0;
+        }
+    }
+
+    if (g_suites.progress != nullptr && g_suites.progress->progressStart != nullptr &&
+        !data->progress_active) {
+        OfxStatus progress_status =
+            g_suites.progress->progressStart(instance, "CorridorKey inference");
+        data->progress_active = (progress_status == kOfxStatOK);
+    }
+
     flush_runtime_panel(data);
     log_message("begin_sequence_render", "Sequence render state reset.");
     return kOfxStatOK;
@@ -1827,6 +1852,31 @@ OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandl
     }
 
     clear_instance_render_caches(data, false);
+
+    // progressEnd must be called to pair progressStart so the host closes its
+    // spinner (OpenFX 1.4 ofxProgress.h: "Signal that we are finished with the
+    // progress meter"). Call before release_session because the spec forbids
+    // progress calls after End.
+    if (data->progress_active && g_suites.progress != nullptr &&
+        g_suites.progress->progressEnd != nullptr) {
+        g_suites.progress->progressEnd(instance);
+    }
+    data->progress_active = false;
+
+    // End-of-sequence is the only deterministic hook the host gives us to drop
+    // the out-of-process session so the child server can release GPU memory
+    // and pinned host buffers. Without this, Resolve keeps the node flagged
+    // as busy because the server process stays alive holding resources.
+    if (data->use_runtime_server && data->runtime_client != nullptr &&
+        data->runtime_client->has_session()) {
+        auto release_result = data->runtime_client->release_session();
+        if (!release_result) {
+            log_message("end_sequence_render",
+                        "release_session_failed detail=" + release_result.error().message);
+        }
+    }
+
+    sync_runtime_panel_session_state_impl(data);
     flush_runtime_panel(data);
     log_message("end_sequence_render", "Sequence render caches cleared.");
     return kOfxStatOK;
@@ -2002,6 +2052,11 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
 OfxStatus destroy_instance(OfxImageEffectHandle instance) {
     InstanceData* data = get_instance_data(instance);
     if (data != nullptr) {
+        if (data->progress_active && g_suites.progress != nullptr &&
+            g_suites.progress->progressEnd != nullptr) {
+            g_suites.progress->progressEnd(instance);
+            data->progress_active = false;
+        }
         delete data;
         set_instance_data(instance, nullptr);
     }
