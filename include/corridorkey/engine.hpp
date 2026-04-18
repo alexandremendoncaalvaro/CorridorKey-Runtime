@@ -39,7 +39,10 @@ CORRIDORKEY_API std::vector<PresetDefinition> preset_catalog();
 
 /**
  * @brief Progress callback for long-running tasks.
- * Return false to cancel the operation.
+ * @param progress Fraction in [0.0, 1.0], or negative when the total work is
+ *                 unknown (indeterminate progress — renderer should show a
+ *                 spinner rather than a partial bar).
+ * @return false to cancel the operation.
  */
 using ProgressCallback = std::function<bool(float progress, const std::string& status)>;
 
