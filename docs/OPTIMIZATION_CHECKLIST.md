@@ -1,0 +1,573 @@
+# Optimization Checklist
+
+## Why This Document Exists
+
+This document is the single resume point for the runtime optimization work.
+It keeps the effort bounded, measurable, and easy to restart without relying
+on previous chat history. Read this file before starting a new optimization
+slice.
+
+The work described here follows [ARCHITECTURE.md](./ARCHITECTURE.md),
+[GUIDELINES.md](./GUIDELINES.md), and the official ONNX Runtime, NVIDIA, and
+Microsoft documentation already chosen for this effort.
+Recorded benchmark checkpoints live in
+[OPTIMIZATION_MEASUREMENTS.md](./OPTIMIZATION_MEASUREMENTS.md).
+
+## Why Scope Control Matters
+
+This optimization track exists to improve long-lived ORT workloads without
+changing the product contract. Every slice must preserve runtime behavior,
+fallback semantics, diagnostics, and OFX isolation while making measurement
+clearer or performance better.
+
+- Active feature branch for this work: `perf/optimization`
+- Baseline display version: `0.7.3`
+- Optimization checkpoint display versions: `0.7.4-X`
+- Public API changes in `include/corridorkey/` are not part of this effort
+- MLX stays unchanged unless build correctness requires a narrow fix
+- Benchmark JSON changes must remain additive
+- Canonical repo scripts stay authoritative for build, corpus, and release work
+- Measurement comes before optimization in every phase
+
+## Why The Checkpoint Version Contract Must Be Explicit
+
+The optimization track now uses a fixed user-facing version policy so manual
+tests can confirm the installed build without guesswork.
+
+- `0.7.3` is the baseline build line
+- `0.7.4` is the patch line reserved for optimization checkpoints
+- `0.7.4-0` is the shared-ORT checkpoint
+- `0.7.4-1` is the extract-output attribution checkpoint
+- `0.7.4-2` is the runtime timing correction checkpoint
+- `0.7.4-3` is the direct-planar-resize checkpoint
+- `0.7.4-4` is the output-validation-fusion checkpoint
+- `0.7.4-5` is the initial I/O-binding groundwork checkpoint
+- `0.7.4-6` is the I/O-binding regression-fix checkpoint
+- `0.7.4-7` is the host-postprocess and OFX-default-alignment checkpoint
+- `0.7.4-8` is the host-input-preparation checkpoint
+- `0.7.4-9` is the preview/writeback full-frame checkpoint
+- `0.7.4-10` is the pinned-host and FP16 vectorization checkpoint
+- each new measured optimization slice increments the suffix:
+  `0.7.4-10`, `0.7.4-11`, `0.7.4-12`
+- the base semantic version remains `0.7.4` while the visible checkpoint label
+  changes per slice
+- checkpoint comparison only counts when the installed build identity was
+  confirmed before the test
+
+## Why The Current Baseline Matters
+
+The baseline phase is complete enough to compare further slices without
+guessing. The current codebase already has repeatable timing surfaces, shared
+ORT process context plumbing, and a validated release flow.
+
+### Phase 0: Baseline And Measurement Discipline
+
+- [x] Existing timing surfaces in `src/core/engine.cpp`,
+      `src/core/inference_session.cpp`, and
+      `src/app/job_orchestrator.cpp` were preserved
+- [x] ORT creation sub-stages were added:
+      `ort_env_acquire`, `ort_session_options`,
+      `ort_session_create`, `ort_metadata_extract`
+- [x] Existing stage names were kept for report compatibility
+- [x] Benchmark metadata was expanded to include `batch_size`, `tiling`,
+      effective resolution, warmup runs, and steady-state runs
+- [x] Official benchmark flow was extended through
+      `scripts/run_corpus.sh` and `scripts/compare_benchmarks.py`
+- [x] An OFX-equivalent benchmark harness was added without introducing a new
+      public CLI command
+
+### Phase 1: ORT Process-Level Architecture
+
+- [x] Internal `OrtProcessContext` was introduced in `src/core/`
+- [x] ORT environment ownership moved out of `InferenceSession`
+- [x] ORT environment creation now uses global thread pools
+- [x] ORT sessions disable per-session threads
+- [x] ORT sessions enable `session.use_env_allocators=1`
+- [x] Shared CPU arena allocator registration is handled at the env level
+- [x] Retry paths, optimized-cache paths, provider setup, fallback behavior,
+      diagnostics, and timing propagation were preserved
+- [x] Context ownership is explicit and injected; this phase does not rely on
+      a library-wide singleton
+- [x] MLX behavior was kept intact apart from a narrow warning cleanup needed
+      for strict Windows builds
+
+## Why Validation State Must Be Explicit
+
+This work only moves forward if the current slice is already proven stable.
+The following validations were completed against the current implementation.
+
+- [x] `scripts/build.ps1 -Preset debug`
+- [x] `ctest --preset unit`
+- [x] `ctest --preset integration`
+- [x] `scripts/build.ps1 -Preset release`
+- [x] Release unit test pass on `build/release`
+- [x] Release integration test pass on `build/release`
+- [x] CLI benchmark smoke test with JSON output
+- [x] OFX benchmark harness smoke test with JSON output
+- [x] Windows release packaging through the canonical release script
+- [x] Local installer generation, bundle validation, and doctor validation
+- [x] Optimization checkpoint release generated as `0.7.4-10`
+- [x] Baseline and optimized installers were copied into
+      `dist/optimization_checkpoints/` for sequential local A/B testing
+
+## Why The Current Findings Change The Next Step
+
+The next step should follow the newest measured bottleneck, not the oldest
+intuition. The current repo-side harness now shows a real gain from attacking
+the current host-side hot path directly, so the next manual plugin comparison
+can test whether that gain survives the full OFX path.
+
+- Shared cache reuse and engine reuse are active in the tested OFX flow
+- TensorRT path stayed healthy during the sampled runtime-server session
+- the latest sampled real OFX `0.7.4-7` run at `High (1024)` shifted the
+  dominant hot path toward `frame_prepare_inputs` and resize-heavy extract work:
+  - `frame_prepare_inputs`: `445.7 ms`
+  - `ort_run`: `203.9 ms`
+  - `frame_extract_outputs`: `268.6 ms`
+  - `frame_extract_outputs_resize`: `222.2 ms`
+  - `post_composite`: `89.6 ms`
+- the newest slice therefore targets host-side input preparation before trying
+  another backend-only optimization
+- `0.7.4-1` now splits `frame_extract_outputs` and `batch_extract_outputs` into
+  conservative sub-stages without removing the parent stage names
+- repo-side synthetic benchmark smoke now shows `frame_extract_outputs_resize`
+  as the dominant part of the extract block
+- `0.7.4-1` also exposed a runtime panel semantics bug: `Last Frame` could
+  double count nested timings and could report cached backend work as if it
+  were the wall time of the current frame
+- `0.7.4-2` fixes the runtime panel semantics so `Last Frame` reflects the
+  measured wall time of the current frame while hotspot selection prefers the
+  deepest actionable stage
+- `0.7.4-3` removes the extra planar-to-interleaved image materialization pass
+  before resize and adds direct planar resize/output population paths for both
+  bilinear and Lanczos handling
+- repo-side `512` benchmark harness comparisons between `0.7.4-2` and
+  `0.7.4-3` on the same workspace showed:
+  - CPU average latency improved from about `2578.4 ms` to `1596.8 ms`
+  - CPU `frame_extract_outputs_resize` improved from about `79.0 ms` to
+    `2.3 ms`
+  - RTX average latency improved from about `446.9 ms` to `282.7 ms`
+  - RTX `frame_extract_outputs_resize` improved from about `103.7 ms` to
+    `8.9 ms`
+- after `0.7.4-3`, the synthetic bottleneck shifts away from resize and back
+  toward `ort_run` plus the remaining CPU-side preparation/extract work
+- `0.7.4-4` fuses output-stat logging and finite-value validation into a
+  single scan for the TensorRT high-resolution diagnostic path
+- repo-side `2048` RTX harness comparisons between `0.7.4-3` and `0.7.4-4`
+  on the same workspace showed:
+  - average latency improved from about `1211.7 ms` to `1055.3 ms`
+  - `frame_extract_outputs_tensor_materialize` improved from about `60.4 ms`
+    to `20.5 ms`
+  - `frame_extract_outputs_finalize` improved from about `66.8 ms` to
+    `26.4 ms`
+  - `frame_extract_outputs` improved from about `134.9 ms` to `54.2 ms`
+- the first manual A/B between `0.7.3` and `0.7.4-0` did not show a speed gain
+- the latest `0.7.4-0` local retest was confirmed by versioned runtime log and
+  installed-bundle hash match
+- latest sampled OFX raw averages were approximately:
+  - `frame_prepare_inputs`: `315 ms`
+  - `ort_run`: `414 ms`
+  - `frame_extract_outputs`: `2619 ms`
+  - `post_composite`: `100.5 ms`
+- latest sampled OFX steady-state averages were approximately:
+  - `frame_prepare_inputs`: `304 ms`
+  - `ort_run`: `378 ms`
+  - `frame_extract_outputs`: `2502 ms`
+  - `post_composite`: `97.9 ms`
+- current reading against the `0.7.3` baseline:
+  - `frame_prepare_inputs`, `ort_run`, and `frame_extract_outputs` are
+    effectively tied in steady-state
+  - `post_composite`, `post_despill`, and `post_premultiply` are still worse
+    on `0.7.4-0`
+- current `0.7.4-2` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - runtime panel semantics now match the intended reading order:
+    wall time first, backend hotspot second
+- current `0.7.4-3` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - repo-side harness numbers now show the first clear throughput win of this
+    optimization track
+  - manual OFX comparison now also shows a real render-time reduction in the
+    plugin path at `Maximum (2048)`
+  - median top-level stage timings in the recorded local `0.7.4-3` window were
+    about:
+    - `frame_prepare_inputs`: `273.0 ms`
+    - `ort_run`: `461.1 ms`
+    - `frame_extract_outputs`: `476.5 ms`
+    - `post_composite`: `110.1 ms`
+  - current steady-state render opportunity is now split between `ort_run` and
+    the remaining host-side extract work
+  - current cold-start opportunity remains dominated by `ort_session_create`
+    and `session_create_requested`
+- current `0.7.4-4` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - repo-side `2048` RTX harness now shows a second clear gain after the
+    direct-planar-resize slice
+  - the remaining steady-state render opportunity is now led by `ort_run`,
+    then the still-material resize/finalize work inside `frame_extract_outputs`,
+    then `frame_prepare_inputs`
+  - the cold-start opportunity is still dominated by
+    `ort_session_create` and `session_create_requested`
+- `0.7.4-5` adds a narrow Windows RTX I/O-binding path that keeps the existing
+  unbound path as the fallback and reuses session-owned bound output buffers
+- `0.7.4-5` benchmark JSON now reports additive I/O-binding metadata with
+  `requested_mode`, `eligible`, `active`, and `observed`
+- repo-side `2048` RTX harness comparisons between `0.7.4-4` unbound and
+  `0.7.4-5` auto-bound on the same workspace showed:
+  - average latency improved from about `660.1 ms` to `477.2 ms`
+  - `frame_extract_outputs` improved from about `53.5 ms` to `32.5 ms`
+  - `frame_prepare_inputs` improved from about `28.1 ms` to `26.2 ms`
+  - `ort_run` stayed effectively tied at about `413 ms`
+- repo-side `3840x2160` sequence comparisons between `0.7.4-4` unbound and
+  `0.7.4-5` auto-bound on the same workspace showed:
+  - total duration stayed effectively flat at about `23.63 s`
+  - `batch_extract_outputs` improved from about `377.2 ms` to `367.3 ms`
+  - `batch_extract_outputs_resize` improved from about `318.5 ms` to
+    `308.2 ms`
+  - `sequence_infer_batch` stayed effectively tied and slightly higher at
+    about `1495.3 ms` to `1509.0 ms`
+- current `0.7.4-5` status:
+  - repo-side measurement remains worth keeping because it shows a real
+    single-frame extract-path gain even though sequence throughput stayed flat
+  - the first packaged build exposed an OFX-visible foreground regression that
+    must be treated as a blocker before Phase 3
+- `0.7.4-6` fixes the bound single-frame foreground path so the OFX-visible
+  result keeps a populated foreground image instead of collapsing to a black
+  silhouette
+- `0.7.4-6` also aligns the packaged output contract by output name instead of
+  trusting raw output index order when binding named outputs
+- `0.7.4-7` removes visible `Auto` wording from OFX selector choices that were
+  still presented as selectable modes and makes `Draft (512)` the real default
+  quality from the initial bootstrap path onward
+- `0.7.4-7` also adds a fused bilinear resize path for planar alpha and
+  foreground outputs plus parallel row execution for the OFX writeback and
+  foreground linearization loops
+- repo-side sequential `3840x2160` workload reruns between `0.7.4-6` and
+  `0.7.4-7` stayed effectively flat to slightly worse:
+  - `2048` total duration moved from about `122.3 s` to `123.9 s`
+  - `512` total duration moved from about `146.7 s` to `148.4 s`
+- current `0.7.4-7` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - the quality default and visible selector language now match the agreed
+    checkpoint policy
+  - the repo-side corpus does not justify a broad speedup claim for this slice
+  - the next high-value optimization work should focus on the still-dominant
+    full-frame host path in `batch_prepare_inputs` and on extending the
+    lower-copy output path beyond the current high-resolution bound path
+- `0.7.4-8` parallelizes the hottest remaining host-side input-preparation work
+  by moving Gaussian blur passes and normalized RGB-plus-hint planar packing to
+  the shared row-parallel path already used elsewhere in the runtime
+- repo-side OFX-harness comparisons at `1024` between `0.7.4-7` and `0.7.4-8`
+  on the same workspace showed:
+  - average roundtrip latency improved from about `192.5 ms` to `171.6 ms`
+  - `frame_prepare_inputs` improved from about `7.7 ms` to `5.9 ms`
+  - `ort_run` improved slightly from about `99.7 ms` to `97.3 ms`
+  - `frame_extract_outputs` improved from about `15.0 ms` to `13.4 ms`
+  - `frame_extract_outputs_resize` improved from about `3.7 ms` to `3.4 ms`
+  - `frame_extract_outputs_finalize` improved from about `5.5 ms` to `4.6 ms`
+- current `0.7.4-8` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - packaged and built CLI identity both report `0.7.4-8`
+  - this is the first prepare-focused slice with a measured repo-side gain at
+    the same `1024` rung that the latest real OFX log exposed as the bottleneck
+  - the next high-value opportunity is still the full-frame render path after
+    the prepare win, especially the extract and preview work visible in OFX
+- `0.7.4-9` adds a full-frame `2048 -> 3840x2160` OFX-style benchmark path,
+  fuses the preview composite to remove redundant host passes, and records the
+  broker writeback cost explicitly
+- repo-side full-frame OFX-harness comparisons between `0.7.4-8` and `0.7.4-9`
+  on the same workspace showed:
+  - average roundtrip latency improved from about `1106.3 ms` to `1017.2 ms`
+  - `post_composite` improved from about `93.4 ms` to `17.0 ms`
+  - `frame_extract_outputs_resize` improved from about `316.8 ms` to
+    `311.3 ms`
+  - `frame_extract_outputs` improved from about `378.7 ms` to `374.7 ms`
+  - `frame_prepare_inputs` improved slightly from about `107.9 ms` to
+    `106.5 ms`
+  - `ort_run` stayed effectively tied at about `426.1 ms` to `425.1 ms`
+  - `ofx_broker_writeback` is now visible at about `10.9 ms`
+- current `0.7.4-9` status:
+  - installer, doctor report, and bundle validation are ready for the next
+    local plugin comparison
+  - packaged CLI identity reports `CorridorKey Runtime v0.7.4-9`
+  - the next high-value opportunity is still `ort_run` and the resize-heavy
+    extract path, not the preview path that this slice just reduced
+- rejected and not kept:
+  - extending the lower-rung bound path to `1024` did not produce a meaningful
+    maintained-path gain
+  - caching bilinear resize maps across frames did not improve throughput and
+    was discarded
+- `0.7.4-10` adds CUDA Toolkit integration with `find_package(CUDAToolkit)`,
+  a `PinnedBuffer<T>` RAII class for pinned host memory via `cudaMallocHost`,
+  vectorized FP16-to-FP32 conversion using AVX2 F16C intrinsics, and
+  `memory_mode` metadata in benchmark JSON
+- repo-side full-frame OFX-harness comparisons at `2048 -> 3840x2160` between
+  `0.7.4-9` and `0.7.4-10` on the same workspace showed:
+  - average latency improved from about `1017.2 ms` to `989.4 ms`
+  - `ort_run` total improved from about `2125.7 ms` to `2046.9 ms`
+  - `frame_prepare_inputs` total improved from about `532.4 ms` to `484.0 ms`
+  - `post_composite` improved from about `84.8 ms` to `63.9 ms`
+- current `0.7.4-10` status:
+  - unit tests for `PinnedBuffer` and FP16 converter passing
+  - integration tests passing with no regressions
+  - benchmark JSON now reports `memory_mode: "pinned"` when CUDA is available
+  - the next high-value opportunity is Slice 0.7.4-11: device-resident outputs
+    and GPU resize via NPP to eliminate the 310ms CPU resize path
+- Ignore `CorridorHint` errors when they come from unrelated branch tests
+
+## Why A Resume Map Saves Time
+
+The files below are the current implementation footprint for the completed
+optimization slices. Inspect them before changing architecture again.
+
+- `src/core/ort_process_context.hpp`
+- `src/core/ort_process_context.cpp`
+- `src/core/inference_session.hpp`
+- `src/core/inference_session.cpp`
+- `src/core/inference_session_metadata.hpp`
+- `src/core/engine.cpp`
+- `src/core/engine_internal.hpp`
+- `src/app/job_orchestrator.cpp`
+- `src/app/ofx_session_broker.hpp`
+- `src/app/ofx_session_broker.cpp`
+- `src/app/runtime_diagnostics.cpp`
+- `src/common/stage_profiler.hpp`
+- `scripts/run_corpus.sh`
+- `scripts/compare_benchmarks.py`
+- `tests/unit/test_ort_process_context.cpp`
+- `tests/unit/test_stage_profiler.cpp`
+- `tests/integration/test_engine_warmup.cpp`
+- `tests/integration/test_job_orchestrator.cpp`
+- `tests/integration/test_ofx_session_broker.cpp`
+- `tests/integration/ofx_benchmark_harness.cpp`
+- `src/core/pinned_buffer.hpp`
+- `src/common/fp16_convert.hpp`
+- `tests/unit/test_pinned_buffer.cpp`
+- `tests/unit/test_fp16_convert.cpp`
+
+## Why Build Identity Must Be Verified Before Testing
+
+Manual tests are only useful if the installed build identity is explicit.
+Before recording a local result, verify the build in this order:
+
+1. check the OFX panel version label
+2. if needed, confirm the runtime version reported by the packaged CLI or
+   doctor output
+3. if ambiguity remains, compare the installed OFX bundle hash against the
+   checkpoint bundle
+
+The current expected visible identities are:
+
+- baseline installer: `0.7.3`
+- current optimization installer: `0.7.4-10`
+
+## Why The Next Tasks Are Ordered
+
+The pending work stays phase-ordered so that later GPU-path changes do not hide
+basic measurement or lifetime mistakes. Do not skip ahead.
+
+### Completed Slice: Extract Output Attribution
+
+- [x] Split `frame_extract_outputs` into conservative internal sub-stages so
+      the bottleneck becomes attributable instead of monolithic
+- [x] Kept the existing `frame_extract_outputs` stage name for compatibility
+      and added sub-stages under it rather than replacing it
+- [x] Covered output tensor materialization, resize, and final consumer-visible
+      output finalization
+- [x] Extended tests only where needed to prove stage presence in synthetic and
+      workload benchmark reporting
+- [x] Generated the `0.7.4-1` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: Runtime Panel Timing Correction
+
+- [x] Corrected `Last Frame` so it preserves the actual wall time of the
+      current frame instead of summing overlapping backend timings
+- [x] Corrected nested timing aggregation fallback so parent and child stages
+      are not double counted when no wall-time sample is available
+- [x] Updated hotspot selection to prefer the deepest actionable stage instead
+      of the largest parent envelope
+- [x] Added unit regression coverage for nested stage timings and cache-hit wall
+      time handling
+- [x] Generated the `0.7.4-2` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: Direct Planar Resize
+
+- [x] Removed the extra intermediate interleaved image materialization before
+      output resize in both frame and batch extract paths
+- [x] Added direct planar-to-destination resize helpers for bilinear and
+      Lanczos output handling while keeping the existing benchmark stage names
+- [x] Parallelized the hot resize kernels with row-safe chunking so the work
+      scales without changing observable output semantics
+- [x] Added unit regression coverage proving the direct-planar paths match the
+      previous resize results
+- [x] Generated the `0.7.4-3` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: Output Validation Fusion
+
+- [x] Fused TensorRT high-resolution output-stat collection and finite-value
+      validation into one scan per buffer instead of two
+- [x] Kept the same validation behavior and diagnostic payload on failure while
+      reducing steady-state hot-path overhead on successful frames
+- [x] Added unit coverage for the new analysis helper used by the fused path
+- [x] Measured the slice on the repo-side RTX `2048` harness before packaging
+- [x] Generated the `0.7.4-4` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: I/O Binding Groundwork
+
+- [x] Designed a narrow ORT I/O Binding path without removing the current path
+- [x] Gated the first implementation to the Windows RTX path
+- [x] Bound both input and output tensors explicitly
+- [x] Kept lifetime, ownership, and shape handling explicit with
+      session-owned bound output buffers
+- [x] Benchmarked bound and unbound paths in frame and sequence workloads
+- [x] Added additive benchmark metadata so reports can distinguish requested,
+      eligible, active, and observed binding state
+- [x] Generated the `0.7.4-5` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: I/O Binding Regression Fix
+
+- [x] Restored foreground buffer allocation on the bound single-frame path so
+      the OFX-visible result keeps a valid foreground image
+- [x] Reordered packaged output metadata by discovered output name so bound
+      names, shapes, and element types stay aligned
+- [x] Added unit regression coverage for output-order mapping and bound
+      foreground-allocation decisions
+- [x] Rebuilt and revalidated debug and release outputs before packaging
+- [x] Generated the `0.7.4-6` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: Host Input Preparation
+
+- [x] Parallelized the hottest remaining host-side Gaussian blur passes with the
+      existing shared row-parallel helper
+- [x] Replaced duplicated manual RGB normalization and hint packing loops with a
+      single reusable planar-pack helper in `ColorUtils`
+- [x] Updated both frame and batch prepare paths to use the new helper without
+      changing the benchmark stage names or the public API
+- [x] Added unit regression coverage proving the fused pack helper matches the
+      previous manual packing contract
+- [x] Measured the slice against the saved `1024` OFX-style harness baseline
+      before packaging
+- [x] Generated the `0.7.4-8` installer and checkpoint artifacts for the next
+      local comparison
+
+### Completed Slice: Preview Composite And Broker Writeback
+
+- [x] Extended the OFX-style harness so it can match real full-frame render
+      size instead of forcing a square transport
+- [x] Fused the preview composite path so checker compositing and display sRGB
+      conversion no longer require an extra full-frame copy plus a separate
+      conversion pass
+- [x] Kept preview output semantics identical to the historical path and added
+      regression coverage proving parity
+- [x] Added explicit `ofx_broker_writeback` timing and moved broker shared-frame
+      copies onto the shared row-parallel worker path
+- [x] Measured the slice against the saved full-frame `2048 -> 3840x2160`
+      OFX-style harness baseline before packaging
+- [x] Generated the `0.7.4-9` installer and checkpoint artifacts for the next
+      local comparison
+
+### Phase 3: Device Tensors And Pinned-Host Strategy
+
+#### Completed: Slice 0.7.4-10 (Pinned Host + FP16 Vectorization)
+
+- [x] CMake: add `find_package(CUDAToolkit)` gated to Windows RTX vendor path;
+      link `CUDA::cudart_static` to `corridorkey_core` target only
+- [x] Create `PinnedBuffer<T>` RAII class using `cudaMallocHost` / `cudaFreeHost`
+      with `std::optional` factory fallback to `AlignedTensorBuffer`
+- [x] Integrate pinned buffers into `BoundTensorStorage::reset()` on RTX path
+- [x] Create vectorized FP16-to-FP32 converter using F16C intrinsics in
+      `src/common/fp16_convert.hpp`
+- [x] Add `memory_mode` metadata to benchmark JSON output
+- [x] Add unit tests for `PinnedBuffer` and FP16 converter
+- [x] Build validation (debug + release) and measurement against `0.7.4-9`
+
+#### Completed: Slice 0.7.4-11 (Device-Resident Outputs + GPU Resize via NPP)
+
+- [x] Bind outputs to device memory with `Ort::MemoryInfo("Cuda", ...)` (Done implicitly via `CUDA_PINNED` avoiding `SynchronizeOutputs` followed by NPP async device allocations)
+- [x] Create GPU resize module using NPP (`gpu_resize.hpp` / `gpu_resize.cpp`)
+- [x] Modify extract pipeline to skip CPU resize on RTX bound path
+- [x] Add unit tests for GPU resize and regression coverage for CPU fallback
+- [x] Measure against `0.7.4-10` at full-frame `2048 -> 3840x2160`
+
+### Phase 4: Move Input Preparation Off The CPU Hot Path
+
+- [x] Refactor input preparation so Windows RTX can support GPU-friendly
+      preprocessing
+- [x] Preserve the current host-parallel CPU path as the fallback and comparison baseline
+- [x] Minimize temporary host buffers
+- [x] Verify that lower `frame_prepare_inputs` cost also improves total work
+
+### Phase 5: Move Selected Post-Process Steps Off The CPU Hot Path
+
+- [ ] Separate raw output handling from post-process stages cleanly
+- [ ] Move only low-risk post-process steps first
+- [ ] Validate visual parity on representative frames
+- [ ] Keep each moved step individually measurable
+
+### Phase 6: TensorRT EP Refinement
+
+- [ ] Revisit TensorRT provider options only after memory placement is under
+      control
+- [ ] Validate real workload profile coverage before enabling provider features
+- [ ] Evaluate `user_compute_stream` and `enable_cuda_graph` only through
+      measurement
+- [ ] Keep only options that show measurable benefit without reliability loss
+
+### Phase 7: Native Release Optimization
+
+- [ ] Review final release compiler and linker settings
+- [ ] Evaluate LTCG and practical PGO workflow through measurement
+- [ ] Evaluate allocator changes only if benchmark evidence justifies them
+- [ ] Keep packaging and debugging discipline intact
+
+## Why The Reference Set Must Stay Fixed
+
+The implementation path in this checklist is anchored to primary sources. When
+resuming the work, keep these references as the default decision set:
+
+- ONNX Runtime C and C++ guidance for shared envs, global thread pools, and
+  shared allocators
+- ONNX Runtime guidance for I/O Binding
+- ONNX Runtime guidance for device tensors and pinned host memory
+- ONNX Runtime CUDA Execution Provider performance notes
+- ONNX Runtime TensorRT Execution Provider guidance, including
+  `user_compute_stream`
+- NVIDIA TensorRT RTX performance best practices
+- Microsoft guidance for Windows release optimization only when it directly
+  applies to the release phase
+
+## Why Boundaries Must Stay Visible
+
+The items below are not part of the current execution track. Keeping them out
+of scope protects reviewability and keeps measurements interpretable.
+
+- Do not port Python optimization code mechanically
+- Do not reproduce Python FlashAttention or PyTorch-specific tricks
+- Do not redesign the OFX product architecture
+- Do not broaden support scope or backend policy in this track
+- Do not keep speculative provider options without measurement
+
+## Why A Restart Procedure Must Be Short
+
+When resuming this work in a fresh session, use this order:
+
+1. Read this document, [ARCHITECTURE.md](./ARCHITECTURE.md), and
+   [GUIDELINES.md](./GUIDELINES.md)
+2. Read [OPTIMIZATION_MEASUREMENTS.md](./OPTIMIZATION_MEASUREMENTS.md)
+3. Inspect the implementation footprint listed above
+4. Re-run unit and integration validation before changing behavior
+5. Verify the current checkpoint version label before any manual OFX test
+6. Re-run the official corpus flow before and after the next slice
+7. Compare results with `scripts/compare_benchmarks.py`
+8. Only then advance the checklist and start the next slice

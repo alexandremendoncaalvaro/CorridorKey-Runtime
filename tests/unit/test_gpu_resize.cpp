@@ -7,13 +7,13 @@
 
 using namespace corridorkey;
 
-TEST_CASE("GpuResizer Availability", "[e2e][gpu]") {
+TEST_CASE("GpuResizer Availability", "[unit][core]") {
     core::GpuResizer resizer;
     bool avail = resizer.available();
     SUCCEED("Queried availability: " + std::to_string(avail));
 }
 
-TEST_CASE("GpuResizer Correctness vs CPU reference", "[e2e][gpu]") {
+TEST_CASE("GpuResizer Correctness vs CPU reference", "[unit][core]") {
     core::GpuResizer resizer;
     if (!resizer.available()) {
         SKIP("GPU resize not available on this host");

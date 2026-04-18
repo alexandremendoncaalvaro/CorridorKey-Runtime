@@ -1,7 +1,6 @@
 #include <cpr/cpr.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <chrono>
 #include <corridorkey/engine.hpp>
@@ -1100,15 +1099,9 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            ProgressCallback progress = [spinner_tick = std::size_t{0}](
-                                            float p, const std::string& status) mutable -> bool {
-                constexpr int bar_width = 50;
-                if (p < 0.0F) {
-                    constexpr std::array<char, 4> frames{'|', '/', '-', '\\'};
-                    std::cout << "\r[" << frames[spinner_tick % frames.size()] << "] " << status
-                              << "     " << std::flush;
-                    ++spinner_tick;
-                } else {
+            ProgressCallback progress = [](float p, const std::string& status) -> bool {
+                {
+                    int bar_width = 50;
                     auto filled = static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
                     auto empty = static_cast<size_t>(bar_width) - filled;
                     std::cout << "\r[" << std::string(filled, '=') << std::string(empty, ' ')
