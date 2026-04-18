@@ -729,9 +729,15 @@ void update_runtime_panel_values(InstanceData* data) {
     } else {
         has_session = data->engine != nullptr;
     }
-    const bool is_loading = !has_session && data->last_error.empty();
     const bool has_recorded_frame_timing =
         data->last_frame_ms > 0.0 || !data->last_render_stage_timings.empty();
+    // "Loading..." must only show on a cold instance that has never produced
+    // a frame. Between sequences the out-of-process session may be released
+    // to mitigate the TRT EP state-growth bug, which flips has_session to
+    // false briefly; honoring recorded timings here keeps the panel showing
+    // real values instead of flashing "Loading..." after every render.
+    const bool is_loading =
+        !has_session && data->last_error.empty() && !has_recorded_frame_timing;
 
     set_string_param_value(data->runtime_processing_param,
                            processing_backend_label(data->device.backend));
@@ -1855,16 +1861,29 @@ OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandl
 
     // Pair progressStart with progressEnd so the host closes its spinner
     // (OpenFX 1.4 ofxProgress.h: "Signal that we are finished with the
-    // progress meter"). The session itself stays alive across sequences:
-    // Resolve fires begin/end sequence around every preview render, so
-    // releasing the runtime session here forces a TensorRT re-prepare per
-    // frame. Idle cleanup is handled by OfxSessionBroker::cleanup_idle_sessions
-    // and by the OfxRuntimeClient destructor at destroy_instance.
+    // progress meter"). progressEnd must fire before releasing the session,
+    // per the suite's pre/post conditions.
     if (data->progress_active && g_suites.progress != nullptr &&
         g_suites.progress->progressEnd != nullptr) {
         g_suites.progress->progressEnd(instance);
     }
     data->progress_active = false;
+
+    // Release the out-of-process session at end-of-sequence. The TensorRT
+    // RTX execution provider accumulates internal state across Run() calls
+    // on the same session, producing monotonically growing ort_run times
+    // (374 ms -> 5391 ms over 16 frames observed on 4K @ 2048). Rebuilding
+    // the session per sequence pays a one-off ~700 ms prepare but keeps
+    // frame latency flat, matching the v0.7.3 behavior. Tracked for a real
+    // fix in docs/ORT_TRT_SESSION_REUSE.md.
+    if (data->use_runtime_server && data->runtime_client != nullptr &&
+        data->runtime_client->has_session()) {
+        auto release_result = data->runtime_client->release_session();
+        if (!release_result) {
+            log_message("end_sequence_render",
+                        "release_session_failed detail=" + release_result.error().message);
+        }
+    }
 
     flush_runtime_panel(data);
     log_message("end_sequence_render", "Sequence render caches cleared.");

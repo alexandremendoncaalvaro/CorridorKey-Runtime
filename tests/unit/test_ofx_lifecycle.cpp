@@ -377,17 +377,14 @@ TEST_CASE("sequence render is a no-op for progress when the host omits the suite
 
 TEST_CASE("end_sequence_render preserves last-frame timing across render cycles",
           "[unit][ofx][regression]") {
-    // Regression guard for v0.7.5-2: end_sequence_render must NOT release the
-    // runtime session. Resolve fires begin/end sequence around every preview
-    // render; tearing the session down forces a TensorRT re-prepare per frame
-    // and produces ~4x slowdowns plus a panel stuck at "Loading...". Session
-    // lifetime belongs to the OFX instance (destroy_instance) and to the
-    // broker's idle timeout, not to the render loop.
-    //
-    // Without a mock OfxRuntimeClient we cannot observe session_ref_count
-    // directly, but we can assert that timing data recorded on InstanceData
-    // survives multiple begin/end cycles and that progressStart / progressEnd
-    // pair cleanly on every cycle without leaking across them.
+    // Regression guard. The TensorRT RTX execution provider accumulates
+    // internal state when the same ORT session is reused across Run() calls,
+    // so end_sequence_render releases the out-of-process session to keep
+    // frame latency flat (v0.7.3-equivalent behavior). What must NOT change
+    // across begin/end cycles is the recorded frame timing: last_frame_ms,
+    // avg_frame_ms, last_render_stage_timings are owned by InstanceData and
+    // survive the session release, which keeps the runtime panel showing
+    // real values instead of flashing "Loading..." after every sequence.
     g_fake_progress_calls = {};
 
     InstanceData data{};

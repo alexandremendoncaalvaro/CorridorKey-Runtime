@@ -9,6 +9,7 @@ param(
     [ValidateSet("rtx", "dml", "all")]
     [string]$Track = "all",
     [string]$DisplayVersionLabel = "",
+    [int]$PreRelease = 0,
     [string[]]$ForwardArguments = @()
 )
 
@@ -64,6 +65,17 @@ $resolvedVersion = Initialize-CorridorKeyVersion `
     -RepoRoot $repoRoot `
     -Version $Version `
     -SyncGuiMetadata:$syncGuiMetadata
+
+# Pre-release suffix: CMake VERSION stays strict SemVer (required by
+# Assert-CorridorKeySemVer), but the display label carries -N so the
+# OFX panel, CLI --version and artifact names all surface it end-to-end.
+if ($PreRelease -gt 0) {
+    if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+        $DisplayVersionLabel = "${resolvedVersion}-${PreRelease}"
+    } elseif ($DisplayVersionLabel -ne "${resolvedVersion}-${PreRelease}") {
+        throw "Conflicting -PreRelease (${PreRelease}) and -DisplayVersionLabel ('${DisplayVersionLabel}'). Pass one or the other."
+    }
+}
 
 $prepareArguments = @("-Version", $resolvedVersion, "-BuildPreset", $Preset)
 if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
@@ -154,6 +166,26 @@ switch ($Task) {
         }
         $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments
+
+        if ($PreRelease -gt 0) {
+            $distRoot = Join-Path $repoRoot "dist"
+            $suffixes = @(
+                "_Windows_RTX",
+                "_Windows_RTX.zip",
+                "_Windows_RTX_Installer.exe",
+                "_Windows_DirectML",
+                "_Windows_DirectML.zip",
+                "_Windows_DirectML_Installer.exe"
+            )
+            foreach ($suffix in $suffixes) {
+                $src = Join-Path $distRoot ("CorridorKey_Resolve_v${resolvedVersion}${suffix}")
+                $dst = Join-Path $distRoot ("CorridorKey_Resolve_v${resolvedVersion}-${PreRelease}${suffix}")
+                if (Test-Path $src) {
+                    Move-Item -Path $src -Destination $dst -Force
+                    Write-Host "[windows] Renamed artifact: $(Split-Path -Leaf $dst)" -ForegroundColor Green
+                }
+            }
+        }
         break
     }
     "regen-rtx-release" {
