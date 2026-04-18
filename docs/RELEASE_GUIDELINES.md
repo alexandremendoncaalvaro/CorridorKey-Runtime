@@ -24,6 +24,30 @@ Every release must bump the root `CMakeLists.txt` `VERSION`. That root CMake
 version is the single Windows release version source. Runtime GUI metadata is
 synchronized from it by the Windows packaging scripts.
 
+### Pre-release builds
+
+Any build that is not the final public GitHub release must use a pre-release
+suffix of the form `-N`, where `N` is an integer incremented on every new
+pre-release build of the same target version. Examples for a target `v0.7.5`:
+
+- First pre-release: `v0.7.5-1`
+- Second pre-release: `v0.7.5-2`
+- Public GitHub release: `v0.7.5` (no suffix)
+
+Rules for pre-release builds:
+
+- The `CMakeLists.txt` `VERSION` stays at the target `MAJOR.MINOR.PATCH`
+  (`0.7.5` in the example) because CMake requires strict SemVer; the `-N`
+  suffix lives in artifact names and release labels only.
+- Artifact names must include the suffix, for example
+  `CorridorKey_Resolve_v0.7.5-1_Windows_RTX.zip`.
+- Before every new pre-release build, wipe `build/` and `dist/` entirely to
+  eliminate cache-driven confusion about which source tree produced the
+  artifact.
+- `N` starts at `1` for the first pre-release against a target version and
+  increments monotonically. Do not reset `N` until the target `MAJOR.MINOR.PATCH`
+  itself changes.
+
 ## 2. Standardized Artifact Naming
 
 Artifact names must expose both the version and the backend-specific hardware
