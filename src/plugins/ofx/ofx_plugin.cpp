@@ -35,6 +35,11 @@ bool fetch_suites() {
     }
     g_suites.message = static_cast<const OfxMessageSuiteV2*>(message_suite);
 
+    // Progress suite is optional per OpenFX 1.4; hosts that don't implement it
+    // return nullptr and we silently skip all progress calls downstream.
+    g_suites.progress = static_cast<const OfxProgressSuiteV1*>(
+        g_host->fetchSuite(g_host->host, kOfxProgressSuite, 1));
+
     if (!g_suites.property || !g_suites.image_effect || !g_suites.parameter) {
         log_message("fetch_suites", "Missing required OpenFX suites.");
         return false;

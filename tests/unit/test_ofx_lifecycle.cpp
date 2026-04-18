@@ -267,3 +267,144 @@ TEST_CASE("is identity remains conservative for CorridorKey output modes",
           "[unit][ofx][regression]") {
     REQUIRE(is_identity(nullptr, nullptr, nullptr) == kOfxStatReplyDefault);
 }
+
+namespace {
+
+struct FakeProgressCalls {
+    int start = 0;
+    int end = 0;
+    int update = 0;
+    OfxImageEffectHandle last_start_instance = nullptr;
+    OfxImageEffectHandle last_end_instance = nullptr;
+};
+
+FakeProgressCalls g_fake_progress_calls{};
+
+OfxStatus fake_progress_start(void* instance, const char*) {
+    ++g_fake_progress_calls.start;
+    g_fake_progress_calls.last_start_instance = reinterpret_cast<OfxImageEffectHandle>(instance);
+    return kOfxStatOK;
+}
+
+OfxStatus fake_progress_update(void*, double) {
+    ++g_fake_progress_calls.update;
+    return kOfxStatOK;
+}
+
+OfxStatus fake_progress_end(void* instance) {
+    ++g_fake_progress_calls.end;
+    g_fake_progress_calls.last_end_instance = reinterpret_cast<OfxImageEffectHandle>(instance);
+    return kOfxStatOK;
+}
+
+}  // namespace
+
+TEST_CASE("sequence render pairs progressStart with progressEnd on the OFX host",
+          "[unit][ofx][regression]") {
+    g_fake_progress_calls = {};
+
+    InstanceData data{};
+    FakeEffectProps props{.instance_data = &data};
+
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxProgressSuiteV1 progress_suite{};
+    progress_suite.progressStart = fake_progress_start;
+    progress_suite.progressUpdate = fake_progress_update;
+    progress_suite.progressEnd = fake_progress_end;
+
+    auto* previous_property_suite = g_suites.property;
+    auto* previous_image_suite = g_suites.image_effect;
+    auto* previous_progress_suite = g_suites.progress;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.progress = &progress_suite;
+
+    auto handle = reinterpret_cast<OfxImageEffectHandle>(&props);
+
+    REQUIRE(begin_sequence_render(handle, nullptr) == kOfxStatOK);
+    CHECK(g_fake_progress_calls.start == 1);
+    CHECK(g_fake_progress_calls.end == 0);
+    CHECK(data.progress_active);
+
+    REQUIRE(end_sequence_render(handle, nullptr) == kOfxStatOK);
+    CHECK(g_fake_progress_calls.end == 1);
+    CHECK_FALSE(data.progress_active);
+    CHECK(g_fake_progress_calls.last_start_instance == handle);
+    CHECK(g_fake_progress_calls.last_end_instance == handle);
+
+    g_suites.progress = previous_progress_suite;
+    g_suites.image_effect = previous_image_suite;
+    g_suites.property = previous_property_suite;
+}
+
+TEST_CASE("sequence render is a no-op for progress when the host omits the suite",
+          "[unit][ofx][regression]") {
+    g_fake_progress_calls = {};
+
+    InstanceData data{};
+    FakeEffectProps props{.instance_data = &data};
+
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+
+    auto* previous_property_suite = g_suites.property;
+    auto* previous_image_suite = g_suites.image_effect;
+    auto* previous_progress_suite = g_suites.progress;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.progress = nullptr;
+
+    auto handle = reinterpret_cast<OfxImageEffectHandle>(&props);
+
+    REQUIRE(begin_sequence_render(handle, nullptr) == kOfxStatOK);
+    CHECK_FALSE(data.progress_active);
+    REQUIRE(end_sequence_render(handle, nullptr) == kOfxStatOK);
+    CHECK_FALSE(data.progress_active);
+    CHECK(g_fake_progress_calls.start == 0);
+    CHECK(g_fake_progress_calls.end == 0);
+
+    g_suites.progress = previous_progress_suite;
+    g_suites.image_effect = previous_image_suite;
+    g_suites.property = previous_property_suite;
+}
+
+TEST_CASE("destroy_instance ends lingering progress display defensively",
+          "[unit][ofx][regression]") {
+    g_fake_progress_calls = {};
+
+    auto* data = new InstanceData{};
+    data->progress_active = true;
+    FakeEffectProps props{.instance_data = data};
+
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxProgressSuiteV1 progress_suite{};
+    progress_suite.progressStart = fake_progress_start;
+    progress_suite.progressUpdate = fake_progress_update;
+    progress_suite.progressEnd = fake_progress_end;
+
+    auto* previous_property_suite = g_suites.property;
+    auto* previous_image_suite = g_suites.image_effect;
+    auto* previous_progress_suite = g_suites.progress;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.progress = &progress_suite;
+
+    REQUIRE(destroy_instance(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+    CHECK(g_fake_progress_calls.end == 1);
+    CHECK(props.instance_data == nullptr);
+
+    g_suites.progress = previous_progress_suite;
+    g_suites.image_effect = previous_image_suite;
+    g_suites.property = previous_property_suite;
+}

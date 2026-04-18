@@ -559,7 +559,7 @@ Result<void> Engine::process_video(const std::filesystem::path& input_video,
         current_batch_future = std::async(std::launch::async, fetch_batch, batch_size);
 
         if (on_progress) {
-            float p = total_frames > 0 ? static_cast<float>(frame_idx) / total_frames : 0.0f;
+            float p = total_frames > 0 ? static_cast<float>(frame_idx) / total_frames : -1.0f;
             if (!on_progress(p, "Inference frames " + std::to_string(frame_idx))) {
                 return Unexpected(Error{ErrorCode::Cancelled, "Processing cancelled by user"});
             }

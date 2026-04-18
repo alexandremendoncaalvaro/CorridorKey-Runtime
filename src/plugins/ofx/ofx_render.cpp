@@ -565,6 +565,21 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         get_double(in_args, kOfxPropTime, time);
     }
 
+    if (data->progress_active && g_suites.progress != nullptr &&
+        g_suites.progress->progressUpdate != nullptr) {
+        const double span = data->sequence_frame_end - data->sequence_frame_start;
+        double fraction = 0.0;
+        if (span > 0.0) {
+            fraction = (time - data->sequence_frame_start) / span;
+            if (fraction < 0.0) {
+                fraction = 0.0;
+            } else if (fraction > 1.0) {
+                fraction = 1.0;
+            }
+        }
+        g_suites.progress->progressUpdate(instance, fraction);
+    }
+
     OfxPropertySetHandle source_props = nullptr;
     if (!fetch_image(data->source_clip, time, source_props)) {
         log_message("render", "Failed to fetch source image.");
