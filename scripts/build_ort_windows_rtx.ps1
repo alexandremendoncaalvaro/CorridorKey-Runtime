@@ -325,7 +325,12 @@ function Resolve-TensorRtRtxHome {
         }
     }
 
-    throw "TensorRT RTX home not found. Pass -TensorRtRtxHome or stage the SDK under vendor\TensorRT-RTX."
+    # SDK not staged yet; auto-download the pinned version. The download
+    # URL lives in the rtx_build_contract so every pipeline (release,
+    # prepare-rtx, collaborator) fetches the same SDK from the same place.
+    Write-Host "[build_ort_windows_rtx] TensorRT-RTX SDK not staged; fetching pinned version..." -ForegroundColor Yellow
+    $resolvedPath = Ensure-CorridorKeyTensorRtRtxHome -RepoRoot $RepoRoot
+    return (Normalize-TensorRtRtxHome -CandidatePath $resolvedPath)
 }
 
 function Resolve-DumpbinPath {

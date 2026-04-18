@@ -111,8 +111,19 @@ function Get-CorridorKeyCmakeVersion {
         return ""
     }
 
-    $firstLine = & $CmakePath --version 2>$null | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($firstLine)) {
+    # Collect the full output before slicing. Piping a native executable
+    # through `Select-Object -First 1` closes stdout after the first line,
+    # which CMake (and other chatty native tools) report back as a broken
+    # pipe — LASTEXITCODE becomes non-zero even though the command itself
+    # succeeded. Capture the output as an array, then take the first line.
+    $output = & $CmakePath --version 2>$null
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0 -or $null -eq $output) {
+        return ""
+    }
+
+    $firstLine = if ($output -is [System.Array]) { $output[0] } else { [string]$output }
+    if ([string]::IsNullOrWhiteSpace($firstLine)) {
         return ""
     }
 
@@ -500,6 +511,99 @@ function Resolve-CorridorKeyTensorRtRtxHome {
     }
 
     return ""
+}
+
+function Expand-CorridorKeyArchive {
+    param(
+        [string]$ArchivePath,
+        [string]$DestinationDir
+    )
+
+    if (Test-Path $DestinationDir) {
+        Remove-Item $DestinationDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+
+    $tar = Get-Command "tar.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $tar) {
+        & $tar.Source -xf $ArchivePath -C $DestinationDir
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+    }
+
+    Expand-Archive -Path $ArchivePath -DestinationPath $DestinationDir -Force
+}
+
+function Ensure-CorridorKeyTensorRtRtxHome {
+    <#
+    .SYNOPSIS
+    Returns the absolute path of the TensorRT-RTX SDK, downloading the
+    pinned version from NVIDIA if the SDK is not already staged.
+
+    .DESCRIPTION
+    Kept in sync with the collaborator model-preparation flow so that
+    every Windows RTX pipeline — not just the collaborator path — can
+    auto-stage the SDK. The pinned version and URL live in the contract
+    returned by `Get-CorridorKeyWindowsRtxBuildContract`.
+
+    Call this from any script that ultimately invokes
+    `build_ort_windows_rtx.ps1` instead of aborting when the SDK is
+    missing. The function is idempotent: subsequent calls find the
+    previously extracted SDK and return its path without re-downloading.
+    #>
+    param([string]$RepoRoot)
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+        throw "Ensure-CorridorKeyTensorRtRtxHome requires -RepoRoot."
+    }
+
+    $existing = Resolve-CorridorKeyTensorRtRtxHome -RepoRoot $RepoRoot
+    if (-not [string]::IsNullOrWhiteSpace($existing)) {
+        $env:TENSORRT_RTX_HOME = $existing
+        return $existing
+    }
+
+    $contract = Get-CorridorKeyWindowsRtxBuildContract
+    $downloadUrl = $contract.tensorrt_rtx_download_url
+    $sdkRoot = Join-Path $RepoRoot ("vendor\TensorRT-RTX-" + $contract.tensorrt_rtx_version)
+    $tempRoot = Join-Path $RepoRoot "temp\tensorrt-rtx-download"
+    $archivePath = Join-Path $tempRoot ([System.IO.Path]::GetFileName($downloadUrl))
+    $extractRoot = Join-Path $tempRoot "extracted"
+
+    if (Test-CorridorKeyTensorRtRtxRoot -CandidatePath $sdkRoot) {
+        $env:TENSORRT_RTX_HOME = $sdkRoot
+        return $sdkRoot
+    }
+
+    $curl = Get-Command "curl.exe" -ErrorAction SilentlyContinue
+    if ($null -eq $curl) {
+        throw "curl.exe is required to download the TensorRT-RTX SDK; install Git for Windows or curl and retry."
+    }
+
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    Write-Host ("[tensorrt-rtx] Downloading SDK {0} for CUDA {1} (~1GB)..." -f
+        $contract.tensorrt_rtx_version, $contract.required_cuda_version) -ForegroundColor Cyan
+    & $curl.Source -L $downloadUrl -o $archivePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to download TensorRT-RTX SDK from $downloadUrl."
+    }
+
+    Write-Host "[tensorrt-rtx] Extracting SDK..." -ForegroundColor Cyan
+    Expand-CorridorKeyArchive -ArchivePath $archivePath -DestinationDir $extractRoot
+
+    $extractedSdkRoot = Join-Path $extractRoot ("TensorRT-RTX-" + $contract.tensorrt_rtx_version)
+    if (-not (Test-CorridorKeyTensorRtRtxRoot -CandidatePath $extractedSdkRoot)) {
+        throw "Downloaded TensorRT-RTX SDK layout is invalid at: $extractedSdkRoot"
+    }
+
+    if (Test-Path $sdkRoot) {
+        Remove-Item $sdkRoot -Recurse -Force
+    }
+    Move-Item -Path $extractedSdkRoot -Destination $sdkRoot
+    $env:TENSORRT_RTX_HOME = $sdkRoot
+    Write-Host "[tensorrt-rtx] SDK ready at $sdkRoot" -ForegroundColor Green
+    return $sdkRoot
 }
 
 function Get-CorridorKeyProjectVersion {

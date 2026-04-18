@@ -417,47 +417,11 @@ function Ensure-CollaboratorCmake {
 }
 
 function Ensure-CollaboratorTensorRtRtxSdk {
-    $existingRoot = Resolve-CollaboratorTensorRtRtxRoot
-    if (-not [string]::IsNullOrWhiteSpace($existingRoot)) {
-        $env:TENSORRT_RTX_HOME = $existingRoot
-        return
-    }
-
-    $downloadUrl = $rtxBuildContract.tensorrt_rtx_download_url
-    $vendorRoot = Join-Path $repoRoot "vendor"
-    $sdkRoot = Join-Path $vendorRoot ("TensorRT-RTX-" + $rtxBuildContract.tensorrt_rtx_version)
-    $tempRoot = Join-Path $repoRoot "temp\collaborator-downloads"
-    $archivePath = Join-Path $tempRoot ([System.IO.Path]::GetFileName($downloadUrl))
-    $extractRoot = Join-Path $tempRoot "tensorrt-rtx-sdk"
-
-    if (Test-CollaboratorTensorRtRtxRoot -CandidatePath $sdkRoot) {
-        $env:TENSORRT_RTX_HOME = $sdkRoot
-        return
-    }
-
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
-    Write-Host "[collaborator] Downloading TensorRT RTX SDK $($rtxBuildContract.tensorrt_rtx_version) for CUDA $($rtxBuildContract.required_cuda_version)..." -ForegroundColor Cyan
-    Invoke-CollaboratorWorkingCommand -FilePath "curl.exe" -Arguments @(
-        "-L",
-        $downloadUrl,
-        "-o",
-        $archivePath
-    )
-
-    Write-Host "[collaborator] Extracting TensorRT RTX SDK..." -ForegroundColor Cyan
-    Extract-CollaboratorArchive -ArchivePath $archivePath -DestinationDir $extractRoot
-
-    $extractedSdkRoot = Join-Path $extractRoot ("TensorRT-RTX-" + $rtxBuildContract.tensorrt_rtx_version)
-    if (-not (Test-CollaboratorTensorRtRtxRoot -CandidatePath $extractedSdkRoot)) {
-        throw "Downloaded TensorRT RTX SDK layout is invalid: $extractedSdkRoot"
-    }
-
-    if (Test-Path $sdkRoot) {
-        Remove-Item $sdkRoot -Recurse -Force
-    }
-    Move-Item -Path $extractedSdkRoot -Destination $sdkRoot
-    $env:TENSORRT_RTX_HOME = $sdkRoot
-    Write-Host "[collaborator] TensorRT RTX SDK ready at $sdkRoot" -ForegroundColor Green
+    # Delegate to the shared helper so every pipeline (collaborator,
+    # prepare-rtx, build_ort_windows_rtx) fetches the same SDK from the
+    # same URL with the same extraction logic. Avoids drift between the
+    # collaborator flow and the release flow.
+    [void](Ensure-CorridorKeyTensorRtRtxHome -RepoRoot $repoRoot)
 }
 
 function Ensure-CollaboratorEnvironment {
