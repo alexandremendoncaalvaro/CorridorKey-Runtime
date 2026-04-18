@@ -24,45 +24,6 @@ Every release must bump the root `CMakeLists.txt` `VERSION`. That root CMake
 version is the single Windows release version source. Runtime GUI metadata is
 synchronized from it by the Windows packaging scripts.
 
-### Pre-release builds
-
-Any build that is not the final public GitHub release must use a pre-release
-suffix of the form `-N`, where `N` is an integer incremented on every new
-pre-release build of the same target version. Examples for a target `v0.7.5`:
-
-- First pre-release: `v0.7.5-1`
-- Second pre-release: `v0.7.5-2`
-- Public GitHub release: `v0.7.5` (no suffix)
-
-Rules for pre-release builds:
-
-- The `CMakeLists.txt` `VERSION` stays at the target `MAJOR.MINOR.PATCH`
-  (`0.7.5` in the example) because CMake requires strict SemVer; the `-N`
-  suffix lives in the display label and in artifact names.
-- Artifact names must include the suffix, for example
-  `CorridorKey_Resolve_v0.7.5-1_Windows_RTX.zip`.
-- The OFX panel (inside DaVinci Resolve), `corridorkey --version` and the
-  runtime log file names must also show `vX.Y.Z-N` so the tester can
-  identify which local build they are exercising.
-- Before every new pre-release build, the canonical wrapper wipes
-  `build/release`, `dist`, and `temp` automatically (see
-  `release_pipeline_windows.ps1`). Do not rely on manual cleanup.
-- `N` starts at `1` for the first pre-release against a target version and
-  increments monotonically. Do not reset `N` until the target `MAJOR.MINOR.PATCH`
-  itself changes.
-
-To produce a pre-release build use the canonical wrapper with `-PreRelease`:
-
-```powershell
-scripts\windows.ps1 -Task release -Version X.Y.Z -Track rtx -PreRelease N
-```
-
-The wrapper sets `CORRIDORKEY_DISPLAY_VERSION_LABEL=X.Y.Z-N` before
-configuring CMake (so the baked-in display string already carries the
-suffix) and renames the generated artifacts from
-`CorridorKey_Resolve_vX.Y.Z_Windows_RTX*` to
-`CorridorKey_Resolve_vX.Y.Z-N_Windows_RTX*` at the end of the run.
-
 ## 2. Standardized Artifact Naming
 
 Artifact names must expose both the version and the backend-specific hardware
