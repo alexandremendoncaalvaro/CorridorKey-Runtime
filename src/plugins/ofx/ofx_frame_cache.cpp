@@ -1,9 +1,9 @@
 #include "ofx_frame_cache.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <optional>
-#include <shared_mutex>
 
 namespace corridorkey::ofx {
 
@@ -32,11 +32,9 @@ std::optional<ImageBuffer> deep_copy_buffer(const Image& src) {
     return buf;
 }
 
-struct RetrievedEntry {
-    Image alpha;
-    Image foreground;
-    std::vector<StageTiming> stage_timings;
-};
+std::size_t buffer_bytes(const ImageBuffer& buffer) {
+    return buffer.const_view().data.size_bytes();
+}
 
 }  // namespace
 
@@ -94,15 +92,24 @@ std::uint64_t frame_signature(const Image& rgb, const Image& hint) {
     return hash;
 }
 
+SharedFrameCache::SharedFrameCache(std::size_t byte_budget) : m_byte_budget(byte_budget) {
+    // Reserve a reasonable capacity to avoid frequent vector growth on the
+    // first dozens of scrub-driven stores. The eventual size is dictated by
+    // the byte budget; the hint here only shapes allocator behavior.
+    m_entries.reserve(32);
+}
+
 bool SharedFrameCache::try_retrieve(const SharedCacheKey& key, ImageBuffer& out_alpha,
                                     ImageBuffer& out_foreground,
-                                    std::vector<StageTiming>* out_stage_timings) const {
-    std::optional<RetrievedEntry> snapshot;
+                                    std::vector<StageTiming>* out_stage_timings) {
+    std::optional<Image> alpha_view;
+    std::optional<Image> foreground_view;
+    std::vector<StageTiming> stage_timings_snapshot;
 
     {
-        std::shared_lock lock(m_mutex);
-        for (const auto& entry : m_entries) {
-            if (!entry.occupied || entry.key != key) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& entry : m_entries) {
+            if (entry.key != key) {
                 continue;
             }
             const Image a = entry.alpha.const_view();
@@ -110,26 +117,61 @@ bool SharedFrameCache::try_retrieve(const SharedCacheKey& key, ImageBuffer& out_
             if (a.data.empty() || f.data.empty()) {
                 continue;
             }
-            snapshot = RetrievedEntry{a, f, entry.stage_timings};
+            alpha_view = a;
+            foreground_view = f;
+            stage_timings_snapshot = entry.stage_timings;
+            entry.last_access_ticks = ++m_access_counter;
             break;
         }
     }
 
-    if (!snapshot.has_value()) {
+    if (!alpha_view.has_value() || !foreground_view.has_value()) {
+        m_misses.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
 
-    auto alpha = deep_copy_buffer(snapshot->alpha);
-    auto foreground = deep_copy_buffer(snapshot->foreground);
+    auto alpha = deep_copy_buffer(*alpha_view);
+    auto foreground = deep_copy_buffer(*foreground_view);
     if (!alpha.has_value() || !foreground.has_value()) {
+        // Treated as miss because the caller cannot observe the cached result.
+        m_misses.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     out_alpha = std::move(*alpha);
     out_foreground = std::move(*foreground);
     if (out_stage_timings != nullptr) {
-        *out_stage_timings = std::move(snapshot->stage_timings);
+        *out_stage_timings = std::move(stage_timings_snapshot);
     }
+    m_hits.fetch_add(1, std::memory_order_relaxed);
     return true;
+}
+
+void SharedFrameCache::evict_until_fits(std::size_t incoming_bytes) {
+    // No-op when the incoming entry alone exceeds the budget: admit it and
+    // evict everything else. The intent is to always keep at least the most
+    // recent render in cache, so the immediate repeat of a heavy render still
+    // serves from cache even though we're technically over budget by the size
+    // of that single entry.
+    if (incoming_bytes >= m_byte_budget) {
+        for (auto& entry : m_entries) {
+            m_current_bytes -= std::min(entry.byte_size, m_current_bytes);
+            entry = CacheEntry{};
+        }
+        m_entries.clear();
+        const auto removed = m_evictions.load(std::memory_order_relaxed);
+        m_evictions.store(removed + 0, std::memory_order_relaxed);
+        return;
+    }
+
+    while (m_current_bytes + incoming_bytes > m_byte_budget && !m_entries.empty()) {
+        auto oldest = std::min_element(m_entries.begin(), m_entries.end(),
+                                       [](const CacheEntry& a, const CacheEntry& b) {
+                                           return a.last_access_ticks < b.last_access_ticks;
+                                       });
+        m_current_bytes -= std::min(oldest->byte_size, m_current_bytes);
+        m_entries.erase(oldest);
+        m_evictions.fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha, const Image& foreground,
@@ -139,37 +181,61 @@ void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha, cons
     if (!alpha_copy.has_value() || !fg_copy.has_value()) {
         return;
     }
+    const std::size_t incoming_bytes = buffer_bytes(*alpha_copy) + buffer_bytes(*fg_copy);
 
-    std::unique_lock lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_mutex);
 
+    // Update-in-place when the same key is re-stored. Common when the plugin
+    // re-renders a frame it previously cached but with a refreshed timings
+    // vector (the caller's snapshot is newer).
     for (auto& entry : m_entries) {
-        if (entry.occupied && entry.key == key) {
+        if (entry.key == key) {
+            m_current_bytes -= std::min(entry.byte_size, m_current_bytes);
             entry.alpha = std::move(*alpha_copy);
             entry.foreground = std::move(*fg_copy);
             entry.stage_timings = std::move(stage_timings);
+            entry.last_access_ticks = ++m_access_counter;
+            entry.byte_size = incoming_bytes;
+            m_current_bytes += incoming_bytes;
+            m_stores.fetch_add(1, std::memory_order_relaxed);
             return;
         }
     }
 
-    auto& slot = m_entries[m_next_slot];
-    slot.key = key;
-    slot.alpha = std::move(*alpha_copy);
-    slot.foreground = std::move(*fg_copy);
-    slot.stage_timings = std::move(stage_timings);
-    slot.occupied = true;
-    m_next_slot = (m_next_slot + 1) % kMaxEntries;
+    evict_until_fits(incoming_bytes);
+
+    CacheEntry entry;
+    entry.key = key;
+    entry.alpha = std::move(*alpha_copy);
+    entry.foreground = std::move(*fg_copy);
+    entry.stage_timings = std::move(stage_timings);
+    entry.last_access_ticks = ++m_access_counter;
+    entry.byte_size = incoming_bytes;
+    m_current_bytes += incoming_bytes;
+    m_entries.push_back(std::move(entry));
+    m_stores.fetch_add(1, std::memory_order_relaxed);
 }
 
 void SharedFrameCache::clear() {
-    std::unique_lock lock(m_mutex);
-    for (auto& entry : m_entries) {
-        entry.key = {};
-        entry.alpha = {};
-        entry.foreground = {};
-        entry.stage_timings.clear();
-        entry.occupied = false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_entries.clear();
+    m_current_bytes = 0;
+    m_access_counter = 0;
+}
+
+SharedFrameCacheStats SharedFrameCache::stats() const {
+    SharedFrameCacheStats result;
+    result.hits = m_hits.load(std::memory_order_relaxed);
+    result.misses = m_misses.load(std::memory_order_relaxed);
+    result.stores = m_stores.load(std::memory_order_relaxed);
+    result.evictions = m_evictions.load(std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        result.entries = m_entries.size();
+        result.bytes = m_current_bytes;
+        result.byte_budget = m_byte_budget;
     }
-    m_next_slot = 0;
+    return result;
 }
 
 }  // namespace corridorkey::ofx

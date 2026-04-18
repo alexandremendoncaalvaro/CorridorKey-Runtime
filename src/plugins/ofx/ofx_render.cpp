@@ -3,6 +3,7 @@
 #include <cmath>
 #include <corridorkey/engine.hpp>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -488,6 +489,27 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     if (!params.output_alpha_only && g_frame_cache != nullptr) {
         g_frame_cache->store(shared_key, alpha_buf.view(), fg_linear_buf.view(),
                              std::vector<StageTiming>(stage_timings.begin(), stage_timings.end()));
+        // Summarize the cache state periodically so the runtime log can show
+        // the scrub-time hit rate, the current byte footprint, and eviction
+        // pressure. Gated to every 8 stores so a long render session does not
+        // spam the log file.
+        const auto cache_stats = g_frame_cache->stats();
+        if (cache_stats.stores % 8ULL == 0ULL) {
+            const std::uint64_t lookups = cache_stats.hits + cache_stats.misses;
+            const double hit_rate =
+                lookups == 0 ? 0.0
+                             : static_cast<double>(cache_stats.hits) / static_cast<double>(lookups);
+            char message[256] = {};
+            std::snprintf(message, sizeof(message),
+                          "event=shared_cache_stats hits=%llu misses=%llu hit_rate=%.3f "
+                          "stores=%llu evictions=%llu entries=%zu bytes=%zu budget=%zu",
+                          static_cast<unsigned long long>(cache_stats.hits),
+                          static_cast<unsigned long long>(cache_stats.misses), hit_rate,
+                          static_cast<unsigned long long>(cache_stats.stores),
+                          static_cast<unsigned long long>(cache_stats.evictions),
+                          cache_stats.entries, cache_stats.bytes, cache_stats.byte_budget);
+            log_message("render", message);
+        }
     }
 
     return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
