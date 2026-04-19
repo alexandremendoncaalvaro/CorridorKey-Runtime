@@ -540,8 +540,13 @@ if (-not $SkipPackage.IsPresent) {
     if (-not $SkipCompileContexts.IsPresent) {
         $packageArguments += "-CompileContexts"
     }
-    foreach ($forbiddenPath in $forbiddenPaths) {
-        $packageArguments += @("-ForbiddenPathPrefix", $forbiddenPath)
+    if ($forbiddenPaths.Count -gt 0) {
+        # package_windows.ps1 declares -ForbiddenPathPrefix as [string[]]; passing
+        # the flag once followed by a comma-joined list is the PowerShell-native
+        # way to bind an array, whereas repeating the flag hits
+        # "ParameterAlreadyBound".
+        $packageArguments += "-ForbiddenPathPrefix"
+        $packageArguments += ($forbiddenPaths -join ",")
     }
 
     Write-Host "[package] Creating the portable Windows RTX bundle..."
