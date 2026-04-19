@@ -957,7 +957,6 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 function Get-CorridorKeyPreparedModelList {
     return @(
         "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_768.onnx",
         "corridorkey_fp16_1024.onnx",
         "corridorkey_fp16_1536.onnx",
         "corridorkey_fp16_2048.onnx",
