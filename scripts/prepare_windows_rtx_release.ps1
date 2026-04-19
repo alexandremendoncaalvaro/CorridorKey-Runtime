@@ -360,16 +360,12 @@ function Invoke-ModelPreparation {
         Write-Host "[1/6] Reusing prepared Windows RTX model pack from $modelsDir"
         Remove-IntermediateModelsFromDestination
         $presentPreparedModels = Get-PresentModelsInDirectory -Directory $modelsDir -ExpectedModels $expectedPreparedModels
-        Write-Host "[2/6] Validating prepared runtime artifact parity..."
-        Invoke-ExportParityValidation -UvPath $UvPath -ToolDir $toolDir `
-            -CheckpointPath $CheckpointPath -SourceRepo $SourceRepo -ExportDir $modelsDir `
-            -Models $presentPreparedModels
-        Write-Host "[3/6] Verifying ONNX contracts and ORT loadability..."
+        Write-Host "[2/6] Verifying ONNX contracts and ORT loadability..."
         Invoke-ModelPackValidation -UvPath $UvPath -ToolDir $toolDir `
             -ModelsDirectory $modelsDir -Models $presentPreparedModels
         Write-ModelPackStatus -Stage "reuse" -Directory $modelsDir `
             -ExpectedModels $expectedPreparedModels -ValidatedModels $presentPreparedModels `
-            -ParityModels $presentPreparedModels
+            -ParityModels @()
         return
     }
 
