@@ -903,6 +903,63 @@ package must replace the first one before any user-visible conclusion is kept.
   regression, not a correctness one). Investigate the GPU input-prep fallback
   before promoting a public pre-release.
 
+### `phase_9_v0.7.5-21_cuda_graph`
+
+- Source state: current main with `CORRIDORKEY_TRT_CUDA_GRAPH=1` made the
+  default in the OFX runtime server process. When active, the server also
+  forces `CORRIDORKEY_IO_BINDING=on` because CUDA graph capture requires
+  fixed-address pre-allocated output buffers (see ORT CUDA EP docs,
+  "CUDA Graphs (Preview)" section). Opt-outs remain available via
+  explicit env var values (`CORRIDORKEY_TRT_CUDA_GRAPH=0` or
+  `CORRIDORKEY_IO_BINDING=off`).
+- Display version label: `0.7.5-21`
+- Local test artifact path:
+  `dist/CorridorKey_Resolve_v0.7.5_Windows_RTX_Installer.exe`
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_9_v0.7.5-21/`
+- Benchmark summary:
+  - Exposes `enable_cuda_graph` on the TensorRT RTX EP provider options,
+    gated on `CORRIDORKEY_TRT_CUDA_GRAPH` env var. The matching
+    `kCudaGraphEnable` alias was added to the local
+    `tensorrt_rtx_option_names` namespace in `inference_session.cpp`.
+  - Harness (60 frames Jordan4k 4K @ 2048, exclusive GPU):
+    - `avg_latency_ms`: `669 ms` (vs `684 ms` on v0.7.5-11 graph off)
+    - steady-state `ort_run`: `~364 ms` (vs `~400 ms` graph off)
+  - DaVinci Resolve session (91 frames, 4K @ 2048, ORT per-op profile):
+    - warm `model_run` p50: `344 ms` (vs `5200 ms` on v0.7.5-11 graph
+      off / io on; `2632 ms` on v0.7.5-20 graph off / io off)
+    - warm `model_run` p99: `524 ms` (vs `26146 ms` / `7265 ms`)
+    - warm `model_run` mean: `358 ms` (vs `4626 ms` / `2786 ms`)
+    - 10-frame buckets show steady-state plateau at 344-352 ms across
+      frames 20-89 -- no in-session degradation. Frame 0 carries the
+      CUDA graph capture warm-up (~460 ms), subsequent frames replay
+      the captured DAG.
+- Manual OFX observations:
+  - Tested live in Resolve 20 on RTX 3080 with the mirror-aware
+    pipeline (v0.7.5-21 installer). Kernel execution time stays flat
+    across the session; the 26 s outlier that motivated the original
+    v0.7.5 revert does not reappear.
+  - No quality regression observed: same model, same inputs, same
+    outputs -- CUDA graph changes only the CUDA submission mechanism,
+    not the computation.
+- Interpretation:
+  - The CUDA driver submits a captured graph as one atomic DAG, so
+    Resolve's own decoder / color / compositor CUDA work cannot
+    interleave between TensorRT RTX kernels the way it did with
+    per-kernel launches. This matches the `torch.compiler.
+    cudagraph_mark_step_begin()` pattern used by the reference
+    CorridorKey Python engine.
+  - Empirical evidence only: the ORT documentation credits CUDA
+    graphs with reduced CPU launch overhead and does not claim a
+    shared-GPU contention resistance benefit. Our measurements in
+    a real Resolve session show the benefit regardless.
+- Keep or revise decision:
+  keep as the OFX runtime server default. Supersedes the v0.7.5-20
+  `CORRIDORKEY_IO_BINDING=off` mitigation, which was a partial fix
+  for the same symptom. The CLI and `ofx_benchmark_harness` default
+  behavior is unchanged because they do not run the runtime server
+  entrypoint.
+
 ### `phase_8_gpu_prepare`
 
 - Source state: current `perf/optimization` working tree with CUDA NPP-based

@@ -196,17 +196,54 @@ int run_runtime_server() {
     // still opts back in for benchmark comparisons. The CLI and
     // `ofx_benchmark_harness` are unaffected because they do not run
     // this entrypoint.
-    // CUDA graph capture (CORRIDORKEY_TRT_CUDA_GRAPH=1) requires I/O binding
-    // by contract: the captured graph reads from / writes to fixed CUDA
-    // virtual addresses at replay time, so outputs must be pre-allocated and
-    // stable. When CUDA graph is opt-in, flip the I/O binding default back
-    // to On even in this runtime server process so the two features agree.
+    // Default CUDA graph capture ON in the OFX runtime server process.
+    //
+    // Measured on v0.7.5-21 with the harness (60 frames Jordan4k, 4K
+    // 2048) and a real DaVinci Resolve session (91 frames, ORT per-op
+    // profiling enabled):
+    //
+    //   graph OFF / io ON  (v0.7.5-11 original): p50 5200 ms, p99 26146 ms
+    //   graph OFF / io OFF (v0.7.5-20 mitigation): p50 2632 ms, p99 7265 ms
+    //   graph ON  / io ON  (v0.7.5-21 experiment): p50  344 ms, p99  524 ms
+    //
+    // The graph-on configuration matches the dedicated-GPU harness
+    // steady state (~350 ms) inside Resolve too, with no in-session
+    // degradation across 90 frames. Hypothesis (validated empirically,
+    // not in docs): the CUDA driver treats a captured graph as one
+    // atomic DAG submission, so Resolve's own decoder/color/compositor
+    // CUDA work cannot interleave between TensorRT RTX kernels the way
+    // it could when each kernel was launched individually. Matches the
+    // `torch.compiler.cudagraph_mark_step_begin()` path used by the
+    // reference CorridorKey Python engine.
+    //
+    // Prerequisites (handled below):
+    // - I/O binding must be ON: CUDA graphs read/write fixed CUDA
+    //   virtual addresses at replay, so outputs must live at stable
+    //   pre-allocated buffers (see ORT CUDA EP docs, "CUDA Graphs").
+    // - Input shapes must stay static: already the case for our
+    //   packaged FP16 ladder where nv_profile_min/opt/max are set to
+    //   the same shape.
+    //
+    // Known upstream caveat: ORT issue #27329 describes precompiled
+    // TRT RTX engines sometimes not triggering capture. Our v1.23.0
+    // build captures correctly in practice (verified via ORT per-op
+    // profiling); documented in docs/WINDOWS_BUILD.md for operators on
+    // a different ORT pin.
+    //
+    // Explicit overrides still win:
+    //   CORRIDORKEY_TRT_CUDA_GRAPH=0  -> disable capture
+    //   CORRIDORKEY_IO_BINDING=off    -> disable binding (also disables
+    //                                    graph capture implicitly since
+    //                                    binding is a hard prerequisite)
+    if (std::getenv("CORRIDORKEY_TRT_CUDA_GRAPH") == nullptr) {
+        _putenv_s("CORRIDORKEY_TRT_CUDA_GRAPH", "1");
+    }
     const char* cuda_graph_env = std::getenv("CORRIDORKEY_TRT_CUDA_GRAPH");
-    const bool cuda_graph_requested =
+    const bool cuda_graph_active =
         cuda_graph_env != nullptr && std::string_view(cuda_graph_env) == "1";
 
     if (std::getenv("CORRIDORKEY_IO_BINDING") == nullptr) {
-        _putenv_s("CORRIDORKEY_IO_BINDING", cuda_graph_requested ? "on" : "off");
+        _putenv_s("CORRIDORKEY_IO_BINDING", cuda_graph_active ? "on" : "off");
     }
 
     auto args = command_line_arguments();
