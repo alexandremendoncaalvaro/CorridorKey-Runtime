@@ -24,6 +24,38 @@ Every release must bump the root `CMakeLists.txt` `VERSION`. That root CMake
 version is the single Windows release version source. Runtime GUI metadata is
 synchronized from it by the Windows packaging scripts.
 
+### Pre-release labels
+
+Iterative pre-release candidates against a fixed public version use a dashed
+suffix, passed via `-DisplayVersionLabel`:
+
+```powershell
+.\scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-12
+```
+
+The suffix is baked into the OFX panel, the CLI `--version` report, and the
+runtime-server log filename (`ofx_runtime_server_v<label>.log`) so the
+operator never has to guess which build is installed. Public releases (no
+pre-release cycle in progress) are cut without `-DisplayVersionLabel`.
+
+**Numbering rules for a new cycle**:
+
+- The suffix counter does not restart when a pre-release trajectory is
+  reverted or abandoned. If the last shipped pre-release of `X.Y.Z` was
+  `-4`, the next cycle's first candidate starts at `-10` or higher, not
+  `-1`. Jumping over the prior range makes it unambiguous in log files,
+  screenshots, and bug reports that a build is on the new cycle, and
+  avoids operator confusion between a `-1` that was the original start
+  and a `-1` that was a reboot.
+- Use round jumps between cycles (`-10`, `-20`, `-30`) so a counter like
+  `-12` immediately reads as "second candidate of the cycle that started
+  at `-10`". This matches how the optimization measurement ledger
+  labels its `phase_9_*` track.
+- Always record the pre-release label in
+  [OPTIMIZATION_MEASUREMENTS.md](OPTIMIZATION_MEASUREMENTS.md) with the
+  measured numbers at the time of cut, even if the build is later
+  abandoned — the ledger is the cross-session memory of the track.
+
 ## 2. Standardized Artifact Naming
 
 Artifact names must expose both the version and the backend-specific hardware

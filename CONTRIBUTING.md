@@ -51,31 +51,43 @@ cmake --build build/debug --parallel
 <details>
 <summary>Windows</summary>
 
+The Windows RTX build requires a custom ONNX Runtime compile (no public
+pre-built binary exists for the TensorRT RTX EP). The canonical pipeline
+owns the full chain — source fetch, ORT build, model staging, CorridorKey
+compile, installer packaging — and should succeed from a clean clone with
+no manual downloads.
+
+Prerequisites, end-to-end build flow, and a troubleshooting index for the
+known failure modes live in [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md).
+Start there.
+
+Quick start once the prerequisites from that document are installed:
+
 ```powershell
-# Set VCPKG_ROOT — required by CMakePresets.json
-$env:VCPKG_ROOT = "D:\dev\vcpkg" # Adjust to your path
+$env:VCPKG_ROOT = "C:\tools\vcpkg" # Adjust to your path
 
-# Canonical Windows runtime roots
-# RTX release track:
-#   vendor\onnxruntime-windows-rtx
-# DirectML release track:
-#   vendor\onnxruntime-windows-dml
-#
-# To prepare the curated RTX runtime from scratch:
-#   .\scripts\prepare_windows_rtx_release.ps1
+# One-time: build ONNX Runtime with TensorRT RTX EP and the CorridorKey
+# binaries. Takes 45 min-2 h on a fresh clone; subsequent runs are fast.
+.\scripts\windows.ps1 -Task prepare-rtx
 
-# Build using the canonical wrapper
-.\scripts\build.ps1 -Preset release
+# Public release -> dist\CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe
+.\scripts\windows.ps1 -Task release -Version X.Y.Z
 ```
 
 Windows rules:
-- `scripts/build.ps1` is the canonical developer entrypoint.
-- `scripts/prepare_windows_rtx_release.ps1` is the canonical RTX preparation flow.
-- `scripts/release_pipeline_windows.ps1` is the canonical Windows release flow.
-- Do not add alternate Windows setup wrappers. Use the canonical entrypoints above.
+- `scripts\windows.ps1` is the only supported Windows entrypoint. Every
+  lower-level script (`build.ps1`, `prepare_windows_rtx_release.ps1`,
+  `build_ort_windows_rtx.ps1`, `release_pipeline_windows.ps1`, etc.) is an
+  internal delegate — call them directly only when debugging the wrapper.
+- Do not add alternate Windows setup wrappers. Fold new flows into
+  `scripts\windows.ps1` as additional `-Task` values.
 - Do not use `vendor\onnxruntime-universal` as a Windows runtime root.
-- Do not rely on globally installed ONNX Runtime for Windows builds. Use `CORRIDORKEY_WINDOWS_ORT_ROOT` or stage one of the curated vendor roots.
-- The supported repo-local Windows runtime locations are only `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
+- Do not rely on globally installed ONNX Runtime for Windows builds.
+- The supported repo-local Windows runtime locations are only
+  `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
+- When the pipeline reports a missing dependency, the fix belongs in the
+  pipeline, not in a one-off manual download. See
+  [docs/WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) section 4.
 
 </details>
 
