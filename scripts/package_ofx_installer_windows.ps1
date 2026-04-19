@@ -236,8 +236,16 @@ ShowUninstDetails show
 Section "Install"
   SetRegView 64
 
-  DetailPrint "Closing DaVinci Resolve..."
+  DetailPrint "Closing DaVinci Resolve and any lingering CorridorKey processes..."
+  ; Order matters: Resolve first so the OFX host releases bundle handles,
+  ; then the out-of-process runtime server + CLI, which otherwise keep the
+  ; previous bundle DLLs mapped and block RMDir below. taskkill returns 128
+  ; when the process is not running -- not an error for our flow.
   nsExec::ExecToStack 'taskkill /F /IM Resolve.exe'
+  Pop `$0
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
+  Pop `$0
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey.exe'
   Pop `$0
   Sleep 2000
 
@@ -268,9 +276,11 @@ Section "Install"
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoRepair" 1
 
-  DetailPrint "Clearing CorridorKey logs..."
-  ExpandEnvStrings `$0 "%LOCALAPPDATA%\CorridorKey\Logs"
-  RMDir /r "`$0"
+  ; Intentionally do NOT clear %LOCALAPPDATA%\CorridorKey\Logs here. Runtime
+  ; server logs are already versioned (`ofx_runtime_server_v<X.Y.Z>.log`) so
+  ; they do not collide across installs; wiping them on every install
+  ; destroys the cross-version comparison data the optimization measurement
+  ; track depends on.
 
   DetailPrint "Clearing DaVinci Resolve OFX cache..."
   Delete "`${CACHE_FILE}"
@@ -281,6 +291,13 @@ SectionEnd
 
 Section "Uninstall"
   SetRegView 64
+
+  DetailPrint "Stopping any running CorridorKey processes..."
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
+  Pop `$0
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey.exe'
+  Pop `$0
+  Sleep 1000
 
   DetailPrint "Unregistering CorridorKey CLI from system PATH..."
   nsExec::ExecToStack 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`${PLUGIN_DEST}\Contents\Win64\update_path.ps1" -Mode Uninstall'
