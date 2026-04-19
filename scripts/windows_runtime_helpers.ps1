@@ -901,6 +901,13 @@ function Test-CorridorKeyWindowsOrtRoot {
     $binDir = Join-Path $OrtRoot "bin"
     $libDir = Join-Path $OrtRoot "lib"
     $headerCandidates = @(
+        # Layout produced by build_ort_windows_rtx.ps1, which copies the
+        # upstream `include/onnxruntime` tree verbatim -- the public
+        # `onnxruntime_c_api.h` ships nested under `core/session/`.
+        (Join-Path $OrtRoot "include\onnxruntime\core\session\onnxruntime_c_api.h"),
+        # Flattened layouts used by some Microsoft-published NuGet/zip
+        # packages; kept so this validator accepts both our in-repo
+        # build and upstream distributions interchangeably.
         (Join-Path $OrtRoot "include\onnxruntime\onnxruntime_c_api.h"),
         (Join-Path $OrtRoot "include\onnxruntime_c_api.h")
     )
