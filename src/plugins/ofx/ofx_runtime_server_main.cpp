@@ -196,8 +196,17 @@ int run_runtime_server() {
     // still opts back in for benchmark comparisons. The CLI and
     // `ofx_benchmark_harness` are unaffected because they do not run
     // this entrypoint.
+    // CUDA graph capture (CORRIDORKEY_TRT_CUDA_GRAPH=1) requires I/O binding
+    // by contract: the captured graph reads from / writes to fixed CUDA
+    // virtual addresses at replay time, so outputs must be pre-allocated and
+    // stable. When CUDA graph is opt-in, flip the I/O binding default back
+    // to On even in this runtime server process so the two features agree.
+    const char* cuda_graph_env = std::getenv("CORRIDORKEY_TRT_CUDA_GRAPH");
+    const bool cuda_graph_requested =
+        cuda_graph_env != nullptr && std::string_view(cuda_graph_env) == "1";
+
     if (std::getenv("CORRIDORKEY_IO_BINDING") == nullptr) {
-        _putenv_s("CORRIDORKEY_IO_BINDING", "off");
+        _putenv_s("CORRIDORKEY_IO_BINDING", cuda_graph_requested ? "on" : "off");
     }
 
     auto args = command_line_arguments();

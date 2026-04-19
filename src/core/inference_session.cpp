@@ -604,6 +604,35 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
         debug_log("Detailed build logging enabled");
     }
 
+    // Optional CUDA graph capture, gated on CORRIDORKEY_TRT_CUDA_GRAPH=1. Maps
+    // to `enable_cuda_graph` in the TensorRT RTX EP provider options
+    // (see vendor/onnxruntime-src/.../nv_provider_options.h `kCudaGraphEnable`).
+    // Per the official docs
+    // (https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html
+    //  and CUDA EP docs section on CUDA Graphs) the feature REQUIRES I/O
+    // binding with pre-allocated fixed-address output buffers, and requires
+    // the first inference to act as a capture warm-up; replayed runs
+    // reuse the captured DAG. Input/output shapes must stay static across
+    // calls -- our packaged FP16 ladder already has that via
+    // nv_profile_min/opt/max set to the same shape.
+    //
+    // This stays opt-in (default off) until benchmarked in-repo and in a
+    // real Resolve session because:
+    //   - ORT issue #27329 reported that precompiled TRT RTX engines
+    //     (our `*_ctx.onnx`) may silently not trigger CUDA graph capture
+    //     depending on the ORT build. We have not yet confirmed the
+    //     referenced PR #27477 landed in ORT v1.23.0 on our side.
+    //   - The benefit on shared-GPU contention (our actual Resolve
+    //     scenario) is unsubstantiated in official docs; the documented
+    //     gain is CPU launch overhead reduction. Needs measurement
+    //     before being made default.
+    if (auto cuda_graph =
+            common::environment_variable_copy("CORRIDORKEY_TRT_CUDA_GRAPH");
+        cuda_graph.has_value() && std::string_view(*cuda_graph) == "1") {
+        provider_options.emplace(tensorrt_rtx_option_names::kCudaGraphEnable, "1");
+        debug_log("TensorRT RTX CUDA graph capture enabled");
+    }
+
     debug_log("Appending execution provider to session options");
     session_options.AppendExecutionProvider(kTensorRtRtxExecutionProvider, provider_options);
     debug_log("Execution provider appended successfully");
