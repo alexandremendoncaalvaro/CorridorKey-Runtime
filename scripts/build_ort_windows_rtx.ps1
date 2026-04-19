@@ -529,12 +529,12 @@ $cudaBinDir = Join-Path $CudaHome "bin"
 $cudaCompiler = Join-Path $cudaBinDir "nvcc.exe"
 $buildPy = Join-Path $OrtSourceDir "tools\ci_build\build.py"
 $cmakeVersion = Resolve-CmakeVersion -CmakePath $CmakePath
+$vswhereDir = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer"
+$env:PATH = "$vswhereDir;$cmakeDir;$pythonDir;$cudaBinDir;$env:PATH"
+$env:CUDA_PATH = $CudaHome
+$env:CUDAToolkit_ROOT = $CudaHome
+
 $command = @(
-    "set `"PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;$cmakeDir;%PATH%`"",
-    "set `"PATH=$pythonDir;%PATH%`"",
-    "set `"PATH=$cudaBinDir;%PATH%`"",
-    "set `"CUDA_PATH=$CudaHome`"",
-    "set `"CUDAToolkit_ROOT=$CudaHome`"",
     "call `"$VsDevCmd`" -arch=x64",
     "cd /d `"$OrtSourceDir`"",
     "`"$PythonExe`" `"$buildPy`" --config $BuildConfig --build_dir `"$buildDir`" --parallel --use_nv_tensorrt_rtx --tensorrt_rtx_home `"$TensorRtRtxHome`" --cuda_home `"$CudaHome`" --cmake_path `"$CmakePath`" --cmake_generator `"$cmakeGenerator`" --build_shared_lib --skip_tests --build --update --use_vcpkg --cmake_extra_defines CUDAToolkit_ROOT=`"$CudaHome`" CMAKE_CUDA_COMPILER=`"$cudaCompiler`""
@@ -544,6 +544,7 @@ Write-Host "[1/3] Building ONNX Runtime with TensorRT RTX support..."
 Write-Host "Using Python: $PythonExe"
 Write-Host "Using CMake: $CmakePath ($cmakeVersion)"
 Write-Host "Using generator: $cmakeGenerator"
+Write-Host "Using vswhere dir: $vswhereDir"
 cmd.exe /c $command
 if ($LASTEXITCODE -ne 0) {
     $logHints = @(Get-OrtBuildLogHints -BuildDir $buildDir -BuildConfig $BuildConfig)
