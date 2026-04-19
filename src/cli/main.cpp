@@ -685,12 +685,12 @@ int main(int argc, char* argv[]) {
 
         if (result.count("check-updates")) {
             app::VersionCheckOptions update_options;
-            update_options.current_version = CORRIDORKEY_VERSION_STRING;
+            update_options.current_version = CORRIDORKEY_DISPLAY_VERSION_STRING;
             update_options.include_prereleases = result.count("include-prereleases") > 0;
             auto update_info = app::check_for_update(update_options);
             if (use_json) {
                 nlohmann::json payload = {
-                    {"current_version", CORRIDORKEY_VERSION_STRING},
+                    {"current_version", CORRIDORKEY_DISPLAY_VERSION_STRING},
                     {"update_available", update_info.has_value()},
                 };
                 if (update_info.has_value()) {
@@ -700,7 +700,7 @@ int main(int argc, char* argv[]) {
                 }
                 std::cout << common::safe_json_dump(payload) << std::endl;
             } else {
-                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_VERSION_STRING << "\n";
+                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING << "\n";
                 if (update_info.has_value()) {
                     std::cout << "Update available: v" << update_info->latest_version
                               << (update_info->is_prerelease ? " (pre-release)" : " (stable)")

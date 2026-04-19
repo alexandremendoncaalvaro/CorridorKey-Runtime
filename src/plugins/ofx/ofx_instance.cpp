@@ -74,7 +74,7 @@ void kickoff_global_update_check() {
     }
     std::thread([&state]() {
         app::VersionCheckOptions options;
-        options.current_version = CORRIDORKEY_VERSION_STRING;
+        options.current_version = CORRIDORKEY_DISPLAY_VERSION_STRING;
         options.include_prereleases = true;
         (void)app::check_for_update(options);
         auto cache = app::read_cache(app::default_cache_path());
@@ -95,7 +95,8 @@ std::optional<app::UpdateInfo> current_update_info(bool include_prereleases) {
     if (!state.cache.has_value()) {
         return std::nullopt;
     }
-    return app::select_update(*state.cache, CORRIDORKEY_VERSION_STRING, include_prereleases);
+    return app::select_update(*state.cache, CORRIDORKEY_DISPLAY_VERSION_STRING,
+                              include_prereleases);
 }
 
 std::string update_banner_text(const app::UpdateInfo& info) {
