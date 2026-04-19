@@ -17,7 +17,9 @@ assets/video_samples/*.mp4 filter=lfs diff=lfs merge=lfs -text
 assets/image_samples/**/*.png filter=lfs diff=lfs merge=lfs -text
 assets/image_samples/**/*.jpg filter=lfs diff=lfs merge=lfs -text
 assets/image_samples/**/*.exr filter=lfs diff=lfs merge=lfs -text
-models/*.pth filter=lfs diff=lfs merge=lfs -text
-models/*.onnx filter=lfs diff=lfs merge=lfs -text
-models/*.safetensors filter=lfs diff=lfs merge=lfs -text
-models/*.mlxfn filter=lfs diff=lfs merge=lfs -text
+# Model artifacts (`.pth`, `.onnx`, `.safetensors`, `.mlxfn`) are hosted on
+# Hugging Face Hub at `alexandrealvaro/CorridorKey` and fetched on demand
+# via `scripts/fetch_models.ps1` on a clean clone. They are not tracked
+# through LFS anymore because the 5 GB LFS quota was blocking fresh
+# clones and CI once the FP16 ladder shipped through `2048px`. See
+# `docs/RELEASE_GUIDELINES.md` section 3 for the canonical flow.

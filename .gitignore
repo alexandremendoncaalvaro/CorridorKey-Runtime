@@ -21,7 +21,19 @@ vcpkg_installed_static/
 # CMake user presets (local machine overrides, not committed)
 CMakeUserPresets.json
 
-# Models tracked via Git LFS (see .gitattributes)
+# Model artifacts are hosted on Hugging Face Hub (alexandrealvaro/CorridorKey)
+# and fetched on demand via scripts/fetch_models.ps1. They are NOT committed
+# to the repository and are NOT tracked via LFS. See .gitattributes and
+# docs/RELEASE_GUIDELINES.md section 3. `models/.gitkeep` and
+# `models/artifact_manifest.json` stay tracked: the first preserves the
+# directory on a fresh clone, the second is the certified-artifact
+# manifest (SHA-256s and certified flags) that the Windows RTX
+# packaging flow validates before building the installer.
+models/*.onnx
+models/*.pth
+models/*.safetensors
+models/*.mlxfn
+models/*.ts
 
 # Local vendor payloads for release preparation
 vendor/onnxruntime-src/

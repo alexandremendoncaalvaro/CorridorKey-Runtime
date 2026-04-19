@@ -348,10 +348,46 @@ function Invoke-ModelPreparation {
 
     $needsPreparation = $Force.IsPresent
     if (-not $needsPreparation) {
+        $missingAny = $false
         foreach ($expected in $expectedPreparedModels) {
             if (-not (Test-Path (Join-Path $modelsDir $expected))) {
-                $needsPreparation = $true
+                $missingAny = $true
                 break
+            }
+        }
+        if ($missingAny) {
+            # Fresh clone path: model artifacts are no longer tracked via
+            # Git LFS (the 5 GB quota was blocking clones and CI). They
+            # live on the Hugging Face Hub at
+            # `alexandrealvaro/CorridorKey` and are fetched on demand by
+            # scripts/fetch_models.ps1 (windows-rtx profile covers the
+            # FP16 + INT8 runtime ladder the packaging flow consumes).
+            # If the download succeeds, skip the expensive regenerate
+            # path entirely and use the fetched ladder verbatim.
+            $fetchScript = Join-Path $PSScriptRoot "fetch_models.ps1"
+            if (Test-Path $fetchScript) {
+                Write-Host "[model-pack] Missing models detected; fetching the windows-rtx + pytorch profiles from Hugging Face..." -ForegroundColor Cyan
+                try {
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fetchScript -Profile windows-rtx
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fetchScript -Profile pytorch
+                } catch {
+                    Write-Host "[model-pack] Hugging Face fetch threw: $($_.Exception.Message). Will fall back to local regeneration." -ForegroundColor Yellow
+                }
+                $missingAfterFetch = $false
+                foreach ($expected in $expectedPreparedModels) {
+                    if (-not (Test-Path (Join-Path $modelsDir $expected))) {
+                        $missingAfterFetch = $true
+                        break
+                    }
+                }
+                if (-not $missingAfterFetch) {
+                    Write-Host "[model-pack] Hugging Face fetch produced the full expected ladder; taking the reuse path." -ForegroundColor Green
+                    $needsPreparation = $false
+                } else {
+                    $needsPreparation = $true
+                }
+            } else {
+                $needsPreparation = $true
             }
         }
     }
