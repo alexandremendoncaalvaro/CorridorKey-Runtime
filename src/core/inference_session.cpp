@@ -451,12 +451,14 @@ constexpr const char* kDumpSubgraphs = onnxruntime::nv::provider_option_names::k
 constexpr const char* kDetailedBuildLog = onnxruntime::nv::provider_option_names::kDetailedBuildLog;
 constexpr const char* kRuntimeCacheFile = onnxruntime::nv::provider_option_names::kRuntimeCacheFile;
 constexpr const char* kMaxWorkspaceSize = onnxruntime::nv::provider_option_names::kMaxWorkspaceSize;
+constexpr const char* kCudaGraphEnable = onnxruntime::nv::provider_option_names::kCudaGraphEnable;
 #else
 constexpr const char* kDeviceId = "device_id";
 constexpr const char* kDumpSubgraphs = "nv_dump_subgraphs";
 constexpr const char* kDetailedBuildLog = "nv_detailed_build_log";
 constexpr const char* kRuntimeCacheFile = "nv_runtime_cache_path";
 constexpr const char* kMaxWorkspaceSize = "nv_max_workspace_size";
+constexpr const char* kCudaGraphEnable = "enable_cuda_graph";
 #endif
 }  // namespace tensorrt_rtx_option_names
 
