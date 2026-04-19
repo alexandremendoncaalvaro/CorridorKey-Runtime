@@ -32,18 +32,7 @@ std::filesystem::path resolve_log_path() {
         return std::filesystem::path(*override_path);
     }
 
-#if defined(__APPLE__)
-    if (auto home = common::environment_variable_copy("HOME"); home.has_value()) {
-        return std::filesystem::path(*home) / "Library" / "Logs" / "CorridorKey" / "ofx.log";
-    }
-#elif defined(_WIN32)
-    if (auto local_app_data = common::environment_variable_copy("LOCALAPPDATA");
-        local_app_data.has_value()) {
-        return std::filesystem::path(*local_app_data) / "CorridorKey" / "Logs" / "ofx.log";
-    }
-#endif
-
-    return std::filesystem::path("corridorkey_ofx.log");
+    return common::default_logs_root() / "ofx.log";
 }
 
 void ensure_parent_directory(const std::filesystem::path& path) {

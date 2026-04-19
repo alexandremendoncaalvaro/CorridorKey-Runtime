@@ -313,6 +313,15 @@ inline std::filesystem::path default_logs_root() {
         local_app_data.has_value()) {
         return std::filesystem::path(*local_app_data) / "CorridorKey" / "Logs";
     }
+#else
+    if (auto xdg_state = environment_variable_copy("XDG_STATE_HOME");
+        xdg_state.has_value() && !xdg_state->empty()) {
+        return std::filesystem::path(*xdg_state) / "CorridorKey";
+    }
+    if (auto home = environment_variable_copy("HOME");
+        home.has_value() && !home->empty()) {
+        return std::filesystem::path(*home) / ".local" / "state" / "CorridorKey";
+    }
 #endif
     return std::filesystem::temp_directory_path() / "corridorkey-logs";
 }
