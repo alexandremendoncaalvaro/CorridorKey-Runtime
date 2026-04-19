@@ -66,6 +66,50 @@ behavior.
 
 ---
 
+## Color Page Shows a Black Background Instead of Transparency
+
+**Symptom:** On the DaVinci Resolve Color page, CorridorKey successfully
+extracts the subject, but everywhere the key removed the background the
+viewer shows **black** instead of transparency. The same project shows
+real transparency in Fusion.
+
+**Why this happens:** CorridorKey outputs a premultiplied RGBA image — the
+alpha is present and correct in the output clip. Resolve's **Color page
+viewer ignores the OFX alpha channel by default** and displays the
+premultiplied RGB literally. Where alpha is zero, RGB is zero, which
+shows as black. Fusion honors the alpha natively because Fusion is a
+compositing graph. This is how every OFX keyer behaves inside Resolve
+(Keylight, Primatte, etc.) — not a CorridorKey-specific limitation.
+
+**Steps — route the alpha through the node tree so the Color page viewer
+uses it for transparency:**
+
+1. Open the **Color** page and select the node with CorridorKey applied.
+2. In the **Node Graph**, **right-click the CorridorKey node** and choose
+   **Add Alpha Output**. A blue triangle output pin appears on the right
+   side of the node.
+3. The node graph itself already has an **Alpha Output** triangle on the
+   far right (next to the RGB output). Drag a connection from the blue
+   triangle you just added on the CorridorKey node to that graph-level
+   Alpha Output.
+4. The Color page viewer now respects the alpha. Transparent regions show
+   through to whatever is below this clip on the timeline, or to the
+   timeline background if nothing is underneath.
+
+**Steps — inspect the key itself on the Color page without routing alpha:**
+
+1. On the CorridorKey panel, change **Output Mode** to **Matte Only**.
+   The viewer then displays the generated matte as grayscale, which is
+   visible in the Color page without any node-graph changes.
+2. Switch back to **Processed** for the keyed composite after you have
+   validated the matte.
+
+The plugin-side output is the same RGBA data in both pages; the
+difference is purely in how the Color page viewer consumes alpha. Route
+the alpha output once per node and the Color workflow matches Fusion.
+
+---
+
 ## Guide Source Shows "Rough Fallback"
 
 **Symptom:** The runtime panel shows `Guide Source: Rough Fallback`.

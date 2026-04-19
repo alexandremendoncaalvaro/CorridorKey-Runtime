@@ -55,6 +55,14 @@ Use this when you want the fastest path to a working key inside the Color page.
    deliberately overriding it.
 8. Leave **Output Mode** on **Processed**.
 9. Confirm **Effective Quality** matches the mode you asked for.
+10. To get a transparent background behind the subject in the Color page
+    viewer, **right-click the CorridorKey node** and choose
+    **Add Alpha Output**, then drag that new blue-triangle pin to the
+    graph-level **Alpha Output** triangle on the far right of the node
+    graph. Without this connection the Color page viewer displays the
+    premultiplied RGB with black where the key removed the background,
+    because the Color page does not consume OFX alpha automatically.
+    (Fusion honors the alpha natively and does not need this step.)
 
 If the runtime panel reports a fallback, stay on the highest stable quality
 instead of forcing a higher one that the machine is not keeping active.
