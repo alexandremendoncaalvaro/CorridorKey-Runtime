@@ -1,16 +1,20 @@
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <corridorkey/engine.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
+#include <mutex>
 #include <new>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "app/runtime_contracts.hpp"
+#include "app/version_check.hpp"
 #include "common/ofx_runtime_defaults.hpp"
 #include "common/runtime_paths.hpp"
 #include "ofx_frame_cache.hpp"
@@ -43,9 +47,60 @@ namespace {
 constexpr const char* kRepoHelpBaseUrl =
     "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/blob/"
     "main/help/";
+constexpr const char* kReleasesIndexUrl =
+    "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases/latest";
 
 std::string help_doc_url(const char* filename) {
     return std::string(kRepoHelpBaseUrl) + filename;
+}
+
+struct UpdateCheckState {
+    std::atomic<bool> started{false};
+    std::atomic<bool> done{false};
+    std::mutex mutex;
+    std::optional<app::CachedCheck> cache;
+};
+
+UpdateCheckState& update_check_state() {
+    static UpdateCheckState state;
+    return state;
+}
+
+void kickoff_global_update_check() {
+    auto& state = update_check_state();
+    bool expected = false;
+    if (!state.started.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
+    std::thread([&state]() {
+        app::VersionCheckOptions options;
+        options.current_version = CORRIDORKEY_VERSION_STRING;
+        options.include_prereleases = true;
+        (void)app::check_for_update(options);
+        auto cache = app::read_cache(app::default_cache_path());
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.cache = cache;
+        }
+        state.done.store(true, std::memory_order_release);
+    }).detach();
+}
+
+std::optional<app::UpdateInfo> current_update_info(bool include_prereleases) {
+    auto& state = update_check_state();
+    if (!state.done.load(std::memory_order_acquire)) {
+        return std::nullopt;
+    }
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.cache.has_value()) {
+        return std::nullopt;
+    }
+    return app::select_update(*state.cache, CORRIDORKEY_VERSION_STRING, include_prereleases);
+}
+
+std::string update_banner_text(const app::UpdateInfo& info) {
+    return std::string("Update available: v") + info.latest_version +
+           (info.is_prerelease ? " (pre-release)" : " (stable)");
 }
 
 bool open_external_url(const std::string& url) {
@@ -764,6 +819,13 @@ void update_runtime_panel_values(InstanceData* data) {
                                                             : runtime_timings_runtime_label(*data));
     set_string_param_value(data->runtime_backend_work_param,
                            is_loading ? "Loading..." : runtime_backend_work_runtime_label(*data));
+
+    const bool include_prereleases = get_bool_param_value(data->include_pre_releases_param, false);
+    if (auto info = current_update_info(include_prereleases); info.has_value()) {
+        set_string_param_value(data->update_status_param, update_banner_text(*info));
+    } else {
+        set_string_param_value(data->update_status_param, "");
+    }
 }
 
 void set_runtime_panel_status(InstanceData* data, const std::string& processing,
@@ -1105,6 +1167,14 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->prepare_timeout_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamAllowCpuFallback,
                                        &data->allow_cpu_fallback_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamUpdateStatus, &data->update_status_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamOpenUpdatePage,
+                                       &data->open_update_page_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamIncludePreReleases,
+                                       &data->include_pre_releases_param, nullptr);
+
+    kickoff_global_update_check();
 
     sync_dependent_params(data.get());
 
@@ -1913,6 +1983,21 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
     if (in_args != nullptr && g_suites.property != nullptr) {
         std::string changed_param;
         if (get_string(in_args, kOfxPropName, changed_param)) {
+            if (changed_param == kParamOpenUpdatePage) {
+                const bool include_prereleases =
+                    get_bool_param_value(data->include_pre_releases_param, false);
+                auto info = current_update_info(include_prereleases);
+                const std::string url =
+                    info.has_value() ? info->release_url : std::string(kReleasesIndexUrl);
+                if (!open_external_url(url)) {
+                    post_message(kOfxMessageError, ("Failed to open release page: " + url).c_str(),
+                                 instance);
+                }
+                return kOfxStatOK;
+            }
+            if (changed_param == kParamIncludePreReleases) {
+                data->runtime_panel_dirty = true;
+            }
             if (changed_param == kParamOpenStartHereGuide ||
                 changed_param == kParamOpenQualityGuide ||
                 changed_param == kParamOpenAlphaHintGuide ||

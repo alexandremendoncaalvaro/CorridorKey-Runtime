@@ -139,6 +139,7 @@ if(BUILD_TESTING)
             corridorkey_headers
             onnxruntime::onnxruntime
             nlohmann_json::nlohmann_json
+            cpr::cpr
         PRIVATE
             OpenEXR::OpenEXR
             PNG::PNG

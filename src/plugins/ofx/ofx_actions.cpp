@@ -282,6 +282,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         std::string("CorridorKey v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
+    define_info_param(param_set, kParamUpdateStatus, "Update", "",
+                      "Shows when a newer CorridorKey release is available on GitHub.",
+                      "runtime_group");
+    define_push_button_param(param_set, kParamOpenUpdatePage, "Open Latest Release",
+                             "Open the GitHub page for the latest CorridorKey release.",
+                             "runtime_group");
+
     define_runtime_status_param(
         param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
         "Shows the backend currently used by this OFX instance.", "runtime_group");
@@ -568,6 +575,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamAllowCpuFallback, "Allow CPU Fallback", 0,
         "Opt in to CPU fallback when the requested Windows GPU path cannot satisfy the current "
         "precision or backend request. INT8 on Windows currently uses this path.",
+        "advanced_runtime_group");
+    define_bool_param(
+        param_set, kParamIncludePreReleases, "Include Pre-releases in Update Check", 0,
+        "When enabled, the update banner surfaces pre-release builds in addition to stable "
+        "releases. Takes effect on the next plugin instance.",
         "advanced_runtime_group");
 
     log_message("describe_in_context", "Describe in context completed.");

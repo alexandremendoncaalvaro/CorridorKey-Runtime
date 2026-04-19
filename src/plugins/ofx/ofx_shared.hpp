@@ -89,6 +89,9 @@ constexpr const char* kParamOpenTilingGuide = "open_tiling_guide";
 constexpr const char* kParamOpenResolveTutorial = "open_resolve_tutorial";
 constexpr const char* kParamOpenTroubleshooting = "open_troubleshooting";
 constexpr const char* kParamHelpGroup = "help_group";
+constexpr const char* kParamUpdateStatus = "update_status";
+constexpr const char* kParamOpenUpdatePage = "open_update_page";
+constexpr const char* kParamIncludePreReleases = "include_pre_releases";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
 
@@ -174,6 +177,9 @@ struct InstanceData {
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
     OfxParamHandle allow_cpu_fallback_param = nullptr;
+    OfxParamHandle update_status_param = nullptr;
+    OfxParamHandle open_update_page_param = nullptr;
+    OfxParamHandle include_pre_releases_param = nullptr;
     // No in-class = nullptr initializers for the unique_ptr members below:
     // clang/libc++ instantiates ~unique_ptr<T>() at the NSDMI site, which then
     // requires complete OfxRuntimeClient / Engine and fails with "sizeof to an

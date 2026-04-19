@@ -45,6 +45,7 @@ add_executable(test_unit
     test_stage_profiler.cpp
     test_ofx_stubs.cpp
     test_tile_blend.cpp
+    test_version_check.cpp
     test_windows_rtx_probe.cpp
     test_warmup_policy.cpp
     test_gpu_prep.cpp
