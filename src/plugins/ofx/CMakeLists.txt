@@ -243,4 +243,23 @@ elseif(UNIX AND NOT APPLE)
         COMMENT "Rewriting libcorridorkey_core.so RUNPATH to \$ORIGIN..."
         VERBATIM
     )
+
+    # ONNX Runtime provider plugins (providers_cuda, providers_shared,
+    # providers_tensorrt) ship from Microsoft's drop without RUNPATH. They are
+    # loaded lazily by libonnxruntime.so during session create, so a missing
+    # RUNPATH does not break OFX dlopen but blows up on first render when the
+    # CUDA/TensorRT EP tries to resolve its siblings. Rewriting to $ORIGIN
+    # pins resolution to the bundle regardless of LD_LIBRARY_PATH or system ORT.
+    if(CORRIDORKEY_ORT_RUNTIME_DIR AND EXISTS "${CORRIDORKEY_ORT_RUNTIME_DIR}")
+        file(GLOB _ofx_ort_provider_sos
+            "${CORRIDORKEY_ORT_RUNTIME_DIR}/libonnxruntime_providers_*.so")
+        foreach(_provider_path IN LISTS _ofx_ort_provider_sos)
+            get_filename_component(_provider_name "${_provider_path}" NAME)
+            add_custom_command(TARGET corridorkey_ofx POST_BUILD
+                COMMAND ${CORRIDORKEY_PATCHELF} --set-rpath "\$ORIGIN"
+                    "${_ofx_bundle_contents_dir}/${_provider_name}"
+                COMMENT "Rewriting ${_provider_name} RUNPATH to \$ORIGIN..."
+                VERBATIM)
+        endforeach()
+    endif()
 endif()
