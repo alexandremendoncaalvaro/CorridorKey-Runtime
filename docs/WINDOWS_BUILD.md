@@ -224,7 +224,66 @@ embed the version — they never collide across installs.
 Logs accumulate across installs and can be compared version-over-
 version for the optimization ledger.
 
-## 4. What NOT to do
+## 4. Running the local benchmark
+
+`tests/integration/ofx_benchmark_harness.exe` drives the same
+`OfxSessionBroker` surface the OFX plugin uses to talk to the runtime,
+so it exercises the prepare_session / render_frame / release_session
+lifecycle without needing DaVinci Resolve on the machine. This is the
+authoritative local reproduction tool for optimization measurements
+and regression tracking — when comparing two versions, run both
+through the harness with the same flags and diff the JSON output.
+
+### 4.1 Synthetic mode (default)
+
+Black zero-filled shared-transport buffers, useful for smoke tests
+and short warm-up measurements:
+
+```powershell
+.\build\release\tests\integration\ofx_benchmark_harness.exe `
+    --model models\corridorkey_fp16_2048.onnx `
+    --resolution 2048 --frame-width 3840 --frame-height 2160 `
+    --iterations 20 --device rtx --io-binding on
+```
+
+### 4.2 Video mode — real 4K input
+
+Drives the session with decoded pairs of frames from two MP4 clips
+(`--input-video` supplies the RGB content, `--hint-video` supplies a
+grayscale alpha matte). Frame dimensions auto-populate from the RGB
+clip; both flags are required together. Each reader loops
+independently on EOF so `--iterations` can exceed the source length.
+
+```powershell
+.\build\release\tests\integration\ofx_benchmark_harness.exe `
+    --model models\corridorkey_fp16_2048.onnx `
+    --resolution 2048 --iterations 60 --device rtx --io-binding on `
+    --input-video assets\video_samples\Jordan4k.mp4 `
+    --hint-video  assets\video_samples\Jordan4k_alphahint.mp4
+```
+
+Use video mode whenever the question is "does this version hold its
+throughput across a long session?" — 60 iterations with real inputs
+is the minimum bar for exposing in-session drift and is the pattern
+the optimization ledger relies on when a new `phase_N_*` checkpoint
+claims a change is safe.
+
+### 4.3 Reading the output
+
+The harness emits a single JSON document on stdout. Redirect to a
+file and key fields:
+
+- `avg_latency_ms`, `fps` — aggregate across all iterations.
+- `stage_timings[]` — aggregated per-stage breakdown (the ledger's
+  historical format; `compare_benchmarks.py` expects this).
+- `per_frame_timings[]` — per-iteration view: `iteration`,
+  `roundtrip_ms`, and a `stages` object with the broker's
+  stage-timing breakdown for that single frame. Use this to spot
+  progressive degradation within a single session (cold-frame spike
+  aside, steady-state numbers should be flat — if `ort_run` climbs
+  frame-over-frame in the harness, investigate before shipping).
+
+## 5. What NOT to do
 
 - Do not call the lower-level scripts (`build.ps1`,
   `prepare_windows_rtx_release.ps1`, etc.) directly as your normal flow —
