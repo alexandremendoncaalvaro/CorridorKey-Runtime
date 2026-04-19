@@ -13,6 +13,8 @@ function Get-CorridorKeyWindowsRtxBuildContract {
         tensorrt_rtx_version = "1.2.0.54"
         tensorrt_rtx_download_url = "https://developer.nvidia.com/downloads/trt/rtx_sdk/secure/1.2/tensorrt-rtx-1.2.0.54-win10-amd64-cuda-12.9-release-external.zip"
         cmake_generator = "Visual Studio 17 2022"
+        openfx_repo_url = "https://github.com/AcademySoftwareFoundation/openfx"
+        openfx_git_ref = "OFX_Release_1.5.1"
     }
 }
 
@@ -603,6 +605,71 @@ function Ensure-CorridorKeyTensorRtRtxHome {
     Move-Item -Path $extractedSdkRoot -Destination $sdkRoot
     $env:TENSORRT_RTX_HOME = $sdkRoot
     Write-Host "[tensorrt-rtx] SDK ready at $sdkRoot" -ForegroundColor Green
+    return $sdkRoot
+}
+
+function Test-CorridorKeyOpenFxSdkRoot {
+    param([string]$CandidatePath)
+
+    return (Test-Path (Join-Path $CandidatePath "include\ofxImageEffect.h"))
+}
+
+function Ensure-CorridorKeyOpenFxSdk {
+    <#
+    .SYNOPSIS
+    Returns the absolute path of the OpenFX SDK, cloning the pinned
+    version from the public AcademySoftwareFoundation repo if the SDK
+    is not already staged under `vendor/openfx`.
+
+    .DESCRIPTION
+    The plugin build at `src/plugins/ofx/CMakeLists.txt` requires
+    `vendor/openfx/include/ofxImageEffect.h`. `vendor/openfx` is
+    gitignored, so a fresh clone of this repo has no OpenFX SDK on
+    disk. This function mirrors `Ensure-CorridorKeyTensorRtRtxHome`:
+    it stages the pinned reference documented in
+    `Get-CorridorKeyWindowsRtxBuildContract` on demand so every Windows
+    RTX pipeline is self-sufficient.
+
+    The function is idempotent — if the SDK is already present and the
+    expected header exists it returns the existing path without
+    touching the checkout.
+    #>
+    param([string]$RepoRoot)
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+        throw "Ensure-CorridorKeyOpenFxSdk requires -RepoRoot."
+    }
+
+    $sdkRoot = Join-Path $RepoRoot "vendor\openfx"
+    if (Test-CorridorKeyOpenFxSdkRoot -CandidatePath $sdkRoot) {
+        return $sdkRoot
+    }
+
+    $gitPath = Resolve-CorridorKeyGitPath
+    if ([string]::IsNullOrWhiteSpace($gitPath)) {
+        throw "git is required to stage the OpenFX SDK; install Git for Windows and retry."
+    }
+
+    $contract = Get-CorridorKeyWindowsRtxBuildContract
+    $repoUrl = $contract.openfx_repo_url
+    $gitRef = $contract.openfx_git_ref
+
+    if (Test-Path $sdkRoot) {
+        Remove-Item $sdkRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $sdkRoot) -Force | Out-Null
+
+    Write-Host "[openfx] Cloning $repoUrl @ $gitRef into $sdkRoot..." -ForegroundColor Cyan
+    & $gitPath clone --depth 1 --branch $gitRef $repoUrl $sdkRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to clone OpenFX SDK $gitRef from $repoUrl."
+    }
+
+    if (-not (Test-CorridorKeyOpenFxSdkRoot -CandidatePath $sdkRoot)) {
+        throw "Cloned OpenFX SDK layout is invalid at: $sdkRoot (missing include/ofxImageEffect.h)."
+    }
+
+    Write-Host "[openfx] SDK ready at $sdkRoot" -ForegroundColor Green
     return $sdkRoot
 }
 

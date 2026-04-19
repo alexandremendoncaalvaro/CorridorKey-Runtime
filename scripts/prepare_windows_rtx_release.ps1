@@ -508,6 +508,7 @@ if (-not $SkipOrtBuild.IsPresent) {
 
 if (-not $SkipRuntimeBuild.IsPresent) {
     Write-Host "[5/5] Configuring and building CorridorKey with the curated runtime..."
+    [void](Ensure-CorridorKeyOpenFxSdk -RepoRoot $repoRoot)
     Invoke-ExternalCommand -FilePath "cmake" -Arguments @(
         "--preset", $BuildPreset,
         "-DCORRIDORKEY_WINDOWS_ORT_ROOT=$ortInstallDir"
