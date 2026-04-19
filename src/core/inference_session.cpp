@@ -813,6 +813,33 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     m_session_options.DisablePerSessionThreads();
     m_session_options.AddConfigEntry(kUseEnvAllocatorsConfig, "1");
 
+    // Optional per-op profiling gated on `CORRIDORKEY_ORT_PROFILE=1`. When
+    // enabled, ORT writes a Chrome-tracing-compatible JSON next to the
+    // runtime logs (`%LOCALAPPDATA%\\CorridorKey\\Logs\\ort_profile_<label>_<ts>.json`
+    // on Windows, `$HOME/.local/share/CorridorKey/Logs/...` elsewhere). The
+    // file is only flushed when the session is destroyed, so callers must
+    // let the process exit normally after the instrumented run to capture
+    // data. Documented at
+    // https://onnxruntime.ai/docs/performance/tune-performance/profiling-tools.html
+    {
+        const char* profile_env = std::getenv("CORRIDORKEY_ORT_PROFILE");
+        if (profile_env != nullptr && std::string_view(profile_env) == "1") {
+            const auto logs_dir = common::default_logs_root();
+            std::error_code ec;
+            std::filesystem::create_directories(logs_dir, ec);
+            const auto prefix_path =
+                logs_dir / (std::string("ort_profile_v") + CORRIDORKEY_DISPLAY_VERSION_STRING + "_");
+#ifdef _WIN32
+            // ORT on Windows expects a wide-char path prefix; std::filesystem::path
+            // already stores as wchar_t, so use native() directly.
+            m_session_options.EnableProfiling(prefix_path.native().c_str());
+#else
+            m_session_options.EnableProfiling(prefix_path.native().c_str());
+#endif
+            debug_log("ORT per-op profiling enabled; output prefix: " + prefix_path.string());
+        }
+    }
+
     debug_log("Setting graph optimization level");
     if (use_optimized_model_cache) {
         m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
