@@ -69,15 +69,34 @@ each session. It contains the non-negotiable rules for this repository.
 ## Operational Rules
 
 - Use feature branches and PRs. Do not work directly on `main`
-- Use `scripts/build.ps1` for Windows development builds
-- Use `scripts/prepare_windows_rtx_release.ps1` for Windows RTX runtime preparation
-- Use `scripts/release_pipeline_windows.ps1` for Windows release packaging
+- `scripts/windows.ps1` is the only Windows entrypoint. Every Windows
+  build, package, certification, and release runs through it via
+  `-Task build | prepare-rtx | certify-rtx-artifacts | package-ofx |
+  package-runtime | release | regen-rtx-release | sync-version`. Never
+  call `scripts/build.ps1`, `scripts/prepare_windows_rtx_release.ps1`,
+  `scripts/release_pipeline_windows.ps1`, or any other sub-script
+  directly; they are internal delegates and skip the version metadata
+  sync, track resolution, and validation the wrapper applies.
+- When any prerequisite is missing (TensorRT-RTX SDK at
+  `vendor/TensorRT-RTX/`, `vcpkg` at `VCPKG_ROOT`, `uv`, CUDA Toolkit
+  12.8), fix the prerequisite. Do not route around the canonical
+  pipeline.
 - The only supported repo-local Windows runtime roots are
   `vendor/onnxruntime-windows-rtx` and `vendor/onnxruntime-windows-dml`
 - Do not use `vendor/onnxruntime-universal` or a globally installed ONNX Runtime
   as a Windows build or release dependency
-- When a canonical repo script exists for build, packaging, or release, use it
-  instead of recreating the flow manually
+- Do not create git worktrees that shadow `vendor/`. `git worktree
+  remove --force` has followed Windows junctions into `vendor/` and
+  erased the real curated runtimes. If a second working copy is needed,
+  stage its own curated runtimes instead of sharing them.
+- Changes to the render hot path (`src/plugins/ofx/`,
+  `src/core/inference_session.cpp`, `src/core/engine.cpp`,
+  `src/core/gpu_prep.cpp`, `src/core/gpu_resize.cpp`,
+  `src/post_process/`) must be measured against the
+  `phase_8_gpu_prepare` baseline in `docs/OPTIMIZATION_MEASUREMENTS.md`
+  via `scripts/run_corpus.sh` + `scripts/compare_benchmarks.py`. Reject
+  the change when `avg_latency_ms` or `ort_run` regresses by more than
+  10%.
 - Windows packaging may proceed with a partial model set, but missing packaged
   models must be surfaced in generated inventory and validation reports.
   Missing models are reportable packaging state; invalid packaged models that

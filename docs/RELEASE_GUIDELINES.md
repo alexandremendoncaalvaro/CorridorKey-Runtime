@@ -104,6 +104,51 @@ Releases must be built through the canonical repo wrapper so version
 synchronization, packaged runtime selection, artifact naming, and validation
 stay consistent.
 
+### Windows Prerequisites
+
+The canonical Windows pipeline auto-stages every dependency that can be
+downloaded from a pinned URL. The table below lists what the operator
+still has to install manually; everything else is fetched on demand by
+`scripts\windows.ps1 -Task prepare-rtx` from a clean clone.
+
+| Tool | Expected location / detection | Notes |
+|---|---|---|
+| Git for Windows | on `PATH` | auto-discovered by the helper scripts as a fallback when not on `PATH` |
+| Visual Studio 2022 | Community, Pro, or Enterprise with the "Desktop development with C++" workload and the Windows 10/11 SDK | `vcvars64.bat` must be locatable under `C:\Program Files\Microsoft Visual Studio\2022\*`; the pipeline injects the MSVC dev shell on demand |
+| CUDA Toolkit 12.8 | default location `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8` | or pass `-CudaHome <path>` through `-ForwardArguments` |
+| vcpkg | `C:\tools\vcpkg` with `VCPKG_ROOT` pointing at it | pinned baseline is in `vcpkg-configuration.json`; every shell that calls the pipeline must export `VCPKG_ROOT` |
+| Python 3.12 | default per-user install from python.org | auto-discovered by `Resolve-CorridorKeyPython312Path`; the pin lives in `Get-CorridorKeyWindowsRtxBuildContract.required_python_version` |
+| uv | `%USERPROFILE%\.local\bin\uv.exe` (default installer path) | auto-discovered via `Resolve-CorridorKeyUvPath`; install once with `irm https://astral.sh/uv/install.ps1 \| iex` |
+| NSIS 3.x | default install at `C:\Program Files (x86)\NSIS\` | auto-discovered |
+
+What the pipeline handles for the operator:
+
+- **TensorRT-RTX SDK:** auto-downloaded from the pinned URL in
+  `Get-CorridorKeyWindowsRtxBuildContract.tensorrt_rtx_download_url`
+  and extracted into `vendor\TensorRT-RTX-<version>\` on first
+  `prepare-rtx`. No manual staging needed.
+- **OpenFX SDK:** auto-cloned at the pinned tag from
+  `AcademySoftwareFoundation/openfx` into `vendor\openfx\`.
+- **ONNX Runtime source:** bootstraps `vendor\onnxruntime-src\` at
+  the pinned ref when absent.
+- **vcpkg eigen3 archive (blocked by Cloudflare on gitlab):**
+  `scripts\vcpkg_asset_fetch.ps1` is wired in as a vcpkg
+  `X_VCPKG_ASSET_SOURCES=x-script,...` that transparently redirects
+  the `libeigen/eigen/<commit>` fetch to the byte-identical
+  `eigen-mirror/eigen` GitHub mirror.
+- **Models:** the seven FP16 + INT8 runtime artifacts under
+  `models\` are the reuse-path source of truth. If all expected
+  files are present the pipeline skips regeneration entirely; if
+  one or more are missing the pipeline exports them from
+  `models\CorridorKey.pth` via `uv run python export_onnx.py`.
+
+If any manual row above is not satisfied, stop and fix it. Do not
+invent workarounds from outside the canonical pipeline; they will
+diverge from what the pipeline produces and from what users install.
+See [docs/WINDOWS_BUILD.md](WINDOWS_BUILD.md) section 3 for the
+troubleshooting index of every failure mode the auto-stage paths have
+been validated against.
+
 ### Windows Build Steps
 
 Windows has two curated runtime roots and one canonical release entrypoint:
@@ -180,6 +225,55 @@ packaging flow now requires:
 If that manifest is absent or does not match the packaged RTX artifacts,
 packaging fails intentionally. This prevents the project from generating a new
 installer from stale or manually copied RTX models.
+
+### Windows Anti-Patterns
+
+Every one of the workarounds below has produced a regression in
+production. They are listed here so contributors (human or AI) stop
+reinventing them.
+
+- **Do not call `scripts\build.ps1`, `scripts\prepare_windows_rtx_release.ps1`,
+  or `scripts\release_pipeline_windows.ps1` directly.** They are internal
+  delegates. Always go through `scripts\windows.ps1 -Task ...`. Direct
+  calls skip version-metadata sync, track resolution, and validation
+  that the wrapper applies.
+- **Do not create git worktrees that shadow `vendor\`.** A worktree
+  inherits a tracked `vendor\` with `.gitkeep` stubs, and running `git
+  worktree remove --force` on a worktree containing a Windows junction
+  into the main `vendor\` has, in practice, followed the junction and
+  erased the real binaries. If a second working copy is needed, use
+  `git worktree add -B <branch> <path>` without touching `vendor\` and
+  stage the curated runtimes separately for that worktree.
+- **Do not skip the quality gate on the release pipeline.** Running
+  `scripts\windows.ps1 -Task release` with `-SkipTests` forwarded through
+  `-ForwardArguments` is a debug convenience only. Any build intended
+  for a user — even an internal pre-release — must pass the quality
+  gate.
+- **Do not touch the render hot path without measuring.** Any change
+  under `src/plugins/ofx/`, `src/core/inference_session.cpp`,
+  `src/core/engine.cpp`, `src/core/gpu_prep.cpp`, `src/core/gpu_resize.cpp`,
+  or `src/post_process/` must be measured against the
+  `phase_8_gpu_prepare` baseline recorded in
+  `docs/OPTIMIZATION_MEASUREMENTS.md`. Use `scripts/run_corpus.sh` then
+  `scripts/compare_benchmarks.py`; reject the change if
+  `avg_latency_ms` or `ort_run` regresses by more than 10%.
+
+### Windows Release Label Plumbing
+
+`-DisplayVersionLabel` is the one mechanism that plumbs a human-readable
+version string into every user-visible surface on Windows. It flows
+through CMake into `include/corridorkey/version.hpp`
+(`CORRIDORKEY_DISPLAY_VERSION_STRING`), which the OFX panel, the
+`corridorkey --version` CLI, and the runtime-server log filename
+(`ofx_runtime_server_v<label>.log`) all read. The packaging scripts
+also bake the label into the dist artifact names when present:
+`CorridorKey_Resolve_v<label>_Windows_RTX_Installer.exe`,
+`CorridorKey_Resolve_v<label>_Windows_RTX.zip`,
+`CorridorKey_Resolve_v<label>_Windows_RTX\\`. Public releases drop the
+flag; `CMakeLists.txt` `VERSION` is authoritative and artifact names
+match it exactly. The numbering rule (counters do not restart across
+reverted cycles; jump to `-10`, `-20`, ...) is documented in
+section 1 "Pre-release labels".
 
 Use the following commands according to the state you have:
 
