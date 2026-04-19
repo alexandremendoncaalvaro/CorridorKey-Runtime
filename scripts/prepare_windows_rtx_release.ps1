@@ -519,7 +519,24 @@ if (-not $SkipRuntimeBuild.IsPresent) {
     ) -WorkingDirectory $repoRoot
 }
 
-if (-not $SkipPackage.IsPresent) {
+$packageTauriGuiBinary = Join-Path $repoRoot "src\gui\src-tauri\target\release\corridorkey-gui.exe"
+$portableBundleApplicable = (-not $SkipPackage.IsPresent) -and (Test-Path $packageTauriGuiBinary)
+if ((-not $SkipPackage.IsPresent) -and (-not (Test-Path $packageTauriGuiBinary))) {
+    # The portable runtime bundle step downstream (package_windows.ps1)
+    # stages the Tauri GUI, which is produced by the Tauri track
+    # (`package-runtime`/pnpm tauri build), not by any step inside
+    # prepare-rtx itself. On the OFX release path the portable runtime
+    # bundle is unused, so rather than aborting the whole prepare flow
+    # (and blocking the subsequent `release` task that only needs the
+    # curated ORT we already built) we skip this step cleanly when the
+    # GUI binary is not present. Users targeting the Tauri/runtime
+    # track should run `scripts\\windows.ps1 -Task package-runtime` after
+    # building the GUI; that task owns the full Tauri flow.
+    Write-Host ("[package] Skipping portable runtime bundle: Tauri GUI not built at {0}. " +
+                "Run ``scripts\\windows.ps1 -Task package-runtime`` to build both the GUI and the portable bundle." `
+                -f $packageTauriGuiBinary) -ForegroundColor Yellow
+}
+if ($portableBundleApplicable) {
     $forbiddenPaths = @(
         $repoRoot,
         $buildDir,
