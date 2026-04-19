@@ -534,6 +534,18 @@ $env:PATH = "$vswhereDir;$cmakeDir;$pythonDir;$cudaBinDir;$env:PATH"
 $env:CUDA_PATH = $CudaHome
 $env:CUDAToolkit_ROOT = $CudaHome
 
+# Route vcpkg source-tarball downloads through our mirror-aware asset fetcher.
+# The default `eigen3` portfile pulls from gitlab.com/libeigen/eigen, which now
+# returns an HTTP 403 behind a Cloudflare bot challenge for many non-browser
+# clients. vcpkg_asset_fetch.ps1 rewrites that single URL to the
+# eigen-mirror/eigen GitHub mirror (byte-identical content; the same mirror
+# upstream onnxruntime FetchContent moved to after
+# https://github.com/microsoft/onnxruntime/issues/24861) and passes every
+# other URL through untouched. Reference:
+# https://learn.microsoft.com/en-us/vcpkg/users/assetcaching
+$assetScriptPath = Join-Path $PSScriptRoot "vcpkg_asset_fetch.ps1"
+$env:X_VCPKG_ASSET_SOURCES = "x-script,powershell -NoProfile -ExecutionPolicy Bypass -File `"$assetScriptPath`" -Url {url} -Sha512 {sha512} -Dst {dst}"
+
 $command = @(
     "call `"$VsDevCmd`" -arch=x64",
     "cd /d `"$OrtSourceDir`"",
