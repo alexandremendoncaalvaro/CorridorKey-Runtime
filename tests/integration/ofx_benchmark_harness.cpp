@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -15,6 +16,7 @@
 #include "common/shared_memory_transport.hpp"
 #include "common/stage_profiler.hpp"
 #include "core/inference_session_metadata.hpp"
+#include "frame_io/video_io.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -30,6 +32,18 @@ struct HarnessOptions {
     int frame_height = 0;
     int iterations = 5;
     core::IoBindingMode io_binding_mode = core::IoBindingMode::Auto;
+    // When both video paths are set the harness runs in "video" mode: it
+    // decodes pairs of frames from the two clips and drives them into the
+    // shared transport before each render. Frame width/height auto-populate
+    // from the RGB clip; both clips loop independently if the iteration
+    // count exceeds their length. Session remains alive for the full loop
+    // so the render path reuses the same underlying ORT session across
+    // frames, which is the pattern a real Resolve session exhibits and
+    // the pattern the synthetic-black-frame harness cannot easily
+    // reproduce (a 20-iteration synthetic pass stops before in-session
+    // resource accumulation has time to surface).
+    std::filesystem::path input_video_path;
+    std::filesystem::path hint_video_path;
 };
 
 Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
@@ -88,9 +102,24 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
             options.io_binding_mode = *parsed;
             continue;
         }
+        if (argument == "--input-video" && index + 1 < argc) {
+            options.input_video_path = argv[++index];
+            continue;
+        }
+        if (argument == "--hint-video" && index + 1 < argc) {
+            options.hint_video_path = argv[++index];
+            continue;
+        }
 
         return Unexpected(
             Error{ErrorCode::InvalidParameters, "Unknown OFX harness argument: " + argument});
+    }
+
+    const bool has_input = !options.input_video_path.empty();
+    const bool has_hint = !options.hint_video_path.empty();
+    if (has_input != has_hint) {
+        return Unexpected(Error{ErrorCode::InvalidParameters,
+                                "--input-video and --hint-video must be provided together."});
     }
 
     if (options.resolution <= 0) {
@@ -128,6 +157,93 @@ bool has_stage(const std::vector<StageTiming>& timings, std::string_view name) {
                        [&](const StageTiming& timing) { return timing.name == name; });
 }
 
+// Decode the next pair of frames from both video clips into the provided
+// transport views. Loops each clip independently on EOF so long harness
+// runs (60+ frames against short source clips) still produce fresh inputs
+// without exhausting the input file. Returns an error only when a fresh
+// reader cannot be opened or a decode fails outright; EOF with a
+// successful re-open is treated as normal.
+Result<void> feed_next_video_frame_pair(std::unique_ptr<VideoReader>& rgb_reader,
+                                        std::unique_ptr<VideoReader>& hint_reader,
+                                        const std::filesystem::path& rgb_path,
+                                        const std::filesystem::path& hint_path,
+                                        Image& transport_rgb, Image& transport_hint) {
+    auto reopen = [](std::unique_ptr<VideoReader>& reader,
+                     const std::filesystem::path& path) -> Result<void> {
+        auto opened = VideoReader::open(path);
+        if (!opened) {
+            return Unexpected(opened.error());
+        }
+        reader = std::move(*opened);
+        return {};
+    };
+
+    auto read_with_loop = [&](std::unique_ptr<VideoReader>& reader,
+                              const std::filesystem::path& path) -> Result<VideoFrame> {
+        auto frame = reader->read_next_frame();
+        if (!frame) {
+            return Unexpected(frame.error());
+        }
+        if (!frame->buffer.view().empty()) {
+            return std::move(*frame);
+        }
+        // EOF -> reopen and read again.
+        auto reopen_res = reopen(reader, path);
+        if (!reopen_res) {
+            return Unexpected(reopen_res.error());
+        }
+        auto retry = reader->read_next_frame();
+        if (!retry) {
+            return Unexpected(retry.error());
+        }
+        if (retry->buffer.view().empty()) {
+            return Unexpected(Error{ErrorCode::IoError,
+                                    "Reopened video returned EOF on first frame: " + path.string()});
+        }
+        return std::move(*retry);
+    };
+
+    auto rgb_frame = read_with_loop(rgb_reader, rgb_path);
+    if (!rgb_frame) {
+        return Unexpected(rgb_frame.error());
+    }
+    auto hint_frame = read_with_loop(hint_reader, hint_path);
+    if (!hint_frame) {
+        return Unexpected(hint_frame.error());
+    }
+
+    // RGB: both the decoded frame and the transport expose 3-channel float32
+    // at the same width/height, so copy directly into the mapped view.
+    const Image rgb_view = rgb_frame->buffer.view();
+    if (rgb_view.width != transport_rgb.width || rgb_view.height != transport_rgb.height ||
+        rgb_view.channels != transport_rgb.channels) {
+        return Unexpected(Error{
+            ErrorCode::InvalidParameters,
+            "Input video dimensions do not match transport: rgb_view=" +
+                std::to_string(rgb_view.width) + "x" + std::to_string(rgb_view.height) + "x" +
+                std::to_string(rgb_view.channels)});
+    }
+    std::memcpy(transport_rgb.data.data(), rgb_view.data.data(),
+                rgb_view.data.size() * sizeof(float));
+
+    // Hint: transport is single-channel; the alpha-hint MP4 is stored as a
+    // 3-channel grayscale matte. Project the first channel into the
+    // single-channel hint plane.
+    const Image hint_view = hint_frame->buffer.view();
+    if (hint_view.width != transport_hint.width || hint_view.height != transport_hint.height) {
+        return Unexpected(Error{
+            ErrorCode::InvalidParameters,
+            "Hint video dimensions do not match transport: hint_view=" +
+                std::to_string(hint_view.width) + "x" + std::to_string(hint_view.height)});
+    }
+    const int pixel_count = hint_view.width * hint_view.height;
+    const int hint_channels = hint_view.channels;
+    for (int i = 0; i < pixel_count; ++i) {
+        transport_hint.data[i] = hint_view.data[i * hint_channels];
+    }
+    return {};
+}
+
 nlohmann::json failure_json(const std::string& message) {
     return nlohmann::json{{"success", false}, {"error", message}};
 }
@@ -149,7 +265,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const HarnessOptions options = *options_res;
+    HarnessOptions options = *options_res;
     apply_io_binding_environment(options.io_binding_mode);
     const auto artifact = common::inspect_model_artifact(options.model_path);
     if (!artifact.found) {
@@ -160,6 +276,52 @@ int main(int argc, char* argv[]) {
     if (!artifact.usable) {
         std::cout << failure_json(artifact.detail).dump(4) << std::endl;
         return 1;
+    }
+
+    const bool video_mode = !options.input_video_path.empty() && !options.hint_video_path.empty();
+    std::unique_ptr<VideoReader> rgb_reader;
+    std::unique_ptr<VideoReader> hint_reader;
+    if (video_mode) {
+        auto rgb_opened = VideoReader::open(options.input_video_path);
+        if (!rgb_opened) {
+            std::cout << failure_json("Failed to open --input-video " +
+                                      options.input_video_path.string() + ": " +
+                                      rgb_opened.error().message)
+                             .dump(4)
+                      << std::endl;
+            return 1;
+        }
+        rgb_reader = std::move(*rgb_opened);
+        auto hint_opened = VideoReader::open(options.hint_video_path);
+        if (!hint_opened) {
+            std::cout << failure_json("Failed to open --hint-video " +
+                                      options.hint_video_path.string() + ": " +
+                                      hint_opened.error().message)
+                             .dump(4)
+                      << std::endl;
+            return 1;
+        }
+        hint_reader = std::move(*hint_opened);
+
+        // Force the transport dimensions to match the source clip. The CLI
+        // --frame-width/--frame-height flags are intentionally ignored here
+        // because any mismatch would produce garbage or an outright
+        // dimension error downstream; video mode is deliberately honest
+        // about the real input resolution.
+        options.frame_width = rgb_reader->width();
+        options.frame_height = rgb_reader->height();
+        if (hint_reader->width() != options.frame_width ||
+            hint_reader->height() != options.frame_height) {
+            std::cout << failure_json("--input-video and --hint-video must share the same "
+                                      "dimensions; got " +
+                                      std::to_string(rgb_reader->width()) + "x" +
+                                      std::to_string(rgb_reader->height()) + " and " +
+                                      std::to_string(hint_reader->width()) + "x" +
+                                      std::to_string(hint_reader->height()))
+                             .dump(4)
+                      << std::endl;
+            return 1;
+        }
     }
 
     const auto transport_path = common::next_ofx_shared_frame_path();
@@ -211,8 +373,28 @@ int main(int argc, char* argv[]) {
     std::optional<BackendFallbackInfo> fallback = prepare_res->session.backend_fallback;
     std::vector<double> render_latencies_ms;
     render_latencies_ms.reserve(static_cast<std::size_t>(options.iterations));
+    // Per-iteration timing view so callers can see in-session drift
+    // (memory leaks, workspace accumulation, etc.) without having to
+    // average across the whole run. Each entry captures the wall-clock
+    // roundtrip plus the stage-timing breakdown the broker reports for
+    // that single frame.
+    std::vector<nlohmann::json> per_frame_timings;
+    per_frame_timings.reserve(static_cast<std::size_t>(options.iterations));
 
     for (int iteration = 0; iteration < options.iterations; ++iteration) {
+        if (video_mode) {
+            Image transport_rgb = transport.rgb_view();
+            Image transport_hint = transport.hint_view();
+            auto feed_res = feed_next_video_frame_pair(
+                rgb_reader, hint_reader, options.input_video_path, options.hint_video_path,
+                transport_rgb, transport_hint);
+            if (!feed_res) {
+                std::filesystem::remove(transport_path, cleanup_error);
+                std::cout << failure_json(feed_res.error().message).dump(4) << std::endl;
+                return 1;
+            }
+        }
+
         OfxRuntimeRenderFrameRequest render_request;
         render_request.session_id = session_id;
         render_request.shared_frame_path = transport_path;
@@ -237,6 +419,17 @@ int main(int argc, char* argv[]) {
         for (const auto& timing : render_res->timings) {
             profiler.record(timing);
         }
+
+        nlohmann::json frame_entry;
+        frame_entry["iteration"] = iteration;
+        frame_entry["roundtrip_ms"] = render_latency_ms;
+        nlohmann::json frame_stages = nlohmann::json::object();
+        for (const auto& timing : render_res->timings) {
+            frame_stages[timing.name] = timing.total_ms;
+        }
+        frame_entry["stages"] = std::move(frame_stages);
+        per_frame_timings.push_back(std::move(frame_entry));
+
         effective_device = render_res->session.effective_device;
         fallback = render_res->session.backend_fallback;
     }
@@ -262,7 +455,11 @@ int main(int argc, char* argv[]) {
 
     nlohmann::json results;
     results["success"] = true;
-    results["mode"] = "ofx_broker_synthetic";
+    results["mode"] = video_mode ? "ofx_broker_video" : "ofx_broker_synthetic";
+    if (video_mode) {
+        results["input_video"] = options.input_video_path.string();
+        results["hint_video"] = options.hint_video_path.string();
+    }
     results["model"] = options.model_path.filename().string();
     results["artifact"] = options.model_path.filename().string();
     results["artifact_path"] = options.model_path.string();
@@ -299,6 +496,7 @@ int main(int argc, char* argv[]) {
                          : 0.0;
     results["stage_timings"] = stage_timings_to_json(stage_timings);
     results["phase_timings"] = summarize_stage_groups(stage_timings);
+    results["per_frame_timings"] = std::move(per_frame_timings);
     if (fallback.has_value()) {
         results["fallback"] = to_json(*fallback);
     }
