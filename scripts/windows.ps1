@@ -92,7 +92,10 @@ switch ($Task) {
             throw "Task 'build' does not accept additional arguments. Use -Preset only."
         }
 
-        $arguments = @("-Preset", $Preset, "-DisplayVersionLabel", $DisplayVersionLabel)
+        $arguments = @("-Preset", $Preset)
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
         Invoke-CorridorKeyScript -ScriptName "build.ps1" -Arguments $arguments
         break
     }
@@ -114,9 +117,12 @@ switch ($Task) {
     "certify-rtx-artifacts" {
         $arguments = @(
             "-Version", $resolvedVersion,
-            "-BuildPreset", $Preset,
-            "-DisplayVersionLabel", $DisplayVersionLabel
-        ) + $additionalArguments
+            "-BuildPreset", $Preset
+        )
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "certify_windows_rtx_artifacts.ps1" -Arguments $arguments
         break
     }
@@ -159,9 +165,11 @@ switch ($Task) {
     "regen-rtx-release" {
         $arguments = @(
             "-Version", $resolvedVersion,
-            "-BuildPreset", $Preset,
-            "-DisplayVersionLabel", $DisplayVersionLabel
+            "-BuildPreset", $Preset
         )
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
         if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
             $arguments += @("-Checkpoint", $Checkpoint)
         }
