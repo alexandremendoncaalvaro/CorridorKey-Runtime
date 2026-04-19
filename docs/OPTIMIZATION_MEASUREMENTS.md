@@ -855,6 +855,54 @@ package must replace the first one before any user-visible conclusion is kept.
   bottleneck identified since the start of optimization, providing the most
   significant throughput increase so far.
 
+### `phase_9_v0.7.5-1`
+
+- Source state: current main after revert `3f70623` (undo of PRs #33/#34/#35) plus
+  the 13 pipeline-autosufficiency fixes landed in this session (TensorRT-RTX SDK
+  auto-download, vcpkg asset-cache mirror for eigen3, OpenFX SDK auto-stage, MSVC
+  env init, etc.). The OFX hot path is post-revert — the intent stated at the
+  start of the cycle was paridade with `phase_8_gpu_prepare`.
+- Display version label: `0.7.5-1`
+- Local test artifact path:
+  `dist/CorridorKey_Resolve_v0.7.5_Windows_RTX_Installer.exe`
+- Corpus output root:
+  `dist/optimization_checkpoints/phase_9_v0.7.5-1/`
+- Benchmark summary:
+  - repo-side OFX-style harness `2048 -> 3840x2160` on the same workspace,
+    TensorRT RTX EP, `io_binding: on`, `memory_mode: pinned`, 20 iterations:
+    - `avg_latency_ms` (roundtrip): `709.77 ms`
+    - `ort_run`: `427.29 ms`
+    - `frame_prepare_inputs`: `48.71 ms`
+    - `frame_extract_outputs`: `122.09 ms`
+    - `frame_extract_outputs_resize`: `49.40 ms`
+    - `frame_extract_outputs_tensor_materialize`: `22.40 ms`
+    - `frame_extract_outputs_finalize`: `50.28 ms`
+    - `post_composite`: `15.30 ms`
+    - `ofx_broker_writeback`: `12.36 ms`
+    - `ort_io_binding_bind_inputs`: `7.38 ms`
+    - cold session: `ort_session_create` `8570.08 ms`,
+      `ofx_prepare_session` `8752.95 ms`
+- Manual OFX observations:
+  - pending local plugin comparison with the packaged `0.7.5-1` installer
+- Comparison against `phase_8_gpu_prepare`:
+  - `avg_latency_ms` regressed from `~<500 ms` to `709.77 ms` (+42%); the
+    current numbers sit at the `phase_7_gpu_resize` level (~710 ms), not the
+    `phase_8_gpu_prepare` level
+  - `frame_prepare_inputs` regressed from `27.19 ms` to `48.71 ms` (+79%)
+  - `frame_extract_outputs_resize` regressed from `27.3 ms` to `49.40 ms` (+81%)
+  - The phase_8 GPU input-prep code (`src/core/gpu_prep.cpp`) is present in the
+    tree and guarded by `m_io_binding_enabled && m_gpu_prep.available()`; this
+    run had I/O binding active but the timing shows the path is either falling
+    back to CPU silently or running slower than when phase_8 was measured. No
+    dedicated `gpu_prep_*` stage timing exists in the current harness, so the
+    failing branch cannot be confirmed from the JSON alone.
+- Keep or revise decision:
+  record the regression; do not ship `v0.7.5-1` to public pre-release on
+  performance grounds. The installer stays available for local manual Resolve
+  validation (the OFX render path is functional; this is a throughput
+  regression, not a correctness one). Investigate the GPU input-prep fallback
+  before promoting a public pre-release.
+
 ### `phase_8_gpu_prepare`
 
 - Source state: current `perf/optimization` working tree with CUDA NPP-based
