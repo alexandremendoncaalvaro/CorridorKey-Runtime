@@ -673,6 +673,50 @@ function Ensure-CorridorKeyOpenFxSdk {
     return $sdkRoot
 }
 
+function Initialize-CorridorKeyMsvcEnvironment {
+    <#
+    .SYNOPSIS
+    Ensures the current PowerShell session has the MSVC developer
+    environment active (cl.exe + INCLUDE + LIB) so downstream cmake
+    invocations can compile C++ sources.
+
+    .DESCRIPTION
+    `cmake --preset release` followed by a build spawns cl.exe directly
+    and expects the MSVC toolchain variables (`INCLUDE`, `LIB`, the
+    compiler on PATH) to already be set. Without them, the build fails
+    with cryptic "Cannot open include file: 'cstdint'" errors as cl.exe
+    can't locate the STL headers that ship with the MSVC runtime.
+
+    `scripts/build.ps1` activates the dev shell via
+    `Launch-VsDevShell.ps1` when cl.exe is missing. Any other script
+    that runs the same cmake step needs the same activation — so the
+    logic lives here, once.
+
+    Idempotent: if cl.exe is already resolvable, this is a no-op.
+    #>
+    if (Get-Command cl.exe -ErrorAction SilentlyContinue) {
+        return
+    }
+
+    $vsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vsWhere)) {
+        throw "Visual Studio is not installed. Cannot locate vswhere.exe at $vsWhere."
+    }
+
+    $vsInstallDir = & $vsWhere -latest -property installationPath 2>$null
+    if ([string]::IsNullOrWhiteSpace($vsInstallDir)) {
+        throw "No Visual Studio installation found by vswhere."
+    }
+
+    $launchScript = Join-Path $vsInstallDir "Common7\Tools\Launch-VsDevShell.ps1"
+    if (-not (Test-Path $launchScript)) {
+        throw "Launch-VsDevShell.ps1 not found at: $launchScript"
+    }
+
+    Write-Host "[msvc] Injecting MSVC environment from: $vsInstallDir" -ForegroundColor Yellow
+    & $launchScript -Arch amd64 -SkipAutomaticLocation | Out-Null
+}
+
 function Get-CorridorKeyProjectVersion {
     param([string]$RepoRoot)
 

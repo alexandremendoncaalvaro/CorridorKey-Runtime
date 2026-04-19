@@ -20,27 +20,7 @@ if (-not (Test-Path $env:VCPKG_ROOT)) {
 
 $isWindowsHost = Test-CorridorKeyWindowsHost
 if ($isWindowsHost) {
-    # If cl.exe is missing, activate the VS Developer Shell before configuring.
-    $clFound = Get-Command cl.exe -ErrorAction SilentlyContinue
-    if (-not $clFound) {
-        $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        if (-not (Test-Path $vsWhere)) {
-            throw "Visual Studio is not installed. Cannot locate vswhere.exe."
-        }
-
-        $vsInstallDir = & $vsWhere -latest -property installationPath 2>$null
-        if ([string]::IsNullOrWhiteSpace($vsInstallDir)) {
-            throw "No Visual Studio installation found by vswhere."
-        }
-
-        $launchScript = Join-Path $vsInstallDir "Common7\Tools\Launch-VsDevShell.ps1"
-        if (-not (Test-Path $launchScript)) {
-            throw "Launch-VsDevShell.ps1 not found at: $launchScript"
-        }
-
-        Write-Host "[build] Injecting MSVC environment from: $vsInstallDir" -ForegroundColor Yellow
-        & $launchScript -Arch amd64 -SkipAutomaticLocation | Out-Null
-    }
+    Initialize-CorridorKeyMsvcEnvironment
 }
 
 $configureArgs = @("--preset", $Preset)
