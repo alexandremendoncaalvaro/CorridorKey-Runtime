@@ -7,6 +7,7 @@ param(
     [string]$ReleaseSuffix = "",
     [ValidateSet("windows-rtx", "windows-universal")]
     [string]$ModelProfile = "",
+    [string]$DisplayVersionLabel = "",
     [switch]$Skip2048
 )
 
@@ -149,7 +150,16 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
     $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
 }
 
-$releaseBasename = "CorridorKey_Resolve_v${Version}_Windows${normalizedSuffix}"
+# When a `-DisplayVersionLabel` (e.g. `0.7.5-21`) is supplied the
+# packaged artifact filenames use it instead of the base version. This
+# keeps the installed build identity visible directly in the filename
+# (`CorridorKey_Resolve_v0.7.5-21_Windows_RTX_Installer.exe`) so
+# operators downloading a pre-release candidate never have to guess
+# which cycle they are installing. Public releases leave
+# `-DisplayVersionLabel` empty and filenames fall back to the base
+# CMake version.
+$artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+$releaseBasename = "CorridorKey_Resolve_v${artifactVersionTag}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
 $zipPath = Join-Path $repoRoot ("dist\" + $releaseBasename + ".zip")

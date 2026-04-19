@@ -114,21 +114,28 @@ try {
         }
     }
 
+    $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+
     foreach ($v in $variants) {
         Write-Host "--- Packaging Variant: $($v.Label) ---" -ForegroundColor Yellow
-        & powershell.exe -NoProfile -File "scripts/package_ofx_installer_windows.ps1" `
-            -Version $Version `
-            -ReleaseSuffix $v.Suffix `
-            -ModelProfile $v.ModelProfile `
-            -OrtRoot $v.Root
+        $packageArgs = @(
+            "-Version", $Version,
+            "-ReleaseSuffix", $v.Suffix,
+            "-ModelProfile", $v.ModelProfile,
+            "-OrtRoot", $v.Root
+        )
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $packageArgs += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        & powershell.exe -NoProfile -File "scripts/package_ofx_installer_windows.ps1" @packageArgs
 
         if ($LASTEXITCODE -ne 0) { throw "Packaging failed for variant: $($v.Suffix)" }
 
-        $expectedInstaller = Join-Path $repoRoot "dist/CorridorKey_Resolve_v${Version}_Windows_$($v.Suffix)_Installer.exe"
+        $expectedInstaller = Join-Path $repoRoot "dist/CorridorKey_Resolve_v${artifactVersionTag}_Windows_$($v.Suffix)_Installer.exe"
         if (-not (Test-Path $expectedInstaller)) {
             throw "CRITICAL: Pipeline claimed success but installer was NOT found at: $expectedInstaller"
         }
-        $expectedValidationReport = Join-Path $repoRoot "dist/CorridorKey_Resolve_v${Version}_Windows_$($v.Suffix)\bundle_validation.json"
+        $expectedValidationReport = Join-Path $repoRoot "dist/CorridorKey_Resolve_v${artifactVersionTag}_Windows_$($v.Suffix)\bundle_validation.json"
         if (-not (Test-Path $expectedValidationReport)) {
             throw "CRITICAL: Bundle validation did not produce a validation report at: $expectedValidationReport"
         }
