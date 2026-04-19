@@ -7,6 +7,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -173,6 +174,32 @@ Result<void> parse_runtime_service_options(const std::vector<std::string>& args,
 }  // namespace
 
 int run_runtime_server() {
+    // Default I/O binding OFF in the OFX runtime server process.
+    //
+    // I/O binding reuses pinned host / device-resident output buffers
+    // across frames to cut memcpy and allocator overhead. On a dedicated
+    // GPU (CLI, harness) that is a small win (~7% at the best-case warm
+    // frame). Under DaVinci Resolve the GPU is shared with the host
+    // decoder/color/compositor/encoder pipelines, and the held buffers
+    // amplify TensorRT RTX kernel-time contention as the session
+    // accumulates frames.
+    //
+    // Measured on v0.7.5-11 via ORT per-op profiling (95-frame Resolve
+    // session, 4K 2048-quality):
+    //   binding on   p50 trt_kernel 5200 ms, p99 26146 ms
+    //   binding off  p50 trt_kernel 2632 ms, p99  7265 ms
+    //
+    // The p99 26 s figure under IO-on matches the "stuck Loading..."
+    // outlier reported against the initial v0.7.5 series. Defaulting
+    // off here fixes that regression for every Resolve session without
+    // requiring an env var; an explicit `CORRIDORKEY_IO_BINDING=on`
+    // still opts back in for benchmark comparisons. The CLI and
+    // `ofx_benchmark_harness` are unaffected because they do not run
+    // this entrypoint.
+    if (std::getenv("CORRIDORKEY_IO_BINDING") == nullptr) {
+        _putenv_s("CORRIDORKEY_IO_BINDING", "off");
+    }
+
     auto args = command_line_arguments();
     if (!args) {
         return 1;
