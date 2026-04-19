@@ -390,23 +390,17 @@ function Invoke-ModelPreparation {
     try {
         Write-Host "[1/6] Exporting CorridorKey ONNX models..."
         $resolutions = @(512, 768, 1024, 1536, 2048)
-        $staticResolutions = @(1536, 2048)
         foreach ($resolution in $resolutions) {
-            $isStatic = $staticResolutions -contains $resolution
-            $mode = if ($isStatic) { "static" } else { "dynamic" }
-            Write-Host "  -> Exporting $resolution px runtime artifact family ($mode)..." -ForegroundColor Cyan
-            $exportArgs = @(
-                "run", "python", "export_onnx.py",
-                "--ckpt", $CheckpointPath,
-                "--out", $baseModelPath,
-                "--resolutions", "$resolution",
-                "--repo-path", $SourceRepo
-            )
-            if ($isStatic) {
-                $exportArgs += "--static"
-            }
+            Write-Host "  -> Exporting $resolution px runtime artifact family..." -ForegroundColor Cyan
             try {
-                Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments $exportArgs
+                Invoke-ExternalCommand -FilePath $UvPath -WorkingDirectory $toolDir -Arguments @(
+                    "run", "python", "export_onnx.py",
+                    "--ckpt", $CheckpointPath,
+                    "--out", $baseModelPath,
+                    "--resolutions", "$resolution",
+                    "--static-resolutions", "1536", "2048",
+                    "--repo-path", $SourceRepo
+                )
             } catch {
                 $generationFailures += [ordered]@{
                     stage = "export"
