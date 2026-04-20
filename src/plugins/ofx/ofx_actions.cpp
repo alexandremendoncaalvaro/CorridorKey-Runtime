@@ -132,7 +132,7 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
 }
 
 void define_push_button_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                              const char* hint, const char* parent = nullptr) {
+                              const char* hint, const char* parent = nullptr, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypePushButton, name, &param_props) !=
         kOfxStatOK) {
@@ -140,6 +140,9 @@ void define_push_button_param(OfxParamSetHandle param_set, const char* name, con
     }
 
     g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    if (secret) {
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
+    }
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -147,7 +150,8 @@ void define_push_button_param(OfxParamSetHandle param_set, const char* name, con
 }
 
 void define_info_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                       const char* value, const char* hint, const char* parent = nullptr) {
+                       const char* value, const char* hint, const char* parent = nullptr,
+                       bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props) !=
         kOfxStatOK) {
@@ -160,6 +164,9 @@ void define_info_param(OfxParamSetHandle param_set, const char* name, const char
                                      kOfxParamStringIsLabel);
     g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, 0);
     g_suites.property->propSetInt(param_props, kOfxParamPropEvaluateOnChange, 0, 0);
+    if (secret) {
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
+    }
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -282,13 +289,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         std::string("CorridorKey v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
-    define_info_param(param_set, kParamUpdateStatus, "Update", "",
-                      "Shows when a newer CorridorKey release is available on GitHub.",
-                      "runtime_group");
-    define_push_button_param(param_set, kParamOpenUpdatePage, "Open Latest Release",
-                             "Open the GitHub page for the latest CorridorKey release.",
-                             "runtime_group");
-
     define_runtime_status_param(
         param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
         "Shows the backend currently used by this OFX instance.", "runtime_group");
@@ -329,6 +329,13 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Shows whether the last frame result came from a backend render, shared cache, or "
         "instance cache.",
         "runtime_group");
+
+    define_info_param(param_set, kParamUpdateStatus, "", "",
+                      "Shows when a newer CorridorKey release is available on GitHub.",
+                      "runtime_group", true);
+    define_push_button_param(param_set, kParamOpenUpdatePage, "Download New Version",
+                             "Open the GitHub page to download the available CorridorKey update.",
+                             "runtime_group", true);
 
     // --- Group 2: Help & Docs (actionable links only) ---
     define_group_param(param_set, kParamHelpGroup, "Help & Docs", false);
@@ -379,6 +386,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
                              "Open the troubleshooting guide on GitHub.", kParamHelpGroup);
+    define_push_button_param(param_set, kParamCheckUpdates, "Check for Updates",
+                             "Manually check GitHub for a newer CorridorKey release.",
+                             kParamHelpGroup);
 
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
@@ -579,7 +589,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_bool_param(
         param_set, kParamIncludePreReleases, "Include Pre-releases in Update Check", 0,
         "When enabled, the update banner surfaces pre-release builds in addition to stable "
-        "releases. Takes effect on the next plugin instance.",
+        "releases. Re-evaluates against the cached release list on the next panel refresh.",
         "advanced_runtime_group");
 
     log_message("describe_in_context", "Describe in context completed.");

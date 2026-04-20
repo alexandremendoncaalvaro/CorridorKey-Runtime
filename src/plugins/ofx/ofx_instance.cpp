@@ -42,6 +42,8 @@ extern char** environ;
 
 namespace corridorkey::ofx {
 
+void set_param_secret(OfxParamHandle param, bool secret);
+
 namespace {
 
 constexpr const char* kRepoHelpBaseUrl =
@@ -66,16 +68,23 @@ UpdateCheckState& update_check_state() {
     return state;
 }
 
-void kickoff_global_update_check() {
+void kickoff_global_update_check(bool force_refresh = false) {
     auto& state = update_check_state();
+    if (force_refresh) {
+        state.done.store(false, std::memory_order_release);
+        state.started.store(false, std::memory_order_release);
+    }
     bool expected = false;
     if (!state.started.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         return;
     }
-    std::thread([&state]() {
+    std::thread([&state, force_refresh]() {
         app::VersionCheckOptions options;
         options.current_version = CORRIDORKEY_DISPLAY_VERSION_STRING;
         options.include_prereleases = true;
+        if (force_refresh) {
+            options.cache_ttl = std::chrono::seconds(0);
+        }
         (void)app::check_for_update(options);
         auto cache = app::read_cache(app::default_cache_path());
         {
@@ -100,8 +109,8 @@ std::optional<app::UpdateInfo> current_update_info(bool include_prereleases) {
 }
 
 std::string update_banner_text(const app::UpdateInfo& info) {
-    return std::string("Update available: v") + info.latest_version +
-           (info.is_prerelease ? " (pre-release)" : " (stable)");
+    return std::string("New version available: v") + info.latest_version +
+           (info.is_prerelease ? " (pre-release)" : "");
 }
 
 bool open_external_url(const std::string& url) {
@@ -822,7 +831,11 @@ void update_runtime_panel_values(InstanceData* data) {
                            is_loading ? "Loading..." : runtime_backend_work_runtime_label(*data));
 
     const bool include_prereleases = get_bool_param_value(data->include_pre_releases_param, false);
-    if (auto info = current_update_info(include_prereleases); info.has_value()) {
+    auto info = current_update_info(include_prereleases);
+    const bool show_banner = info.has_value();
+    set_param_secret(data->update_status_param, !show_banner);
+    set_param_secret(data->open_update_page_param, !show_banner);
+    if (show_banner) {
         set_string_param_value(data->update_status_param, update_banner_text(*info));
     } else {
         set_string_param_value(data->update_status_param, "");
@@ -1038,6 +1051,7 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data) {
 }
 
 void set_param_enabled(OfxParamHandle param, bool enabled);
+void set_param_secret(OfxParamHandle param, bool secret);
 void sync_dependent_params(InstanceData* data);
 
 OfxStatus create_instance(OfxImageEffectHandle instance) {
@@ -1955,6 +1969,16 @@ void set_param_enabled(OfxParamHandle param, bool enabled) {
     }
 }
 
+void set_param_secret(OfxParamHandle param, bool secret) {
+    if (param == nullptr) {
+        return;
+    }
+    OfxPropertySetHandle props = nullptr;
+    if (g_suites.parameter->paramGetPropertySet(param, &props) == kOfxStatOK) {
+        g_suites.property->propSetInt(props, kOfxParamPropSecret, 0, secret ? 1 : 0);
+    }
+}
+
 void sync_dependent_params(InstanceData* data) {
     int tiling_enabled = 0;
     if (data->enable_tiling_param) {
@@ -1994,6 +2018,11 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                     post_message(kOfxMessageError, ("Failed to open release page: " + url).c_str(),
                                  instance);
                 }
+                return kOfxStatOK;
+            }
+            if (changed_param == kParamCheckUpdates) {
+                kickoff_global_update_check(true);
+                data->runtime_panel_dirty = true;
                 return kOfxStatOK;
             }
             if (changed_param == kParamIncludePreReleases) {

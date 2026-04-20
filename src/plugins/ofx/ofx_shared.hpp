@@ -91,6 +91,7 @@ constexpr const char* kParamOpenTroubleshooting = "open_troubleshooting";
 constexpr const char* kParamHelpGroup = "help_group";
 constexpr const char* kParamUpdateStatus = "update_status";
 constexpr const char* kParamOpenUpdatePage = "open_update_page";
+constexpr const char* kParamCheckUpdates = "check_updates";
 constexpr const char* kParamIncludePreReleases = "include_pre_releases";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
