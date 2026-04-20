@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace corridorkey::app {
 
@@ -26,10 +27,15 @@ struct VersionCheckOptions {
     std::string current_version;
     std::string repository = "alexandremendoncaalvaro/CorridorKey-Runtime";
     bool include_prereleases = false;
+    std::string platform_code;
     std::filesystem::path cache_path;
     std::chrono::seconds cache_ttl = std::chrono::hours(24);
     std::chrono::milliseconds network_timeout = std::chrono::seconds(5);
 };
+
+CORRIDORKEY_API std::string_view current_platform_code();
+
+CORRIDORKEY_API std::string prerelease_platform_code(const std::string& prerelease);
 
 CORRIDORKEY_API std::optional<SemVer> parse_semver(const std::string& version);
 

@@ -26,35 +26,84 @@ synchronized from it by the Windows packaging scripts.
 
 ### Pre-release labels
 
-Iterative pre-release candidates against a fixed public version use a dashed
-suffix, passed via `-DisplayVersionLabel`:
+Iterative pre-release candidates against a fixed public version use a
+platform-qualified SemVer 2.0.0 prerelease identifier, passed via
+`-DisplayVersionLabel`:
 
 ```powershell
-.\scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-12
+.\scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-win.22
 ```
 
-The suffix is baked into the OFX panel, the CLI `--version` report, and the
-runtime-server log filename (`ofx_runtime_server_v<label>.log`) so the
-operator never has to guess which build is installed. Public releases (no
-pre-release cycle in progress) are cut without `-DisplayVersionLabel`.
+The label is baked into the OFX panel, the CLI `--version` report, the
+runtime-server log filename (`ofx_runtime_server_v<label>.log`), and the
+dist artifact filenames so the operator never has to guess which build is
+installed. Public releases (no pre-release cycle in progress) are cut
+without `-DisplayVersionLabel`; `CMakeLists.txt` `VERSION` is authoritative
+and artifact names match it exactly.
 
-**Numbering rules for a new cycle**:
+**Tag format**. The Git tag, the display label, and the artifact filenames
+all use the same string:
 
-- The suffix counter does not restart when a pre-release trajectory is
-  reverted or abandoned. If the last shipped pre-release of `X.Y.Z` was
-  `-4`, the next cycle's first candidate starts at `-10` or higher, not
-  `-1`. Jumping over the prior range makes it unambiguous in log files,
-  screenshots, and bug reports that a build is on the new cycle, and
-  avoids operator confusion between a `-1` that was the original start
-  and a `-1` that was a reboot.
-- Use round jumps between cycles (`-10`, `-20`, `-30`) so a counter like
-  `-12` immediately reads as "second candidate of the cycle that started
-  at `-10`". This matches how the optimization measurement ledger
-  labels its `phase_9_*` track.
+- Windows prerelease: `vX.Y.Z-win.N`
+- macOS prerelease: `vX.Y.Z-mac.N`
+- Linux prerelease: `vX.Y.Z-linux.N`
+- Stable (all platforms): `vX.Y.Z` with no suffix
+
+The platform identifier (`win`, `mac`, `linux`) is required on every
+prerelease tag. A suffix-only tag like `v0.7.5-22` is not valid and will be
+rejected by the publishing pipeline. The auto-updater in
+[version_check.cpp](../src/app/version_check.cpp) filters releases by this
+identifier so a Windows user on `v0.7.5-win.22` never receives a macOS
+prerelease and vice versa. Stable releases without a suffix apply to all
+platforms universally.
+
+**Per-platform counters**. Each platform maintains its own independent
+counter (`N` above). Windows and macOS iterate at whatever cadence their
+track demands; they do not share or coordinate the counter.
+
+**Numbering rules for a new cycle** (applied per platform):
+
+- The counter does not restart when a pre-release trajectory is reverted
+  or abandoned. If the last shipped pre-release of `X.Y.Z-<platform>`
+  was `.4`, the next cycle's first candidate starts at `.10` or higher,
+  not `.1`. Jumping over the prior range makes it unambiguous in log
+  files, screenshots, and bug reports that a build is on the new cycle,
+  and avoids operator confusion between a `.1` that was the original
+  start and a `.1` that was a reboot.
+- Use round jumps between cycles (`.10`, `.20`, `.30`) so a counter like
+  `-win.12` immediately reads as "second candidate of the Windows cycle
+  that started at `.10`". This matches how the optimization measurement
+  ledger labels its `phase_9_*` track.
 - Always record the pre-release label in
   [OPTIMIZATION_MEASUREMENTS.md](OPTIMIZATION_MEASUREMENTS.md) with the
   measured numbers at the time of cut, even if the build is later
   abandoned — the ledger is the cross-session memory of the track.
+
+### Tag and release immutability
+
+A published tag is immutable. Once a release is pushed to GitHub, its
+assets must never be replaced, re-uploaded, or re-pointed to a different
+commit. A build that needs to be redone gets a new tag with the next
+counter value. This rule is absolute: the SemVer comparator in
+[version_check.cpp](../src/app/version_check.cpp) trusts the tag name as
+ground truth, so mutating a published tag's assets breaks every installed
+client that cached a stale URL from it.
+
+This also forbids hosting multiple platforms' assets under a single
+shared tag (for example, Windows `-win.22` alongside macOS `-mac.10`
+under one `v0.7.5` release). Each platform-qualified tag owns exactly
+its platform's assets.
+
+### GitHub release publishing flags
+
+The canonical Windows release pipeline calls `gh release create` with
+these flags, derived from the tag shape:
+
+- Tag with `-<platform>.N` suffix → `--prerelease`
+- Tag with no suffix → `--latest`
+
+Stable release `vX.Y.Z` is published only after every active platform
+track has shipped its final prerelease for that `X.Y.Z` cycle.
 
 ## 2. Standardized Artifact Naming
 
@@ -77,26 +126,28 @@ packaging scripts internally.
 
 - Apple Silicon: `CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg`
 
-### Release Archives
+### Linux Installers
 
-- `CorridorKey_Resolve_vX.Y.Z_Windows_RTX.zip`
-- `CorridorKey_Resolve_vX.Y.Z_Windows_DirectML.zip`
+Linux is an experimental product track. Packaging emits two installer wrappers
+around the same validated `CorridorKey.ofx.bundle` payload, one per
+distribution family, so each user installs through the idiomatic package
+manager of the host distribution.
 
-### Linux Installers and Archives
-
-Linux is an experimental product track. Packaging emits three wrappers around
-the same validated `CorridorKey.ofx.bundle` payload, one per distribution
-family, so each user installs through the idiomatic package manager of the
-host distribution.
-
-- Universal portable archive: `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz`
 - Debian package (Ubuntu 22.04 / 24.04 LTS): `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb`
 - RPM package (Rocky Linux / RHEL 9): `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm`
 
-All three artifacts share the same embedded `CorridorKey.ofx.bundle`,
-`bundle_validation.json`, and model inventory. The wrappers differ only in how
-they install the bundle under `/usr/OFX/Plugins/` and how they manage the
+Both artifacts share the same embedded `CorridorKey.ofx.bundle`,
+`bundle_validation.json`, and model inventory. They differ only in how they
+install the bundle under `/usr/OFX/Plugins/` and how they manage the
 `/usr/local/bin/corridorkey` symlink.
+
+### One installer per platform
+
+Release assets are installers only. Portable archives (`.zip` for Windows,
+`.tar.gz` for Linux) are not produced or published. Every supported
+platform has exactly one installer artifact per track, matching the
+filenames above. A user on an unsupported distro or locked-down Windows
+host is not a target; do not add fallback archives to accommodate them.
 
 ## 3. Build and Packaging Process
 
@@ -269,10 +320,11 @@ through CMake into `include/corridorkey/version.hpp`
 also bake the label into the dist artifact names when present:
 `CorridorKey_Resolve_v<label>_Windows_RTX_Installer.exe`,
 `CorridorKey_Resolve_v<label>_Windows_RTX.zip`,
-`CorridorKey_Resolve_v<label>_Windows_RTX\\`. Public releases drop the
-flag; `CMakeLists.txt` `VERSION` is authoritative and artifact names
+`CorridorKey_Resolve_v<label>_Windows_RTX\\`. On Windows the label must
+be of the form `X.Y.Z-win.N` (platform-qualified). Public releases drop
+the flag; `CMakeLists.txt` `VERSION` is authoritative and artifact names
 match it exactly. The numbering rule (counters do not restart across
-reverted cycles; jump to `-10`, `-20`, ...) is documented in
+reverted cycles; jump to `.10`, `.20`, ...) is documented in
 section 1 "Pre-release labels".
 
 Use the following commands according to the state you have:
@@ -403,7 +455,6 @@ Use the following release description template:
 - Include this section only when the release contains a Linux artifact.
 - **Ubuntu 22.04 / 24.04 LTS (experimental):** Download `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb`.
 - **Rocky Linux / RHEL 9 (experimental):** Download `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm`.
-- **Other Linux distributions (experimental, unvalidated):** Download `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz`.
 - Do not describe the Linux artifacts as official support. Refer readers to `help/SUPPORT_MATRIX.md` for the real support designation. A proprietary NVIDIA driver 555 or newer is required; the CUDA Toolkit is not required.
 
 ## Installation Instructions

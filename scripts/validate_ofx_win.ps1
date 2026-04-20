@@ -24,6 +24,116 @@ function Test-CorridorKeyJsonProperty {
     return $Object.PSObject.Properties.Match($Name).Count -gt 0
 }
 
+function Resolve-CorridorKeyDumpbinPath {
+    $dumpbinCommand = Get-Command "dumpbin.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $dumpbinCommand) {
+        return $dumpbinCommand.Source
+    }
+
+    $toolRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:VSINSTALLDIR)) {
+        $toolRoots += Join-Path $env:VSINSTALLDIR "VC\Tools\MSVC"
+    }
+
+    $vswhereCommand = Get-Command "vswhere.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $vswhereCommand) {
+        $installationPath = & $vswhereCommand.Source -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($installationPath)) {
+            $toolRoots += Join-Path ($installationPath | Out-String).Trim() "VC\Tools\MSVC"
+        }
+    }
+
+    foreach ($installationRoot in @(
+            "C:\Program Files\Microsoft Visual Studio\2022\Community",
+            "C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+            "C:\Program Files\Microsoft Visual Studio\2022\Professional",
+            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+        )) {
+        $toolRoots += Join-Path $installationRoot "VC\Tools\MSVC"
+    }
+
+    foreach ($toolRoot in ($toolRoots | Select-Object -Unique)) {
+        if (-not (Test-Path $toolRoot)) {
+            continue
+        }
+        $candidate = Get-ChildItem -Path $toolRoot -Directory | Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName "bin\Hostx64\x64\dumpbin.exe" } |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($null -ne $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Get-CorridorKeyPeImports {
+    param(
+        [string]$DumpbinPath,
+        [string]$ImagePath
+    )
+
+    $output = & $DumpbinPath /DEPENDENTS $ImagePath 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return @()
+    }
+
+    return $output |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -match '^[A-Za-z0-9_.-]+\.dll$' } |
+        Select-Object -Unique
+}
+
+# System DLLs that are always resolvable from Windows and must not be bundled.
+# Extends the list shared by build_ort_windows_rtx.ps1 with networking/UI deps
+# that cpr/libcurl can pull in (wintrust, crypt32, bcrypt variants).
+$script:CorridorKeySystemDllAllowlist = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($dll in @(
+        "KERNEL32.dll","KERNELBASE.dll","USER32.dll","GDI32.dll","GDI32FULL.dll",
+        "ADVAPI32.dll","SHELL32.dll","SHLWAPI.dll","OLE32.dll","OLEAUT32.dll",
+        "COMBASE.dll","RPCRT4.dll","WS2_32.dll","WLDAP32.dll","WININET.dll",
+        "WINHTTP.dll","CRYPT32.dll","BCRYPT.dll","BCRYPTPRIMITIVES.dll",
+        "SECUR32.dll","NCRYPT.dll","WINTRUST.dll","IPHLPAPI.dll",
+        "NTDLL.dll","PSAPI.DLL","COMDLG32.dll","DXGI.dll","SETUPAPI.dll",
+        "IMM32.dll","USERENV.dll","POWRPROF.dll",
+        "VCRUNTIME140.dll","VCRUNTIME140_1.dll","MSVCP140.dll","MSVCP140_1.dll","MSVCP140_2.dll",
+        "UCRTBASE.dll","MSVCRT.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll","api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll","api-ms-win-crt-string-l1-1-0.dll",
+        "api-ms-win-crt-convert-l1-1-0.dll","api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-filesystem-l1-1-0.dll","api-ms-win-crt-environment-l1-1-0.dll",
+        "api-ms-win-crt-time-l1-1-0.dll","api-ms-win-crt-locale-l1-1-0.dll",
+        "api-ms-win-crt-utility-l1-1-0.dll","api-ms-win-crt-conio-l1-1-0.dll",
+        "api-ms-win-crt-process-l1-1-0.dll"
+    )) {
+    [void]$script:CorridorKeySystemDllAllowlist.Add($dll)
+}
+
+function Test-CorridorKeyPeImportsResolvable {
+    param(
+        [string]$ImagePath,
+        [string]$BundleDir,
+        [string]$DumpbinPath
+    )
+
+    $missing = @()
+    $imports = Get-CorridorKeyPeImports -DumpbinPath $DumpbinPath -ImagePath $ImagePath
+    foreach ($import in $imports) {
+        if ($script:CorridorKeySystemDllAllowlist.Contains($import)) {
+            continue
+        }
+        # api-ms-win-*.dll family is large; match by prefix.
+        if ($import -like "api-ms-win-*.dll" -or $import -like "ext-ms-*.dll") {
+            continue
+        }
+        $bundledPath = Join-Path $BundleDir $import
+        if (-not (Test-Path $bundledPath)) {
+            $missing += $import
+        }
+    }
+    return ,$missing
+}
+
 function Get-CorridorKeyInventoryContractIssues {
     param(
         [object]$Inventory,
@@ -178,6 +288,32 @@ Write-Host "[PASS] Found CLI binary ($([math]::Round($cliBinarySize / 1MB, 2)) M
 
 $runtimeServerSize = (Get-Item $runtimeServer).Length
 Write-Host "[PASS] Found runtime server binary ($([math]::Round($runtimeServerSize / 1MB, 2)) MB)" -ForegroundColor Green
+
+# Regression guard: any import beyond the system allowlist must be packaged
+# in Contents\Win64\. Catches the failure mode where a new target_link_libraries
+# (e.g. cpr pulling libcurl+OpenSSL for the update check) lands without the
+# corresponding POST_BUILD copy, shipping a bundle that cannot load in Resolve.
+$dumpbinPath = Resolve-CorridorKeyDumpbinPath
+if ($null -eq $dumpbinPath) {
+    Write-Host "[WARN] dumpbin.exe not found; skipping PE import scan. Run from a VS developer shell to enable." -ForegroundColor Yellow
+} else {
+    $importScanTargets = @($plugin, $cliBinary, $runtimeServer)
+    $importScanFailures = @()
+    foreach ($imageTarget in $importScanTargets) {
+        $missing = Test-CorridorKeyPeImportsResolvable -ImagePath $imageTarget -BundleDir $win64Dir -DumpbinPath $dumpbinPath
+        $imageName = Split-Path $imageTarget -Leaf
+        if ($missing.Count -eq 0) {
+            Write-Host "[PASS] PE imports for $imageName all resolvable within bundle" -ForegroundColor Green
+        } else {
+            Write-Host "[FAIL] $imageName depends on DLL(s) missing from bundle: $($missing -join ', ')" -ForegroundColor Red
+            $importScanFailures += [PSCustomObject]@{ image = $imageName; missing = $missing }
+        }
+    }
+    if ($importScanFailures.Count -gt 0) {
+        $summary = ($importScanFailures | ForEach-Object { "$($_.image) -> $($_.missing -join ', ')" }) -join '; '
+        throw "PE import scan failed. Unbundled dependencies would prevent Resolve from loading the plugin: $summary"
+    }
+}
 
 $supportedBackends = @()
 Push-Location $win64Dir

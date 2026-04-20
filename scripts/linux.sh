@@ -43,15 +43,14 @@ Tasks:
   build          Configure and compile with --preset (default release-linux-portable).
   prepare-cuda   Stage the curated Linux ONNX Runtime GPU drop at
                  vendor/onnxruntime-linux-cuda/.
-  package-ofx    Build the OFX bundle and assemble the .tar.gz, .deb, and .rpm
-                 artifacts in dist/. Requires --version.
+  package-ofx    Build the OFX bundle and assemble the .deb and .rpm
+                 installers in dist/. Requires --version.
   release        Full pipeline: prepare-cuda (if needed) -> build -> tests ->
                  package-ofx -> validate. Requires --version.
   sync-version   Read CMakeLists.txt VERSION and update embedded GUI version
                  metadata. Safe to run any time.
 
 Artifacts emitted by package-ofx and release:
-  dist/CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz
   dist/CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb
   dist/CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm
 USAGE
@@ -114,7 +113,7 @@ task_release() {
         "${REPO_ROOT}/dist/CorridorKey_Resolve_v${VERSION}_Linux_RTX/CorridorKey.ofx.bundle"
     say "Release pipeline complete."
     say "Artifacts:"
-    (cd "${REPO_ROOT}" && ls -lh dist/CorridorKey_Resolve_v${VERSION}_Linux_RTX.{tar.gz,deb,rpm} 2>/dev/null || true)
+    (cd "${REPO_ROOT}" && ls -lh dist/CorridorKey_Resolve_v${VERSION}_Linux_RTX.{deb,rpm} 2>/dev/null || true)
 }
 
 task_sync_version() {

@@ -162,7 +162,6 @@ $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { 
 $releaseBasename = "CorridorKey_Resolve_v${artifactVersionTag}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
-$zipPath = Join-Path $repoRoot ("dist\" + $releaseBasename + ".zip")
 $installerPath = Join-Path $repoRoot ("dist\" + $releaseBasename + "_Installer.exe")
 $installScriptPath = Join-Path $releaseDir "install_plugin.bat"
 $readmePath = Join-Path $releaseDir "README.txt"
@@ -172,9 +171,6 @@ $tempNsiPath = Join-Path $env:TEMP ("corridorkey_ofx_installer_" + [System.Guid]
 Write-Host "[1/5] Preparing release directory..." -ForegroundColor Cyan
 if (Test-Path $releaseDir) {
     Remove-Item $releaseDir -Recurse -Force
-}
-if (Test-Path $zipPath) {
-    Remove-Item $zipPath -Force
 }
 if (Test-Path $installerPath) {
     Remove-Item $installerPath -Force
@@ -221,7 +217,6 @@ Write-ReleaseReadme -Path $readmePath `
     -ReleaseBasename $releaseBasename `
     -ReleaseLabel $releaseLabel `
     -ModelProfile $ModelProfile
-Compress-Archive -Path $releaseDir -DestinationPath $zipPath -CompressionLevel Optimal
 
 $escapedBundlePath = $bundlePath.Replace('\', '\\')
 $escapedInstallerPath = $installerPath.Replace('\', '\\')
@@ -344,5 +339,4 @@ try {
 }
 
 Write-Host "Release directory ready at: $releaseDir" -ForegroundColor Green
-Write-Host "Release archive ready at: $zipPath" -ForegroundColor Green
 Write-Host "Installer ready at: $installerPath" -ForegroundColor Green

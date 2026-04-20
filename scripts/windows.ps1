@@ -18,13 +18,34 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
+function Assert-CorridorKeyWindowsReleaseLabelFormat {
+    param(
+        [string]$Version,
+        [string]$DisplayVersionLabel
+    )
+    if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+        return
+    }
+    $pattern = '^(?<core>\d+\.\d+\.\d+)-win\.(?<counter>\d+)$'
+    $match = [regex]::Match($DisplayVersionLabel, $pattern)
+    if (-not $match.Success) {
+        throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows prerelease label. Expected form: X.Y.Z-win.N (see docs/RELEASE_GUIDELINES.md section 1)."
+    }
+    $labelCore = $match.Groups['core'].Value
+    if (-not [string]::IsNullOrWhiteSpace($Version) -and $labelCore -ne $Version) {
+        throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
+    }
+}
+
 function Assert-CorridorKeyVariantDoctorHealthy {
     param(
         [string]$Version,
-        [string]$ReleaseSuffix
+        [string]$ReleaseSuffix,
+        [string]$DisplayVersionLabel = ""
     )
 
-    $bundleValidationPath = Join-Path $repoRoot ("dist\\CorridorKey_Resolve_v${Version}_Windows_${ReleaseSuffix}\\bundle_validation.json")
+    $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+    $bundleValidationPath = Join-Path $repoRoot ("dist\CorridorKey_Resolve_v${artifactVersionTag}_Windows_${ReleaseSuffix}\bundle_validation.json")
     Assert-CorridorKeyBundleValidationHealthy `
         -ValidationReportPath $bundleValidationPath `
         -Label "Variant $ReleaseSuffix" | Out-Null
@@ -65,12 +86,19 @@ $resolvedVersion = Initialize-CorridorKeyVersion `
     -Version $Version `
     -SyncGuiMetadata:$syncGuiMetadata
 
+Assert-CorridorKeyWindowsReleaseLabelFormat `
+    -Version $resolvedVersion `
+    -DisplayVersionLabel $DisplayVersionLabel
+
 $prepareArguments = @("-Version", $resolvedVersion, "-BuildPreset", $Preset)
 if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
     $prepareArguments += @("-Checkpoint", $Checkpoint)
 }
 if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
     $prepareArguments += @("-CorridorKeyRepo", $CorridorKeyRepo)
+}
+if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+    $prepareArguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
 }
 
 Write-Host "[windows] Task: $Task" -ForegroundColor Cyan
@@ -132,9 +160,13 @@ switch ($Task) {
                 "-Version", $resolvedVersion,
                 "-ReleaseSuffix", $variant.Suffix,
                 "-ModelProfile", $variant.ModelProfile
-            ) + $additionalArguments
+            )
+            if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+                $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+            }
+            $arguments += $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_ofx_installer_windows.ps1" -Arguments $arguments
-            Assert-CorridorKeyVariantDoctorHealthy -Version $resolvedVersion -ReleaseSuffix $variant.Suffix
+            Assert-CorridorKeyVariantDoctorHealthy -Version $resolvedVersion -ReleaseSuffix $variant.Suffix -DisplayVersionLabel $DisplayVersionLabel
         }
         break
     }

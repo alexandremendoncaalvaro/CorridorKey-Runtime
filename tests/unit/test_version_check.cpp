@@ -60,6 +60,42 @@ TEST_CASE("is_newer_version ordering", "[unit][version_check]") {
     REQUIRE(is_newer_version("0.7.6", "garbage"));
 }
 
+TEST_CASE("is_newer_version uses SemVer 2.0.0 numeric prerelease precedence",
+          "[unit][version_check]") {
+    using corridorkey::app::is_newer_version;
+
+    REQUIRE(is_newer_version("0.7.5-win.22", "0.7.5-win.21"));
+    REQUIRE(is_newer_version("0.7.5-win.11", "0.7.5-win.2"));
+    REQUIRE(is_newer_version("0.7.5-win.100", "0.7.5-win.99"));
+    REQUIRE_FALSE(is_newer_version("0.7.5-win.21", "0.7.5-win.22"));
+    REQUIRE_FALSE(is_newer_version("0.7.5-win.22", "0.7.5-win.22"));
+}
+
+TEST_CASE("prerelease_platform_code extracts the leading non-numeric identifier",
+          "[unit][version_check]") {
+    using corridorkey::app::prerelease_platform_code;
+
+    REQUIRE(prerelease_platform_code("win.22") == "win");
+    REQUIRE(prerelease_platform_code("mac.10") == "mac");
+    REQUIRE(prerelease_platform_code("linux.1") == "linux");
+    REQUIRE(prerelease_platform_code("").empty());
+    REQUIRE(prerelease_platform_code("22").empty());
+    REQUIRE(prerelease_platform_code("rc.1") == "rc");
+}
+
+TEST_CASE("current_platform_code reports the compile-time platform", "[unit][version_check]") {
+    using corridorkey::app::current_platform_code;
+
+    const auto code = current_platform_code();
+#if defined(_WIN32)
+    REQUIRE(code == "win");
+#elif defined(__APPLE__)
+    REQUIRE(code == "mac");
+#elif defined(__linux__)
+    REQUIRE(code == "linux");
+#endif
+}
+
 TEST_CASE("cache round-trips stable and prerelease entries", "[unit][version_check]") {
     using namespace corridorkey::app;
 
@@ -117,7 +153,7 @@ TEST_CASE("select_update respects prerelease toggle and current version", "[unit
 
     CachedCheck cache;
     cache.stable = UpdateInfo{"0.7.6", "https://example.com/stable", false};
-    cache.prerelease = UpdateInfo{"0.7.7-rc.1", "https://example.com/pre", true};
+    cache.prerelease = UpdateInfo{"0.7.7-win.1", "https://example.com/pre", true};
 
     auto stable_only = select_update(cache, "0.7.5", false);
     REQUIRE(stable_only.has_value());
@@ -125,11 +161,29 @@ TEST_CASE("select_update respects prerelease toggle and current version", "[unit
 
     auto with_prereleases = select_update(cache, "0.7.5", true);
     REQUIRE(with_prereleases.has_value());
-    REQUIRE(with_prereleases->latest_version == "0.7.7-rc.1");
+    REQUIRE(with_prereleases->latest_version == "0.7.7-win.1");
 
     auto no_update = select_update(cache, "0.7.7", true);
     REQUIRE_FALSE(no_update.has_value());
 
     CachedCheck empty_cache;
     REQUIRE_FALSE(select_update(empty_cache, "0.7.5", true).has_value());
+}
+
+TEST_CASE("select_update does not offer a later prerelease when cache has only prereleases",
+          "[unit][version_check][regression]") {
+    using namespace corridorkey::app;
+
+    CachedCheck cache;
+    cache.prerelease = UpdateInfo{"0.7.5-win.22", "https://example.com/pre", true};
+
+    auto same_build = select_update(cache, "0.7.5-win.22", true);
+    REQUIRE_FALSE(same_build.has_value());
+
+    auto older_build = select_update(cache, "0.7.5-win.21", true);
+    REQUIRE(older_build.has_value());
+    REQUIRE(older_build->latest_version == "0.7.5-win.22");
+
+    auto stable_installed = select_update(cache, "0.7.5", true);
+    REQUIRE_FALSE(stable_installed.has_value());
 }

@@ -2,6 +2,8 @@
 
 #include <cpr/cpr.h>
 
+#include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cstdlib>
 #include <fstream>
@@ -9,6 +11,7 @@
 #include <sstream>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #if defined(_WIN32)
 #include <shlobj.h>
@@ -38,6 +41,66 @@ std::string strip_leading_v(const std::string& value) {
         return value.substr(1);
     }
     return value;
+}
+
+std::vector<std::string> split_identifiers(std::string_view pre_release) {
+    std::vector<std::string> identifiers;
+    size_t start = 0;
+    while (start <= pre_release.size()) {
+        const auto next = pre_release.find('.', start);
+        const auto end = next == std::string_view::npos ? pre_release.size() : next;
+        identifiers.emplace_back(pre_release.substr(start, end - start));
+        if (next == std::string_view::npos) {
+            break;
+        }
+        start = next + 1;
+    }
+    return identifiers;
+}
+
+bool is_numeric_identifier(std::string_view value) {
+    if (value.empty()) {
+        return false;
+    }
+    return std::all_of(value.begin(), value.end(),
+                       [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+
+int compare_identifier(std::string_view a, std::string_view b) {
+    const bool a_num = is_numeric_identifier(a);
+    const bool b_num = is_numeric_identifier(b);
+    if (a_num && b_num) {
+        auto parsed_a = parse_int(a);
+        auto parsed_b = parse_int(b);
+        if (parsed_a.has_value() && parsed_b.has_value()) {
+            if (*parsed_a < *parsed_b) return -1;
+            if (*parsed_a > *parsed_b) return 1;
+            return 0;
+        }
+    }
+    if (a_num && !b_num) return -1;
+    if (!a_num && b_num) return 1;
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+}
+
+int compare_prerelease(std::string_view a, std::string_view b) {
+    if (a.empty() && b.empty()) return 0;
+    if (a.empty()) return 1;
+    if (b.empty()) return -1;
+    const auto ids_a = split_identifiers(a);
+    const auto ids_b = split_identifiers(b);
+    const size_t count = std::min(ids_a.size(), ids_b.size());
+    for (size_t i = 0; i < count; ++i) {
+        const int cmp = compare_identifier(ids_a[i], ids_b[i]);
+        if (cmp != 0) {
+            return cmp;
+        }
+    }
+    if (ids_a.size() < ids_b.size()) return -1;
+    if (ids_a.size() > ids_b.size()) return 1;
+    return 0;
 }
 
 #if defined(_WIN32)
@@ -83,7 +146,8 @@ std::optional<UpdateInfo> update_info_from_json(const nlohmann::json& node) {
 }
 
 CachedCheck build_cache_from_releases(const nlohmann::json& releases,
-                                      std::chrono::system_clock::time_point now) {
+                                      std::chrono::system_clock::time_point now,
+                                      std::string_view platform_code) {
     CachedCheck cache;
     cache.fetched_at_unix_seconds =
         std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
@@ -101,7 +165,19 @@ CachedCheck build_cache_from_releases(const nlohmann::json& releases,
         if (info.latest_version.empty()) {
             continue;
         }
-        if (info.is_prerelease) {
+        const auto parsed = parse_semver(info.latest_version);
+        if (!parsed.has_value()) {
+            continue;
+        }
+        const bool has_prerelease = !parsed->pre_release.empty();
+        if (has_prerelease) {
+            const std::string tag_platform = prerelease_platform_code(parsed->pre_release);
+            if (tag_platform.empty()) {
+                continue;
+            }
+            if (!platform_code.empty() && tag_platform != platform_code) {
+                continue;
+            }
             if (!cache.prerelease.has_value() ||
                 is_newer_version(info.latest_version, cache.prerelease->latest_version)) {
                 cache.prerelease = info;
@@ -194,13 +270,34 @@ bool is_newer_version(const std::string& latest, const std::string& current) {
     if (latest_sv->patch != current_sv->patch) {
         return latest_sv->patch > current_sv->patch;
     }
-    if (latest_sv->pre_release.empty() && !current_sv->pre_release.empty()) {
-        return true;
+    return compare_prerelease(latest_sv->pre_release, current_sv->pre_release) > 0;
+}
+
+std::string_view current_platform_code() {
+#if defined(_WIN32)
+    return "win";
+#elif defined(__APPLE__)
+    return "mac";
+#elif defined(__linux__)
+    return "linux";
+#else
+    return "";
+#endif
+}
+
+std::string prerelease_platform_code(const std::string& prerelease) {
+    if (prerelease.empty()) {
+        return {};
     }
-    if (!latest_sv->pre_release.empty() && current_sv->pre_release.empty()) {
-        return false;
+    const auto identifiers = split_identifiers(prerelease);
+    if (identifiers.empty()) {
+        return {};
     }
-    return latest_sv->pre_release > current_sv->pre_release;
+    const std::string& first = identifiers.front();
+    if (is_numeric_identifier(first)) {
+        return {};
+    }
+    return first;
 }
 
 std::filesystem::path default_cache_path() {
@@ -297,6 +394,9 @@ std::optional<UpdateInfo> check_for_update(const VersionCheckOptions& options) {
     }
     const auto cache_path = options.cache_path.empty() ? default_cache_path() : options.cache_path;
     const auto now = std::chrono::system_clock::now();
+    const std::string platform = options.platform_code.empty()
+                                     ? std::string(current_platform_code())
+                                     : options.platform_code;
 
     if (auto cache = read_cache(cache_path);
         cache.has_value() && is_cache_fresh(*cache, options.cache_ttl, now)) {
@@ -308,7 +408,7 @@ std::optional<UpdateInfo> check_for_update(const VersionCheckOptions& options) {
         return std::nullopt;
     }
 
-    auto cache = build_cache_from_releases(*releases, now);
+    auto cache = build_cache_from_releases(*releases, now, platform);
     write_cache(cache_path, cache);
     return select_update(cache, options.current_version, options.include_prereleases);
 }

@@ -4,7 +4,9 @@ param(
     [string]$Track = "rtx",
     [string]$DisplayVersionLabel = "",
     [switch]$SkipTests,
-    [switch]$CleanOnly
+    [switch]$CleanOnly,
+    [switch]$PublishGithub,
+    [string]$GithubRepo = "alexandremendoncaalvaro/CorridorKey-Runtime"
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,8 +22,84 @@ function Write-Success([string]$msg) {
     Write-Host "[SUCCESS] $msg" -ForegroundColor Green
 }
 
+function Assert-CorridorKeyWindowsReleaseLabel {
+    param(
+        [string]$Version,
+        [string]$DisplayVersionLabel
+    )
+    if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+        return
+    }
+    $pattern = '^(?<core>\d+\.\d+\.\d+)-win\.(?<counter>\d+)$'
+    $match = [regex]::Match($DisplayVersionLabel, $pattern)
+    if (-not $match.Success) {
+        throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows prerelease label. Expected form: X.Y.Z-win.N (see docs/RELEASE_GUIDELINES.md section 1)."
+    }
+    $labelCore = $match.Groups['core'].Value
+    if ($labelCore -ne $Version) {
+        throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
+    }
+}
+
+function Publish-CorridorKeyGithubRelease {
+    param(
+        [string]$Version,
+        [string]$DisplayVersionLabel,
+        [string]$Track,
+        [string]$GithubRepo,
+        [string]$RepoRoot
+    )
+    $tagLabel = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+    $tagName = "v$tagLabel"
+    $isPrerelease = -not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)
+
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if (-not $gh) {
+        throw "Cannot publish GitHub release: 'gh' CLI is not on PATH. Install GitHub CLI or publish manually."
+    }
+
+    $existing = & gh release view $tagName --repo $GithubRepo --json tagName 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existing)) {
+        throw "GitHub release '$tagName' already exists in $GithubRepo. Per docs/RELEASE_GUIDELINES.md, a published tag is immutable. Bump the counter and retry."
+    }
+
+    $assetGlobs = @()
+    foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
+        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_Resolve_v${tagLabel}_Windows_$($variant.Suffix)_Installer.exe"))
+    }
+    foreach ($asset in $assetGlobs) {
+        if (-not (Test-Path $asset)) {
+            throw "Expected release asset missing: $asset"
+        }
+    }
+
+    $titlePlatform = if ($isPrerelease) { "Windows prerelease" } else { "Windows" }
+    $title = "CorridorKey Resolve OFX v$tagLabel ($titlePlatform)"
+
+    $ghArgs = @(
+        "release", "create", $tagName,
+        "--repo", $GithubRepo,
+        "--title", $title,
+        "--notes", "Auto-published by scripts\release_pipeline_windows.ps1."
+    )
+    if ($isPrerelease) {
+        $ghArgs += "--prerelease"
+    } else {
+        $ghArgs += @("--latest")
+    }
+    $ghArgs += $assetGlobs
+
+    Write-Host "Publishing GitHub release: $tagName ($(if ($isPrerelease) { 'prerelease' } else { 'stable latest' }))"
+    & gh @ghArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "gh release create failed for $tagName."
+    }
+    Write-Success "Published GitHub release $tagName in $GithubRepo."
+}
+
 try {
     $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version -SyncGuiMetadata
+    Assert-CorridorKeyWindowsReleaseLabel -Version $Version -DisplayVersionLabel $DisplayVersionLabel
 
     $needsRtxTrack = $Track -in @("rtx", "all")
     $needsDirectMlTrack = $Track -in @("dml", "all")
@@ -156,6 +234,20 @@ try {
 
     Write-Step "Release v$Version is READY"
     Get-ChildItem "dist/*.exe" | Select-Object Name, @{Name="Size(MB)"; Expression={"{0:N2}" -f ($_.Length / 1MB)}} | Format-Table -AutoSize
+
+    if ($PublishGithub) {
+        Write-Step "Publishing GitHub Release"
+        Publish-CorridorKeyGithubRelease `
+            -Version $Version `
+            -DisplayVersionLabel $DisplayVersionLabel `
+            -Track $Track `
+            -GithubRepo $GithubRepo `
+            -RepoRoot $repoRoot
+    } else {
+        Write-Host "`n[INFO] -PublishGithub not set; skipping GitHub release publish." -ForegroundColor Yellow
+        Write-Host "       To publish: rerun with -ForwardArguments '-PublishGithub' through scripts\\windows.ps1," -ForegroundColor Yellow
+        Write-Host "       or call this script directly with -PublishGithub." -ForegroundColor Yellow
+    }
 
 } catch {
     Write-Host "`n[FATAL ERROR] Pipeline failed at step: $($_.InvocationInfo.ScriptName)" -ForegroundColor Red

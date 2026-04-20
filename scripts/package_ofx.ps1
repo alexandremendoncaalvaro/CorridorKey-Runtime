@@ -339,6 +339,28 @@ if ($requiresCudaRuntime) {
     foreach ($candidate in $cudartCandidates) {
         Copy-Item $candidate.FullName $win64Dir -Force
     }
+
+    # The RTX pipeline links CUDA NPP (gpu_resize). NPP ships only as DLLs
+    # on Windows (no static libs in CUDA 12.8), so we must bundle them or
+    # Resolve will silently fail to load the plugin on machines without a
+    # system CUDA install.
+    $cudaRoot = $env:CUDA_PATH
+    if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
+        $cudaRoot = $env:CUDA_PATH_V12_8
+    }
+    if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
+        $cudaRoot = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8"
+    }
+    $cudaBin = Join-Path $cudaRoot "bin"
+    $nppDllNames = @("nppc64_12.dll", "nppial64_12.dll", "nppidei64_12.dll", "nppig64_12.dll")
+    foreach ($nppName in $nppDllNames) {
+        $nppPath = Join-Path $cudaBin $nppName
+        if (-not (Test-Path $nppPath)) {
+            throw "Required CUDA NPP DLL not found: $nppPath (set CUDA_PATH to the CUDA 12.8 install root)."
+        }
+        Copy-Item $nppPath $win64Dir -Force
+    }
+    Write-Host "Copied CUDA NPP DLLs: $($nppDllNames -join ', ')"
 } else {
     Write-Host "Skipping CUDA runtime staging because no CUDA/TensorRT provider was found."
 }

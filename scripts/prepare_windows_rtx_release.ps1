@@ -12,6 +12,7 @@ param(
     [string]$PythonExe = "",
     [string]$Uv = "",
     [string]$BuildPreset = "release",
+    [string]$DisplayVersionLabel = "",
     [switch]$BootstrapOrtSource,
     [switch]$SkipModelPreparation,
     [switch]$SkipOrtBuild,
@@ -546,10 +547,12 @@ if (-not $SkipRuntimeBuild.IsPresent) {
     Write-Host "[5/5] Configuring and building CorridorKey with the curated runtime..."
     [void](Ensure-CorridorKeyOpenFxSdk -RepoRoot $repoRoot)
     Initialize-CorridorKeyMsvcEnvironment
-    Invoke-ExternalCommand -FilePath "cmake" -Arguments @(
+    $configureArgs = @(
         "--preset", $BuildPreset,
-        "-DCORRIDORKEY_WINDOWS_ORT_ROOT=$ortInstallDir"
-    ) -WorkingDirectory $repoRoot
+        "-DCORRIDORKEY_WINDOWS_ORT_ROOT=$ortInstallDir",
+        "-DCORRIDORKEY_DISPLAY_VERSION_LABEL=$DisplayVersionLabel"
+    )
+    Invoke-ExternalCommand -FilePath "cmake" -Arguments $configureArgs -WorkingDirectory $repoRoot
     Invoke-ExternalCommand -FilePath "cmake" -Arguments @(
         "--build", "--preset", $BuildPreset, "--parallel"
     ) -WorkingDirectory $repoRoot
