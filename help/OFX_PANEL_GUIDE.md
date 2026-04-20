@@ -426,3 +426,21 @@ If `Ultra (1536)` or `Maximum (2048)` does not hold:
    already stable.
 4. If the backend or artifact should have worked, collect the runtime log and
    use the troubleshooting guide.
+
+## Updates
+
+CorridorKey checks GitHub for newer releases in the background when a plugin
+instance loads. The result is cached locally for 24 hours so the check does
+not run on every render.
+
+- When a newer release exists, a notice appears at the bottom of the runtime
+  status group with the exact version that is available, followed by a
+  **Download New Version** button that opens the release page.
+- When no newer release is available, nothing is shown.
+- **Help & Docs -> Check for Updates** runs the check on demand and bypasses
+  the 24 hour cache. Use this after publishing a release if you want to
+  confirm the notice appears without waiting for the cache to expire.
+- **Advanced Runtime Status -> Include Pre-releases in Update Check** makes
+  pre-release builds eligible for the notice in addition to stable releases.
+  Toggling it re-evaluates against the cached release list on the next panel
+  refresh.

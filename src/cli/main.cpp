@@ -20,6 +20,7 @@
 #include "../app/model_compiler.hpp"
 #include "../app/ofx_runtime_service.hpp"
 #include "../app/runtime_contracts.hpp"
+#include "../app/version_check.hpp"
 #include "../common/json_utils.hpp"
 #include "../common/local_ipc.hpp"
 #include "../common/runtime_paths.hpp"
@@ -618,8 +619,10 @@ int main(int argc, char* argv[]) {
                                        cxxopts::value<int>()->default_value("1"))(
         "despill", "Green spill removal (0.0-1.0)", cxxopts::value<float>()->default_value("0.5"))(
         "despeckle", "Enable morphological cleanup")("tiled", "Enable tiling for high-res (4K+)")(
-        "json", "Output results in JSON format")("v,version", "Print version")(
-        "h,help", "Print detailed help");
+        "json", "Output results in JSON format")("check-updates",
+                                                 "Check for a newer CorridorKey release on GitHub")(
+        "include-prereleases", "Include pre-releases when running --check-updates")(
+        "v,version", "Print version")("h,help", "Print detailed help");
 
     options.parse_positional({"command", "args"});
     options.positional_help("command [input] [output]");
@@ -676,6 +679,36 @@ int main(int argc, char* argv[]) {
             } else {
                 std::cout << "CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING
                           << std::endl;
+            }
+            return 0;
+        }
+
+        if (result.count("check-updates")) {
+            app::VersionCheckOptions update_options;
+            update_options.current_version = CORRIDORKEY_DISPLAY_VERSION_STRING;
+            update_options.include_prereleases = result.count("include-prereleases") > 0;
+            auto update_info = app::check_for_update(update_options);
+            if (use_json) {
+                nlohmann::json payload = {
+                    {"current_version", CORRIDORKEY_DISPLAY_VERSION_STRING},
+                    {"update_available", update_info.has_value()},
+                };
+                if (update_info.has_value()) {
+                    payload["latest_version"] = update_info->latest_version;
+                    payload["release_url"] = update_info->release_url;
+                    payload["is_prerelease"] = update_info->is_prerelease;
+                }
+                std::cout << common::safe_json_dump(payload) << std::endl;
+            } else {
+                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING << "\n";
+                if (update_info.has_value()) {
+                    std::cout << "Update available: v" << update_info->latest_version
+                              << (update_info->is_prerelease ? " (pre-release)" : " (stable)")
+                              << "\n"
+                              << update_info->release_url << std::endl;
+                } else {
+                    std::cout << "You are on the latest version." << std::endl;
+                }
             }
             return 0;
         }
