@@ -6,7 +6,8 @@ param(
     [switch]$SkipTests,
     [switch]$CleanOnly,
     [switch]$PublishGithub,
-    [string]$GithubRepo = "alexandremendoncaalvaro/CorridorKey-Runtime"
+    [string]$GithubRepo = "alexandremendoncaalvaro/CorridorKey-Runtime",
+    [string]$NotesFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,7 +48,8 @@ function Publish-CorridorKeyGithubRelease {
         [string]$DisplayVersionLabel,
         [string]$Track,
         [string]$GithubRepo,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [string]$NotesFile
     )
     $tagLabel = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
     $tagName = "v$tagLabel"
@@ -56,6 +58,25 @@ function Publish-CorridorKeyGithubRelease {
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if (-not $gh) {
         throw "Cannot publish GitHub release: 'gh' CLI is not on PATH. Install GitHub CLI or publish manually."
+    }
+
+    # Release notes are required; docs/RELEASE_GUIDELINES.md section 5
+    # defines the Overview/Changelog/Assets/Installation template that
+    # every release must carry. Refuse to publish with a placeholder.
+    if ([string]::IsNullOrWhiteSpace($NotesFile)) {
+        throw "Cannot publish GitHub release: -NotesFile is required. Write build/release_notes/v$tagLabel.md per docs/RELEASE_GUIDELINES.md section 5 and pass -ForwardArguments '-PublishGithub','-NotesFile','build\release_notes\v$tagLabel.md' through scripts\windows.ps1."
+    }
+    if (-not (Test-Path $NotesFile)) {
+        throw "Cannot publish GitHub release: release notes file not found at '$NotesFile'."
+    }
+    $notesText = Get-Content -Raw -LiteralPath $NotesFile
+    if ([string]::IsNullOrWhiteSpace($notesText)) {
+        throw "Cannot publish GitHub release: release notes file '$NotesFile' is empty."
+    }
+    foreach ($marker in @('## Overview', '## Changelog', '## Assets & Downloads', '## Installation Instructions')) {
+        if ($notesText -notmatch [regex]::Escape($marker)) {
+            throw "Cannot publish GitHub release: notes file '$NotesFile' is missing required section '$marker'. See docs/RELEASE_GUIDELINES.md section 5."
+        }
     }
 
     # gh release view exits non-zero when the release does not exist and
@@ -84,14 +105,16 @@ function Publish-CorridorKeyGithubRelease {
         }
     }
 
-    $titlePlatform = if ($isPrerelease) { "Windows prerelease" } else { "Windows" }
-    $title = "CorridorKey Resolve OFX v$tagLabel ($titlePlatform)"
+    # Title format is defined in docs/RELEASE_GUIDELINES.md section 5:
+    # "CorridorKey Resolve OFX vX.Y.Z (Windows)". The prerelease state is
+    # carried by the --prerelease flag, not by the title string.
+    $title = "CorridorKey Resolve OFX v$tagLabel (Windows)"
 
     $ghArgs = @(
         "release", "create", $tagName,
         "--repo", $GithubRepo,
         "--title", $title,
-        "--notes", "Auto-published by scripts\release_pipeline_windows.ps1."
+        "--notes-file", $NotesFile
     )
     if ($isPrerelease) {
         $ghArgs += "--prerelease"
@@ -248,12 +271,21 @@ try {
 
     if ($PublishGithub) {
         Write-Step "Publishing GitHub Release"
+        $resolvedNotesFile = $NotesFile
+        if ([string]::IsNullOrWhiteSpace($resolvedNotesFile)) {
+            $notesTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+            $defaultNotesFile = Join-Path $repoRoot ("build/release_notes/v$notesTag.md")
+            if (Test-Path $defaultNotesFile) {
+                $resolvedNotesFile = $defaultNotesFile
+            }
+        }
         Publish-CorridorKeyGithubRelease `
             -Version $Version `
             -DisplayVersionLabel $DisplayVersionLabel `
             -Track $Track `
             -GithubRepo $GithubRepo `
-            -RepoRoot $repoRoot
+            -RepoRoot $repoRoot `
+            -NotesFile $resolvedNotesFile
     } else {
         Write-Host "`n[INFO] -PublishGithub not set; skipping GitHub release publish." -ForegroundColor Yellow
         Write-Host "       To publish: rerun with -ForwardArguments '-PublishGithub' through scripts\\windows.ps1," -ForegroundColor Yellow

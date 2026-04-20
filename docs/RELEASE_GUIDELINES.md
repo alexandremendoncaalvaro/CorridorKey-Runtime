@@ -404,7 +404,18 @@ officially supported hardware family.
 ## 5. GitHub Release Publishing
 
 GitHub release titles must stay consistent so users can identify the platform
-and artifact type quickly.
+and artifact type quickly. Release notes are mandatory and follow the
+template below. The canonical pipeline
+(`scripts\release_pipeline_windows.ps1`) refuses to publish a release
+without a notes file containing the required sections, so there is no
+path to shipping a placeholder like "Auto-published by ...".
+
+Before publishing, write the notes to `build/release_notes/v<tag>.md`
+(for example `build/release_notes/v0.7.6-win.1.md`). When
+`-PublishGithub` is passed through `scripts\windows.ps1 -Task release`,
+the pipeline picks that file up automatically if it exists at the
+convention path; otherwise pass `-ForwardArguments '-PublishGithub','-NotesFile','<path>'`
+explicitly.
 
 ### CorridorKey Resolve OFX
 
