@@ -58,8 +58,19 @@ function Publish-CorridorKeyGithubRelease {
         throw "Cannot publish GitHub release: 'gh' CLI is not on PATH. Install GitHub CLI or publish manually."
     }
 
-    $existing = & gh release view $tagName --repo $GithubRepo --json tagName 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existing)) {
+    # gh release view exits non-zero when the release does not exist and
+    # writes "release not found" to stderr. Under $ErrorActionPreference=Stop
+    # that non-zero exit is escalated to a terminating error before we can
+    # inspect $LASTEXITCODE, so isolate the probe with a local preference.
+    $priorPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $existing = & gh release view $tagName --repo $GithubRepo --json tagName 2>$null
+        $viewExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+    if ($viewExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($existing)) {
         throw "GitHub release '$tagName' already exists in $GithubRepo. Per docs/RELEASE_GUIDELINES.md, a published tag is immutable. Bump the counter and retry."
     }
 
