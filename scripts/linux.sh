@@ -91,7 +91,11 @@ task_build() {
         task_prepare_cuda
     fi
     say "Configuring preset ${PRESET}..."
-    cmake --preset "${PRESET}"
+    local configure_args=(--preset "${PRESET}")
+    if [ -n "${VERSION}" ]; then
+        configure_args+=(-DCORRIDORKEY_DISPLAY_VERSION_LABEL="${VERSION}")
+    fi
+    cmake "${configure_args[@]}"
     say "Building preset ${PRESET}..."
     cmake --build --preset "${PRESET}"
 }
