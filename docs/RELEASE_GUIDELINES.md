@@ -201,7 +201,7 @@ packaging scripts internally.
 
 ### macOS Installers
 
-- Apple Silicon: `CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg`
+- Apple Silicon: `CorridorKey_Resolve_vX.Y.Z_macOS_AppleSilicon.dmg`
 
 ### Linux Installers
 
@@ -550,7 +550,7 @@ Use the following release description template:
 
 ### macOS
 - Include this section only when the release contains a macOS installer.
-- **Apple Silicon (M-Series):** Download `CorridorKey_Resolve_vX.Y.Z_macOS_Silicon_Installer.pkg`.
+- **Apple Silicon (M-Series):** Download `CorridorKey_Resolve_vX.Y.Z_macOS_AppleSilicon.dmg`.
 
 ### Linux
 - Include this section only when the release contains a Linux artifact.
