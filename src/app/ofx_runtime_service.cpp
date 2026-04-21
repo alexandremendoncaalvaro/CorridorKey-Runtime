@@ -7,6 +7,7 @@
 #include <fstream>
 #include <mutex>
 
+#include "../common/host_memory.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/mlx_memory_governor.hpp"
 
@@ -19,13 +20,10 @@
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
 #include <mach/mach.h>
-#include <mach/mach_host.h>
 #include <mach/task.h>
 #include <mach/task_policy.h>
-#include <mach/vm_statistics.h>
 #include <pthread.h>
 #include <sys/qos.h>
-#include <unistd.h>
 #endif
 
 namespace corridorkey::app {
@@ -277,40 +275,7 @@ std::string current_task_role_label() {
     return describe_task_role(policy.role);
 }
 
-// System-wide memory accounting sampled via host_statistics64(). os/proc.h's
-// os_proc_available_memory() is iOS-only; for macOS we need the host-level
-// view anyway because memory pressure on this machine is a function of what
-// Resolve, Chrome, and the compressor are doing, not of our own footprint.
-// free_bytes: pages the kernel considers immediately free. Anchors the
-//   "do we have headroom?" question -- on a 16 GB machine, under 500 MB is
-//   already pressure, under 100 MB is where we saw the 50-108 s stalls.
-// compressor_bytes: pages currently held by the VM compressor. Documented
-//   as the dominant driver of the Metal-submit stalls in our analysis
-//   (compressor > 6 GB correlates 1:1 with catastrophic sessions).
-struct HostMemoryStats {
-    std::size_t free_bytes = 0;
-    std::size_t compressor_bytes = 0;
-};
-
-HostMemoryStats query_host_memory_stats() {
-    HostMemoryStats out;
-    vm_statistics64_data_t info{};
-    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
-    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&info),
-                          &count) != KERN_SUCCESS) {
-        return out;
-    }
-    const long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size <= 0) {
-        return out;
-    }
-    const std::size_t bytes_per_page = static_cast<std::size_t>(page_size);
-    out.free_bytes = static_cast<std::size_t>(info.free_count) * bytes_per_page;
-    out.compressor_bytes = static_cast<std::size_t>(info.compressor_page_count) * bytes_per_page;
-    return out;
-}
-
-std::string format_host_memory_fields(const HostMemoryStats& stats) {
+std::string format_host_memory_fields(const common::HostMemoryStats& stats) {
     std::string out;
     out.reserve(80);
     out.append(" host_free_mb=").append(format_mb(stats.free_bytes));
@@ -356,7 +321,7 @@ class MemoryPressureMonitor {
               policy = core::mlx_memory::Policy::PressureWarn;
           }
           const auto snap = core::mlx_memory::apply_policy(policy);
-          const auto host_stats = query_host_memory_stats();
+          const auto host_stats = common::query_host_memory_stats();
           std::string event = std::string("event=memory_pressure level=") + level;
           event += format_host_memory_fields(host_stats);
           event += format_mlx_memory_fields(snap);
@@ -416,7 +381,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         const auto memory_snap = core::mlx_memory::initialize_defaults();
         std::string init_event = "event=mlx_memory_init";
 #if defined(__APPLE__)
-        init_event += format_host_memory_fields(query_host_memory_stats());
+        init_event += format_host_memory_fields(common::query_host_memory_stats());
 #endif
         init_event += format_mlx_memory_fields(memory_snap);
         logger.log(init_event);
@@ -499,8 +464,12 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                     // reused=1 means the broker hit its cache. reused=0 means a fresh
                     // engine creation which pays the full MLX/ORT compile cost. Pairing
                     // this with duration_ms on request_completed separates cold-load
-                    // spikes from steady-state warm loads.
+                    // spikes from steady-state warm loads. host_free_mb /
+                    // host_compressor_mb let the reader correlate a downshift
+                    // (effective_resolution < requested_resolution) with the memory
+                    // state that drove it.
                     const auto& snapshot = prepare_response->session;
+                    const auto host_stats = common::query_host_memory_stats();
                     logger.log(
                         std::string("event=prepare_session_details session_id=") +
                         sanitize_log_token(snapshot.session_id) +
@@ -512,6 +481,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                         std::to_string(snapshot.recommended_resolution) +
                         " ref_count=" + std::to_string(snapshot.ref_count) +
                         " model=" + sanitize_log_token(snapshot.artifact_name) +
+                        format_host_memory_fields(host_stats) +
                         " stage_total_ms=" + format_ms(total_stage_ms(prepare_response->timings)) +
                         " stages=" + format_stage_summary(prepare_response->timings));
                 }

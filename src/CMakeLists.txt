@@ -88,6 +88,7 @@ endif()
 target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_EXPORTS)
 
 target_sources(corridorkey_core PRIVATE
+    common/host_memory.cpp
     common/local_ipc.cpp
     common/shared_memory_transport.cpp
 )
@@ -169,6 +170,7 @@ if(BUILD_TESTING)
     target_compile_definitions(corridorkey_core_static PUBLIC CORRIDORKEY_STATIC_DEFINE)
 
     target_sources(corridorkey_core_static PRIVATE
+        common/host_memory.cpp
         common/local_ipc.cpp
         common/shared_memory_transport.cpp
     )
