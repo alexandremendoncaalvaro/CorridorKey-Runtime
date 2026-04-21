@@ -469,6 +469,86 @@ path during installation.
 The Windows RTX installer must pass packaged `doctor` validation before it is
 considered releasable.
 
+### macOS Build Steps
+
+macOS has one curated runtime root and one canonical release entrypoint:
+
+- `vendor/onnxruntime/` — vendored Apple Silicon ONNX Runtime dylib
+- `scripts/release_pipeline_macos.sh` — canonical macOS build, package, and
+  publish entrypoint
+
+The canonical macOS release command is:
+
+```bash
+scripts/release_pipeline_macos.sh --display-label X.Y.Z-mac.N
+```
+
+Passing `--display-label` bakes the label into `version.hpp`
+(`CORRIDORKEY_DISPLAY_VERSION_STRING`), the CLI `--version` output, the
+OFX panel, the runtime-server log filename, and the DMG filename
+(`CorridorKey_Resolve_vX.Y.Z-mac.N_macOS_AppleSilicon.dmg`). The label
+must match `X.Y.Z-mac.N` and its `X.Y.Z` core must equal
+`CMakeLists.txt` `PROJECT_VERSION`; the pipeline refuses to proceed
+otherwise.
+
+Other flags supported by the wrapper:
+
+- `--skip-tests` — debug convenience; any build intended for a user must
+  pass the quality gate, same rule as Windows.
+- `--clean-only` — sanitize `build/release-macos-portable`,
+  `build/debug-macos-portable`, and `dist/` then exit.
+- `--publish-github` — after the build, package, and validation gates
+  pass, invoke `scripts/publish_github_release.sh` with the produced
+  DMG. Requires `--display-label`. Looks for release notes at
+  `build/release_notes/v<label>.md` by default, or at
+  `--notes-file PATH` when provided.
+- `--github-repo OWNER/REPO` — override the publish target.
+
+### Linux Build Steps
+
+Linux is the experimental track. It has one canonical wrapper:
+
+- `scripts/linux.sh --task release --version X.Y.Z [--display-label X.Y.Z-linux.N]`
+
+The `--display-label` and `--publish-github` flags follow the same
+contract as macOS: label shape is `X.Y.Z-linux.N`, core must match
+`--version`, and publishing reuses
+`scripts/publish_github_release.sh` with a notes file at
+`build/release_notes/v<label>.md`. Linux emits two installer assets per
+release (`.deb` and `.rpm`); both go up under the same tag.
+
+### Publishing guardrails (shared)
+
+`scripts/publish_github_release.sh` is the single bash helper that both
+the macOS and Linux pipelines hand off to for GitHub publication. It
+enforces, in this order, the same rules that
+`Publish-CorridorKeyGithubRelease` enforces on Windows:
+
+1. `--display-label` must parse as `X.Y.Z-<platform>.N` and its core
+   must match `--version`. Naked `X.Y.Z` tags are treated as stable
+   and mapped to `--latest`; labels with a suffix are mapped to
+   `--prerelease`.
+2. Working tree must be clean: `git diff`, `git diff --cached`, and
+   `git ls-files --others --exclude-standard` must all be empty. The
+   helper refuses to publish from a dirty checkout because the label
+   baked into the artifact would otherwise be unreproducible from Git.
+3. Release notes file must exist, be non-empty, and contain all four
+   sections: `## Overview`, `## Changelog`, `## Assets & Downloads`,
+   `## Installation Instructions`. Any missing section aborts the
+   publish with a pointer to section 5 of this document.
+4. The target tag `v<label>` must not already exist on the remote.
+   Tag immutability is absolute (section 1, "Tag and release
+   immutability").
+5. Every declared `--asset` must exist on disk.
+6. Title is constructed from the platform: `... (Windows)`,
+   `... (macOS) - Apple Silicon`, or `... (Linux)`. The prerelease
+   state is carried by the `--prerelease` flag, not by the title
+   string.
+
+`--dry-run` prints the exact `gh release create` command the helper
+would run without invoking it. Use it as a final sanity check before
+letting the real publish fire.
+
 ## 4. Support Claims in Release Assets
 
 Release names, GitHub release text, installer labels, and download guidance
@@ -495,17 +575,23 @@ officially supported hardware family.
 
 GitHub release titles must stay consistent so users can identify the platform
 and artifact type quickly. Release notes are mandatory and follow the
-template below. The canonical pipeline
-(`scripts\release_pipeline_windows.ps1`) refuses to publish a release
-without a notes file containing the required sections, so there is no
-path to shipping a placeholder like "Auto-published by ...".
+template below. Every canonical pipeline
+(`scripts\release_pipeline_windows.ps1` on Windows,
+`scripts/release_pipeline_macos.sh` on macOS, `scripts/linux.sh` on
+Linux) refuses to publish a release without a notes file containing
+the required sections, so there is no path to shipping a placeholder
+like "Auto-published by ...".
 
 Before publishing, write the notes to `build/release_notes/v<tag>.md`
-(for example `build/release_notes/v0.7.6-win.1.md`). When
-`-PublishGithub` is passed through `scripts\windows.ps1 -Task release`,
-the pipeline picks that file up automatically if it exists at the
-convention path; otherwise pass `-ForwardArguments '-PublishGithub','-NotesFile','<path>'`
-explicitly.
+(for example `build/release_notes/v0.7.6-win.1.md` or
+`build/release_notes/v0.7.6-mac.1.md`). When the publish flag is
+passed through the platform wrapper, the pipeline picks that file up
+automatically if it exists at the convention path; otherwise point to
+it explicitly:
+
+- Windows: `scripts\windows.ps1 -Task release -Version X.Y.Z -ForwardArguments '-PublishGithub','-NotesFile','<path>'`
+- macOS: `scripts/release_pipeline_macos.sh --display-label X.Y.Z-mac.N --publish-github --notes-file <path>`
+- Linux: `scripts/linux.sh --task release --version X.Y.Z --display-label X.Y.Z-linux.N --publish-github --notes-file <path>`
 
 ### CorridorKey Resolve OFX
 
