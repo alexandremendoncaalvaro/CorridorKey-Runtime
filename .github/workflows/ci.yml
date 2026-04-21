@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-and-syntax:
+    name: Docs + script syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Docs consistency (AGENTS.md == CLAUDE.md, no broken relative links)
+        run: python3 scripts/check_docs_consistency.py
+
+      - name: Shell script syntax (bash -n)
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r -d '' script; do
+            if ! bash -n "$script"; then
+              echo "::error file=$script::bash syntax check failed"
+              failed=1
+            fi
+          done < <(find scripts -maxdepth 2 -type f -name '*.sh' -print0)
+          exit "$failed"
+
+      - name: Python script syntax (py_compile)
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r -d '' script; do
+            if ! python3 -m py_compile "$script"; then
+              echo "::error file=$script::py_compile failed"
+              failed=1
+            fi
+          done < <(find scripts tools -type f -name '*.py' -print0)
+          exit "$failed"
