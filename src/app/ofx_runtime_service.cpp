@@ -5,6 +5,7 @@
 #include <corridorkey/version.hpp>
 #include <cstdio>
 #include <fstream>
+#include <mutex>
 
 #include "../common/runtime_paths.hpp"
 #include "../core/mlx_memory_governor.hpp"
@@ -16,11 +17,15 @@
 #endif
 
 #if defined(__APPLE__)
+#include <dispatch/dispatch.h>
 #include <mach/mach.h>
+#include <mach/mach_host.h>
 #include <mach/task.h>
 #include <mach/task_policy.h>
+#include <mach/vm_statistics.h>
 #include <pthread.h>
 #include <sys/qos.h>
+#include <unistd.h>
 #endif
 
 namespace corridorkey::app {
@@ -35,7 +40,10 @@ class RuntimeLogger {
         m_stream.open(path, std::ios::app);
     }
 
+    // Mutex-guarded so the dispatch-memorypressure handler can append events
+    // concurrently with the main request loop without interleaving lines.
     void log(const std::string& message) {
+        std::lock_guard<std::mutex> guard(m_mutex);
         if (!m_stream.is_open()) {
             return;
         }
@@ -44,6 +52,7 @@ class RuntimeLogger {
     }
 
    private:
+    std::mutex m_mutex;
     std::ofstream m_stream;
 };
 
@@ -267,6 +276,115 @@ std::string current_task_role_label() {
     }
     return describe_task_role(policy.role);
 }
+
+// System-wide memory accounting sampled via host_statistics64(). os/proc.h's
+// os_proc_available_memory() is iOS-only; for macOS we need the host-level
+// view anyway because memory pressure on this machine is a function of what
+// Resolve, Chrome, and the compressor are doing, not of our own footprint.
+// free_bytes: pages the kernel considers immediately free. Anchors the
+//   "do we have headroom?" question -- on a 16 GB machine, under 500 MB is
+//   already pressure, under 100 MB is where we saw the 50-108 s stalls.
+// compressor_bytes: pages currently held by the VM compressor. Documented
+//   as the dominant driver of the Metal-submit stalls in our analysis
+//   (compressor > 6 GB correlates 1:1 with catastrophic sessions).
+struct HostMemoryStats {
+    std::size_t free_bytes = 0;
+    std::size_t compressor_bytes = 0;
+};
+
+HostMemoryStats query_host_memory_stats() {
+    HostMemoryStats out;
+    vm_statistics64_data_t info{};
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&info),
+                          &count) != KERN_SUCCESS) {
+        return out;
+    }
+    const long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) {
+        return out;
+    }
+    const std::size_t bytes_per_page = static_cast<std::size_t>(page_size);
+    out.free_bytes = static_cast<std::size_t>(info.free_count) * bytes_per_page;
+    out.compressor_bytes = static_cast<std::size_t>(info.compressor_page_count) * bytes_per_page;
+    return out;
+}
+
+std::string format_host_memory_fields(const HostMemoryStats& stats) {
+    std::string out;
+    out.reserve(80);
+    out.append(" host_free_mb=").append(format_mb(stats.free_bytes));
+    out.append(" host_compressor_mb=").append(format_mb(stats.compressor_bytes));
+    return out;
+}
+
+// RAII wrapper around a DISPATCH_SOURCE_TYPE_MEMORYPRESSURE source. The
+// kernel signals this source on memorystatus transitions (warn -> critical
+// -> normal); the block inside runs on a dedicated serial queue and tightens
+// MLX's cache budget via the governor so we cooperate with the VM compressor
+// instead of fighting it. Installing the source is idempotent from the
+// kernel's side -- multiple processes can each register their own handler.
+class MemoryPressureMonitor {
+   public:
+    MemoryPressureMonitor(RuntimeLogger& logger) : m_logger(&logger) {
+        m_queue = dispatch_queue_create("com.corridorkey.memorypressure", DISPATCH_QUEUE_SERIAL);
+        if (m_queue == nullptr) {
+            return;
+        }
+        // Subscribing to NORMAL lets us restore the baseline policy when
+        // pressure recedes, so a transient spike does not permanently shrink
+        // MLX's cache for the remainder of the session.
+        const uintptr_t mask = DISPATCH_MEMORYPRESSURE_NORMAL | DISPATCH_MEMORYPRESSURE_WARN |
+                               DISPATCH_MEMORYPRESSURE_CRITICAL;
+        m_source = dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0, mask, m_queue);
+        if (m_source == nullptr) {
+            dispatch_release(m_queue);
+            m_queue = nullptr;
+            return;
+        }
+        dispatch_source_t source = m_source;
+        RuntimeLogger* logger_ptr = m_logger;
+        dispatch_source_set_event_handler(m_source, ^{
+          const unsigned long data = dispatch_source_get_data(source);
+          const char* level = "normal";
+          core::mlx_memory::Policy policy = core::mlx_memory::Policy::Normal;
+          if (data & DISPATCH_MEMORYPRESSURE_CRITICAL) {
+              level = "critical";
+              policy = core::mlx_memory::Policy::PressureCritical;
+          } else if (data & DISPATCH_MEMORYPRESSURE_WARN) {
+              level = "warn";
+              policy = core::mlx_memory::Policy::PressureWarn;
+          }
+          const auto snap = core::mlx_memory::apply_policy(policy);
+          const auto host_stats = query_host_memory_stats();
+          std::string event = std::string("event=memory_pressure level=") + level;
+          event += format_host_memory_fields(host_stats);
+          event += format_mlx_memory_fields(snap);
+          logger_ptr->log(event);
+        });
+        dispatch_resume(m_source);
+    }
+
+    ~MemoryPressureMonitor() {
+        if (m_source != nullptr) {
+            dispatch_source_cancel(m_source);
+            dispatch_release(m_source);
+        }
+        if (m_queue != nullptr) {
+            dispatch_release(m_queue);
+        }
+    }
+
+    MemoryPressureMonitor(const MemoryPressureMonitor&) = delete;
+    MemoryPressureMonitor& operator=(const MemoryPressureMonitor&) = delete;
+    MemoryPressureMonitor(MemoryPressureMonitor&&) = delete;
+    MemoryPressureMonitor& operator=(MemoryPressureMonitor&&) = delete;
+
+   private:
+    RuntimeLogger* m_logger = nullptr;
+    dispatch_source_t m_source = nullptr;
+    dispatch_queue_t m_queue = nullptr;
+};
 #endif
 
 }  // namespace
@@ -296,8 +414,22 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
     // still surfaces that the subsystem is absent.
     {
         const auto memory_snap = core::mlx_memory::initialize_defaults();
-        logger.log(std::string("event=mlx_memory_init") + format_mlx_memory_fields(memory_snap));
+        std::string init_event = "event=mlx_memory_init";
+#if defined(__APPLE__)
+        init_event += format_host_memory_fields(query_host_memory_stats());
+#endif
+        init_event += format_mlx_memory_fields(memory_snap);
+        logger.log(init_event);
     }
+
+#if defined(__APPLE__)
+    // The monitor registers a DISPATCH_SOURCE_TYPE_MEMORYPRESSURE handler on a
+    // dedicated serial queue. When the kernel raises Warn/Critical we trim the
+    // MLX cache through the governor; on Normal we restore the baseline. RAII
+    // keeps the source alive for the lifetime of the run() loop.
+    MemoryPressureMonitor memory_pressure_monitor(logger);
+    (void)memory_pressure_monitor;
+#endif
 
     auto server = common::LocalJsonServer::listen(options.endpoint);
     if (!server) {
