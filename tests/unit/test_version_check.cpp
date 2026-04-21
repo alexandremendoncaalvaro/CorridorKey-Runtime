@@ -71,6 +71,36 @@ TEST_CASE("is_newer_version uses SemVer 2.0.0 numeric prerelease precedence",
     REQUIRE_FALSE(is_newer_version("0.7.5-win.22", "0.7.5-win.22"));
 }
 
+TEST_CASE("is_newer_version normalizes git-describe labels before comparing",
+          "[unit][version_check][regression]") {
+    using corridorkey::app::is_newer_version;
+    using corridorkey::app::parse_semver;
+
+    // A local build 3 commits past v0.7.6-win.1 should parse as if it were
+    // exactly at v0.7.6-win.1 for comparison purposes. Without the
+    // git-describe normalization this would sort above win.2 (non-numeric
+    // identifier "1-3-gabc1234" outranks numeric "2" under SemVer 2.0.0),
+    // blocking the auto-updater from offering a real update to dev builds.
+    auto parsed = parse_semver("0.7.6-win.1-3-gabc1234");
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->pre_release == "win.1");
+
+    auto parsed_dirty = parse_semver("0.7.6-win.1-3-gabc1234-dirty");
+    REQUIRE(parsed_dirty.has_value());
+    REQUIRE(parsed_dirty->pre_release == "win.1");
+
+    REQUIRE(is_newer_version("0.7.6-win.2", "0.7.6-win.1-3-gabc1234"));
+    REQUIRE(is_newer_version("0.7.6-win.2", "0.7.6-win.1-3-gabc1234-dirty"));
+    REQUIRE_FALSE(is_newer_version("0.7.6-win.1-3-gabc1234", "0.7.6-win.1"));
+
+    // Arbitrary non-describe suffix must not be mistaken for a describe tail.
+    // `rc.beta` contains neither a numeric count nor `-g<hex>` and must
+    // survive intact.
+    auto untouched = parse_semver("0.7.6-rc.beta");
+    REQUIRE(untouched.has_value());
+    REQUIRE(untouched->pre_release == "rc.beta");
+}
+
 TEST_CASE("prerelease_platform_code extracts the leading non-numeric identifier",
           "[unit][version_check]") {
     using corridorkey::app::prerelease_platform_code;

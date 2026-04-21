@@ -66,6 +66,44 @@ bool is_numeric_identifier(std::string_view value) {
                        [](unsigned char c) { return std::isdigit(c) != 0; });
 }
 
+// Strip the trailing `-<N>-g<SHA>[-dirty]` appended by `git describe` so a
+// locally built binary compares against published tags as if it were the
+// tag it was derived from. Without this, a dev build like
+// `win.1-3-gabc1234` would sort above the published `win.2` because the
+// non-numeric identifier `1-3-gabc1234` outranks the numeric `2` under
+// SemVer 2.0.0 precedence.
+std::string strip_git_describe_suffix(std::string_view prerelease) {
+    std::string_view remaining = prerelease;
+    constexpr std::string_view kDirty = "-dirty";
+    if (remaining.size() >= kDirty.size() &&
+        remaining.compare(remaining.size() - kDirty.size(), kDirty.size(), kDirty) == 0) {
+        remaining = remaining.substr(0, remaining.size() - kDirty.size());
+    }
+
+    const auto g_pos = remaining.rfind("-g");
+    if (g_pos == std::string_view::npos) {
+        return std::string(prerelease);
+    }
+    const auto sha = remaining.substr(g_pos + 2);
+    if (sha.size() < 7 || !std::all_of(sha.begin(), sha.end(), [](unsigned char c) {
+            return std::isxdigit(c) != 0;
+        })) {
+        return std::string(prerelease);
+    }
+
+    const auto before_g = remaining.substr(0, g_pos);
+    const auto dash_pos = before_g.rfind('-');
+    if (dash_pos == std::string_view::npos) {
+        return std::string(prerelease);
+    }
+    const auto count = before_g.substr(dash_pos + 1);
+    if (count.empty() || !is_numeric_identifier(count)) {
+        return std::string(prerelease);
+    }
+
+    return std::string(before_g.substr(0, dash_pos));
+}
+
 int compare_identifier(std::string_view a, std::string_view b) {
     const bool a_num = is_numeric_identifier(a);
     const bool b_num = is_numeric_identifier(b);
@@ -247,7 +285,7 @@ std::optional<SemVer> parse_semver(const std::string& version) {
         start = next + 1;
     }
     if (pre_pos != std::string::npos) {
-        result.pre_release = trimmed.substr(pre_pos + 1);
+        result.pre_release = strip_git_describe_suffix(trimmed.substr(pre_pos + 1));
     }
     return result;
 }
