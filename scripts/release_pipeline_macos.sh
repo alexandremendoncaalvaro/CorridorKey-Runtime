@@ -4,6 +4,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Resolve and export VCPKG_ROOT so direct `cmake --preset` calls in this
+# script (not just child scripts that source the helper themselves) can
+# locate the vcpkg toolchain.
+source "$REPO_ROOT/scripts/model_artifact_checks.sh"
+require_vcpkg_root
+
 SKIP_TESTS=0
 CLEAN_ONLY=0
 DISPLAY_LABEL=""
