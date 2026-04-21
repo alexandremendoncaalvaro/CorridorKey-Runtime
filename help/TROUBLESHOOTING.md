@@ -23,7 +23,7 @@ installation.
 1. Confirm DaVinci Resolve was closed before running the installer. The
    installer cannot register the plugin while Resolve holds an active OFX
    scan cache. Close Resolve, run the installer, then reopen Resolve.
-2. Confirm the correct installer for your platform was used. The macOS `.pkg`
+2. Confirm the correct installer for your platform was used. The macOS `.dmg`
    installer and the Windows `.exe` installer are not interchangeable.
 3. On Windows, confirm you chose the right Windows track:
    - `Windows RTX` for the official NVIDIA RTX 30 series and newer track

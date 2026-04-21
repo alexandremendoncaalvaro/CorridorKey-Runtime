@@ -3,8 +3,8 @@
 # scripts/validate_ofx_win.ps1. Asserts:
 #   1. The bundle has the expected Linux-x86_64 layout and core files.
 #   2. The embedded corridorkey CLI reports doctor healthy=true.
-#   3. Optional: the three packaged artifacts (tar.gz/deb/rpm) extract
-#      cleanly and contain the same payload.
+#   3. Optional: the packaged installers (deb/rpm) extract cleanly and
+#      contain the same payload.
 # Usage:
 #   scripts/validate_ofx_linux.sh path/to/CorridorKey.ofx.bundle
 

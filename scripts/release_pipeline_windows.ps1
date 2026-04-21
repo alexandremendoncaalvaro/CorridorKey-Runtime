@@ -4,7 +4,10 @@ param(
     [string]$Track = "rtx",
     [string]$DisplayVersionLabel = "",
     [switch]$SkipTests,
-    [switch]$CleanOnly
+    [switch]$CleanOnly,
+    [switch]$PublishGithub,
+    [string]$GithubRepo = "alexandremendoncaalvaro/CorridorKey-Runtime",
+    [string]$NotesFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,8 +23,117 @@ function Write-Success([string]$msg) {
     Write-Host "[SUCCESS] $msg" -ForegroundColor Green
 }
 
+function Assert-CorridorKeyWindowsReleaseLabel {
+    param(
+        [string]$Version,
+        [string]$DisplayVersionLabel
+    )
+    if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+        return
+    }
+    $pattern = '^(?<core>\d+\.\d+\.\d+)-win\.(?<counter>\d+)$'
+    $match = [regex]::Match($DisplayVersionLabel, $pattern)
+    if (-not $match.Success) {
+        throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows prerelease label. Expected form: X.Y.Z-win.N (see docs/RELEASE_GUIDELINES.md section 1)."
+    }
+    $labelCore = $match.Groups['core'].Value
+    if ($labelCore -ne $Version) {
+        throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
+    }
+}
+
+function Publish-CorridorKeyGithubRelease {
+    param(
+        [string]$Version,
+        [string]$DisplayVersionLabel,
+        [string]$Track,
+        [string]$GithubRepo,
+        [string]$RepoRoot,
+        [string]$NotesFile
+    )
+    $tagLabel = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+    $tagName = "v$tagLabel"
+    $isPrerelease = -not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)
+
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if (-not $gh) {
+        throw "Cannot publish GitHub release: 'gh' CLI is not on PATH. Install GitHub CLI or publish manually."
+    }
+
+    # Release notes are required; docs/RELEASE_GUIDELINES.md section 5
+    # defines the Overview/Changelog/Assets/Installation template that
+    # every release must carry. Refuse to publish with a placeholder.
+    if ([string]::IsNullOrWhiteSpace($NotesFile)) {
+        throw "Cannot publish GitHub release: -NotesFile is required. Write build/release_notes/v$tagLabel.md per docs/RELEASE_GUIDELINES.md section 5 and pass -ForwardArguments '-PublishGithub','-NotesFile','build\release_notes\v$tagLabel.md' through scripts\windows.ps1."
+    }
+    if (-not (Test-Path $NotesFile)) {
+        throw "Cannot publish GitHub release: release notes file not found at '$NotesFile'."
+    }
+    $notesText = Get-Content -Raw -LiteralPath $NotesFile
+    if ([string]::IsNullOrWhiteSpace($notesText)) {
+        throw "Cannot publish GitHub release: release notes file '$NotesFile' is empty."
+    }
+    foreach ($marker in @('## Overview', '## Changelog', '## Assets & Downloads', '## Installation Instructions')) {
+        if ($notesText -notmatch [regex]::Escape($marker)) {
+            throw "Cannot publish GitHub release: notes file '$NotesFile' is missing required section '$marker'. See docs/RELEASE_GUIDELINES.md section 5."
+        }
+    }
+
+    # gh release view exits non-zero when the release does not exist and
+    # writes "release not found" to stderr. Under $ErrorActionPreference=Stop
+    # that non-zero exit is escalated to a terminating error before we can
+    # inspect $LASTEXITCODE, so isolate the probe with a local preference.
+    $priorPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $existing = & gh release view $tagName --repo $GithubRepo --json tagName 2>$null
+        $viewExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $priorPreference
+    }
+    if ($viewExit -eq 0 -and -not [string]::IsNullOrWhiteSpace($existing)) {
+        throw "GitHub release '$tagName' already exists in $GithubRepo. Per docs/RELEASE_GUIDELINES.md, a published tag is immutable. Bump the counter and retry."
+    }
+
+    $assetGlobs = @()
+    foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
+        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_Resolve_v${tagLabel}_Windows_$($variant.Suffix)_Installer.exe"))
+    }
+    foreach ($asset in $assetGlobs) {
+        if (-not (Test-Path $asset)) {
+            throw "Expected release asset missing: $asset"
+        }
+    }
+
+    # Title format is defined in docs/RELEASE_GUIDELINES.md section 5:
+    # "CorridorKey Resolve OFX vX.Y.Z (Windows)". The prerelease state is
+    # carried by the --prerelease flag, not by the title string.
+    $title = "CorridorKey Resolve OFX v$tagLabel (Windows)"
+
+    $ghArgs = @(
+        "release", "create", $tagName,
+        "--repo", $GithubRepo,
+        "--title", $title,
+        "--notes-file", $NotesFile
+    )
+    if ($isPrerelease) {
+        $ghArgs += "--prerelease"
+    } else {
+        $ghArgs += @("--latest")
+    }
+    $ghArgs += $assetGlobs
+
+    Write-Host "Publishing GitHub release: $tagName ($(if ($isPrerelease) { 'prerelease' } else { 'stable latest' }))"
+    & gh @ghArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "gh release create failed for $tagName."
+    }
+    Write-Success "Published GitHub release $tagName in $GithubRepo."
+}
+
 try {
     $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version -SyncGuiMetadata
+    Assert-CorridorKeyWindowsReleaseLabel -Version $Version -DisplayVersionLabel $DisplayVersionLabel
 
     $needsRtxTrack = $Track -in @("rtx", "all")
     $needsDirectMlTrack = $Track -in @("dml", "all")
@@ -156,6 +268,29 @@ try {
 
     Write-Step "Release v$Version is READY"
     Get-ChildItem "dist/*.exe" | Select-Object Name, @{Name="Size(MB)"; Expression={"{0:N2}" -f ($_.Length / 1MB)}} | Format-Table -AutoSize
+
+    if ($PublishGithub) {
+        Write-Step "Publishing GitHub Release"
+        $resolvedNotesFile = $NotesFile
+        if ([string]::IsNullOrWhiteSpace($resolvedNotesFile)) {
+            $notesTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+            $defaultNotesFile = Join-Path $repoRoot ("build/release_notes/v$notesTag.md")
+            if (Test-Path $defaultNotesFile) {
+                $resolvedNotesFile = $defaultNotesFile
+            }
+        }
+        Publish-CorridorKeyGithubRelease `
+            -Version $Version `
+            -DisplayVersionLabel $DisplayVersionLabel `
+            -Track $Track `
+            -GithubRepo $GithubRepo `
+            -RepoRoot $repoRoot `
+            -NotesFile $resolvedNotesFile
+    } else {
+        Write-Host "`n[INFO] -PublishGithub not set; skipping GitHub release publish." -ForegroundColor Yellow
+        Write-Host "       To publish: rerun with -ForwardArguments '-PublishGithub' through scripts\\windows.ps1," -ForegroundColor Yellow
+        Write-Host "       or call this script directly with -PublishGithub." -ForegroundColor Yellow
+    }
 
 } catch {
     Write-Host "`n[FATAL ERROR] Pipeline failed at step: $($_.InvocationInfo.ScriptName)" -ForegroundColor Red

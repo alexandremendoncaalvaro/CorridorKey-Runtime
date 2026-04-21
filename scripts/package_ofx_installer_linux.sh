@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux OFX packaging - emits .tar.gz, .deb, and .rpm from a single staged
+# Linux OFX packaging - emits .deb and .rpm installers from a single staged
 # CorridorKey.ofx.bundle. All three artifacts embed the same validated
 # bundle; they differ only in the distribution wrapper and the post-install
 # symlink lifecycle. Usage:
@@ -11,7 +11,6 @@ VERSION=""
 BUILD_DIR=""
 SKIP_DEB=0
 SKIP_RPM=0
-SKIP_TAR=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -19,7 +18,6 @@ while [[ $# -gt 0 ]]; do
         --build-dir) BUILD_DIR="$2"; shift 2 ;;
         --skip-deb) SKIP_DEB=1; shift ;;
         --skip-rpm) SKIP_RPM=1; shift ;;
-        --skip-tar) SKIP_TAR=1; shift ;;
         --help|-h)
             cat <<USAGE
 Usage: package_ofx_installer_linux.sh --version X.Y.Z [options]
@@ -29,7 +27,6 @@ Options:
   --build-dir PATH    CMake build directory (default: build/release-linux-portable).
   --skip-deb          Do not emit the Debian package.
   --skip-rpm          Do not emit the RPM package.
-  --skip-tar          Do not emit the tarball.
 USAGE
             exit 0
             ;;
@@ -163,12 +160,6 @@ Uninstall:
 A proprietary NVIDIA driver 555 or newer is required. The CUDA Toolkit is
 NOT required - the CUDA user-mode libraries ship inside the bundle.
 README
-
-if [[ $SKIP_TAR -eq 0 ]]; then
-    echo "[linux-package] emitting tarball"
-    tar -C "$DIST_DIR" -czf "$DIST_DIR/${RELEASE_NAME}.tar.gz" "$RELEASE_NAME"
-    echo "  -> $DIST_DIR/${RELEASE_NAME}.tar.gz"
-fi
 
 # ---------------------------------------------------------------------------
 # Debian package (.deb) - data.tar.gz layout mirrors the on-disk install

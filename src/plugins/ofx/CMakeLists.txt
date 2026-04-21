@@ -121,10 +121,26 @@ if(WIN32)
     file(GLOB _corridorkey_ofx_runtime_dlls
         "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
 
+    # FindCUDAToolkit maps CUDA::nppc et al. to import libs, so
+    # $<TARGET_RUNTIME_DLLS:corridorkey_ofx> cannot find them. We collect
+    # them explicitly from the toolkit bin dir to prevent a Windows loader
+    # failure when Resolve loads the plugin on a machine without CUDA installed.
+    set(_corridorkey_ofx_cuda_dlls)
+    if(CORRIDORKEY_HAS_CUDA AND CUDAToolkit_BIN_DIR)
+        foreach(_npp_name nppc64_12 nppial64_12 nppidei64_12 nppig64_12)
+            set(_npp_path "${CUDAToolkit_BIN_DIR}/${_npp_name}.dll")
+            if(EXISTS "${_npp_path}")
+                list(APPEND _corridorkey_ofx_cuda_dlls "${_npp_path}")
+            endif()
+        endforeach()
+    endif()
+
     if(_corridorkey_ofx_runtime_dlls)
         add_custom_command(TARGET corridorkey_ofx POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${_corridorkey_ofx_runtime_dlls}
+                ${_corridorkey_ofx_cuda_dlls}
+                $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
                 "$<TARGET_FILE_DIR:corridorkey_ofx>"
             # Create bundle directories
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
@@ -137,6 +153,14 @@ if(WIN32)
 
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
+
+            # Copy transitive runtime DLLs (e.g. libcurl/OpenSSL/zlib pulled in by
+            # cpr for the in-plugin update check). Empty generator expression is
+            # a no-op, so this is safe when the plugin has no dynamic deps.
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_corridorkey_ofx_cuda_dlls}
+                $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
+                "${_ofx_bundle_dir}/Contents/Win64/"
 
             # Copy models
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
@@ -158,9 +182,18 @@ if(WIN32)
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
 
+            # Copy transitive runtime DLLs (e.g. libcurl/OpenSSL/zlib pulled in by
+            # cpr for the in-plugin update check). Empty generator expression is
+            # a no-op, so this is safe when the plugin has no dynamic deps.
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_corridorkey_ofx_cuda_dlls}
+                $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
+                "${_ofx_bundle_dir}/Contents/Win64/"
+
             # Copy models
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
 
+            COMMAND_EXPAND_LISTS
             COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
         )
     endif()
