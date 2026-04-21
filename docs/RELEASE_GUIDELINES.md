@@ -26,23 +26,23 @@ synchronized from it by the Windows packaging scripts.
 
 ### Pre-release labels
 
-Iterative pre-release candidates against a fixed public version use a
-platform-qualified SemVer 2.0.0 prerelease identifier, passed via
-`-DisplayVersionLabel`:
+Two distinct identifier kinds exist and must not be confused. Both are
+derived mechanically from Git state; neither uses a hand-maintained
+counter file.
 
-```powershell
-.\scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-win.22
-```
+| Kind | Who sees it | How it is produced | When it changes |
+|---|---|---|---|
+| **Published tag** | GitHub Releases consumers, auto-updater | `vX.Y.Z-<platform>.N`, written by the publishing pipeline | Only when a release is published to GitHub |
+| **Local build label** | OFX panel, CLI `--version`, runtime-server log filename, dist artifact filenames | Output of `git describe --tags --dirty --match "v*-<platform>.*"` (or `--match "v*"` for stable) | Every commit; also flips to `-dirty` on uncommitted changes |
 
-The label is baked into the OFX panel, the CLI `--version` report, the
-runtime-server log filename (`ofx_runtime_server_v<label>.log`), and the
-dist artifact filenames so the operator never has to guess which build is
-installed. Public releases (no pre-release cycle in progress) are cut
-without `-DisplayVersionLabel`; `CMakeLists.txt` `VERSION` is authoritative
-and artifact names match it exactly.
+This split follows the pattern used by the Linux kernel, Go, Rust
+nightly, Kubernetes, and most projects that ship a binary carrying a
+version string. The published tag is the rare, human-curated event; the
+local label is the always-on, self-maintaining identifier that answers
+"which build is loaded in my Resolve right now?" without ever inflating
+the release list.
 
-**Tag format**. The Git tag, the display label, and the artifact filenames
-all use the same string:
+**Published tag format**. Every tag pushed to GitHub uses this shape:
 
 - Windows prerelease: `vX.Y.Z-win.N`
 - macOS prerelease: `vX.Y.Z-mac.N`
@@ -50,34 +50,67 @@ all use the same string:
 - Stable (all platforms): `vX.Y.Z` with no suffix
 
 The platform identifier (`win`, `mac`, `linux`) is required on every
-prerelease tag. A suffix-only tag like `v0.7.5-22` is not valid and will be
-rejected by the publishing pipeline. The auto-updater in
-[version_check.cpp](../src/app/version_check.cpp) filters releases by this
-identifier so a Windows user on `v0.7.5-win.22` never receives a macOS
-prerelease and vice versa. Stable releases without a suffix apply to all
-platforms universally.
+prerelease tag. A suffix-only tag like `v0.7.5-22` is not valid and will
+be rejected by the publishing pipeline. The auto-updater in
+[version_check.cpp](../src/app/version_check.cpp) filters releases by
+this identifier so a Windows user on `v0.7.5-win.22` never receives a
+macOS prerelease and vice versa. Stable releases without a suffix apply
+to all platforms universally.
 
 **Per-platform counters**. Each platform maintains its own independent
-counter (`N` above). Windows and macOS iterate at whatever cadence their
-track demands; they do not share or coordinate the counter.
+counter `N`. Windows and macOS iterate at whatever cadence their track
+demands; they do not share or coordinate the counter. `N` is the count
+of **published** prereleases for that `X.Y.Z-<platform>` cycle — it is
+never incremented by a local build, so it grows slowly and predictably
+(typically 1 to 5 per cycle, matching how Kubernetes, Node.js, and
+Python number their RCs).
 
-**Numbering rules for a new cycle** (applied per platform):
+**Local build label format**. When a build is produced without
+`-DisplayVersionLabel`, the pipeline derives the label from
+`git describe --tags --dirty --match "v*-<platform>.*"`, stripping the
+leading `v`. Concrete examples for a Windows build:
 
-- The counter does not restart when a pre-release trajectory is reverted
-  or abandoned. If the last shipped pre-release of `X.Y.Z-<platform>`
-  was `.4`, the next cycle's first candidate starts at `.10` or higher,
-  not `.1`. Jumping over the prior range makes it unambiguous in log
-  files, screenshots, and bug reports that a build is on the new cycle,
-  and avoids operator confusion between a `.1` that was the original
-  start and a `.1` that was a reboot.
-- Use round jumps between cycles (`.10`, `.20`, `.30`) so a counter like
-  `-win.12` immediately reads as "second candidate of the Windows cycle
-  that started at `.10`". This matches how the optimization measurement
-  ledger labels its `phase_9_*` track.
-- Always record the pre-release label in
-  [OPTIMIZATION_MEASUREMENTS.md](OPTIMIZATION_MEASUREMENTS.md) with the
-  measured numbers at the time of cut, even if the build is later
-  abandoned — the ledger is the cross-session memory of the track.
+| Git state | Derived label |
+|---|---|
+| Clean checkout at exactly the tag `v0.7.6-win.1` | `0.7.6-win.1` |
+| 3 commits past `v0.7.6-win.1`, at commit `abc1234`, clean | `0.7.6-win.1-3-gabc1234` |
+| Same as above, with uncommitted changes | `0.7.6-win.1-3-gabc1234-dirty` |
+| Before the first prerelease of this `X.Y.Z` cycle | `0.0.0-win.0-<n>-g<sha>` (fallback — pipeline falls back to the repo's initial commit) |
+
+The label reads directly as a statement about the repo state:
+`0.7.6-win.1-3-gabc1234` means "three commits past the `v0.7.6-win.1`
+prerelease, at commit `abc1234`". Two rebuilds of the same commit
+produce the same label, which is what you want — the label identifies
+the source, not the build attempt.
+
+**Counter advancement rule (absolute)**. `N` advances only inside the
+`-PublishGithub` code path of the canonical release pipeline. There is
+no other mechanism — no manual edit to a version file, no
+`-DisplayVersionLabel` override that bumps state, no local task that
+writes a new tag. The next `N` is computed as
+`max(existing-N-for-this-X.Y.Z-platform) + 1`, from the tags already on
+the remote. First prerelease of a new `X.Y.Z` cycle starts at `.1`.
+
+**Dirty-tree rule (absolute)**. The pipeline refuses to publish when
+`git describe --dirty` reports `-dirty`, or when there are staged but
+uncommitted changes. Publication requires a clean, committed,
+pushed-or-pushable HEAD. This closes the loophole where a label baked
+from an uncommitted working tree could reach users and be
+unreproducible from Git.
+
+**`-DisplayVersionLabel` override**. The flag remains for the narrow
+case where the operator needs to force a specific label string — for
+example, when cutting a bespoke build for a single tester. It is not
+the normal flow; the normal flow is letting `git describe` derive the
+label. Using `-DisplayVersionLabel` does not publish anything and does
+not advance `N`.
+
+**Measurement ledger**. Published prereleases must be recorded in
+[OPTIMIZATION_MEASUREMENTS.md](OPTIMIZATION_MEASUREMENTS.md) with the
+measured hot-path numbers at the time of cut. Unpublished local builds
+do not go in the ledger — they are ephemeral by definition and their
+labels contain the commit sha, so any measurement taken from one is
+already traceable to the exact source.
 
 ### Tag and release immutability
 
@@ -104,6 +137,50 @@ these flags, derived from the tag shape:
 
 Stable release `vX.Y.Z` is published only after every active platform
 track has shipped its final prerelease for that `X.Y.Z` cycle.
+
+### Release lifecycle
+
+Because Windows, macOS, and Linux are cut on independent timelines and
+each platform's users download from its own tag, the lifecycle rules
+below are absolute. Breaking any of them can invalidate a download link
+that a user on a different platform is actively relying on.
+
+**Cross-platform non-interference (absolute).** Publishing, deleting,
+renaming, or editing a release or tag on one platform must never touch
+a release or tag on another platform. The publishing pipeline's only
+write path is `gh release create` (plus `gh release edit` on the tag it
+just created, for retitling). It must not call `gh release delete` or
+`git push --delete <tag>` on any tag whose platform identifier differs
+from the one being published. This is defense-in-depth against a
+single-track operator accidentally wiping downloads for the other two
+tracks.
+
+**Same-platform supersession is manual and conservative.** When
+`vX.Y.Z-<platform>.N+1` ships, the prior `vX.Y.Z-<platform>.N` is not
+deleted by the pipeline. The operator may manually delete a superseded
+prerelease only when (a) a strictly newer `vX.Y.Z-<platform>.M` with
+`M > N` already exists on the same platform and `X.Y.Z`, and (b) the
+older build is known broken or obsolete. Absent both conditions, keep
+the release — the release list is also an audit log.
+
+**Known-broken prereleases may be deleted.** A prerelease that shipped
+a reproducible fatal defect (for example, the `v0.7.5-21` Windows build
+that failed to load in Resolve due to missing NPP runtime DLLs) may be
+deleted to prevent new downloads of a guaranteed-broken artifact. The
+deletion must be explicit, logged in the commit or PR that replaces it,
+and must not touch any other platform's tags.
+
+**Stable does not erase its prereleases.** When stable `vX.Y.Z` ships,
+the `vX.Y.Z-win.*`, `vX.Y.Z-mac.*`, and `vX.Y.Z-linux.*` prereleases
+stay. Users on a prerelease are migrated to stable by the auto-updater
+via SemVer precedence (stable outranks any prerelease of the same
+`X.Y.Z`), so deleting the prereleases provides no functional benefit
+and costs historical traceability.
+
+**Mutation is forbidden on any published tag.** See the "Tag and
+release immutability" subsection above. This applies regardless of
+platform, age, or supersession state. A broken tag gets deleted (under
+the rules above) and replaced with a new tag — never mutated in place.
 
 ## 2. Standardized Artifact Naming
 
@@ -311,21 +388,34 @@ reinventing them.
 
 ### Windows Release Label Plumbing
 
-`-DisplayVersionLabel` is the one mechanism that plumbs a human-readable
-version string into every user-visible surface on Windows. It flows
-through CMake into `include/corridorkey/version.hpp`
+The display label plumbs a human-readable version string into every
+user-visible surface on Windows. It flows through CMake into
+`include/corridorkey/version.hpp`
 (`CORRIDORKEY_DISPLAY_VERSION_STRING`), which the OFX panel, the
 `corridorkey --version` CLI, and the runtime-server log filename
 (`ofx_runtime_server_v<label>.log`) all read. The packaging scripts
 also bake the label into the dist artifact names when present:
 `CorridorKey_Resolve_v<label>_Windows_RTX_Installer.exe`,
-`CorridorKey_Resolve_v<label>_Windows_RTX.zip`,
-`CorridorKey_Resolve_v<label>_Windows_RTX\\`. On Windows the label must
-be of the form `X.Y.Z-win.N` (platform-qualified). Public releases drop
-the flag; `CMakeLists.txt` `VERSION` is authoritative and artifact names
-match it exactly. The numbering rule (counters do not restart across
-reverted cycles; jump to `.10`, `.20`, ...) is documented in
-section 1 "Pre-release labels".
+`CorridorKey_Resolve_v<label>_Windows_RTX\\`.
+
+The label is produced by one of three mechanisms, in priority order:
+
+1. `-DisplayVersionLabel <string>` explicitly passed. Override for
+   narrow cases (bespoke tester build, reproducing a historical label).
+   No validation beyond shape.
+2. Publication flow (`-Task release -PublishGithub`). The pipeline
+   computes the next canonical tag `vX.Y.Z-win.N` and uses that, after
+   enforcing the dirty-tree rule.
+3. Default (every local `build`, `package-ofx`, or `release` without
+   `-PublishGithub`). Derived from
+   `git describe --tags --dirty --match "v*-win.*"` with the leading
+   `v` stripped.
+
+The full derivation rules, dirty-tree rejection, and counter advancement
+semantics are documented in section 1 "Pre-release labels". On Windows,
+published labels must be of the form `X.Y.Z-win.N`; local labels are
+free to be the longer `git describe` form ending in `-<count>-g<sha>`
+or `-<count>-g<sha>-dirty`.
 
 Use the following commands according to the state you have:
 
