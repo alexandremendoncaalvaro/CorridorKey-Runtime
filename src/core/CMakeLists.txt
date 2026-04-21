@@ -7,6 +7,7 @@ target_sources(corridorkey_core PRIVATE
     gpu_resize.cpp
     inference_session.cpp
     ort_process_context.cpp
+    mlx_memory_governor.cpp
     mlx_session.cpp
     mlx_probe.cpp
     windows_rtx_probe.cpp

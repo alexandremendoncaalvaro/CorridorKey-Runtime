@@ -9,6 +9,7 @@
 #include "common/accelerate_utils.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/stage_profiler.hpp"
+#include "mlx_memory_governor.hpp"
 #include "post_process/color_utils.hpp"
 
 #if CORRIDORKEY_WITH_MLX
@@ -156,6 +157,13 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
     if (!executable_artifact_res) {
         return Unexpected(executable_artifact_res.error());
     }
+
+    // Belt-and-suspenders: make sure the process-wide MLX memory limits are in
+    // place before the bridge is imported. initialize_defaults() is idempotent
+    // via std::call_once, so paying for this here when the OFX runtime service
+    // has already called it costs one atomic check.
+    common::measure_stage(
+        on_stage, "mlx_memory_init", [&]() { (void)mlx_memory::initialize_defaults(); }, 1);
 
     try {
         auto session = std::unique_ptr<MlxSession>(new MlxSession());

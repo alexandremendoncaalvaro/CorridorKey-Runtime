@@ -7,6 +7,7 @@
 #include <fstream>
 
 #include "../common/runtime_paths.hpp"
+#include "../core/mlx_memory_governor.hpp"
 
 #if defined(_WIN32)
 #include <process.h>
@@ -159,6 +160,28 @@ double elapsed_ms(std::chrono::steady_clock::time_point start,
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+// Convert a byte count into a floating MB value with two decimals for logging.
+// We keep the log tokens MB-scale so operators can eyeball the numbers against
+// Activity Monitor without reaching for a calculator.
+std::string format_mb(std::size_t bytes) {
+    char buffer[32] = {};
+    std::snprintf(buffer, sizeof(buffer), "%.2f", static_cast<double>(bytes) / (1024.0 * 1024.0));
+    return std::string(buffer);
+}
+
+std::string format_mlx_memory_fields(const core::mlx_memory::Snapshot& snap) {
+    std::string out;
+    out.reserve(160);
+    out.append(" active_mb=").append(format_mb(snap.active_bytes));
+    out.append(" cache_mb=").append(format_mb(snap.cache_bytes));
+    out.append(" peak_mb=").append(format_mb(snap.peak_bytes));
+    out.append(" memory_limit_mb=").append(format_mb(snap.memory_limit_bytes));
+    out.append(" cache_limit_mb=").append(format_mb(snap.cache_limit_bytes));
+    out.append(" wired_limit_mb=").append(format_mb(snap.wired_limit_bytes));
+    out.append(" working_set_mb=").append(format_mb(snap.max_recommended_working_set_bytes));
+    return out;
+}
+
 #if defined(__APPLE__)
 // Report the effective QoS class so the server log surfaces cases where the
 // process was spawned under an inherited low-QoS class (utility/background).
@@ -264,6 +287,17 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
     start_event += " task_role=" + current_task_role_label();
 #endif
     logger.log(start_event);
+
+    // Install the MLX memory baseline (set_wired_limit(0), conservative
+    // memory_limit, aggressive cache_limit) and log the resulting snapshot.
+    // The init is idempotent, but doing it here at server startup means the
+    // limits are in force before any PrepareSession call allocates Metal
+    // buffers. On non-MLX builds the snapshot is all zeros and the log line
+    // still surfaces that the subsystem is absent.
+    {
+        const auto memory_snap = core::mlx_memory::initialize_defaults();
+        logger.log(std::string("event=mlx_memory_init") + format_mlx_memory_fields(memory_snap));
+    }
 
     auto server = common::LocalJsonServer::listen(options.endpoint);
     if (!server) {
@@ -379,6 +413,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                     // the grep story stays readable; consumers that want the full set can
                     // capture the RPC response directly via the existing timings field.
                     const auto& snapshot = render_response->session;
+                    const auto memory_snap = core::mlx_memory::snapshot();
                     logger.log(
                         std::string("event=render_frame_details session_id=") +
                         sanitize_log_token(snapshot.session_id) +
@@ -389,6 +424,8 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                         " target_resolution=" +
                         std::to_string(render_request->params.target_resolution) +
                         " tiling=" + (render_request->params.enable_tiling ? "1" : "0") +
+                        " mlx_active_mb=" + format_mb(memory_snap.active_bytes) +
+                        " mlx_cache_mb=" + format_mb(memory_snap.cache_bytes) +
                         " stage_total_ms=" + format_ms(total_stage_ms(render_response->timings)) +
                         " stages=" + format_stage_summary(render_response->timings));
                 }
@@ -405,6 +442,13 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                 const std::size_t sessions_before_release = broker.session_count();
                 auto release_result = broker.release_session(*release_request);
                 const std::size_t sessions_after_release = broker.session_count();
+                // If the broker actually destroyed a session, ask MLX to drop any
+                // cached buffers the bridge left behind. This prevents the cache
+                // from holding onto ~1-2 GB of dead bridge allocations between
+                // Resolve scrubs. No-op when nothing was destroyed.
+                if (sessions_after_release < sessions_before_release) {
+                    core::mlx_memory::clear_cache();
+                }
                 logger.log(std::string("event=release_session_details session_id=") +
                            sanitize_log_token(release_request->session_id) + " destroyed=" +
                            (sessions_after_release < sessions_before_release ? "1" : "0") +
