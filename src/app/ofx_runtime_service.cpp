@@ -14,6 +14,14 @@
 #include <unistd.h>
 #endif
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/task.h>
+#include <mach/task_policy.h>
+#include <pthread.h>
+#include <sys/qos.h>
+#endif
+
 namespace corridorkey::app {
 
 namespace {
@@ -151,6 +159,93 @@ double elapsed_ms(std::chrono::steady_clock::time_point start,
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+#if defined(__APPLE__)
+// Report the effective QoS class so the server log surfaces cases where the
+// process was spawned under an inherited low-QoS class (utility/background).
+// Running MLX under a low QoS lets Metal/GPU work get preempted by higher-QoS
+// work in the host process (e.g. DaVinci Resolve) and produces 20-70x
+// slowdowns; see docs/OPTIMIZATION_MEASUREMENTS.md.
+std::string describe_qos_class(qos_class_t qos) {
+    switch (qos) {
+        case QOS_CLASS_USER_INTERACTIVE:
+            return "user-interactive";
+        case QOS_CLASS_USER_INITIATED:
+            return "user-initiated";
+        case QOS_CLASS_DEFAULT:
+            return "default";
+        case QOS_CLASS_UTILITY:
+            return "utility";
+        case QOS_CLASS_BACKGROUND:
+            return "background";
+        case QOS_CLASS_UNSPECIFIED:
+        default:
+            return "unspecified";
+    }
+}
+
+std::string current_qos_label() {
+    qos_class_t qos = QOS_CLASS_UNSPECIFIED;
+    int relative = 0;
+    if (pthread_get_qos_class_np(pthread_self(), &qos, &relative) != 0) {
+        return "unknown";
+    }
+    return describe_qos_class(qos);
+}
+
+// pthread_get_qos_class_np() returns the pthread's last-SET QoS, not the
+// effective task-level role. macOS propagates a task role across posix_spawn
+// from the parent's coalition, and pthread_set_qos_class_self_np() /
+// posix_spawnattr_set_qos_class_np() cannot raise above that role clamp.
+// TASK_CATEGORY_POLICY exposes the kernel's view of this task's role
+// (TASK_FOREGROUND_APPLICATION, TASK_DARWINBG_APPLICATION, etc.), so the
+// server log surfaces whether the pthread_override_qos_class_start_np()
+// dance on the client side actually elevated the task out of Resolve's
+// background role, or whether we are still running under a role that lets
+// the host preempt our Metal work.
+const char* describe_task_role(task_role_t role) {
+    switch (role) {
+        case TASK_RENICED:
+            return "reniced";
+        case TASK_UNSPECIFIED:
+            return "unspecified";
+        case TASK_FOREGROUND_APPLICATION:
+            return "foreground";
+        case TASK_BACKGROUND_APPLICATION:
+            return "background";
+        case TASK_CONTROL_APPLICATION:
+            return "control";
+        case TASK_GRAPHICS_SERVER:
+            return "graphics-server";
+        case TASK_THROTTLE_APPLICATION:
+            return "throttle";
+        case TASK_NONUI_APPLICATION:
+            return "nonui";
+        case TASK_DEFAULT_APPLICATION:
+            return "default-app";
+        case TASK_DARWINBG_APPLICATION:
+            return "darwinbg";
+        case TASK_USER_INIT_APPLICATION:
+            return "user-init-app";
+        default:
+            return "unknown";
+    }
+}
+
+std::string current_task_role_label() {
+    task_category_policy_data_t policy{};
+    policy.role = TASK_UNSPECIFIED;
+    mach_msg_type_number_t count = TASK_CATEGORY_POLICY_COUNT;
+    boolean_t get_default = FALSE;
+    kern_return_t rc =
+        task_policy_get(mach_task_self(), TASK_CATEGORY_POLICY,
+                        reinterpret_cast<task_policy_t>(&policy), &count, &get_default);
+    if (rc != KERN_SUCCESS) {
+        return "unknown";
+    }
+    return describe_task_role(policy.role);
+}
+#endif
+
 }  // namespace
 
 Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
@@ -159,10 +254,16 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
     // The version banner lets the log reader know which build emitted the events.
     // display_version carries the optimization checkpoint label (e.g. 0.7.5-2); it
     // collapses to the semantic version when no override is active at build time.
-    logger.log(std::string("event=server_start pid=") + std::to_string(current_process_id()) +
-               " port=" + std::to_string(options.endpoint.port) +
-               " version=" + CORRIDORKEY_VERSION_STRING +
-               " display_version=" + CORRIDORKEY_DISPLAY_VERSION_STRING);
+    std::string start_event = std::string("event=server_start pid=") +
+                              std::to_string(current_process_id()) +
+                              " port=" + std::to_string(options.endpoint.port) +
+                              " version=" + CORRIDORKEY_VERSION_STRING +
+                              " display_version=" + CORRIDORKEY_DISPLAY_VERSION_STRING;
+#if defined(__APPLE__)
+    start_event += " qos_class=" + current_qos_label();
+    start_event += " task_role=" + current_task_role_label();
+#endif
+    logger.log(start_event);
 
     auto server = common::LocalJsonServer::listen(options.endpoint);
     if (!server) {

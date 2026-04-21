@@ -29,6 +29,11 @@
 #include "device_selection.hpp"
 #include "process_paths.hpp"
 
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <sys/qos.h>
+#endif
+
 using namespace corridorkey;
 using namespace corridorkey::app;
 
@@ -849,6 +854,18 @@ int main(int argc, char* argv[]) {
         }
 
         if (cmd == "ofx-runtime-server") {
+#if defined(__APPLE__)
+            // The OFX plugin spawns this subcommand from a Resolve render-action
+            // thread whose QoS class is typically UTILITY or BACKGROUND. macOS
+            // propagates that QoS to posix_spawn children, and on Apple Silicon
+            // a low-QoS child's Metal commands get preempted by the host's
+            // higher-QoS Metal workload, producing 10-70x per-frame slowdowns.
+            // Elevate this main thread (and therefore the MLX worker threads
+            // it goes on to create) to USER_INITIATED before any MLX/Metal
+            // work starts. See ofx_runtime_service.cpp server_start event which
+            // logs the resulting qos_class for diagnosability.
+            pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+#endif
             app::OfxRuntimeServiceOptions service_options;
             service_options.endpoint = common::default_ofx_runtime_endpoint();
             service_options.log_path = common::ofx_runtime_server_log_path();
