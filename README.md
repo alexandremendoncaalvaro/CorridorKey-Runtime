@@ -144,8 +144,8 @@ integration.
 
 ## Community Tutorials
 
-- **Tutorial by Heiko (@hethfilms):** practical walkthrough of the CorridorKey Resolve OFX plugin, including installation and real professoonal workflow usage. [Watch here](https://youtu.be/VMcIk2jnQfg?si=IuitekQanKyDR4S-)
-
+- **Tutorial by Heiko (@hethfilms):** practical walkthrough of the CorridorKey Resolve OFX plugin, including installation and real professional workflow usage. [Watch here](https://youtu.be/VMcIk2jnQfg?si=IuitekQanKyDR4S-)
+- **Tutorial by Heiko (@hethfilms):** CORRIDORKEY - How to key difficult shots. [Watch here](https://www.youtube.com/watch?v=dAfeHmHFP9k)
 ## Building from Source
 
 ### Prerequisites
