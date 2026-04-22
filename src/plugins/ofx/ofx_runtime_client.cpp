@@ -10,8 +10,11 @@
 #include "ofx_logging.hpp"
 
 #if defined(__APPLE__)
+#include <pthread.h>
+#include <pthread/spawn.h>
 #include <signal.h>
 #include <spawn.h>
+#include <sys/qos.h>
 extern char** environ;
 #elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -575,11 +578,57 @@ Result<void> OfxRuntimeClient::launch_server() {
                                idle_timeout.data(),
                                nullptr};
     pid_t pid = 0;
+#if defined(__APPLE__)
+    // DaVinci Resolve invokes OFX render actions on UTILITY/BACKGROUND QoS
+    // worker threads. macOS clamps posix_spawn child's task QoS to the
+    // calling thread's effective QoS and silently clamps any subsequent
+    // pthread_set_qos_class_self_np / posix_spawnattr_set_qos_class_np to
+    // that ceiling (these APIs can LOWER but not RAISE). On Apple Silicon
+    // a low-QoS child has its Metal work preempted by the host's higher-
+    // QoS Metal workload, causing 10-70x per-frame slowdowns.
+    //
+    // To raise the ceiling we use pthread_override_qos_class_start_np,
+    // which is the documented override API used by libdispatch to avoid
+    // priority inversion. An active override elevates the thread's
+    // effective QoS for the duration of the call. The spawnattr + server-
+    // side pthread_set_qos_class_self_np then succeed because the ceiling
+    // allows it.
+    qos_class_t caller_qos = QOS_CLASS_UNSPECIFIED;
+    int caller_relative = 0;
+    pthread_get_qos_class_np(pthread_self(), &caller_qos, &caller_relative);
+    log_message("ofx_runtime_client", std::string("event=launch_server_parent_qos qos=") +
+                                          std::to_string(static_cast<int>(caller_qos)));
+    pthread_override_t qos_override =
+        pthread_override_qos_class_start_np(pthread_self(), QOS_CLASS_USER_INITIATED, 0);
+
+    posix_spawnattr_t spawn_attrs;
+    int attr_rc = posix_spawnattr_init(&spawn_attrs);
+    posix_spawnattr_t* attrs_ptr = nullptr;
+    if (attr_rc == 0) {
+        posix_spawnattr_set_qos_class_np(&spawn_attrs, QOS_CLASS_USER_INITIATED);
+        attrs_ptr = &spawn_attrs;
+    }
+    int spawn_rc = posix_spawn(&pid, m_options.server_binary.c_str(), nullptr, attrs_ptr,
+                               argv.data(), environ);
+    if (attr_rc == 0) {
+        posix_spawnattr_destroy(&spawn_attrs);
+    }
+
+    if (qos_override != nullptr) {
+        pthread_override_qos_class_end_np(qos_override);
+    }
+
+    if (spawn_rc != 0) {
+        return Unexpected<Error>(
+            Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
+    }
+#else
     if (posix_spawn(&pid, m_options.server_binary.c_str(), nullptr, nullptr, argv.data(),
                     environ) != 0) {
         return Unexpected<Error>(
             Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
     }
+#endif
 #endif
 
     return {};

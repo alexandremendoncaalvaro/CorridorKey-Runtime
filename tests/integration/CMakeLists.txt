@@ -80,3 +80,60 @@ if(NOT MSVC)
 else()
     target_compile_options(ofx_benchmark_harness PRIVATE /W4 /WX /permissive-)
 endif()
+
+# RPC-path harness: spawns the real runtime-server binary via OfxRuntimeClient
+# and measures per-frame latency end-to-end. Used to isolate IPC-layer
+# regressions from broker/engine regressions.
+add_executable(ofx_rpc_benchmark_harness
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
+    ofx_rpc_benchmark_harness.cpp
+)
+
+corridorkey_apply_windows_common_compile_defs(ofx_rpc_benchmark_harness)
+
+target_link_libraries(ofx_rpc_benchmark_harness
+    PRIVATE
+        corridorkey_core_static
+        nlohmann_json::nlohmann_json
+)
+
+target_include_directories(ofx_rpc_benchmark_harness PRIVATE
+    ${PROJECT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/vendor/openfx/include)
+
+target_compile_definitions(ofx_rpc_benchmark_harness PRIVATE
+    PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
+)
+
+corridorkey_stage_ort_runtime(ofx_rpc_benchmark_harness)
+
+if(NOT MSVC)
+    target_compile_options(ofx_rpc_benchmark_harness PRIVATE -Wall -Wextra -Wpedantic -Werror)
+else()
+    target_compile_options(ofx_rpc_benchmark_harness PRIVATE /W4 /WX /permissive-)
+endif()
+
+# Regression guard for the v0.7.6-mac.1 "scrubbing absurdly slow" bug caused
+# by posix_spawn inheriting Resolve's low parent QoS into the runtime server.
+# The harness invocation below spawns the server from a BACKGROUND-QoS
+# parent; the test asserts steady-state latency recovers. Without the fix,
+# per-frame latency held at 30-120s.
+if(APPLE)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(
+            NAME macos_runtime_qos_regression
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_macos_runtime_qos_regression.py
+        )
+        set_tests_properties(macos_runtime_qos_regression PROPERTIES
+            LABELS "integration;macos;regression;slow"
+            TIMEOUT 600
+            ENVIRONMENT
+                "HARNESS_BIN=$<TARGET_FILE:ofx_rpc_benchmark_harness>;SERVER_BIN=$<TARGET_FILE:corridorkey_cli>;PROJECT_ROOT=${PROJECT_SOURCE_DIR}"
+        )
+    endif()
+endif()

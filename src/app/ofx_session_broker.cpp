@@ -2,12 +2,15 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <string_view>
 
+#include "../common/host_memory.hpp"
 #include "../common/parallel_for.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../common/shared_memory_transport.hpp"
 #include "../common/stage_profiler.hpp"
 #include "../core/engine_internal.hpp"
+#include "../core/mlx_memory_governor.hpp"
 #include "../core/ort_process_context.hpp"
 #include "ofx_session_policy.hpp"
 
@@ -38,6 +41,65 @@ Error broker_error(ErrorCode code, const std::string& message) {
 
 void append_timing(std::vector<StageTiming>& timings, const StageTiming& timing) {
     timings.push_back(timing);
+}
+
+// Derive a safe bridge-resolution ceiling from the current host memory state.
+// The thresholds come from the v0.7.6-mac.1 log analysis: 50-108 s Metal-submit
+// stalls correlate with compressor > 6 GB and free_bytes < 100 MB. Under those
+// conditions, loading a large bridge (1536 or 2048) is almost guaranteed to
+// push MLX's working set into the compressor's path and fall into the slow
+// regime. The ceiling returned by this helper is advisory: the broker
+// reports it back in the response snapshot so the plugin / UI can honor the
+// downshift on the next render; it does not force the current engine to a
+// smaller bridge because the model_path is already resolution-specific.
+//
+// 0 means "no ceiling" (either the telemetry is unavailable or the host has
+// abundant headroom). Any positive value is a bridge ceiling in pixels.
+int safe_bridge_ceiling_px(const common::HostMemoryStats& stats) {
+    if (stats.free_bytes == 0 && stats.compressor_bytes == 0) {
+        return 0;
+    }
+    constexpr std::size_t kMegabyte = 1024ULL * 1024ULL;
+    const std::size_t free_mb = stats.free_bytes / kMegabyte;
+    const std::size_t compressor_mb = stats.compressor_bytes / kMegabyte;
+
+    // Critical: host is actively compressing and free is small. The machine
+    // is already in the regime where a fresh 1.5-2 GB bridge allocation will
+    // trigger compressor thrash; cap at 512 so any new session picks the
+    // smallest viable bridge.
+    if (free_mb < 256 || compressor_mb > 8192) {
+        return 512;
+    }
+    // Warn: free is low or compressor is elevated. Cap at 768 -- measurably
+    // better quality than 512 while still keeping the working set small.
+    if (free_mb < 768 || compressor_mb > 4096) {
+        return 768;
+    }
+    // Moderate: free is tight but the compressor is still idle. Cap at 1024,
+    // which fits comfortably on a 16 GB machine with Resolve running.
+    if (free_mb < 1536 || compressor_mb > 2048) {
+        return 1024;
+    }
+    return 0;
+}
+
+const char* bridge_pressure_level(const common::HostMemoryStats& stats) {
+    if (stats.free_bytes == 0 && stats.compressor_bytes == 0) {
+        return "unknown";
+    }
+    constexpr std::size_t kMegabyte = 1024ULL * 1024ULL;
+    const std::size_t free_mb = stats.free_bytes / kMegabyte;
+    const std::size_t compressor_mb = stats.compressor_bytes / kMegabyte;
+    if (free_mb < 256 || compressor_mb > 8192) {
+        return "critical";
+    }
+    if (free_mb < 768 || compressor_mb > 4096) {
+        return "warn";
+    }
+    if (free_mb < 1536 || compressor_mb > 2048) {
+        return "moderate";
+    }
+    return "normal";
 }
 
 void copy_image_rows(Image source, Image destination) {
@@ -90,6 +152,29 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
                                                 {}};
     }
 
+    // Sample host memory before loading the engine so we can (a) release any
+    // stale MLX cache back to the kernel if the machine is already compressed,
+    // and (b) downshift the effective bridge resolution to one that fits the
+    // current headroom. Both decisions are advisory -- the model_path is
+    // resolution-specific so we cannot retarget the engine here -- but the
+    // downshift is recorded in effective_resolution and propagates to the
+    // plugin's next render so it can pick a smaller target_resolution.
+    const auto host_stats = common::query_host_memory_stats();
+    const char* pressure_level = bridge_pressure_level(host_stats);
+    const int safe_ceiling = safe_bridge_ceiling_px(host_stats);
+    if (std::string_view(pressure_level) == "critical" ||
+        std::string_view(pressure_level) == "warn") {
+        // Dropping cached-but-unused MLX allocations here gives the upcoming
+        // engine load room to allocate without tripping the compressor. No-op
+        // on non-MLX builds.
+        corridorkey::core::mlx_memory::clear_cache();
+    }
+
+    int effective_resolution = request.effective_resolution;
+    if (safe_ceiling > 0 && effective_resolution > safe_ceiling) {
+        effective_resolution = safe_ceiling;
+    }
+
     std::vector<StageTiming> timings;
     StageTimingCallback on_stage = [&](const StageTiming& timing) {
         append_timing(timings, timing);
@@ -111,7 +196,7 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.snapshot.requested_device = request.requested_device;
     entry.snapshot.requested_quality_mode = request.requested_quality_mode;
     entry.snapshot.requested_resolution = request.requested_resolution;
-    entry.snapshot.effective_resolution = request.effective_resolution;
+    entry.snapshot.effective_resolution = effective_resolution;
     entry.snapshot.ref_count = 1;
     entry.snapshot.reused_existing_session = false;
     refresh_engine_snapshot(entry.snapshot, *entry.engine);

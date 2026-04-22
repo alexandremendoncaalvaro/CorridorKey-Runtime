@@ -9,6 +9,7 @@
 #include "common/accelerate_utils.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/stage_profiler.hpp"
+#include "mlx_memory_governor.hpp"
 #include "post_process/color_utils.hpp"
 
 #if CORRIDORKEY_WITH_MLX
@@ -157,6 +158,13 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
         return Unexpected(executable_artifact_res.error());
     }
 
+    // Belt-and-suspenders: make sure the process-wide MLX memory limits are in
+    // place before the bridge is imported. initialize_defaults() is idempotent
+    // via std::call_once, so paying for this here when the OFX runtime service
+    // has already called it costs one atomic check.
+    common::measure_stage(
+        on_stage, "mlx_memory_init", [&]() { (void)mlx_memory::initialize_defaults(); }, 1);
+
     try {
         auto session = std::unique_ptr<MlxSession>(new MlxSession());
         session->m_impl->model_resolution = resolved_model_resolution(*executable_artifact_res);
@@ -218,12 +226,27 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
     try {
         int model_res = m_impl->model_resolution;
 
+        // Downscale from the host frame size (e.g. 1920x1080) to the model
+        // resolution (e.g. 1024x1024). At 1920x1080 -> 1024 this is CPU-
+        // bound area resampling and was invisible until this instrumentation
+        // landed. Measuring it separately keeps mlx_prepare_inputs honest.
         ensure_buffer_shape(m_impl->prepared_rgb, model_res, model_res, 3);
-        ColorUtils::resize_area_into(rgb, m_impl->prepared_rgb.view(), m_impl->color_utils_state);
+        common::measure_stage(
+            on_stage, "mlx_downscale_rgb",
+            [&]() {
+                ColorUtils::resize_area_into(rgb, m_impl->prepared_rgb.view(),
+                                             m_impl->color_utils_state);
+            },
+            1);
 
         ensure_buffer_shape(m_impl->prepared_hint, model_res, model_res, 1);
-        ColorUtils::resize_area_into(alpha_hint, m_impl->prepared_hint.view(),
-                                     m_impl->color_utils_state);
+        common::measure_stage(
+            on_stage, "mlx_downscale_hint",
+            [&]() {
+                ColorUtils::resize_area_into(alpha_hint, m_impl->prepared_hint.view(),
+                                             m_impl->color_utils_state);
+            },
+            1);
 
         Image input = m_impl->input_buffer.view();
         Image rgb_view = m_impl->prepared_rgb.view();
@@ -282,14 +305,26 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
                 common::measure_stage(
                     on_stage, "mlx_materialize_outputs",
                     [&]() {
+                        // Split eval (submission/graph evaluation) from wait
+                        // (blocking for GPU completion). When the host is
+                        // preempting the Metal command queue the cost lands
+                        // in mlx_wait_alpha / mlx_wait_fg. When the cost is
+                        // actual graph work it lands in mlx_eval.
+                        common::measure_stage(
+                            on_stage, "mlx_eval",
+                            [&]() {
+                                if (foreground.has_value()) {
+                                    mlx::core::eval(alpha, *foreground);
+                                } else {
+                                    mlx::core::eval(alpha);
+                                }
+                            },
+                            1);
+                        common::measure_stage(
+                            on_stage, "mlx_wait_alpha", [&]() { alpha.wait(); }, 1);
                         if (foreground.has_value()) {
-                            mlx::core::eval(alpha, *foreground);
-                        } else {
-                            mlx::core::eval(alpha);
-                        }
-                        alpha.wait();
-                        if (foreground.has_value()) {
-                            foreground->wait();
+                            common::measure_stage(
+                                on_stage, "mlx_wait_fg", [&]() { foreground->wait(); }, 1);
                         }
                     },
                     1);
@@ -337,16 +372,36 @@ Result<FrameResult> MlxSession::infer(const Image& rgb, const Image& alpha_hint,
         FrameResult result;
         bool use_lanczos = upscale_method == UpscaleMethod::Lanczos4;
 
-        result.alpha = use_lanczos ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height,
+        // CPU-side upscale from model_resolution (e.g. 1024) to the host
+        // frame size (e.g. 1920x1080). Previously this was not instrumented,
+        // so any regression here would be invisible to support. Stage name
+        // reflects whether Lanczos or nearest was chosen.
+        const char* upscale_stage_alpha =
+            use_lanczos ? "mlx_upscale_alpha_lanczos" : "mlx_upscale_alpha_nearest";
+        const char* upscale_stage_fg =
+            use_lanczos ? "mlx_upscale_fg_lanczos" : "mlx_upscale_fg_nearest";
+
+        common::measure_stage(
+            on_stage, upscale_stage_alpha,
+            [&]() {
+                result.alpha = use_lanczos
+                                   ? ColorUtils::resize_lanczos(full_alpha, rgb.width, rgb.height,
                                                                 m_impl->color_utils_state)
                                    : ColorUtils::resize(full_alpha, rgb.width, rgb.height);
-        ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+            },
+            1);
         if (foreground.has_value()) {
             Image full_fg = m_impl->foreground_buffer.view();
-            result.foreground = use_lanczos
-                                    ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height,
+            common::measure_stage(
+                on_stage, upscale_stage_fg,
+                [&]() {
+                    result.foreground =
+                        use_lanczos ? ColorUtils::resize_lanczos(full_fg, rgb.width, rgb.height,
                                                                  m_impl->color_utils_state)
                                     : ColorUtils::resize(full_fg, rgb.width, rgb.height);
+                },
+                1);
         }
         return result;
     } catch (const std::exception& error) {
@@ -422,14 +477,19 @@ Result<FrameResult> MlxSession::infer_tile(const Image& rgb_tile, const Image& h
             foreground.emplace(mlx::core::contiguous(outputs[1]));
         }
 
+        common::measure_stage(
+            on_stage, "mlx_eval_tile",
+            [&]() {
+                if (foreground.has_value()) {
+                    mlx::core::eval(alpha, *foreground);
+                } else {
+                    mlx::core::eval(alpha);
+                }
+            },
+            1);
+        common::measure_stage(on_stage, "mlx_wait_alpha_tile", [&]() { alpha.wait(); }, 1);
         if (foreground.has_value()) {
-            mlx::core::eval(alpha, *foreground);
-        } else {
-            mlx::core::eval(alpha);
-        }
-        alpha.wait();
-        if (foreground.has_value()) {
-            foreground->wait();
+            common::measure_stage(on_stage, "mlx_wait_fg_tile", [&]() { foreground->wait(); }, 1);
         }
 
         const auto& alpha_shape = alpha.shape();
