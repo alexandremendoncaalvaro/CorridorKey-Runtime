@@ -42,6 +42,11 @@ struct OfxRuntimePrepareSessionRequest {
     int requested_quality_mode = 0;
     int requested_resolution = 0;
     int effective_resolution = 0;
+    // Upper bound (ms) the server honors for the synchronous prewarm phase
+    // inside prepare_session. Mirrors the Prepare Timeout UI parameter so
+    // the server aborts a runaway MLX JIT before the client RPC times out.
+    // 0 means "no explicit cap; fall back to the client RPC timeout."
+    int prepare_timeout_ms = 0;
 };
 
 struct OfxRuntimeSessionSnapshot {

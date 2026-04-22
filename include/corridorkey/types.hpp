@@ -30,7 +30,14 @@ enum class ErrorCode : std::uint8_t {
     IoError,
     InvalidParameters,
     Cancelled,
-    HardwareNotSupported
+    HardwareNotSupported,
+    // Returned from prepare_session when the Metal working-set headroom is
+    // too small to safely resident even the post-warmup footprint of the
+    // requested bridge resolution. The session broker refuses to create the
+    // engine rather than allocate into a thrashing system. The plugin
+    // surfaces this as a user-visible alert so the operator can close apps
+    // or pick a lower quality mode -- never a silent downshift.
+    InsufficientMemory
 };
 
 /**

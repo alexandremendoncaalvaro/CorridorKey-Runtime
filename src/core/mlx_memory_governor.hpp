@@ -54,4 +54,12 @@ Snapshot snapshot();
 // the cache entirely.
 Snapshot apply_policy(Policy policy);
 
+// Read the policy that apply_policy() last installed. The session broker
+// consults this before compiling a new MLX shape: while the dispatch memory-
+// pressure source is reporting Warn or Critical, prewarm is skipped so we do
+// not commit a large allocation on top of a system that is already thrashing.
+// Safe to call concurrently with apply_policy(); the underlying storage is a
+// std::atomic.
+Policy current_policy();
+
 }  // namespace corridorkey::core::mlx_memory

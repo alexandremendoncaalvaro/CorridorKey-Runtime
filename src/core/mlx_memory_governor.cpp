@@ -1,10 +1,13 @@
 #include "mlx_memory_governor.hpp"
 
+#include <atomic>
 #include <mutex>
 
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <sys/types.h>
+
+#include "metal_memory_probe.hpp"
 #endif
 
 #if CORRIDORKEY_WITH_MLX
@@ -66,6 +69,12 @@ std::once_flag g_initialize_once;
 BaselineLimits g_baseline_limits;
 #endif
 
+// Last Policy installed by apply_policy(). Read by current_policy() and by
+// the session broker when deciding whether to prewarm a new shape. std::atomic
+// rather than a mutex because the read is on the hot prepare path and the
+// write fires from a dedicated serial dispatch queue.
+std::atomic<Policy> g_current_policy{Policy::Normal};
+
 Snapshot current_snapshot() {
     Snapshot out;
 #if CORRIDORKEY_WITH_MLX
@@ -76,9 +85,13 @@ Snapshot current_snapshot() {
     // set_cache_limit / set_wired_limit return the previous limit when given
     // the same value. There is no getter, so we cache the last applied values
     // on the module and read them back from the baseline / most-recent policy.
-    // max_recommended_working_set_bytes stays 0 because the Metal-scoped
-    // device_info() symbol is not exported from libmlx; the policy no longer
-    // depends on it.
+#endif
+#if defined(__APPLE__)
+    // Metal driver's dynamic working-set ceiling. This is the same number
+    // PyTorch MPS and llama.cpp consult; it shrinks automatically when the
+    // system is under pressure. libmlx does not export the device_info()
+    // symbol that would surface it, so we read it directly via a Metal probe.
+    out.max_recommended_working_set_bytes = metal_memory::recommended_max_working_set_bytes();
 #endif
     return out;
 }
@@ -153,14 +166,19 @@ Snapshot apply_policy(Policy policy) {
     if (policy != Policy::Normal) {
         mlx::core::clear_cache();
     }
+    g_current_policy.store(policy, std::memory_order_release);
     Snapshot snap = current_snapshot();
     snap.cache_limit_bytes = cache_target;
     snap.wired_limit_bytes = 0;
     return snap;
 #else
-    (void)policy;
+    g_current_policy.store(policy, std::memory_order_release);
     return Snapshot{};
 #endif
+}
+
+Policy current_policy() {
+    return g_current_policy.load(std::memory_order_acquire);
 }
 
 }  // namespace corridorkey::core::mlx_memory
