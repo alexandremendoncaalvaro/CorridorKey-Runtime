@@ -41,6 +41,21 @@ target_compile_definitions(test_integration PRIVATE
     OFX_PLUGIN_PATH="$<TARGET_FILE:corridorkey_ofx>"
 )
 
+# test_ofx_plugin_exceptions dlopen's the built OFX bundle at runtime — the
+# generator-expression path alone does not imply a build-order edge, so without
+# this dependency a targeted "ninja test_integration" leaves the plugin unbuilt
+# and the test fails with a nullptr handle.
+add_dependencies(test_integration corridorkey_ofx)
+
+# corridorkey_core carries -fsanitize=address under ENABLE_ASAN while
+# test_integration itself does not. When the test dlopen's CorridorKey.ofx the
+# ASAN runtime is pulled in after process start and aborts with "Interceptors
+# are not working". Surface that at compile time so the test can skip cleanly
+# under sanitized presets instead of SIGABRT-ing.
+if(ENABLE_ASAN)
+    target_compile_definitions(test_integration PRIVATE CORRIDORKEY_DEPS_HAVE_ASAN=1)
+endif()
+
 if(NOT MSVC)
     target_compile_options(test_integration PRIVATE -Wall -Wextra -Wpedantic -Werror)
 else()
