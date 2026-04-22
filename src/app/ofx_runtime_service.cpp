@@ -93,8 +93,17 @@ std::string sanitize_log_token(const std::string& value) {
     return output;
 }
 
-// Summarize the top-N stages by total_ms into a compact "name:ms,name:ms" list.
-// The log consumer can grep the summary without needing the full per-stage JSON.
+// Stages that must always appear in the render-frame summary so the log alone
+// answers "eval-bound or wait-bound?" — mlx_eval tends to dominate the top-N
+// slots and hide the wait split that tells us whether we're Metal-queue-bound.
+bool is_pinned_stage(const std::string& name) {
+    return name == "mlx_eval" || name == "mlx_wait_alpha" || name == "mlx_wait_fg" ||
+           name == "mlx_eval_tile" || name == "mlx_wait_alpha_tile" || name == "mlx_wait_fg_tile";
+}
+
+// Summarize stages into a compact "name:ms,name:ms" list. Returns the top-N by
+// total_ms plus any pinned stages that fell outside the cut, so diagnostic
+// signals never get squeezed out by a single dominant stage.
 std::string format_stage_summary(const std::vector<StageTiming>& timings, std::size_t top_n = 5) {
     if (timings.empty()) {
         return "none";
@@ -108,12 +117,25 @@ std::string format_stage_summary(const std::vector<StageTiming>& timings, std::s
         return timings[a].total_ms > timings[b].total_ms;
     });
 
-    const std::size_t limit = std::min(top_n, indices.size());
+    const std::size_t top_limit = std::min(top_n, indices.size());
+    std::vector<bool> included(indices.size(), false);
+    for (std::size_t i = 0; i < top_limit; ++i) {
+        included[indices[i]] = true;
+    }
+    for (std::size_t i = top_limit; i < indices.size(); ++i) {
+        if (is_pinned_stage(timings[indices[i]].name)) {
+            included[indices[i]] = true;
+        }
+    }
+
     std::string summary;
-    summary.reserve(64);
-    for (std::size_t i = 0; i < limit; ++i) {
+    summary.reserve(128);
+    for (std::size_t i = 0; i < indices.size(); ++i) {
+        if (!included[indices[i]]) {
+            continue;
+        }
         const auto& timing = timings[indices[i]];
-        if (i > 0) {
+        if (!summary.empty()) {
             summary.push_back(',');
         }
         char buffer[64] = {};
