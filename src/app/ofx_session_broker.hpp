@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <corridorkey/engine.hpp>
+#include <future>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -19,12 +20,6 @@ namespace corridorkey::app {
 struct OfxSessionBrokerOptions {
     std::size_t max_cached_sessions = 4;
     std::chrono::milliseconds idle_session_ttl = common::kDefaultOfxIdleTimeout;
-    // After a memory-pressure-driven bridge ceiling is applied, hold that
-    // ceiling for this long before letting a subsequent relaxation (lower
-    // pressure) take effect. Prevents oscillation between bridges where each
-    // flicker would trigger a fresh MLX JIT compile. See
-    // ofx_session_policy.hpp :: resolve_sticky_bridge_ceiling.
-    std::chrono::milliseconds bridge_ceiling_cooldown = std::chrono::seconds(10);
 };
 
 class OfxSessionBroker {
@@ -43,7 +38,18 @@ class OfxSessionBroker {
    private:
     struct SessionEntry {
         OfxRuntimeSessionSnapshot snapshot = {};
-        std::unique_ptr<Engine> engine = nullptr;
+        // shared_ptr (not unique_ptr) so a background prewarm worker can
+        // hold its own strong reference. If the broker evicts this entry
+        // while prewarm is still compiling, the Engine outlives the map
+        // entry until the worker finishes, keeping the MLX JIT safe from
+        // use-after-free. See prewarm_with_timeout() in the .cpp.
+        std::shared_ptr<Engine> engine = nullptr;
+        // Shared future gated by the prewarm worker's promise. render_frame
+        // blocks on this before calling process_frame so a detached prewarm
+        // cannot race with inference on the same Engine (Engine is not
+        // thread-safe). valid() is false when no prewarm was scheduled,
+        // in which case render_frame does not wait.
+        std::shared_future<void> prewarm_ready = {};
         std::chrono::steady_clock::time_point last_used_at = {};
     };
 
@@ -55,7 +61,6 @@ class OfxSessionBroker {
     OfxSessionBrokerOptions m_options = {};
     std::unordered_map<std::string, SessionEntry> m_sessions = {};
     std::shared_ptr<corridorkey::core::OrtProcessContext> m_ort_process_context = nullptr;
-    detail::StickyBridgeCeilingState m_sticky_bridge_ceiling = {};
 };
 
 }  // namespace corridorkey::app

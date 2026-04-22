@@ -17,6 +17,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     prepare_request.requested_quality_mode = 2;
     prepare_request.requested_resolution = 1024;
     prepare_request.effective_resolution = 1024;
+    prepare_request.prepare_timeout_ms = 45000;
 
     auto prepare_json = to_json(prepare_request);
     auto parsed_prepare = prepare_session_request_from_json(prepare_json);
@@ -26,6 +27,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     CHECK(parsed_prepare->requested_device.backend == Backend::TensorRT);
     CHECK_FALSE(parsed_prepare->engine_options.allow_cpu_fallback);
     CHECK(parsed_prepare->engine_options.disable_cpu_ep_fallback);
+    CHECK(parsed_prepare->prepare_timeout_ms == 45000);
 
     OfxRuntimeSessionSnapshot snapshot;
     snapshot.session_id = "session-1";
