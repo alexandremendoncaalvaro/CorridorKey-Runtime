@@ -164,6 +164,15 @@ class CORRIDORKEY_API Engine {
                                StageTimingCallback on_stage = nullptr);
 
     /**
+     * @brief Pre-compile and warm up inference kernels at the given target resolution.
+     *
+     * Intended to be called from session-preparation code (e.g. the OFX broker's
+     * prepare_session) so the first render_frame does not pay the JIT compile cost.
+     * Safe to call repeatedly; the underlying warmup is idempotent per-resolution.
+     */
+    Result<void> prewarm(int target_resolution, StageTimingCallback on_stage = nullptr);
+
+    /**
      * @brief Get the recommended resolution based on current hardware limits.
      * Use this as a default value if InferenceParams::target_resolution is 0.
      */
