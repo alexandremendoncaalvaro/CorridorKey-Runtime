@@ -1,10 +1,13 @@
 #include "ofx_session_broker.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
-#include <string_view>
+#include <future>
+#include <memory>
+#include <string>
+#include <thread>
 
-#include "../common/host_memory.hpp"
 #include "../common/parallel_for.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../common/shared_memory_transport.hpp"
@@ -43,63 +46,75 @@ void append_timing(std::vector<StageTiming>& timings, const StageTiming& timing)
     timings.push_back(timing);
 }
 
-// Derive a safe bridge-resolution ceiling from the current host memory state.
-// The thresholds come from the v0.7.6-mac.1 log analysis: 50-108 s Metal-submit
-// stalls correlate with compressor > 6 GB and free_bytes < 100 MB. Under those
-// conditions, loading a large bridge (1536 or 2048) is almost guaranteed to
-// push MLX's working set into the compressor's path and fall into the slow
-// regime. The ceiling returned by this helper is advisory: the broker
-// reports it back in the response snapshot so the plugin / UI can honor the
-// downshift on the next render; it does not force the current engine to a
-// smaller bridge because the model_path is already resolution-specific.
-//
-// 0 means "no ceiling" (either the telemetry is unavailable or the host has
-// abundant headroom). Any positive value is a bridge ceiling in pixels.
-int safe_bridge_ceiling_px(const common::HostMemoryStats& stats) {
-    if (stats.free_bytes == 0 && stats.compressor_bytes == 0) {
-        return 0;
-    }
-    constexpr std::size_t kMegabyte = 1024ULL * 1024ULL;
-    const std::size_t free_mb = stats.free_bytes / kMegabyte;
-    const std::size_t compressor_mb = stats.compressor_bytes / kMegabyte;
-
-    // Critical: host is actively compressing and free is small. The machine
-    // is already in the regime where a fresh 1.5-2 GB bridge allocation will
-    // trigger compressor thrash; cap at 512 so any new session picks the
-    // smallest viable bridge.
-    if (free_mb < 256 || compressor_mb > 8192) {
-        return 512;
-    }
-    // Warn: free is low or compressor is elevated. Cap at 768 -- measurably
-    // better quality than 512 while still keeping the working set small.
-    if (free_mb < 768 || compressor_mb > 4096) {
-        return 768;
-    }
-    // Moderate: free is tight but the compressor is still idle. Cap at 1024,
-    // which fits comfortably on a 16 GB machine with Resolve running.
-    if (free_mb < 1536 || compressor_mb > 2048) {
-        return 1024;
-    }
-    return 0;
+// Capture the current MLX / Metal memory state for admission and prewarm
+// gating. On non-Apple builds the snapshot is empty (all zeros) and the
+// policy helpers treat that as "telemetry unavailable -> allow."
+detail::PrewarmMemorySnapshot capture_prewarm_snapshot() {
+    detail::PrewarmMemorySnapshot out;
+    const auto mlx_snap = corridorkey::core::mlx_memory::snapshot();
+    out.recommended_working_set_bytes = mlx_snap.max_recommended_working_set_bytes;
+    out.mlx_active_bytes = mlx_snap.active_bytes;
+    out.mlx_cache_bytes = mlx_snap.cache_bytes;
+    const auto policy = corridorkey::core::mlx_memory::current_policy();
+    out.system_pressure_warn_or_critical =
+        policy == corridorkey::core::mlx_memory::Policy::PressureWarn ||
+        policy == corridorkey::core::mlx_memory::Policy::PressureCritical;
+    return out;
 }
 
-const char* bridge_pressure_level(const common::HostMemoryStats& stats) {
-    if (stats.free_bytes == 0 && stats.compressor_bytes == 0) {
-        return "unknown";
+// Outcome of prewarm_with_timeout(). Detached means the budget expired
+// but the worker is still compiling in the background; the returned
+// shared_future lets render_frame() wait for the compile to finish
+// before touching the Engine (Engine is not thread-safe).
+struct PrewarmRun {
+    std::shared_future<void> ready = {};
+    enum class Status { Completed, Detached, Skipped } status = Status::Skipped;
+};
+
+// Run engine->prewarm(shape) under a wall-clock budget. If the prewarm
+// does not complete within `timeout`, we return without waiting and the
+// worker keeps running in the background. The worker holds its own
+// shared_ptr to the Engine so the MLX JIT can finish safely even if the
+// broker later evicts the session entry.
+PrewarmRun prewarm_with_timeout(std::shared_ptr<Engine> engine, int shape_px,
+                                std::chrono::milliseconds timeout, StageTimingCallback on_stage) {
+    PrewarmRun out;
+    if (!engine || shape_px <= 0) {
+        out.status = PrewarmRun::Status::Skipped;
+        return out;
     }
-    constexpr std::size_t kMegabyte = 1024ULL * 1024ULL;
-    const std::size_t free_mb = stats.free_bytes / kMegabyte;
-    const std::size_t compressor_mb = stats.compressor_bytes / kMegabyte;
-    if (free_mb < 256 || compressor_mb > 8192) {
-        return "critical";
+    // std::promise + std::shared_future gives us both the timed-wait
+    // primitive we need and a rendezvous point the render path can park
+    // on. Heap-allocating the promise keeps it alive if the worker
+    // continues after we return (detach path).
+    auto promise = std::make_shared<std::promise<void>>();
+    out.ready = promise->get_future().share();
+    std::thread worker([promise, engine, shape_px, on_stage]() mutable {
+        try {
+            (void)engine->prewarm(shape_px, on_stage);
+        } catch (...) {
+            // Swallow; the caller's next render will surface any real
+            // failure via the normal Result<> channel.
+        }
+        promise->set_value();
+    });
+    if (timeout <= std::chrono::milliseconds(0)) {
+        worker.join();
+        out.status = PrewarmRun::Status::Completed;
+        return out;
     }
-    if (free_mb < 768 || compressor_mb > 4096) {
-        return "warn";
+    if (out.ready.wait_for(timeout) == std::future_status::ready) {
+        worker.join();
+        out.status = PrewarmRun::Status::Completed;
+        return out;
     }
-    if (free_mb < 1536 || compressor_mb > 2048) {
-        return "moderate";
-    }
-    return "normal";
+    // Timed out: let the worker finish in the background. The captured
+    // shared_ptr<Engine> keeps the Engine alive; the captured
+    // shared_ptr<promise> outlives this stack frame too. render_frame
+    // will park on `out.ready` before touching the Engine.
+    worker.detach();
+    out.status = PrewarmRun::Status::Detached;
+    return out;
 }
 
 void copy_image_rows(Image source, Image destination) {
@@ -152,29 +167,33 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
                                                 {}};
     }
 
-    // Sample host memory before loading the engine so we can (a) release any
-    // stale MLX cache back to the kernel if the machine is already compressed,
-    // and (b) downshift the effective bridge resolution to one that fits the
-    // current headroom. Both decisions are advisory -- the model_path is
-    // resolution-specific so we cannot retarget the engine here -- but the
-    // downshift is recorded in effective_resolution and propagates to the
-    // plugin's next render so it can pick a smaller target_resolution.
-    const auto host_stats = common::query_host_memory_stats();
-    const char* pressure_level = bridge_pressure_level(host_stats);
-    const int raw_ceiling = safe_bridge_ceiling_px(host_stats);
-    const int safe_ceiling = detail::resolve_sticky_bridge_ceiling(
-        m_sticky_bridge_ceiling, raw_ceiling, now(), m_options.bridge_ceiling_cooldown);
-    if (std::string_view(pressure_level) == "critical" ||
-        std::string_view(pressure_level) == "warn") {
-        // Dropping cached-but-unused MLX allocations here gives the upcoming
-        // engine load room to allocate without tripping the compressor. No-op
-        // on non-MLX builds.
+    // Capture the current MLX / Metal memory state. This is the input to
+    // both the admission check (does the requested shape even fit?) and
+    // the prewarm gate (is it safe to pay the JIT compile up front?).
+    // If the system is already under Warn / Critical pressure we first
+    // ask MLX to release its cache -- cheap, safe, and buys us back
+    // whatever the buffer pool was hoarding before we compute headroom.
+    if (corridorkey::core::mlx_memory::current_policy() !=
+        corridorkey::core::mlx_memory::Policy::Normal) {
         corridorkey::core::mlx_memory::clear_cache();
     }
+    const auto memory_snapshot = capture_prewarm_snapshot();
 
-    int effective_resolution = request.effective_resolution;
-    if (safe_ceiling > 0 && effective_resolution > safe_ceiling) {
-        effective_resolution = safe_ceiling;
+    // Admission: the model_path is resolution-specific (the plugin-side
+    // selection already picked the packaged artifact closest to the user's
+    // Target Resolution). If that shape won't fit on this device right now,
+    // we refuse rather than swap in a different resolution silently --
+    // matting edge quality depends on the user's choice of bridge, and
+    // quietly running at 768 when the user asked for 1024 is a contract
+    // violation. The plugin surfaces InsufficientMemory as a user-visible
+    // alert with next-step guidance.
+    const int target_shape = request.effective_resolution > 0 ? request.effective_resolution
+                                                              : request.requested_resolution;
+    if (!detail::can_admit_session(memory_snapshot, target_shape)) {
+        return Unexpected<Error>(
+            broker_error(ErrorCode::InsufficientMemory,
+                         "Not enough GPU memory available for the requested resolution. "
+                         "Close other GPU-intensive apps or lower Target Resolution / Quality."));
     }
 
     std::vector<StageTiming> timings;
@@ -182,15 +201,18 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         append_timing(timings, timing);
     };
 
-    auto engine = corridorkey::core::EngineFactory::create_with_ort_process_context(
+    auto engine_result = corridorkey::core::EngineFactory::create_with_ort_process_context(
         request.model_path, request.requested_device, m_ort_process_context, on_stage,
         request.engine_options);
-    if (!engine) {
-        return Unexpected<Error>(engine.error());
+    if (!engine_result) {
+        return Unexpected<Error>(engine_result.error());
     }
 
     SessionEntry entry;
-    entry.engine = std::move(*engine);
+    // Convert the factory's unique_ptr into a shared_ptr so the prewarm
+    // worker can hold its own strong reference. The std::shared_ptr
+    // constructor from std::unique_ptr&& adopts ownership cleanly.
+    entry.engine = std::shared_ptr<Engine>(std::move(*engine_result));
     entry.last_used_at = now();
     entry.snapshot.session_id = key;
     entry.snapshot.model_path = request.model_path;
@@ -198,17 +220,36 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.snapshot.requested_device = request.requested_device;
     entry.snapshot.requested_quality_mode = request.requested_quality_mode;
     entry.snapshot.requested_resolution = request.requested_resolution;
-    entry.snapshot.effective_resolution = effective_resolution;
+    entry.snapshot.effective_resolution = request.effective_resolution;
     entry.snapshot.ref_count = 1;
     entry.snapshot.reused_existing_session = false;
     refresh_engine_snapshot(entry.snapshot, *entry.engine);
 
-    // Pay the MLX JIT / kernel-compile cost here, during session prep, instead of on
-    // the user's first render_frame. Before this, first-frame latency in Resolve
-    // was ~9s at 1024 bridge; after, the first render sees warm kernels. The warmup
-    // is idempotent per resolution, so process_frame's existing call becomes a
-    // no-op for the same shape.
-    (void)entry.engine->prewarm(effective_resolution, on_stage);
+    // Prewarm gate: even when the shape fits at steady state, the JIT
+    // compile peak can blow past the Metal ceiling. Skip (do not downshift)
+    // when headroom is tight or the system is under pressure; the first
+    // render_frame will pay the JIT the old way, but prepare_session
+    // stays fast and the UI does not freeze.
+    const auto decision = detail::evaluate_prewarm_decision(memory_snapshot, target_shape);
+    if (decision == detail::PrewarmDecision::Prewarm ||
+        decision == detail::PrewarmDecision::SkipTelemetryUnavailable) {
+        // Honor the UI-selected prepare timeout so a misbehaving JIT (e.g.
+        // a 2048-bridge 191 s compile under load) cannot wedge the RPC.
+        // The worker keeps running in the background after timeout so the
+        // user's next render still benefits from the warm kernels.
+        const std::chrono::milliseconds timeout{std::max(0, request.prepare_timeout_ms)};
+        auto prewarm_run = prewarm_with_timeout(entry.engine, target_shape, timeout, on_stage);
+        entry.prewarm_ready = prewarm_run.ready;
+    } else {
+        // Emit a marker stage so the runtime log can correlate skipped
+        // prewarm with steady-state first-frame latency.
+        StageTiming marker;
+        marker.name = std::string("prewarm_skipped_") + detail::prewarm_decision_label(decision);
+        marker.total_ms = 0.0;
+        marker.sample_count = 1;
+        marker.work_units = 0;
+        append_timing(timings, marker);
+    }
 
     auto response =
         OfxRuntimePrepareSessionResponse{response_snapshot(entry.snapshot, false), timings};
@@ -238,6 +279,17 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
     StageTimingCallback on_stage = [&](const StageTiming& timing) {
         append_timing(timings, timing);
     };
+
+    // Wait for any background prewarm to finish before touching the Engine.
+    // When prepare_session detached the worker on timeout, the first
+    // render_frame arrives while MLX is still JIT-compiling the shape.
+    // Engine state is not thread-safe, so we park here until the worker
+    // is done. The measure_stage() wrapper surfaces the wait in telemetry
+    // so the source of the apparent first-frame latency is obvious.
+    if (session->second.prewarm_ready.valid()) {
+        common::measure_stage(
+            on_stage, "prewarm_wait", [&]() { session->second.prewarm_ready.wait(); }, 1);
+    }
 
     auto result = session->second.engine->process_frame(
         transport->rgb_view(), transport->hint_view(), request.params, on_stage);

@@ -658,6 +658,25 @@ double elapsed_ms_since(std::chrono::steady_clock::time_point start_time) {
     return std::chrono::duration<double, std::milli>(elapsed).count();
 }
 
+// Surface ErrorCode::InsufficientMemory from prepare_session as a blocking
+// OFX alert. The broker returns this code when the requested model shape
+// will not fit the current GPU working-set headroom. Quietly downshifting
+// to a smaller shape is out of scope (that would change matting edge
+// quality behind the user's back), so the correct response is to tell the
+// user what happened and what they can do about it.
+bool maybe_surface_insufficient_memory(OfxImageEffectHandle instance, const Error& error) {
+    if (error.code != ErrorCode::InsufficientMemory) {
+        return false;
+    }
+    std::string message =
+        "Not enough GPU memory for the current model. Lower Target Resolution or "
+        "Quality, or close other GPU-intensive apps (browsers, other Resolve "
+        "projects) and try again.\n\nDetail: " +
+        error.message;
+    post_message(kOfxMessageError, message.c_str(), instance);
+    return true;
+}
+
 void log_stage_timing(std::string_view scope, std::string_view phase,
                       const DeviceInfo& requested_device,
                       const std::filesystem::path& artifact_path, int requested_resolution,
@@ -1326,6 +1345,15 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                  candidate.effective_resolution, std::nullopt,
                                  prepare_result.error().message);
                 log_message("create_instance", std::string("Runtime prepare failed: ") + failure);
+                // Insufficient GPU memory is a user-actionable state, not a
+                // candidate iteration we can silently paper over; surface it
+                // as an alert and abort bootstrap so the user can change
+                // settings before anything else tries.
+                if (maybe_surface_insufficient_memory(instance, prepare_result.error())) {
+                    data->last_error = prepare_result.error().message;
+                    log_create_total("insufficient_memory", prepare_result.error().message);
+                    return kOfxStatFailed;
+                }
                 if (!failure_summary.empty()) {
                     failure_summary += " | ";
                 }
@@ -1703,6 +1731,17 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                  selection.effective_resolution, std::nullopt,
                                  prepare_result.error().message);
                 log_message("ensure_engine_for_quality", data->last_error);
+                // Out-of-memory during a live quality switch is actionable:
+                // alert the user so they can relax Target Resolution instead
+                // of getting a silent fallback. Stop iterating candidates.
+                if (maybe_surface_insufficient_memory(data->effect, prepare_result.error())) {
+                    set_runtime_panel_state_for_failed_quality_request(
+                        data, requested_quality_mode, requested_resolution,
+                        cpu_quality_guardrail_active, selection.executable_model_path);
+                    update_runtime_panel(data);
+                    log_quality_total("insufficient_memory", data->last_error);
+                    return false;
+                }
                 if (should_record_quality_compile_failure(requested_device.backend,
                                                           prepare_result.error())) {
                     record_quality_compile_failure(data->quality_compile_failure_cache,

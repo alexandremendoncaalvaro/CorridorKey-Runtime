@@ -472,7 +472,8 @@ nlohmann::json to_json(const OfxRuntimePrepareSessionRequest& request) {
                 {"engine_options", to_json(request.engine_options)},
                 {"requested_quality_mode", request.requested_quality_mode},
                 {"requested_resolution", request.requested_resolution},
-                {"effective_resolution", request.effective_resolution}};
+                {"effective_resolution", request.effective_resolution},
+                {"prepare_timeout_ms", request.prepare_timeout_ms}};
 }
 
 Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
@@ -497,6 +498,12 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
     if (!requested_resolution) return Unexpected<Error>(requested_resolution.error());
     auto effective_resolution = required_int(json, "effective_resolution");
     if (!effective_resolution) return Unexpected<Error>(effective_resolution.error());
+    // prepare_timeout_ms is optional for backwards compatibility with v0
+    // clients; treat missing as 0 (no explicit cap).
+    int prepare_timeout_ms = 0;
+    if (json.contains("prepare_timeout_ms") && json.at("prepare_timeout_ms").is_number_integer()) {
+        prepare_timeout_ms = json.at("prepare_timeout_ms").get<int>();
+    }
 
     OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = *client_instance_id;
@@ -507,6 +514,7 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
     request.requested_quality_mode = *requested_quality_mode;
     request.requested_resolution = *requested_resolution;
     request.effective_resolution = *effective_resolution;
+    request.prepare_timeout_ms = prepare_timeout_ms;
     return request;
 }
 

@@ -207,7 +207,18 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
         }
     }
 
-    auto payload = app::to_json(request);
+    // Mirror the client's RPC-level prepare timeout into the server-side
+    // request so the server can bound its own prewarm phase. Without this
+    // the server might spend the entire timeout on MLX JIT compile and
+    // leave no budget for the network round trip. We deliberately send a
+    // slightly shorter value (90% of the client RPC budget) so the server
+    // has time to return an error or timeout-status response before the
+    // client transport gives up.
+    app::OfxRuntimePrepareSessionRequest outgoing = request;
+    if (outgoing.prepare_timeout_ms <= 0) {
+        outgoing.prepare_timeout_ms = (m_options.prepare_timeout_ms * 9) / 10;
+    }
+    auto payload = app::to_json(outgoing);
     auto ensure_result = ensure_server_running();
     if (!ensure_result) {
         return Unexpected<Error>(ensure_result.error());
@@ -480,9 +491,16 @@ Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_st
     if (!ensure_result) {
         return Unexpected<Error>(ensure_result.error());
     }
-    auto response = send_command_without_launch(app::OfxRuntimeCommand::PrepareSession,
-                                                app::to_json(*m_last_prepare_request),
-                                                m_options.prepare_timeout_ms);
+    // Same reasoning as OfxRuntimeClient::prepare_session(): propagate a
+    // shorter server-side prewarm budget so the server cannot consume the
+    // full RPC budget inside MLX JIT compile.
+    app::OfxRuntimePrepareSessionRequest outgoing = *m_last_prepare_request;
+    if (outgoing.prepare_timeout_ms <= 0) {
+        outgoing.prepare_timeout_ms = (m_options.prepare_timeout_ms * 9) / 10;
+    }
+    auto response =
+        send_command_without_launch(app::OfxRuntimeCommand::PrepareSession, app::to_json(outgoing),
+                                    m_options.prepare_timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
