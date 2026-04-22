@@ -54,6 +54,16 @@ OfxHost g_mock_host = {nullptr, mock_fetchSuite};
 
 TEST_CASE("OFX C-API Boundary catches exceptions and returns kOfxStatFailed",
           "[integration][ofx][exceptions]") {
+#if defined(CORRIDORKEY_DEPS_HAVE_ASAN)
+    // corridorkey_core ships AddressSanitizer under ENABLE_ASAN but this TU
+    // does not, so when we dlopen CorridorKey.ofx its ASAN runtime installs
+    // after process start and aborts ("Interceptors are not working"). The
+    // exception-boundary contract is still covered by non-sanitized presets.
+    SKIP(
+        "ASAN-instrumented dependency aborts on late dlopen; "
+        "coverage ships via non-sanitized preset runs.");
+#endif
+
     // Resolve the path to the built DLL
 #if defined(_WIN32)
     std::string plugin_path = OFX_PLUGIN_PATH;
