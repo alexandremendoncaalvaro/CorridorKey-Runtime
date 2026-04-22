@@ -640,4 +640,11 @@ std::optional<BackendFallbackInfo> Engine::backend_fallback() const {
     return m_impl ? m_impl->fallback_info : std::nullopt;
 }
 
+Result<void> Engine::prewarm(int target_resolution, StageTimingCallback on_stage) {
+    if (!m_impl || !m_impl->session) {
+        return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
+    }
+    return m_impl->ensure_warmup(on_stage, target_resolution);
+}
+
 }  // namespace corridorkey

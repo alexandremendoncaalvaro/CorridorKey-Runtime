@@ -161,7 +161,9 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     // plugin's next render so it can pick a smaller target_resolution.
     const auto host_stats = common::query_host_memory_stats();
     const char* pressure_level = bridge_pressure_level(host_stats);
-    const int safe_ceiling = safe_bridge_ceiling_px(host_stats);
+    const int raw_ceiling = safe_bridge_ceiling_px(host_stats);
+    const int safe_ceiling = detail::resolve_sticky_bridge_ceiling(
+        m_sticky_bridge_ceiling, raw_ceiling, now(), m_options.bridge_ceiling_cooldown);
     if (std::string_view(pressure_level) == "critical" ||
         std::string_view(pressure_level) == "warn") {
         // Dropping cached-but-unused MLX allocations here gives the upcoming
@@ -200,6 +202,13 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.snapshot.ref_count = 1;
     entry.snapshot.reused_existing_session = false;
     refresh_engine_snapshot(entry.snapshot, *entry.engine);
+
+    // Pay the MLX JIT / kernel-compile cost here, during session prep, instead of on
+    // the user's first render_frame. Before this, first-frame latency in Resolve
+    // was ~9s at 1024 bridge; after, the first render sees warm kernels. The warmup
+    // is idempotent per resolution, so process_frame's existing call becomes a
+    // no-op for the same shape.
+    (void)entry.engine->prewarm(effective_resolution, on_stage);
 
     auto response =
         OfxRuntimePrepareSessionResponse{response_snapshot(entry.snapshot, false), timings};
