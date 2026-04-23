@@ -51,10 +51,17 @@ def _patched_mask_unit_attention_forward(self: Any, x: torch.Tensor) -> torch.Te
     coremltools can keep on the Neural Engine. The global path is passed
     through untouched.
     """
-    B, N, _ = x.shape
+    # Force Python-int shape values so the trace stores them as constants
+    # rather than ``floor_divide`` graph ops. On Windows ``x.shape[1]``
+    # during trace resolves to a numpy.intc-typed value; propagating that
+    # through ``//`` creates a MIL ``floor_divide`` with an unsupported
+    # dtype. ``int(...)`` coerces to Python int on every platform so
+    # coremltools sees scalar constants instead.
+    B = int(x.shape[0])
+    N = int(x.shape[1])
 
     if self.use_mask_unit_attn:
-        num_windows = N // (self.q_stride * self.window_size)
+        num_windows = N // (int(self.q_stride) * int(self.window_size))
         tpw = N // num_windows  # tokens per window before q_stride pooling
 
         # Split QKV along the channel axis first so no intermediate tensor
