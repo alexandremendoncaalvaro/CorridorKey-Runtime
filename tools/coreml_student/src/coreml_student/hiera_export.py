@@ -326,6 +326,8 @@ def run_spike(
     repo_path: Path | None,
     use_refiner: bool = True,
     static_shape: bool = False,
+    save_traced_path: Path | None = None,
+    from_traced_path: Path | None = None,
 ) -> int:
     """Load teacher, apply the SDPA patch, trace, and convert to CoreML.
 
@@ -333,6 +335,13 @@ def run_spike(
     ``.mlpackage``, ``1`` on conversion failure (expected outcome that
     invalidates the Phase 2 hypothesis), ``2`` on setup failure (missing
     dependency, checkpoint, etc.).
+
+    The trace and convert steps can be run on separate hosts when the
+    tracing host cannot execute the final ``.mlpackage`` save. coremltools'
+    native BlobWriter (``libmilstoragepython``) is macOS-only, so Windows
+    can trace + convert but not save. Use ``save_traced_path`` on the
+    tracing host to emit a torchscript ``.pt``, then run with
+    ``from_traced_path`` on a macOS host to finish the conversion.
     """
     try:
         import coremltools as ct
@@ -340,58 +349,85 @@ def run_spike(
         print(f"[hiera_export] coremltools not installed: {exc}", file=sys.stderr)
         return 2
 
-    from .teacher import load_teacher
+    if from_traced_path is not None:
+        # Convert-only path: skip teacher load + trace, just rehydrate the
+        # pre-traced torchscript module and run ct.convert + save. This
+        # flow is intended for the macOS host in a split Windows-trace /
+        # Mac-save pipeline; the traced graph already encodes all the
+        # patches (attention, reroll, interpolate) because they were
+        # applied on the tracing host before ``torch.jit.trace``.
+        try:
+            traced = torch.jit.load(str(from_traced_path), map_location="cpu")
+        except Exception as exc:
+            print(
+                f"[hiera_export] torch.jit.load failed: {exc}", file=sys.stderr
+            )
+            return 2
+        print(f"[hiera_export] loaded traced module from {from_traced_path}")
+    else:
+        from .teacher import load_teacher
 
-    try:
-        teacher = load_teacher(
-            checkpoint_path=checkpoint_path,
-            img_size=img_size,
-            repo_path=repo_path,
-            device="cpu",
-            use_refiner=use_refiner,
-        )
-    except Exception as exc:
-        print(f"[hiera_export] teacher load failed: {exc}", file=sys.stderr)
-        return 2
+        try:
+            teacher = load_teacher(
+                checkpoint_path=checkpoint_path,
+                img_size=img_size,
+                repo_path=repo_path,
+                device="cpu",
+                use_refiner=use_refiner,
+            )
+        except Exception as exc:
+            print(f"[hiera_export] teacher load failed: {exc}", file=sys.stderr)
+            return 2
 
-    patched = patch_hiera_attention()
-    if patched == 0:
-        print(
-            "[hiera_export] MaskUnitAttention not found; Hiera layout may "
-            "have changed upstream. Spike aborted.",
-            file=sys.stderr,
-        )
-        return 2
-    print(f"[hiera_export] patched {patched} MaskUnitAttention class(es)")
+        patched = patch_hiera_attention()
+        if patched == 0:
+            print(
+                "[hiera_export] MaskUnitAttention not found; Hiera layout may "
+                "have changed upstream. Spike aborted.",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"[hiera_export] patched {patched} MaskUnitAttention class(es)")
 
-    # Reroll.forward re-reads ``N = x.shape[1]`` on every loop iteration and
-    # on Windows that read resolves to numpy.intc during trace, which makes
-    # the subsequent ``N // math.prod(strides)`` emit a MIL floor_divide op
-    # with an unsupported dtype. The patch forces Python-int arithmetic.
-    reroll_patched = patch_hiera_reroll()
-    if reroll_patched == 0:
-        print(
-            "[hiera_export] Reroll not found; Hiera layout may have changed "
-            "upstream. Spike aborted.",
-            file=sys.stderr,
-        )
-        return 2
-    print(f"[hiera_export] patched {reroll_patched} Reroll class(es)")
+        # Reroll.forward re-reads ``N = x.shape[1]`` on every loop iteration and
+        # on Windows that read resolves to numpy.intc during trace, which makes
+        # the subsequent ``N // math.prod(strides)`` emit a MIL floor_divide op
+        # with an unsupported dtype. The patch forces Python-int arithmetic.
+        reroll_patched = patch_hiera_reroll()
+        if reroll_patched == 0:
+            print(
+                "[hiera_export] Reroll not found; Hiera layout may have changed "
+                "upstream. Spike aborted.",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"[hiera_export] patched {reroll_patched} Reroll class(es)")
 
-    # Convert every ``F.interpolate(..., size=...)`` call into
-    # ``scale_factor=(sh, sw)`` form so coremltools' upsample lowering pass
-    # sees static scale constants instead of shape-op-derived target sizes.
-    patch_interpolate_for_trace()
-    print("[hiera_export] patched F.interpolate for static scale_factor")
+        # Convert every ``F.interpolate(..., size=...)`` call into
+        # ``scale_factor=(sh, sw)`` form so coremltools' upsample lowering pass
+        # sees static scale constants instead of shape-op-derived target sizes.
+        patch_interpolate_for_trace()
+        print("[hiera_export] patched F.interpolate for static scale_factor")
 
-    wrapper = _TracingWrapper(teacher.module).eval()
-    example = torch.zeros(1, 4, img_size, img_size)
+        wrapper = _TracingWrapper(teacher.module).eval()
+        example = torch.zeros(1, 4, img_size, img_size)
 
-    try:
-        traced = torch.jit.trace(wrapper, example, strict=False)
-    except Exception as exc:
-        print(f"[hiera_export] torch.jit.trace failed: {exc}", file=sys.stderr)
-        return 1
+        try:
+            traced = torch.jit.trace(wrapper, example, strict=False)
+        except Exception as exc:
+            print(f"[hiera_export] torch.jit.trace failed: {exc}", file=sys.stderr)
+            return 1
+
+        if save_traced_path is not None:
+            # Trace-only path: persist the torchscript to disk and exit. The
+            # Mac side of the split pipeline will pick it up with
+            # ``--from-traced``. Saving here keeps the memory-heavy trace on
+            # the 32 GB host while the .mlpackage save (macOS-only because of
+            # BlobWriter) happens on the 16 GB Mac.
+            save_traced_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.jit.save(traced, str(save_traced_path))
+            print(f"[hiera_export] saved traced module to {save_traced_path}")
+            return 0
 
     if static_shape:
         # Fixed shape: ANE refuses models with enumerated/flexible inputs.
@@ -454,6 +490,25 @@ def _cli(argv: list[str] | None = None) -> int:
         "enumerated/flexible shapes; a static export is required to see "
         "whether ANE residency is achievable at all.",
     )
+    parser.add_argument(
+        "--save-traced",
+        default=None,
+        help="Trace-only mode: run the teacher trace with the attention / "
+        "reroll / interpolate patches applied and write the torchscript "
+        "module to this path. Skips ct.convert and .mlpackage save. "
+        "Intended for the tracing host in a split Windows-trace / "
+        "Mac-save pipeline (Windows can trace at 1024 with 32 GB RAM "
+        "where macOS with 16 GB OOMs; but only macOS can save the "
+        "final .mlpackage because coremltools BlobWriter is macOS-only).",
+    )
+    parser.add_argument(
+        "--from-traced",
+        default=None,
+        help="Convert-only mode: load a torchscript module previously "
+        "produced by --save-traced and run ct.convert + save. Skips "
+        "teacher load, patching, and tracing entirely; the patches must "
+        "have been baked in on the tracing host.",
+    )
     args = parser.parse_args(argv)
 
     return run_spike(
@@ -463,6 +518,8 @@ def _cli(argv: list[str] | None = None) -> int:
         repo_path=Path(args.repo_path) if args.repo_path else None,
         use_refiner=not args.no_refiner,
         static_shape=args.static_shape,
+        save_traced_path=Path(args.save_traced) if args.save_traced else None,
+        from_traced_path=Path(args.from_traced) if args.from_traced else None,
     )
 
 
