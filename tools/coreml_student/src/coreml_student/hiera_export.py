@@ -124,6 +124,86 @@ def _patched_mask_unit_attention_forward(self: Any, x: torch.Tensor) -> torch.Te
     return self.proj(out)
 
 
+def _patched_reroll_forward(
+    self: Any,
+    x: torch.Tensor,
+    block_idx: int,
+    mask: torch.Tensor = None,
+) -> torch.Tensor:
+    """Drop-in replacement for ``timm.models.hiera.Reroll.forward``.
+
+    timm's version does ``x = x.view(B, *strides, N // math.prod(strides),
+    *cur_mu_shape, C)`` inside a loop where ``N`` is re-read from
+    ``x.shape[1]`` each iteration. On Windows those shape reads can
+    resolve to ``numpy.intc`` during trace, and the subsequent ``//``
+    emits a MIL ``floor_divide`` op whose dtype coremltools refuses.
+    The patch wraps every shape read in ``int(...)`` so the arithmetic
+    stays in pure Python and the trace stores the counts as constants.
+    Numerical behavior is unchanged; the input image size is fixed at
+    trace time so all sizes are statically known.
+    """
+    import math as _math
+
+    schedule, size = self.schedule[block_idx]
+    B = int(x.shape[0])
+    N = int(x.shape[1])
+    C = int(x.shape[2])
+
+    D = len(size)
+    cur_mu_shape = [1] * D
+
+    for strides in schedule:
+        x = x.view(B, *strides, N // _math.prod(strides), *cur_mu_shape, C)
+        L = len(x.shape)
+        permute = (
+            [0, 1 + D]
+            + sum(
+                [list(p) for p in zip(range(1, 1 + D), range(1 + D + 1, L - 1))],
+                [],
+            )
+            + [L - 1]
+        )
+        x = x.permute(permute)
+        for i in range(D):
+            cur_mu_shape[i] *= strides[i]
+        x = x.reshape(B, -1, *cur_mu_shape, C)
+        N = int(x.shape[1])
+
+    x = x.view(B, N, *cur_mu_shape, C)
+
+    if mask is not None:
+        return x
+
+    # ``undo_windowing`` is defined in the same module. Resolve it via the
+    # class's MRO so we do not have to duplicate the import here.
+    from timm.models.hiera import undo_windowing
+
+    x = undo_windowing(x, size, cur_mu_shape)
+    return x
+
+
+def patch_hiera_reroll() -> int:
+    """Monkey-patch every ``Reroll`` class's ``forward`` method.
+
+    Mirrors :func:`patch_hiera_attention` but targets the shape-dependent
+    reshape loop in timm's ``Reroll.forward`` that emits ``floor_divide``
+    graph ops on Windows.
+    """
+    patched = 0
+    for module_name, module in list(sys.modules.items()):
+        if not module_name.startswith(("hiera", "timm.models.hiera")):
+            continue
+        for attr_name in dir(module):
+            if attr_name != "Reroll":
+                continue
+            cls = getattr(module, attr_name)
+            if not isinstance(cls, type):
+                continue
+            cls.forward = _patched_reroll_forward  # type: ignore[assignment]
+            patched += 1
+    return patched
+
+
 def patch_hiera_attention() -> int:
     """Monkey-patch every ``MaskUnitAttention`` instance's forward method.
 
@@ -283,6 +363,20 @@ def run_spike(
         )
         return 2
     print(f"[hiera_export] patched {patched} MaskUnitAttention class(es)")
+
+    # Reroll.forward re-reads ``N = x.shape[1]`` on every loop iteration and
+    # on Windows that read resolves to numpy.intc during trace, which makes
+    # the subsequent ``N // math.prod(strides)`` emit a MIL floor_divide op
+    # with an unsupported dtype. The patch forces Python-int arithmetic.
+    reroll_patched = patch_hiera_reroll()
+    if reroll_patched == 0:
+        print(
+            "[hiera_export] Reroll not found; Hiera layout may have changed "
+            "upstream. Spike aborted.",
+            file=sys.stderr,
+        )
+        return 2
+    print(f"[hiera_export] patched {reroll_patched} Reroll class(es)")
 
     # Convert every ``F.interpolate(..., size=...)`` call into
     # ``scale_factor=(sh, sw)`` form so coremltools' upsample lowering pass
