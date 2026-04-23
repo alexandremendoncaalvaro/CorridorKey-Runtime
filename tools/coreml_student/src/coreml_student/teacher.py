@@ -144,6 +144,7 @@ def load_teacher(
     img_size: int,
     repo_path: Path | None = None,
     device: torch.device | str = "cpu",
+    use_refiner: bool = True,
 ) -> GreenFormerTeacher:
     """Load the GreenFormer teacher for a specific input resolution.
 
@@ -168,7 +169,7 @@ def load_teacher(
     module = GreenFormer(
         encoder_name=DEFAULT_ENCODER_NAME,
         img_size=img_size,
-        use_refiner=True,
+        use_refiner=use_refiner,
     )
     checkpoint = torch.load(str(checkpoint_path), map_location="cpu", weights_only=True)
     state_dict = checkpoint.get("state_dict", checkpoint)
