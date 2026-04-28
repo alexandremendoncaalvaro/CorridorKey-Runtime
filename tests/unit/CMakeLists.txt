@@ -80,8 +80,22 @@ else()
     target_compile_options(test_unit PRIVATE /W4 /WX /permissive-)
 endif()
 
-add_test(NAME unit_tests COMMAND test_unit)
-set_tests_properties(unit_tests PROPERTIES
+# Process isolation between ORT/TensorRT-touching tests and raw CUDA
+# helper tests. Tests that exercise the inference engine through ORT/TRT
+# leave the CUDA driver state in conditions that can SIGSEGV a subsequent
+# raw cudaStreamCreate inside this process. The leak is documented in
+# ONNX Runtime issue #18466 (cublas/cudnn handles created in TRT EP
+# constructor without matching destroy calls) and acknowledged in the
+# ONNX Runtime CUDA Programming wiki ("CUDA code sometimes hangs in
+# destruction"). Catch2 does not support per-TEST_CASE process isolation
+# natively (catchorg/Catch2 issue #462), so we split the suite into two
+# ctest entries that each spawn a fresh process and therefore see a clean
+# CUDA primary context. The same test_unit binary is reused -- the only
+# difference is the Catch2 tag filter passed as argv[1].
+add_test(NAME unit_tests COMMAND test_unit "~[core]")
+add_test(NAME unit_tests_gpu COMMAND test_unit "[core]")
+
+set_tests_properties(unit_tests unit_tests_gpu PROPERTIES
     LABELS "unit"
     ENVIRONMENT "CUDA_LAUNCH_BLOCKING=1"
 )
