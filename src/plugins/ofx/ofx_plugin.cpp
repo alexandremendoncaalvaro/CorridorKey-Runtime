@@ -25,21 +25,34 @@ static void set_host(OfxHost* host) {
 // Safe to call multiple times; the second call is a no-op when the name was
 // already captured. Must be invoked after fetch_suites() succeeds because it
 // depends on the property suite.
+//
+// Host-name capture is metadata only -- it drives help-button routing and
+// log breadcrumbs, never the render path. The internal try/catch keeps a
+// host whose property suite throws or violates the C ABI from turning Load
+// (or any other action that calls this) into kOfxStatFailed. The plugin
+// degrades to "unknown host" routing instead of refusing to load.
 void capture_host_name() {
-    if (!g_host_name.empty()) {
-        return;
-    }
-    if (g_host == nullptr || g_suites.property == nullptr) {
-        return;
-    }
-    char* host_name_cstr = nullptr;
-    const OfxStatus status =
-        g_suites.property->propGetString(g_host->host, kOfxPropName, 0, &host_name_cstr);
-    if (status == kOfxStatOK && host_name_cstr != nullptr) {
-        g_host_name = host_name_cstr;
-        log_message("capture_host_name", std::string("kOfxPropName=") + g_host_name);
-    } else {
-        log_message("capture_host_name", "kOfxPropName unavailable on host property set.");
+    try {
+        if (!g_host_name.empty()) {
+            return;
+        }
+        if (g_host == nullptr || g_suites.property == nullptr ||
+            g_suites.property->propGetString == nullptr) {
+            return;
+        }
+        char* host_name_cstr = nullptr;
+        const OfxStatus status =
+            g_suites.property->propGetString(g_host->host, kOfxPropName, 0, &host_name_cstr);
+        if (status == kOfxStatOK && host_name_cstr != nullptr) {
+            g_host_name = host_name_cstr;
+            log_message("capture_host_name", std::string("kOfxPropName=") + g_host_name);
+        } else {
+            log_message("capture_host_name", "kOfxPropName unavailable on host property set.");
+        }
+    } catch (const std::exception& e) {
+        log_message("capture_host_name_exception", e.what());
+    } catch (...) {
+        log_message("capture_host_name_exception", "Unknown exception while reading kOfxPropName.");
     }
 }
 
