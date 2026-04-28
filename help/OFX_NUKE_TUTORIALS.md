@@ -38,6 +38,24 @@ but the manual fallback above always works.
 
 CorridorKey appears in the node menu under **OFX > Keying > CorridorKey**.
 
+## License Requirement (Non-commercial Will Not Work)
+
+Nuke Non-commercial does not load any third-party OFX plug-in -- this is a
+Foundry license-tier restriction, not a CorridorKey limitation. The plugin
+is scanned and registered in Nuke's OFX cache (you can confirm by grepping
+`%LOCALAPPDATA%\Temp\nuke\ofxplugincache\ofxplugincache-<version>-64.xml`
+for `com.corridorkey.resolve`) but the node menu hides it.
+
+To use CorridorKey in Nuke you need one of:
+
+- **Nuke 30-day Commercial trial** (free) -- the simplest path for evaluation.
+- **Nuke Indie 12.2v3 or newer** (paid) -- third-party OFX support was added
+  in 12.2v3.
+- **Nuke / NukeX / Nuke Studio** (commercial subscription or perpetual).
+
+See Foundry's [Non-commercial FAQ](https://www.foundry.com/non-commercial-faqs)
+and [Q100427: Limitations of Nuke Non-commercial](https://support.foundry.com/hc/en-us/articles/360001227130).
+
 ## Color-Managed Reminder
 
 Nuke's project-level color management (OCIO or Nuke's native color
