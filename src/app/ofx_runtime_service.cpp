@@ -211,6 +211,18 @@ std::string format_mlx_memory_fields(const core::mlx_memory::Snapshot& snap) {
     return out;
 }
 
+// host_free_mb / host_compressor_mb are emitted on every platform so the
+// prepare_session_details log keeps its host-memory pressure column readable
+// across Windows and macOS. common::query_host_memory_stats() already has
+// platform-specific implementations; this function is purely formatting.
+std::string format_host_memory_fields(const common::HostMemoryStats& stats) {
+    std::string out;
+    out.reserve(80);
+    out.append(" host_free_mb=").append(format_mb(stats.free_bytes));
+    out.append(" host_compressor_mb=").append(format_mb(stats.compressor_bytes));
+    return out;
+}
+
 #if defined(__APPLE__)
 // Report the effective QoS class so the server log surfaces cases where the
 // process was spawned under an inherited low-QoS class (utility/background).
@@ -295,14 +307,6 @@ std::string current_task_role_label() {
         return "unknown";
     }
     return describe_task_role(policy.role);
-}
-
-std::string format_host_memory_fields(const common::HostMemoryStats& stats) {
-    std::string out;
-    out.reserve(80);
-    out.append(" host_free_mb=").append(format_mb(stats.free_bytes));
-    out.append(" host_compressor_mb=").append(format_mb(stats.compressor_bytes));
-    return out;
 }
 
 // RAII wrapper around a DISPATCH_SOURCE_TYPE_MEMORYPRESSURE source. The
