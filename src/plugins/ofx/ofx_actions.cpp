@@ -368,9 +368,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "instance cache.",
         "runtime_details_group");
 
+    const std::string start_here_hint =
+        host_qualified_phrase(g_host_name, "Open the quick-start guide for CorridorKey") + ".";
     define_push_button_param(param_set, kParamOpenStartHereGuide, "Open Start Here Guide",
-                             "Open the quick-start guide for CorridorKey in Resolve.",
-                             kParamHelpGroup);
+                             start_here_hint.c_str(), kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenQualityGuide, "Open Quality Guide",
                              "Open the quality and fallback guide for CorridorKey.",
                              kParamHelpGroup);
@@ -381,9 +382,27 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                              "Open the Recover Original Details guide.", kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenTilingGuide, "Open Tiling Guide",
                              "Open the tiling guide and trade-offs.", kParamHelpGroup);
-    define_push_button_param(
-        param_set, kParamOpenResolveTutorial, "Open Resolve Tutorial",
-        "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", kParamHelpGroup);
+    // The tutorial button keeps the kParamOpenResolveTutorial id for backward
+    // compatibility with saved Resolve project files; its label and hint adapt
+    // to the active host so Nuke users see "Nuke Tutorial" rather than
+    // "Resolve Tutorial".
+    const char* tutorial_label = "Open Tutorial";
+    if (is_nuke_host()) {
+        tutorial_label = "Open Nuke Tutorial";
+    } else if (is_resolve_host()) {
+        tutorial_label = "Open Resolve Tutorial";
+    }
+    std::string tutorial_hint;
+    if (is_nuke_host()) {
+        tutorial_hint = "Open step-by-step CorridorKey workflows for Foundry Nuke on GitHub.";
+    } else if (is_resolve_host()) {
+        tutorial_hint =
+            "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.";
+    } else {
+        tutorial_hint = "Open step-by-step CorridorKey workflows on GitHub.";
+    }
+    define_push_button_param(param_set, kParamOpenResolveTutorial, tutorial_label,
+                             tutorial_hint.c_str(), kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
                              "Open the troubleshooting guide on GitHub.", kParamHelpGroup);
     define_push_button_param(param_set, kParamCheckUpdates, "Check for Updates",

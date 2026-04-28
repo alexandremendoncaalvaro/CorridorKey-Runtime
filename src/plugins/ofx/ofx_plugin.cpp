@@ -1,6 +1,8 @@
 #include <cstring>
 #include <exception>
 #include <memory>
+#include <string>
+#include <string_view>
 
 #include "ofx_frame_cache.hpp"
 #include "ofx_logging.hpp"
@@ -11,9 +13,34 @@ namespace corridorkey::ofx {
 OfxHost* g_host = nullptr;
 OfxSuites g_suites = {};
 std::unique_ptr<SharedFrameCache> g_frame_cache = nullptr;
+std::string g_host_name;
 
 static void set_host(OfxHost* host) {
     g_host = host;
+}
+
+// Reads the host's kOfxPropName into g_host_name. Per the OpenFX 1.4 spec
+// (ofxCore.h, kOfxPropName) this is the globally unique reverse-DNS string
+// the host advertises, e.g. "uk.co.thefoundry.nuke" or "DaVinciResolveLite".
+// Safe to call multiple times; the second call is a no-op when the name was
+// already captured. Must be invoked after fetch_suites() succeeds because it
+// depends on the property suite.
+void capture_host_name() {
+    if (!g_host_name.empty()) {
+        return;
+    }
+    if (g_host == nullptr || g_suites.property == nullptr) {
+        return;
+    }
+    char* host_name_cstr = nullptr;
+    const OfxStatus status =
+        g_suites.property->propGetString(g_host->host, kOfxPropName, 0, &host_name_cstr);
+    if (status == kOfxStatOK && host_name_cstr != nullptr) {
+        g_host_name = host_name_cstr;
+        log_message("capture_host_name", std::string("kOfxPropName=") + g_host_name);
+    } else {
+        log_message("capture_host_name", "kOfxPropName unavailable on host property set.");
+    }
 }
 
 bool fetch_suites() {
@@ -56,6 +83,7 @@ OfxStatus on_load() {
         log_message("on_load", "Missing required suites.");
         return kOfxStatErrMissingHostFeature;
     }
+    capture_host_name();
     g_frame_cache = std::make_unique<SharedFrameCache>();
     log_message("on_load", "Load successful.");
     return kOfxStatOK;

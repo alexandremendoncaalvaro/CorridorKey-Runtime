@@ -2086,7 +2086,7 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 } else if (changed_param == kParamOpenTilingGuide) {
                     url = help_doc_url("OFX_PANEL_GUIDE.md#tiling");
                 } else if (changed_param == kParamOpenResolveTutorial) {
-                    url = help_doc_url("OFX_RESOLVE_TUTORIALS.md");
+                    url = help_doc_url(select_tutorial_doc(g_host_name).c_str());
                 } else {
                     url = help_doc_url("TROUBLESHOOTING.md");
                 }

@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ofxCore.h"
@@ -33,9 +34,20 @@ namespace corridorkey::ofx {
 
 class OfxRuntimeClient;
 
+// The plugin identifier carries the legacy ".resolve" suffix because changing
+// it would orphan every existing CorridorKey node in saved DaVinci Resolve
+// projects. The string is otherwise opaque to OFX hosts and the plugin runs
+// unchanged in any spec-compliant host (Resolve, Foundry Nuke, others).
 constexpr const char* kPluginIdentifier = "com.corridorkey.resolve";
 constexpr const char* kPluginLabel = "CorridorKey";
 constexpr const char* kPluginGroup = "Keying";
+
+// Values that supported hosts report for their kOfxPropName host property
+// (the globally unique reverse-DNS string defined by ofxCore.h). Sourced from
+// the OpenFX community host reference
+// (https://github.com/NatronGitHub/openfx-misc/blob/master/README-hosts.txt).
+constexpr const char* kHostNameNuke = "uk.co.thefoundry.nuke";
+constexpr const char* kHostNameResolve = "DaVinciResolveLite";
 
 constexpr const char* kClipAlphaHint = "Alpha Hint";
 constexpr const char* kClipMatteOutput = "Matte Output";
@@ -251,8 +263,49 @@ class SharedFrameCache;
 extern OfxHost* g_host;
 extern OfxSuites g_suites;
 extern std::unique_ptr<SharedFrameCache> g_frame_cache;
+extern std::string g_host_name;
 
 bool fetch_suites();
+void capture_host_name();
+
+inline bool is_nuke_host_name(std::string_view host_name) {
+    return host_name == kHostNameNuke;
+}
+
+inline bool is_resolve_host_name(std::string_view host_name) {
+    return host_name == kHostNameResolve;
+}
+
+inline bool is_nuke_host() {
+    return is_nuke_host_name(g_host_name);
+}
+
+inline bool is_resolve_host() {
+    return is_resolve_host_name(g_host_name);
+}
+
+inline std::string select_tutorial_doc(std::string_view host_name) {
+    if (is_nuke_host_name(host_name)) {
+        return "OFX_NUKE_TUTORIALS.md";
+    }
+    if (is_resolve_host_name(host_name)) {
+        return "OFX_RESOLVE_TUTORIALS.md";
+    }
+    return "OFX_PANEL_GUIDE.md";
+}
+
+inline std::string host_qualified_phrase(std::string_view host_name, const char* base_phrase) {
+    if (base_phrase == nullptr) {
+        return std::string();
+    }
+    std::string result(base_phrase);
+    if (is_nuke_host_name(host_name)) {
+        result += " in Nuke";
+    } else if (is_resolve_host_name(host_name)) {
+        result += " in Resolve";
+    }
+    return result;
+}
 void post_message(const char* message_type, const char* message, OfxImageEffectHandle effect);
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
