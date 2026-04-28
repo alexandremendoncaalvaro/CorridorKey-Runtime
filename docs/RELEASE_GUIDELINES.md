@@ -72,13 +72,13 @@ leading `v`. Concrete examples for a Windows build:
 
 | Git state | Derived label |
 |---|---|
-| Clean checkout at exactly the tag `v0.7.6-win.1` | `0.7.6-win.1` |
-| 3 commits past `v0.7.6-win.1`, at commit `abc1234`, clean | `0.7.6-win.1-3-gabc1234` |
-| Same as above, with uncommitted changes | `0.7.6-win.1-3-gabc1234-dirty` |
+| Clean checkout at exactly the tag `v0.8.0-win.1` | `0.8.0-win.1` |
+| 3 commits past `v0.8.0-win.1`, at commit `abc1234`, clean | `0.8.0-win.1-3-gabc1234` |
+| Same as above, with uncommitted changes | `0.8.0-win.1-3-gabc1234-dirty` |
 | Before the first prerelease of this `X.Y.Z` cycle | `0.0.0-win.0-<n>-g<sha>` (fallback — pipeline falls back to the repo's initial commit) |
 
 The label reads directly as a statement about the repo state:
-`0.7.6-win.1-3-gabc1234` means "three commits past the `v0.7.6-win.1`
+`0.8.0-win.1-3-gabc1234` means "three commits past the `v0.8.0-win.1`
 prerelease, at commit `abc1234`". Two rebuilds of the same commit
 produce the same label, which is what you want — the label identifies
 the source, not the build attempt.
@@ -583,8 +583,8 @@ the required sections, so there is no path to shipping a placeholder
 like "Auto-published by ...".
 
 Before publishing, write the notes to `build/release_notes/v<tag>.md`
-(for example `build/release_notes/v0.7.6-win.1.md` or
-`build/release_notes/v0.7.6-mac.1.md`). When the publish flag is
+(for example `build/release_notes/v0.8.0-win.1.md` or
+`build/release_notes/v0.8.0-mac.1.md`). When the publish flag is
 passed through the platform wrapper, the pipeline picks that file up
 automatically if it exists at the convention path; otherwise point to
 it explicitly:

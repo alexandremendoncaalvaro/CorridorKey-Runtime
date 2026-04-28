@@ -13,10 +13,10 @@
 # Usage:
 #   scripts/publish_github_release.sh \
 #     --platform mac \
-#     --version 0.7.6 \
-#     --display-label 0.7.6-mac.1 \
-#     --notes-file build/release_notes/v0.7.6-mac.1.md \
-#     --asset dist/CorridorKey_Resolve_v0.7.6-mac.1_macOS_AppleSilicon.dmg \
+#     --version 0.8.0 \
+#     --display-label 0.8.0-mac.1 \
+#     --notes-file build/release_notes/v0.8.0-mac.1.md \
+#     --asset dist/CorridorKey_Resolve_v0.8.0-mac.1_macOS_AppleSilicon.dmg \
 #     [--asset dist/<second asset>] \
 #     [--repo alexandremendoncaalvaro/CorridorKey-Runtime] \
 #     [--dry-run]
