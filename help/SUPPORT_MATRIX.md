@@ -41,6 +41,30 @@ does not appear in Resolve 18, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 
+## Foundry Nuke - Host Version Support
+
+| Nuke Version | OFX Plugin Support |
+|--------------|-------------------|
+| Nuke 17.0v2 (Windows RTX) | Best-effort - validated via headless smoke and manual UAT |
+| Nuke 16.x, 15.x, 14.x | Best-effort - shares the OFX 1.4 surface, not systematically validated |
+| Nuke 13.x and earlier | Unsupported |
+
+The plugin uses standard OpenFX 1.4 properties and suites that are part of
+every modern Nuke release; there are no Nuke-specific code paths in the
+render hot path. Help labels and the tutorial button adapt to the active
+host based on the `kOfxPropName` string the host advertises.
+
+Cache cleanup on plugin update is handled automatically by the Windows
+installer when Nuke is detected. The installer clears
+`%LOCALAPPDATA%\Temp\nuke\ofxplugincache\ofxplugincache_Nuke<ver>-64.xml`
+so the freshly staged bundle is rescanned on the next Nuke launch.
+
+Designation escalates to Officially supported once a licensed-runner
+headless smoke (`CORRIDORKEY_RUN_NUKE_E2E=1`) is gating CI and the track
+has accumulated a clean run history.
+
+---
+
 ## macOS - Platform and Hardware Support
 
 | Configuration | Support |
