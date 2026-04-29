@@ -165,7 +165,6 @@ TEST_CASE("ofx bootstrap honors fixed preview quality on windows tensorRT",
     TempDirGuard temp_dir("corridorkey-ofx-bootstrap-preview");
     touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
-    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
 
     auto candidates = build_bootstrap_candidates(
         windows_capabilities(), DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
@@ -444,7 +443,6 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
-    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
 
     auto candidates = build_bootstrap_candidates(
         windows_capabilities(), DeviceInfo{"RTX", 24576, Backend::TensorRT}, temp_dir.path());
@@ -575,7 +573,6 @@ TEST_CASE("auto windows tensorRT ignores the deprecated 768 fp16 artifact",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-prefers-fp16");
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
-    touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
 
     auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 1920,
                                              1080, kQuantizationFp16);

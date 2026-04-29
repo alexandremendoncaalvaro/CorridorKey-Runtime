@@ -13,10 +13,7 @@
         "corridorkey_fp16_512.onnx",
         "corridorkey_fp16_1024.onnx",
         "corridorkey_fp16_1536.onnx",
-        "corridorkey_fp16_2048.onnx",
-        "corridorkey_int8_512.onnx",
-        "corridorkey_int8_768.onnx",
-        "corridorkey_int8_1024.onnx"
+        "corridorkey_fp16_2048.onnx"
     ],
     "artifacts": [
         {
@@ -82,30 +79,6 @@
             "base_model": "corridorkey_fp16_512.onnx",
             "certified": true,
             "resolution": 512
-        },
-        {
-            "filename": "corridorkey_int8_1024.onnx",
-            "sha256": "9AA1DA1F9F14B049E6FF5101DE373D12BF238BCE03346EA04345358F7AD38E69",
-            "artifact_kind": "supporting_model",
-            "base_model": "corridorkey_int8_1024.onnx",
-            "certified": false,
-            "resolution": 1024
-        },
-        {
-            "filename": "corridorkey_int8_512.onnx",
-            "sha256": "498BC2D3A4E02E023059E3EC33275D878D11234A1A68FE2D8A2E1A259BFB0257",
-            "artifact_kind": "supporting_model",
-            "base_model": "corridorkey_int8_512.onnx",
-            "certified": false,
-            "resolution": 512
-        },
-        {
-            "filename": "corridorkey_int8_768.onnx",
-            "sha256": "FB82E565F0ABD0A116F8AC411F859A11F5A7D177BE9EF60985E4BEF183370206",
-            "artifact_kind": "supporting_model",
-            "base_model": "corridorkey_int8_768.onnx",
-            "certified": false,
-            "resolution": 768
         }
     ],
     "certification_device": {

@@ -32,7 +32,6 @@ try {
     $files = @{
         "corridorkey_fp16_512.onnx" = "fp16-512"
         "corridorkey_fp16_512_ctx.onnx" = "fp16-512-ctx"
-        "corridorkey_int8_512.onnx" = "int8-512"
     }
 
     foreach ($entry in $files.GetEnumerator()) {
@@ -51,7 +50,7 @@ try {
 
     $manifest = Assert-CorridorKeyWindowsRtxArtifactManifestHealthy `
         -ArtifactsDir $modelsDir `
-        -ExpectedModels @("corridorkey_fp16_512.onnx", "corridorkey_int8_512.onnx") `
+        -ExpectedModels @("corridorkey_fp16_512.onnx") `
         -ExpectedCompiledContextModels @("corridorkey_fp16_512_ctx.onnx") `
         -ArtifactManifestPath $manifestPath `
         -Label "regression fixture"
@@ -65,7 +64,7 @@ try {
     Assert-Throws -Message "Expected the RTX manifest assertion to fail after the packaged model changed." -ScriptBlock {
         Assert-CorridorKeyWindowsRtxArtifactManifestHealthy `
             -ArtifactsDir $modelsDir `
-            -ExpectedModels @("corridorkey_fp16_512.onnx", "corridorkey_int8_512.onnx") `
+            -ExpectedModels @("corridorkey_fp16_512.onnx") `
             -ExpectedCompiledContextModels @("corridorkey_fp16_512_ctx.onnx") `
             -ArtifactManifestPath $manifestPath `
             -Label "mutated fixture" | Out-Null
