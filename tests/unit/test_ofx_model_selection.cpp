@@ -682,3 +682,38 @@ TEST_CASE("ofx runtime panel fields are read-only dynamic strings", "[unit][ofx]
     REQUIRE(std::string_view{kRuntimeStatusStringMode} == kOfxParamStringIsSingleLine);
     REQUIRE(kRuntimeStatusEnabled == 0);
 }
+
+TEST_CASE("Path B placeholder Backend::Auto must not yield int8 quality candidates",
+          "[unit][ofx][regression]") {
+    // The v0.8.0 Path B refactor populates the .ofx-side DeviceInfo with
+    // Backend::Auto until the runtime server reports the real backend on the
+    // first prepare_session response. quality_artifact_candidates is invoked
+    // with that placeholder backend during the candidate-selection loop, and
+    // its result is fed straight into prepare_session. On the Windows RTX
+    // track, packaged corridorkey_int8_*.onnx artifacts crash the runtime
+    // server (TensorRT-RTX 1.2.0.54 cannot load them), so the candidate list
+    // surfaced to the loop must not contain any int8 entries when an fp16
+    // alternative is packaged.
+    //
+    // candidate_artifact_paths_for_request in src/app/runtime_contracts.cpp
+    // explicitly returns {fp16_path} for Backend::TensorRT, but returns
+    // {fp16_path, int8_path} for Backend::Auto with the FP16 variant
+    // preference. That divergence is what drives the regression observed in
+    // ofx.log on 2026-04-29: fp16_1024 prepares successfully, the loop
+    // continues to int8_1024, and the server crashes mid-prepare.
+    TempDirGuard temp_dir("corridorkey-ofx-path-b-no-int8-candidates");
+    touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
+    touch_file(temp_dir.path() / "corridorkey_int8_1024.onnx");
+
+    auto candidates = quality_artifact_candidates(temp_dir.path(), Backend::Auto, kQualityHigh,
+                                                  1920, 1080, kQuantizationFp16, 10240);
+
+    REQUIRE_FALSE(candidates.empty());
+    for (const auto& candidate : candidates) {
+        const auto filename = candidate.executable_model_path.filename().string();
+        INFO("candidate filename: " << filename);
+        REQUIRE(filename.find("int8") == std::string::npos);
+    }
+}

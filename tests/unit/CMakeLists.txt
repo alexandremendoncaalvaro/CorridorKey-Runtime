@@ -27,6 +27,7 @@ add_executable(test_unit
     test_ofx_help_routing.cpp
     test_ofx_host_detection.cpp
     test_ofx_image_utils.cpp
+    test_ofx_backend_matching.cpp
     test_ofx_lifecycle.cpp
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp

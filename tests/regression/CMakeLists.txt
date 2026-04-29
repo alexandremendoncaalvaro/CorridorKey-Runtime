@@ -4,12 +4,18 @@ add_executable(test_regression
     test_placeholder.cpp
     test_regression_dml_provider.cpp
     test_regression_hardware_providers.cpp
+    test_regression_path_b_quality_loop.cpp
 )
 
 target_link_libraries(test_regression
     PRIVATE
         corridorkey_core_static
         Catch2::Catch2WithMain
+)
+
+target_include_directories(test_regression
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/vendor/openfx/include
 )
 
 corridorkey_stage_ort_runtime(test_regression)
