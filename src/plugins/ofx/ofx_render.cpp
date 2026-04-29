@@ -667,10 +667,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         g_suites.parameter->paramGetValueAtTime(data->coarse_resolution_override_param, time,
                                                 &coarse_resolution_override);
     }
-    if (data->quantization_mode_param) {
-        g_suites.parameter->paramGetValueAtTime(data->quantization_mode_param, time,
-                                                &quantization_mode);
-    }
     if (data->screen_color_param) {
         g_suites.parameter->paramGetValueAtTime(data->screen_color_param, time, &screen_color);
     }

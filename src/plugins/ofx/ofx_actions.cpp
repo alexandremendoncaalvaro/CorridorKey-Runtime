@@ -502,13 +502,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 8: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
 
-    define_choice_param(
-        param_set, kParamQuantizationMode, "Precision", kDefaultQuantizationMode,
-        {"FP16 (Official)", "INT8 (Experimental)"},
-        "Model precision. FP16 (Official) is the validated Windows RTX path. "
-        "INT8 (Experimental) remains part of the decision program and currently requires "
-        "Allow CPU Fallback on Windows GPU tracks.",
-        "performance_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process the full model output in overlapping tiles at source resolution. "
                       "Use this when lower quality modes lose too much detail and you accept a "

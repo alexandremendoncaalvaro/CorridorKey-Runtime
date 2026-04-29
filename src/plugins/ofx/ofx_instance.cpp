@@ -1068,8 +1068,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        &data->coarse_resolution_override_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamInputColorSpace,
                                        &data->input_color_space_param, nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamQuantizationMode,
-                                       &data->quantization_mode_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamScreenColor, &data->screen_color_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamTemporalSmoothing,
@@ -1803,30 +1801,6 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                     }
                     data->runtime_client->set_request_timeout_ms(render_t * 1000);
                     data->runtime_client->set_prepare_timeout_ms(prepare_t * 1000);
-                }
-            }
-            if (changed_param == kParamQuantizationMode ||
-                changed_param == kParamAllowCpuFallback) {
-                int quant = 0;
-                if (data->quantization_mode_param &&
-                    g_suites.parameter->paramGetValue(data->quantization_mode_param, &quant) ==
-                        kOfxStatOK) {
-                    DeviceInfo requested_device = data->preferred_device;
-                    if (requested_device.backend == Backend::Auto) {
-                        requested_device = data->device;
-                    }
-                    const bool allow_cpu_fallback = allow_cpu_fallback_requested(data);
-                    if (auto unsupported_quantization = unsupported_quantization_message(
-                            requested_device.backend, quant, allow_cpu_fallback);
-                        unsupported_quantization.has_value()) {
-                        data->last_error = *unsupported_quantization;
-                        data->quantization_error_active = true;
-                        data->runtime_panel_dirty = true;
-                    } else if (data->quantization_error_active) {
-                        data->last_error.clear();
-                        data->quantization_error_active = false;
-                        data->runtime_panel_dirty = true;
-                    }
                 }
             }
         }

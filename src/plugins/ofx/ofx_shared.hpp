@@ -56,7 +56,6 @@ constexpr const char* kParamOutputMode = "output_mode";
 constexpr const char* kParamRefinementMode = "refinement_mode";
 constexpr const char* kParamCoarseResolutionOverride = "coarse_resolution_override";
 constexpr const char* kParamInputColorSpace = "input_color_space";
-constexpr const char* kParamQuantizationMode = "quantization_mode";
 constexpr const char* kParamScreenColor = "screen_color";
 constexpr const char* kParamTemporalSmoothing = "temporal_smoothing";
 constexpr const char* kParamDespillStrength = "despill_strength";
@@ -153,7 +152,6 @@ struct InstanceData {
     OfxParamHandle refinement_mode_param = nullptr;
     OfxParamHandle coarse_resolution_override_param = nullptr;
     OfxParamHandle input_color_space_param = nullptr;
-    OfxParamHandle quantization_mode_param = nullptr;
     OfxParamHandle screen_color_param = nullptr;
     OfxParamHandle temporal_smoothing_param = nullptr;
     OfxParamHandle despill_param = nullptr;
@@ -222,7 +220,6 @@ struct InstanceData {
     std::vector<StageTiming> last_render_stage_timings = {};
     bool in_render = false;
     bool runtime_panel_dirty = false;
-    bool quantization_error_active = false;
 
     FrameResult cached_result = {};
     bool cached_result_valid = false;
