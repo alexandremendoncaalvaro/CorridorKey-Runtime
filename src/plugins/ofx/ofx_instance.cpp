@@ -17,6 +17,7 @@
 #include "app/version_check.hpp"
 #include "common/ofx_runtime_defaults.hpp"
 #include "common/runtime_paths.hpp"
+#include "ofx_backend_matching.hpp"
 #include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
@@ -200,9 +201,6 @@ bool environment_flag_enabled(const char* name) {
 bool runtime_server_binary_present(const std::filesystem::path& runtime_server_path) {
     return !runtime_server_path.empty() && std::filesystem::exists(runtime_server_path);
 }
-
-bool backend_matches_request(const DeviceInfo& effective_device,
-                             const DeviceInfo& requested_device);
 
 bool is_windows_gpu_backend(Backend backend) {
     return backend == Backend::TensorRT || backend == Backend::CUDA ||
@@ -860,14 +858,6 @@ void set_runtime_panel_status(InstanceData* data, const std::string& processing,
     set_string_param_value(data->runtime_status_param, status);
     set_string_param_value(data->runtime_timings_param, timings);
     set_string_param_value(data->runtime_backend_work_param, backend_work);
-}
-
-bool backend_matches_request(const DeviceInfo& effective_device,
-                             const DeviceInfo& requested_device) {
-    if (requested_device.backend == Backend::CPU) {
-        return true;
-    }
-    return effective_device.backend == requested_device.backend;
 }
 
 std::optional<std::filesystem::path> plugin_module_path() {
