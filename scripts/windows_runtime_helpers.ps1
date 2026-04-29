@@ -1077,10 +1077,7 @@ function Get-CorridorKeyPreparedModelList {
         "corridorkey_fp16_512.onnx",
         "corridorkey_fp16_1024.onnx",
         "corridorkey_fp16_1536.onnx",
-        "corridorkey_fp16_2048.onnx",
-        "corridorkey_int8_512.onnx",
-        "corridorkey_int8_768.onnx",
-        "corridorkey_int8_1024.onnx"
+        "corridorkey_fp16_2048.onnx"
     )
 }
 
@@ -1089,10 +1086,7 @@ function Get-CorridorKeyWindowsRtxPromotedModelList {
         "corridorkey_fp16_512.onnx",
         "corridorkey_fp16_1024.onnx",
         "corridorkey_fp16_1536.onnx",
-        "corridorkey_fp16_2048.onnx",
-        "corridorkey_int8_512.onnx",
-        "corridorkey_int8_768.onnx",
-        "corridorkey_int8_1024.onnx"
+        "corridorkey_fp16_2048.onnx"
     )
 }
 
@@ -1122,10 +1116,7 @@ function Get-CorridorKeyOfxBundleTargetModels {
                 "corridorkey_fp16_768.onnx",
                 "corridorkey_fp16_1024.onnx",
                 "corridorkey_fp16_1536.onnx",
-                "corridorkey_fp16_2048.onnx",
-                "corridorkey_int8_512.onnx",
-                "corridorkey_int8_768.onnx",
-                "corridorkey_int8_1024.onnx"
+                "corridorkey_fp16_2048.onnx"
             )
         }
         default {
@@ -1229,9 +1220,8 @@ function Get-CorridorKeyWindowsOfxReleaseVariants {
 
 function Get-CorridorKeyPortableRuntimeTargetModels {
     return @(
-        "corridorkey_fp16_768.onnx",
-        "corridorkey_fp16_1024.onnx",
-        "corridorkey_int8_512.onnx"
+        "corridorkey_fp16_512.onnx",
+        "corridorkey_fp16_1024.onnx"
     )
 }
 
