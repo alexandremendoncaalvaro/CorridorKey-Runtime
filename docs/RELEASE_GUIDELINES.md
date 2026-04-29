@@ -264,11 +264,12 @@ What the pipeline handles for the operator:
   `X_VCPKG_ASSET_SOURCES=x-script,...` that transparently redirects
   the `libeigen/eigen/<commit>` fetch to the byte-identical
   `eigen-mirror/eigen` GitHub mirror.
-- **Models:** the seven FP16 + INT8 runtime artifacts under
-  `models\` are the reuse-path source of truth. If all expected
-  files are present the pipeline skips regeneration entirely; if
-  one or more are missing the pipeline exports them from
-  `models\CorridorKey.pth` via `uv run python export_onnx.py`.
+- **Models:** the four FP16 runtime artifacts under `models\`
+  (corridorkey_fp16_512/1024/1536/2048.onnx) are the reuse-path source
+  of truth. If all expected files are present the pipeline skips
+  regeneration entirely; if one or more are missing the pipeline
+  exports them from `models\CorridorKey.pth` via
+  `uv run python export_onnx.py`.
 
 If any manual row above is not satisfied, stop and fix it. Do not
 invent workarounds from outside the canonical pipeline; they will
@@ -460,8 +461,9 @@ unavailable.
 Windows RTX now ships as a single installer that replaces the same OFX bundle
 path during installation.
 
-- `Windows RTX` packages the public FP16 ladder through `2048px` plus the
-  portable INT8 CPU artifacts.
+- `Windows RTX` packages the public FP16 ladder through `2048px`. INT8 ONNX
+  and CPU rendering have been retired; FP16 on RTX is the only quality and
+  only backend the installer ships.
 - `Auto` continues to respect the safe quality ceiling of the active GPU tier.
 - Manual fixed quality may attempt a higher packaged rung directly and then
   follow the established runtime failure path if that quality cannot execute.

@@ -112,8 +112,9 @@ packaged and validated.
 
 **Windows RTX installer policy:**
 - `Windows RTX` is the official Windows installer for NVIDIA RTX 30 series and
-  newer. It packages the complete FP16 ladder through `2048px` and includes
-  the portable INT8 CPU artifacts.
+  newer. It packages the complete FP16 ladder through `2048px`. INT8 ONNX and
+  CPU rendering have been retired: FP16 on RTX is the only quality and only
+  backend the installer ships.
 - In `Auto`, `Windows RTX` respects the current safe quality ceiling for the
   detected VRAM tier.
 - In fixed modes, `Windows RTX` can attempt a packaged quality above the safe
@@ -195,9 +196,8 @@ application support defined in the host version table above.
 The CLI does not have a host application dependency and can be used
 independently of any NLE.
 
-CPU fallback is also surface-dependent:
-
-- CLI and tolerant automation workflows may fall back to the ONNX CPU path.
-- The OFX plugin prefers explicit failure over silent CPU fallback on
-  unsupported interactive GPU requests. CPU fallback only happens there when
-  the advanced `Allow CPU Fallback` option is enabled.
+CPU rendering has been retired. The OFX plugin and CLI both require a
+supported GPU (NVIDIA RTX 30 series or newer on Windows; Apple Silicon with
+MLX on macOS). Requesting `Backend::CPU` no longer resolves to a packaged
+artifact and surfaces a "no supported render backend" failure rather than
+falling back to a quality the renderer cannot ship.
