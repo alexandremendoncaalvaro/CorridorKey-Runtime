@@ -3,6 +3,24 @@
 # Collect source files for the core library
 # This is where we handle the PIMPL implementation and internal details
 
+# corridorkey_common: ORT-free static library that hosts the parts of the
+# runtime that do NOT need to talk to ONNX Runtime directly (IPC wire codec,
+# pure types, frame I/O, post-process pixel math, version check, runtime
+# contracts policy). The .ofx plugin links exclusively against this library
+# so its import table never names onnxruntime.dll. Foundry Nuke ships its
+# own CUDA stack next to its executable, and the Win32 loader resolves
+# `LoadLibrary("cudart64_12.dll")` against the first module in the process
+# with that base name regardless of search path or LOAD_WITH_ALTERED_SEARCH_PATH
+# (https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadlibraryexa).
+# Keeping ORT entirely out of the plugin's link line is the only documented
+# way to prevent the host's CUDA from binding to our delay-loaded sibling
+# DLLs and tripping ERROR_DLL_INIT_FAILED (1114) inside the TensorRT-RTX
+# provider's DllMain. All inference work runs out-of-process in
+# corridorkey_ofx_runtime_server.exe, which has its own loader namespace.
+add_library(corridorkey_common STATIC)
+target_compile_definitions(corridorkey_common PUBLIC CORRIDORKEY_STATIC_DEFINE)
+corridorkey_apply_windows_common_compile_defs(corridorkey_common)
+
 if(WIN32)
     # Force static for all internal targets on Windows
     add_library(corridorkey_core STATIC)
@@ -87,7 +105,46 @@ endif()
 # Set the compile definition for the export macro
 target_compile_definitions(corridorkey_core PRIVATE CORRIDORKEY_EXPORTS)
 
-target_sources(corridorkey_core PRIVATE
+# corridorkey_common build settings (mirrors corridorkey_core where
+# applicable but never links against onnxruntime).
+target_include_directories(corridorkey_common PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${FFMPEG_INCLUDE_DIRS}
+)
+
+if(MSVC)
+    target_compile_options(corridorkey_common PRIVATE /W4 /WX /permissive-)
+else()
+    target_compile_options(corridorkey_common PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    if(ENABLE_ASAN)
+        target_compile_options(corridorkey_common PRIVATE -fsanitize=address)
+        target_link_options(corridorkey_common PRIVATE -fsanitize=address)
+    endif()
+endif()
+
+target_link_libraries(corridorkey_common
+    PUBLIC
+        corridorkey_headers
+        nlohmann_json::nlohmann_json
+    PRIVATE
+        OpenEXR::OpenEXR
+        PNG::PNG
+        ${FFMPEG_LIBRARIES}
+        cpr::cpr
+)
+
+if(WIN32)
+    target_link_libraries(corridorkey_common PRIVATE ws2_32)
+    corridorkey_apply_windows_x64_link_dirs(corridorkey_common)
+endif()
+
+target_compile_definitions(corridorkey_common PRIVATE CORRIDORKEY_EXPORTS)
+
+# corridorkey_core depends PUBLIC on corridorkey_common so existing consumers
+# (CLI, OFX runtime server) keep working with a single link line.
+target_link_libraries(corridorkey_core PUBLIC corridorkey_common)
+
+target_sources(corridorkey_common PRIVATE
     common/host_memory.cpp
     common/local_ipc.cpp
     common/shared_memory_transport.cpp
@@ -116,9 +173,14 @@ if(BUILD_TESTING)
     add_library(corridorkey_core_static STATIC)
     corridorkey_apply_windows_common_compile_defs(corridorkey_core_static)
 
-    # Share the same source files
+    # Share the same source files. Pull from both corridorkey_core (the
+    # ORT-using slice) and corridorkey_common (the ORT-free slice) so the
+    # test static library exposes every internal symbol without rewriting
+    # the per-subdir source lists.
     get_target_property(_core_sources corridorkey_core SOURCES)
     target_sources(corridorkey_core_static PRIVATE ${_core_sources})
+    get_target_property(_common_sources corridorkey_common SOURCES)
+    target_sources(corridorkey_core_static PRIVATE ${_common_sources})
 
     if(APPLE)
         target_include_directories(corridorkey_core_static PUBLIC
@@ -168,12 +230,6 @@ if(BUILD_TESTING)
     endif()
 
     target_compile_definitions(corridorkey_core_static PUBLIC CORRIDORKEY_STATIC_DEFINE)
-
-    target_sources(corridorkey_core_static PRIVATE
-        common/host_memory.cpp
-        common/local_ipc.cpp
-        common/shared_memory_transport.cpp
-    )
 
     if(NOT MSVC)
         set_source_files_properties(frame_io/png_io.cpp PROPERTIES

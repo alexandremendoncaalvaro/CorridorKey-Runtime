@@ -281,10 +281,6 @@ inline int clamp_quality_mode_for_cpu_backend(Backend backend, int quality_mode)
     return quality_mode;
 }
 
-inline bool should_prepare_bootstrap_during_instance_create(bool use_runtime_server) {
-    return !use_runtime_server;
-}
-
 inline int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
     if (quality_mode == kQualityPreview) return 512;
     if (quality_mode == kQualityHigh) return 1024;

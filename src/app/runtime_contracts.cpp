@@ -13,6 +13,14 @@
 
 namespace corridorkey {
 
+// Forward declarations for the probe-using entry points whose definitions
+// live in runtime_contracts_probes.cpp (corridorkey_core). The wrappers in
+// the corridorkey::app namespace below dispatch to them by qualified name,
+// and corridorkey_common cannot define them because they pull device-
+// detection probes that link against ONNX Runtime.
+RuntimeCapabilities runtime_capabilities();
+std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector);
+
 namespace {
 
 bool has_backend(const RuntimeCapabilities& capabilities, Backend backend) {
@@ -311,45 +319,9 @@ InferenceParams make_preset_inference_params(int target_resolution, bool auto_de
 
 }  // namespace
 
-RuntimeCapabilities runtime_capabilities() {
-    RuntimeCapabilities capabilities;
-
-#if defined(__APPLE__)
-    capabilities.platform = "macos";
-#elif defined(_WIN32)
-    capabilities.platform = "windows";
-#else
-    capabilities.platform = "linux";
-#endif
-
-    auto devices = list_devices();
-    capabilities.supported_backends.reserve(devices.size());
-    for (const auto& device : devices) {
-        capabilities.supported_backends.push_back(device.backend);
-        if (device.backend == Backend::CoreML) {
-            capabilities.apple_silicon = true;
-            capabilities.coreml_available = true;
-        }
-        if (device.backend == Backend::MLX) {
-            capabilities.apple_silicon = true;
-        }
-        if (device.backend == Backend::CPU) {
-            capabilities.cpu_fallback_available = true;
-        }
-    }
-
-    capabilities.mlx_probe_available = core::mlx_probe_available();
-    capabilities.videotoolbox_available = is_videotoolbox_available();
-    VideoFrameFormat input_format;
-    auto video_support = inspect_video_output_support(input_format);
-    capabilities.default_video_mode = video_support.default_mode;
-    capabilities.default_video_container = video_support.default_container;
-    capabilities.default_video_encoder = video_support.default_encoder;
-    capabilities.lossless_video_available = video_support.lossless_available;
-    capabilities.lossless_video_unavailable_reason = video_support.lossless_unavailable_reason;
-
-    return capabilities;
-}
+// runtime_capabilities() lives in runtime_contracts_probes.cpp (corridorkey_core)
+// because it pulls device-detection probes that link against ONNX Runtime.
+// The .ofx plugin links corridorkey_common only and never calls this function.
 
 std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filename) {
     for (const auto& entry : model_catalog()) {
@@ -361,23 +333,9 @@ std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filen
     return std::nullopt;
 }
 
-std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector) {
-    auto normalized = normalize_preset_selector(selector);
-    if (!normalized.has_value()) {
-        return std::nullopt;
-    }
-
-    auto capabilities = runtime_capabilities();
-    auto resolved_id = resolve_platform_preset_alias(*normalized, capabilities);
-
-    for (const auto& preset : preset_catalog()) {
-        if (normalized_lower(preset.id) == resolved_id) {
-            return preset;
-        }
-    }
-
-    return std::nullopt;
-}
+// find_preset_by_selector() lives in runtime_contracts_probes.cpp because it
+// internally calls runtime_capabilities(). The .ofx never calls this entry
+// point.
 
 std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities) {
@@ -821,9 +779,10 @@ std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filen
     return corridorkey::find_model_by_filename(filename);
 }
 
-std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector) {
-    return corridorkey::find_preset_by_selector(selector);
-}
+// app::find_preset_by_selector() wrapper lives in runtime_contracts_probes.cpp
+// because it dispatches to corridorkey::find_preset_by_selector, which is
+// itself defined there (it depends on device-detection probes that bring
+// ONNX Runtime into the link line).
 
 std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities) {
@@ -1167,105 +1126,10 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     return selections;
 }
 
-Result<std::filesystem::path> resolve_model_artifact_for_request(
-    const std::filesystem::path& model_path, const InferenceParams& params,
-    const DeviceInfo& requested_device) {
-    const int model_resolution = packaged_model_resolution(model_path).value_or(0);
-    const int requested_resolution =
-        params.requested_quality_resolution > 0
-            ? params.requested_quality_resolution
-            : (params.target_resolution > 0 ? params.target_resolution : model_resolution);
-    const bool allow_unrestricted_quality_attempt =
-        runtime_optimization_profile_for_device(runtime_capabilities(), requested_device)
-            .unrestricted_quality_attempt;
+// resolve_model_artifact_for_request() lives in runtime_contracts_probes.cpp
+// because it calls runtime_capabilities(). The .ofx never calls this entry
+// point; it asks the runtime server to resolve quality artifacts.
 
-    const bool has_override = params.coarse_resolution_override > 0;
-    const bool coarse_to_fine_requested =
-        params.quality_fallback_mode == QualityFallbackMode::CoarseToFine || has_override;
-    if (coarse_to_fine_requested && has_override &&
-        params.coarse_resolution_override >= requested_resolution) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
-            "quality.",
-        }};
-    }
-
-    const auto validate_resolved_model =
-        [&](const std::filesystem::path& resolved_model_path) -> Result<std::filesystem::path> {
-        auto refinement_validation =
-            validate_refinement_mode_for_artifact(resolved_model_path, params.refinement_mode);
-        if (!refinement_validation) {
-            return Unexpected<Error>(refinement_validation.error());
-        }
-        return resolved_model_path;
-    };
-
-    if (allow_unrestricted_quality_attempt && is_packaged_corridorkey_model(model_path) &&
-        model_resolution > 0 && requested_resolution > model_resolution &&
-        !should_use_coarse_to_fine_for_request(
-            requested_device, requested_resolution, params.quality_fallback_mode,
-            params.coarse_resolution_override, allow_unrestricted_quality_attempt)) {
-        auto direct_attempt_path =
-            sibling_model_path_for_resolution(model_path, requested_resolution);
-        if (direct_attempt_path.empty()) {
-            return Unexpected<Error>{Error{
-                ErrorCode::InvalidParameters,
-                "The requested packaged quality artifact could not be derived from the selected "
-                "model.",
-            }};
-        }
-        if (!std::filesystem::exists(direct_attempt_path)) {
-            return Unexpected<Error>{Error{
-                ErrorCode::ModelLoadFailed,
-                "The requested packaged quality artifact is missing: " +
-                    direct_attempt_path.string(),
-            }};
-        }
-        return validate_resolved_model(direct_attempt_path);
-    }
-
-    if (!should_use_coarse_to_fine_for_request(
-            requested_device, requested_resolution, params.quality_fallback_mode,
-            params.coarse_resolution_override, allow_unrestricted_quality_attempt)) {
-        return validate_resolved_model(model_path);
-    }
-
-    if (!is_packaged_corridorkey_model(model_path)) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Explicit --model only supports coarse-to-fine for packaged CorridorKey artifacts. "
-            "Use a packaged model or switch --quality-fallback to direct.",
-        }};
-    }
-
-    auto coarse_resolution_search = search_resolution_for_request(
-        requested_device, requested_resolution, params.quality_fallback_mode,
-        params.coarse_resolution_override, allow_unrestricted_quality_attempt);
-    if (!coarse_resolution_search) {
-        return Unexpected<Error>(coarse_resolution_search.error());
-    }
-    const int coarse_resolution = coarse_resolution_search->first;
-
-    auto coarse_model_path = sibling_model_path_for_resolution(model_path, coarse_resolution);
-    if (coarse_model_path.empty()) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Coarse-to-fine requested a smaller packaged artifact, but the artifact name "
-            "could not be derived from the selected model.",
-        }};
-    }
-
-    if (!std::filesystem::exists(coarse_model_path)) {
-        return Unexpected<Error>{Error{
-            ErrorCode::ModelLoadFailed,
-            "Coarse-to-fine requested a packaged coarse artifact, but it is missing: " +
-                coarse_model_path.string(),
-        }};
-    }
-
-    return validate_resolved_model(coarse_model_path);
-}
 nlohmann::json to_json(const BackendFallbackInfo& fallback) {
     nlohmann::json json;
     json["requested_backend"] = backend_to_string(fallback.requested_backend);

@@ -41,10 +41,6 @@ else()
 endif()
 
 if(WIN32)
-    target_sources(corridorkey_ofx PRIVATE win_delayload_hook.cpp)
-endif()
-
-if(WIN32)
     add_executable(corridorkey_ofx_runtime_server WIN32
         ofx_runtime_server_main.cpp
     )
@@ -89,7 +85,13 @@ target_include_directories(corridorkey_ofx PRIVATE
     ${_corridorkey_ofx_sdk_root}/include
 )
 
-target_link_libraries(corridorkey_ofx PRIVATE corridorkey_core)
+# The .ofx links exclusively against corridorkey_common (no ONNX Runtime).
+# All inference work flows through corridorkey_ofx_runtime_server.exe over
+# IPC, which has its own loader namespace and is therefore immune to the
+# host-process CUDA-stack collision that causes ERROR_DLL_INIT_FAILED (1114)
+# in Foundry Nuke. Validate via `dumpbin -imports CorridorKey.ofx` after
+# every link: onnxruntime.dll must not appear in the dependents list.
+target_link_libraries(corridorkey_ofx PRIVATE corridorkey_common)
 corridorkey_apply_windows_common_compile_defs(corridorkey_ofx)
 
 if(MSVC)
@@ -105,13 +107,17 @@ set_target_properties(corridorkey_ofx PROPERTIES
 )
 
 if(WIN32)
-    if(CORRIDORKEY_MSVC_DELAYIMP_LIB)
-        target_link_libraries(corridorkey_ofx PRIVATE "${CORRIDORKEY_MSVC_DELAYIMP_LIB}")
-    else()
-        target_link_libraries(corridorkey_ofx PRIVATE delayimp.lib)
-    endif()
+    # The .ofx no longer references ONNX Runtime symbols directly: every
+    # inference call goes through corridorkey_ofx_runtime_server.exe over
+    # IPC, so the plugin DLL is intentionally ORT-import-free. Drop the
+    # delay-load infrastructure (delayimp.lib + /DELAYLOAD:onnxruntime.dll)
+    # along with the win_delayload_hook source. The bundle still ships
+    # onnxruntime.dll for the server process, but the host's loader
+    # (Foundry Nuke ships cudart64_12.dll 12.8 next to its executable)
+    # cannot drag the plugin into a CUDA-version conflict because the
+    # plugin import table no longer mentions onnxruntime.dll at all.
+    # Validate via `dumpbin -imports CorridorKey.ofx` before each release.
     corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx)
-    set_property(TARGET corridorkey_ofx APPEND_STRING PROPERTY LINK_FLAGS " /DELAYLOAD:onnxruntime.dll")
 endif()
 
 if(WIN32)

@@ -26,10 +26,6 @@
 #define CORRIDORKEY_OFX_EXPORT
 #endif
 
-namespace corridorkey {
-class Engine;
-}
-
 namespace corridorkey::ofx {
 
 class OfxRuntimeClient;
@@ -193,13 +189,12 @@ struct InstanceData {
     OfxParamHandle update_status_param = nullptr;
     OfxParamHandle open_update_page_param = nullptr;
     OfxParamHandle include_pre_releases_param = nullptr;
-    // No in-class = nullptr initializers for the unique_ptr members below:
-    // clang/libc++ instantiates ~unique_ptr<T>() at the NSDMI site, which then
-    // requires complete OfxRuntimeClient / Engine and fails with "sizeof to an
-    // incomplete type" in TUs that don't include their full definitions.
-    // unique_ptr default-constructs to nullptr already.
+    // No in-class = nullptr initializer for the unique_ptr below: clang/libc++
+    // instantiates ~unique_ptr<T>() at the NSDMI site, which then requires
+    // complete OfxRuntimeClient and fails with "sizeof to an incomplete type"
+    // in TUs that don't include its full definition. unique_ptr default-
+    // constructs to nullptr already.
     std::unique_ptr<OfxRuntimeClient> runtime_client;
-    std::unique_ptr<Engine> engine;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     std::filesystem::path runtime_server_path = {};
@@ -214,7 +209,6 @@ struct InstanceData {
     GuideSourceKind last_guide_source = GuideSourceKind::Unknown;
     RuntimePathKind last_runtime_path = RuntimePathKind::Unknown;
     QualityCompileFailureCache quality_compile_failure_cache = {};
-    bool use_runtime_server = false;
     std::uint64_t render_count = 0;
     std::string last_error = {};
     // Non-fatal status note shown alongside frame timings. Set when the engine fell back to a
