@@ -176,8 +176,6 @@ std::string precision_preference_to_string(PrecisionPreference preference) {
     switch (preference) {
         case PrecisionPreference::FP16:
             return "fp16";
-        case PrecisionPreference::Int8:
-            return "int8";
         case PrecisionPreference::Auto:
         default:
             return "auto";
@@ -187,7 +185,6 @@ std::string precision_preference_to_string(PrecisionPreference preference) {
 Result<PrecisionPreference> precision_preference_from_string(const std::string& value) {
     if (value == "auto") return PrecisionPreference::Auto;
     if (value == "fp16") return PrecisionPreference::FP16;
-    if (value == "int8") return PrecisionPreference::Int8;
     return Unexpected<Error>(invalid_protocol_error("Unknown precision preference: " + value));
 }
 

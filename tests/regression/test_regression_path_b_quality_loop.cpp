@@ -100,7 +100,7 @@ TEST_CASE(
     touch_file(temp_dir.path() / "corridorkey_int8_1024.onnx");
 
     auto candidates = quality_artifact_candidates(temp_dir.path(), Backend::Auto, kQualityHigh,
-                                                  1920, 1080, kQuantizationFp16, 10240);
+                                                  1920, 1080, 10240);
 
     REQUIRE_FALSE(candidates.empty());
     for (const auto& candidate : candidates) {

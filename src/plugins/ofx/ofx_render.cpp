@@ -629,7 +629,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int refinement_mode = kRefinementAuto;
     int coarse_resolution_override = kCoarseResolutionAutomatic;
     int input_color_space = kDefaultInputColorSpace;
-    int quantization_mode = kDefaultQuantizationMode;
     int screen_color = kDefaultScreenColor;
     double temporal_smoothing = kDefaultTemporalSmoothing;
     int despeckle_enabled = 0;
@@ -732,7 +731,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         make_screen_color_transform(rgb_view, screen_color_mode);
     canonicalize_to_green_domain(rgb_view, screen_color_transform);
     if (!ensure_engine_for_quality(
-            data, quality_mode, width, height, quantization_mode,
+            data, quality_mode, width, height,
             quality_fallback_mode_from_choice(quality_fallback_mode),
             coarse_resolution_override_from_choice(coarse_resolution_override),
             refinement_mode_from_choice(refinement_mode))) {

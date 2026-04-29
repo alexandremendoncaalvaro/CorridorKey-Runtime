@@ -32,7 +32,6 @@ struct QualityCompileFailureCacheContext {
     Backend backend = Backend::Auto;
     int device_index = 0;
     std::int64_t available_memory_mb = 0;
-    int quantization_mode = kQuantizationFp16;
 };
 
 struct QualityCompileFailureEntry {
@@ -162,8 +161,7 @@ inline bool quality_compile_failure_cache_matches(
            cache.context.models_bundle_token == context.models_bundle_token &&
            cache.context.backend == context.backend &&
            cache.context.device_index == context.device_index &&
-           cache.context.available_memory_mb == context.available_memory_mb &&
-           cache.context.quantization_mode == context.quantization_mode;
+           cache.context.available_memory_mb == context.available_memory_mb;
 }
 
 inline void prepare_quality_compile_failure_cache(
@@ -253,34 +251,6 @@ inline bool should_abort_quality_fallback_after_compile_failure(
            selection.effective_resolution == selection.requested_resolution;
 }
 
-inline std::optional<std::string> unsupported_quantization_message(
-    Backend backend, int quantization_mode, bool allow_cpu_fallback = false) {
-    if (quantization_mode != kQuantizationInt8) {
-        return std::nullopt;
-    }
-
-    if ((backend == Backend::TensorRT || backend == Backend::CUDA) && !allow_cpu_fallback) {
-        return "INT8 (Experimental) is currently CPU-only on the Windows RTX track. "
-               "Enable Allow CPU Fallback or use FP16 (Official).";
-    }
-
-    if ((backend == Backend::DirectML || backend == Backend::WindowsML ||
-         backend == Backend::OpenVINO) &&
-        !allow_cpu_fallback) {
-        return "INT8 (Experimental) is not yet validated on the selected Windows GPU backend. "
-               "Enable Allow CPU Fallback or use FP16 (Official).";
-    }
-
-    return std::nullopt;
-}
-
-inline int clamp_quality_mode_for_cpu_backend(Backend backend, int quality_mode) {
-    if (backend == Backend::CPU) {
-        return kQualityPreview;
-    }
-    return quality_mode;
-}
-
 inline int resolve_target_resolution(int quality_mode, int input_width, int input_height) {
     if (quality_mode == kQualityPreview) return 512;
     if (quality_mode == kQualityHigh) return 1024;
@@ -317,21 +287,7 @@ inline std::filesystem::path artifact_path_for_backend(const std::filesystem::pa
     if (backend == Backend::MLX) {
         return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
     }
-    if (backend == Backend::TensorRT || backend == Backend::CUDA) {
-        return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
-    }
-    return models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
-}
-
-inline app::ArtifactVariantPreference artifact_variant_preference(int quantization_mode) {
-    switch (quantization_mode) {
-        case kQuantizationFp16:
-            return app::ArtifactVariantPreference::FP16;
-        case kQuantizationInt8:
-            return app::ArtifactVariantPreference::Int8;
-        default:
-            return app::ArtifactVariantPreference::Auto;
-    }
+    return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
 }
 
 inline std::string format_artifact_filename_list(
@@ -356,19 +312,17 @@ inline std::optional<std::filesystem::path> primary_expected_artifact_path(
 
 inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
-    int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
+    int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
-    const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
     const int requested_resolution =
-        resolve_target_resolution(effective_quality_mode, input_width, input_height);
-    const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(effective_quality_mode);
+        resolve_target_resolution(quality_mode, input_width, input_height);
+    const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
 
     auto expected = app::expected_artifact_paths_for_request(
-        models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
-        allow_unrestricted_quality_attempt);
+        models_root, device, requested_resolution, allow_lower_resolution_fallback, fallback_mode,
+        coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!expected) {
         return {};
     }
@@ -393,35 +347,24 @@ inline std::string missing_artifact_message(
 
 inline std::string missing_quality_artifact_message(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
-    int input_height, int quantization_mode, bool cpu_quality_guardrail_active,
-    std::int64_t available_memory_mb = 0,
+    int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
-    const int effective_quality_mode = clamp_quality_mode_for_cpu_backend(backend, quality_mode);
     const int requested_resolution = normalize_target_resolution_for_backend(
-        backend, effective_quality_mode,
-        resolve_target_resolution(effective_quality_mode, input_width, input_height));
-    const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(effective_quality_mode);
+        backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
+    const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto expected = app::expected_artifact_paths_for_request(
-        models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
-        allow_unrestricted_quality_attempt);
+        models_root, device, requested_resolution, allow_lower_resolution_fallback, fallback_mode,
+        coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!expected) {
         return expected.error().message;
-    }
-
-    const auto& expected_artifacts = *expected;
-    if (cpu_quality_guardrail_active) {
-        return missing_artifact_message(
-            "CPU backend is limited to Draft (512), but the required model artifact is missing",
-            models_root, expected_artifacts);
     }
 
     return missing_artifact_message("Requested quality " +
                                         std::string(quality_mode_label(quality_mode)) +
                                         " is missing the required model artifact",
-                                    models_root, expected_artifacts);
+                                    models_root, *expected);
 }
 inline bool path_exists(const std::filesystem::path& path) {
     std::error_code error;
@@ -490,7 +433,7 @@ inline std::string missing_bootstrap_artifact_message(const RuntimeCapabilities&
 
 inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
-    int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
+    int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
     const int requested_resolution = normalize_target_resolution_for_backend(
@@ -498,9 +441,8 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto candidates = app::quality_artifact_candidates_for_request(
-        models_root, device, requested_resolution, artifact_variant_preference(quantization_mode),
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
-        allow_unrestricted_quality_attempt);
+        models_root, device, requested_resolution, allow_lower_resolution_fallback, fallback_mode,
+        coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!candidates) {
         return {};
     }
@@ -509,14 +451,13 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
 
 inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
-    int input_height, int quantization_mode, std::int64_t available_memory_mb = 0,
+    int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
 
 inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
     const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
-    const std::filesystem::path& models_root, int quality_mode = kQualityAuto,
-    int quantization_mode = kDefaultQuantizationMode) {
+    const std::filesystem::path& models_root, int quality_mode = kQualityAuto) {
     std::vector<BootstrapEngineCandidate> candidates;
 
     auto append_unique = [&](BootstrapEngineCandidate candidate) {
@@ -535,7 +476,7 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
 
     auto append_quality_candidate = [&](const DeviceInfo& device) {
         auto selection = select_quality_artifact(models_root, device.backend, quality_mode, 0, 0,
-                                                 quantization_mode, device.available_memory_mb);
+                                                 device.available_memory_mb);
         if (!selection.has_value()) {
             return;
         }
@@ -558,10 +499,6 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
 
     if (is_fixed_quality_mode(quality_mode)) {
         append_quality_candidate(detected_device);
-        if (detected_device.backend != Backend::CPU) {
-            append_quality_candidate(
-                DeviceInfo{"Generic CPU", detected_device.available_memory_mb, Backend::CPU});
-        }
         return candidates;
     }
 
@@ -594,23 +531,18 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
     };
 
     append_default_candidate(detected_device);
-    if (detected_device.backend != Backend::CPU) {
-        append_default_candidate(
-            DeviceInfo{"Generic CPU", detected_device.available_memory_mb, Backend::CPU});
-    }
 
     return candidates;
 }
 
 inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
-    int input_height, int quantization_mode, std::int64_t available_memory_mb,
-    QualityFallbackMode fallback_mode, int coarse_resolution_override,
-    bool allow_unrestricted_quality_attempt) {
+    int input_height, std::int64_t available_memory_mb, QualityFallbackMode fallback_mode,
+    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
     auto candidates =
         quality_artifact_candidates(models_root, backend, quality_mode, input_width, input_height,
-                                    quantization_mode, available_memory_mb, fallback_mode,
-                                    coarse_resolution_override, allow_unrestricted_quality_attempt);
+                                    available_memory_mb, fallback_mode, coarse_resolution_override,
+                                    allow_unrestricted_quality_attempt);
     if (!candidates.empty()) {
         return candidates.front();
     }

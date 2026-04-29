@@ -288,23 +288,12 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_rtx_model.has_value());
     REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_1024.onnx");
 
-    auto windows_rtx_fp16_model = default_model_for_request(
-        windows_capabilities, DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
-        windows_default, ArtifactVariantPreference::FP16);
-    REQUIRE(windows_rtx_fp16_model.has_value());
-    REQUIRE(windows_rtx_fp16_model->filename == "corridorkey_fp16_1024.onnx");
-
     // Windows CPU rendering retired with INT8: Backend::CPU yields no
-    // catalog match regardless of variant_preference. Callers must surface
-    // "no supported render backend" rather than emit a downgraded artifact.
+    // catalog match. Callers must surface "no supported render backend"
+    // rather than emit a downgraded artifact.
     auto windows_cpu_model = default_model_for_request(
         windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default);
     REQUIRE_FALSE(windows_cpu_model.has_value());
-
-    auto windows_cpu_fp16_model =
-        default_model_for_request(windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU},
-                                  windows_default, ArtifactVariantPreference::FP16);
-    REQUIRE_FALSE(windows_cpu_fp16_model.has_value());
 
     RuntimeCapabilities windows_universal_capabilities;
     windows_universal_capabilities.platform = "windows";
@@ -401,16 +390,16 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     std::ofstream(temp_dir / "corridorkey_fp16_512.onnx") << "stub";
 
     auto selections = quality_artifact_candidates_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
-        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
+        QualityFallbackMode::Auto);
     REQUIRE(selections.has_value());
     REQUIRE_FALSE(selections->empty());
     CHECK(selections->front().effective_resolution == 512);
     CHECK(selections->front().coarse_to_fine);
 
     auto expected = expected_artifact_paths_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
-        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
+        QualityFallbackMode::Auto);
     REQUIRE(expected.has_value());
     REQUIRE(expected->size() == 2);
     CHECK(expected->front().filename() == "corridorkey_fp16_1024.onnx");

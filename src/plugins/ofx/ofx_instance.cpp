@@ -208,13 +208,10 @@ bool is_windows_gpu_backend(Backend backend) {
            backend == Backend::OpenVINO;
 }
 
-EngineCreateOptions ofx_engine_options(const DeviceInfo& requested_device,
-                                       bool allow_cpu_fallback = false) {
+EngineCreateOptions ofx_engine_options(const DeviceInfo& requested_device) {
     EngineCreateOptions options;
-    if (requested_device.backend != Backend::CPU) {
-        options.allow_cpu_fallback = allow_cpu_fallback;
-        options.disable_cpu_ep_fallback = false;
-    }
+    options.allow_cpu_fallback = false;
+    options.disable_cpu_ep_fallback = (requested_device.backend != Backend::CPU);
     return options;
 }
 
@@ -353,14 +350,13 @@ std::uint64_t models_bundle_token(const std::filesystem::path& models_root) {
 }
 
 QualityCompileFailureCacheContext build_quality_compile_failure_cache_context(
-    const InstanceData& data, const DeviceInfo& requested_device, int quantization_mode) {
+    const InstanceData& data, const DeviceInfo& requested_device) {
     QualityCompileFailureCacheContext context;
     context.models_root = data.models_root;
     context.models_bundle_token = models_bundle_token(data.models_root);
     context.backend = requested_device.backend;
     context.device_index = requested_device.device_index;
     context.available_memory_mb = requested_device.available_memory_mb;
-    context.quantization_mode = quantization_mode;
     return context;
 }
 
@@ -724,46 +720,6 @@ void append_status_note(std::string& status, const std::string& note) {
     status += note;
 }
 
-bool allow_cpu_fallback_requested(const InstanceData* data) {
-    // CPU rendering retired alongside INT8: there is no longer a user-facing
-    // "Allow CPU Fallback" toggle and no CPU artifact in the bundle. Every
-    // gate that calls this predicate now collapses to its non-fallback
-    // branch. Predicate kept for source compatibility while the threading is
-    // pruned in a follow-up commit.
-    (void)data;
-    return false;
-}
-
-bool should_reroute_int8_to_cpu(const DeviceInfo& requested_device, int quantization_mode,
-                                bool allow_cpu_fallback) {
-    return allow_cpu_fallback && quantization_mode == kQuantizationInt8 &&
-           is_windows_gpu_backend(requested_device.backend);
-}
-
-DeviceInfo cpu_fallback_device_for_request(const DeviceInfo& requested_device) {
-    DeviceInfo cpu_device = requested_device;
-    cpu_device.name = "Generic CPU";
-    cpu_device.backend = Backend::CPU;
-    cpu_device.device_index = 0;
-    return cpu_device;
-}
-
-std::string cpu_fallback_warning_message(bool rerouted_to_cpu) {
-    if (!rerouted_to_cpu) {
-        return {};
-    }
-    return "INT8 (Experimental) is running on CPU because Allow CPU Fallback is enabled.";
-}
-
-std::string cpu_quality_guardrail_warning_message(int requested_quality_mode,
-                                                  bool cpu_quality_guardrail_active) {
-    if (!cpu_quality_guardrail_active) {
-        return {};
-    }
-    return "CPU backend is limited to Draft (512) for interactive rendering. " +
-           std::string(quality_mode_label(requested_quality_mode)) + " will run as Draft (512).";
-}
-
 std::string manual_override_warning_message(const DeviceInfo& requested_device, int quality_mode,
                                             int requested_resolution,
                                             bool allow_unrestricted_quality_attempt) {
@@ -922,13 +878,13 @@ std::filesystem::path resolve_models_root() {
 
 app::OfxRuntimePrepareSessionRequest build_prepare_request(
     const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
-    int requested_quality_mode, bool allow_cpu_fallback = false) {
+    int requested_quality_mode) {
     app::OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = "quality_switch";
     request.model_path = selection.executable_model_path;
     request.artifact_name = selection.executable_model_path.filename().string();
     request.requested_device = requested_device;
-    request.engine_options = ofx_engine_options(requested_device, allow_cpu_fallback);
+    request.engine_options = ofx_engine_options(requested_device);
     request.requested_quality_mode = requested_quality_mode;
     request.requested_resolution = selection.requested_resolution;
     request.effective_resolution = selection.effective_resolution;
@@ -1252,9 +1208,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 }
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
-                               int input_height, int quantization_mode,
-                               QualityFallbackMode fallback_mode, int coarse_resolution_override,
-                               RefinementMode refinement_mode) {
+                               int input_height, QualityFallbackMode fallback_mode,
+                               int coarse_resolution_override, RefinementMode refinement_mode) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +
@@ -1272,47 +1227,34 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         return true;
     }
 
-    DeviceInfo original_requested_device = data->preferred_device;
-    if (original_requested_device.backend == Backend::Auto) {
-        original_requested_device = data->device;
+    DeviceInfo requested_device = data->preferred_device;
+    if (requested_device.backend == Backend::Auto) {
+        requested_device = data->device;
     }
 
-    const bool allow_cpu_fallback = allow_cpu_fallback_requested(data);
-    const bool reroute_int8_to_cpu = should_reroute_int8_to_cpu(
-        original_requested_device, quantization_mode, allow_cpu_fallback);
-    DeviceInfo requested_device = reroute_int8_to_cpu
-                                      ? cpu_fallback_device_for_request(original_requested_device)
-                                      : original_requested_device;
     const int requested_quality_mode = quality_mode;
-    const int effective_quality_mode =
-        clamp_quality_mode_for_cpu_backend(requested_device.backend, requested_quality_mode);
-    const bool cpu_quality_guardrail_active = effective_quality_mode != requested_quality_mode;
     const int requested_resolution =
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
-    const bool allow_unrestricted_quality_attempt = allow_unrestricted_quality_attempt_for_request(
-        *data, requested_quality_mode, original_requested_device);
-    const std::string cpu_fallback_warning = cpu_fallback_warning_message(reroute_int8_to_cpu);
-    const std::string cpu_quality_guardrail_warning =
-        cpu_quality_guardrail_warning_message(requested_quality_mode, cpu_quality_guardrail_active);
+    const bool allow_unrestricted_quality_attempt =
+        allow_unrestricted_quality_attempt_for_request(*data, requested_quality_mode,
+                                                       requested_device);
     const std::string manual_override_warning =
-        manual_override_warning_message(original_requested_device, requested_quality_mode,
+        manual_override_warning_message(requested_device, requested_quality_mode,
                                         requested_resolution, allow_unrestricted_quality_attempt);
+    // CPU rendering retired with INT8: the quality-guardrail and CPU-fallback
+    // warning paths can never fire at runtime now. The local stubs below keep
+    // helpers like set_runtime_panel_state_for_failed_quality_request and
+    // should_abort_quality_fallback_after_compile_failure callable while the
+    // wider panel-state struct cleanup is staged in a follow-up commit.
+    constexpr bool cpu_quality_guardrail_active = false;
+    const std::string cpu_fallback_warning;
+    const std::string cpu_quality_guardrail_warning;
     data->runtime_panel_state.requested_quality_mode = requested_quality_mode;
     data->runtime_panel_state.requested_resolution = requested_resolution;
-    data->runtime_panel_state.cpu_quality_guardrail_active = cpu_quality_guardrail_active;
     const auto compile_cache_context =
-        build_quality_compile_failure_cache_context(*data, requested_device, quantization_mode);
+        build_quality_compile_failure_cache_context(*data, requested_device);
     prepare_quality_compile_failure_cache(data->quality_compile_failure_cache,
                                           compile_cache_context);
-    if (auto unsupported_quantization = unsupported_quantization_message(
-            original_requested_device.backend, quantization_mode, allow_cpu_fallback);
-        unsupported_quantization.has_value()) {
-        data->last_error = *unsupported_quantization;
-        log_message("ensure_engine_for_quality", data->last_error);
-        update_runtime_panel(data);
-        log_quality_total("unsupported_quantization", data->last_error);
-        return false;
-    }
     auto unsupported_quality =
         fallback_mode == QualityFallbackMode::Direct
             ? unsupported_quality_message(requested_device, requested_quality_mode,
@@ -1338,30 +1280,22 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         return false;
     }
     auto selections = quality_artifact_candidates(
-        data->models_root, requested_device.backend, effective_quality_mode, input_width,
-        input_height, quantization_mode, requested_device.available_memory_mb, fallback_mode,
+        data->models_root, requested_device.backend, requested_quality_mode, input_width,
+        input_height, requested_device.available_memory_mb, fallback_mode,
         coarse_resolution_override, allow_unrestricted_quality_attempt);
     const auto original_selections = selections;
-    data->cpu_quality_guardrail_active = cpu_quality_guardrail_active;
-    if (!cpu_fallback_warning.empty()) {
-        log_message("ensure_engine_for_quality", cpu_fallback_warning);
-    }
-    if (!cpu_quality_guardrail_warning.empty()) {
-        log_message("ensure_engine_for_quality", cpu_quality_guardrail_warning);
-    }
     if (!manual_override_warning.empty()) {
         log_message("ensure_engine_for_quality", manual_override_warning);
     }
     if (selections.empty()) {
         const auto expected_artifacts = expected_quality_artifact_paths(
-            data->models_root, requested_device.backend, effective_quality_mode, input_width,
-            input_height, quantization_mode, requested_device.available_memory_mb, fallback_mode,
+            data->models_root, requested_device.backend, requested_quality_mode, input_width,
+            input_height, requested_device.available_memory_mb, fallback_mode,
             coarse_resolution_override, allow_unrestricted_quality_attempt);
         data->last_error = missing_quality_artifact_message(
-            data->models_root, requested_device.backend, effective_quality_mode, input_width,
-            input_height, quantization_mode, cpu_quality_guardrail_active,
-            requested_device.available_memory_mb, fallback_mode, coarse_resolution_override,
-            allow_unrestricted_quality_attempt);
+            data->models_root, requested_device.backend, requested_quality_mode, input_width,
+            input_height, requested_device.available_memory_mb, fallback_mode,
+            coarse_resolution_override, allow_unrestricted_quality_attempt);
         if (auto expected_artifact = primary_expected_artifact_path(expected_artifacts);
             expected_artifact.has_value()) {
             set_runtime_panel_state_for_failed_quality_request(
@@ -1480,8 +1414,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
         set_string_param_value(data->runtime_timings_param, runtime_timings_runtime_label(*data));
         auto prepare_result = data->runtime_client->prepare_session(
-            build_prepare_request(requested_device, selection, requested_quality_mode,
-                                  allow_cpu_fallback),
+            build_prepare_request(requested_device, selection, requested_quality_mode),
             [&](const StageTiming& timing) {
                 log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase, requested_device,
                                  selection.executable_model_path, requested_resolution,

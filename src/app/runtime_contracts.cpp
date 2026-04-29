@@ -206,17 +206,7 @@ std::optional<ModelCatalogEntry> model_catalog_entry_for_path(
 }
 
 std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
-    const std::filesystem::path& models_root, Backend backend, int resolution,
-    app::ArtifactVariantPreference variant_preference) {
-    // INT8 ONNX artifacts have been retired: they carried a visible quality
-    // loss against FP16 and the lower-resolution rungs (Draft 512, High 1024,
-    // Ultra 1536) plus the existing tile path already cover the preview /
-    // low-VRAM use cases that originally motivated INT8. The
-    // ArtifactVariantPreference parameter is preserved for now so this commit
-    // stays scoped to candidate generation; the predicate threading and the
-    // enum itself go in the next refactor commit.
-    (void)variant_preference;
-
+    const std::filesystem::path& models_root, Backend backend, int resolution) {
     if (backend == Backend::MLX) {
         return {models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn")};
     }
@@ -339,15 +329,7 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset,
-    app::ArtifactVariantPreference variant_preference) {
-    // INT8 retired: every backend resolves to FP16 (or MLX on Apple Silicon).
-    // The variant_preference argument is preserved to keep the public API
-    // stable across the in-flight refactor and is silently ignored. The
-    // signature drops in the follow-up commit that removes the
-    // ArtifactVariantPreference enum entirely.
-    (void)variant_preference;
-
+    const std::optional<PresetDefinition>& preset) {
     auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
@@ -733,9 +715,8 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset, ArtifactVariantPreference variant_preference) {
-    return corridorkey::default_model_for_request(capabilities, requested_device, preset,
-                                                  variant_preference);
+    const std::optional<PresetDefinition>& preset) {
+    return corridorkey::default_model_for_request(capabilities, requested_device, preset);
 }
 
 std::string backend_to_string(Backend backend) {
@@ -956,9 +937,9 @@ Result<void> validate_refinement_mode_for_artifact(const std::filesystem::path& 
 
 Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
-    int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback, QualityFallbackMode fallback_mode,
-    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
+    int requested_resolution, bool allow_lower_resolution_fallback,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt) {
     if (requested_resolution <= 0) {
         return Unexpected<Error>{Error{
             ErrorCode::InvalidParameters,
@@ -996,7 +977,7 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
         }
 
         auto artifact_paths = candidate_artifact_paths_for_request(
-            models_root, requested_device.backend, resolution, variant_preference);
+            models_root, requested_device.backend, resolution);
         expected.insert(expected.end(), artifact_paths.begin(), artifact_paths.end());
     }
 
@@ -1005,13 +986,12 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
 
 Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
-    int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback, QualityFallbackMode fallback_mode,
-    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
+    int requested_resolution, bool allow_lower_resolution_fallback,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt) {
     auto expected_paths = expected_artifact_paths_for_request(
-        models_root, requested_device, requested_resolution, variant_preference,
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
-        allow_unrestricted_quality_attempt);
+        models_root, requested_device, requested_resolution, allow_lower_resolution_fallback,
+        fallback_mode, coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!expected_paths) {
         return Unexpected<Error>(expected_paths.error());
     }
@@ -1041,7 +1021,7 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
         }
 
         auto artifact_paths = candidate_artifact_paths_for_request(
-            models_root, requested_device.backend, resolution, variant_preference);
+            models_root, requested_device.backend, resolution);
         bool found_for_resolution = false;
         for (const auto& artifact_path : artifact_paths) {
             if (!std::filesystem::exists(artifact_path)) {

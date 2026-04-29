@@ -302,11 +302,11 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
 std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
-    int input_width, int input_height, int quantization_mode, std::int64_t available_memory_mb,
+    int input_width, int input_height, std::int64_t available_memory_mb,
     QualityFallbackMode fallback_mode, int coarse_resolution_override,
     bool allow_unrestricted_quality_attempt);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
-                               int input_height = 0, int quantization_mode = kQuantizationFp16,
+                               int input_height = 0,
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
                                int coarse_resolution_override = 0,
                                RefinementMode refinement_mode = RefinementMode::Auto);

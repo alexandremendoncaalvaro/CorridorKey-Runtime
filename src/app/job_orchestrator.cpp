@@ -211,8 +211,6 @@ std::string precision_preference_to_string(PrecisionPreference preference) {
     switch (preference) {
         case PrecisionPreference::FP16:
             return "fp16";
-        case PrecisionPreference::Int8:
-            return "int8";
         case PrecisionPreference::Auto:
         default:
             return "auto";

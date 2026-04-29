@@ -10,8 +10,6 @@
 
 namespace corridorkey::app {
 
-enum class ArtifactVariantPreference : std::uint8_t { Auto, FP16, Int8 };
-
 struct ArtifactSelection {
     std::filesystem::path executable_model_path = {};
     int requested_resolution = 0;
@@ -59,8 +57,7 @@ CORRIDORKEY_API std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities);
 CORRIDORKEY_API std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset,
-    ArtifactVariantPreference variant_preference = ArtifactVariantPreference::Auto);
+    const std::optional<PresetDefinition>& preset);
 CORRIDORKEY_API std::optional<int> max_supported_resolution_for_device(
     const DeviceInfo& requested_device);
 CORRIDORKEY_API std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend,
@@ -80,14 +77,12 @@ CORRIDORKEY_API Result<void> validate_refinement_mode_for_artifact(
     const std::filesystem::path& model_path, RefinementMode refinement_mode);
 CORRIDORKEY_API Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
-    int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback = false,
+    int requested_resolution, bool allow_lower_resolution_fallback = false,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
 CORRIDORKEY_API Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
-    int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback = false,
+    int requested_resolution, bool allow_lower_resolution_fallback = false,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
 CORRIDORKEY_API Result<std::filesystem::path> resolve_model_artifact_for_request(
