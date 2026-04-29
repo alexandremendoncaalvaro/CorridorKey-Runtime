@@ -725,7 +725,13 @@ void append_status_note(std::string& status, const std::string& note) {
 }
 
 bool allow_cpu_fallback_requested(const InstanceData* data) {
-    return data != nullptr && get_bool_param_value(data->allow_cpu_fallback_param, false);
+    // CPU rendering retired alongside INT8: there is no longer a user-facing
+    // "Allow CPU Fallback" toggle and no CPU artifact in the bundle. Every
+    // gate that calls this predicate now collapses to its non-fallback
+    // branch. Predicate kept for source compatibility while the threading is
+    // pruned in a follow-up commit.
+    (void)data;
+    return false;
 }
 
 bool should_reroute_int8_to_cpu(const DeviceInfo& requested_device, int quantization_mode,
@@ -1129,8 +1135,6 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamPrepareTimeout,
                                        &data->prepare_timeout_param, nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamAllowCpuFallback,
-                                       &data->allow_cpu_fallback_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamUpdateStatus, &data->update_status_param,
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamOpenUpdatePage,

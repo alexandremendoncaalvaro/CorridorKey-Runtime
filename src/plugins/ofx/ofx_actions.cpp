@@ -594,11 +594,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Increase if first-frame initialization times out.",
                      "advanced_runtime_group");
     define_bool_param(
-        param_set, kParamAllowCpuFallback, "Allow CPU Fallback", 0,
-        "Opt in to CPU fallback when the requested Windows GPU path cannot satisfy the current "
-        "precision or backend request. INT8 on Windows currently uses this path.",
-        "advanced_runtime_group");
-    define_bool_param(
         param_set, kParamIncludePreReleases, "Include Pre-releases in Update Check", 0,
         "When enabled, the update banner surfaces pre-release builds in addition to stable "
         "releases. Re-evaluates against the cached release list on the next panel refresh.",

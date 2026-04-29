@@ -87,7 +87,6 @@ constexpr const char* kParamRuntimeTimings = "runtime_timings";
 constexpr const char* kParamRuntimeBackendWork = "runtime_backend_work";
 constexpr const char* kParamRenderTimeout = "render_timeout";
 constexpr const char* kParamPrepareTimeout = "prepare_timeout";
-constexpr const char* kParamAllowCpuFallback = "allow_cpu_fallback";
 constexpr const char* kParamOpenStartHereGuide = "open_start_here_guide";
 constexpr const char* kParamOpenQualityGuide = "open_quality_guide";
 constexpr const char* kParamOpenAlphaHintGuide = "open_alpha_hint_guide";
@@ -183,7 +182,6 @@ struct InstanceData {
     OfxParamHandle runtime_backend_work_param = nullptr;
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
-    OfxParamHandle allow_cpu_fallback_param = nullptr;
     OfxParamHandle update_status_param = nullptr;
     OfxParamHandle open_update_page_param = nullptr;
     OfxParamHandle include_pre_releases_param = nullptr;
