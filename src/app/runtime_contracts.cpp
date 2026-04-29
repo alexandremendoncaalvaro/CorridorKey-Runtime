@@ -214,40 +214,25 @@ std::optional<ModelCatalogEntry> model_catalog_entry_for_path(
 std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
     const std::filesystem::path& models_root, Backend backend, int resolution,
     app::ArtifactVariantPreference variant_preference) {
+    // INT8 ONNX artifacts have been retired: they carried a visible quality
+    // loss against FP16 and the lower-resolution rungs (Draft 512, High 1024,
+    // Ultra 1536) plus the existing tile path already cover the preview /
+    // low-VRAM use cases that originally motivated INT8. The
+    // ArtifactVariantPreference parameter is preserved for now so this commit
+    // stays scoped to candidate generation; the predicate threading and the
+    // enum itself go in the next refactor commit.
+    (void)variant_preference;
+
     if (backend == Backend::MLX) {
         return {models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn")};
     }
 
-    const std::filesystem::path fp16_path =
-        models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
-    const std::filesystem::path int8_path =
-        models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
-
-    if (backend == Backend::TensorRT || backend == Backend::CUDA) {
-        if (!windows_tensorrt_packaged_resolution_supported(resolution)) {
-            return {};
-        }
-        if (backend == Backend::TensorRT) {
-            return {fp16_path};
-        }
-        switch (variant_preference) {
-            case app::ArtifactVariantPreference::Int8:
-                return {int8_path, fp16_path};
-            case app::ArtifactVariantPreference::Auto:
-            case app::ArtifactVariantPreference::FP16:
-            default:
-                return {fp16_path, int8_path};
-        }
+    if ((backend == Backend::TensorRT || backend == Backend::CUDA) &&
+        !windows_tensorrt_packaged_resolution_supported(resolution)) {
+        return {};
     }
 
-    switch (variant_preference) {
-        case app::ArtifactVariantPreference::FP16:
-            return {fp16_path, int8_path};
-        case app::ArtifactVariantPreference::Int8:
-        case app::ArtifactVariantPreference::Auto:
-        default:
-            return {int8_path, fp16_path};
-    }
+    return {models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx")};
 }
 
 Result<std::pair<int, bool>> search_resolution_for_request(

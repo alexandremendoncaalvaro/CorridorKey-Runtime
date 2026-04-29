@@ -616,22 +616,6 @@ TEST_CASE("windows universal bootstrap aligns int8 artifact selection with devic
     REQUIRE(candidates.front().effective_resolution == 1024);
 }
 
-TEST_CASE("auto windows universal quality falls back to the highest packaged int8 model",
-          "[unit][ofx][regression]") {
-    TempDirGuard temp_dir("corridorkey-ofx-windows-universal-quality-auto");
-    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
-    touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
-
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::DirectML, kQualityAuto, 4096,
-                                             2160, kQuantizationFp16);
-
-    REQUIRE(selection.has_value());
-    REQUIRE(selection->requested_resolution == 2048);
-    REQUIRE(selection->effective_resolution == 512);
-    REQUIRE(selection->used_fallback);
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_int8_512.onnx");
-}
-
 TEST_CASE("unsupported OFX quantization combinations report product-safe guidance",
           "[unit][ofx][regression]") {
     auto tensorrt_message = unsupported_quantization_message(Backend::TensorRT, kQuantizationInt8);
