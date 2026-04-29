@@ -48,16 +48,18 @@ TEST_CASE("windows TensorRT probes respect supported VRAM tiers", "[unit][doctor
     }
 
     SECTION("windows universal keeps the public ladder on 512 and 1024") {
+        // INT8 ONNX retired alongside CPU rendering: the diagnostics smoke
+        // ladder no longer probes corridorkey_int8_512.onnx. Universal
+        // backends (DirectML / WindowsML / OpenVINO) now exercise only the
+        // FP16 artifacts that ship in the bundle.
         DeviceInfo smaller_device{"AMD Radeon", 8192, Backend::DirectML, 0};
         auto smaller_models = windows_probe_models_for_backend(Backend::DirectML, smaller_device);
-        REQUIRE(smaller_models ==
-                std::vector<std::string>{"corridorkey_fp16_512.onnx", "corridorkey_int8_512.onnx"});
+        REQUIRE(smaller_models == std::vector<std::string>{"corridorkey_fp16_512.onnx"});
 
         DeviceInfo larger_device{"AMD Radeon", 16384, Backend::DirectML, 0};
         auto larger_models = windows_probe_models_for_backend(Backend::DirectML, larger_device);
         REQUIRE(larger_models == std::vector<std::string>{"corridorkey_fp16_1024.onnx",
-                                                          "corridorkey_fp16_512.onnx",
-                                                          "corridorkey_int8_512.onnx"});
+                                                          "corridorkey_fp16_512.onnx"});
     }
 }
 

@@ -179,12 +179,6 @@ std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_m
 
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
-    if (selector == "preview") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
-            return "win-cpu-safe";
-        }
-        return "mac-preview";
-    }
     if (selector == "balanced" || selector == "default") {
         if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
             return "win-rtx-balanced";
@@ -347,6 +341,13 @@ std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
     const std::optional<PresetDefinition>& preset,
     app::ArtifactVariantPreference variant_preference) {
+    // INT8 retired: every backend resolves to FP16 (or MLX on Apple Silicon).
+    // The variant_preference argument is preserved to keep the public API
+    // stable across the in-flight refactor and is silently ignored. The
+    // signature drops in the follow-up commit that removes the
+    // ArtifactVariantPreference enum entirely.
+    (void)variant_preference;
+
     auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
@@ -369,24 +370,18 @@ std::optional<ModelCatalogEntry> default_model_for_request(
     };
 
     auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
-        const bool prefer_fp16 = variant_preference == app::ArtifactVariantPreference::FP16;
         if (requested_device.available_memory_mb >= 10000) {
-            return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_1024.onnx"
-                                                      : "corridorkey_int8_1024.onnx");
+            return find_model_by_filename("corridorkey_fp16_1024.onnx");
         }
-        if (requested_device.available_memory_mb >= 8000) {
-            return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_768.onnx"
-                                                      : "corridorkey_int8_768.onnx");
-        }
-        return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_512.onnx"
-                                                  : "corridorkey_int8_512.onnx");
+        return find_model_by_filename("corridorkey_fp16_512.onnx");
     };
 
     if (requested_device.backend == Backend::CPU) {
-        if (variant_preference == app::ArtifactVariantPreference::FP16) {
-            return find_model_by_filename("corridorkey_fp16_512.onnx");
-        }
-        return find_model_by_filename("corridorkey_int8_512.onnx");
+        // CPU rendering retired together with INT8: the only ONNX artifact
+        // packaged for CPU was corridorkey_int8_*, which carried unacceptable
+        // quality loss. Callers that still ask for Backend::CPU must handle
+        // the empty result rather than receive a downgraded fallback.
+        return std::nullopt;
     }
 
     if ((requested_device.backend == Backend::Auto || requested_device.backend == Backend::MLX) &&
@@ -417,23 +412,11 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         return windows_universal_model();
     }
 
-    return find_model_by_filename("corridorkey_int8_512.onnx");
+    return std::nullopt;
 }
 
 std::vector<ModelCatalogEntry> model_catalog() {
     return {
-        make_model_entry("int8", 512, "corridorkey_int8_512.onnx", "onnx", "cpu",
-                         "Validated macOS default for preview and 8 GB machines.",
-                         "portable_preview", true, true, true, {"macos_apple_silicon"},
-                         {"macos_apple_silicon"}, {"apple_silicon_8gb"}),
-        make_model_entry("int8", 768, "corridorkey_int8_768.onnx", "onnx", "cpu",
-                         "Validated CPU compatibility baseline for 16 GB Apple Silicon systems.",
-                         "portable_default", true, false, true, {"macos_apple_silicon"},
-                         {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
-        make_model_entry("int8", 1024, "corridorkey_int8_1024.onnx", "onnx", "cpu",
-                         "Available for manual testing on high-memory systems.",
-                         "manual_high_resolution_validation", false, false, true, {},
-                         {"macos_apple_silicon"}, {}),
         make_model_entry("mlx", 2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
                          "Official Apple Silicon model pack for the first native MLX backend.",
                          "apple_acceleration_primary", true, true, false, {"macos_apple_silicon"},
@@ -481,19 +464,6 @@ std::vector<ModelCatalogEntry> model_catalog() {
 std::vector<PresetDefinition> preset_catalog() {
     return {
         PresetDefinition{
-            "mac-preview",
-            "Mac Preview",
-            "Fast validation preset for smoke tests and low-memory systems.",
-            make_preset_inference_params(512, false, false, 32),
-            "corridorkey_int8_512.onnx",
-            "smoke_preview",
-            false,
-            false,
-            {"macos_apple_silicon"},
-            {"macos_apple_silicon"},
-            {"apple_silicon_8gb"},
-        },
-        PresetDefinition{
             "mac-balanced",
             "Mac Balanced",
             "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
@@ -519,19 +489,6 @@ std::vector<PresetDefinition> preset_catalog() {
             {"macos_apple_silicon"},
             {"macos_apple_silicon"},
             {"apple_silicon_16gb_plus"},
-        },
-        PresetDefinition{
-            "win-cpu-safe",
-            "Windows CPU Safe",
-            "Compatibility preset that keeps the Windows RTX bundle on the CPU fallback path.",
-            make_preset_inference_params(512, false, false, 32),
-            "corridorkey_int8_512.onnx",
-            "windows_cpu_fallback",
-            false,
-            false,
-            {"windows_rtx_30_plus"},
-            {"windows_rtx_30_plus"},
-            {"cpu_fallback"},
         },
         PresetDefinition{
             "win-rtx-balanced",

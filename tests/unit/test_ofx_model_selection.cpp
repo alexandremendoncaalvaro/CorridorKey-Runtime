@@ -62,40 +62,27 @@ RuntimeCapabilities windows_universal_capabilities() {
 
 }  // namespace
 
+#if defined(__APPLE__)
 TEST_CASE("ofx bootstrap prefers mlx on apple silicon when bootstrap artifacts are present",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-bootstrap-mlx");
     touch_file(temp_dir.path() / "corridorkey_mlx.safetensors");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_512.mlxfn");
-    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
 
     auto candidates = build_bootstrap_candidates(
         mac_capabilities(), DeviceInfo{"Apple Silicon", 65536, Backend::CoreML}, temp_dir.path());
 
     REQUIRE_FALSE(candidates.empty());
-#if defined(__APPLE__)
     REQUIRE(candidates.front().device.backend == Backend::MLX);
     REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_mlx.safetensors");
     REQUIRE(candidates.front().executable_model_path.filename() ==
             "corridorkey_mlx_bridge_512.mlxfn");
-#else
-    REQUIRE(candidates.front().device.backend == Backend::CoreML);
+}
 #endif
-}
 
-TEST_CASE("ofx bootstrap falls back to detected backend when mlx bootstrap artifacts are missing",
-          "[unit][ofx][regression]") {
-    TempDirGuard temp_dir("corridorkey-ofx-bootstrap-fallback");
-    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
-
-    auto candidates = build_bootstrap_candidates(
-        mac_capabilities(), DeviceInfo{"Apple Silicon", 65536, Backend::CoreML}, temp_dir.path());
-
-    REQUIRE_FALSE(candidates.empty());
-    REQUIRE(candidates.front().device.backend == Backend::CoreML);
-    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_int8_512.onnx");
-    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_int8_512.onnx");
-}
+// CoreML bootstrap fallback retired: the historical CoreML+int8 path is gone
+// together with INT8 artifacts and CPU rendering. macOS support narrows to
+// MLX on Apple Silicon; older Mac hardware is no longer in scope.
 
 TEST_CASE("fixed mlx quality resolves the exact requested bridge", "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-quality-fixed");
@@ -582,7 +569,6 @@ TEST_CASE("missing bootstrap artifact message lists the expected bootstrap files
         windows_capabilities(), DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, temp_dir.path());
 
     REQUIRE(message.find("corridorkey_fp16_1024.onnx") != std::string::npos);
-    REQUIRE(message.find("corridorkey_int8_512.onnx") != std::string::npos);
     REQUIRE(message.find(temp_dir.path().string()) != std::string::npos);
 }
 TEST_CASE("auto windows tensorRT ignores the deprecated 768 fp16 artifact",
@@ -597,12 +583,11 @@ TEST_CASE("auto windows tensorRT ignores the deprecated 768 fp16 artifact",
     REQUIRE_FALSE(selection.has_value());
 }
 
-TEST_CASE("windows universal bootstrap aligns int8 artifact selection with device memory",
+TEST_CASE("windows universal bootstrap selects fp16 artifact aligned with device memory",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-windows-universal-bootstrap");
-    touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
-    touch_file(temp_dir.path() / "corridorkey_int8_768.onnx");
-    touch_file(temp_dir.path() / "corridorkey_int8_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
 
     auto candidates = build_bootstrap_candidates(windows_universal_capabilities(),
                                                  DeviceInfo{"AMD Radeon", 16384, Backend::DirectML},
@@ -610,8 +595,8 @@ TEST_CASE("windows universal bootstrap aligns int8 artifact selection with devic
 
     REQUIRE_FALSE(candidates.empty());
     REQUIRE(candidates.front().device.backend == Backend::DirectML);
-    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_int8_1024.onnx");
-    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_int8_1024.onnx");
+    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_1024.onnx");
+    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
     REQUIRE(candidates.front().requested_resolution == 1024);
     REQUIRE(candidates.front().effective_resolution == 1024);
 }
