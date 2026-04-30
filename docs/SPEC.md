@@ -22,14 +22,24 @@ model. It exists to eliminate the Python dependency from model execution and
 to deliver a distributable, hardware-accelerated inference engine for
 professional video production workflows.
 
-The product currently provides:
+The product currently provides three surfaces:
 
-- A **CLI** (`corridorkey`) for direct command-line and pipeline use.
-- An **OFX plugin** for DaVinci Resolve on Windows and macOS, backed by an
-  out-of-process runtime service.
+- An **OFX plugin** for DaVinci Resolve and Foundry Nuke on Windows and macOS,
+  backed by an out-of-process runtime service. The plugin is host-agnostic at
+  the OFX 1.4 contract level; per-host workarounds (Resolve and Nuke 17 today)
+  live in dedicated branches that never regress the path the other host
+  depends on.
+- A **CLI** (`corridorkey`) for direct command-line and pipeline use. The CLI
+  ships inside the OFX installer and is registered on the system `PATH` at
+  install time, so a single OFX install delivers both the OFX plugin and the
+  CLI. The CLI is also available standalone in the portable runtime bundle.
+- A **GUI** (Tauri-based desktop app) for users who prefer a graphical
+  workflow over the CLI. The GUI is distributed as a separate desktop
+  installer that embeds its own copy of the runtime payload; it is not bundled
+  into the OFX installer.
 
-Both surfaces consume the same underlying library. Logic is never duplicated
-between them.
+All three surfaces consume the same underlying library. Logic is never
+duplicated between them.
 
 ### 1.2 What This Is Not
 
@@ -45,10 +55,12 @@ between them.
 
 - **Local operators** who want native execution without Python or virtual
   environments.
-- **Color graders and compositors** using DaVinci Resolve on officially
-  supported hardware.
+- **Color graders and compositors** using DaVinci Resolve or Foundry Nuke on
+  officially supported hardware.
 - **Pipeline integrators** who need a stable CLI or library surface for
   automated workflows.
+- **Desktop users** who prefer a graphical interface to the CLI for keying
+  and diagnostics tasks.
 
 ---
 
@@ -80,7 +92,7 @@ The complete support table is in [Support Matrix](../help/SUPPORT_MATRIX.md).
 
 ### 3.1 Layer Overview
 
-- **Interface layer:** CLI and OFX plugin
+- **Interface layer:** CLI, OFX plugin, and Tauri GUI
 - **Application layer:** job orchestration, OFX runtime service, diagnostics
 - **Core layer:** inference session management, device detection, frame I/O,
   post-process, and session policies
@@ -111,9 +123,9 @@ App-layer OFX runtime service. The plugin is a thin IPC client; it does not
 load ONNX sessions or GPU backends directly.
 
 This design isolates backend failures, TensorRT RTX compilation errors, and
-VRAM exhaustion from the DaVinci Resolve host process. The session broker in
-the service layer pools initialized sessions across multiple OFX node
-instances to avoid redundant GPU warmups.
+VRAM exhaustion from the host process (DaVinci Resolve or Foundry Nuke). The
+session broker in the service layer pools initialized sessions across multiple
+OFX node instances to avoid redundant GPU warmups.
 
 Frame data moves between plugin and service over shared memory. The IPC
 protocol is versioned to ensure the plugin and service remain compatible

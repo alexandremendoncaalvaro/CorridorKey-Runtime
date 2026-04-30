@@ -601,7 +601,14 @@ it explicitly:
 - macOS: `scripts/release_pipeline_macos.sh --display-label X.Y.Z-mac.N --publish-github --notes-file <path>`
 - Linux: `scripts/linux.sh --task release --version X.Y.Z --display-label X.Y.Z-linux.N --publish-github --notes-file <path>`
 
-### CorridorKey OFX
+### CorridorKey OFX (OFX plugin + bundled CLI)
+
+This release track ships the OFX plugin used by DaVinci Resolve and
+Foundry Nuke, plus the `corridorkey` CLI bundled inside the same
+installer. The CLI's directory is registered on the system `PATH` at
+install time, so a single OFX install delivers both the OFX surface
+and the CLI surface; the Tauri GUI is shipped separately (see the
+"CorridorKey Runtime" track below).
 
 The host-coverage qualifier `[Nuke & Resolve]` precedes the platform
 qualifier on every OFX release title, regardless of platform combination.
@@ -620,7 +627,17 @@ every example into a broken local link.
 - Windows and Linux: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Windows & Linux)`
 - Windows, macOS, and Linux: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Windows, macOS & Linux)`
 
-### CorridorKey Runtime
+### CorridorKey Runtime (Tauri GUI desktop app)
+
+This release track ships the Tauri-based desktop GUI defined in
+`src/gui`. The historical name "Runtime" is preserved on the release
+title and on the asset filename
+(`CorridorKey_Runtime_v<label>_<Platform>_<Track>_Installer.exe`)
+because changing it would break the auto-updater for users already on
+this track. The product surface is the GUI; the embedded runtime
+payload it ships is a copy of the same artifacts the OFX installer
+ships (see Section 1 "What This Is" in `docs/SPEC.md` for the full
+three-surface breakdown).
 
 - Windows only: `CorridorKey Runtime vX.Y.Z (Windows)`
 - macOS only: `CorridorKey Runtime vX.Y.Z (macOS)`
