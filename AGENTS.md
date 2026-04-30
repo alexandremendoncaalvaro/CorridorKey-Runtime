@@ -109,6 +109,19 @@ each session. It contains the non-negotiable rules for this repository.
 - Conventional Commits: `feat:`, `fix:`, `test:`, `refactor:`, `chore:`,
   `docs:`, `perf:`
 - Do not commit to `main` directly
+- **Every commit must carry a `Signed-off-by:` trailer.** The repository
+  enforces the Developer Certificate of Origin (see `CONTRIBUTING.md`
+  section "Developer Certificate of Origin (DCO)") via a status check
+  that blocks merge on any commit lacking the trailer. Use
+  `git commit --signoff` (or `-s`) so the trailer is added at commit
+  time. Commits authored through the Claude Code agent are no exception
+  — passing `--signoff` from the start avoids the "rebase + force-push
+  to add sign-off retroactively" remediation that rewrites every commit
+  hash on the branch (and detaches any tag previously published from the
+  branch ancestry it once shared). Past remediation: PR #51 was admin-
+  merged on 2026-04-30 specifically because 30 unsigned commits had
+  accumulated; preserving the published `v0.8.2-win.1` tag's commit
+  hash precluded the rewrite path.
 
 ## Documentation Rules (see docs/GUIDELINES.md section 10 for details)
 
