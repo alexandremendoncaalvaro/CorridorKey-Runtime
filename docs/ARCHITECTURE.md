@@ -17,15 +17,16 @@ The project exists to ship CorridorKey inference as a native, distributable,
 and integrable runtime for real hardware. The architecture enforces strict
 separation between the Core (inference, math, I/O), the Application
 (orchestration, OFX service, diagnostics), and the Interfaces (CLI, OFX
-plugin).
+plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
 
 **Key Principles:**
 
-1. **Library First.** The engine is the product boundary. CLI and OFX plugin
-   consume the same runtime rather than reimplementing behavior.
-2. **Interface Segregation.** Each surface (CLI, OFX plugin) is a thin client
-   over the App/Core contracts. Business logic never lives in an interface
-   layer.
+1. **Library First.** The engine is the product boundary. CLI, OFX plugin,
+   and Tauri GUI all consume the same runtime rather than reimplementing
+   behavior.
+2. **Interface Segregation.** Each surface (CLI, OFX plugin, Tauri GUI) is
+   a thin client over the App/Core contracts. Business logic never lives in
+   an interface layer.
 3. **Predictable Operations.** Diagnostics, fallback behavior, and error
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
@@ -72,15 +73,26 @@ Orchestration of Core capabilities into coherent jobs and services.
 - OFX runtime service: out-of-process session brokering, IPC protocol, and
   session lifecycle management for the OFX plugin.
 - Product-track policy: artifact selection, compatibility rules, and support
-  behavior shared by CLI and OFX.
+  behavior shared by CLI, OFX, and the Tauri GUI.
 
-### Layer 3: Interfaces (`src/cli`, `src/plugins/ofx`)
+### Layer 3: Interfaces (`src/cli`, `src/plugins/ofx`, `src/gui`)
 
 User-facing surfaces. Each is a thin consumer of App/Core contracts.
 
 - **CLI** (`src/cli`): Argument parsing, output formatting, command dispatch.
+  Ships inside the OFX installer alongside `CorridorKey.ofx` and is registered
+  on the system `PATH` so it is callable from any terminal after the OFX
+  install. Also available standalone in the portable runtime bundle that
+  feeds the Tauri GUI installer.
 - **OFX Plugin** (`src/plugins/ofx`): OpenFX host integration, render
   callback, runtime client that communicates with the App-layer OFX service.
+  Host-agnostic at the OFX 1.4 contract level; Resolve and Nuke 17 are the
+  validated hosts today, with per-host workarounds gated behind explicit
+  branches that never regress the path the other host depends on.
+- **Tauri GUI** (`src/gui`): Tauri 2 + React desktop application. Distributed
+  as a separate desktop installer that embeds its own copy of the runtime
+  payload (the staged output of `package_windows.ps1`); does not require the
+  OFX bundle to be installed.
 
 ---
 

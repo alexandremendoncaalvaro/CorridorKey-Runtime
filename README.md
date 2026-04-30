@@ -2,12 +2,15 @@
 
 ![CorridorKey OFX Plugin](./assets/ofx_example.gif)
 
-Native AI keying runtime and OFX plugin for **DaVinci Resolve**, built in collaboration with **Corridor Digital**.
+Native AI keying runtime and OFX plugin for **DaVinci Resolve and Foundry Nuke**, built in collaboration with **Corridor Digital**.
 
-CorridorKey-Runtime provides two supported surfaces:
+CorridorKey-Runtime provides three product surfaces:
 
-- **DaVinci Resolve OFX plugin** for interactive keying inside Resolve
-- **CLI runtime** for local processing, diagnostics, and automation
+- **OFX plugin** for interactive keying inside DaVinci Resolve and Foundry Nuke
+- **CLI** (`corridorkey`) for local processing, diagnostics, and automation
+- **GUI** (Tauri-based desktop app) for users who prefer a graphical workflow over the CLI
+
+The OFX plugin and the CLI ship in the same installer: the OFX bundle places `corridorkey.exe` next to `CorridorKey.ofx` and registers it on the system `PATH`, so the CLI is available after the OFX install. The GUI is distributed as a separate desktop installer that embeds its own copy of the runtime payload.
 
 Current public builds support:
 
@@ -26,24 +29,26 @@ Current public builds support:
 - Native local execution
 - Practical deployment in real editing workflows
 - Support for **NVIDIA RTX** and **Apple Silicon**
-- Stable surfaces for both **DaVinci Resolve users** and **CLI/integration workflows**
+- Stable surfaces for **DaVinci Resolve and Foundry Nuke users**, **CLI/integration workflows**, and **desktop GUI operators**
 
 ## Supported Surfaces
 
-### OFX plugin for DaVinci Resolve
+### OFX plugin for DaVinci Resolve and Foundry Nuke
 
-Use CorridorKey directly inside DaVinci Resolve through the OFX plugin.
+Use CorridorKey directly inside DaVinci Resolve or Foundry Nuke through the OFX plugin. The plugin is host-agnostic and registers itself at the standard OpenFX bundle path, so any OFX 1.4-compliant host that scans that path picks it up.
 
+### CLI (`corridorkey`)
 
-
-### CLI runtime
-
-Use the CLI for:
+The OFX installer ships the `corridorkey` CLI alongside the plugin and registers its directory on `PATH`. After installing the OFX bundle, `corridorkey` is callable from any terminal. Use it for:
 
 - environment diagnostics
 - scripted processing
 - machine-readable JSON output
 - automation and integration workflows
+
+### GUI (Tauri desktop app)
+
+A Tauri-based desktop application is available as a separate installer for users who prefer a graphical workflow over the CLI. The GUI embeds its own copy of the runtime payload, so it does not require the OFX bundle to be installed.
 
 ## Documentation
 
