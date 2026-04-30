@@ -14,9 +14,8 @@ TEST_CASE("doctor summary honors packaged bundle inventory for Windows RTX",
     report["bundle"]["packaged_models"] =
         nlohmann::json::array({{{"filename", "corridorkey_fp16_512.onnx"}, {"found", true}},
                                {{"filename", "corridorkey_fp16_1024.onnx"}, {"found", true}},
-                               {{"filename", "corridorkey_int8_512.onnx"}, {"found", true}},
-                               {{"filename", "corridorkey_int8_768.onnx"}, {"found", true}},
-                               {{"filename", "corridorkey_int8_1024.onnx"}, {"found", true}}});
+                               {{"filename", "corridorkey_fp16_1536.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_fp16_2048.onnx"}, {"found", true}}});
     report["video"]["healthy"] = true;
     report["cache"]["healthy"] = true;
     report["coreml"]["applicable"] = false;

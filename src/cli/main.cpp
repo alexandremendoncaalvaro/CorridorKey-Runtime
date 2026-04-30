@@ -232,12 +232,9 @@ Result<PrecisionPreference> parse_precision_preference(const std::string& value)
     if (normalized == "fp16") {
         return PrecisionPreference::FP16;
     }
-    if (normalized == "int8") {
-        return PrecisionPreference::Int8;
-    }
     return Unexpected<Error>{Error{
         ErrorCode::InvalidParameters,
-        "Invalid --precision value. Use 'auto', 'fp16', or 'int8'.",
+        "Invalid --precision value. Use 'auto' or 'fp16'.",
     }};
 }
 
@@ -245,8 +242,6 @@ std::string precision_preference_to_string(PrecisionPreference preference) {
     switch (preference) {
         case PrecisionPreference::FP16:
             return "fp16";
-        case PrecisionPreference::Int8:
-            return "int8";
         case PrecisionPreference::Auto:
         default:
             return "auto";
@@ -266,19 +261,6 @@ std::string artifact_precision_label(const std::filesystem::path& model_path) {
         return "mlx";
     }
     return "auto";
-}
-
-ArtifactVariantPreference artifact_variant_preference_for_precision(
-    PrecisionPreference preference) {
-    switch (preference) {
-        case PrecisionPreference::FP16:
-            return ArtifactVariantPreference::FP16;
-        case PrecisionPreference::Int8:
-            return ArtifactVariantPreference::Int8;
-        case PrecisionPreference::Auto:
-        default:
-            return ArtifactVariantPreference::Auto;
-    }
 }
 
 Result<int> parse_coarse_resolution_override(const std::string& value) {
@@ -449,9 +431,8 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
                                         : std::nullopt,
             argc, argv);
 
-        auto selected_model = default_model_for_request(
-            capabilities, device, resolved.preset,
-            artifact_variant_preference_for_precision(resolved.params.precision_preference));
+        auto selected_model =
+            default_model_for_request(capabilities, device, resolved.preset);
         if (!selected_model.has_value()) {
             return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                            "Could not resolve a default model for this device."}};

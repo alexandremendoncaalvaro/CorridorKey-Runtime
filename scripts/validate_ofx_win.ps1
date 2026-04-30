@@ -617,6 +617,70 @@ if ($doctorSucceeded -and -not $doctorHealthy -and -not $doctorFailureTolerated)
     }
 }
 
+$nukeSmokePayload = [ordered]@{
+    attempted = $false
+    succeeded = $null
+    failure_reason = ""
+    nuke_exe = ""
+    nuke_version = ""
+    output_path = ""
+    exit_code = $null
+    skipped_reason = ""
+}
+
+# Nuke smoke is opt-in: CI runners do not have a licensed Nuke install,
+# so the validator stays silent unless the operator explicitly asks for the
+# probe via CORRIDORKEY_VALIDATE_NUKE=1. The smoke runner emits its own
+# JSON which we ingest verbatim into the bundle validation payload.
+$validateNukeRequested = ($env:CORRIDORKEY_VALIDATE_NUKE -eq "1")
+if ($validateNukeRequested) {
+    Write-Host "[NUKE] CORRIDORKEY_VALIDATE_NUKE=1 -- running headless Nuke smoke against staged bundle..." -ForegroundColor Cyan
+    $smokeRunner = Join-Path $repoRoot "scripts\test_nuke_smoke.ps1"
+    if (-not (Test-Path $smokeRunner)) {
+        $nukeSmokePayload.attempted = $true
+        $nukeSmokePayload.succeeded = $false
+        $nukeSmokePayload.failure_reason = "Smoke runner not found at $smokeRunner."
+        Write-Host "[NUKE] Skipping: $($nukeSmokePayload.failure_reason)" -ForegroundColor Yellow
+    } else {
+        $smokeResultPath = Join-Path $env:TEMP ("corridorkey_nuke_smoke_" + [System.Guid]::NewGuid().ToString("N") + ".json")
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $smokeRunner `
+                -BundlePath $bundleDescriptor `
+                -ResultJsonPath $smokeResultPath
+            $smokeExit = $LASTEXITCODE
+            if (Test-Path $smokeResultPath) {
+                $smokeReport = Get-Content -Path $smokeResultPath -Raw | ConvertFrom-Json
+                $nukeSmokePayload.attempted = [bool]$smokeReport.attempted
+                $nukeSmokePayload.succeeded = [bool]$smokeReport.succeeded
+                $nukeSmokePayload.failure_reason = [string]$smokeReport.failure_reason
+                $nukeSmokePayload.nuke_exe = [string]$smokeReport.nuke_exe
+                $nukeSmokePayload.nuke_version = [string]$smokeReport.nuke_version
+                $nukeSmokePayload.output_path = [string]$smokeReport.output_path
+                $nukeSmokePayload.exit_code = [int]$smokeReport.exit_code
+            } else {
+                $nukeSmokePayload.attempted = $true
+                $nukeSmokePayload.succeeded = $false
+                $nukeSmokePayload.failure_reason = "Smoke runner did not produce a result JSON (exit=$smokeExit)."
+                $nukeSmokePayload.exit_code = $smokeExit
+            }
+        } catch {
+            $nukeSmokePayload.attempted = $true
+            $nukeSmokePayload.succeeded = $false
+            $nukeSmokePayload.failure_reason = "Smoke runner threw: $_"
+        } finally {
+            Remove-Item $smokeResultPath -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($nukeSmokePayload.succeeded) {
+            Write-Host "[NUKE] Smoke PASS (Nuke $($nukeSmokePayload.nuke_version))" -ForegroundColor Green
+        } else {
+            Write-Host "[NUKE] Smoke FAIL: $($nukeSmokePayload.failure_reason)" -ForegroundColor Red
+        }
+    }
+} else {
+    $nukeSmokePayload.skipped_reason = "CORRIDORKEY_VALIDATE_NUKE not set; opt in by exporting CORRIDORKEY_VALIDATE_NUKE=1."
+}
+
 $validationPayload = [ordered]@{
     bundle_path = $bundleDescriptor
     validation_passed = $true
@@ -666,6 +730,7 @@ $validationPayload = [ordered]@{
         failure_reason = $doctorFailureReason
         report_path = if ($doctorSucceeded) { $doctorReportPath } else { "" }
     }
+    nuke_smoke = $nukeSmokePayload
 }
 Write-CorridorKeyJsonFile -Path $bundleValidationPath -Payload $validationPayload
 Write-Host "[PASS] Wrote bundle validation report: $bundleValidationPath" -ForegroundColor Green

@@ -341,22 +341,30 @@ if ($requiresCudaRuntime) {
     }
 
     # The RTX pipeline links CUDA NPP (gpu_resize). NPP ships only as DLLs
-    # on Windows (no static libs in CUDA 12.8), so we must bundle them or
-    # Resolve will silently fail to load the plugin on machines without a
-    # system CUDA install.
+    # on Windows (no static libs), so we must bundle them or Resolve will
+    # silently fail to load the plugin on machines without a system CUDA
+    # install. The required CUDA Toolkit version is sourced from the build
+    # contract (Get-CorridorKeyWindowsRtxBuildContract.required_cuda_version)
+    # so a contract bump is the single source of truth and this script never
+    # drifts behind. The NPP DLL filename suffix _64_12 is the CUDA 12.x ABI
+    # tag, stable across all 12.x minor versions, so the names are constant.
+    $cudaContract = Get-CorridorKeyWindowsRtxBuildContract
+    $cudaVersion = $cudaContract.required_cuda_version
+    $cudaVersionTag = "v$cudaVersion"
+    $cudaVersionEnvVar = "CUDA_PATH_V" + ($cudaVersion -replace '\.', '_')
     $cudaRoot = $env:CUDA_PATH
     if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
-        $cudaRoot = $env:CUDA_PATH_V12_8
+        $cudaRoot = [System.Environment]::GetEnvironmentVariable($cudaVersionEnvVar)
     }
     if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
-        $cudaRoot = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8"
+        $cudaRoot = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\$cudaVersionTag"
     }
     $cudaBin = Join-Path $cudaRoot "bin"
     $nppDllNames = @("nppc64_12.dll", "nppial64_12.dll", "nppidei64_12.dll", "nppig64_12.dll")
     foreach ($nppName in $nppDllNames) {
         $nppPath = Join-Path $cudaBin $nppName
         if (-not (Test-Path $nppPath)) {
-            throw "Required CUDA NPP DLL not found: $nppPath (set CUDA_PATH to the CUDA 12.8 install root)."
+            throw "Required CUDA NPP DLL not found: $nppPath (set CUDA_PATH or $cudaVersionEnvVar to the CUDA $cudaVersion install root, per the build contract)."
         }
         Copy-Item $nppPath $win64Dir -Force
     }

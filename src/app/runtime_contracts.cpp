@@ -13,6 +13,14 @@
 
 namespace corridorkey {
 
+// Forward declarations for the probe-using entry points whose definitions
+// live in runtime_contracts_probes.cpp (corridorkey_core). The wrappers in
+// the corridorkey::app namespace below dispatch to them by qualified name,
+// and corridorkey_common cannot define them because they pull device-
+// detection probes that link against ONNX Runtime.
+RuntimeCapabilities runtime_capabilities();
+std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector);
+
 namespace {
 
 bool has_backend(const RuntimeCapabilities& capabilities, Backend backend) {
@@ -171,12 +179,6 @@ std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_m
 
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
-    if (selector == "preview") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
-            return "win-cpu-safe";
-        }
-        return "mac-preview";
-    }
     if (selector == "balanced" || selector == "default") {
         if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
             return "win-rtx-balanced";
@@ -204,42 +206,17 @@ std::optional<ModelCatalogEntry> model_catalog_entry_for_path(
 }
 
 std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
-    const std::filesystem::path& models_root, Backend backend, int resolution,
-    app::ArtifactVariantPreference variant_preference) {
+    const std::filesystem::path& models_root, Backend backend, int resolution) {
     if (backend == Backend::MLX) {
         return {models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn")};
     }
 
-    const std::filesystem::path fp16_path =
-        models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
-    const std::filesystem::path int8_path =
-        models_root / ("corridorkey_int8_" + std::to_string(resolution) + ".onnx");
-
-    if (backend == Backend::TensorRT || backend == Backend::CUDA) {
-        if (!windows_tensorrt_packaged_resolution_supported(resolution)) {
-            return {};
-        }
-        if (backend == Backend::TensorRT) {
-            return {fp16_path};
-        }
-        switch (variant_preference) {
-            case app::ArtifactVariantPreference::Int8:
-                return {int8_path, fp16_path};
-            case app::ArtifactVariantPreference::Auto:
-            case app::ArtifactVariantPreference::FP16:
-            default:
-                return {fp16_path, int8_path};
-        }
+    if ((backend == Backend::TensorRT || backend == Backend::CUDA) &&
+        !windows_tensorrt_packaged_resolution_supported(resolution)) {
+        return {};
     }
 
-    switch (variant_preference) {
-        case app::ArtifactVariantPreference::FP16:
-            return {fp16_path, int8_path};
-        case app::ArtifactVariantPreference::Int8:
-        case app::ArtifactVariantPreference::Auto:
-        default:
-            return {int8_path, fp16_path};
-    }
+    return {models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx")};
 }
 
 Result<std::pair<int, bool>> search_resolution_for_request(
@@ -311,45 +288,9 @@ InferenceParams make_preset_inference_params(int target_resolution, bool auto_de
 
 }  // namespace
 
-RuntimeCapabilities runtime_capabilities() {
-    RuntimeCapabilities capabilities;
-
-#if defined(__APPLE__)
-    capabilities.platform = "macos";
-#elif defined(_WIN32)
-    capabilities.platform = "windows";
-#else
-    capabilities.platform = "linux";
-#endif
-
-    auto devices = list_devices();
-    capabilities.supported_backends.reserve(devices.size());
-    for (const auto& device : devices) {
-        capabilities.supported_backends.push_back(device.backend);
-        if (device.backend == Backend::CoreML) {
-            capabilities.apple_silicon = true;
-            capabilities.coreml_available = true;
-        }
-        if (device.backend == Backend::MLX) {
-            capabilities.apple_silicon = true;
-        }
-        if (device.backend == Backend::CPU) {
-            capabilities.cpu_fallback_available = true;
-        }
-    }
-
-    capabilities.mlx_probe_available = core::mlx_probe_available();
-    capabilities.videotoolbox_available = is_videotoolbox_available();
-    VideoFrameFormat input_format;
-    auto video_support = inspect_video_output_support(input_format);
-    capabilities.default_video_mode = video_support.default_mode;
-    capabilities.default_video_container = video_support.default_container;
-    capabilities.default_video_encoder = video_support.default_encoder;
-    capabilities.lossless_video_available = video_support.lossless_available;
-    capabilities.lossless_video_unavailable_reason = video_support.lossless_unavailable_reason;
-
-    return capabilities;
-}
+// runtime_capabilities() lives in runtime_contracts_probes.cpp (corridorkey_core)
+// because it pulls device-detection probes that link against ONNX Runtime.
+// The .ofx plugin links corridorkey_common only and never calls this function.
 
 std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filename) {
     for (const auto& entry : model_catalog()) {
@@ -361,23 +302,9 @@ std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filen
     return std::nullopt;
 }
 
-std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector) {
-    auto normalized = normalize_preset_selector(selector);
-    if (!normalized.has_value()) {
-        return std::nullopt;
-    }
-
-    auto capabilities = runtime_capabilities();
-    auto resolved_id = resolve_platform_preset_alias(*normalized, capabilities);
-
-    for (const auto& preset : preset_catalog()) {
-        if (normalized_lower(preset.id) == resolved_id) {
-            return preset;
-        }
-    }
-
-    return std::nullopt;
-}
+// find_preset_by_selector() lives in runtime_contracts_probes.cpp because it
+// internally calls runtime_capabilities(). The .ofx never calls this entry
+// point.
 
 std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities) {
@@ -402,8 +329,7 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset,
-    app::ArtifactVariantPreference variant_preference) {
+    const std::optional<PresetDefinition>& preset) {
     auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
         if (preset.has_value()) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
@@ -426,24 +352,18 @@ std::optional<ModelCatalogEntry> default_model_for_request(
     };
 
     auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
-        const bool prefer_fp16 = variant_preference == app::ArtifactVariantPreference::FP16;
         if (requested_device.available_memory_mb >= 10000) {
-            return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_1024.onnx"
-                                                      : "corridorkey_int8_1024.onnx");
+            return find_model_by_filename("corridorkey_fp16_1024.onnx");
         }
-        if (requested_device.available_memory_mb >= 8000) {
-            return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_768.onnx"
-                                                      : "corridorkey_int8_768.onnx");
-        }
-        return find_model_by_filename(prefer_fp16 ? "corridorkey_fp16_512.onnx"
-                                                  : "corridorkey_int8_512.onnx");
+        return find_model_by_filename("corridorkey_fp16_512.onnx");
     };
 
     if (requested_device.backend == Backend::CPU) {
-        if (variant_preference == app::ArtifactVariantPreference::FP16) {
-            return find_model_by_filename("corridorkey_fp16_512.onnx");
-        }
-        return find_model_by_filename("corridorkey_int8_512.onnx");
+        // CPU rendering retired together with INT8: the only ONNX artifact
+        // packaged for CPU was corridorkey_int8_*, which carried unacceptable
+        // quality loss. Callers that still ask for Backend::CPU must handle
+        // the empty result rather than receive a downgraded fallback.
+        return std::nullopt;
     }
 
     if ((requested_device.backend == Backend::Auto || requested_device.backend == Backend::MLX) &&
@@ -474,23 +394,11 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         return windows_universal_model();
     }
 
-    return find_model_by_filename("corridorkey_int8_512.onnx");
+    return std::nullopt;
 }
 
 std::vector<ModelCatalogEntry> model_catalog() {
     return {
-        make_model_entry("int8", 512, "corridorkey_int8_512.onnx", "onnx", "cpu",
-                         "Validated macOS default for preview and 8 GB machines.",
-                         "portable_preview", true, true, true, {"macos_apple_silicon"},
-                         {"macos_apple_silicon"}, {"apple_silicon_8gb"}),
-        make_model_entry("int8", 768, "corridorkey_int8_768.onnx", "onnx", "cpu",
-                         "Validated CPU compatibility baseline for 16 GB Apple Silicon systems.",
-                         "portable_default", true, false, true, {"macos_apple_silicon"},
-                         {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
-        make_model_entry("int8", 1024, "corridorkey_int8_1024.onnx", "onnx", "cpu",
-                         "Available for manual testing on high-memory systems.",
-                         "manual_high_resolution_validation", false, false, true, {},
-                         {"macos_apple_silicon"}, {}),
         make_model_entry("mlx", 2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
                          "Official Apple Silicon model pack for the first native MLX backend.",
                          "apple_acceleration_primary", true, true, false, {"macos_apple_silicon"},
@@ -538,19 +446,6 @@ std::vector<ModelCatalogEntry> model_catalog() {
 std::vector<PresetDefinition> preset_catalog() {
     return {
         PresetDefinition{
-            "mac-preview",
-            "Mac Preview",
-            "Fast validation preset for smoke tests and low-memory systems.",
-            make_preset_inference_params(512, false, false, 32),
-            "corridorkey_int8_512.onnx",
-            "smoke_preview",
-            false,
-            false,
-            {"macos_apple_silicon"},
-            {"macos_apple_silicon"},
-            {"apple_silicon_8gb"},
-        },
-        PresetDefinition{
             "mac-balanced",
             "Mac Balanced",
             "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
@@ -576,19 +471,6 @@ std::vector<PresetDefinition> preset_catalog() {
             {"macos_apple_silicon"},
             {"macos_apple_silicon"},
             {"apple_silicon_16gb_plus"},
-        },
-        PresetDefinition{
-            "win-cpu-safe",
-            "Windows CPU Safe",
-            "Compatibility preset that keeps the Windows RTX bundle on the CPU fallback path.",
-            make_preset_inference_params(512, false, false, 32),
-            "corridorkey_int8_512.onnx",
-            "windows_cpu_fallback",
-            false,
-            false,
-            {"windows_rtx_30_plus"},
-            {"windows_rtx_30_plus"},
-            {"cpu_fallback"},
         },
         PresetDefinition{
             "win-rtx-balanced",
@@ -821,9 +703,10 @@ std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filen
     return corridorkey::find_model_by_filename(filename);
 }
 
-std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector) {
-    return corridorkey::find_preset_by_selector(selector);
-}
+// app::find_preset_by_selector() wrapper lives in runtime_contracts_probes.cpp
+// because it dispatches to corridorkey::find_preset_by_selector, which is
+// itself defined there (it depends on device-detection probes that bring
+// ONNX Runtime into the link line).
 
 std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities) {
@@ -832,9 +715,8 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset, ArtifactVariantPreference variant_preference) {
-    return corridorkey::default_model_for_request(capabilities, requested_device, preset,
-                                                  variant_preference);
+    const std::optional<PresetDefinition>& preset) {
+    return corridorkey::default_model_for_request(capabilities, requested_device, preset);
 }
 
 std::string backend_to_string(Backend backend) {
@@ -1055,9 +937,9 @@ Result<void> validate_refinement_mode_for_artifact(const std::filesystem::path& 
 
 Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
-    int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback, QualityFallbackMode fallback_mode,
-    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
+    int requested_resolution, bool allow_lower_resolution_fallback,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt) {
     if (requested_resolution <= 0) {
         return Unexpected<Error>{Error{
             ErrorCode::InvalidParameters,
@@ -1095,7 +977,7 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
         }
 
         auto artifact_paths = candidate_artifact_paths_for_request(
-            models_root, requested_device.backend, resolution, variant_preference);
+            models_root, requested_device.backend, resolution);
         expected.insert(expected.end(), artifact_paths.begin(), artifact_paths.end());
     }
 
@@ -1104,13 +986,12 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
 
 Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
-    int requested_resolution, ArtifactVariantPreference variant_preference,
-    bool allow_lower_resolution_fallback, QualityFallbackMode fallback_mode,
-    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
+    int requested_resolution, bool allow_lower_resolution_fallback,
+    QualityFallbackMode fallback_mode, int coarse_resolution_override,
+    bool allow_unrestricted_quality_attempt) {
     auto expected_paths = expected_artifact_paths_for_request(
-        models_root, requested_device, requested_resolution, variant_preference,
-        allow_lower_resolution_fallback, fallback_mode, coarse_resolution_override,
-        allow_unrestricted_quality_attempt);
+        models_root, requested_device, requested_resolution, allow_lower_resolution_fallback,
+        fallback_mode, coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!expected_paths) {
         return Unexpected<Error>(expected_paths.error());
     }
@@ -1140,7 +1021,7 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
         }
 
         auto artifact_paths = candidate_artifact_paths_for_request(
-            models_root, requested_device.backend, resolution, variant_preference);
+            models_root, requested_device.backend, resolution);
         bool found_for_resolution = false;
         for (const auto& artifact_path : artifact_paths) {
             if (!std::filesystem::exists(artifact_path)) {
@@ -1167,105 +1048,10 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     return selections;
 }
 
-Result<std::filesystem::path> resolve_model_artifact_for_request(
-    const std::filesystem::path& model_path, const InferenceParams& params,
-    const DeviceInfo& requested_device) {
-    const int model_resolution = packaged_model_resolution(model_path).value_or(0);
-    const int requested_resolution =
-        params.requested_quality_resolution > 0
-            ? params.requested_quality_resolution
-            : (params.target_resolution > 0 ? params.target_resolution : model_resolution);
-    const bool allow_unrestricted_quality_attempt =
-        runtime_optimization_profile_for_device(runtime_capabilities(), requested_device)
-            .unrestricted_quality_attempt;
+// resolve_model_artifact_for_request() lives in runtime_contracts_probes.cpp
+// because it calls runtime_capabilities(). The .ofx never calls this entry
+// point; it asks the runtime server to resolve quality artifacts.
 
-    const bool has_override = params.coarse_resolution_override > 0;
-    const bool coarse_to_fine_requested =
-        params.quality_fallback_mode == QualityFallbackMode::CoarseToFine || has_override;
-    if (coarse_to_fine_requested && has_override &&
-        params.coarse_resolution_override >= requested_resolution) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
-            "quality.",
-        }};
-    }
-
-    const auto validate_resolved_model =
-        [&](const std::filesystem::path& resolved_model_path) -> Result<std::filesystem::path> {
-        auto refinement_validation =
-            validate_refinement_mode_for_artifact(resolved_model_path, params.refinement_mode);
-        if (!refinement_validation) {
-            return Unexpected<Error>(refinement_validation.error());
-        }
-        return resolved_model_path;
-    };
-
-    if (allow_unrestricted_quality_attempt && is_packaged_corridorkey_model(model_path) &&
-        model_resolution > 0 && requested_resolution > model_resolution &&
-        !should_use_coarse_to_fine_for_request(
-            requested_device, requested_resolution, params.quality_fallback_mode,
-            params.coarse_resolution_override, allow_unrestricted_quality_attempt)) {
-        auto direct_attempt_path =
-            sibling_model_path_for_resolution(model_path, requested_resolution);
-        if (direct_attempt_path.empty()) {
-            return Unexpected<Error>{Error{
-                ErrorCode::InvalidParameters,
-                "The requested packaged quality artifact could not be derived from the selected "
-                "model.",
-            }};
-        }
-        if (!std::filesystem::exists(direct_attempt_path)) {
-            return Unexpected<Error>{Error{
-                ErrorCode::ModelLoadFailed,
-                "The requested packaged quality artifact is missing: " +
-                    direct_attempt_path.string(),
-            }};
-        }
-        return validate_resolved_model(direct_attempt_path);
-    }
-
-    if (!should_use_coarse_to_fine_for_request(
-            requested_device, requested_resolution, params.quality_fallback_mode,
-            params.coarse_resolution_override, allow_unrestricted_quality_attempt)) {
-        return validate_resolved_model(model_path);
-    }
-
-    if (!is_packaged_corridorkey_model(model_path)) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Explicit --model only supports coarse-to-fine for packaged CorridorKey artifacts. "
-            "Use a packaged model or switch --quality-fallback to direct.",
-        }};
-    }
-
-    auto coarse_resolution_search = search_resolution_for_request(
-        requested_device, requested_resolution, params.quality_fallback_mode,
-        params.coarse_resolution_override, allow_unrestricted_quality_attempt);
-    if (!coarse_resolution_search) {
-        return Unexpected<Error>(coarse_resolution_search.error());
-    }
-    const int coarse_resolution = coarse_resolution_search->first;
-
-    auto coarse_model_path = sibling_model_path_for_resolution(model_path, coarse_resolution);
-    if (coarse_model_path.empty()) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Coarse-to-fine requested a smaller packaged artifact, but the artifact name "
-            "could not be derived from the selected model.",
-        }};
-    }
-
-    if (!std::filesystem::exists(coarse_model_path)) {
-        return Unexpected<Error>{Error{
-            ErrorCode::ModelLoadFailed,
-            "Coarse-to-fine requested a packaged coarse artifact, but it is missing: " +
-                coarse_model_path.string(),
-        }};
-    }
-
-    return validate_resolved_model(coarse_model_path);
-}
 nlohmann::json to_json(const BackendFallbackInfo& fallback) {
     nlohmann::json json;
     json["requested_backend"] = backend_to_string(fallback.requested_backend);

@@ -192,10 +192,6 @@ inline bool input_color_runtime_mode_is_linear(InputColorRuntimeMode mode) {
            mode == InputColorRuntimeMode::AutoFallbackLinear;
 }
 
-// Quantization mode
-constexpr int kQuantizationFp16 = 0;
-constexpr int kQuantizationInt8 = 1;
-
 // Screen color
 constexpr int kScreenColorGreen = 0;
 constexpr int kScreenColorBlue = 1;
@@ -207,7 +203,6 @@ constexpr int kMaxEdgeErode = 100;
 constexpr int kMaxEdgeBlur = 100;
 constexpr int kDefaultInputColorSpace = kInputColorAutoHostManaged;
 constexpr double kResolutionScaleBaselineLongEdge = 1920.0;
-constexpr int kDefaultQuantizationMode = kQuantizationFp16;
 constexpr int kDefaultScreenColor = kScreenColorGreen;
 constexpr double kDefaultTemporalSmoothing = 0.0;
 

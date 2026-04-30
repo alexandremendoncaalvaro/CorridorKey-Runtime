@@ -15,6 +15,22 @@ std::string clip_property_key(const char* property_name, const char* clip_name) 
     return std::string(property_name) + "_" + clip_name;
 }
 
+// Param definition errors are silent in production unless logged here. Strict
+// hosts (Foundry Nuke 17) return non-OK on duplicate names, unsupported types,
+// or descriptor-state failures, but DaVinci Resolve accepts and silently
+// drops the duplicate. Without this log line the failure is invisible until
+// the user opens the panel and finds it empty. The regression test
+// "describe_in_context defines every param exactly once" catches duplicates
+// at build time, but operator-side logging stays as a backstop for any other
+// paramDefine failure mode (unsupported type, bad descriptor handle).
+void log_param_define_failure(const char* helper, const char* name, const char* param_type,
+                              OfxStatus status) {
+    log_message(helper, std::string("paramDefine failed name=") +
+                            (name == nullptr ? "<null>" : name) +
+                            " type=" + (param_type == nullptr ? "<null>" : param_type) +
+                            " status=" + std::to_string(status));
+}
+
 void set_preferred_colourspaces(OfxPropertySetHandle props, const char* clip_name,
                                 std::initializer_list<const char*> colourspaces) {
     const std::string property_key =
@@ -35,8 +51,10 @@ void define_double_param(OfxParamSetHandle param_set, const char* name, const ch
                          double default_value, double min_value, double max_value, const char* hint,
                          const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeDouble, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeDouble, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_double_param", name, kOfxParamTypeDouble, status);
         return;
     }
 
@@ -54,10 +72,12 @@ void define_double_param(OfxParamSetHandle param_set, const char* name, const ch
 
 void define_int_param(OfxParamSetHandle param_set, const char* name, const char* label,
                       int default_value, int min_value, int max_value, const char* hint,
-                      const char* parent = nullptr) {
+                      const char* parent = nullptr, bool enabled = true) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeInteger, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeInteger, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_int_param", name, kOfxParamTypeInteger, status);
         return;
     }
 
@@ -67,6 +87,7 @@ void define_int_param(OfxParamSetHandle param_set, const char* name, const char*
     g_suites.property->propSetInt(param_props, kOfxParamPropMax, 0, max_value);
     g_suites.property->propSetInt(param_props, kOfxParamPropDisplayMin, 0, min_value);
     g_suites.property->propSetInt(param_props, kOfxParamPropDisplayMax, 0, max_value);
+    g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, enabled ? 1 : 0);
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -76,8 +97,10 @@ void define_int_param(OfxParamSetHandle param_set, const char* name, const char*
 void define_bool_param(OfxParamSetHandle param_set, const char* name, const char* label,
                        int default_value, const char* hint, const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeBoolean, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeBoolean, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_bool_param", name, kOfxParamTypeBoolean, status);
         return;
     }
 
@@ -93,8 +116,10 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
                          int default_value, const std::vector<const char*>& options,
                          const char* hint, const char* parent = nullptr, bool enabled = true) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeChoice, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeChoice, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_choice_param", name, kOfxParamTypeChoice, status);
         return;
     }
 
@@ -114,8 +139,10 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
                                  const char* default_value, const char* hint,
                                  const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_runtime_status_param", name, kOfxParamTypeString, status);
         return;
     }
 
@@ -134,8 +161,10 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
 void define_push_button_param(OfxParamSetHandle param_set, const char* name, const char* label,
                               const char* hint, const char* parent = nullptr, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypePushButton, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypePushButton, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_push_button_param", name, kOfxParamTypePushButton, status);
         return;
     }
 
@@ -153,8 +182,10 @@ void define_info_param(OfxParamSetHandle param_set, const char* name, const char
                        const char* value, const char* hint, const char* parent = nullptr,
                        bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_info_param", name, kOfxParamTypeString, status);
         return;
     }
 
@@ -176,8 +207,10 @@ void define_info_param(OfxParamSetHandle param_set, const char* name, const char
 void define_group_param(OfxParamSetHandle param_set, const char* name, const char* label, bool open,
                         const char* parent = nullptr) {
     OfxPropertySetHandle param_props = nullptr;
-    if (g_suites.parameter->paramDefine(param_set, kOfxParamTypeGroup, name, &param_props) !=
-        kOfxStatOK) {
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeGroup, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_group_param", name, kOfxParamTypeGroup, status);
         return;
     }
 
@@ -228,10 +261,30 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsTiles, 0, 0);
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsMultiResolution, 0, 1);
     g_suites.property->propSetInt(props, kOfxImageEffectPropTemporalClipAccess, 0, 0);
-    g_suites.property->propSetString(props, kOfxImageEffectPropColourManagementStyle, 0,
-                                     kOfxImageEffectColourManagementCore);
-    g_suites.property->propSetString(props, kOfxImageEffectPropColourManagementAvailableConfigs, 0,
-                                     kOfxConfigIdentifier);
+    // OFX 1.5 colour management extension (kOfxImageEffectPropColourManagementStyle
+    // and kOfxImageEffectPropColourManagementAvailableConfigs) is implemented by
+    // DaVinci Resolve and the plugin negotiates Core colourspaces with it. Foundry
+    // Nuke 17.0 release notes do not advertise OFX 1.5 colour-management support
+    // (the only OFX entry mentions removal of the 8K resolution cap), and the
+    // openfx-misc PIK reference chroma keyer — which is validated in Nuke +
+    // Resolve + Natron — does not declare these properties either. Setting them
+    // appears to leave Nuke in a partial state that suppresses our parameter
+    // panel and crashes when an Alpha Hint clip is connected. Per the OFX 1.4
+    // spec on kOfxPropName, plugins are expected to apply host-specific
+    // workarounds for known host quirks, so the declaration is gated to non-Nuke
+    // hosts here. The plugin still owns its own colour pipeline through the
+    // kParamInputColorSpace parameter, which is the same approach openfx-misc
+    // PIK uses.
+    // References:
+    // https://learn.foundry.com/nuke/content/release_notes/17.0/nuke_17.0v1_releasenotes.html
+    // https://github.com/NatronGitHub/openfx-misc/blob/master/PIK/PIK.cpp
+    // https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
+    if (!is_nuke_host()) {
+        g_suites.property->propSetString(props, kOfxImageEffectPropColourManagementStyle, 0,
+                                         kOfxImageEffectColourManagementCore);
+        g_suites.property->propSetString(props, kOfxImageEffectPropColourManagementAvailableConfigs,
+                                         0, kOfxConfigIdentifier);
+    }
 
     log_message("describe", "Describe completed.");
     return kOfxStatOK;
@@ -305,11 +358,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "guide for the last render.",
         "runtime_group");
     define_runtime_status_param(
-        param_set, kParamRuntimePath, "Runtime Path", "Initializing...",
-        "Shows whether the last render used the direct path, artifact fallback, or full-model "
-        "tiling.",
-        "runtime_group");
-    define_runtime_status_param(
         param_set, kParamRuntimeSession, "Runtime Session", "Initializing...",
         "Shows whether this OFX instance is using a dedicated runtime session or a shared one.",
         "runtime_group");
@@ -324,18 +372,31 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "the rolling average. This value persists across playback sequences until a new frame is "
         "computed.",
         "runtime_group");
-    define_runtime_status_param(
-        param_set, kParamRuntimeBackendWork, "Backend Work", "Initializing...",
-        "Shows whether the last frame result came from a backend render, shared cache, or "
-        "instance cache.",
-        "runtime_group");
+    // kParamRuntimePath and kParamRuntimeBackendWork live in the
+    // runtime_details_group subgroup further below. They are defined exactly
+    // once per OFX 1.5 spec (vendor/openfx/include/ofxParam.h:912 verbatim:
+    // "name -- unique name of the parameter"; ofxParam.h:362-363: "Valid
+    // Values - ASCII string unique to all parameters in the plug-in").
+    // DaVinci Resolve historically tolerates duplicate paramDefine names by
+    // silently keeping the first; Foundry Nuke 17 follows the spec and may
+    // invalidate the descriptor on the first duplicate, leaving the param
+    // panel empty. The regression test
+    // "describe_in_context defines every param exactly once"
+    // pins this contract.
 
+    // Update banner params follow the Natron-documented Nuke quirk: params
+    // declared as secret in describe can never be revealed afterwards on
+    // strict hosts (Foundry Nuke). The fix is to declare them visible here
+    // and set them as secret at the end of create_instance when no banner
+    // is yet known. Subsequent reveals (when the GitHub update check
+    // completes and a banner is available) are then permitted.
+    // Reference: https://github.com/MrKepzie/Natron/wiki/OpenFX-plugin-programming-guide-(Advanced-issues)
     define_info_param(param_set, kParamUpdateStatus, "", "",
                       "Shows when a newer CorridorKey release is available on GitHub.",
-                      "runtime_group", true);
+                      "runtime_group", false);
     define_push_button_param(param_set, kParamOpenUpdatePage, "Download New Version",
                              "Open the GitHub page to download the available CorridorKey update.",
-                             "runtime_group", true);
+                             "runtime_group", false);
 
     // --- Group 2: Help & Docs (actionable links only) ---
     define_group_param(param_set, kParamHelpGroup, "Help & Docs", false);
@@ -368,9 +429,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "instance cache.",
         "runtime_details_group");
 
+    const std::string start_here_hint =
+        host_qualified_phrase(g_host_name, "Open the quick-start guide for CorridorKey") + ".";
     define_push_button_param(param_set, kParamOpenStartHereGuide, "Open Start Here Guide",
-                             "Open the quick-start guide for CorridorKey in Resolve.",
-                             kParamHelpGroup);
+                             start_here_hint.c_str(), kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenQualityGuide, "Open Quality Guide",
                              "Open the quality and fallback guide for CorridorKey.",
                              kParamHelpGroup);
@@ -381,9 +443,27 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                              "Open the Recover Original Details guide.", kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenTilingGuide, "Open Tiling Guide",
                              "Open the tiling guide and trade-offs.", kParamHelpGroup);
-    define_push_button_param(
-        param_set, kParamOpenResolveTutorial, "Open Resolve Tutorial",
-        "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.", kParamHelpGroup);
+    // The tutorial button keeps the kParamOpenResolveTutorial id for backward
+    // compatibility with saved Resolve project files; its label and hint adapt
+    // to the active host so Nuke users see "Nuke Tutorial" rather than
+    // "Resolve Tutorial".
+    const char* tutorial_label = "Open Tutorial";
+    if (is_nuke_host()) {
+        tutorial_label = "Open Nuke Tutorial";
+    } else if (is_resolve_host()) {
+        tutorial_label = "Open Resolve Tutorial";
+    }
+    std::string tutorial_hint;
+    if (is_nuke_host()) {
+        tutorial_hint = "Open step-by-step CorridorKey workflows for Foundry Nuke on GitHub.";
+    } else if (is_resolve_host()) {
+        tutorial_hint =
+            "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.";
+    } else {
+        tutorial_hint = "Open step-by-step CorridorKey workflows on GitHub.";
+    }
+    define_push_button_param(param_set, kParamOpenResolveTutorial, tutorial_label,
+                             tutorial_hint.c_str(), kParamHelpGroup);
     define_push_button_param(param_set, kParamOpenTroubleshooting, "Open Troubleshooting",
                              "Open the troubleshooting guide on GitHub.", kParamHelpGroup);
     define_push_button_param(param_set, kParamCheckUpdates, "Check for Updates",
@@ -483,22 +563,20 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 8: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
 
-    define_choice_param(
-        param_set, kParamQuantizationMode, "Precision", kDefaultQuantizationMode,
-        {"FP16 (Official)", "INT8 (Experimental)"},
-        "Model precision. FP16 (Official) is the validated Windows RTX path. "
-        "INT8 (Experimental) remains part of the decision program and currently requires "
-        "Allow CPU Fallback on Windows GPU tracks.",
-        "performance_group");
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process the full model output in overlapping tiles at source resolution. "
                       "Use this when lower quality modes lose too much detail and you accept a "
                       "slower, heavier full-model tiling path.",
                       "performance_group");
+    // tile_overlap follows the kParamEnableTiling toggle (default 0). The
+    // initial enabled state must be set during describe_in_context — driving
+    // it from create_instance via paramSetValue / propSetInt is a side-effect
+    // that breaks strict OFX hosts (Foundry Nuke 17 crashes during
+    // OfxActionCreateInstance when plugins do that work).
     define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
                      "Pixel overlap between tiles for seam-safe blending. Larger values reduce "
                      "tile boundary artifacts at the cost of more work.",
-                     "performance_group");
+                     "performance_group", /*enabled=*/false);
 
     // --- Group 9: Advanced (subdivided by intent for expert tuning) ---
     define_group_param(param_set, "advanced_group", "Advanced", false);
@@ -530,10 +608,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_matte_group");
     define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
                       "Clean small matte speckles automatically.", "advanced_matte_group");
+    // despeckle_size follows the kParamAutoDespeckle toggle (default 0).
     define_int_param(param_set, kParamDespeckleSize, "Min Region Size", 400, 50, 2000,
                      "Minimum connected component area in pixels to keep. "
                      "Regions smaller than this are removed.",
-                     "advanced_matte_group");
+                     "advanced_matte_group", /*enabled=*/false);
     define_double_param(param_set, kParamTemporalSmoothing, "Temporal Smoothing",
                         kDefaultTemporalSmoothing, 0.0, 1.0,
                         "Blend current output with the previous frame for temporal stability.",
@@ -582,11 +661,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                      "Increase if first-frame initialization times out.",
                      "advanced_runtime_group");
     define_bool_param(
-        param_set, kParamAllowCpuFallback, "Allow CPU Fallback", 0,
-        "Opt in to CPU fallback when the requested Windows GPU path cannot satisfy the current "
-        "precision or backend request. INT8 on Windows currently uses this path.",
-        "advanced_runtime_group");
-    define_bool_param(
         param_set, kParamIncludePreReleases, "Include Pre-releases in Update Check", 0,
         "When enabled, the update banner surfaces pre-release builds in addition to stable "
         "releases. Re-evaluates against the cached release list on the next panel refresh.",
@@ -619,9 +693,19 @@ OfxStatus get_clip_preferences(OfxImageEffectHandle instance, OfxPropertySetHand
 
     const char* output_clips[] = {kOfxImageEffectOutputClipName};
 
-    set_preferred_colourspaces(out_args, kOfxImageEffectSimpleSourceClipName,
-                               {kOfxColourspaceSrgbTx, kOfxColourspaceLinRec709Srgb});
-    set_preferred_colourspaces(out_args, kClipAlphaHint, {kOfxColourspaceRaw});
+    // Per-clip preferred colourspaces are part of the OFX 1.5 colour management
+    // extension. DaVinci Resolve consumes them; Foundry Nuke 17 does not
+    // advertise OFX 1.5 colour-management support (see describe() above), and
+    // setting these property keys appears to leave Nuke in a state that breaks
+    // the parameter panel and crashes when an Alpha Hint clip is connected.
+    // Resolve users keep the rich host-managed colour negotiation; Nuke users
+    // get the manual sRGB/Linear path through kParamInputColorSpace, mirroring
+    // the openfx-misc PIK keyer pattern.
+    if (!is_nuke_host()) {
+        set_preferred_colourspaces(out_args, kOfxImageEffectSimpleSourceClipName,
+                                   {kOfxColourspaceSrgbTx, kOfxColourspaceLinRec709Srgb});
+        set_preferred_colourspaces(out_args, kClipAlphaHint, {kOfxColourspaceRaw});
+    }
 
     for (const char* clip_name : output_clips) {
         std::string components_key = std::string("OfxImageClipPropComponents_") + clip_name;
@@ -646,6 +730,15 @@ OfxStatus get_output_colourspace(OfxImageEffectHandle instance, OfxPropertySetHa
     if (out_args == nullptr || g_suites.property == nullptr) {
         log_message("get_output_colourspace", "Missing out_args or property suite.");
         return kOfxStatFailed;
+    }
+
+    // kOfxImageClipPropColourspace is part of the OFX 1.5 colour management
+    // extension. Foundry Nuke 17 does not implement OFX 1.5 colour management
+    // and reacts adversely to OFX 1.5 colour properties (see describe() and
+    // get_clip_preferences()). Defer to the host's native colour management
+    // for Nuke; Resolve keeps the negotiated output colourspace.
+    if (is_nuke_host()) {
+        return kOfxStatReplyDefault;
     }
 
     int output_mode = kOutputProcessed;

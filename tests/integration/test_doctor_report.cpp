@@ -129,7 +129,7 @@ TEST_CASE("doctor report ignores macOS metadata sidecars in packaged models",
     std::filesystem::create_directories(temp_dir);
 
     for (const auto& filename :
-         {"corridorkey_int8_512.onnx", "corridorkey_mlx.safetensors",
+         {"corridorkey_fp16_512.onnx", "corridorkey_mlx.safetensors",
           "corridorkey_mlx_bridge_512.mlxfn", "corridorkey_mlx_bridge_1024.mlxfn"}) {
         std::filesystem::create_symlink(source_models_dir / filename, temp_dir / filename);
     }

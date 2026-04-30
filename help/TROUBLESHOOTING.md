@@ -213,20 +213,20 @@ staged next to the runtime bundle or inside the plugin bundle.
 
 ---
 
-## Fallback Behavior
+## Backend Requirements
 
-Fallback is surface-dependent.
+CorridorKey requires a supported GPU on every render path:
 
-- CLI and tolerant automation workflows may fall back to ONNX CPU execution.
-- The OFX plugin prefers explicit failure over silent CPU fallback on
-  unsupported interactive GPU requests. CPU fallback there only happens when
-  the advanced `Allow CPU Fallback` option is enabled.
+- Windows: NVIDIA RTX 30 series or newer with TensorRT-RTX.
+- macOS: Apple Silicon with MLX.
 
-CPU fallback is significantly slower than GPU execution. It is suitable for
-validation and tolerant workflows, but not recommended for production
-throughput.
+CPU rendering has been retired alongside INT8 ONNX. Requesting CPU no longer
+resolves to a packaged artifact; the renderer surfaces a "no supported render
+backend" failure rather than downgrading to a quality the bundle cannot ship.
+If you previously relied on the `Allow CPU Fallback` toggle, the parameter no
+longer exists in the OFX panel and saved values are ignored on load.
 
-To confirm fallback or explicit backend failure and understand the reason, run:
+To confirm the active backend and the reason for any failure, run:
 
 ```bash
 corridorkey doctor

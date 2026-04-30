@@ -7,15 +7,16 @@
     (alexandrealvaro/CorridorKey) into the local models/ directory. The release
     pipeline and runtime continue to read models from this directory unchanged.
 
-    By default, the Windows RTX profile downloads the ONNX ladder, CPU INT8
-    fallbacks, and any packaged Torch-TensorRT TorchScript artifacts used by the
-    experimental Windows RTX engine selector.
+    By default, the Windows RTX profile downloads the FP16 ONNX ladder and any
+    packaged Torch-TensorRT TorchScript artifacts used by the experimental
+    Windows RTX engine selector. INT8 ONNX models were retired together with
+    CPU rendering: FP16 is now the only quality the runtime ships.
 
 .PARAMETER Profile
     Model set to download:
-      windows-rtx  : FP16 + INT8 ONNX models + Torch-TensorRT TorchScript artifacts (default)
-      windows-turing-source : checkpoint + reference ONNX models for the Turing collaboration kit
-      windows-all  : FP16 + FP16 context + INT8 ONNX models + Torch-TensorRT TorchScript artifacts
+      windows-rtx  : FP16 ONNX models + Torch-TensorRT TorchScript artifacts (default)
+      windows-turing-source : checkpoint + reference FP16 ONNX models for the Turing collaboration kit
+      windows-all  : FP16 + FP16 context ONNX models + Torch-TensorRT TorchScript artifacts
       apple        : MLX safetensors + bridge files
       pytorch      : Training checkpoint (.pth)
       all          : Everything
@@ -61,9 +62,6 @@ $windowsRtxFiles = @{
     "onnx/fp16/corridorkey_fp16_1024.onnx"  = "corridorkey_fp16_1024.onnx"
     "onnx/fp16/corridorkey_fp16_1536.onnx"  = "corridorkey_fp16_1536.onnx"
     "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
-    "onnx/int8/corridorkey_int8_512.onnx"   = "corridorkey_int8_512.onnx"
-    "onnx/int8/corridorkey_int8_768.onnx"   = "corridorkey_int8_768.onnx"
-    "onnx/int8/corridorkey_int8_1024.onnx"  = "corridorkey_int8_1024.onnx"
 }
 
 $windowsTorchTensorRtFiles = @{
@@ -78,9 +76,6 @@ $windowsTuringSourceFiles = @{
     "onnx/fp16/corridorkey_fp16_1024.onnx"  = "corridorkey_fp16_1024.onnx"
     "onnx/fp16/corridorkey_fp16_1536.onnx"  = "corridorkey_fp16_1536.onnx"
     "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
-    "onnx/int8/corridorkey_int8_512.onnx"   = "corridorkey_int8_512.onnx"
-    "onnx/int8/corridorkey_int8_768.onnx"   = "corridorkey_int8_768.onnx"
-    "onnx/int8/corridorkey_int8_1024.onnx"  = "corridorkey_int8_1024.onnx"
     "pytorch/CorridorKey.pth"               = "CorridorKey.pth"
 }
 

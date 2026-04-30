@@ -53,8 +53,8 @@ function Write-ReleaseReadme {
     }
 
 @"
-CorridorKey Resolve OFX v$Version - $ReleaseLabel
-===============================================
+CorridorKey OFX v$Version - $ReleaseLabel
+=========================================
 
 $modelCoverageText
 
@@ -65,17 +65,20 @@ Files in this release:
 - CorridorKey.ofx.bundle\model_inventory.json: packaged model inventory
 
 Recommended install path:
-1. Run $ReleaseBasename`_Installer.exe as Administrator.
-2. Start DaVinci Resolve after the installer finishes.
+1. Run $ReleaseBasename`_Install.exe as Administrator.
+2. Open your OFX host of choice (DaVinci Resolve or Foundry Nuke). The
+   plugin is registered for both at the standard OpenFX bundle location.
 
 Installer behavior:
-- This installer replaces any existing CorridorKey Windows OFX installation before copying the new bundle.
+- The installer replaces any existing CorridorKey Windows OFX installation before copying the new bundle.
+- It detects DaVinci Resolve and/or Foundry Nuke and only acts on hosts that are present (closes the host if running and clears its OFX metadata cache).
 - The CorridorKey CLI (corridorkey.exe) directory is registered on the system PATH, so `corridorkey` is available from any terminal after installation. Open a new shell to pick up the change.
 - Uninstalling restores the previous system PATH.
+- The installer never auto-launches a host; you choose when to open Resolve or Nuke.
 
 Manual fallback path:
 1. Run install_plugin.bat as Administrator from this folder.
-2. Start DaVinci Resolve after installation finishes.
+2. Open DaVinci Resolve or Foundry Nuke when you are ready to use the plugin.
 "@ | Set-Content -Path $Path -Encoding ASCII
 }
 
@@ -150,19 +153,18 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
     $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
 }
 
-# When a `-DisplayVersionLabel` (e.g. `0.7.5-21`) is supplied the
+# When a `-DisplayVersionLabel` (e.g. `0.8.2-win.1`) is supplied the
 # packaged artifact filenames use it instead of the base version. This
 # keeps the installed build identity visible directly in the filename
-# (`CorridorKey_Resolve_v0.7.5-21_Windows_RTX_Installer.exe`) so
-# operators downloading a pre-release candidate never have to guess
-# which cycle they are installing. Public releases leave
-# `-DisplayVersionLabel` empty and filenames fall back to the base
-# CMake version.
+# (`CorridorKey_OFX_v0.8.2-win.1_Windows_RTX_Install.exe`) so operators
+# downloading a pre-release candidate never have to guess which cycle
+# they are installing. Public releases leave `-DisplayVersionLabel`
+# empty and filenames fall back to the base CMake version.
 $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
-$releaseBasename = "CorridorKey_Resolve_v${artifactVersionTag}_Windows${normalizedSuffix}"
+$releaseBasename = "CorridorKey_OFX_v${artifactVersionTag}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
-$installerPath = Join-Path $repoRoot ("dist\" + $releaseBasename + "_Installer.exe")
+$installerPath = Join-Path $repoRoot ("dist\" + $releaseBasename + "_Install.exe")
 $installScriptPath = Join-Path $releaseDir "install_plugin.bat"
 $readmePath = Join-Path $releaseDir "README.txt"
 $nsisCompiler = Resolve-NsisCompiler
@@ -224,30 +226,79 @@ $nsiScript = @"
 Unicode True
 RequestExecutionLevel admin
 SetCompressor /SOLID zlib
-Name "CorridorKey Resolve OFX $Version ($releaseLabel)"
+!include "LogicLib.nsh"
+
+Name "CorridorKey OFX (Nuke & Resolve) $Version ($releaseLabel)"
 OutFile "$escapedInstallerPath"
-InstallDir "`$PROGRAMFILES64\CorridorKey Resolve OFX"
+InstallDir "`$PROGRAMFILES64\CorridorKey OFX"
 BrandingText "$releaseLabel"
 ShowInstDetails show
 ShowUninstDetails show
 
-!define PRODUCT_NAME "CorridorKey Resolve OFX ($releaseLabel)"
+!define PRODUCT_NAME "CorridorKey OFX (Nuke & Resolve) ($releaseLabel)"
 !define PRODUCT_VERSION "$Version"
 !define PLUGIN_SOURCE "$escapedBundlePath"
 !define PLUGIN_DEST "`$COMMONFILES64\OFX\Plugins\CorridorKey.ofx.bundle"
-!define CACHE_FILE "`$APPDATA\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
-!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\CorridorKeyResolveOFX"
+!define RESOLVE_EXE "`$PROGRAMFILES64\Blackmagic Design\DaVinci Resolve\Resolve.exe"
+!define RESOLVE_CACHE_FILE "`$APPDATA\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
+!define NUKE_OFX_CACHE_DIR "`$LOCALAPPDATA\Temp\nuke\ofxplugincache"
+; Registry uninstall key renamed from CorridorKeyResolveOFX in v0.8.2 alongside
+; the host-agnostic naming standardization. Users upgrading from v0.7.x or
+; earlier will see the legacy "CorridorKey Resolve OFX" entry persist in
+; Apps & Features alongside the new entry until they uninstall it manually.
+!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\CorridorKeyOFX"
+
+; Host-presence flags populated at install time. Both Install and Uninstall
+; sections compute these per machine so the installer never assumes a host
+; is present (today's reality is multi-host: Resolve, Nuke, both, neither).
+Var ResolveDetected
+Var NukeDetected
+Var NukeRoot
+Var NukeCacheFile
+Var FindHandle
+
+!macro DetectInstalledHosts
+  StrCpy `$ResolveDetected "0"
+  StrCpy `$NukeDetected "0"
+
+  IfFileExists "`${RESOLVE_EXE}" 0 +3
+    DetailPrint "Detected DaVinci Resolve."
+    StrCpy `$ResolveDetected "1"
+
+  ; Nuke versions live under `$PROGRAMFILES64\Nuke<ver>\Nuke<ver>.exe` and the
+  ; user can have several side by side. We treat any Nuke* directory whose
+  ; folder also contains a Nuke*.exe as a positive detection.
+  FindFirst `$FindHandle `$NukeRoot "`$PROGRAMFILES64\Nuke*"
+  `${DoWhile} `$NukeRoot != ""
+    IfFileExists "`$PROGRAMFILES64\`$NukeRoot\Nuke*.exe" 0 +3
+      DetailPrint "Detected Foundry Nuke at `$PROGRAMFILES64\`$NukeRoot."
+      StrCpy `$NukeDetected "1"
+    FindNext `$FindHandle `$NukeRoot
+  `${Loop}
+  FindClose `$FindHandle
+!macroend
 
 Section "Install"
   SetRegView 64
 
-  DetailPrint "Closing DaVinci Resolve and any lingering CorridorKey processes..."
-  ; Order matters: Resolve first so the OFX host releases bundle handles,
-  ; then the out-of-process runtime server + CLI, which otherwise keep the
-  ; previous bundle DLLs mapped and block RMDir below. taskkill returns 128
-  ; when the process is not running -- not an error for our flow.
-  nsExec::ExecToStack 'taskkill /F /IM Resolve.exe'
-  Pop `$0
+  !insertmacro DetectInstalledHosts
+
+  ; Order matters: close hosts first so they release bundle handles, then the
+  ; out-of-process runtime server + CLI which otherwise keep the previous
+  ; bundle DLLs mapped and block RMDir below. taskkill returns 128 when the
+  ; process is not running -- not an error for our flow.
+  `${If} `$ResolveDetected == "1"
+    DetailPrint "Closing DaVinci Resolve..."
+    nsExec::ExecToStack 'taskkill /F /IM Resolve.exe'
+    Pop `$0
+  `${EndIf}
+
+  `${If} `$NukeDetected == "1"
+    DetailPrint "Closing Foundry Nuke..."
+    nsExec::ExecToStack 'taskkill /F /IM Nuke*.exe'
+    Pop `$0
+  `${EndIf}
+
   nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
   Pop `$0
   nsExec::ExecToStack 'taskkill /F /IM corridorkey.exe'
@@ -271,13 +322,13 @@ Section "Install"
 
   DetailPrint "Writing uninstaller..."
   SetOutPath "`$INSTDIR"
-  WriteUninstaller "`$INSTDIR\Uninstall CorridorKey Resolve OFX.exe"
+  WriteUninstaller "`$INSTDIR\Uninstall CorridorKey OFX.exe"
 
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "DisplayName" "`${PRODUCT_NAME}"
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "DisplayVersion" "`${PRODUCT_VERSION}"
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "Publisher" "CorridorKey"
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "InstallLocation" "`$INSTDIR"
-  WriteRegStr HKLM "`${UNINSTALL_KEY}" "UninstallString" "`$INSTDIR\Uninstall CorridorKey Resolve OFX.exe"
+  WriteRegStr HKLM "`${UNINSTALL_KEY}" "UninstallString" "`$INSTDIR\Uninstall CorridorKey OFX.exe"
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoRepair" 1
 
@@ -287,15 +338,37 @@ Section "Install"
   ; destroys the cross-version comparison data the optimization measurement
   ; track depends on.
 
-  DetailPrint "Clearing DaVinci Resolve OFX cache..."
-  Delete "`${CACHE_FILE}"
+  `${If} `$ResolveDetected == "1"
+    DetailPrint "Clearing DaVinci Resolve OFX cache..."
+    Delete "`${RESOLVE_CACHE_FILE}"
+  `${EndIf}
 
-  DetailPrint "Starting DaVinci Resolve..."
-  ExecShell "" "`$PROGRAMFILES64\Blackmagic Design\DaVinci Resolve\Resolve.exe"
+  `${If} `$NukeDetected == "1"
+    DetailPrint "Clearing Foundry Nuke OFX cache..."
+    FindFirst `$FindHandle `$NukeCacheFile "`${NUKE_OFX_CACHE_DIR}\ofxplugincache_Nuke*-64.xml"
+    `${DoWhile} `$NukeCacheFile != ""
+      Delete "`${NUKE_OFX_CACHE_DIR}\`$NukeCacheFile"
+      FindNext `$FindHandle `$NukeCacheFile
+    `${Loop}
+    FindClose `$FindHandle
+  `${EndIf}
+
+  ; Industry standard for OFX installers (Sapphire, Mocha Pro, Re:Vision)
+  ; is to never auto-launch a host; the user picks when and which to open.
+  ; The previous behavior of auto-launching DaVinci Resolve was surprising
+  ; on machines where the user had also installed the plugin for Nuke.
+  `${If} `$ResolveDetected == "1"
+  `${OrIf} `$NukeDetected == "1"
+    DetailPrint "Plugin registered. Open DaVinci Resolve and/or Foundry Nuke when ready."
+  `${Else}
+    DetailPrint "Plugin installed at `${PLUGIN_DEST}. Install DaVinci Resolve or Foundry Nuke to use it."
+  `${EndIf}
 SectionEnd
 
 Section "Uninstall"
   SetRegView 64
+
+  !insertmacro DetectInstalledHosts
 
   DetailPrint "Stopping any running CorridorKey processes..."
   nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
@@ -315,10 +388,22 @@ Section "Uninstall"
   DetailPrint "Removing CorridorKey OFX bundle..."
   RMDir /r "`${PLUGIN_DEST}"
 
-  DetailPrint "Clearing DaVinci Resolve OFX cache..."
-  Delete "`${CACHE_FILE}"
+  `${If} `$ResolveDetected == "1"
+    DetailPrint "Clearing DaVinci Resolve OFX cache..."
+    Delete "`${RESOLVE_CACHE_FILE}"
+  `${EndIf}
 
-  Delete "`$INSTDIR\Uninstall CorridorKey Resolve OFX.exe"
+  `${If} `$NukeDetected == "1"
+    DetailPrint "Clearing Foundry Nuke OFX cache..."
+    FindFirst `$FindHandle `$NukeCacheFile "`${NUKE_OFX_CACHE_DIR}\ofxplugincache_Nuke*-64.xml"
+    `${DoWhile} `$NukeCacheFile != ""
+      Delete "`${NUKE_OFX_CACHE_DIR}\`$NukeCacheFile"
+      FindNext `$FindHandle `$NukeCacheFile
+    `${Loop}
+    FindClose `$FindHandle
+  `${EndIf}
+
+  Delete "`$INSTDIR\Uninstall CorridorKey OFX.exe"
   RMDir "`$INSTDIR"
   DeleteRegKey HKLM "`${UNINSTALL_KEY}"
 SectionEnd

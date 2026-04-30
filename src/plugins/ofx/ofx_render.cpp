@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <corridorkey/engine.hpp>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -66,14 +65,8 @@ DeviceInfo effective_device_for_render_log(const InstanceData* data) {
     if (data == nullptr) {
         return {};
     }
-    if (data->use_runtime_server) {
-        if (data->runtime_client != nullptr && data->runtime_client->has_session()) {
-            return data->runtime_client->current_device();
-        }
-        return data->device;
-    }
-    if (data->engine != nullptr) {
-        return data->engine->current_device();
+    if (data->runtime_client != nullptr && data->runtime_client->has_session()) {
+        return data->runtime_client->current_device();
     }
     return data->device;
 }
@@ -396,47 +389,32 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     const std::string render_phase = render_phase_label(data->render_count);
     log_render_event("render_begin", render_phase, requested_device, effective_device_before,
                      data->model_path, data->requested_resolution, data->active_resolution,
-                     data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                              : data->engine->backend_fallback());
+                     data->runtime_client->backend_fallback());
 
-    auto result =
-        data->use_runtime_server
-            ? data->runtime_client->process_frame(
-                  rgb_view, hint_view, params, data->render_count,
-                  [&](const StageTiming& timing) {
-                      stage_timings.push_back(timing);
-                      log_render_stage(render_phase, requested_device, data->model_path,
-                                       data->requested_resolution, data->active_resolution, timing);
-                  })
-            : data->engine->process_frame(
-                  rgb_view, hint_view, params, [&](const StageTiming& timing) {
-                      stage_timings.push_back(timing);
-                      log_render_stage(render_phase, requested_device, data->model_path,
-                                       data->requested_resolution, data->active_resolution, timing);
-                  });
+    auto result = data->runtime_client->process_frame(
+        rgb_view, hint_view, params, data->render_count, [&](const StageTiming& timing) {
+            stage_timings.push_back(timing);
+            log_render_stage(render_phase, requested_device, data->model_path,
+                             data->requested_resolution, data->active_resolution, timing);
+        });
     ++data->render_count;
     if (!result) {
         log_render_event("render_result", render_phase, requested_device,
                          effective_device_for_render_log(data), data->model_path,
                          data->requested_resolution, data->active_resolution,
-                         data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                                  : data->engine->backend_fallback(),
-                         result.error().message);
-        log_message("render", std::string("Engine processing failed: ") + result.error().message);
+                         data->runtime_client->backend_fallback(), result.error().message);
+        log_message("render", std::string("Render processing failed: ") + result.error().message);
         set_runtime_error(data, result.error().message, instance);
         bypass_with_source(source_data, output_data, width, height, source_row_bytes,
                            output_row_bytes, source_depth);
         return {{}, {}, InferenceOutcome::kBypass, LastRenderWorkOrigin::BackendRender, {}};
     }
 
-    const DeviceInfo effective_device = data->use_runtime_server
-                                            ? data->runtime_client->current_device()
-                                            : data->engine->current_device();
+    const DeviceInfo effective_device = data->runtime_client->current_device();
     const bool session_state_changed = sync_runtime_panel_session_state(data);
     log_render_event("render_result", render_phase, requested_device, effective_device,
                      data->model_path, data->requested_resolution, data->active_resolution,
-                     data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                              : data->engine->backend_fallback());
+                     data->runtime_client->backend_fallback());
     if (effective_device.backend != data->device.backend ||
         effective_device.name != data->device.name) {
         data->device = effective_device;
@@ -449,8 +427,7 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         std::string fallback_message =
             "Render switched away from the requested backend while using " +
             data->model_path.filename().string() + ".";
-        if (auto fallback = data->use_runtime_server ? data->runtime_client->backend_fallback()
-                                                     : data->engine->backend_fallback();
+        if (auto fallback = data->runtime_client->backend_fallback();
             fallback.has_value() && !fallback->reason.empty()) {
             fallback_message += " Reason: " + fallback->reason;
         }
@@ -550,10 +527,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     InstanceData* data = get_instance_data(instance);
-    if (data == nullptr || (data->use_runtime_server && data->runtime_client == nullptr) ||
-        (!data->use_runtime_server && data->engine == nullptr)) {
-        log_message("render", "Engine is not ready.");
-        set_runtime_error(data, "CorridorKey engine is not ready.", instance);
+    if (data == nullptr) {
+        log_message("render", "No instance data.");
+        return kOfxStatFailed;
+    }
+    if (!ensure_runtime_client(data, instance)) {
+        log_message("render", "Runtime client could not be initialized.");
         return kOfxStatFailed;
     }
 
@@ -653,7 +632,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     int refinement_mode = kRefinementAuto;
     int coarse_resolution_override = kCoarseResolutionAutomatic;
     int input_color_space = kDefaultInputColorSpace;
-    int quantization_mode = kDefaultQuantizationMode;
     int screen_color = kDefaultScreenColor;
     double temporal_smoothing = kDefaultTemporalSmoothing;
     int despeckle_enabled = 0;
@@ -690,10 +668,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->coarse_resolution_override_param) {
         g_suites.parameter->paramGetValueAtTime(data->coarse_resolution_override_param, time,
                                                 &coarse_resolution_override);
-    }
-    if (data->quantization_mode_param) {
-        g_suites.parameter->paramGetValueAtTime(data->quantization_mode_param, time,
-                                                &quantization_mode);
     }
     if (data->screen_color_param) {
         g_suites.parameter->paramGetValueAtTime(data->screen_color_param, time, &screen_color);
@@ -760,7 +734,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         make_screen_color_transform(rgb_view, screen_color_mode);
     canonicalize_to_green_domain(rgb_view, screen_color_transform);
     if (!ensure_engine_for_quality(
-            data, quality_mode, width, height, quantization_mode,
+            data, quality_mode, width, height,
             quality_fallback_mode_from_choice(quality_fallback_mode),
             coarse_resolution_override_from_choice(coarse_resolution_override),
             refinement_mode_from_choice(refinement_mode))) {

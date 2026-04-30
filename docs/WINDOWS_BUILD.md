@@ -25,7 +25,7 @@ clones one (the OpenFX SDK). Everything else must be installed by the operator.
 | CMake | `3.28+` | The pinned minimum lives in `Get-CorridorKeyWindowsRtxBuildContract.minimum_cmake_version`. |
 | Python | `3.12` (exact) | Required by the ORT build's own helpers and by the model exporter. The pinned version lives in `Get-CorridorKeyWindowsRtxBuildContract.required_python_version`. Installing from [python.org](https://www.python.org/downloads/) into the default per-user path is enough — the pipeline resolves it via `Resolve-CorridorKeyPython312Path`. |
 | uv | latest | Python dependency manager used by the model exporter. Install with `irm https://astral.sh/uv/install.ps1 \| iex`. The installer drops `uv.exe` under `%USERPROFILE%\.local\bin\` — the pipeline looks there even when it is not on `PATH`. |
-| CUDA Toolkit | `12.8` or `12.9` | Required for CUDA headers and `nvcc`. The contract pins `required_cuda_version = 12.9`; `12.8` also works. Install to the default path `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.X\`. |
+| CUDA Toolkit | `12.9` (mandatory) | Required for CUDA headers, `nvcc`, and the NPP DLLs the OFX bundle ships. The contract pins `required_cuda_version = 12.9` because TensorRT-RTX 1.2.0.54 only ships against CUDA 12.9 and 13.x ([NVIDIA prerequisites](https://docs.nvidia.com/deeplearning/tensorrt-rtx/latest/installing-tensorrt-rtx/prerequisites.html)) and CUDA Minor Version Compatibility is forward-only ([NVIDIA compatibility guide](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)) — building against 12.8 produces `ERROR_DLL_INIT_FAILED` (1114) inside `onnxruntime_providers_nv_tensorrt_rtx.dll` at host load time. Install to the default path `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\`. Coexists with an existing 12.8 install. |
 | vcpkg | manifest mode | Clone `microsoft/vcpkg`, run `bootstrap-vcpkg.bat`, then export `VCPKG_ROOT=<path>`. Prefer a short path such as `C:\tools\vcpkg` to avoid Windows long-path issues in vcpkg build output. |
 | NSIS | `3.x` | Required to build the installer. Default install location (`C:\Program Files (x86)\NSIS\`) is auto-discovered. |
 | Git for Windows | latest | Needed by the OpenFX SDK shallow-clone step and the ORT source checkout. |
@@ -71,9 +71,9 @@ Expected completion time on a fresh clone: **45 min – 2 h**, dominated by the 
 ```powershell
 $env:VCPKG_ROOT = "C:\tools\vcpkg"
 
-# Public release. Produces CorridorKey_Resolve_v0.7.5_Windows_RTX_Installer.exe
-# plus the matching zip and bundle_validation.json.
-.\scripts\windows.ps1 -Task release -Version 0.7.5
+# Public release. Produces CorridorKey_OFX_v0.8.2_Windows_RTX_Install.exe
+# plus the matching bundle_validation.json.
+.\scripts\windows.ps1 -Task release -Version 0.8.2
 ```
 
 ### 2.3 Pre-release

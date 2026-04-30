@@ -1,5 +1,6 @@
 #include <array>
 #include <catch2/catch_all.hpp>
+#include <filesystem>
 #include <map>
 #include <string>
 
@@ -266,4 +267,264 @@ TEST_CASE("get regions of interest propagates the requested ROI to source clips"
 TEST_CASE("is identity remains conservative for CorridorKey output modes",
           "[unit][ofx][regression]") {
     REQUIRE(is_identity(nullptr, nullptr, nullptr) == kOfxStatReplyDefault);
+}
+
+// Canonical OFX createInstance contract: the IPC client is initialized lazily
+// on first render via ensure_runtime_client, not synchronously inside
+// createInstance. ensure_runtime_client must therefore tolerate null inputs
+// and missing-binary states without crashing or throwing, so that strict
+// hosts (Foundry Nuke) can call createInstance even when the bundle is
+// partially staged or the server has not yet been laid down.
+TEST_CASE("ensure_runtime_client refuses null instance data without crashing",
+          "[unit][ofx][regression]") {
+    REQUIRE_FALSE(ensure_runtime_client(nullptr, nullptr));
+}
+
+TEST_CASE("ensure_runtime_client reports binary-missing without throwing",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.runtime_server_path =
+        std::filesystem::path("nonexistent_runtime_server_path_for_regression.exe");
+
+    REQUIRE_FALSE(ensure_runtime_client(&data, nullptr));
+    CHECK(data.runtime_client == nullptr);
+    CHECK_FALSE(data.last_error.empty());
+}
+
+TEST_CASE("ensure_runtime_client is idempotent when data is null again",
+          "[unit][ofx][regression]") {
+    // Second call returns false again, no state change.
+    REQUIRE_FALSE(ensure_runtime_client(nullptr, nullptr));
+    REQUIRE_FALSE(ensure_runtime_client(nullptr, nullptr));
+}
+
+// OFX 1.4 spec, ofxParam.h paramSetValue documentation:
+// "paramSetValue should only be called from within a ::kOfxActionInstanceChanged
+// or interact action." The plugin must therefore defer paramSetValue from
+// render-thread actions (Render, BeginSequenceRender, EndSequenceRender,
+// IsIdentity, GetRegionOfDefinition, GetRegionsOfInterest, GetFramesNeeded).
+namespace {
+
+int g_param_set_value_count = 0;
+
+OfxStatus counting_param_set_value(OfxParamHandle, ...) {
+    ++g_param_set_value_count;
+    return kOfxStatOK;
+}
+
+OfxStatus passthrough_param_get_value(OfxParamHandle, ...) {
+    return kOfxStatOK;
+}
+
+OfxStatus accept_prop_set_int(OfxPropertySetHandle, const char*, int, int) {
+    return kOfxStatOK;
+}
+
+OfxStatus accept_param_get_property_set(OfxParamHandle, OfxPropertySetHandle* props) {
+    if (props != nullptr) {
+        *props = nullptr;
+    }
+    return kOfxStatOK;
+}
+
+OfxParameterSuiteV1 make_counting_parameter_suite() {
+    OfxParameterSuiteV1 suite{};
+    suite.paramSetValue = counting_param_set_value;
+    suite.paramGetValue = passthrough_param_get_value;
+    suite.paramGetPropertySet = accept_param_get_property_set;
+    return suite;
+}
+
+OfxPropertySuiteV1 make_accepting_property_suite() {
+    OfxPropertySuiteV1 suite{};
+    suite.propSetInt = accept_prop_set_int;
+    return suite;
+}
+
+// A non-null sentinel so set_string_param_value reaches the parameter suite
+// instead of short-circuiting on the null-handle guard.
+OfxParamHandle dummy_param_handle() {
+    static int sentinel = 0;
+    return reinterpret_cast<OfxParamHandle>(&sentinel);
+}
+
+void wire_runtime_status_param_handles(InstanceData& data) {
+    OfxParamHandle handle = dummy_param_handle();
+    data.runtime_processing_param = handle;
+    data.runtime_device_param = handle;
+    data.runtime_requested_quality_param = handle;
+    data.runtime_effective_quality_param = handle;
+    data.runtime_safe_quality_ceiling_param = handle;
+    data.runtime_artifact_param = handle;
+    data.runtime_guide_source_param = handle;
+    data.runtime_path_param = handle;
+    data.runtime_session_param = handle;
+    data.runtime_status_param = handle;
+    data.runtime_timings_param = handle;
+    data.runtime_backend_work_param = handle;
+    data.update_status_param = handle;
+    data.open_update_page_param = handle;
+    data.include_pre_releases_param = handle;
+}
+
+}  // namespace
+
+TEST_CASE("Foundry Nuke defers paramSetValue inside Render action",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    data.in_render = true;
+
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameNuke;
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_param_set_value_count = 0;
+
+    update_runtime_panel(&data);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_host_name = previous_host_name;
+
+    CHECK(g_param_set_value_count == 0);
+    CHECK(data.runtime_panel_dirty);
+}
+
+TEST_CASE("Foundry Nuke defers paramSetValue inside the BeginSequenceRender window",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    data.in_render_sequence = true;
+
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameNuke;
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_param_set_value_count = 0;
+
+    update_runtime_panel(&data);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_host_name = previous_host_name;
+
+    CHECK(g_param_set_value_count == 0);
+    CHECK(data.runtime_panel_dirty);
+}
+
+// DaVinci Resolve has historically tolerated render-thread paramSetValue
+// through internal locking. The OFX spec endorses host-specific workarounds
+// via kOfxPropName, so we take the permissive path on Resolve to preserve
+// the long-standing live runtime-status UX. Reference:
+// https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
+TEST_CASE("DaVinci Resolve flushes paramSetValue live during render",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    data.in_render = true;
+
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameResolve;
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_param_set_value_count = 0;
+
+    update_runtime_panel(&data);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_host_name = previous_host_name;
+
+    CHECK(g_param_set_value_count > 0);
+    CHECK_FALSE(data.runtime_panel_dirty);
+}
+
+TEST_CASE("update_runtime_panel flushes paramSetValue on the main thread",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    // Both flags false — main thread, paramSetValue is permitted.
+
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_param_set_value_count = 0;
+
+    update_runtime_panel(&data);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+
+    CHECK(g_param_set_value_count > 0);
+    CHECK_FALSE(data.runtime_panel_dirty);
+}
+
+TEST_CASE("flush_runtime_panel is a no-op when nothing is pending",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    data.runtime_panel_dirty = false;
+
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    auto* previous_parameter = g_suites.parameter;
+    g_suites.parameter = &parameter_suite;
+    g_param_set_value_count = 0;
+
+    flush_runtime_panel(&data);
+
+    g_suites.parameter = previous_parameter;
+
+    CHECK(g_param_set_value_count == 0);
+}
+
+TEST_CASE("sync_private_data drains a deferred render-thread update",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    // Simulate a render-sequence call that deferred paramSetValue.
+    data.runtime_panel_dirty = true;
+    data.in_render = false;
+    data.in_render_sequence = false;
+
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    // sync_private_data resolves the InstanceData via propGetPointer; the
+    // canonical accepting property suite stub does not need this so it is
+    // wired up locally for this test only.
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_param_set_value_count = 0;
+
+    FakeEffectProps props{.instance_data = &data};
+    REQUIRE(sync_private_data(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+
+    CHECK(g_param_set_value_count > 0);
+    CHECK_FALSE(data.runtime_panel_dirty);
 }

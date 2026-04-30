@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ofxCore.h"
@@ -25,17 +26,24 @@
 #define CORRIDORKEY_OFX_EXPORT
 #endif
 
-namespace corridorkey {
-class Engine;
-}
-
 namespace corridorkey::ofx {
 
 class OfxRuntimeClient;
 
+// The plugin identifier carries the legacy ".resolve" suffix because changing
+// it would orphan every existing CorridorKey node in saved DaVinci Resolve
+// projects. The string is otherwise opaque to OFX hosts and the plugin runs
+// unchanged in any spec-compliant host (Resolve, Foundry Nuke, others).
 constexpr const char* kPluginIdentifier = "com.corridorkey.resolve";
 constexpr const char* kPluginLabel = "CorridorKey";
 constexpr const char* kPluginGroup = "Keying";
+
+// Values that supported hosts report for their kOfxPropName host property
+// (the globally unique reverse-DNS string defined by ofxCore.h). Sourced from
+// the OpenFX community host reference
+// (https://github.com/NatronGitHub/openfx-misc/blob/master/README-hosts.txt).
+constexpr const char* kHostNameNuke = "uk.co.thefoundry.nuke";
+constexpr const char* kHostNameResolve = "DaVinciResolveLite";
 
 constexpr const char* kClipAlphaHint = "Alpha Hint";
 constexpr const char* kClipMatteOutput = "Matte Output";
@@ -48,7 +56,6 @@ constexpr const char* kParamOutputMode = "output_mode";
 constexpr const char* kParamRefinementMode = "refinement_mode";
 constexpr const char* kParamCoarseResolutionOverride = "coarse_resolution_override";
 constexpr const char* kParamInputColorSpace = "input_color_space";
-constexpr const char* kParamQuantizationMode = "quantization_mode";
 constexpr const char* kParamScreenColor = "screen_color";
 constexpr const char* kParamTemporalSmoothing = "temporal_smoothing";
 constexpr const char* kParamDespillStrength = "despill_strength";
@@ -80,7 +87,6 @@ constexpr const char* kParamRuntimeTimings = "runtime_timings";
 constexpr const char* kParamRuntimeBackendWork = "runtime_backend_work";
 constexpr const char* kParamRenderTimeout = "render_timeout";
 constexpr const char* kParamPrepareTimeout = "prepare_timeout";
-constexpr const char* kParamAllowCpuFallback = "allow_cpu_fallback";
 constexpr const char* kParamOpenStartHereGuide = "open_start_here_guide";
 constexpr const char* kParamOpenQualityGuide = "open_quality_guide";
 constexpr const char* kParamOpenAlphaHintGuide = "open_alpha_hint_guide";
@@ -145,7 +151,6 @@ struct InstanceData {
     OfxParamHandle refinement_mode_param = nullptr;
     OfxParamHandle coarse_resolution_override_param = nullptr;
     OfxParamHandle input_color_space_param = nullptr;
-    OfxParamHandle quantization_mode_param = nullptr;
     OfxParamHandle screen_color_param = nullptr;
     OfxParamHandle temporal_smoothing_param = nullptr;
     OfxParamHandle despill_param = nullptr;
@@ -177,17 +182,15 @@ struct InstanceData {
     OfxParamHandle runtime_backend_work_param = nullptr;
     OfxParamHandle render_timeout_param = nullptr;
     OfxParamHandle prepare_timeout_param = nullptr;
-    OfxParamHandle allow_cpu_fallback_param = nullptr;
     OfxParamHandle update_status_param = nullptr;
     OfxParamHandle open_update_page_param = nullptr;
     OfxParamHandle include_pre_releases_param = nullptr;
-    // No in-class = nullptr initializers for the unique_ptr members below:
-    // clang/libc++ instantiates ~unique_ptr<T>() at the NSDMI site, which then
-    // requires complete OfxRuntimeClient / Engine and fails with "sizeof to an
-    // incomplete type" in TUs that don't include their full definitions.
-    // unique_ptr default-constructs to nullptr already.
+    // No in-class = nullptr initializer for the unique_ptr below: clang/libc++
+    // instantiates ~unique_ptr<T>() at the NSDMI site, which then requires
+    // complete OfxRuntimeClient and fails with "sizeof to an incomplete type"
+    // in TUs that don't include its full definition. unique_ptr default-
+    // constructs to nullptr already.
     std::unique_ptr<OfxRuntimeClient> runtime_client;
-    std::unique_ptr<Engine> engine;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     std::filesystem::path runtime_server_path = {};
@@ -202,7 +205,6 @@ struct InstanceData {
     GuideSourceKind last_guide_source = GuideSourceKind::Unknown;
     RuntimePathKind last_runtime_path = RuntimePathKind::Unknown;
     QualityCompileFailureCache quality_compile_failure_cache = {};
-    bool use_runtime_server = false;
     std::uint64_t render_count = 0;
     std::string last_error = {};
     // Non-fatal status note shown alongside frame timings. Set when the engine fell back to a
@@ -214,9 +216,17 @@ struct InstanceData {
     std::uint64_t frame_time_samples = 0;
     LastRenderWorkOrigin last_render_work_origin = LastRenderWorkOrigin::None;
     std::vector<StageTiming> last_render_stage_timings = {};
+    // True only during the body of kOfxImageEffectActionRender. Set by
+    // RenderScope in ofx_render.cpp. Used to gate paramSetValue chains, which
+    // OFX 1.4 / 1.5 restrict to main-thread actions only (strict hosts such as
+    // Foundry Nuke 17 crash if paramSetValue is called from a render thread).
     bool in_render = false;
+    // True from kOfxImageEffectActionBeginSequenceRender through
+    // kOfxImageEffectActionEndSequenceRender. Covers ensure_engine_for_quality
+    // and any paramSetValue chains that fire between begin and end of a render
+    // sequence (when in_render is briefly false between Render calls).
+    bool in_render_sequence = false;
     bool runtime_panel_dirty = false;
-    bool quantization_error_active = false;
 
     FrameResult cached_result = {};
     bool cached_result_valid = false;
@@ -251,8 +261,49 @@ class SharedFrameCache;
 extern OfxHost* g_host;
 extern OfxSuites g_suites;
 extern std::unique_ptr<SharedFrameCache> g_frame_cache;
+extern std::string g_host_name;
 
 bool fetch_suites();
+void capture_host_name();
+
+inline bool is_nuke_host_name(std::string_view host_name) {
+    return host_name == kHostNameNuke;
+}
+
+inline bool is_resolve_host_name(std::string_view host_name) {
+    return host_name == kHostNameResolve;
+}
+
+inline bool is_nuke_host() {
+    return is_nuke_host_name(g_host_name);
+}
+
+inline bool is_resolve_host() {
+    return is_resolve_host_name(g_host_name);
+}
+
+inline std::string select_tutorial_doc(std::string_view host_name) {
+    if (is_nuke_host_name(host_name)) {
+        return "OFX_NUKE_TUTORIALS.md";
+    }
+    if (is_resolve_host_name(host_name)) {
+        return "OFX_RESOLVE_TUTORIALS.md";
+    }
+    return "OFX_PANEL_GUIDE.md";
+}
+
+inline std::string host_qualified_phrase(std::string_view host_name, const char* base_phrase) {
+    if (base_phrase == nullptr) {
+        return std::string();
+    }
+    std::string result(base_phrase);
+    if (is_nuke_host_name(host_name)) {
+        result += " in Nuke";
+    } else if (is_resolve_host_name(host_name)) {
+        result += " in Resolve";
+    }
+    return result;
+}
 void post_message(const char* message_type, const char* message, OfxImageEffectHandle effect);
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
@@ -260,11 +311,11 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
 std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
-    int input_width, int input_height, int quantization_mode, std::int64_t available_memory_mb,
+    int input_width, int input_height, std::int64_t available_memory_mb,
     QualityFallbackMode fallback_mode, int coarse_resolution_override,
     bool allow_unrestricted_quality_attempt);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
-                               int input_height = 0, int quantization_mode = kQuantizationFp16,
+                               int input_height = 0,
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
                                int coarse_resolution_override = 0,
                                RefinementMode refinement_mode = RefinementMode::Auto);
@@ -286,6 +337,11 @@ Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_vie
                                                   AlphaHintPolicy alpha_hint_policy);
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
+// Lazy-initializes the out-of-process runtime client on the first render. Must
+// not run inside kOfxImageEffectActionCreateInstance: subprocess spawn from
+// that action triggers host-side stalls and crashes (Foundry Nuke 17), and
+// the canonical OFX createInstance is for handle caching only.
+bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
 
 OfxStatus on_load();
@@ -293,6 +349,11 @@ OfxStatus describe(OfxImageEffectHandle descriptor);
 OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context);
 OfxStatus create_instance(OfxImageEffectHandle instance);
 OfxStatus destroy_instance(OfxImageEffectHandle instance);
+// Main-thread action per OFX 1.4 spec. Used by hosts to request that the
+// plugin flush its private state to host-visible storage. We use this hook
+// to flush any deferred runtime panel paramSetValue chains that accumulated
+// during the previous render sequence.
+OfxStatus sync_private_data(OfxImageEffectHandle instance);
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle out_args);
 OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);

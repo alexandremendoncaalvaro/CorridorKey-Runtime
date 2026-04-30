@@ -48,16 +48,18 @@ TEST_CASE("windows TensorRT probes respect supported VRAM tiers", "[unit][doctor
     }
 
     SECTION("windows universal keeps the public ladder on 512 and 1024") {
+        // INT8 ONNX retired alongside CPU rendering: the diagnostics smoke
+        // ladder no longer probes corridorkey_int8_512.onnx. Universal
+        // backends (DirectML / WindowsML / OpenVINO) now exercise only the
+        // FP16 artifacts that ship in the bundle.
         DeviceInfo smaller_device{"AMD Radeon", 8192, Backend::DirectML, 0};
         auto smaller_models = windows_probe_models_for_backend(Backend::DirectML, smaller_device);
-        REQUIRE(smaller_models ==
-                std::vector<std::string>{"corridorkey_fp16_512.onnx", "corridorkey_int8_512.onnx"});
+        REQUIRE(smaller_models == std::vector<std::string>{"corridorkey_fp16_512.onnx"});
 
         DeviceInfo larger_device{"AMD Radeon", 16384, Backend::DirectML, 0};
         auto larger_models = windows_probe_models_for_backend(Backend::DirectML, larger_device);
         REQUIRE(larger_models == std::vector<std::string>{"corridorkey_fp16_1024.onnx",
-                                                          "corridorkey_fp16_512.onnx",
-                                                          "corridorkey_int8_512.onnx"});
+                                                          "corridorkey_fp16_512.onnx"});
     }
 }
 
@@ -114,8 +116,7 @@ TEST_CASE("doctor bundle inspection recognizes Windows OFX DirectML layout",
     const auto models_dir = temp_dir / "Contents" / "Resources" / "models";
 
     for (const auto& filename :
-         {"corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx",
-          "corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx",
+         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx",
           "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}) {
         touch_file(models_dir / filename);
     }
@@ -139,12 +140,10 @@ TEST_CASE("doctor bundle inspection recognizes Windows OFX DirectML layout",
         {"certification_tier", "experimental"},
         {"unrestricted_quality_attempt", false},
         {"expected_models",
-         {"corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx",
-          "corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx",
+         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx",
           "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}},
         {"present_models",
-         {"corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx",
-          "corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx",
+         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_768.onnx", "corridorkey_fp16_1024.onnx",
           "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}},
         {"missing_models", nlohmann::json::array()},
         {"compiled_context_models", nlohmann::json::array()},
@@ -204,8 +203,7 @@ TEST_CASE("doctor bundle inspection reports packaged TensorRT context models",
     const auto models_dir = temp_dir / "Contents" / "Resources" / "models";
 
     for (const auto& filename :
-         {"corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx",
-          "corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_768.onnx",
+         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_768.onnx",
           "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1024_ctx.onnx",
           "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}) {
         touch_file(models_dir / filename);
@@ -243,8 +241,7 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     const auto models_dir = bundle_dir / "Contents" / "Resources" / "models";
 
     for (const auto& filename :
-         {"corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx", "corridorkey_int8_1024.onnx",
-          "corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx",
+         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx",
           "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1024_ctx.onnx",
           "corridorkey_fp16_1536.onnx", "corridorkey_fp16_1536_ctx.onnx",
           "corridorkey_fp16_2048.onnx", "corridorkey_fp16_2048_ctx.onnx"}) {
@@ -273,12 +270,10 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
         {"unrestricted_quality_attempt", true},
         {"expected_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
-          "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx"}},
         {"present_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
-          "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx"}},
         {"missing_models", nlohmann::json::array()},
         {"compiled_context_models",
          nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
@@ -306,7 +301,7 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
 
     const auto packaged_models = report["packaged_models"];
     REQUIRE(packaged_models.is_array());
-    REQUIRE(packaged_models.size() == 7);
+    REQUIRE(packaged_models.size() == 4);
     for (const auto& entry : packaged_models) {
         REQUIRE(entry["found"].get<bool>());
     }
@@ -325,8 +320,7 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
 
     for (const auto& filename :
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
-          "corridorkey_int8_1024.onnx"}) {
+          "corridorkey_fp16_2048.onnx"}) {
         touch_file(models_dir / filename);
     }
 
@@ -352,12 +346,10 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
         {"unrestricted_quality_attempt", true},
         {"expected_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
-          "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx"}},
         {"present_models",
          {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_int8_512.onnx", "corridorkey_int8_768.onnx",
-          "corridorkey_int8_1024.onnx"}},
+          "corridorkey_fp16_2048.onnx"}},
         {"missing_models", nlohmann::json::array()},
         {"compiled_context_models", nlohmann::json::array()},
         {"expected_compiled_context_models",

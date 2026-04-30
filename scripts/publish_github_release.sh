@@ -13,10 +13,10 @@
 # Usage:
 #   scripts/publish_github_release.sh \
 #     --platform mac \
-#     --version 0.7.6 \
-#     --display-label 0.7.6-mac.1 \
-#     --notes-file build/release_notes/v0.7.6-mac.1.md \
-#     --asset dist/CorridorKey_Resolve_v0.7.6-mac.1_macOS_AppleSilicon.dmg \
+#     --version 0.8.1 \
+#     --display-label 0.8.1-mac.1 \
+#     --notes-file build/release_notes/v0.8.1-mac.1.md \
+#     --asset dist/CorridorKey_OFX_v0.8.1-mac.1_macOS_AppleSilicon.dmg \
 #     [--asset dist/<second asset>] \
 #     [--repo alexandremendoncaalvaro/CorridorKey-Runtime] \
 #     [--dry-run]
@@ -209,9 +209,9 @@ if [ $view_exit -eq 0 ] && [ -n "$existing" ]; then
 fi
 
 case "$PLATFORM" in
-    mac) TITLE="CorridorKey Resolve OFX v${TAG_LABEL} (macOS) - Apple Silicon" ;;
-    linux) TITLE="CorridorKey Resolve OFX v${TAG_LABEL} (Linux)" ;;
-    win) TITLE="CorridorKey Resolve OFX v${TAG_LABEL} (Windows)" ;;
+    mac) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve](macOS) - Apple Silicon" ;;
+    linux) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve](Linux)" ;;
+    win) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve](Windows)" ;;
 esac
 
 echo "[publish] tag:         $TAG_NAME"

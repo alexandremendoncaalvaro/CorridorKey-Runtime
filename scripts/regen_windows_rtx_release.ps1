@@ -423,7 +423,7 @@ foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
             "-ArtifactManifestPath", $promotedManifestPath
         )
 
-    $bundleValidationPath = Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_$($variant.Suffix)\\bundle_validation.json"
+    $bundleValidationPath = Join-Path $repoRoot "dist\\CorridorKey_OFX_v${Version}_Windows_$($variant.Suffix)\\bundle_validation.json"
     Assert-CorridorKeyBundleValidationHealthy `
         -ValidationReportPath $bundleValidationPath `
         -Label "Packaged track $($variant.Suffix)" | Out-Null
@@ -440,10 +440,10 @@ $summary = [ordered]@{
     promoted_artifact_manifest = $promotedManifestPath
     validation_report = [System.IO.Path]::GetFullPath($validationReportPath)
     installers = [ordered]@{
-        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX_Installer.exe"))
+        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_OFX_v${Version}_Windows_RTX_Install.exe"))
     }
     bundle_validation = [ordered]@{
-        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_Resolve_v${Version}_Windows_RTX\\bundle_validation.json"))
+        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_OFX_v${Version}_Windows_RTX\\bundle_validation.json"))
     }
 }
 

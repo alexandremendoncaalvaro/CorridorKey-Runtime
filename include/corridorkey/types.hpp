@@ -372,7 +372,7 @@ enum class RefinementMode : std::uint8_t { Auto, FullFrame, Tiled };
 /**
  * @brief Preferred model precision when multiple packaged artifact variants exist.
  */
-enum class PrecisionPreference : std::uint8_t { Auto, FP16, Int8 };
+enum class PrecisionPreference : std::uint8_t { Auto, FP16 };
 
 /**
  * @brief Runtime policy for obtaining the alpha hint guide when the caller does not provide one.

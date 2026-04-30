@@ -92,7 +92,7 @@ TEST_CASE("I/O binding policy parsing and eligibility", "[unit][inference][regre
                                                         Backend::TensorRT));
 #endif
 
-    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_int8_512.onnx",
+    REQUIRE_FALSE(core::supports_windows_rtx_io_binding("models/corridorkey_fp32_512.onnx",
                                                         Backend::TensorRT));
     REQUIRE_FALSE(
         core::supports_windows_rtx_io_binding("models/corridorkey_fp16_1536.onnx", Backend::CPU));

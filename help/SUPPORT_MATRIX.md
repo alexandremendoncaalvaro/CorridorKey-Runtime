@@ -41,6 +41,30 @@ does not appear in Resolve 18, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 
+## Foundry Nuke - Host Version Support
+
+| Nuke Version | OFX Plugin Support |
+|--------------|-------------------|
+| Nuke 17.0v2 (Windows RTX) | Best-effort - validated via headless smoke and manual UAT |
+| Nuke 16.x, 15.x, 14.x | Best-effort - shares the OFX 1.4 surface, not systematically validated |
+| Nuke 13.x and earlier | Unsupported |
+
+The plugin uses standard OpenFX 1.4 properties and suites that are part of
+every modern Nuke release; there are no Nuke-specific code paths in the
+render hot path. Help labels and the tutorial button adapt to the active
+host based on the `kOfxPropName` string the host advertises.
+
+Cache cleanup on plugin update is handled automatically by the Windows
+installer when Nuke is detected. The installer clears
+`%LOCALAPPDATA%\Temp\nuke\ofxplugincache\ofxplugincache_Nuke<ver>-64.xml`
+so the freshly staged bundle is rescanned on the next Nuke launch.
+
+Designation escalates to Officially supported once a licensed-runner
+headless smoke (`CORRIDORKEY_RUN_NUKE_E2E=1`) is gating CI and the track
+has accumulated a clean run history.
+
+---
+
 ## macOS - Platform and Hardware Support
 
 | Configuration | Support |
@@ -88,8 +112,9 @@ packaged and validated.
 
 **Windows RTX installer policy:**
 - `Windows RTX` is the official Windows installer for NVIDIA RTX 30 series and
-  newer. It packages the complete FP16 ladder through `2048px` and includes
-  the portable INT8 CPU artifacts.
+  newer. It packages the complete FP16 ladder through `2048px`. INT8 ONNX and
+  CPU rendering have been retired: FP16 on RTX is the only quality and only
+  backend the installer ships.
 - In `Auto`, `Windows RTX` respects the current safe quality ceiling for the
   detected VRAM tier.
 - In fixed modes, `Windows RTX` can attempt a packaged quality above the safe
@@ -127,11 +152,11 @@ not yet built for Linux and is tracked for a future release.
 
 Linux packaging emits three artifacts from the same validated bundle:
 
-- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz` - universal portable archive
+- `CorridorKey_OFX_vX.Y.Z_Linux_RTX.tar.gz` - universal portable archive
   with `install.sh` and `uninstall.sh` helpers.
-- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb` - Debian package for Ubuntu
+- `CorridorKey_OFX_vX.Y.Z_Linux_RTX.deb` - Debian package for Ubuntu
   22.04 LTS and Ubuntu 24.04 LTS.
-- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm` - RPM package for Rocky Linux 9
+- `CorridorKey_OFX_vX.Y.Z_Linux_RTX.rpm` - RPM package for Rocky Linux 9
   and RHEL 9.
 
 All three wrappers install the same bundle at
@@ -171,9 +196,8 @@ application support defined in the host version table above.
 The CLI does not have a host application dependency and can be used
 independently of any NLE.
 
-CPU fallback is also surface-dependent:
-
-- CLI and tolerant automation workflows may fall back to the ONNX CPU path.
-- The OFX plugin prefers explicit failure over silent CPU fallback on
-  unsupported interactive GPU requests. CPU fallback only happens there when
-  the advanced `Allow CPU Fallback` option is enabled.
+CPU rendering has been retired. The OFX plugin and CLI both require a
+supported GPU (NVIDIA RTX 30 series or newer on Windows; Apple Silicon with
+MLX on macOS). Requesting `Backend::CPU` no longer resolves to a packaged
+artifact and surfaces a "no supported render backend" failure rather than
+falling back to a quality the renderer cannot ship.

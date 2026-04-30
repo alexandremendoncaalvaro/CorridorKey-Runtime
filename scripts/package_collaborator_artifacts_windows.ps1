@@ -65,7 +65,7 @@ foreach ($reportPath in @(
 }
 
 foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
-    $bundleRoot = Join-Path $distRoot ("CorridorKey_Resolve_v" + $resolvedVersion + "_Windows_" + $variant.Suffix)
+    $bundleRoot = Join-Path $distRoot ("CorridorKey_OFX_v" + $resolvedVersion + "_Windows_" + $variant.Suffix)
     foreach ($bundleReportName in @("bundle_validation.json", "doctor_report.json", "model_inventory.json")) {
         $bundleReportPath = Join-Path $bundleRoot $bundleReportName
         if (Test-Path $bundleReportPath) {
@@ -78,7 +78,7 @@ foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
 
 $includedInstallers = [System.Collections.Generic.List[string]]::new()
 foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
-    $installerName = "CorridorKey_Resolve_v" + $resolvedVersion + "_Windows_" + $variant.Suffix + "_Installer.exe"
+    $installerName = "CorridorKey_OFX_v" + $resolvedVersion + "_Windows_" + $variant.Suffix + "_Install.exe"
     $installerPath = Join-Path $distRoot $installerName
     if (Test-Path $installerPath) {
         Copy-Item -Path $installerPath -Destination (Join-Path $installersDestination $installerName) -Force

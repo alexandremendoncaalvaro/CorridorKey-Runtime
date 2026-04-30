@@ -251,7 +251,6 @@ std::vector<std::string> windows_probe_models_for_backend(Backend backend,
     }
 
     append_unique_model(models, "corridorkey_fp16_512.onnx");
-    append_unique_model(models, "corridorkey_int8_512.onnx");
     return models;
 }
 

@@ -136,28 +136,13 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
         });
     };
 
-    auto int8_512 = find_model("corridorkey_int8_512.onnx");
-    REQUIRE(int8_512 != models.end());
-    REQUIRE(int8_512->validated_for_macos);
-    REQUIRE(int8_512->packaged_for_macos);
-    REQUIRE(int8_512->packaged_for_windows);
-    REQUIRE(int8_512->intended_use == "portable_preview");
-    REQUIRE(int8_512->artifact_family == "onnx");
-    REQUIRE(int8_512->recommended_backend == "cpu");
-    std::vector<std::string> validated_platforms = {"macos_apple_silicon"};
-    REQUIRE(int8_512->validated_platforms == validated_platforms);
-
-    auto int8_768 = find_model("corridorkey_int8_768.onnx");
-    REQUIRE(int8_768 != models.end());
-    REQUIRE(int8_768->validated_for_macos);
-    REQUIRE_FALSE(int8_768->packaged_for_macos);
-    REQUIRE(int8_768->packaged_for_windows);
-    REQUIRE(int8_768->validated_hardware_tiers == std::vector<std::string>{"apple_silicon_16gb"});
-
-    auto int8_1024 = find_model("corridorkey_int8_1024.onnx");
-    REQUIRE(int8_1024 != models.end());
-    REQUIRE_FALSE(int8_1024->validated_for_macos);
-    REQUIRE(int8_1024->packaged_for_windows);
+    // INT8 ONNX entries (corridorkey_int8_512/768/1024.onnx) were retired
+    // alongside CPU rendering. The catalog must not surface them anymore so
+    // diagnostics, presets, and bundle staging all converge on the FP16 +
+    // MLX artifacts that ship in production.
+    REQUIRE(find_model("corridorkey_int8_512.onnx") == models.end());
+    REQUIRE(find_model("corridorkey_int8_768.onnx") == models.end());
+    REQUIRE(find_model("corridorkey_int8_1024.onnx") == models.end());
 
     auto mlx_pack = find_model("corridorkey_mlx.safetensors");
     REQUIRE(mlx_pack != models.end());
@@ -242,13 +227,11 @@ TEST_CASE("preset lookup accepts product-facing aliases", "[unit][runtime]") {
         std::find(capabilities.supported_backends.begin(), capabilities.supported_backends.end(),
                   Backend::TensorRT) != capabilities.supported_backends.end();
 
-    auto preview = find_preset_by_selector("preview");
-    REQUIRE(preview.has_value());
-    if (windows_rtx_defaults) {
-        REQUIRE(preview->id == "win-cpu-safe");
-    } else {
-        REQUIRE(preview->id == "mac-preview");
-    }
+    // The "preview" alias was retired alongside the int8/CPU presets
+    // (mac-preview, win-cpu-safe). Callers that previously asked for preview
+    // must now select a specific Draft (512) quality on the balanced preset
+    // or pick one of the still-supported aliases below.
+    REQUIRE_FALSE(find_preset_by_selector("preview").has_value());
 
     auto balanced = find_preset_by_selector("balanced");
     REQUIRE(balanced.has_value());
@@ -284,10 +267,12 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(mlx_model.has_value());
     REQUIRE(mlx_model->filename == "corridorkey_mlx.safetensors");
 
+    // CPU rendering retired with INT8: requesting Backend::CPU yields no
+    // catalog match. Callers must surface this as "no supported render
+    // backend on this machine" rather than silently downgrade quality.
     auto cpu_model = default_model_for_request(
         mac_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, default_preset);
-    REQUIRE(cpu_model.has_value());
-    REQUIRE(cpu_model->filename == "corridorkey_int8_512.onnx");
+    REQUIRE_FALSE(cpu_model.has_value());
 
     RuntimeCapabilities windows_capabilities;
     windows_capabilities.platform = "windows";
@@ -303,32 +288,25 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_rtx_model.has_value());
     REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_1024.onnx");
 
-    auto windows_rtx_fp16_model = default_model_for_request(
-        windows_capabilities, DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
-        windows_default, ArtifactVariantPreference::FP16);
-    REQUIRE(windows_rtx_fp16_model.has_value());
-    REQUIRE(windows_rtx_fp16_model->filename == "corridorkey_fp16_1024.onnx");
-
+    // Windows CPU rendering retired with INT8: Backend::CPU yields no
+    // catalog match. Callers must surface "no supported render backend"
+    // rather than emit a downgraded artifact.
     auto windows_cpu_model = default_model_for_request(
         windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU}, windows_default);
-    REQUIRE(windows_cpu_model.has_value());
-    REQUIRE(windows_cpu_model->filename == "corridorkey_int8_512.onnx");
-
-    auto windows_cpu_fp16_model =
-        default_model_for_request(windows_capabilities, DeviceInfo{"Generic CPU", 0, Backend::CPU},
-                                  windows_default, ArtifactVariantPreference::FP16);
-    REQUIRE(windows_cpu_fp16_model.has_value());
-    REQUIRE(windows_cpu_fp16_model->filename == "corridorkey_fp16_512.onnx");
+    REQUIRE_FALSE(windows_cpu_model.has_value());
 
     RuntimeCapabilities windows_universal_capabilities;
     windows_universal_capabilities.platform = "windows";
     windows_universal_capabilities.supported_backends = {Backend::DirectML, Backend::CPU};
 
+    // Windows universal track (DirectML / WindowsML / OpenVINO) now uses the
+    // FP16 ladder. INT8 ONNX retired with CPU rendering, so non-RTX GPUs are
+    // routed to the same fp16 artifacts that ship for the RTX track.
     auto windows_universal_model =
         default_model_for_request(windows_universal_capabilities,
                                   DeviceInfo{"AMD Radeon", 16384, Backend::DirectML}, std::nullopt);
     REQUIRE(windows_universal_model.has_value());
-    REQUIRE(windows_universal_model->filename == "corridorkey_int8_1024.onnx");
+    REQUIRE(windows_universal_model->filename == "corridorkey_fp16_1024.onnx");
 }
 
 TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
@@ -412,16 +390,16 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     std::ofstream(temp_dir / "corridorkey_fp16_512.onnx") << "stub";
 
     auto selections = quality_artifact_candidates_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
-        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
+        QualityFallbackMode::Auto);
     REQUIRE(selections.has_value());
     REQUIRE_FALSE(selections->empty());
     CHECK(selections->front().effective_resolution == 512);
     CHECK(selections->front().coarse_to_fine);
 
     auto expected = expected_artifact_paths_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048,
-        ArtifactVariantPreference::FP16, false, QualityFallbackMode::Auto);
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
+        QualityFallbackMode::Auto);
     REQUIRE(expected.has_value());
     REQUIRE(expected->size() == 2);
     CHECK(expected->front().filename() == "corridorkey_fp16_1024.onnx");
@@ -468,15 +446,13 @@ TEST_CASE("artifact runtime state separates packaged, certified, and recommended
     REQUIRE_FALSE(certified_state.recommended_for_active_device);
     REQUIRE(certified_state.state == "packaged");
 
-    auto int8_1024 = find_model_by_filename("corridorkey_int8_1024.onnx");
-    REQUIRE(int8_1024.has_value());
-    auto packaged_only_state =
-        artifact_runtime_state_for_device(*int8_1024, windows_capabilities, rtx_3080, true);
-    REQUIRE(packaged_only_state.packaged_for_active_track);
-    REQUIRE(packaged_only_state.present);
-    REQUIRE_FALSE(packaged_only_state.certified_for_active_track);
-    REQUIRE_FALSE(packaged_only_state.recommended_for_active_device);
-    REQUIRE(packaged_only_state.state == "packaged");
+    // The packaged-but-not-certified state historically used corridorkey_int8_1024.onnx
+    // (packaged_for_windows=true, validated_platforms={}, validated_hardware_tiers={}).
+    // After INT8 retirement, every remaining packaged Windows artifact has at
+    // least one rtx_* hardware tier and therefore counts as certified for the
+    // RTX track. The state is still implemented in
+    // artifact_runtime_state_for_device for future catalog entries that may
+    // ship without a tier guarantee, but no current entry exercises it.
 
     auto fp16_768 = find_model_by_filename("corridorkey_fp16_768.onnx");
     REQUIRE(fp16_768.has_value());
