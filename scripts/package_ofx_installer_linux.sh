@@ -59,7 +59,7 @@ if [[ ! -f "$CONTENTS_DIR/CorridorKey.ofx" ]] || [[ ! -f "$CONTENTS_DIR/corridor
     exit 1
 fi
 
-RELEASE_NAME="CorridorKey_Resolve_v${VERSION}_Linux_RTX"
+RELEASE_NAME="CorridorKey_OFX_v${VERSION}_Linux_RTX"
 DIST_DIR="$REPO_ROOT/dist"
 STAGE_DIR="$DIST_DIR/$RELEASE_NAME"
 
@@ -144,7 +144,7 @@ UNINSTALL
 chmod +x "$STAGE_DIR/uninstall.sh"
 
 cat > "$STAGE_DIR/README.txt" <<README
-CorridorKey Resolve OFX v${VERSION} - Linux RTX (Experimental)
+CorridorKey OFX v${VERSION} - Linux RTX (Experimental, Nuke & Resolve)
 
 This archive installs the CorridorKey OpenFX plugin and its companion CLI
 into the system OpenFX directory under /usr/OFX/Plugins/ and registers

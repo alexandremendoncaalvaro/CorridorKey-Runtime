@@ -23,7 +23,7 @@
 #
 # Usage
 # -----
-#   scripts/smoke_extract_and_run.sh dist/CorridorKey_Resolve_v0.7.5_macOS.zip
+#   scripts/smoke_extract_and_run.sh dist/CorridorKey_OFX_v0.8.2_macOS.zip
 #   scripts/smoke_extract_and_run.sh dist/CorridorKey.dmg --expected-version 0.7.5
 #   scripts/smoke_extract_and_run.sh dist/CorridorKey.zip --keep
 #

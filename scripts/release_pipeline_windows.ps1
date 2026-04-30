@@ -97,7 +97,7 @@ function Publish-CorridorKeyGithubRelease {
 
     $assetGlobs = @()
     foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
-        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_Resolve_v${tagLabel}_Windows_$($variant.Suffix)_Installer.exe"))
+        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_OFX_v${tagLabel}_Windows_$($variant.Suffix)_Install.exe"))
     }
     foreach ($asset in $assetGlobs) {
         if (-not (Test-Path $asset)) {
@@ -106,9 +106,11 @@ function Publish-CorridorKeyGithubRelease {
     }
 
     # Title format is defined in docs/RELEASE_GUIDELINES.md section 5:
-    # "CorridorKey Resolve OFX vX.Y.Z (Windows)". The prerelease state is
-    # carried by the --prerelease flag, not by the title string.
-    $title = "CorridorKey Resolve OFX v$tagLabel (Windows)"
+    # "CorridorKey OFX vX.Y.Z [Nuke & Resolve](Windows)". The host-coverage
+    # qualifier "[Nuke & Resolve]" is required on every OFX release title;
+    # the prerelease state is carried by the --prerelease flag, not by the
+    # title string.
+    $title = "CorridorKey OFX v$tagLabel [Nuke & Resolve](Windows)"
 
     $ghArgs = @(
         "release", "create", $tagName,
@@ -243,11 +245,11 @@ try {
 
         if ($LASTEXITCODE -ne 0) { throw "Packaging failed for variant: $($v.Suffix)" }
 
-        $expectedInstaller = Join-Path $repoRoot "dist/CorridorKey_Resolve_v${artifactVersionTag}_Windows_$($v.Suffix)_Installer.exe"
+        $expectedInstaller = Join-Path $repoRoot "dist/CorridorKey_OFX_v${artifactVersionTag}_Windows_$($v.Suffix)_Install.exe"
         if (-not (Test-Path $expectedInstaller)) {
             throw "CRITICAL: Pipeline claimed success but installer was NOT found at: $expectedInstaller"
         }
-        $expectedValidationReport = Join-Path $repoRoot "dist/CorridorKey_Resolve_v${artifactVersionTag}_Windows_$($v.Suffix)\bundle_validation.json"
+        $expectedValidationReport = Join-Path $repoRoot "dist/CorridorKey_OFX_v${artifactVersionTag}_Windows_$($v.Suffix)\bundle_validation.json"
         if (-not (Test-Path $expectedValidationReport)) {
             throw "CRITICAL: Bundle validation did not produce a validation report at: $expectedValidationReport"
         }

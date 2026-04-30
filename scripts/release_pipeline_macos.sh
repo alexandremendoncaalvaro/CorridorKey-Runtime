@@ -28,7 +28,7 @@ Options:
                              UI, and artifact filenames. Must be of the form
                              X.Y.Z-mac.N. Required when --publish-github is
                              set so the resulting DMG is named
-                             CorridorKey_Resolve_v<LABEL>_macOS_AppleSilicon.dmg.
+                             CorridorKey_OFX_v<LABEL>_macOS_AppleSilicon.dmg.
   --publish-github           After a successful build and package step, hand
                              the DMG to scripts/publish_github_release.sh.
                              Requires --display-label and --notes-file.
@@ -175,7 +175,7 @@ fi
 # 8. Optional Publish
 if [ "$PUBLISH_GITHUB" = "1" ]; then
     step "Publishing GitHub Release"
-    DMG_PATH="${REPO_ROOT}/dist/CorridorKey_Resolve_v${DISPLAY_LABEL}_macOS_AppleSilicon.dmg"
+    DMG_PATH="${REPO_ROOT}/dist/CorridorKey_OFX_v${DISPLAY_LABEL}_macOS_AppleSilicon.dmg"
     bash "$REPO_ROOT/scripts/publish_github_release.sh" \
         --platform mac \
         --version "$CMAKE_VERSION" \

@@ -70,7 +70,7 @@ $env:VCPKG_ROOT = "C:\tools\vcpkg" # Adjust to your path
 # binaries. Takes 45 min-2 h on a fresh clone; subsequent runs are fast.
 .\scripts\windows.ps1 -Task prepare-rtx
 
-# Public release -> dist\CorridorKey_Resolve_vX.Y.Z_Windows_RTX_Installer.exe
+# Public release -> dist\CorridorKey_OFX_vX.Y.Z_Windows_RTX_Install.exe
 .\scripts\windows.ps1 -Task release -Version X.Y.Z
 ```
 

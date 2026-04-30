@@ -53,8 +53,8 @@ function Write-ReleaseReadme {
     }
 
 @"
-CorridorKey Resolve OFX v$Version - $ReleaseLabel
-===============================================
+CorridorKey OFX v$Version - $ReleaseLabel
+=========================================
 
 $modelCoverageText
 
@@ -65,7 +65,7 @@ Files in this release:
 - CorridorKey.ofx.bundle\model_inventory.json: packaged model inventory
 
 Recommended install path:
-1. Run $ReleaseBasename`_Installer.exe as Administrator.
+1. Run $ReleaseBasename`_Install.exe as Administrator.
 2. Open your OFX host of choice (DaVinci Resolve or Foundry Nuke). The
    plugin is registered for both at the standard OpenFX bundle location.
 
@@ -153,19 +153,18 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
     $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
 }
 
-# When a `-DisplayVersionLabel` (e.g. `0.7.5-21`) is supplied the
+# When a `-DisplayVersionLabel` (e.g. `0.8.2-win.1`) is supplied the
 # packaged artifact filenames use it instead of the base version. This
 # keeps the installed build identity visible directly in the filename
-# (`CorridorKey_Resolve_v0.7.5-21_Windows_RTX_Installer.exe`) so
-# operators downloading a pre-release candidate never have to guess
-# which cycle they are installing. Public releases leave
-# `-DisplayVersionLabel` empty and filenames fall back to the base
-# CMake version.
+# (`CorridorKey_OFX_v0.8.2-win.1_Windows_RTX_Install.exe`) so operators
+# downloading a pre-release candidate never have to guess which cycle
+# they are installing. Public releases leave `-DisplayVersionLabel`
+# empty and filenames fall back to the base CMake version.
 $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
-$releaseBasename = "CorridorKey_Resolve_v${artifactVersionTag}_Windows${normalizedSuffix}"
+$releaseBasename = "CorridorKey_OFX_v${artifactVersionTag}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)
 $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
-$installerPath = Join-Path $repoRoot ("dist\" + $releaseBasename + "_Installer.exe")
+$installerPath = Join-Path $repoRoot ("dist\" + $releaseBasename + "_Install.exe")
 $installScriptPath = Join-Path $releaseDir "install_plugin.bat"
 $readmePath = Join-Path $releaseDir "README.txt"
 $nsisCompiler = Resolve-NsisCompiler
@@ -229,21 +228,25 @@ RequestExecutionLevel admin
 SetCompressor /SOLID zlib
 !include "LogicLib.nsh"
 
-Name "CorridorKey Resolve OFX $Version ($releaseLabel)"
+Name "CorridorKey OFX (Nuke & Resolve) $Version ($releaseLabel)"
 OutFile "$escapedInstallerPath"
-InstallDir "`$PROGRAMFILES64\CorridorKey Resolve OFX"
+InstallDir "`$PROGRAMFILES64\CorridorKey OFX"
 BrandingText "$releaseLabel"
 ShowInstDetails show
 ShowUninstDetails show
 
-!define PRODUCT_NAME "CorridorKey Resolve OFX ($releaseLabel)"
+!define PRODUCT_NAME "CorridorKey OFX (Nuke & Resolve) ($releaseLabel)"
 !define PRODUCT_VERSION "$Version"
 !define PLUGIN_SOURCE "$escapedBundlePath"
 !define PLUGIN_DEST "`$COMMONFILES64\OFX\Plugins\CorridorKey.ofx.bundle"
 !define RESOLVE_EXE "`$PROGRAMFILES64\Blackmagic Design\DaVinci Resolve\Resolve.exe"
 !define RESOLVE_CACHE_FILE "`$APPDATA\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml"
 !define NUKE_OFX_CACHE_DIR "`$LOCALAPPDATA\Temp\nuke\ofxplugincache"
-!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\CorridorKeyResolveOFX"
+; Registry uninstall key renamed from CorridorKeyResolveOFX in v0.8.2 alongside
+; the host-agnostic naming standardization. Users upgrading from v0.7.x or
+; earlier will see the legacy "CorridorKey Resolve OFX" entry persist in
+; Apps & Features alongside the new entry until they uninstall it manually.
+!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\CorridorKeyOFX"
 
 ; Host-presence flags populated at install time. Both Install and Uninstall
 ; sections compute these per machine so the installer never assumes a host
@@ -319,13 +322,13 @@ Section "Install"
 
   DetailPrint "Writing uninstaller..."
   SetOutPath "`$INSTDIR"
-  WriteUninstaller "`$INSTDIR\Uninstall CorridorKey Resolve OFX.exe"
+  WriteUninstaller "`$INSTDIR\Uninstall CorridorKey OFX.exe"
 
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "DisplayName" "`${PRODUCT_NAME}"
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "DisplayVersion" "`${PRODUCT_VERSION}"
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "Publisher" "CorridorKey"
   WriteRegStr HKLM "`${UNINSTALL_KEY}" "InstallLocation" "`$INSTDIR"
-  WriteRegStr HKLM "`${UNINSTALL_KEY}" "UninstallString" "`$INSTDIR\Uninstall CorridorKey Resolve OFX.exe"
+  WriteRegStr HKLM "`${UNINSTALL_KEY}" "UninstallString" "`$INSTDIR\Uninstall CorridorKey OFX.exe"
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoRepair" 1
 
@@ -400,7 +403,7 @@ Section "Uninstall"
     FindClose `$FindHandle
   `${EndIf}
 
-  Delete "`$INSTDIR\Uninstall CorridorKey Resolve OFX.exe"
+  Delete "`$INSTDIR\Uninstall CorridorKey OFX.exe"
   RMDir "`$INSTDIR"
   DeleteRegKey HKLM "`${UNINSTALL_KEY}"
 SectionEnd

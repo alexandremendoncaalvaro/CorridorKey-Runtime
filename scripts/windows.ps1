@@ -45,7 +45,7 @@ function Assert-CorridorKeyVariantDoctorHealthy {
     )
 
     $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
-    $bundleValidationPath = Join-Path $repoRoot ("dist\CorridorKey_Resolve_v${artifactVersionTag}_Windows_${ReleaseSuffix}\bundle_validation.json")
+    $bundleValidationPath = Join-Path $repoRoot ("dist\CorridorKey_OFX_v${artifactVersionTag}_Windows_${ReleaseSuffix}\bundle_validation.json")
     Assert-CorridorKeyBundleValidationHealthy `
         -ValidationReportPath $bundleValidationPath `
         -Label "Variant $ReleaseSuffix" | Out-Null

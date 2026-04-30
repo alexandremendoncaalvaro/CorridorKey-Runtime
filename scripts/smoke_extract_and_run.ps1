@@ -37,11 +37,11 @@
     Skip cleanup. Useful for local debugging.
 
 .EXAMPLE
-    scripts\smoke_extract_and_run.ps1 dist\CorridorKey_Resolve_v0.7.5_Windows_RTX.zip
+    scripts\smoke_extract_and_run.ps1 dist\CorridorKey_OFX_v0.8.2_Windows_RTX.zip
 
 .EXAMPLE
-    scripts\smoke_extract_and_run.ps1 dist\CorridorKey_Resolve_v0.7.5_Windows_RTX_Installer.exe `
-        -ExpectedVersion 0.7.5
+    scripts\smoke_extract_and_run.ps1 dist\CorridorKey_OFX_v0.8.2_Windows_RTX_Install.exe `
+        -ExpectedVersion 0.8.2
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]

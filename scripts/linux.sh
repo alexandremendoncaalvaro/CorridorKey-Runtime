@@ -80,8 +80,8 @@ Tasks:
                  metadata. Safe to run any time.
 
 Artifacts emitted by package-ofx and release:
-  dist/CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb
-  dist/CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm
+  dist/CorridorKey_OFX_vX.Y.Z_Linux_RTX.deb
+  dist/CorridorKey_OFX_vX.Y.Z_Linux_RTX.rpm
 USAGE
             exit 0
             ;;
@@ -188,10 +188,10 @@ task_release() {
     task_package_ofx
     say "Validating packaged bundle..."
     bash "${REPO_ROOT}/scripts/validate_ofx_linux.sh" \
-        "${REPO_ROOT}/dist/CorridorKey_Resolve_v${artifact_tag}_Linux_RTX/CorridorKey.ofx.bundle"
+        "${REPO_ROOT}/dist/CorridorKey_OFX_v${artifact_tag}_Linux_RTX/CorridorKey.ofx.bundle"
     say "Release pipeline complete."
     say "Artifacts:"
-    (cd "${REPO_ROOT}" && ls -lh dist/CorridorKey_Resolve_v${artifact_tag}_Linux_RTX.{deb,rpm} 2>/dev/null || true)
+    (cd "${REPO_ROOT}" && ls -lh dist/CorridorKey_OFX_v${artifact_tag}_Linux_RTX.{deb,rpm} 2>/dev/null || true)
 
     if [ "${PUBLISH_GITHUB}" = "1" ]; then
         say "Publishing GitHub release..."
@@ -201,8 +201,8 @@ task_release() {
             --display-label "${DISPLAY_LABEL}" \
             --notes-file "${resolved_notes_file}" \
             --repo "${GITHUB_REPO}" \
-            --asset "${REPO_ROOT}/dist/CorridorKey_Resolve_v${artifact_tag}_Linux_RTX.deb" \
-            --asset "${REPO_ROOT}/dist/CorridorKey_Resolve_v${artifact_tag}_Linux_RTX.rpm"
+            --asset "${REPO_ROOT}/dist/CorridorKey_OFX_v${artifact_tag}_Linux_RTX.deb" \
+            --asset "${REPO_ROOT}/dist/CorridorKey_OFX_v${artifact_tag}_Linux_RTX.rpm"
         say "GitHub release published."
     fi
 }

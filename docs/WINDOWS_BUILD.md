@@ -71,9 +71,9 @@ Expected completion time on a fresh clone: **45 min – 2 h**, dominated by the 
 ```powershell
 $env:VCPKG_ROOT = "C:\tools\vcpkg"
 
-# Public release. Produces CorridorKey_Resolve_v0.7.5_Windows_RTX_Installer.exe
-# plus the matching zip and bundle_validation.json.
-.\scripts\windows.ps1 -Task release -Version 0.7.5
+# Public release. Produces CorridorKey_OFX_v0.8.2_Windows_RTX_Install.exe
+# plus the matching bundle_validation.json.
+.\scripts\windows.ps1 -Task release -Version 0.8.2
 ```
 
 ### 2.3 Pre-release

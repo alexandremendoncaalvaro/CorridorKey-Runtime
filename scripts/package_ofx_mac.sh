@@ -25,7 +25,7 @@ DIST_SUFFIX="${CORRIDORKEY_OFX_DIST_SUFFIX:-}"
 if [ -z "$DIST_SUFFIX" ] && [ "$REQUIRE_MLX_2048" != "1" ]; then
     DIST_SUFFIX="_test-no2048"
 fi
-DIST_BASENAME="CorridorKey_Resolve_v${VERSION}_macOS_AppleSilicon${DIST_SUFFIX}"
+DIST_BASENAME="CorridorKey_OFX_v${VERSION}_macOS_AppleSilicon${DIST_SUFFIX}"
 DIST_DIR="${REPO_ROOT}/dist/${DIST_BASENAME}"
 WORK_DIR="${REPO_ROOT}/build/ofx_mac_pkg"
 BUNDLE_NAME="CorridorKey.ofx.bundle"
@@ -402,7 +402,7 @@ case "$ARCHIVE_FORMAT" in
         rm -rf "$DMG_ROOT"
         mkdir -p "$DMG_ROOT"
         cp "$PKG_PATH" "$DMG_ROOT/"
-        hdiutil create -volname "CorridorKey Resolve OFX" -srcfolder "$DMG_ROOT" \
+        hdiutil create -volname "CorridorKey OFX" -srcfolder "$DMG_ROOT" \
             -ov -format ULFO "$DMG_PATH"
         if [ -n "$SIGN_IDENTITY" ]; then
             codesign --force --sign "$SIGN_IDENTITY" "$DMG_PATH"

@@ -152,11 +152,11 @@ not yet built for Linux and is tracked for a future release.
 
 Linux packaging emits three artifacts from the same validated bundle:
 
-- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.tar.gz` - universal portable archive
+- `CorridorKey_OFX_vX.Y.Z_Linux_RTX.tar.gz` - universal portable archive
   with `install.sh` and `uninstall.sh` helpers.
-- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.deb` - Debian package for Ubuntu
+- `CorridorKey_OFX_vX.Y.Z_Linux_RTX.deb` - Debian package for Ubuntu
   22.04 LTS and Ubuntu 24.04 LTS.
-- `CorridorKey_Resolve_vX.Y.Z_Linux_RTX.rpm` - RPM package for Rocky Linux 9
+- `CorridorKey_OFX_vX.Y.Z_Linux_RTX.rpm` - RPM package for Rocky Linux 9
   and RHEL 9.
 
 All three wrappers install the same bundle at
