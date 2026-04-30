@@ -967,6 +967,60 @@ void set_param_enabled(OfxParamHandle param, bool enabled);
 void set_param_secret(OfxParamHandle param, bool secret);
 void sync_dependent_params(InstanceData* data);
 
+bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
+    if (data == nullptr) {
+        return false;
+    }
+    if (data->runtime_client != nullptr) {
+        return true;
+    }
+
+    if (data->runtime_server_path.empty()) {
+        data->runtime_server_path =
+            resolve_ofx_runtime_server_binary(plugin_module_path().value_or(""));
+    }
+    if (!runtime_server_binary_present(data->runtime_server_path)) {
+        // The .ofx is the host's address space; running ORT/TRT-RTX in it
+        // collides with hosts that pre-load their own CUDA stack (Foundry
+        // Nuke ships cudart64_12.dll 12.8 next to its executable, which the
+        // Win32 loader binds before our 12.9 copy because module-name
+        // uniqueness is keyed on basename). The runtime server lives in a
+        // separate process, so its loader is independent. Refuse to start
+        // without it rather than papering over the failure.
+        data->last_error =
+            "CorridorKey runtime server binary not found alongside the OFX bundle.";
+        log_message("ensure_runtime_client", data->last_error);
+        post_message(kOfxMessageError, data->last_error.c_str(), instance);
+        return false;
+    }
+
+    int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
+    int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;
+    if (data->render_timeout_param != nullptr) {
+        g_suites.parameter->paramGetValue(data->render_timeout_param, &render_timeout_s);
+    }
+    if (data->prepare_timeout_param != nullptr) {
+        g_suites.parameter->paramGetValue(data->prepare_timeout_param, &prepare_timeout_s);
+    }
+
+    OfxRuntimeClientOptions client_options;
+    client_options.endpoint = common::default_ofx_runtime_endpoint();
+    client_options.server_binary = data->runtime_server_path;
+    client_options.request_timeout_ms = render_timeout_s * 1000;
+    client_options.prepare_timeout_ms = prepare_timeout_s * 1000;
+    auto runtime_client = OfxRuntimeClient::create(std::move(client_options));
+    if (!runtime_client) {
+        data->last_error = runtime_client.error().message;
+        log_message("ensure_runtime_client",
+                    "Runtime client init failed: " + runtime_client.error().message);
+        post_message(kOfxMessageError, data->last_error.c_str(), instance);
+        return false;
+    }
+    data->runtime_client = std::move(*runtime_client);
+    log_message("ensure_runtime_client", "Using out-of-process OFX runtime.");
+    return true;
+}
+
 OfxStatus create_instance(OfxImageEffectHandle instance) {
     const auto create_start = std::chrono::steady_clock::now();
     const auto log_create_total = [&](std::string_view outcome, std::string_view detail = {}) {
@@ -1106,51 +1160,12 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
                              "Loading...", "Loading...", "Loading...", "Loading...", "Loading...",
                              "Loading...");
 
-    int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
-    int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;
-    if (data->render_timeout_param != nullptr) {
-        g_suites.parameter->paramGetValue(data->render_timeout_param, &render_timeout_s);
-    }
-    if (data->prepare_timeout_param != nullptr) {
-        g_suites.parameter->paramGetValue(data->prepare_timeout_param, &prepare_timeout_s);
-    }
-
-    data->runtime_server_path =
-        resolve_ofx_runtime_server_binary(plugin_module_path().value_or(""));
-    if (!runtime_server_binary_present(data->runtime_server_path)) {
-        // The .ofx is the host's address space; running ORT/TRT-RTX in it
-        // collides with hosts that pre-load their own CUDA stack (Foundry
-        // Nuke ships cudart64_12.dll 12.8 next to its executable, which the
-        // Win32 loader binds before our 12.9 copy because module-name
-        // uniqueness is keyed on basename). The runtime server lives in a
-        // separate process, so its loader is independent. Refuse to start
-        // without it rather than papering over the failure.
-        data->last_error =
-            "CorridorKey runtime server binary not found alongside the OFX bundle.";
-        log_message("create_instance", data->last_error);
-        post_message(kOfxMessageError, data->last_error.c_str(), instance);
-        log_create_total("runtime_server_missing", data->last_error);
-        return kOfxStatFailed;
-    }
-    {
-        OfxRuntimeClientOptions client_options;
-        client_options.endpoint = common::default_ofx_runtime_endpoint();
-        client_options.server_binary = data->runtime_server_path;
-        client_options.request_timeout_ms = render_timeout_s * 1000;
-        client_options.prepare_timeout_ms = prepare_timeout_s * 1000;
-        auto runtime_client = OfxRuntimeClient::create(std::move(client_options));
-        if (!runtime_client) {
-            data->last_error = runtime_client.error().message;
-            log_message("create_instance",
-                        "Runtime client init failed: " + runtime_client.error().message);
-            post_message(kOfxMessageError, data->last_error.c_str(), instance);
-            log_create_total("runtime_client_failed", data->last_error);
-            return kOfxStatFailed;
-        }
-        data->runtime_client = std::move(*runtime_client);
-        log_message("create_instance", "Using out-of-process OFX runtime.");
-    }
-
+    // The runtime server path resolution, binary-presence check, and IPC
+    // client init were previously done here. They are now deferred to the
+    // first render via ensure_runtime_client(). Per OFX 1.4, createInstance
+    // is for caching handles and allocating per-instance state only;
+    // spawning a subprocess from this action triggers host-side stalls and
+    // crashes on stricter hosts (Foundry Nuke 17).
     data->models_root = resolve_models_root();
     // Device detection and capability probes call into windows_rtx_probe /
     // mlx_probe / linux_cuda_probe, which transitively reference ONNX Runtime

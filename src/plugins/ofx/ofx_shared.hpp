@@ -328,6 +328,11 @@ Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_vie
                                                   AlphaHintPolicy alpha_hint_policy);
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
+// Lazy-initializes the out-of-process runtime client on the first render. Must
+// not run inside kOfxImageEffectActionCreateInstance: subprocess spawn from
+// that action triggers host-side stalls and crashes (Foundry Nuke 17), and
+// the canonical OFX createInstance is for handle caching only.
+bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
 
 OfxStatus on_load();

@@ -527,9 +527,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     InstanceData* data = get_instance_data(instance);
-    if (data == nullptr || data->runtime_client == nullptr) {
-        log_message("render", "Runtime client is not ready.");
-        set_runtime_error(data, "CorridorKey runtime client is not ready.", instance);
+    if (data == nullptr) {
+        log_message("render", "No instance data.");
+        return kOfxStatFailed;
+    }
+    if (!ensure_runtime_client(data, instance)) {
+        log_message("render", "Runtime client could not be initialized.");
         return kOfxStatFailed;
     }
 

@@ -1,5 +1,6 @@
 #include <array>
 #include <catch2/catch_all.hpp>
+#include <filesystem>
 #include <map>
 #include <string>
 
@@ -266,4 +267,33 @@ TEST_CASE("get regions of interest propagates the requested ROI to source clips"
 TEST_CASE("is identity remains conservative for CorridorKey output modes",
           "[unit][ofx][regression]") {
     REQUIRE(is_identity(nullptr, nullptr, nullptr) == kOfxStatReplyDefault);
+}
+
+// Canonical OFX createInstance contract: the IPC client is initialized lazily
+// on first render via ensure_runtime_client, not synchronously inside
+// createInstance. ensure_runtime_client must therefore tolerate null inputs
+// and missing-binary states without crashing or throwing, so that strict
+// hosts (Foundry Nuke) can call createInstance even when the bundle is
+// partially staged or the server has not yet been laid down.
+TEST_CASE("ensure_runtime_client refuses null instance data without crashing",
+          "[unit][ofx][regression]") {
+    REQUIRE_FALSE(ensure_runtime_client(nullptr, nullptr));
+}
+
+TEST_CASE("ensure_runtime_client reports binary-missing without throwing",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.runtime_server_path =
+        std::filesystem::path("nonexistent_runtime_server_path_for_regression.exe");
+
+    REQUIRE_FALSE(ensure_runtime_client(&data, nullptr));
+    CHECK(data.runtime_client == nullptr);
+    CHECK_FALSE(data.last_error.empty());
+}
+
+TEST_CASE("ensure_runtime_client is idempotent when data is null again",
+          "[unit][ofx][regression]") {
+    // Second call returns false again, no state change.
+    REQUIRE_FALSE(ensure_runtime_client(nullptr, nullptr));
+    REQUIRE_FALSE(ensure_runtime_client(nullptr, nullptr));
 }
