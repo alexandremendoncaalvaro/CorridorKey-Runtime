@@ -106,11 +106,13 @@ function Publish-CorridorKeyGithubRelease {
     }
 
     # Title format is defined in docs/RELEASE_GUIDELINES.md section 5:
-    # "CorridorKey OFX vX.Y.Z [Nuke & Resolve](Windows)". The host-coverage
+    # "CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Windows)". The host-coverage
     # qualifier "[Nuke & Resolve]" is required on every OFX release title;
     # the prerelease state is carried by the --prerelease flag, not by the
-    # title string.
-    $title = "CorridorKey OFX v$tagLabel [Nuke & Resolve](Windows)"
+    # title string. The space between "]" and "(" is intentional so the
+    # title is not parsed as a Markdown [text](url) link by docs renderers
+    # or by scripts/check_docs_consistency.py.
+    $title = "CorridorKey OFX v$tagLabel [Nuke & Resolve] (Windows)"
 
     $ghArgs = @(
         "release", "create", $tagName,
