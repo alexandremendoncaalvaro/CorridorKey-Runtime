@@ -216,7 +216,16 @@ struct InstanceData {
     std::uint64_t frame_time_samples = 0;
     LastRenderWorkOrigin last_render_work_origin = LastRenderWorkOrigin::None;
     std::vector<StageTiming> last_render_stage_timings = {};
+    // True only during the body of kOfxImageEffectActionRender. Set by
+    // RenderScope in ofx_render.cpp. Used to gate paramSetValue chains, which
+    // OFX 1.4 / 1.5 restrict to main-thread actions only (strict hosts such as
+    // Foundry Nuke 17 crash if paramSetValue is called from a render thread).
     bool in_render = false;
+    // True from kOfxImageEffectActionBeginSequenceRender through
+    // kOfxImageEffectActionEndSequenceRender. Covers ensure_engine_for_quality
+    // and any paramSetValue chains that fire between begin and end of a render
+    // sequence (when in_render is briefly false between Render calls).
+    bool in_render_sequence = false;
     bool runtime_panel_dirty = false;
 
     FrameResult cached_result = {};
@@ -340,6 +349,11 @@ OfxStatus describe(OfxImageEffectHandle descriptor);
 OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context);
 OfxStatus create_instance(OfxImageEffectHandle instance);
 OfxStatus destroy_instance(OfxImageEffectHandle instance);
+// Main-thread action per OFX 1.4 spec. Used by hosts to request that the
+// plugin flush its private state to host-visible storage. We use this hook
+// to flush any deferred runtime panel paramSetValue chains that accumulated
+// during the previous render sequence.
+OfxStatus sync_private_data(OfxImageEffectHandle instance);
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle out_args);
 OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);

@@ -623,6 +623,49 @@ TEST_CASE("describe_in_context keeps runtime first and help second with advanced
     CHECK(prop_ints(refinement_props, kOfxParamPropEnabled).front() == 0);
 }
 
+// Per OFX 1.5 spec (vendor/openfx/include/ofxParam.h:912 verbatim:
+// "name -- unique name of the parameter") and the property-name uniqueness
+// rule (ofxParam.h:362-363: "Valid Values - ASCII string unique to all
+// parameters in the plug-in"), every paramDefine call within a single
+// describe_in_context invocation must use a name not already defined.
+//
+// DaVinci Resolve historically tolerates duplicate paramDefine names by
+// keeping the first definition and silently ignoring the second. Foundry
+// Nuke 17 follows the spec and may invalidate the descriptor on the first
+// duplicate, leaving the param panel empty. The plugin's helpers swallow
+// the paramDefine return status, so a duplicate would otherwise be invisible
+// in production logs. This regression test catches that class of bug at
+// build time so the panel never reaches a strict host with duplicates.
+TEST_CASE("describe_in_context defines every param exactly once",
+          "[unit][ofx][regression]") {
+    SuiteScope suites;
+    FakeEffect descriptor;
+
+    REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                                kOfxImageEffectContextFilter) == kOfxStatOK);
+
+    std::unordered_map<std::string, int> define_counts;
+    for (const auto& name : descriptor.param_set.define_order) {
+        ++define_counts[name];
+    }
+
+    std::vector<std::string> duplicates;
+    for (const auto& [name, count] : define_counts) {
+        if (count > 1) {
+            duplicates.push_back(name + " (defined " + std::to_string(count) + " times)");
+        }
+    }
+    INFO("Duplicate paramDefine names: " << [&] {
+        std::string out;
+        for (const auto& entry : duplicates) {
+            if (!out.empty()) out += ", ";
+            out += entry;
+        }
+        return out;
+    }());
+    CHECK(duplicates.empty());
+}
+
 TEST_CASE("clip preferences request host-managed source colourspaces and raw alpha hint",
           "[unit][ofx][regression]") {
     SuiteScope suites;
@@ -676,6 +719,83 @@ TEST_CASE("output colourspace action follows output mode", "[unit][ofx][regressi
                 kOfxStatOK);
         CHECK(prop_strings(out_args, kOfxImageClipPropColourspace).front() == kOfxColourspaceRaw);
     }
+}
+
+// Foundry Nuke 17.0 release notes do not advertise OFX 1.5 colour-management
+// support, and openfx-misc PIK (the reference chroma keyer for Nuke + Resolve
+// + Natron) does not declare these properties either. The plugin therefore
+// keeps the rich OFX 1.5 negotiation for hosts that implement it (Resolve)
+// and skips the declaration on Nuke, where it appears to leave the host in a
+// partial state that suppresses the parameter panel and crashes when an
+// optional clip is connected. References:
+// https://learn.foundry.com/nuke/content/release_notes/17.0/nuke_17.0v1_releasenotes.html
+// https://github.com/NatronGitHub/openfx-misc/blob/master/PIK/PIK.cpp
+// https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
+TEST_CASE("describe omits OFX 1.5 colour management properties on Foundry Nuke",
+          "[unit][ofx][regression]") {
+    SuiteScope suites;
+    FakeEffect descriptor;
+
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameNuke;
+    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor)) == kOfxStatOK);
+    g_host_name = previous_host_name;
+
+    CHECK(prop_strings(descriptor.props, kOfxImageEffectPropColourManagementStyle).empty());
+    CHECK(prop_strings(descriptor.props, kOfxImageEffectPropColourManagementAvailableConfigs)
+              .empty());
+}
+
+TEST_CASE("clip preferences omit preferred colourspaces on Foundry Nuke",
+          "[unit][ofx][regression]") {
+    SuiteScope suites;
+    FakeEffect instance;
+    FakePropertySet* source_clip = define_clip(instance, kOfxImageEffectSimpleSourceClipName);
+    source_clip->strings[kOfxImageEffectPropPixelDepth] = {kOfxBitDepthFloat};
+
+    InstanceData data{};
+    data.source_clip = reinterpret_cast<OfxImageClipHandle>(source_clip);
+    set_instance_data(reinterpret_cast<OfxImageEffectHandle>(&instance), &data);
+
+    FakePropertySet out_args;
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameNuke;
+    REQUIRE(get_clip_preferences(reinterpret_cast<OfxImageEffectHandle>(&instance),
+                                 reinterpret_cast<OfxPropertySetHandle>(&out_args)) == kOfxStatOK);
+    g_host_name = previous_host_name;
+
+    CHECK(prop_strings(out_args, clip_property_key(kOfxImageClipPropPreferredColourspaces,
+                                                   kOfxImageEffectSimpleSourceClipName)
+                                     .c_str())
+              .empty());
+    CHECK(prop_strings(
+              out_args,
+              clip_property_key(kOfxImageClipPropPreferredColourspaces, kClipAlphaHint).c_str())
+              .empty());
+}
+
+TEST_CASE("output colourspace defers to native handling on Foundry Nuke",
+          "[unit][ofx][regression]") {
+    SuiteScope suites;
+    FakeEffect instance;
+    FakeParamValue* output_mode =
+        define_param(instance, kParamOutputMode, FakeParamValue::Kind::Choice);
+
+    InstanceData data{};
+    data.output_mode_param = reinterpret_cast<OfxParamHandle>(output_mode);
+    set_instance_data(reinterpret_cast<OfxImageEffectHandle>(&instance), &data);
+
+    FakePropertySet out_args;
+    output_mode->int_value = kOutputProcessed;
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameNuke;
+    const auto status = get_output_colourspace(reinterpret_cast<OfxImageEffectHandle>(&instance),
+                                               nullptr,
+                                               reinterpret_cast<OfxPropertySetHandle>(&out_args));
+    g_host_name = previous_host_name;
+
+    CHECK(status == kOfxStatReplyDefault);
+    CHECK(prop_strings(out_args, kOfxImageClipPropColourspace).empty());
 }
 
 TEST_CASE("input color auto resolves supported host-managed colourspaces and falls back cleanly",

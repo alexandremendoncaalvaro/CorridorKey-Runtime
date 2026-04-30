@@ -747,8 +747,39 @@ bool allow_unrestricted_quality_attempt_for_request_impl(const InstanceData& dat
 
 void update_runtime_panel_values(InstanceData* data) {
     if (data == nullptr) {
+        log_message("update_runtime_panel_values", "skip reason=null_data");
         return;
     }
+
+    // OFX 1.4 / 1.5 threading model: paramSetValue is main-thread-only per
+    // ofxParam.h:1088 ("paramSetValue should only be called from within a
+    // kOfxActionInstanceChanged or interact action"). If we are inside a
+    // render-thread action (Render, BeginSequenceRender, EndSequenceRender,
+    // IsIdentity, GetRegionOfDefinition, GetRegionsOfInterest,
+    // GetFramesNeeded) defer by marking dirty so the next main-thread
+    // action flushes the panel.
+    //
+    // DaVinci Resolve has historically tolerated render-thread paramSetValue
+    // through internal locking, and the Resolve user experience has long
+    // depended on the runtime status panel updating live during render.
+    // Per the OFX 1.4 spec on kOfxPropName, plugins are expected to apply
+    // host-specific workarounds for known host quirks. Resolve therefore
+    // takes the permissive path here while Foundry Nuke and any other host
+    // we have not validated take the canonical defer-to-main-thread path.
+    // References:
+    // https://openfx.readthedocs.io/en/main/Reference/ofxThreadSafety.html
+    // https://openfx.readthedocs.io/en/main/Reference/ofxRendering.html
+    // https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
+    if ((data->in_render || data->in_render_sequence) && !is_resolve_host()) {
+        data->runtime_panel_dirty = true;
+        log_message("update_runtime_panel_values",
+                    std::string("defer reason=render_thread in_render=") +
+                        (data->in_render ? "1" : "0") + " in_render_sequence=" +
+                        (data->in_render_sequence ? "1" : "0"));
+        return;
+    }
+    log_message("update_runtime_panel_values", "enter flush=full");
+    data->runtime_panel_dirty = false;
 
     sync_runtime_panel_session_state_impl(data);
 
@@ -800,26 +831,8 @@ void update_runtime_panel_values(InstanceData* data) {
     } else {
         set_string_param_value(data->update_status_param, "");
     }
-}
-
-void set_runtime_panel_status(InstanceData* data, const std::string& processing,
-                              const std::string& device, const std::string& requested_quality,
-                              const std::string& effective_quality, const std::string& artifact,
-                              const std::string& session, const std::string& status,
-                              const std::string& timings, const std::string& backend_work) {
-    if (data == nullptr) {
-        return;
-    }
-
-    set_string_param_value(data->runtime_processing_param, processing);
-    set_string_param_value(data->runtime_device_param, device);
-    set_string_param_value(data->runtime_requested_quality_param, requested_quality);
-    set_string_param_value(data->runtime_effective_quality_param, effective_quality);
-    set_string_param_value(data->runtime_artifact_param, artifact);
-    set_string_param_value(data->runtime_session_param, session);
-    set_string_param_value(data->runtime_status_param, status);
-    set_string_param_value(data->runtime_timings_param, timings);
-    set_string_param_value(data->runtime_backend_work_param, backend_work);
+    log_message("update_runtime_panel_values",
+                std::string("exit ok banner=") + (show_banner ? "1" : "0"));
 }
 
 std::optional<std::filesystem::path> plugin_module_path() {
@@ -1154,11 +1167,15 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
     kickoff_global_update_check();
 
-    sync_dependent_params(data.get());
-
-    set_runtime_panel_status(data.get(), "Initializing...", "Detecting...", "Loading...",
-                             "Loading...", "Loading...", "Loading...", "Loading...", "Loading...",
-                             "Loading...");
+    // sync_dependent_params and set_runtime_panel_status used to run here.
+    // Both invoke the OFX parameter suite (set_param_enabled and
+    // paramSetValue) inside kOfxImageEffectActionCreateInstance, which
+    // strict hosts (Foundry Nuke 17) reject by crashing the host. The
+    // dependent-param initial enabled state is now expressed in
+    // describe_in_context via define_int_param's enabled flag, and the
+    // runtime status panel is populated on first render via
+    // update_runtime_panel — both align with the canonical OFX 1.4
+    // contract that scopes createInstance to handle caching only.
 
     // The runtime server path resolution, binary-presence check, and IPC
     // client init were previously done here. They are now deferred to the
@@ -1216,7 +1233,25 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     data->last_error.clear();
 
     log_message("create_instance", "Deferring runtime session bootstrap until first render.");
-    update_runtime_panel_values(data.get());
+    // update_runtime_panel_values used to run here; it calls paramSetValue
+    // for each runtime-status string param plus set_param_secret on the
+    // update banner toggles, both of which are side-effects forbidden in
+    // canonical createInstance and reject by strict hosts. The render path
+    // (and instance_changed) already drive update_runtime_panel before the
+    // user sees results, so the panel converges to the correct state on
+    // first interaction.
+
+    // Natron-documented Nuke fix for the update banner secret quirk: the
+    // params were declared visible (secret=false) in describe so that a
+    // future reveal is permitted; here we set them secret at the end of
+    // create_instance when no banner is yet known. The first instance has
+    // no cached update result, so default to hidden. The flush triggered by
+    // the next instance_changed or sync_private_data reveals the banner if
+    // the GitHub update-check thread reports one.
+    // Reference: https://github.com/MrKepzie/Natron/wiki/OpenFX-plugin-programming-guide-(Advanced-issues)
+    set_param_secret(data->update_status_param, true);
+    set_param_secret(data->open_update_page_param, true);
+
     set_instance_data(instance, data.release());
     log_create_total("success", "bootstrap=deferred");
     return kOfxStatOK;
@@ -1412,7 +1447,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             data->last_warning = runtime_warning;
             data->last_error.clear();
             sync_runtime_panel_state_from_active_session(data);
-            update_runtime_panel_values(data);
+            update_runtime_panel(data);
             log_quality_total("reused_engine");
             return true;
         }
@@ -1424,10 +1459,13 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 
         DeviceInfo effective_device = requested_device;
         std::optional<BackendFallbackInfo> fallback = std::nullopt;
-        set_string_param_value(
-            data->runtime_status_param,
-            "Preparing " + std::string(quality_mode_label(requested_quality_mode)) + "...");
-        set_string_param_value(data->runtime_timings_param, runtime_timings_runtime_label(*data));
+        // The previous code called set_string_param_value directly here to
+        // surface a transient "Preparing ..." spinner on the runtime status
+        // line. That bypasses the render-thread guard and crashes strict OFX
+        // hosts. Mark the panel dirty instead; the next main-thread action
+        // flushes the latest status. The transient spinner is the canonical
+        // OFX trade-off for thread-safe paramSetValue.
+        update_runtime_panel(data);
         auto prepare_result = data->runtime_client->prepare_session(
             build_prepare_request(requested_device, selection, requested_quality_mode),
             [&](const StageTiming& timing) {
@@ -1543,7 +1581,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                     std::string("Effective backend: ") + backend_label(data->device.backend));
         log_message("ensure_engine_for_quality",
                     "Effective resolution: " + std::to_string(data->active_resolution));
-        update_runtime_panel_values(data);
+        update_runtime_panel(data);
         log_quality_total("success");
         return true;
     }
@@ -1554,22 +1592,21 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 }
 
 void update_runtime_panel(InstanceData* data) {
+    // update_runtime_panel_values now owns the render-thread guard. Mark
+    // dirty up front so a deferred call still has the right signal even when
+    // the body short-circuits.
     if (data == nullptr) {
         return;
     }
     data->runtime_panel_dirty = true;
-    if (data->in_render) {
-        return;
-    }
-    data->runtime_panel_dirty = false;
     update_runtime_panel_values(data);
 }
 
 void flush_runtime_panel(InstanceData* data) {
-    if (data != nullptr && data->runtime_panel_dirty && !data->in_render) {
-        data->runtime_panel_dirty = false;
-        update_runtime_panel_values(data);
+    if (data == nullptr || !data->runtime_panel_dirty) {
+        return;
     }
+    update_runtime_panel_values(data);
 }
 
 OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandle /*in_args*/) {
@@ -1578,8 +1615,11 @@ OfxStatus begin_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHan
         return kOfxStatReplyDefault;
     }
 
+    // Mark the render sequence so any update_runtime_panel call between begin
+    // and end (including from ensure_engine_for_quality) defers paramSetValue
+    // to the next main-thread action.
+    data->in_render_sequence = true;
     clear_instance_render_caches(data, false);
-    flush_runtime_panel(data);
     log_message("begin_sequence_render", "Sequence render state reset.");
     return kOfxStatOK;
 }
@@ -1591,8 +1631,10 @@ OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandl
     }
 
     clear_instance_render_caches(data, false);
-    flush_runtime_panel(data);
     log_message("end_sequence_render", "Sequence render caches cleared.");
+    // Clear the sequence flag last so anything triggered above still defers
+    // paramSetValue. The flush happens on the next main-thread action.
+    data->in_render_sequence = false;
     return kOfxStatOK;
 }
 
@@ -1766,6 +1808,33 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
         data->runtime_panel_dirty = false;
         update_runtime_panel_values(data);
     }
+    return kOfxStatOK;
+}
+
+OfxStatus sync_private_data(OfxImageEffectHandle instance) {
+    InstanceData* data = get_instance_data(instance);
+    if (data == nullptr) {
+        log_message("sync_private_data", "skip reason=null_instance_data");
+        return kOfxStatReplyDefault;
+    }
+    // Main-thread action: flush any panel state that was marked dirty during
+    // a render sequence. Hosts call this before save/serialize, which is
+    // exactly when the user needs the runtime status reflected in the project
+    // file. paramSetValue is allowed here under the canonical SyncPrivateData
+    // contract (OFX 1.5 vendor/openfx/include/ofxCore.h:298-301: "synchronise
+    // any private data structures to its parameter set").
+    //
+    // Foundry Nuke 17 sessions in 2026-04 logs went silent mid-sync at
+    // 17:15:42 after an Alpha Hint render. Without entry/exit telemetry we
+    // could not tell whether the call entered, hung inside flush, or crashed
+    // afterwards. The boundary log lines here are the smallest instrumentation
+    // that distinguishes those three possibilities in the next UAT.
+    log_message("sync_private_data",
+                std::string("enter dirty=") + (data->runtime_panel_dirty ? "1" : "0") +
+                    " in_render=" + (data->in_render ? "1" : "0") + " in_render_sequence=" +
+                    (data->in_render_sequence ? "1" : "0"));
+    flush_runtime_panel(data);
+    log_message("sync_private_data", "exit ok");
     return kOfxStatOK;
 }
 

@@ -156,6 +156,10 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
             return instance_changed(
                 reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), in_args);
         }
+        if (std::strcmp(action, kOfxActionSyncPrivateData) == 0) {
+            return sync_private_data(
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
+        }
         if (std::strcmp(action, kOfxImageEffectActionRender) == 0) {
             return render(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
                           in_args, out_args);
