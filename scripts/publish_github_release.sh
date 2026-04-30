@@ -209,9 +209,9 @@ if [ $view_exit -eq 0 ] && [ -n "$existing" ]; then
 fi
 
 case "$PLATFORM" in
-    mac) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve](macOS) - Apple Silicon" ;;
-    linux) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve](Linux)" ;;
-    win) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve](Windows)" ;;
+    mac) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve] (macOS) - Apple Silicon" ;;
+    linux) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve] (Linux)" ;;
+    win) TITLE="CorridorKey OFX v${TAG_LABEL} [Nuke & Resolve] (Windows)" ;;
 esac
 
 echo "[publish] tag:         $TAG_NAME"

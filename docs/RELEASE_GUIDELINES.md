@@ -606,14 +606,19 @@ it explicitly:
 The host-coverage qualifier `[Nuke & Resolve]` precedes the platform
 qualifier on every OFX release title, regardless of platform combination.
 This makes the host coverage explicit at a glance and matches the
-host-agnostic artifact name (`CorridorKey_OFX_*`).
+host-agnostic artifact name (`CorridorKey_OFX_*`). The single space
+between the closing bracket and the opening parenthesis is intentional:
+without it, Markdown renderers (and the
+`scripts/check_docs_consistency.py` linter) would interpret the title
+as an inline link and treat the platform name as a target path, turning
+every example into a broken local link.
 
-- Windows only: `CorridorKey OFX vX.Y.Z [Nuke & Resolve](Windows)`
-- macOS only: `CorridorKey OFX vX.Y.Z [Nuke & Resolve](macOS) - Apple Silicon`
-- Linux only: `CorridorKey OFX vX.Y.Z [Nuke & Resolve](Linux)`
-- Windows and macOS: `CorridorKey OFX vX.Y.Z [Nuke & Resolve](Windows & macOS)`
-- Windows and Linux: `CorridorKey OFX vX.Y.Z [Nuke & Resolve](Windows & Linux)`
-- Windows, macOS, and Linux: `CorridorKey OFX vX.Y.Z [Nuke & Resolve](Windows, macOS & Linux)`
+- Windows only: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Windows)`
+- macOS only: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (macOS) - Apple Silicon`
+- Linux only: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Linux)`
+- Windows and macOS: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Windows & macOS)`
+- Windows and Linux: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Windows & Linux)`
+- Windows, macOS, and Linux: `CorridorKey OFX vX.Y.Z [Nuke & Resolve] (Windows, macOS & Linux)`
 
 ### CorridorKey Runtime
 
