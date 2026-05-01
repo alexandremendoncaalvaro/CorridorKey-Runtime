@@ -760,7 +760,15 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const bool loaded_model_is_blue =
         loaded_artifact_filename.rfind("corridorkey_blue_", 0) == 0;
     const bool blue_requested = (screen_color_mode == ScreenColorMode::Blue);
-    const bool blue_canonicalization_fallback = blue_requested && !loaded_model_is_blue;
+    // When ensure_engine_for_quality fails on a non-fixed quality request the
+    // render falls through with data->model_path possibly empty (first-render
+    // case) or stale. Treating that as "fallback to canonicalization" would
+    // emit a spurious blue_fallback_active warning even though no model is
+    // about to run -- the render actually bypasses with source. Guard the
+    // fallback decision on a real load so the warning only fires when the
+    // green model is genuinely about to handle a blue plate.
+    const bool blue_canonicalization_fallback =
+        blue_requested && !loaded_model_is_blue && !loaded_artifact_filename.empty();
 
     ScreenColorTransform screen_color_transform;
     if (blue_canonicalization_fallback) {
