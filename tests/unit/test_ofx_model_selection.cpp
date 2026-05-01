@@ -617,6 +617,74 @@ TEST_CASE("ofx runtime panel fields are read-only dynamic strings", "[unit][ofx]
     REQUIRE(kRuntimeStatusEnabled == 0);
 }
 
+TEST_CASE("blue screen request with dedicated artifact present uses dedicated path",
+          "[unit][ofx][screen-color]") {
+    TempDirGuard temp_dir("corridorkey-ofx-blue-dedicated");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_blue_fp16_1024.onnx");
+
+    auto selection = select_quality_artifact(
+        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+        QualityFallbackMode::Auto, 0, false, "blue");
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_blue_fp16_1024.onnx");
+    REQUIRE_FALSE(selection->used_fallback);
+}
+
+TEST_CASE("blue screen request without dedicated artifact falls back to packaged green",
+          "[unit][ofx][screen-color]") {
+    TempDirGuard temp_dir("corridorkey-ofx-blue-fallback");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+
+    auto selection = select_quality_artifact(
+        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+        QualityFallbackMode::Auto, 0, false, "blue");
+
+    // The selection layer hands back the green rung; ofx_render detects the
+    // mismatch (entry.screen_color=="green" while the request was "blue") and
+    // runs the canonicalization workaround plus the one-shot warning.
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
+}
+
+TEST_CASE("green screen request stays on green even when blue artifact is staged",
+          "[unit][ofx][screen-color]") {
+    TempDirGuard temp_dir("corridorkey-ofx-green-with-blue-staged");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_blue_fp16_1024.onnx");
+
+    auto selection = select_quality_artifact(
+        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+        QualityFallbackMode::Auto, 0, false, "green");
+
+    REQUIRE(selection.has_value());
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
+}
+
+TEST_CASE("expected_quality_artifact_paths surfaces blue rung first under blue request",
+          "[unit][ofx][screen-color]") {
+    TempDirGuard temp_dir("corridorkey-ofx-blue-expected-paths");
+
+    const auto expected = expected_quality_artifact_paths(
+        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+        QualityFallbackMode::Auto, 0, false, "blue");
+
+    REQUIRE_FALSE(expected.empty());
+    REQUIRE(expected.front().filename() == "corridorkey_blue_fp16_1024.onnx");
+    // Green rung still in the list so missing-artifact diagnostics stay
+    // accurate and the bundle validator can report "blue missing, green
+    // fallback present".
+    bool green_present = false;
+    for (const auto& path : expected) {
+        if (path.filename() == "corridorkey_fp16_1024.onnx") {
+            green_present = true;
+            break;
+        }
+    }
+    REQUIRE(green_present);
+}
+
 TEST_CASE("artifact_path_for_backend resolves blue artifacts when screen_color='blue'",
           "[unit][ofx][screen-color]") {
     const std::filesystem::path models_root = "/fake/models";
