@@ -98,8 +98,17 @@ def export_resolution(args, resolution):
     import torch
     disable_torch_compile_for_export(torch)
 
-    static = getattr(args, 'static', False)
-    suffix = f'_static_{resolution}' if static else f'_{resolution}'
+    # Per-resolution static is the contract the canonical pipeline expects:
+    # corridorkey[_blue]_fp32_<res>.onnx regardless of static-ness, with the
+    # static export only applied to the rungs TensorRT requires (1536, 2048).
+    # The legacy --static flag is retained, but it keeps the historical
+    # _static_<res>.onnx suffix to avoid breaking any standalone caller that
+    # already relied on it.
+    static_resolutions = getattr(args, 'static_resolutions', None) or []
+    static_global = getattr(args, 'static', False)
+    static = (resolution in static_resolutions) or static_global
+    use_legacy_naming = static_global and not static_resolutions
+    suffix = f'_static_{resolution}' if (static and use_legacy_naming) else f'_{resolution}'
     out_path = args.out.replace('.onnx', f'{suffix}.onnx')
     mode_label = "STATIC" if static else "DYNAMIC"
     print(f"\n[Info] === Exporting Resolution {resolution}x{resolution} ({mode_label}) ===")
@@ -165,8 +174,15 @@ def main():
     parser.add_argument("--resolutions", type=int, nargs="+", default=[512, 768, 1024, 1536, 2048],
                         help="Resolutions to export (default: 512 768 1024 1536 2048)")
     parser.add_argument("--static", action="store_true",
-                        help="Export with fully static shapes (batch_size=1 baked in). "
-                             "Required for TensorRT at 1536+ resolutions.")
+                        help="Export every resolution with fully static shapes "
+                             "(batch_size=1 baked in). Legacy global flag; output filenames "
+                             "carry a _static_<res> suffix.")
+    parser.add_argument("--static-resolutions", type=int, nargs="+", default=[],
+                        help="Resolutions in this list are exported with static shapes; "
+                             "all others stay dynamic. Output filenames keep the canonical "
+                             "<base>_<res>.onnx form, which is what optimize_model.py and "
+                             "the windows-rtx pipeline expect. Use this to enable TensorRT "
+                             "at 1536+ resolutions without breaking downstream naming.")
     parser.add_argument("--repo-path", type=str,
                         help="Path to local CorridorKey repo (cloned automatically if omitted)")
     args = parser.parse_args()
