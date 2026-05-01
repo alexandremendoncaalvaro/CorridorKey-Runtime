@@ -102,7 +102,6 @@ require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn" 20
 if [ "$REQUIRE_MLX_2048" = "1" ]; then
     require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn" 200000000 "packaged MLX bridge 2048"
 fi
-require_real_model_artifact "${MODELS_DIR}/corridorkey_int8_512.onnx" 50000000 "packaged CPU baseline model"
 
 require_min_size "$PLUGIN_BINARY" 100000
 require_min_size "$CLI_BINARY" 100000

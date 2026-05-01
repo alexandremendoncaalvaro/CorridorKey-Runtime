@@ -49,7 +49,6 @@ PLUGINS_SCRIPTS_DIR="${REPO_ROOT}/scripts/ofx_pkg"
 PLUGIN_BINARY="${BUILD_DIR}/src/plugins/ofx/CorridorKey.ofx"
 CLI_BINARY="${BUILD_DIR}/src/cli/corridorkey"
 CORE_LIB="${BUILD_DIR}/src/libcorridorkey_core.dylib"
-CPU_BASELINE_MODEL="${REPO_ROOT}/models/corridorkey_int8_512.onnx"
 MLX_REQUIRED_PACK="${REPO_ROOT}/models/corridorkey_mlx.safetensors"
 MLX_BRIDGE_512="${REPO_ROOT}/models/corridorkey_mlx_bridge_512.mlxfn"
 MLX_BRIDGE_768="${REPO_ROOT}/models/corridorkey_mlx_bridge_768.mlxfn"
@@ -220,7 +219,6 @@ fi
 require_file "$PLUGIN_BINARY"
 require_file "$CLI_BINARY"
 require_file "$CORE_LIB"
-require_real_model_artifact "$CPU_BASELINE_MODEL" 50000000 "CPU baseline model"
 require_real_model_artifact "$MLX_REQUIRED_PACK" 300000000 "MLX model pack"
 require_real_model_artifact "$MLX_BRIDGE_512" 200000000 "MLX bridge 512"
 require_real_model_artifact "$MLX_BRIDGE_768" 200000000 "MLX bridge 768"
@@ -269,7 +267,6 @@ chmod u+w "$MACOS_DIR/$PLUGIN_NAME" "$BIN_DIR/corridorkey" "$MACOS_DIR/$CORE_LIB
     "$MACOS_DIR/$RUNTIME_LINK_NAME" "$MACOS_DIR/$MLX_LIB_NAME" \
     "$MACOS_DIR/$MLX_METALLIB_NAME"
 
-cp "$CPU_BASELINE_MODEL" "$MODELS_DIR/"
 cp "$MLX_REQUIRED_PACK" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_512" "$MODELS_DIR/"
 cp "$MLX_BRIDGE_768" "$MODELS_DIR/"

@@ -105,7 +105,6 @@ bundle_track = sys.argv[4]
 include_mlx_2048 = sys.argv[5] == "1"
 
 expected_models = [
-    "corridorkey_int8_512.onnx",
     "corridorkey_mlx.safetensors",
     "corridorkey_mlx_bridge_512.mlxfn",
     "corridorkey_mlx_bridge_768.mlxfn",

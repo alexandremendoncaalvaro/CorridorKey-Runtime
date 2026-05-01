@@ -88,7 +88,6 @@ MLX_BRIDGE_1024="models/corridorkey_mlx_bridge_1024.mlxfn"
 MLX_BRIDGE_1536="models/corridorkey_mlx_bridge_1536.mlxfn"
 MLX_BRIDGE_2048="models/corridorkey_mlx_bridge_2048.mlxfn"
 REQUIRE_MLX_2048="${CORRIDORKEY_REQUIRE_MLX_2048:-0}"
-CPU_BASELINE_MODEL="models/corridorkey_int8_512.onnx"
 ZIP_PATH="dist/${DIST_BASENAME}.zip"
 DMG_PATH="dist/${DIST_BASENAME}.dmg"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -244,7 +243,6 @@ if [ ! -f "$CORE_LIB" ]; then
     exit 1
 fi
 
-require_real_model_artifact "$CPU_BASELINE_MODEL" 50000000 "CPU baseline model"
 require_real_model_artifact "$MLX_REQUIRED_PACK" 300000000 "MLX model pack"
 
 for bridge in "$MLX_BRIDGE_512" "$MLX_BRIDGE_768" "$MLX_BRIDGE_1024" "$MLX_BRIDGE_1536"; do
@@ -317,7 +315,7 @@ if [ "$RUNTIME_LIB_NAME" != "$RUNTIME_LINK_NAME" ]; then
     ln -sf "$RUNTIME_LIB_NAME" "$DIST_DIR/bin/$RUNTIME_LINK_NAME"
 fi
 
-for model in corridorkey_int8_512.onnx corridorkey_mlx.safetensors corridorkey_mlx_bridge_512.mlxfn corridorkey_mlx_bridge_768.mlxfn corridorkey_mlx_bridge_1024.mlxfn corridorkey_mlx_bridge_1536.mlxfn; do
+for model in corridorkey_mlx.safetensors corridorkey_mlx_bridge_512.mlxfn corridorkey_mlx_bridge_768.mlxfn corridorkey_mlx_bridge_1024.mlxfn corridorkey_mlx_bridge_1536.mlxfn; do
     cp "models/$model" "$DIST_DIR/models/"
 done
 if [ -f "$MLX_BRIDGE_2048" ]; then
