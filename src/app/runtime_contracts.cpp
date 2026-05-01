@@ -1182,6 +1182,7 @@ nlohmann::json to_json(const ModelCatalogEntry& model) {
     json["validated_platforms"] = model.validated_platforms;
     json["intended_platforms"] = model.intended_platforms;
     json["validated_hardware_tiers"] = model.validated_hardware_tiers;
+    json["screen_color"] = model.screen_color;
     return json;
 }
 
@@ -1190,6 +1191,7 @@ nlohmann::json to_json(const PresetDefinition& preset) {
     params["target_resolution"] = preset.params.target_resolution;
     params["despill_strength"] = preset.params.despill_strength;
     params["spill_method"] = preset.params.spill_method;
+    params["despill_screen_channel"] = preset.params.despill_screen_channel;
     params["auto_despeckle"] = preset.params.auto_despeckle;
     params["despeckle_size"] = preset.params.despeckle_size;
     params["refiner_scale"] = preset.params.refiner_scale;

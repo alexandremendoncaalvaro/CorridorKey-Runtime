@@ -368,6 +368,19 @@ TEST_CASE("blue screen routes to dedicated CorridorKeyBlue artifacts on Windows 
         REQUIRE(blue_entry->screen_color == "blue");
         REQUIRE(blue_entry->packaged_for_windows);
     }
+
+    SECTION("to_json exposes screen_color so CLI / API consumers can route") {
+        auto blue_entry = find_model_by_filename("corridorkey_blue_fp16_1024.onnx");
+        REQUIRE(blue_entry.has_value());
+        const auto blue_json = to_json(*blue_entry);
+        REQUIRE(blue_json.contains("screen_color"));
+        REQUIRE(blue_json["screen_color"] == "blue");
+
+        auto green_entry = find_model_by_filename("corridorkey_fp16_1024.onnx");
+        REQUIRE(green_entry.has_value());
+        const auto green_json = to_json(*green_entry);
+        REQUIRE(green_json["screen_color"] == "green");
+    }
 }
 
 TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
