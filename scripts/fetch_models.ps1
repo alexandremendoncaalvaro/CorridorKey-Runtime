@@ -14,12 +14,13 @@
 
 .PARAMETER Profile
     Model set to download:
-      windows-rtx  : FP16 ONNX models + Torch-TensorRT TorchScript artifacts (default)
+      windows-rtx       : FP16 ONNX models + Torch-TensorRT TorchScript artifacts (default)
+      windows-rtx-blue  : Dedicated CorridorKeyBlue FP16 ONNX models for blue-screen plates
       windows-turing-source : checkpoint + reference FP16 ONNX models for the Turing collaboration kit
-      windows-all  : FP16 + FP16 context ONNX models + Torch-TensorRT TorchScript artifacts
-      apple        : MLX safetensors + bridge files
-      pytorch      : Training checkpoint (.pth)
-      all          : Everything
+      windows-all       : FP16 + FP16 context ONNX models + Torch-TensorRT TorchScript artifacts + blue
+      apple             : MLX safetensors + bridge files
+      pytorch           : Training checkpoint (.pth)
+      all               : Everything
 
 .PARAMETER HfRepo
     Hugging Face repository identifier. Defaults to alexandrealvaro/CorridorKey.
@@ -37,10 +38,17 @@
 #>
 
 param(
-    [ValidateSet("windows-rtx", "windows-turing-source", "windows-all", "apple", "pytorch", "hint-tracker", "all")]
+    [ValidateSet("windows-rtx", "windows-rtx-blue", "windows-turing-source", "windows-all",
+                 "apple", "pytorch", "hint-tracker", "all")]
     [string]$Profile = "windows-rtx",
 
     [string]$HfRepo = "alexandrealvaro/CorridorKey",
+    # Separate repo for the dedicated CorridorKeyBlue ladder. The user-visible
+    # canonical home for CorridorKey assets is alexandrealvaro/corridorkey-models;
+    # the green ladder still lives at $HfRepo above and will be migrated
+    # separately. Keeping the two repos addressable here lets us ship blue
+    # without blocking on the green migration.
+    [string]$HfBlueRepo = "alexandrealvaro/corridorkey-models",
     [string]$Revision = "main",
     [switch]$Force
 )
@@ -56,12 +64,20 @@ if (-not (Test-Path $modelsDir)) {
 }
 
 $hfBaseUrl = "https://huggingface.co/$HfRepo/resolve/$Revision"
+$hfBlueBaseUrl = "https://huggingface.co/$HfBlueRepo/resolve/$Revision"
 
 $windowsRtxFiles = @{
     "onnx/fp16/corridorkey_fp16_512.onnx"   = "corridorkey_fp16_512.onnx"
     "onnx/fp16/corridorkey_fp16_1024.onnx"  = "corridorkey_fp16_1024.onnx"
     "onnx/fp16/corridorkey_fp16_1536.onnx"  = "corridorkey_fp16_1536.onnx"
     "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
+}
+
+$windowsRtxBlueFiles = @{
+    "onnx/fp16-blue/corridorkey_blue_fp16_512.onnx"   = "corridorkey_blue_fp16_512.onnx"
+    "onnx/fp16-blue/corridorkey_blue_fp16_1024.onnx"  = "corridorkey_blue_fp16_1024.onnx"
+    "onnx/fp16-blue/corridorkey_blue_fp16_1536.onnx"  = "corridorkey_blue_fp16_1536.onnx"
+    "onnx/fp16-blue/corridorkey_blue_fp16_2048.onnx"  = "corridorkey_blue_fp16_2048.onnx"
 }
 
 $windowsTorchTensorRtFiles = @{
@@ -108,6 +124,10 @@ $hintTrackerFiles = @{
 }
 
 $filesToDownload = @{}
+# Files in $filesToDownloadBlue are fetched from $HfBlueRepo
+# (alexandrealvaro/corridorkey-models) instead of $HfRepo. Tracked separately
+# while the green ladder migration to the canonical repo is pending.
+$filesToDownloadBlue = @{}
 
 switch ($Profile) {
     "windows-rtx" {
@@ -118,6 +138,9 @@ switch ($Profile) {
         foreach ($entry in $hintTrackerFiles.GetEnumerator()) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
+    }
+    "windows-rtx-blue" {
+        $filesToDownloadBlue = $windowsRtxBlueFiles.Clone()
     }
     "windows-turing-source" {
         $filesToDownload = $windowsTuringSourceFiles.Clone()
@@ -133,6 +156,7 @@ switch ($Profile) {
         foreach ($entry in $hintTrackerFiles.GetEnumerator()) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
+        $filesToDownloadBlue = $windowsRtxBlueFiles.Clone()
     }
     "apple" {
         $filesToDownload = $appleFiles.Clone()
@@ -152,11 +176,16 @@ switch ($Profile) {
                 $filesToDownload[$entry.Key] = $entry.Value
             }
         }
+        $filesToDownloadBlue = $windowsRtxBlueFiles.Clone()
     }
 }
 
-Write-Host "[fetch-models] Profile: $Profile ($($filesToDownload.Count) files)"
+$totalFiles = $filesToDownload.Count + $filesToDownloadBlue.Count
+Write-Host "[fetch-models] Profile: $Profile ($totalFiles files)"
 Write-Host "[fetch-models] Source:  $HfRepo@$Revision"
+if ($filesToDownloadBlue.Count -gt 0) {
+    Write-Host "[fetch-models] Blue source: $HfBlueRepo@$Revision"
+}
 Write-Host "[fetch-models] Target:  $modelsDir"
 Write-Host ""
 
@@ -164,11 +193,26 @@ $downloaded = 0
 $skipped = 0
 $failed = 0
 
-foreach ($entry in $filesToDownload.GetEnumerator() | Sort-Object Value) {
-    $remotePath = $entry.Key
-    $localName = $entry.Value
+# Iterate green files (default $HfRepo) and blue files ($HfBlueRepo) with the
+# correct base URL for each. Output names land in models/ with the same
+# filename regardless of which repo they came from.
+$allEntries = @()
+foreach ($entry in $filesToDownload.GetEnumerator()) {
+    $allEntries += [pscustomobject]@{
+        RemotePath = $entry.Key; LocalName = $entry.Value; BaseUrl = $hfBaseUrl
+    }
+}
+foreach ($entry in $filesToDownloadBlue.GetEnumerator()) {
+    $allEntries += [pscustomobject]@{
+        RemotePath = $entry.Key; LocalName = $entry.Value; BaseUrl = $hfBlueBaseUrl
+    }
+}
+
+foreach ($entry in $allEntries | Sort-Object LocalName) {
+    $remotePath = $entry.RemotePath
+    $localName = $entry.LocalName
     $localPath = Join-Path $modelsDir $localName
-    $url = "$hfBaseUrl/$remotePath"
+    $url = "$($entry.BaseUrl)/$remotePath"
 
     if ((Test-Path $localPath) -and -not $Force.IsPresent) {
         Write-Host "  [skip] $localName (already exists, use -Force to re-download)"

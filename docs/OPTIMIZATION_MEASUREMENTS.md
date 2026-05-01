@@ -42,6 +42,7 @@ remain the source of truth for methodology and caveats.
 | `phase_6_device_tensors` | `0.7.4-10` | pinned host output buffers via CUDA and vectorized FP16-to-FP32 conversion via F16C intrinsics | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `2.7%`; `ort_run` improved about `3.7%`; `frame_prepare_inputs` improved about `9.1%` | keep; modest but real DMA and vectorization win with correct `memory_mode: pinned` metadata |
 | `phase_7_gpu_resize` | `0.7.4-11` | device-resident tensor flow and GPU-accelerated NPP bilinear resize | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `28%`; `frame_extract_outputs_resize` down to `27ms` | keep; massive win effectively eliminating the strongest remaining CPU hotspot |
 | `phase_8_gpu_prepare` | `0.7.4-12` | GPU-accelerated input preparation via NPP resizing, splitting, and normalization | full-frame `2048 -> 3840x2160` OFX-style harness `frame_prepare_inputs` improved by `~74%` | keep; effectively eliminates the final CPU bottleneck, achieving end-to-end device residence |
+| `phase_9_blue_dedicated_screen_color` | `0.8.3-win.1` (proposed) | dedicated CorridorKeyBlue catalog + screen-color OFX selection / render branching + despill `screen_channel` generalization | green-path bench gate within +1.5% (`avg_latency_ms`) and +4.3% (`ort_run`); blue dedicated baseline pending FP32-I/O wrapper re-export | gate passes; blue 512 measured; 1024 / 1536 / 2048 to be re-recorded after the in-flight re-export |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -959,6 +960,86 @@ package must replace the first one before any user-visible conclusion is kept.
   for the same symptom. The CLI and `ofx_benchmark_harness` default
   behavior is unchanged because they do not run the runtime server
   entrypoint.
+
+### `phase_9_blue_dedicated_screen_color`
+
+- Source state: branch `feat/blue-screen-dedicated-model-rtx` rebased on
+  `main` at `6268dc8`. Adds the dedicated CorridorKeyBlue catalog entries,
+  screen-color-aware OFX selection / render branching, the despill
+  generalization with `screen_channel`, and the export-pipeline tooling
+  needed to turn `CorridorKeyBlue_1.0.pth` into the four-rung FP16 ladder.
+- Display version label: pending (`0.8.3-win.1` proposed once packaged)
+- Local test artifact path: pending packaging
+- Corpus output root: `build/runtime_corpus_after/` (this branch),
+  `build/runtime_corpus_before/` (main at `6268dc8`)
+- Bench gate (the metric CLAUDE.md requires for any render hot-path edit):
+  - matrix: `synthetic_primary` at `1024` on RTX 3080, TensorRT RTX EP,
+    `corridorkey_fp16_1024.onnx` (the green production model -- the gate
+    measures whether the new screen-color branching regresses the green
+    path).
+  - `cold_latency_ms`: 363.39 -> 380.61 (+4.7%, within the 10% threshold)
+  - `avg_latency_ms`: 101.29 -> 102.77 (+1.5%, within the 10% threshold)
+  - `ort_run`: 748.99 -> 781.26 (+4.3%, within the 10% threshold)
+  - `frame_prepare_inputs`: 51.50 -> 45.63 (-11.4%, run-to-run variance)
+  - All other stages within +/-5% of the noise floor on this single host.
+- Blue dedicated baselines (separate from the gate, recorded for future
+  comparisons; same RTX 3080, TensorRT RTX EP, `synthetic` benchmark):
+  - `corridorkey_blue_fp16_512.onnx`: `avg_latency_ms` `27.49 ms`,
+    `cold_latency_ms` `342.6 ms`, `ort_run` `427.20 ms` cumulative.
+    Production-fast, ships.
+  - `corridorkey_blue_fp16_1024.onnx`: TensorRT and CUDA EP both produce
+    all-NaN inference output. CPUExecutionProvider on the same ONNX
+    returns finite outputs across all 1860 intermediate tensors when
+    captured via shape-inferred value_info, so the model is
+    mathematically valid -- the corruption is in the GPU EP execution.
+    Same effect reproduces with and without onnxsim, with and without
+    `force_fp16_initializers`, and across `op_block_list` strategies
+    that cover the LayerNorm decomposition. Identical graph topology
+    to the green 1024 ONNX (1812 nodes, 27 Casts, same op counts, same
+    initializer dtypes); the only difference is initializer values, so
+    the issue is weight-driven FP16 instability that surfaces only on
+    GPU EPs. Removed from the local model pack pending a TensorRT-side
+    fix; runtime falls back to the canonicalization workaround per the
+    documented "Windows Model Availability Policy" in
+    `RELEASE_GUIDELINES.md`.
+  - `corridorkey_blue_fp16_1536.onnx` and `corridorkey_blue_fp16_2048.onnx`:
+    the export path forces FP16 at trace time for >=1536px, producing
+    ONNXes with FP16 I/O. TensorRT serves those correctly (inference
+    finite) but the runtime's FP32 host pipeline cannot fuse with the
+    FP16 entry point, measuring `avg_latency_ms` ~28 s and ~71 s
+    respectively against `~245 ms` and `~484 ms` for the production
+    green ladder at the same resolutions. Same removal rationale:
+    runtime falls back to canonicalization until an FP32-I/O production
+    layout is reproducible for blue at >=1024 without re-triggering the
+    TensorRT FP16 NaN.
+- Diagnostic finding logged for the audit trail:
+  - The original symptom: `optimize_model.py` invokes
+    `onnxruntime.transformers.float16.convert_float_to_float16` with
+    `force_fp16_initializers=True` and `keep_io_types=True`. This works
+    for the green checkpoint at every resolution and for the blue
+    checkpoint at 512px, but corrupts the blue 1024 dynamic export --
+    the resulting FP16 ONNX returns all-NaN inference output on
+    TensorRT and CUDA execution providers.
+  - Cast variants tried (all produced NaN on TensorRT): default
+    settings, `force_fp16_initializers=False`, `op_block_list=['Softmax']`,
+    `op_block_list=['Sqrt']`, `['ReduceMean']`, `['Div']`, `['Sqrt','ReduceMean']`.
+    Variants that produced finite output but at ~80x latency hit (171
+    Cast nodes vs the green 27 because op_block_list inserts Cast
+    around every blocked op): `op_block_list=['Pow']`, `['Pow','Sqrt']`,
+    `['Pow','Sqrt','ReduceMean','Div']`, `['Pow','Sqrt','ReduceMean','Div','Softmax']`.
+    Skipping onnxsim entirely (running cast on the raw export) also NaN.
+    Switching to `onnxconverter_common.float16` produced a model whose
+    Cast outputs failed type validation at ORT load time.
+  - The CPU vs GPU divergence on identical FP16 weights is the smoking
+    gun. ORT bug, TensorRT FP16 path quirk on this specific weight
+    distribution, or both. Tracking as a follow-up.
+- Keep or revise decision:
+  keep the green-path bench gate result (the runtime change is correct).
+  The blue dedicated artifact at 512px ships; 1024 / 1536 / 2048 are
+  recorded as known-blocked in the model pack until the GPU EP NaN is
+  isolated, and the OFX render falls back to the canonicalization
+  workaround on the green model whenever a missing blue rung is
+  requested. Re-revisit this entry once the GPU NaN root cause lands.
 
 ### `phase_8_gpu_prepare`
 

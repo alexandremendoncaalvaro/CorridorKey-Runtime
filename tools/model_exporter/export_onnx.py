@@ -177,8 +177,23 @@ def export_resolution(args, resolution):
     model = ONNXWrapper(base_model)
     dummy_x = torch.randn(1, 4, resolution, resolution, device=device)
 
-    if resolution >= 1536:
-        print(f"[Info] Forcing FP16 mode for {resolution}px to save memory...")
+    # FP16 export at trace time produces an ONNX with FP16 weights AND FP16
+    # I/O. TensorRT serves that ONNX correctly but the runtime's FP32 host
+    # pipeline costs roughly 100x more per frame on RTX 3080 because the EP
+    # cannot fuse FP32 host pinned input with an FP16-typed entry point.
+    # The production layout (FP32 I/O + FP16 internal weights with Cast only
+    # at the I/O boundary) is produced by `optimize_model.py` running
+    # `convert_float_to_float16(keep_io_types=True)` on a plain FP32 export.
+    # Default policy: never force FP16 at trace time; let optimize_model
+    # produce the canonical layout. Resolutions beyond `--fp16-from-resolution`
+    # opt in if the host cannot fit the FP32 trace; this preserves the
+    # legacy >=1536 escape valve for hosts with limited RAM.
+    fp16_resolutions = getattr(args, 'fp16_resolutions', None) or []
+    fp16_threshold = getattr(args, 'fp16_from_resolution', 1536)
+    use_fp16 = (resolution in fp16_resolutions) or (resolution >= fp16_threshold)
+    if use_fp16:
+        print(f"[Info] Forcing FP16 export at trace time for {resolution}px "
+              f"(--fp16-resolutions opt-in or --fp16-from-resolution threshold).")
         model = model.half()
         dummy_x = dummy_x.half()
 
@@ -235,6 +250,18 @@ def main():
                              "<base>_<res>.onnx form, which is what optimize_model.py and "
                              "the windows-rtx pipeline expect. Use this to enable TensorRT "
                              "at 1536+ resolutions without breaking downstream naming.")
+    parser.add_argument("--fp16-resolutions", type=int, nargs="+", default=[],
+                        help="Resolutions to export directly in FP16 (model.half() before "
+                             "torch.onnx.export). Bypasses the post-export "
+                             "onnxconverter_common cast that produced all-NaN models for "
+                             "CorridorKeyBlue at 1024px in TensorRT and CUDA. Use this "
+                             "for any resolution where the cast path is suspect. "
+                             "Resolutions >= --fp16-from-resolution always use FP16 export "
+                             "regardless of this list.")
+    parser.add_argument("--fp16-from-resolution", type=int, default=1536,
+                        help="Resolutions at or above this threshold always use FP16 export "
+                             "(default: 1536, which is the documented memory ceiling for "
+                             "FP32 tracing of the Hiera_base_plus model).")
     parser.add_argument("--repo-path", type=str,
                         help="Path to local CorridorKey repo (cloned automatically if omitted). "
                              "When omitted, the upstream is cloned and pinned to "
