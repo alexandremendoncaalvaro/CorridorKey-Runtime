@@ -158,12 +158,15 @@ def export_resolution(args, resolution):
         warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
         from torch.nn.attention import SDPBackend, sdpa_kernel
 
-        # Force the legacy TorchScript-based exporter (dynamo=False). The Hiera model uses 5D
-        # SDPA tensors [batch, units, tokens, heads, dim] that the dynamo exporter cannot
-        # translate. With SDPBackend.MATH, PyTorch decomposes SDPA into matmul+softmax before
-        # the tracer sees it — matching the PyTorch 2.3.1 behavior that produced existing models.
+        # Use the TorchScript-based exporter that ships in torch 2.3.1+cu121
+        # (the version pinned in pyproject.toml). The Hiera model uses 5D SDPA
+        # tensors [batch, units, tokens, heads, dim] that the dynamo-based
+        # exporter (introduced in torch 2.5) cannot translate. SDPBackend.MATH
+        # decomposes SDPA into matmul+softmax before the tracer sees it.
+        # The legacy exporter is the only torch.onnx.export() path in 2.3.1, so
+        # there is no `dynamo=` kwarg to set.
         with sdpa_kernel(SDPBackend.MATH):
-            torch.onnx.export(model, dummy_x, out_path, dynamo=False, **export_kwargs)
+            torch.onnx.export(model, dummy_x, out_path, **export_kwargs)
     print(f"[Success] Exported ONNX {'static' if static else 'FP32'} {resolution}px model to {out_path}")
 
 
