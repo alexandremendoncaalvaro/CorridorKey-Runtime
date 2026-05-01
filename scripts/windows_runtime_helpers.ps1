@@ -1103,13 +1103,16 @@ function Get-CorridorKeyPreparedModelList {
 }
 
 function Get-CorridorKeyWindowsRtxPromotedModelList {
-    # Bundle-facing list. Defaults to "all" so the OFX bundle inventory always
-    # advertises both green and blue rungs as expected; missing blue files are
-    # reported but do not block packaging per the Windows Model Availability
-    # Policy in docs/RELEASE_GUIDELINES.md.
+    # Bundle-facing list. Defaults to "green" so the existing package-ofx +
+    # certify-rtx-artifacts flow stays bit-for-bit compatible while blue is
+    # not yet promoted through the canonical pipeline. Pass -Variant blue or
+    # -Variant all explicitly to advertise blue in the OFX bundle inventory
+    # (the runtime catalog already declares blue intent via packaged_for_windows
+    # = true; missing blue files surface as missing in bundle_validation.json
+    # per the documented Windows Model Availability Policy).
     param(
         [ValidateSet("green", "blue", "all")]
-        [string]$Variant = "all"
+        [string]$Variant = "green"
     )
 
     return @(Get-CorridorKeyPreparedModelList -Variant $Variant)
