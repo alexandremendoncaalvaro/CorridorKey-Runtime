@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -283,9 +284,14 @@ inline std::filesystem::path mlx_pack_path(const std::filesystem::path& models_r
 }
 
 inline std::filesystem::path artifact_path_for_backend(const std::filesystem::path& models_root,
-                                                       Backend backend, int resolution) {
+                                                       Backend backend, int resolution,
+                                                       std::string_view screen_color = "green") {
     if (backend == Backend::MLX) {
         return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
+    }
+    if (screen_color == "blue") {
+        return models_root /
+               ("corridorkey_blue_fp16_" + std::to_string(resolution) + ".onnx");
     }
     return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
 }
@@ -314,7 +320,8 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    std::string_view screen_color = "green") {
     const int requested_resolution =
         resolve_target_resolution(quality_mode, input_width, input_height);
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -325,6 +332,22 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
         coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!expected) {
         return {};
+    }
+
+    // When the user picked a Blue screen, surface the dedicated artifact in
+    // diagnostics so missing-blue messages stay actionable. Falls in front of
+    // the existing green ladder so error text reads "expected blue, got
+    // green" naturally. The actual selection prefers blue separately in
+    // quality_artifact_candidates below.
+    if (screen_color == "blue" && (backend == Backend::TensorRT || backend == Backend::CUDA)) {
+        std::vector<std::filesystem::path> result;
+        result.reserve(expected->size() + 1);
+        result.push_back(
+            artifact_path_for_backend(models_root, backend, requested_resolution, "blue"));
+        for (const auto& path : *expected) {
+            result.push_back(path);
+        }
+        return result;
     }
 
     return *expected;
@@ -349,7 +372,8 @@ inline std::string missing_quality_artifact_message(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    std::string_view screen_color = "green") {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -361,10 +385,17 @@ inline std::string missing_quality_artifact_message(
         return expected.error().message;
     }
 
+    std::vector<std::filesystem::path> expected_paths = *expected;
+    if (screen_color == "blue" && (backend == Backend::TensorRT || backend == Backend::CUDA)) {
+        expected_paths.insert(
+            expected_paths.begin(),
+            artifact_path_for_backend(models_root, backend, requested_resolution, "blue"));
+    }
+
     return missing_artifact_message("Requested quality " +
                                         std::string(quality_mode_label(quality_mode)) +
                                         " is missing the required model artifact",
-                                    models_root, *expected);
+                                    models_root, expected_paths);
 }
 inline bool path_exists(const std::filesystem::path& path) {
     std::error_code error;
@@ -435,25 +466,51 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false) {
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    std::string_view screen_color = "green") {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
+
+    std::vector<QualityArtifactSelection> selections;
+
+    // Prepend the dedicated blue artifact when the user picked a Blue screen
+    // and the file is staged. The downstream engine-creation loop will pick
+    // the first candidate that actually loads, so green-rung selections keep
+    // their role as the canonicalization fallback when blue is missing.
+    if (screen_color == "blue" && (backend == Backend::TensorRT || backend == Backend::CUDA)) {
+        const auto blue_path =
+            artifact_path_for_backend(models_root, backend, requested_resolution, "blue");
+        std::error_code blue_ec;
+        if (std::filesystem::exists(blue_path, blue_ec)) {
+            QualityArtifactSelection blue_selection{};
+            blue_selection.executable_model_path = blue_path;
+            blue_selection.requested_resolution = requested_resolution;
+            blue_selection.effective_resolution = requested_resolution;
+            blue_selection.used_fallback = false;
+            blue_selection.coarse_to_fine = false;
+            selections.push_back(std::move(blue_selection));
+        }
+    }
+
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     DeviceInfo device{"", available_memory_mb, backend};
     auto candidates = app::quality_artifact_candidates_for_request(
         models_root, device, requested_resolution, allow_lower_resolution_fallback, fallback_mode,
         coarse_resolution_override, allow_unrestricted_quality_attempt);
-    if (!candidates) {
-        return {};
+    if (candidates) {
+        for (auto& candidate : *candidates) {
+            selections.push_back(std::move(candidate));
+        }
     }
-    return *candidates;
+    return selections;
 }
 
 inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    std::string_view screen_color = "green");
 
 inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
     const RuntimeCapabilities& capabilities, const DeviceInfo& detected_device,
@@ -538,11 +595,12 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
 inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, std::int64_t available_memory_mb, QualityFallbackMode fallback_mode,
-    int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
+    int coarse_resolution_override, bool allow_unrestricted_quality_attempt,
+    std::string_view screen_color) {
     auto candidates =
         quality_artifact_candidates(models_root, backend, quality_mode, input_width, input_height,
                                     available_memory_mb, fallback_mode, coarse_resolution_override,
-                                    allow_unrestricted_quality_attempt);
+                                    allow_unrestricted_quality_attempt, screen_color);
     if (!candidates.empty()) {
         return candidates.front();
     }

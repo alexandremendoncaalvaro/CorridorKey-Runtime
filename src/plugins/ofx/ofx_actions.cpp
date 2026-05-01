@@ -475,10 +475,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
                         {"Green", "Blue"},
-                        "Select the dominant screen color. Blue input is normalized into "
-                        "CorridorKey's internal green domain using a screen-aware color mapping "
-                        "before rough matte fallback, inference, Recover Original Details, and "
-                        "despill, then restored before color outputs.",
+                        "Select the dominant screen color. Each color routes to its dedicated "
+                        "CorridorKey model: Green uses the original weights and cleans green "
+                        "spill; Blue uses CorridorKeyBlue and cleans blue spill natively. "
+                        "Installs missing the dedicated blue pack fall back to a "
+                        "canonicalization workaround on the green model and log a one-time "
+                        "warning.",
                         "setup_group");
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityPreview,

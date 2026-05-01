@@ -1073,21 +1073,46 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 }
 
 function Get-CorridorKeyPreparedModelList {
-    return @(
+    # Defaults to "green" so the existing prepare-rtx flow keeps regenerating
+    # only the green ladder from CorridorKey_v1.0.pth. Pass -Variant blue to
+    # produce the dedicated CorridorKeyBlue ladder; pass -Variant all to
+    # ask for both (typically only used by inventory/bundle reporting).
+    param(
+        [ValidateSet("green", "blue", "all")]
+        [string]$Variant = "green"
+    )
+
+    $green = @(
         "corridorkey_fp16_512.onnx",
         "corridorkey_fp16_1024.onnx",
         "corridorkey_fp16_1536.onnx",
         "corridorkey_fp16_2048.onnx"
     )
+    $blue = @(
+        "corridorkey_blue_fp16_512.onnx",
+        "corridorkey_blue_fp16_1024.onnx",
+        "corridorkey_blue_fp16_1536.onnx",
+        "corridorkey_blue_fp16_2048.onnx"
+    )
+
+    switch ($Variant) {
+        "green" { return $green }
+        "blue"  { return $blue }
+        default { return $green + $blue }
+    }
 }
 
 function Get-CorridorKeyWindowsRtxPromotedModelList {
-    return @(
-        "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_1024.onnx",
-        "corridorkey_fp16_1536.onnx",
-        "corridorkey_fp16_2048.onnx"
+    # Bundle-facing list. Defaults to "all" so the OFX bundle inventory always
+    # advertises both green and blue rungs as expected; missing blue files are
+    # reported but do not block packaging per the Windows Model Availability
+    # Policy in docs/RELEASE_GUIDELINES.md.
+    param(
+        [ValidateSet("green", "blue", "all")]
+        [string]$Variant = "all"
     )
+
+    return @(Get-CorridorKeyPreparedModelList -Variant $Variant)
 }
 
 function Get-CorridorKeyIntermediateModelList {

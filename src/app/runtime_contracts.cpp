@@ -5,6 +5,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 #include <utility>
 
 #include "../common/runtime_paths.hpp"
@@ -250,7 +251,8 @@ ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
                                    bool packaged_for_windows,
                                    std::vector<std::string> validated_platforms,
                                    std::vector<std::string> intended_platforms,
-                                   std::vector<std::string> validated_hardware_tiers) {
+                                   std::vector<std::string> validated_hardware_tiers,
+                                   std::string screen_color = "green") {
     ModelCatalogEntry entry;
     entry.variant = variant;
     entry.resolution = resolution;
@@ -266,6 +268,7 @@ ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
     entry.validated_platforms = std::move(validated_platforms);
     entry.intended_platforms = std::move(intended_platforms);
     entry.validated_hardware_tiers = std::move(validated_hardware_tiers);
+    entry.screen_color = std::move(screen_color);
     return entry;
 }
 
@@ -329,9 +332,11 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset) {
+    const std::optional<PresetDefinition>& preset, std::string_view screen_color) {
+    const bool prefer_blue = (screen_color == "blue");
+
     auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
-        if (preset.has_value()) {
+        if (preset.has_value() && !prefer_blue) {
             auto preset_model = find_model_by_filename(preset->recommended_model);
             if (preset_model.has_value() &&
                 has_validated_tier_for_device(*preset_model, requested_device, capabilities)) {
@@ -339,16 +344,32 @@ std::optional<ModelCatalogEntry> default_model_for_request(
             }
         }
 
+        const auto pick = [&](const char* blue_name,
+                              const char* green_name) -> std::optional<ModelCatalogEntry> {
+            if (prefer_blue) {
+                if (auto blue = find_model_by_filename(blue_name);
+                    blue.has_value() && blue->packaged_for_windows) {
+                    return blue;
+                }
+                // Blue requested but the dedicated artifact is not in the
+                // catalog (or not packaged for Windows): fall back to the
+                // green rung. The OFX render path detects this by comparing
+                // the returned entry's screen_color against the requested
+                // "blue" and then runs the canonicalization workaround.
+            }
+            return find_model_by_filename(green_name);
+        };
+
         if (requested_device.available_memory_mb >= 24000) {
-            return find_model_by_filename("corridorkey_fp16_2048.onnx");
+            return pick("corridorkey_blue_fp16_2048.onnx", "corridorkey_fp16_2048.onnx");
         }
         if (requested_device.available_memory_mb >= 16000) {
-            return find_model_by_filename("corridorkey_fp16_1536.onnx");
+            return pick("corridorkey_blue_fp16_1536.onnx", "corridorkey_fp16_1536.onnx");
         }
         if (requested_device.available_memory_mb >= 10000) {
-            return find_model_by_filename("corridorkey_fp16_1024.onnx");
+            return pick("corridorkey_blue_fp16_1024.onnx", "corridorkey_fp16_1024.onnx");
         }
-        return find_model_by_filename("corridorkey_fp16_512.onnx");
+        return pick("corridorkey_blue_fp16_512.onnx", "corridorkey_fp16_512.onnx");
     };
 
     auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
@@ -423,6 +444,22 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Extreme quality Windows RTX pack for 24 GB VRAM systems.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_24gb"}),
+        make_model_entry("fp16-blue", 512, "corridorkey_blue_fp16_512.onnx", "onnx", "tensorrt",
+                         "Lower-memory Windows RTX pack trained on dedicated blue-screen plates.",
+                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_8gb"}, "blue"),
+        make_model_entry("fp16-blue", 1024, "corridorkey_blue_fp16_1024.onnx", "onnx", "tensorrt",
+                         "Maximum quality Windows RTX blue-screen pack for 10 GB and higher tiers.",
+                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_10gb_plus"}, "blue"),
+        make_model_entry("fp16-blue", 1536, "corridorkey_blue_fp16_1536.onnx", "onnx", "tensorrt",
+                         "High-fidelity Windows RTX blue-screen pack for 16 GB VRAM systems.",
+                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_16gb_plus"}, "blue"),
+        make_model_entry("fp16-blue", 2048, "corridorkey_blue_fp16_2048.onnx", "onnx", "tensorrt",
+                         "Extreme quality Windows RTX blue-screen pack for 24 GB VRAM systems.",
+                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_24gb"}, "blue"),
         make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
                          false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
@@ -715,8 +752,9 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset) {
-    return corridorkey::default_model_for_request(capabilities, requested_device, preset);
+    const std::optional<PresetDefinition>& preset, std::string_view screen_color) {
+    return corridorkey::default_model_for_request(capabilities, requested_device, preset,
+                                                  screen_color);
 }
 
 std::string backend_to_string(Backend backend) {

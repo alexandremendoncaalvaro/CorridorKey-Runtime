@@ -617,6 +617,38 @@ TEST_CASE("ofx runtime panel fields are read-only dynamic strings", "[unit][ofx]
     REQUIRE(kRuntimeStatusEnabled == 0);
 }
 
+TEST_CASE("artifact_path_for_backend resolves blue artifacts when screen_color='blue'",
+          "[unit][ofx][screen-color]") {
+    const std::filesystem::path models_root = "/fake/models";
+
+    SECTION("TensorRT + green returns the legacy fp16 filename") {
+        const auto path = artifact_path_for_backend(models_root, Backend::TensorRT, 1024, "green");
+        REQUIRE(path.filename().string() == "corridorkey_fp16_1024.onnx");
+    }
+
+    SECTION("TensorRT + blue returns the dedicated blue filename") {
+        const auto path = artifact_path_for_backend(models_root, Backend::TensorRT, 1024, "blue");
+        REQUIRE(path.filename().string() == "corridorkey_blue_fp16_1024.onnx");
+    }
+
+    SECTION("CUDA + blue returns the dedicated blue filename") {
+        const auto path = artifact_path_for_backend(models_root, Backend::CUDA, 2048, "blue");
+        REQUIRE(path.filename().string() == "corridorkey_blue_fp16_2048.onnx");
+    }
+
+    SECTION("MLX path is unaffected by screen_color") {
+        const auto path_green = artifact_path_for_backend(models_root, Backend::MLX, 512, "green");
+        const auto path_blue = artifact_path_for_backend(models_root, Backend::MLX, 512, "blue");
+        REQUIRE(path_green == path_blue);
+        REQUIRE(path_green.filename().string() == "corridorkey_mlx_bridge_512.mlxfn");
+    }
+
+    SECTION("Default screen_color preserves green semantics") {
+        const auto path = artifact_path_for_backend(models_root, Backend::TensorRT, 1024);
+        REQUIRE(path.filename().string() == "corridorkey_fp16_1024.onnx");
+    }
+}
+
 TEST_CASE("Path B placeholder Backend::Auto must not yield int8 quality candidates",
           "[unit][ofx][regression]") {
     // The v0.8.0 Path B refactor populates the .ofx-side DeviceInfo with

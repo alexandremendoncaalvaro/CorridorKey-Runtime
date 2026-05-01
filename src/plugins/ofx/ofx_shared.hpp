@@ -254,6 +254,11 @@ struct InstanceData {
     int temporal_height = 0;
 
     AlphaEdgeState alpha_edge_state = {};
+
+    // One-shot guard so the "blue requested but dedicated artifact missing"
+    // warning fires once per instance instead of per frame. Reset implicitly
+    // on plugin reload because InstanceData is recreated.
+    bool blue_fallback_warning_logged = false;
 };
 
 class SharedFrameCache;
@@ -313,12 +318,13 @@ std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
     int input_width, int input_height, std::int64_t available_memory_mb,
     QualityFallbackMode fallback_mode, int coarse_resolution_override,
-    bool allow_unrestricted_quality_attempt);
+    bool allow_unrestricted_quality_attempt, std::string_view screen_color);
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
                                int input_height = 0,
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
                                int coarse_resolution_override = 0,
-                               RefinementMode refinement_mode = RefinementMode::Auto);
+                               RefinementMode refinement_mode = RefinementMode::Auto,
+                               std::string_view screen_color = "green");
 bool allow_unrestricted_quality_attempt_for_request(const InstanceData& data, int quality_mode,
                                                     const DeviceInfo& requested_device);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,

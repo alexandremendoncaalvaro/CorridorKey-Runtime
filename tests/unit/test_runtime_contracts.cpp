@@ -309,6 +309,67 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_universal_model->filename == "corridorkey_fp16_1024.onnx");
 }
 
+TEST_CASE("blue screen routes to dedicated CorridorKeyBlue artifacts on Windows RTX",
+          "[unit][runtime][screen-color]") {
+    RuntimeCapabilities windows_capabilities;
+    windows_capabilities.platform = "windows";
+    windows_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
+
+    auto windows_default = default_preset_for_capabilities(windows_capabilities);
+
+    SECTION("Green request returns green catalog entry") {
+        auto entry = default_model_for_request(
+            windows_capabilities, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+            windows_default, "green");
+        REQUIRE(entry.has_value());
+        REQUIRE(entry->filename == "corridorkey_fp16_1024.onnx");
+        REQUIRE(entry->screen_color == "green");
+    }
+
+    SECTION("Blue request at 10 GB tier returns blue 1024 entry") {
+        auto entry = default_model_for_request(
+            windows_capabilities, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+            windows_default, "blue");
+        REQUIRE(entry.has_value());
+        REQUIRE(entry->filename == "corridorkey_blue_fp16_1024.onnx");
+        REQUIRE(entry->screen_color == "blue");
+    }
+
+    SECTION("Blue request at 24 GB tier returns blue 2048 entry") {
+        auto entry = default_model_for_request(
+            windows_capabilities, DeviceInfo{"RTX 4090", 24576, Backend::TensorRT},
+            windows_default, "blue");
+        REQUIRE(entry.has_value());
+        REQUIRE(entry->filename == "corridorkey_blue_fp16_2048.onnx");
+        REQUIRE(entry->screen_color == "blue");
+    }
+
+    SECTION("Blue request at 8 GB tier returns blue 512 entry") {
+        auto entry = default_model_for_request(
+            windows_capabilities, DeviceInfo{"RTX 3070", 8192, Backend::TensorRT},
+            windows_default, "blue");
+        REQUIRE(entry.has_value());
+        REQUIRE(entry->filename == "corridorkey_blue_fp16_512.onnx");
+        REQUIRE(entry->screen_color == "blue");
+    }
+
+    SECTION("Default screen_color argument preserves green semantics") {
+        auto entry = default_model_for_request(
+            windows_capabilities, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+            windows_default);
+        REQUIRE(entry.has_value());
+        REQUIRE(entry->filename == "corridorkey_fp16_1024.onnx");
+        REQUIRE(entry->screen_color == "green");
+    }
+
+    SECTION("find_model_by_filename surfaces blue entries with screen_color='blue'") {
+        auto blue_entry = find_model_by_filename("corridorkey_blue_fp16_1024.onnx");
+        REQUIRE(blue_entry.has_value());
+        REQUIRE(blue_entry->screen_color == "blue");
+        REQUIRE(blue_entry->packaged_for_windows);
+    }
+}
+
 TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
     REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3070", 8192, Backend::TensorRT}) ==
             512);

@@ -536,12 +536,15 @@ TEST_CASE("describe_in_context makes blue-screen canonicalization explicit in OF
     CHECK(prop_strings(descriptor.props, kOfxPropPluginDescription)
               .front()
               .find("chroma screen keyer") != std::string::npos);
-    CHECK(
-        prop_strings(screen_color_props, kOfxParamPropHint).front().find("internal green domain") !=
-        std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
               .front()
-              .find("restored before color outputs") != std::string::npos);
+              .find("dedicated CorridorKey model") != std::string::npos);
+    CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
+              .front()
+              .find("CorridorKeyBlue") != std::string::npos);
+    CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
+              .front()
+              .find("canonicalization workaround") != std::string::npos);
     CHECK(prop_strings(despill_props, kOfxParamPropHint).front().find("selected screen color") !=
           std::string::npos);
     CHECK(prop_strings(spill_method_props, kOfxParamPropHint)

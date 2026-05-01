@@ -1259,7 +1259,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height, QualityFallbackMode fallback_mode,
-                               int coarse_resolution_override, RefinementMode refinement_mode) {
+                               int coarse_resolution_override, RefinementMode refinement_mode,
+                               std::string_view screen_color) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +
@@ -1332,7 +1333,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     auto selections = quality_artifact_candidates(
         data->models_root, requested_device.backend, requested_quality_mode, input_width,
         input_height, requested_device.available_memory_mb, fallback_mode,
-        coarse_resolution_override, allow_unrestricted_quality_attempt);
+        coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
     const auto original_selections = selections;
     if (!manual_override_warning.empty()) {
         log_message("ensure_engine_for_quality", manual_override_warning);
@@ -1341,11 +1342,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         const auto expected_artifacts = expected_quality_artifact_paths(
             data->models_root, requested_device.backend, requested_quality_mode, input_width,
             input_height, requested_device.available_memory_mb, fallback_mode,
-            coarse_resolution_override, allow_unrestricted_quality_attempt);
+            coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
         data->last_error = missing_quality_artifact_message(
             data->models_root, requested_device.backend, requested_quality_mode, input_width,
             input_height, requested_device.available_memory_mb, fallback_mode,
-            coarse_resolution_override, allow_unrestricted_quality_attempt);
+            coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
         if (auto expected_artifact = primary_expected_artifact_path(expected_artifacts);
             expected_artifact.has_value()) {
             set_runtime_panel_state_for_failed_quality_request(

@@ -92,21 +92,32 @@ def main():
         default="portable-ort",
         help="Select the optimization profile for the generated artifacts."
     )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        choices=("green", "blue"),
+        default="green",
+        help="Screen-color variant. 'green' keeps the historical "
+             "corridorkey_{fp32,fp16}_<res>.onnx names; 'blue' switches to "
+             "corridorkey_blue_{fp32,fp16}_<res>.onnx so the dedicated "
+             "CorridorKeyBlue artifacts can sit alongside green in models/."
+    )
     args = parser.parse_args()
 
     models_dir = os.path.abspath(args.dir)
+    prefix = "corridorkey" if args.variant == "green" else "corridorkey_blue"
 
     resolutions = [512, 768, 1024, 1536, 2048]
 
     for res in resolutions:
-        raw_path = os.path.join(models_dir, f"corridorkey_fp32_{res}.onnx")
+        raw_path = os.path.join(models_dir, f"{prefix}_fp32_{res}.onnx")
         if not os.path.exists(raw_path):
             print(f"[Skip] {raw_path} not found.")
             continue
 
         # Target names
-        fp32_opt_path = os.path.join(models_dir, f"corridorkey_fp32_{res}_opt.onnx")
-        fp16_opt_path = os.path.join(models_dir, f"corridorkey_fp16_{res}.onnx")
+        fp32_opt_path = os.path.join(models_dir, f"{prefix}_fp32_{res}_opt.onnx")
+        fp16_opt_path = os.path.join(models_dir, f"{prefix}_fp16_{res}.onnx")
 
         if args.target == "windows-rtx":
             simplify_and_convert_windows_rtx(raw_path, raw_path, fp16_opt_path)

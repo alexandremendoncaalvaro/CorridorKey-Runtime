@@ -386,6 +386,12 @@ struct InferenceParams {
     int target_resolution = 0;  // 0 = Auto-detect based on hardware
     float despill_strength = 0.5F;
     int spill_method = 0;  // 0=Average, 1=DoubleLimit, 2=Neutral
+    // Channel index of the dominant screen color (0=R, 1=G, 2=B). Drives the
+    // generalized despill so a blue-screen render cleans channel 2 directly,
+    // instead of relying on a green-domain canonicalization workaround. The
+    // default 1 (green) preserves the historical behavior for every caller
+    // that does not opt into screen-color routing.
+    int despill_screen_channel = 1;
     bool auto_despeckle = false;
     int despeckle_size = 400;
     float refiner_scale = 1.0F;
@@ -444,6 +450,11 @@ struct ModelCatalogEntry {
     std::vector<std::string> validated_platforms = {};
     std::vector<std::string> intended_platforms = {};
     std::vector<std::string> validated_hardware_tiers = {};
+    // Dominant screen color the model was trained on. "green" for the original
+    // CorridorKey checkpoints; "blue" for the dedicated CorridorKeyBlue weights.
+    // Drives selection routing in default_model_for_request and lets the OFX
+    // render path detect when a Blue request fell back to a green artifact.
+    std::string screen_color = "green";
 };
 
 /**

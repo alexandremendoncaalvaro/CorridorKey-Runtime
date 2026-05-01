@@ -1466,7 +1466,8 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
         on_stage, "post_despill",
         [&]() {
             despill(result.foreground.view(), params.despill_strength,
-                    static_cast<SpillMethod>(params.spill_method));
+                    static_cast<SpillMethod>(params.spill_method),
+                    params.despill_screen_channel);
         },
         1);
 

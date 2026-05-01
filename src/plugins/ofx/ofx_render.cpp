@@ -150,6 +150,7 @@ bool update_color_management_status(InstanceData* data, InputColorRuntimeMode mo
 bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& rhs) {
     return lhs.target_resolution == rhs.target_resolution &&
            lhs.despill_strength == rhs.despill_strength && lhs.spill_method == rhs.spill_method &&
+           lhs.despill_screen_channel == rhs.despill_screen_channel &&
            lhs.auto_despeckle == rhs.auto_despeckle && lhs.despeckle_size == rhs.despeckle_size &&
            lhs.refiner_scale == rhs.refiner_scale &&
            lhs.alpha_hint_policy == rhs.alpha_hint_policy &&
@@ -730,14 +731,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     const ScreenColorMode screen_color_mode = screen_color_mode_from_choice(screen_color);
-    const ScreenColorTransform screen_color_transform =
-        make_screen_color_transform(rgb_view, screen_color_mode);
-    canonicalize_to_green_domain(rgb_view, screen_color_transform);
+    const std::string_view screen_color_label =
+        (screen_color_mode == ScreenColorMode::Blue) ? "blue" : "green";
+
     if (!ensure_engine_for_quality(
             data, quality_mode, width, height,
             quality_fallback_mode_from_choice(quality_fallback_mode),
             coarse_resolution_override_from_choice(coarse_resolution_override),
-            refinement_mode_from_choice(refinement_mode))) {
+            refinement_mode_from_choice(refinement_mode), screen_color_label)) {
         const std::string quality_error =
             data->last_error.empty() ? "Failed to switch quality mode." : data->last_error;
         if (is_fixed_quality_mode(quality_mode)) {
@@ -749,6 +750,34 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
         log_message("render", quality_error + " Using current engine.");
     }
+
+    // Decide which screen-color path to run now that the engine is bound. The
+    // dedicated CorridorKeyBlue artifact accepts blue plates natively, so the
+    // canonicalization workaround is only invoked when the user picked Blue
+    // but the install does not ship the dedicated weights.
+    const std::string loaded_artifact_filename =
+        data->model_path.empty() ? std::string{} : data->model_path.filename().string();
+    const bool loaded_model_is_blue =
+        loaded_artifact_filename.rfind("corridorkey_blue_", 0) == 0;
+    const bool blue_requested = (screen_color_mode == ScreenColorMode::Blue);
+    const bool blue_canonicalization_fallback = blue_requested && !loaded_model_is_blue;
+
+    ScreenColorTransform screen_color_transform;
+    if (blue_canonicalization_fallback) {
+        screen_color_transform = make_screen_color_transform(rgb_view, screen_color_mode);
+        if (!data->blue_fallback_warning_logged) {
+            log_message("render",
+                        "event=blue_fallback_active reason=dedicated_blue_artifact_missing "
+                        "running canonicalization workaround. Install the blue model pack "
+                        "to enable the dedicated path.");
+            data->blue_fallback_warning_logged = true;
+        }
+    } else {
+        screen_color_transform.mode = screen_color_mode;
+        screen_color_transform.is_identity = true;
+    }
+    canonicalize_to_green_domain(rgb_view, screen_color_transform);
+
     if (data->output_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->output_mode_param, time, &output_mode);
     }
@@ -872,6 +901,11 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         coarse_resolution_override_from_choice(coarse_resolution_override);
     params.despill_strength = static_cast<float>(despill_strength);
     params.spill_method = spill_method;
+    // Despill operates on the channel of whatever model produced the
+    // foreground. Dedicated blue weights leave the input in the blue domain,
+    // so spill cleaning targets channel 2; the green model (default and
+    // canonicalization fallback) keeps the historical channel-1 behavior.
+    params.despill_screen_channel = loaded_model_is_blue ? 2 : 1;
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
     params.refiner_scale = 1.0f;
