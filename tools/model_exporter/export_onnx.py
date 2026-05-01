@@ -21,22 +21,38 @@ def disable_torch_compile_for_export(torch_module):
     torch_module.compile = passthrough_compile
 
 
+# Empirically validated against the green and blue checkpoints currently in
+# C:\Dev\CorridorKey\CorridorKeyModule\checkpoints (CorridorKey_v1.0.pth from
+# 2026-04-14 and CorridorKeyBlue_1.0.pth from 2026-04-30): with this exact
+# upstream SHA, load_state_dict produces empty missing/unexpected key lists
+# after the pos_embed interpolation pass. Bumping this pin requires re-running
+# `uv run python export_onnx.py --ckpt <pth>` for both checkpoints and
+# confirming that "Missing keys" / "Unexpected keys" lines stay absent.
+NIKO_UPSTREAM_PIN = "422f9999d1d83323534d2da9d776086a3134050d"
+
+
 def clone_original_repo():
-    print("[Info] Cloning original CorridorKey repository for export dependencies...")
+    print(f"[Info] Cloning original CorridorKey repository (pinned to {NIKO_UPSTREAM_PIN[:12]})...")
     temp_dir = tempfile.mkdtemp(prefix="corridorkey_repo_")
     try:
+        # Full clone (no --depth) so we can checkout the pinned SHA. Shallow
+        # clones cannot reach arbitrary commits without server-side allowance.
         subprocess.run(
-            ["git", "clone", "--depth", "1", "https://github.com/nikopueringer/CorridorKey.git", temp_dir],
+            ["git", "clone", "https://github.com/nikopueringer/CorridorKey.git", temp_dir],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        subprocess.run(
+            ["git", "-C", temp_dir, "checkout", "--quiet", NIKO_UPSTREAM_PIN],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         return temp_dir
     except subprocess.CalledProcessError as e:
-        print(f"[Error] Failed to clone original repository: {e}")
+        print(f"[Error] Failed to clone or checkout pinned upstream: {e}")
         shutil.rmtree(temp_dir, ignore_errors=True)
         sys.exit(1)
 
 
-def load_model_with_pos_embed_interpolation(checkpoint_path, img_size):
+def load_model_with_pos_embed_interpolation(checkpoint_path, img_size, allow_key_drift=False):
     """Load GreenFormer with position embedding interpolation for arbitrary resolutions.
 
     Replicates the logic from CorridorKeyEngine._load_model() but works on all
@@ -86,10 +102,41 @@ def load_model_with_pos_embed_interpolation(checkpoint_path, img_size):
         new_state_dict[k] = v
 
     missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
-    if missing:
-        print(f"  [Warning] Missing keys: {missing}")
-    if unexpected:
-        print(f"  [Warning] Unexpected keys: {unexpected}")
+
+    # After the pos_embed interpolation pass, missing/unexpected lists must be
+    # empty. A non-empty list means the upstream GreenFormer architecture has
+    # drifted from the checkpoint we are loading -- strict=False would silently
+    # leave layers either untrained (missing) or unused (unexpected), producing
+    # an ONNX whose math no longer matches the original PyTorch model. Fail
+    # loudly so this never reaches a release. --allow-key-drift exists for
+    # deliberate upstream-bump or training experiments; never use it in CI or
+    # when packaging shipped models.
+    if missing or unexpected:
+        message_lines = [
+            "[Error] state_dict mismatch between checkpoint and GreenFormer.",
+            f"  checkpoint: {checkpoint_path}",
+            f"  resolution: {img_size}",
+        ]
+        if missing:
+            message_lines.append(f"  missing keys ({len(missing)}): {missing}")
+        if unexpected:
+            message_lines.append(f"  unexpected keys ({len(unexpected)}): {unexpected}")
+        message_lines.append(
+            "  Bump NIKO_UPSTREAM_PIN to a commit whose GreenFormer matches this "
+            "checkpoint, or pass --repo-path to a known-good local checkout."
+        )
+        if not allow_key_drift:
+            for line in message_lines:
+                print(line, file=sys.stderr)
+            print(
+                "  Pass --allow-key-drift to override (training experiments only -- "
+                "the resulting ONNX has untrained or stranded layers).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        for line in message_lines:
+            print(line.replace("[Error]", "[Warning]"))
+        print("  --allow-key-drift was set; continuing despite drift.")
 
     return model
 
@@ -113,7 +160,9 @@ def export_resolution(args, resolution):
     mode_label = "STATIC" if static else "DYNAMIC"
     print(f"\n[Info] === Exporting Resolution {resolution}x{resolution} ({mode_label}) ===")
 
-    base_model = load_model_with_pos_embed_interpolation(args.ckpt, resolution)
+    base_model = load_model_with_pos_embed_interpolation(
+        args.ckpt, resolution, allow_key_drift=getattr(args, 'allow_key_drift', False)
+    )
 
     class ONNXWrapper(torch.nn.Module):
         def __init__(self, model):
@@ -187,7 +236,14 @@ def main():
                              "the windows-rtx pipeline expect. Use this to enable TensorRT "
                              "at 1536+ resolutions without breaking downstream naming.")
     parser.add_argument("--repo-path", type=str,
-                        help="Path to local CorridorKey repo (cloned automatically if omitted)")
+                        help="Path to local CorridorKey repo (cloned automatically if omitted). "
+                             "When omitted, the upstream is cloned and pinned to "
+                             f"{NIKO_UPSTREAM_PIN[:12]} -- the SHA empirically validated against "
+                             "the green and blue checkpoints currently shipped.")
+    parser.add_argument("--allow-key-drift", action="store_true",
+                        help="Continue export even when the checkpoint's state_dict has missing or "
+                             "unexpected keys against the upstream GreenFormer. Default behavior is "
+                             "to fail hard so we never silently ship an ONNX with untrained layers.")
     args = parser.parse_args()
 
     repo_to_clean = None
