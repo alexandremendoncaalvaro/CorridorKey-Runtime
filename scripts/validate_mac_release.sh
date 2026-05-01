@@ -203,7 +203,6 @@ require_file "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn"
 if [ "$REQUIRE_MLX_2048" = "1" ]; then
     require_file "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn"
 fi
-require_file "${MODELS_DIR}/corridorkey_int8_512.onnx"
 
 require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx.safetensors" 300000000 "packaged MLX model pack"
 require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_512.mlxfn" 200000000 "packaged MLX bridge 512"
@@ -213,7 +212,6 @@ require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_1536.mlxfn" 20
 if [ "$REQUIRE_MLX_2048" = "1" ]; then
     require_real_model_artifact "${MODELS_DIR}/corridorkey_mlx_bridge_2048.mlxfn" 200000000 "packaged MLX bridge 2048"
 fi
-require_real_model_artifact "${MODELS_DIR}/corridorkey_int8_512.onnx" 50000000 "packaged CPU baseline model"
 
 chmod +x "$CLI"
 chmod +x "$LAUNCHER"
