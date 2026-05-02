@@ -32,42 +32,22 @@ function Get-CorridorKeyWindowsTorchTrtBuildContract {
         required_cuda_version = "12.8"
         required_python_version = "3.12"
         required_python_abi_tag = "cp312"
-        # DLLs we curate into vendor/torchtrt-windows/bin/ at prepare-torchtrt
-        # time. Empirically derived in Sprint 0: this set is the minimum the
-        # blue forward pass loads via torch.jit.load + TensorRT runtime.
-        # Excluded on purpose:
-        #   nvinfer_builder_resource_10.dll (1.8 GB) - compile-time only
-        #   cufft64_11.dll, cusparse64_12.dll, cusolver*64_11.dll - no FFT/sparse/solver ops
-        #   torch_python.dll, *_python.dll - C++ runtime never imports Python
-        #   asmjit.dll - host-only JIT, our path is GPU forward
-        torch_runtime_dlls = @(
-            "c10.dll",
-            "c10_cuda.dll",
-            "torch.dll",
-            "torch_cpu.dll",
-            "torch_cuda.dll",
-            "torch_global_deps.dll",
-            "caffe2_nvrtc.dll",
-            "cudart64_12.dll",
-            "cublas64_12.dll",
-            "cublasLt64_12.dll",
-            "cudnn64_9.dll",
-            "cudnn_adv64_9.dll",
-            "cudnn_cnn64_9.dll",
-            "cudnn_engines_precompiled64_9.dll",
-            "cudnn_engines_runtime_compiled64_9.dll",
-            "cudnn_graph64_9.dll",
-            "cudnn_heuristic64_9.dll",
-            "cudnn_ops64_9.dll",
-            "nvrtc64_120_0.dll",
-            "nvrtc-builtins64_128.dll"
-        )
-        torch_tensorrt_runtime_dlls = @(
-            "torchtrt.dll"
-        )
-        tensorrt_runtime_dlls = @(
-            "nvinfer_10.dll",
-            "nvinfer_plugin_10.dll"
+        # DLL exclusion list (everything in torch/lib EXCEPT these gets
+        # vendored). This intentional inversion: bringing up
+        # tools/torchtrt_runner taught us libtorch's DLL graph has too many
+        # delay-loaded transitive deps to safely curate by allowlist (every
+        # missing dep surfaced as opaque GetLastError=126 with no symbol).
+        # The single big win we keep is excluding nvinfer_builder_resource_10.dll
+        # (1.8 GB), which is the engine BUILDER and never used at runtime
+        # deserialization. Net curated payload is ~3.5 GB instead of ~9 GB.
+        # Future maintainers: prune more only if a dumpbin sweep proves
+        # nothing in torch_cpu/torch_cuda/torchtrt/nvinfer_10 references
+        # the candidate.
+        torch_lib_exclusions = @()
+        torch_tensorrt_lib_exclusions = @()
+        tensorrt_lib_exclusions = @(
+            # 1.8 GB engine builder; runtime deserialization never invokes it.
+            "nvinfer_builder_resource_10.dll"
         )
     }
 }

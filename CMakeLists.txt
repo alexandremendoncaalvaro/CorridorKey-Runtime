@@ -429,6 +429,14 @@ add_subdirectory(src)
 # CLI Application
 add_subdirectory(src/cli)
 
+# Optional standalone tools that depend on vendored payloads. Kept under
+# tools/ per ARCHITECTURE.md "Standalone auxiliary tools. Must not leak
+# dependencies into the main build." Each subdirectory is self-gated; the
+# torchtrt_runner only builds when the Windows TorchTRT vendor is staged.
+if(CORRIDORKEY_HAS_TORCHTRT)
+    add_subdirectory(tools/torchtrt_runner)
+endif()
+
 # Testing
 if(BUILD_TESTING)
     enable_testing()

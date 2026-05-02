@@ -110,23 +110,31 @@ function Find-WheelByPrefix {
 function Copy-DllSetIntoBin {
     param(
         [string]$SourceDir,
-        [string[]]$DllNames,
+        [string[]]$ExcludedDlls,
         [string]$DestinationBin,
         [System.Collections.Generic.List[object]]$ManifestList,
         [string]$SourceLabel
     )
 
-    foreach ($dll in $DllNames) {
-        $srcPath = Join-Path $SourceDir $dll
-        if (-not (Test-Path $srcPath)) {
-            throw "Curated DLL not found in extracted wheel: $srcPath  (source=$SourceLabel)"
+    # Inversion (see Get-CorridorKeyWindowsTorchTrtBuildContract): copy
+    # everything in $SourceDir except the named exclusions. The dependency
+    # graph in libtorch + torch_tensorrt + tensorrt is wide enough that an
+    # allowlist gets brittle - every missed transitive dep manifests as
+    # GetLastError=126 with no symbol info.
+    $excluded = @{}
+    foreach ($name in $ExcludedDlls) { $excluded[$name.ToLowerInvariant()] = $true }
+
+    $dlls = @(Get-ChildItem -Path $SourceDir -Filter "*.dll" -File -ErrorAction Stop)
+    foreach ($srcInfo in $dlls) {
+        if ($excluded.ContainsKey($srcInfo.Name.ToLowerInvariant())) {
+            continue
         }
-        $dstPath = Join-Path $DestinationBin $dll
-        Copy-Item -Path $srcPath -Destination $dstPath -Force
+        $dstPath = Join-Path $DestinationBin $srcInfo.Name
+        Copy-Item -Path $srcInfo.FullName -Destination $dstPath -Force
         $info = Get-Item -Path $dstPath
         $hash = (Get-FileHash -Path $dstPath -Algorithm SHA256).Hash
         $ManifestList.Add([ordered]@{
-            name = $dll
+            name = $srcInfo.Name
             source = $SourceLabel
             size_bytes = $info.Length
             sha256 = $hash
@@ -254,19 +262,19 @@ New-Item -ItemType Directory -Path $vendorInclude -Force | Out-Null
 $dllManifest = New-Object 'System.Collections.Generic.List[object]'
 
 Copy-DllSetIntoBin -SourceDir $torchLibDir `
-    -DllNames $contract.torch_runtime_dlls `
+    -ExcludedDlls $contract.torch_lib_exclusions `
     -DestinationBin $vendorBin `
     -ManifestList $dllManifest `
     -SourceLabel ("torch-" + $contract.torch_version)
 
 Copy-DllSetIntoBin -SourceDir $torchTrtLibDir `
-    -DllNames $contract.torch_tensorrt_runtime_dlls `
+    -ExcludedDlls $contract.torch_tensorrt_lib_exclusions `
     -DestinationBin $vendorBin `
     -ManifestList $dllManifest `
     -SourceLabel ("torch-tensorrt-" + $contract.torch_tensorrt_version)
 
 Copy-DllSetIntoBin -SourceDir $tensorRtLibDir `
-    -DllNames $contract.tensorrt_runtime_dlls `
+    -ExcludedDlls $contract.tensorrt_lib_exclusions `
     -DestinationBin $vendorBin `
     -ManifestList $dllManifest `
     -SourceLabel ("tensorrt-cu12-" + $contract.tensorrt_cu12_version)

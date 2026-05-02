@@ -100,11 +100,45 @@ foreach ($probe in @(
 
 # ---- DLL checks ----
 
-$expectedDlls = @() + $contract.torch_runtime_dlls + $contract.torch_tensorrt_runtime_dlls + $contract.tensorrt_runtime_dlls
+# Validate via the manifest emitted by prepare-torchtrt: every entry must
+# exist on disk with the recorded byte count. This makes certify resilient
+# to the contract-driven DLL set evolving (Sprint 1 PR 2 went from
+# allowlist to exclusion-list because the libtorch DLL graph is too wide
+# to safely curate by hand).
 $dllsOk = $true
-foreach ($dll in $expectedDlls) {
-    $ok = Add-DllCheck -Name $dll -Path (Join-Path $binDir $dll)
-    if (-not $ok) { $dllsOk = $false }
+$manifestEntries = @()
+if (Test-Path $manifestPath) {
+    try {
+        $manifestData = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+        if ($null -ne $manifestData -and $manifestData.PSObject.Properties.Name -contains "dlls") {
+            $manifestEntries = @($manifestData.dlls)
+        }
+    } catch {
+        $dllsOk = $false
+        $report.dll_checks += [ordered]@{
+            name = "<manifest>"
+            path = $manifestPath
+            exists = $true
+            error = "Failed to parse manifest: $($_.Exception.Message)"
+        }
+    }
+}
+if ($manifestEntries.Count -eq 0) {
+    # Fallback when no manifest yet: enumerate vendor bin directly.
+    $manifestEntries = @(Get-ChildItem -Path $binDir -Filter "*.dll" -File -ErrorAction SilentlyContinue |
+        ForEach-Object { [pscustomobject]@{ name = $_.Name; size_bytes = $_.Length } })
+}
+foreach ($entry in $manifestEntries) {
+    $dllName = $entry.name
+    $dllPath = Join-Path $binDir $dllName
+    $exists = (Test-Path $dllPath) -and ((Get-Item $dllPath).Length -gt 0)
+    $report.dll_checks += [ordered]@{
+        name = $dllName
+        path = $dllPath
+        exists = $exists
+        size_bytes = if ($exists) { (Get-Item $dllPath).Length } else { 0 }
+    }
+    if (-not $exists) { $dllsOk = $false }
 }
 
 # ---- optional smoke load ----
