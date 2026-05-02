@@ -45,6 +45,7 @@ vendor/cuda-*/
 vendor/CUDA-*/
 vendor/openfx/
 vendor/onnxruntime-universal/
+vendor/torchtrt-windows/
 
 # Compiled objects
 *.o

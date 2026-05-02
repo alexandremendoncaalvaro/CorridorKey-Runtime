@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "certify-rtx-artifacts", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -152,6 +152,19 @@ switch ($Task) {
         }
         $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "certify_windows_rtx_artifacts.ps1" -Arguments $arguments
+        break
+    }
+    "prepare-torchtrt" {
+        # Stages the curated TorchTRT runtime payload under
+        # vendor/torchtrt-windows/. Sister to prepare-rtx but bound to the
+        # blue-pack runtime (see Sprint 1 plan, Strategy C).
+        $arguments = @() + $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "prepare_windows_torchtrt_release.ps1" -Arguments $arguments
+        break
+    }
+    "certify-torchtrt-artifacts" {
+        $arguments = @() + $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "certify_windows_torchtrt_artifacts.ps1" -Arguments $arguments
         break
     }
     "package-ofx" {
