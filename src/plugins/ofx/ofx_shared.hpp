@@ -2,6 +2,7 @@
 
 #include <corridorkey/types.hpp>
 #include <corridorkey/version.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -18,7 +19,7 @@
 #include "ofx_model_selection.hpp"
 #include "post_process/alpha_edge.hpp"
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #define CORRIDORKEY_OFX_EXPORT OfxExport
 #elif defined(__GNUC__)
 #define CORRIDORKEY_OFX_EXPORT __attribute__((visibility("default")))
@@ -120,20 +121,20 @@ struct RuntimePanelState {
     std::uint64_t session_ref_count = 0;
 };
 
-enum class GuideSourceKind {
+enum class GuideSourceKind : std::uint8_t {
     Unknown,
     ExternalAlphaHint,
     RoughFallback,
 };
 
-enum class RuntimePathKind {
+enum class RuntimePathKind : std::uint8_t {
     Unknown,
     Direct,
     ArtifactFallback,
     FullModelTiling,
 };
 
-enum class LastRenderWorkOrigin {
+enum class LastRenderWorkOrigin : std::uint8_t {
     None,
     BackendRender,
     SharedCache,
@@ -206,16 +207,16 @@ struct InstanceData {
     RuntimePathKind last_runtime_path = RuntimePathKind::Unknown;
     QualityCompileFailureCache quality_compile_failure_cache = {};
     std::uint64_t render_count = 0;
-    std::string last_error = {};
+    std::string last_error;
     // Non-fatal status note shown alongside frame timings. Set when the engine fell back to a
     // lower resolution because the requested one failed to compile (e.g. TensorRT 2048 -> 1536).
-    std::string last_warning = {};
-    std::string color_management_status = {};
+    std::string last_warning;
+    std::string color_management_status;
     double last_frame_ms = 0.0;
     double avg_frame_ms = 0.0;
     std::uint64_t frame_time_samples = 0;
     LastRenderWorkOrigin last_render_work_origin = LastRenderWorkOrigin::None;
-    std::vector<StageTiming> last_render_stage_timings = {};
+    std::vector<StageTiming> last_render_stage_timings;
     // True only during the body of kOfxImageEffectActionRender. Set by
     // RenderScope in ofx_render.cpp. Used to gate paramSetValue chains, which
     // OFX 1.4 / 1.5 restrict to main-thread actions only (strict hosts such as
@@ -237,7 +238,7 @@ struct InstanceData {
     bool cached_signature_valid = false;
     InferenceParams cached_params = {};
     std::filesystem::path cached_model_path = {};
-    std::vector<StageTiming> cached_render_stage_timings = {};
+    std::vector<StageTiming> cached_render_stage_timings;
     int cached_screen_color = kDefaultScreenColor;
     double cached_alpha_black_point = 0.0;
     double cached_alpha_white_point = 1.0;
@@ -246,8 +247,8 @@ struct InstanceData {
     double cached_alpha_gamma = 1.0;
     double cached_temporal_smoothing = kDefaultTemporalSmoothing;
 
-    ImageBuffer temporal_alpha = {};
-    ImageBuffer temporal_foreground = {};
+    ImageBuffer temporal_alpha;
+    ImageBuffer temporal_foreground;
     bool temporal_state_valid = false;
     double temporal_time = 0.0;
     int temporal_width = 0;
@@ -263,9 +264,19 @@ struct InstanceData {
 
 class SharedFrameCache;
 
+// OFX hosts populate these process-wide singletons exactly once at plugin
+// load (OfxSetHost / on_load). They are not meaningfully const because OFX
+// hands us raw OfxHost*/suite vtables it owns, and the frame cache is a
+// mutable runtime resource shared across all instances. Wrapping each
+// extern instead of using a file-level lint-suppress block keeps the
+// suppression scoped to the four singletons that require global state.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern OfxHost* g_host;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern OfxSuites g_suites;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern std::unique_ptr<SharedFrameCache> g_frame_cache;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern std::string g_host_name;
 
 bool fetch_suites();
@@ -299,7 +310,7 @@ inline std::string select_tutorial_doc(std::string_view host_name) {
 
 inline std::string host_qualified_phrase(std::string_view host_name, const char* base_phrase) {
     if (base_phrase == nullptr) {
-        return std::string();
+        return {};
     }
     std::string result(base_phrase);
     if (is_nuke_host_name(host_name)) {
@@ -314,11 +325,8 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
-std::optional<QualityArtifactSelection> select_quality_artifact(
-    const std::filesystem::path& models_dir, Backend runtime_backend, int quality_mode,
-    int input_width, int input_height, std::int64_t available_memory_mb,
-    QualityFallbackMode fallback_mode, int coarse_resolution_override,
-    bool allow_unrestricted_quality_attempt, std::string_view screen_color);
+// Note: select_quality_artifact is declared in ofx_model_selection.hpp which
+// is included above. No forward declaration here.
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width = 0,
                                int input_height = 0,
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
