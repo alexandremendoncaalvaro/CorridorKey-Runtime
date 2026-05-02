@@ -156,6 +156,8 @@ std::string backend_label(Backend backend) {
             return "openvino";
         case Backend::MLX:
             return "mlx";
+        case Backend::TorchTRT:
+            return "torchtrt";
         default:
             return "auto";
     }
@@ -179,6 +181,8 @@ std::string processing_backend_label(Backend backend) {
             return "OpenVINO";
         case Backend::MLX:
             return "MLX GPU";
+        case Backend::TorchTRT:
+            return "Torch-TensorRT GPU";
         default:
             return "Auto";
     }

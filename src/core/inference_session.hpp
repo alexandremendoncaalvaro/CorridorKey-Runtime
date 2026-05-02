@@ -46,6 +46,7 @@ namespace corridorkey {
 
 namespace core {
 class MlxSession;
+class TorchTrtSession;
 class OrtProcessContext;
 }  // namespace core
 
@@ -169,6 +170,9 @@ class InferenceSession {
     // requires complete MlxSession / BoundIoState and fails with "sizeof to an
     // incomplete type". unique_ptr default-constructs to nullptr already.
     std::unique_ptr<core::MlxSession> m_mlx_session;
+#if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
+    std::unique_ptr<core::TorchTrtSession> m_torch_trt_session;
+#endif
     std::shared_ptr<core::OrtProcessContext> m_ort_process_context = nullptr;
     std::unique_ptr<BoundIoState> m_bound_io_state;
     bool m_io_binding_enabled = false;

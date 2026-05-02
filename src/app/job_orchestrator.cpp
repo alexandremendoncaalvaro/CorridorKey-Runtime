@@ -733,6 +733,9 @@ nlohmann::json JobOrchestrator::get_system_info() {
             case Backend::MLX:
                 backend_name = "mlx";
                 break;
+            case Backend::TorchTRT:
+                backend_name = "torchtrt";
+                break;
             default:
                 backend_name = "unknown";
                 break;

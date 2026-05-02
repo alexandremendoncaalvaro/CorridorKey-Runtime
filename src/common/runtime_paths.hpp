@@ -60,6 +60,8 @@ inline std::string backend_token(Backend backend) {
             return "dml";
         case Backend::MLX:
             return "mlx";
+        case Backend::TorchTRT:
+            return "torchtrt";
         default:
             return "auto";
     }

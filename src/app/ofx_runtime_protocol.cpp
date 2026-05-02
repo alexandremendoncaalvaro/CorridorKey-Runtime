@@ -95,6 +95,7 @@ Result<Backend> backend_from_string(const std::string& value) {
     if (value == "mlx") return Backend::MLX;
     if (value == "winml") return Backend::WindowsML;
     if (value == "openvino") return Backend::OpenVINO;
+    if (value == "torchtrt") return Backend::TorchTRT;
     return Unexpected<Error>(invalid_protocol_error("Unknown backend: " + value));
 }
 
@@ -116,6 +117,8 @@ std::string backend_to_string(Backend backend) {
             return "winml";
         case Backend::OpenVINO:
             return "openvino";
+        case Backend::TorchTRT:
+            return "torchtrt";
         default:
             return "auto";
     }

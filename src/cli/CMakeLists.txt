@@ -38,6 +38,24 @@ if(WIN32)
             $<TARGET_FILE_DIR:corridorkey_cli>
         COMMAND_EXPAND_LISTS
     )
+
+    # Sprint 1 PR 3 dev-only: when corridorkey_core is linked against
+    # libtorch (CORRIDORKEY_HAS_TORCHTRT), copy the curated TorchTRT
+    # runtime payload next to the CLI exe so it can launch at all (the
+    # static-link path requires torch_cpu/c10/etc to be on the loader path
+    # at process start - AddDllDirectory inside main is too late).
+    # Production blue-pack delivery (PR 4 follow-up) will refactor
+    # torch_trt_session.cpp into a separate dynamic library that the base
+    # exe loads on demand, so green-only users do not pay the ~5 GB cost.
+    if(CORRIDORKEY_HAS_TORCHTRT AND DEFINED CORRIDORKEY_TORCHTRT_RUNTIME_DIR)
+        add_custom_command(TARGET corridorkey_cli POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}"
+                $<TARGET_FILE_DIR:corridorkey_cli>
+            COMMENT "Staging vendored TorchTRT DLLs next to corridorkey.exe (dev only)"
+            VERBATIM
+        )
+    endif()
 elseif(UNIX AND NOT APPLE)
     # Make the OFX plugin wait on the CLI so the Linux bundle's POST_BUILD
     # stage (in src/plugins/ofx/CMakeLists.txt) can copy corridorkey next to

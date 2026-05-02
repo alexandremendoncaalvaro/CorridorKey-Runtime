@@ -771,6 +771,8 @@ std::string backend_to_string(Backend backend) {
             return "dml";
         case Backend::MLX:
             return "mlx";
+        case Backend::TorchTRT:
+            return "torchtrt";
         default:
             return "auto";
     }

@@ -36,6 +36,9 @@
 #include "inference_output_validation.hpp"
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
+#if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
+#include "torch_trt_session.hpp"
+#endif
 #include "ort_process_context.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/despeckle.hpp"
@@ -1075,6 +1078,25 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             session_ptr->m_mlx_session = std::move(*mlx_session_res);
             return session_ptr;
         }
+#if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
+        if (requested_device.backend == Backend::TorchTRT) {
+            auto torch_trt_res =
+                core::TorchTrtSession::create(model_path, requested_device, on_stage);
+            if (!torch_trt_res) {
+                return Unexpected(torch_trt_res.error());
+            }
+            session_ptr->m_recommended_resolution = (*torch_trt_res)->model_resolution();
+            session_ptr->m_torch_trt_session = std::move(*torch_trt_res);
+            return session_ptr;
+        }
+#else
+        if (requested_device.backend == Backend::TorchTRT) {
+            return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                    "TorchTRT backend not compiled into this build. "
+                                    "Re-build with vendor/torchtrt-windows staged via "
+                                    "scripts/windows.ps1 -Task prepare-torchtrt."});
+        }
+#endif
 
         if (!ort_process_context) {
             ort_process_context = std::make_shared<core::OrtProcessContext>();
@@ -1593,6 +1615,19 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
     const std::vector<Image>& rgbs, const std::vector<Image>& alpha_hints,
     const InferenceParams& params, StageTimingCallback on_stage) {
     if (rgbs.empty()) return std::vector<FrameResult>{};
+#if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
+    if (m_torch_trt_session != nullptr) {
+        std::vector<FrameResult> results;
+        results.reserve(rgbs.size());
+        for (size_t index = 0; index < rgbs.size(); ++index) {
+            auto frame = m_torch_trt_session->infer(rgbs[index], alpha_hints[index],
+                                                    params.output_alpha_only, on_stage);
+            if (!frame) return Unexpected(frame.error());
+            results.push_back(std::move(*frame));
+        }
+        return results;
+    }
+#endif
     if (m_mlx_session != nullptr) {
         if (params.target_resolution > 0 && params.target_resolution != m_recommended_resolution) {
             return Unexpected<Error>{Error{
@@ -1868,6 +1903,13 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
                                                 const InferenceParams& params,
                                                 StageTimingCallback on_stage) {
+#if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
+    if (m_torch_trt_session != nullptr) {
+        auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
+        if (!batch_res) return Unexpected(batch_res.error());
+        return std::move((*batch_res)[0]);
+    }
+#endif
     if (m_mlx_session != nullptr) {
         auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
         if (!batch_res) {

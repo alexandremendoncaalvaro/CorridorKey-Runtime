@@ -22,6 +22,8 @@ inline std::string backend_name(Backend backend) {
             return "dml";
         case Backend::MLX:
             return "mlx";
+        case Backend::TorchTRT:
+            return "torchtrt";
         default:
             return "auto";
     }
@@ -50,10 +52,20 @@ inline DeviceInfo select_device(const std::vector<DeviceInfo>& devices, std::str
     if (device_str == "rtx" || device_str == "trt") {
         device_str = "tensorrt";
     }
+    if (device_str == "torch_trt" || device_str == "torch-trt" || device_str == "ttrt") {
+        device_str = "torchtrt";
+    }
     for (const auto& device : devices) {
         if (backend_name(device.backend) == device_str) {
             return device;
         }
+    }
+    // TorchTRT is not in the standard detected-devices list (it is selected
+    // via .ts artifact on the blue model pack rather than via hardware
+    // probe). Synthesize a device entry so --device torchtrt routes to the
+    // TorchTrtSession factory regardless of probe output.
+    if (device_str == "torchtrt") {
+        return DeviceInfo{"TorchTRT", fallback_device.available_memory_mb, Backend::TorchTRT};
     }
 
     return fallback_device;

@@ -161,6 +161,8 @@ std::string diagnostic_backend_label(Backend backend) {
             return "winml";
         case Backend::OpenVINO:
             return "openvino";
+        case Backend::TorchTRT:
+            return "torchtrt";
         case Backend::Auto:
         default:
             return "auto";

@@ -174,6 +174,8 @@ const char* backend_log_token(Backend backend) {
             return "winml";
         case Backend::OpenVINO:
             return "openvino";
+        case Backend::TorchTRT:
+            return "torchtrt";
     }
     return "unknown";
 }

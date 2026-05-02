@@ -42,6 +42,8 @@ std::string backend_label(Backend backend) {
             return "openvino";
         case Backend::MLX:
             return "mlx";
+        case Backend::TorchTRT:
+            return "torchtrt";
         default:
             return "auto";
     }

@@ -143,7 +143,11 @@ enum class Backend : std::uint8_t {
     DirectML,
     MLX,
     WindowsML,
-    OpenVINO
+    OpenVINO,
+    /// Torch-TensorRT in-process backend (Windows blue-pack, Sprint 1).
+    /// Loads a .ts engine via torch::jit::load and runs forward through
+    /// the bundled TorchTRT custom ops. See src/core/torch_trt_session.cpp.
+    TorchTRT
 };
 /**
  * @brief Output encoding policy for video exports.
