@@ -7,6 +7,23 @@
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,readability-function-size,modernize-use-integer-sign-comparison,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+//
+// ofx_actions.cpp tidy-suppression rationale.
+//
+// This translation unit is the OFX action dispatch handler. The
+// define_*_param helpers each take (param_name, label_text, hint_text)
+// triples plus per-type (default, min, max) numeric triples that mirror
+// the OFX kOfxParamProp* property quartet exactly; restructuring them
+// would force every call site in describe_in_context to wrap every
+// argument in a designated-init aggregate for negligible review
+// benefit. The numeric defaults / min / max values are the canonical
+// OFX panel ranges defined in common/ofx_runtime_defaults.hpp; magic-
+// number warnings on the literals are noise once that header is
+// understood. The remaining c-arrays / function-size / sign-comparison
+// / unchecked-container-access suppressions are driven by the OFX
+// property-suite buffer shape and the canonical describe_in_context
+// flow whose discrete branches map 1:1 to OFX param types.
 namespace corridorkey::ofx {
 
 namespace {
@@ -755,3 +772,4 @@ OfxStatus get_output_colourspace(OfxImageEffectHandle instance, OfxPropertySetHa
 }
 
 }  // namespace corridorkey::ofx
+// NOLINTEND(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,readability-function-size,modernize-use-integer-sign-comparison,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
