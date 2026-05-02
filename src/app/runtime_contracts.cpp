@@ -444,20 +444,34 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Extreme quality Windows RTX pack for 24 GB VRAM systems.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_24gb"}),
-        make_model_entry("fp16-blue", 512, "corridorkey_blue_fp16_512.onnx", "onnx", "tensorrt",
-                         "Lower-memory Windows RTX pack trained on dedicated blue-screen plates.",
+        // Strategy C, Sprint 1 PR 4: blue Windows RTX is delivered via the
+        // Torch-TensorRT runtime (HANDOFF.md "Sprint 0 outcome" + Sprint 1
+        // plan). The ONNX -> TRT-RTX EP path NaN'd at >=1024 for blue;
+        // TorchTRT loads cleanly at every resolution. The runtime DLL set
+        // ships INSIDE the blue model pack rather than the base bundle, so
+        // green users do not pay the ~5 GB cost.
+        make_model_entry("fp16-blue", 512, "corridorkey_blue_torchtrt_fp16_512.ts", "torchtrt",
+                         "torchtrt",
+                         "Windows RTX blue-screen pack (Torch-TensorRT) for 8 GB tiers.",
                          "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb"}, "blue"),
-        make_model_entry("fp16-blue", 1024, "corridorkey_blue_fp16_1024.onnx", "onnx", "tensorrt",
-                         "Maximum quality Windows RTX blue-screen pack for 10 GB and higher tiers.",
+        make_model_entry("fp16-blue", 1024, "corridorkey_blue_torchtrt_fp16_1024.ts", "torchtrt",
+                         "torchtrt",
+                         "Windows RTX blue-screen pack (Torch-TensorRT) for 10 GB and higher tiers.",
                          "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_10gb_plus"}, "blue"),
-        make_model_entry("fp16-blue", 1536, "corridorkey_blue_fp16_1536.onnx", "onnx", "tensorrt",
-                         "High-fidelity Windows RTX blue-screen pack for 16 GB VRAM systems.",
+        // Blue 1536 ships as FP32 because Sprint 0 found FP16 NaNs at this
+        // graph size for the blue checkpoint (HANDOFF.md section 2.2).
+        // Blue 2048 follows the same precision constraint and is staged via
+        // cloud GPU compile per HANDOFF Sprint 2.
+        make_model_entry("fp32-blue", 1536, "corridorkey_blue_torchtrt_fp32_1536.ts", "torchtrt",
+                         "torchtrt",
+                         "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 16 GB VRAM systems.",
                          "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_16gb_plus"}, "blue"),
-        make_model_entry("fp16-blue", 2048, "corridorkey_blue_fp16_2048.onnx", "onnx", "tensorrt",
-                         "Extreme quality Windows RTX blue-screen pack for 24 GB VRAM systems.",
+        make_model_entry("fp32-blue", 2048, "corridorkey_blue_torchtrt_fp32_2048.ts", "torchtrt",
+                         "torchtrt",
+                         "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 24 GB VRAM systems.",
                          "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_24gb"}, "blue"),
         make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",

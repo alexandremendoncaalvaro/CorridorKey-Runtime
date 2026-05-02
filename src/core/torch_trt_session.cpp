@@ -53,18 +53,31 @@ std::optional<std::filesystem::path> resolve_torchtrt_runtime_bin(
             return candidate;
         }
     }
-    auto pack_relative = ts_path.parent_path().parent_path() / "torchtrt-runtime" / "bin";
+    // Absolutise first: relative paths (e.g. "models/foo.ts") yield an
+    // empty parent_path() chain after one or two steps, breaking the walk
+    // loop before it reaches the repo root or any blue-pack-shaped layout.
+    std::error_code ec;
+    auto absolute_ts = std::filesystem::absolute(ts_path, ec);
+    if (ec) absolute_ts = ts_path;
+
+    auto pack_relative = absolute_ts.parent_path().parent_path() / "torchtrt-runtime" / "bin";
     if (std::filesystem::exists(pack_relative / "torchtrt.dll")) {
         return pack_relative;
     }
     // Walk a few levels up looking for vendor/torchtrt-windows/bin.
-    auto walk = ts_path.parent_path();
-    for (int i = 0; i < 6 && !walk.empty(); ++i) {
+    auto walk = absolute_ts.parent_path();
+    for (int i = 0; i < 8 && !walk.empty() && walk != walk.root_path(); ++i) {
         auto candidate = walk / "vendor" / "torchtrt-windows" / "bin";
         if (std::filesystem::exists(candidate / "torchtrt.dll")) {
             return candidate;
         }
         walk = walk.parent_path();
+    }
+    // Last try at the absolute root (covers `C:\<repo>` setups where the
+    // walk above stops one level early).
+    auto root_candidate = walk / "vendor" / "torchtrt-windows" / "bin";
+    if (std::filesystem::exists(root_candidate / "torchtrt.dll")) {
+        return root_candidate;
     }
     return std::nullopt;
 }
@@ -121,8 +134,23 @@ class TorchTrtSession::Impl {
 
     torch::jit::script::Module module;
     int resolution = 0;
+    // Engine input dtype - inferred from filename (corridorkey_*_fp32_<res>.ts
+    // vs corridorkey_*_fp16_<res>.ts). Sprint 0 found blue 1536+ needs FP32
+    // because FP16 NaNs in LayerNorm/Softmax for the blue checkpoint; green
+    // is stable at FP16 across the full ladder.
+    torch::Dtype input_dtype = torch::kFloat16;
     DeviceInfo device;
 };
+
+namespace {
+torch::Dtype infer_input_dtype(const std::filesystem::path& path) {
+    auto stem = path.stem().string();
+    if (stem.find("fp32") != std::string::npos) {
+        return torch::kFloat32;
+    }
+    return torch::kFloat16;
+}
+}  // namespace
 
 TorchTrtSession::TorchTrtSession() : m_impl(std::make_unique<Impl>()) {}
 TorchTrtSession::~TorchTrtSession() = default;
@@ -168,6 +196,7 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
                                            ts_path.filename().string()}};
     }
     session->m_impl->resolution = *inferred_res;
+    session->m_impl->input_dtype = infer_input_dtype(ts_path);
 
     try {
         common::measure_stage(on_stage, "torchtrt_jit_load", [&]() {
@@ -224,7 +253,7 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
             dst[2 * plane + i] = rgb_data[i * 3 + 2];
             dst[3 * plane + i] = hint_data[i];
         }
-        auto cuda_input = host_input.to(torch::Device(torch::kCUDA), torch::kFloat16);
+        auto cuda_input = host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype);
 
         torch::IValue raw_out;
         common::measure_stage(on_stage, "torchtrt_forward", [&]() {
