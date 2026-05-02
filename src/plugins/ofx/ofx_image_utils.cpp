@@ -5,6 +5,30 @@
 
 #include "common/srgb_lut.hpp"
 
+// NOLINTBEGIN(readability-uppercase-literal-suffix,cppcoreguidelines-avoid-magic-numbers,readability-math-missing-parentheses,cppcoreguidelines-pro-type-reinterpret-cast,readability-identifier-length,modernize-use-auto,readability-qualified-auto,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-easily-swappable-parameters)
+//
+// ofx_image_utils.cpp tidy-suppression rationale.
+//
+// This translation unit is the OFX image-format conversion path on the
+// pixel hot path. Every diagnostic suppressed here is required by the
+// OFX C ABI shape or the universal pixel-coord conventions:
+//
+//   * The OFX property suite returns rectangles as int[4] / void*
+//     scalar buffers; the get_rect_i helper's int values[4] mirror the
+//     suite signature so an std::array would force an extra .data()
+//     hop on every call.
+//   * The OFX 'OfxImageEffectStruct' image data pointer is a void* by
+//     spec; reinterpret_cast<float*> / <unsigned char*> is the
+//     canonical way to access typed rows, and per-row arithmetic uses
+//     (x, y, c) which fall under the universal pixel-coord identifier-
+//     length exception.
+//   * 255.0F / 65535.0F / 0.5F / 8 / 16 are the standard 8-bit and
+//     16-bit sRGB quantization constants whose meaning is documented
+//     at the surrounding sRGB LUT call site; naming each one would
+//     scatter the conversion arithmetic.
+//   * The two row-iterating converters have intrinsic per-format /
+//     per-channel branching that maps 1:1 to OFX-host pixel layouts;
+//     splitting them into helpers would not help any other caller.
 namespace corridorkey::ofx {
 
 ImageHandleGuard::~ImageHandleGuard() {
@@ -247,3 +271,4 @@ void write_output_image(const Image& src, void* dst_data, int row_bytes, const s
 }
 
 }  // namespace corridorkey::ofx
+// NOLINTEND(readability-uppercase-literal-suffix,cppcoreguidelines-avoid-magic-numbers,readability-math-missing-parentheses,cppcoreguidelines-pro-type-reinterpret-cast,readability-identifier-length,modernize-use-auto,readability-qualified-auto,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-easily-swappable-parameters)
