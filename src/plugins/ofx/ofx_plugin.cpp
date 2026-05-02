@@ -10,6 +10,20 @@
 
 namespace corridorkey::ofx {
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-const-cast,readability-function-size,readability-function-cognitive-complexity,modernize-use-designated-initializers)
+//
+// ofx_plugin.cpp tidy-suppression rationale.
+//
+// The OpenFX 1.4 C ABI mandates a fixed set of TU-local globals (host,
+// suite pointers, plugin descriptor) that the host queries through
+// OfxSetHost / OfxGetPlugin. The host hands actions in as a void*
+// handle that the spec requires the plugin to interpret as the typed
+// OfxImageEffectHandle - the reinterpret_cast plus const_cast pair is
+// the canonical OFX dispatcher form. plugin_main_entry's size and
+// branching reflects the action-dispatch table the spec defines, not
+// accidental complexity. The g_plugin POD is initialised in the field
+// order required by the OfxPlugin struct contract; designated
+// initialisers would obscure the spec field order.
 OfxHost* g_host = nullptr;
 OfxSuites g_suites = {};
 std::unique_ptr<SharedFrameCache> g_frame_cache = nullptr;
@@ -75,7 +89,8 @@ bool fetch_suites() {
     }
     g_suites.message = static_cast<const OfxMessageSuiteV2*>(message_suite);
 
-    if (!g_suites.property || !g_suites.image_effect || !g_suites.parameter) {
+    if (g_suites.property == nullptr || g_suites.image_effect == nullptr ||
+        g_suites.parameter == nullptr) {
         log_message("fetch_suites", "Missing required OpenFX suites.");
         return false;
     }
@@ -245,3 +260,4 @@ CORRIDORKEY_OFX_EXPORT OfxPlugin* OfxGetPlugin(int nth) {
 }
 
 }  // extern "C"
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-const-cast,readability-function-size,readability-function-cognitive-complexity,modernize-use-designated-initializers)
