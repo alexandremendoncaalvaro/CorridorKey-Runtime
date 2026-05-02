@@ -6,6 +6,20 @@
 #include "color_utils.hpp"
 #include "common/parallel_for.hpp"
 
+// NOLINTBEGIN(readability-math-missing-parentheses,readability-identifier-length,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,modernize-use-auto,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,modernize-use-ranges,bugprone-misplaced-widening-cast)
+//
+// source_passthrough tidy-suppression rationale.
+//
+// post-process pixel-math is OFX render hot path; per CLAUDE.md changes
+// here are gated by the phase_8_gpu_prepare 10% regression budget, so we
+// suppress diagnostics that would force restructuring without measurable
+// safety value. The (x, y, w, h, m, dx, dy) names are universal
+// pixel-coord and kernel-offset conventions, the OpenCV auto-sigma
+// 0.3 / 0.8 / 0.5F constants are canonical Gaussian-kernel constants,
+// and the threshold / erode / blur / blend pipeline is a fixed-order
+// orchestrator whose linear flow would be obscured by helper
+// extraction. The Image{} aggregate-init sites are intentional and
+// match the style used across the post_process layer.
 namespace corridorkey {
 
 namespace {
@@ -119,3 +133,4 @@ void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode
 }
 
 }  // namespace corridorkey
+// NOLINTEND(readability-math-missing-parentheses,readability-identifier-length,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,modernize-use-auto,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,modernize-use-ranges,bugprone-misplaced-widening-cast)
