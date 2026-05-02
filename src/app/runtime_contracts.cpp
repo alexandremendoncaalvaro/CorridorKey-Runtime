@@ -379,59 +379,129 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
     return std::nullopt;
 }
 
-std::optional<ModelCatalogEntry> default_model_for_request(
+namespace {
+
+// Bundles the blue / green filename pair for a single resolution tier.
+// Wrapping the two const char* into a named struct removes the
+// bugprone-easily-swappable-parameters risk (otherwise blue and green could
+// be reversed at the call site without the compiler noticing) and reads
+// naturally at the table sites below.
+struct BlueGreenFilenames {
+    const char* blue;
+    const char* green;
+};
+
+// Picks the blue artifact when requested and packaged, otherwise falls back
+// to the green rung. Encapsulates the "blue requested but not packaged ->
+// green canonicalization fallback" rule the OFX render path detects via
+// the returned entry's screen_color.
+std::optional<ModelCatalogEntry> pick_blue_or_green(std::string_view screen_color,
+                                                    BlueGreenFilenames filenames) {
+    if (screen_color == "blue") {
+        if (auto blue = app::find_model_by_filename(filenames.blue);
+            blue.has_value() && blue->packaged_for_windows) {
+            return blue;
+        }
+        // Fall through to green rung; OFX render path canonicalises blue input.
+    }
+    return app::find_model_by_filename(filenames.green);
+}
+
+// Resolves the Windows RTX (TensorRT or CUDA) catalog entry for the given
+// memory tier. Sprint 1 PR 4: blue ships as TorchTRT .ts; blue 1536+ uses
+// FP32 because Sprint 0 found FP16 NaNs at those graph sizes (HANDOFF
+// section 2.2). Green stays on ONNX -> TRT-RTX EP.
+std::optional<ModelCatalogEntry> windows_rtx_catalog_entry_for_tier(
+    std::int64_t available_memory_mb, std::string_view screen_color) {
+    if (available_memory_mb >= kVram24GbMiB) {
+        return pick_blue_or_green(screen_color,
+                                  BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp32_2048.ts",
+                                                     .green = "corridorkey_fp16_2048.onnx"});
+    }
+    if (available_memory_mb >= kVram16GbMiB) {
+        return pick_blue_or_green(screen_color,
+                                  BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp32_1536.ts",
+                                                     .green = "corridorkey_fp16_1536.onnx"});
+    }
+    if (available_memory_mb >= kVram10GbMiB) {
+        return pick_blue_or_green(screen_color,
+                                  BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp16_1024.ts",
+                                                     .green = "corridorkey_fp16_1024.onnx"});
+    }
+    return pick_blue_or_green(screen_color,
+                              BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp16_512.ts",
+                                                 .green = "corridorkey_fp16_512.onnx"});
+}
+
+// Picks a Windows RTX entry, prioritising the preset's recommended model when
+// it is validated for the device and the request is not blue (preset models
+// are green-track; blue requests bypass preset and use the dedicated table).
+std::optional<ModelCatalogEntry> windows_rtx_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
     const std::optional<PresetDefinition>& preset, std::string_view screen_color) {
     const bool prefer_blue = (screen_color == "blue");
-
-    auto windows_rtx_model = [&]() -> std::optional<ModelCatalogEntry> {
-        if (preset.has_value() && !prefer_blue) {
-            auto preset_model = find_model_by_filename(preset->recommended_model);
-            if (preset_model.has_value() &&
-                has_validated_tier_for_device(*preset_model, requested_device, capabilities)) {
-                return preset_model;
-            }
+    if (preset.has_value() && !prefer_blue) {
+        auto preset_model = app::find_model_by_filename(preset->recommended_model);
+        if (preset_model.has_value() &&
+            has_validated_tier_for_device(*preset_model, requested_device, capabilities)) {
+            return preset_model;
         }
+    }
+    return windows_rtx_catalog_entry_for_tier(requested_device.available_memory_mb, screen_color);
+}
 
-        const auto pick = [&](const char* blue_name,
-                              const char* green_name) -> std::optional<ModelCatalogEntry> {
-            if (prefer_blue) {
-                if (auto blue = find_model_by_filename(blue_name);
-                    blue.has_value() && blue->packaged_for_windows) {
-                    return blue;
-                }
-                // Blue requested but the dedicated artifact is not in the
-                // catalog (or not packaged for Windows): fall back to the
-                // green rung. The OFX render path detects this by comparing
-                // the returned entry's screen_color against the requested
-                // "blue" and then runs the canonicalization workaround.
-            }
-            return find_model_by_filename(green_name);
-        };
+std::optional<ModelCatalogEntry> windows_universal_model_for_request(
+    const DeviceInfo& requested_device) {
+    if (requested_device.available_memory_mb >= kVram10GbMiB) {
+        return app::find_model_by_filename("corridorkey_fp16_1024.onnx");
+    }
+    return app::find_model_by_filename("corridorkey_fp16_512.onnx");
+}
 
-        // Sprint 1 PR 4: blue Windows RTX entries are now TorchTRT .ts
-        // engines (Strategy C). Green stays on the ONNX -> TRT-RTX EP path.
-        // Blue 1536+ ships as FP32 because Sprint 0 found FP16 NaNs at
-        // those graph sizes (HANDOFF section 2.2).
-        if (requested_device.available_memory_mb >= kVram24GbMiB) {
-            return pick("corridorkey_blue_torchtrt_fp32_2048.ts", "corridorkey_fp16_2048.onnx");
+std::optional<ModelCatalogEntry> apple_silicon_model_for_request(
+    const std::optional<PresetDefinition>& preset) {
+    if (preset.has_value()) {
+        if (auto preset_model = app::find_model_by_filename(preset->recommended_model);
+            preset_model.has_value()) {
+            return preset_model;
         }
-        if (requested_device.available_memory_mb >= kVram16GbMiB) {
-            return pick("corridorkey_blue_torchtrt_fp32_1536.ts", "corridorkey_fp16_1536.onnx");
-        }
-        if (requested_device.available_memory_mb >= kVram10GbMiB) {
-            return pick("corridorkey_blue_torchtrt_fp16_1024.ts", "corridorkey_fp16_1024.onnx");
-        }
-        return pick("corridorkey_blue_torchtrt_fp16_512.ts", "corridorkey_fp16_512.onnx");
-    };
+    }
+    return app::find_model_by_filename("corridorkey_mlx.safetensors");
+}
 
-    auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
-        if (requested_device.available_memory_mb >= kVram10GbMiB) {
-            return find_model_by_filename("corridorkey_fp16_1024.onnx");
-        }
-        return find_model_by_filename("corridorkey_fp16_512.onnx");
-    };
+bool is_apple_silicon_request(const DeviceInfo& requested_device,
+                              const RuntimeCapabilities& capabilities) {
+    return (requested_device.backend == Backend::Auto ||
+            requested_device.backend == Backend::MLX) &&
+           capabilities.platform == "macos" && capabilities.apple_silicon;
+}
 
+bool is_windows_rtx_request(const DeviceInfo& requested_device,
+                            const RuntimeCapabilities& capabilities) {
+    if (capabilities.platform != "windows") return false;
+    if (requested_device.backend == Backend::Auto ||
+        requested_device.backend == Backend::TensorRT) {
+        return has_backend(capabilities, Backend::TensorRT);
+    }
+    if (requested_device.backend == Backend::CUDA) {
+        return has_backend(capabilities, Backend::CUDA);
+    }
+    return false;
+}
+
+bool is_windows_universal_request(const DeviceInfo& requested_device,
+                                  const RuntimeCapabilities& capabilities) {
+    return capabilities.platform == "windows" &&
+           (requested_device.backend == Backend::DirectML ||
+            requested_device.backend == Backend::WindowsML ||
+            requested_device.backend == Backend::OpenVINO);
+}
+
+}  // namespace
+
+std::optional<ModelCatalogEntry> default_model_for_request(
+    const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
+    const std::optional<PresetDefinition>& preset, std::string_view screen_color) {
     if (requested_device.backend == Backend::CPU) {
         // CPU rendering retired together with INT8: the only ONNX artifact
         // packaged for CPU was corridorkey_int8_*, which carried unacceptable
@@ -439,35 +509,15 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         // the empty result rather than receive a downgraded fallback.
         return std::nullopt;
     }
-
-    if ((requested_device.backend == Backend::Auto || requested_device.backend == Backend::MLX) &&
-        capabilities.platform == "macos" && capabilities.apple_silicon) {
-        if (preset.has_value()) {
-            auto preset_model = find_model_by_filename(preset->recommended_model);
-            if (preset_model.has_value()) {
-                return preset_model;
-            }
-        }
-        return find_model_by_filename("corridorkey_mlx.safetensors");
+    if (is_apple_silicon_request(requested_device, capabilities)) {
+        return apple_silicon_model_for_request(preset);
     }
-
-    if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT) &&
-        (requested_device.backend == Backend::Auto ||
-         requested_device.backend == Backend::TensorRT)) {
-        return windows_rtx_model();
+    if (is_windows_rtx_request(requested_device, capabilities)) {
+        return windows_rtx_model_for_request(capabilities, requested_device, preset, screen_color);
     }
-
-    if (capabilities.platform == "windows" && requested_device.backend == Backend::CUDA &&
-        has_backend(capabilities, Backend::CUDA)) {
-        return windows_rtx_model();
+    if (is_windows_universal_request(requested_device, capabilities)) {
+        return windows_universal_model_for_request(requested_device);
     }
-
-    if (capabilities.platform == "windows" && (requested_device.backend == Backend::DirectML ||
-                                               requested_device.backend == Backend::WindowsML ||
-                                               requested_device.backend == Backend::OpenVINO)) {
-        return windows_universal_model();
-    }
-
     return std::nullopt;
 }
 
@@ -689,73 +739,105 @@ std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& ca
     return devices.front();
 }
 
+namespace {
+
+// Per-profile factories. Splitting the long if/else chain in
+// runtime_optimization_profile_for_device into named builders keeps each
+// rung self-contained and lets the dispatcher stay under the
+// readability-function-size threshold.
+RuntimeOptimizationProfile windows_rtx_profile() {
+    return RuntimeOptimizationProfile{
+        .id = "windows-rtx",
+        .label = "Windows RTX",
+        .intended_track = "windows_rtx",
+        .backend_intent = "tensorrt",
+        .fallback_policy = "safe_auto_quality_with_manual_override",
+        .warmup_policy = "precompiled_context_or_first_run_compile",
+        .certification_tier = "packaged_fp16_ladder_through_2048",
+        .unrestricted_quality_attempt = true,
+    };
+}
+
+RuntimeOptimizationProfile linux_rtx_cuda_profile() {
+    return RuntimeOptimizationProfile{
+        .id = "linux-rtx-cuda",
+        .label = "Linux RTX (CUDA Execution Provider)",
+        .intended_track = "linux_rtx",
+        .backend_intent = "cuda",
+        .fallback_policy = "experimental_gpu_then_cpu_tolerant_workflows",
+        .warmup_policy = "provider_specific_session_warmup",
+        .certification_tier = "experimental",
+        .unrestricted_quality_attempt = false,
+    };
+}
+
+RuntimeOptimizationProfile windows_directml_profile(const DeviceInfo& device) {
+    return RuntimeOptimizationProfile{
+        .id = "windows-directml",
+        .label = "Windows DirectML",
+        .intended_track = "windows_universal",
+        .backend_intent = backend_to_string(device.backend),
+        .fallback_policy = "experimental_gpu_then_cpu_tolerant_workflows",
+        .warmup_policy = "provider_specific_session_warmup",
+        .certification_tier = "experimental",
+        .unrestricted_quality_attempt = false,
+    };
+}
+
+RuntimeOptimizationProfile apple_silicon_mlx_profile() {
+    return RuntimeOptimizationProfile{
+        .id = "apple-silicon-mlx",
+        .label = "Apple Silicon MLX",
+        .intended_track = "apple_silicon",
+        .backend_intent = "mlx",
+        .fallback_policy = "curated_primary_pack_with_bridge_exports",
+        .warmup_policy = "bridge_import_and_callable_compile",
+        .certification_tier = "official_apple_silicon_track",
+        .unrestricted_quality_attempt = true,
+    };
+}
+
+RuntimeOptimizationProfile cpu_fallback_profile() {
+    return RuntimeOptimizationProfile{
+        .id = "cpu-fallback",
+        .label = "CPU Fallback",
+        .intended_track = "portable_fallback",
+        .backend_intent = "cpu",
+        .fallback_policy = "tolerant_workflow_only",
+        .warmup_policy = "minimal",
+        .certification_tier = "best_effort",
+        .unrestricted_quality_attempt = false,
+    };
+}
+
+bool is_linux_rtx_cuda(const DeviceInfo& device, const RuntimeCapabilities& capabilities) {
+    return capabilities.platform == "linux" &&
+           (device.backend == Backend::CUDA || device.backend == Backend::TensorRT);
+}
+
+bool is_windows_universal(const DeviceInfo& device, const RuntimeCapabilities& capabilities) {
+    return capabilities.platform == "windows" &&
+           (device.backend == Backend::DirectML || device.backend == Backend::WindowsML ||
+            device.backend == Backend::OpenVINO);
+}
+
+}  // namespace
+
 RuntimeOptimizationProfile runtime_optimization_profile_for_device(
     const RuntimeCapabilities& capabilities, const DeviceInfo& device) {
-    RuntimeOptimizationProfile profile;
-
-    if (capabilities.platform == "windows" &&
-        (device.backend == Backend::TensorRT || device.backend == Backend::CUDA)) {
-        profile.id = "windows-rtx";
-        profile.label = "Windows RTX";
-        profile.intended_track = "windows_rtx";
-        profile.backend_intent = "tensorrt";
-        profile.fallback_policy = "safe_auto_quality_with_manual_override";
-        profile.warmup_policy = "precompiled_context_or_first_run_compile";
-        profile.certification_tier = "packaged_fp16_ladder_through_2048";
-        profile.unrestricted_quality_attempt = true;
-        return profile;
+    if (is_windows_rtx_device(device, capabilities)) {
+        return windows_rtx_profile();
     }
-
-    if (capabilities.platform == "linux" &&
-        (device.backend == Backend::CUDA || device.backend == Backend::TensorRT)) {
-        profile.id = "linux-rtx-cuda";
-        profile.label = "Linux RTX (CUDA Execution Provider)";
-        profile.intended_track = "linux_rtx";
-        profile.backend_intent = "cuda";
-        profile.fallback_policy = "experimental_gpu_then_cpu_tolerant_workflows";
-        profile.warmup_policy = "provider_specific_session_warmup";
-        profile.certification_tier = "experimental";
-        profile.unrestricted_quality_attempt = false;
-        return profile;
+    if (is_linux_rtx_cuda(device, capabilities)) {
+        return linux_rtx_cuda_profile();
     }
-
-    if (capabilities.platform == "windows" &&
-        (device.backend == Backend::DirectML || device.backend == Backend::WindowsML ||
-         device.backend == Backend::OpenVINO)) {
-        profile.id = "windows-directml";
-        profile.label = "Windows DirectML";
-        profile.intended_track = "windows_universal";
-        profile.backend_intent = backend_to_string(device.backend);
-        profile.fallback_policy = "experimental_gpu_then_cpu_tolerant_workflows";
-        profile.warmup_policy = "provider_specific_session_warmup";
-        profile.certification_tier = "experimental";
-        profile.unrestricted_quality_attempt = false;
-        return profile;
+    if (is_windows_universal(device, capabilities)) {
+        return windows_directml_profile(device);
     }
-
-    if (capabilities.platform == "macos" &&
-        (device.backend == Backend::MLX || device.backend == Backend::CoreML ||
-         device.backend == Backend::Auto)) {
-        profile.id = "apple-silicon-mlx";
-        profile.label = "Apple Silicon MLX";
-        profile.intended_track = "apple_silicon";
-        profile.backend_intent = "mlx";
-        profile.fallback_policy = "curated_primary_pack_with_bridge_exports";
-        profile.warmup_policy = "bridge_import_and_callable_compile";
-        profile.certification_tier = "official_apple_silicon_track";
-        profile.unrestricted_quality_attempt = true;
-        return profile;
+    if (is_apple_silicon_device(device, capabilities)) {
+        return apple_silicon_mlx_profile();
     }
-
-    profile.id = "cpu-fallback";
-    profile.label = "CPU Fallback";
-    profile.intended_track = "portable_fallback";
-    profile.backend_intent = "cpu";
-    profile.fallback_policy = "tolerant_workflow_only";
-    profile.warmup_policy = "minimal";
-    profile.certification_tier = "best_effort";
-    profile.unrestricted_quality_attempt = false;
-    return profile;
+    return cpu_fallback_profile();
 }
 
 ArtifactRuntimeState artifact_runtime_state_for_device(const ModelCatalogEntry& model,
@@ -1104,6 +1186,59 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     return expected;
 }
 
+namespace {
+
+// Bundles the per-call state shared by the resolution-walk helpers below.
+// Pointer members instead of references keep the struct trivially copyable
+// (cppcoreguidelines-avoid-const-or-ref-data-members) while preserving the
+// "borrowed, not owned" contract: every callsite constructs the struct on
+// the stack with the active models_root / requested_device.
+struct CandidateSelectionContext {
+    const std::filesystem::path* models_root;
+    const DeviceInfo* requested_device;
+    int requested_resolution;
+    int search_resolution;
+    bool coarse_to_fine;
+    bool require_exact_resolution;
+};
+
+// Appends selections for one resolution rung to the running vector.
+// Returns true if at least one packaged artifact was found at that
+// resolution. The bool lets the caller short-circuit when require_exact
+// is set and the exact-resolution rung is empty.
+bool append_selections_for_resolution(int resolution, const CandidateSelectionContext& context,
+                                      std::vector<ArtifactSelection>& selections) {
+    auto artifact_paths = candidate_artifact_paths_for_request(
+        *context.models_root, context.requested_device->backend, resolution);
+    bool found = false;
+    for (const auto& artifact_path : artifact_paths) {
+        if (!std::filesystem::exists(artifact_path)) {
+            continue;
+        }
+        found = true;
+        selections.push_back(ArtifactSelection{
+            .executable_model_path = artifact_path,
+            .requested_resolution = context.requested_resolution,
+            .effective_resolution = resolution,
+            .used_fallback =
+                resolution != context.requested_resolution || context.coarse_to_fine,
+            .coarse_to_fine = context.coarse_to_fine,
+        });
+    }
+    return found;
+}
+
+bool should_skip_resolution(int resolution, const CandidateSelectionContext& context,
+                            bool exact_artifact_available) {
+    if (resolution > context.search_resolution) {
+        return true;
+    }
+    return context.require_exact_resolution && resolution != context.search_resolution &&
+           !exact_artifact_available;
+}
+
+}  // namespace
+
 Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback,
@@ -1123,42 +1258,27 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
         return Unexpected<Error>(resolution_search.error());
     }
 
-    const int search_resolution = resolution_search->first;
-    const bool coarse_to_fine = resolution_search->second;
-    const bool require_exact_resolution =
-        !allow_lower_resolution_fallback && (!coarse_to_fine || coarse_resolution_override > 0);
+    const CandidateSelectionContext context{
+        .models_root = &models_root,
+        .requested_device = &requested_device,
+        .requested_resolution = requested_resolution,
+        .search_resolution = resolution_search->first,
+        .coarse_to_fine = resolution_search->second,
+        .require_exact_resolution =
+            !allow_lower_resolution_fallback &&
+            (!resolution_search->second || coarse_resolution_override > 0),
+    };
 
     std::vector<ArtifactSelection> selections;
     bool exact_artifact_available = false;
     constexpr std::array<int, 4> kFallbackResolutions = {kRes2048, kRes1536, kRes1024, kRes512};
     for (int resolution : kFallbackResolutions) {
-        if (resolution > search_resolution) {
+        if (should_skip_resolution(resolution, context, exact_artifact_available)) {
             continue;
         }
-        if (require_exact_resolution && resolution != search_resolution &&
-            !exact_artifact_available) {
-            continue;
-        }
-
-        auto artifact_paths =
-            candidate_artifact_paths_for_request(models_root, requested_device.backend, resolution);
-        bool found_for_resolution = false;
-        for (const auto& artifact_path : artifact_paths) {
-            if (!std::filesystem::exists(artifact_path)) {
-                continue;
-            }
-            found_for_resolution = true;
-            selections.push_back(ArtifactSelection{
-                .executable_model_path = artifact_path,
-                .requested_resolution = requested_resolution,
-                .effective_resolution = resolution,
-                .used_fallback = resolution != requested_resolution || coarse_to_fine,
-                .coarse_to_fine = coarse_to_fine,
-            });
-        }
-
-        if (require_exact_resolution && resolution == search_resolution) {
-            if (!found_for_resolution) {
+        const bool found = append_selections_for_resolution(resolution, context, selections);
+        if (context.require_exact_resolution && resolution == context.search_resolution) {
+            if (!found) {
                 return std::vector<ArtifactSelection>{};
             }
             exact_artifact_available = true;
