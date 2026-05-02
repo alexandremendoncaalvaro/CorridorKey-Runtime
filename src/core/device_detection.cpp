@@ -4,7 +4,7 @@
 #include "mlx_probe.hpp"
 #include "windows_rtx_probe.hpp"
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #elif defined(_WIN32)
@@ -17,9 +17,22 @@
 
 namespace corridorkey {
 
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-avoid-magic-numbers,bugprone-implicit-widening-of-multiplication-result,modernize-use-designated-initializers)
+//
+// device_detection.cpp tidy-suppression rationale.
+//
+// This file enumerates platform GPUs by index using stable per-platform
+// vector results from probe helpers; the indexed access is bounded by
+// the loop counter and is the canonical way to surface device_index
+// downstream. Probe routines and their tier ordering form a single
+// orchestration function whose size and branching reflect the explicit
+// platform priority list (TensorRT-RTX -> WindowsML -> OpenVINO -> CUDA
+// -> DirectML -> CPU), not accidental complexity. The 1024*1024 byte-to-
+// MiB conversion and the DeviceInfo aggregate initialisers are
+// deliberate, well-known forms used throughout the engine API.
 namespace {
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 bool compiled_for_apple_silicon() {
 #if defined(__aarch64__) || defined(__arm64__)
     return true;
@@ -45,7 +58,7 @@ DeviceInfo auto_detect() {
     device.backend = Backend::CPU;  // Default fallback
     device.available_memory_mb = 0;
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     bool apple_silicon = detect_apple_silicon();
 
     char model[256];
@@ -164,7 +177,7 @@ DeviceInfo auto_detect() {
 
 std::vector<DeviceInfo> list_devices() {
     std::vector<DeviceInfo> devices;
-#if defined(__APPLE__)
+#ifdef __APPLE__
     DeviceInfo detected = auto_detect();
     if (detect_apple_silicon() && core::mlx_probe_available()) {
         devices.push_back({"Apple Silicon MLX", detected.available_memory_mb, Backend::MLX});
@@ -216,3 +229,4 @@ std::vector<DeviceInfo> list_devices() {
 }
 
 }  // namespace corridorkey
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-avoid-magic-numbers,bugprone-implicit-widening-of-multiplication-result,modernize-use-designated-initializers)
