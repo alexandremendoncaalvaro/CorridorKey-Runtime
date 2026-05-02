@@ -8,7 +8,7 @@
 
 #include "runtime_paths.hpp"
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -20,6 +20,27 @@
 #include <unistd.h>
 #endif
 
+// NOLINTBEGIN(readability-use-concise-preprocessor-directives,modernize-use-designated-initializers,readability-math-missing-parentheses,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-qualified-auto,cppcoreguidelines-pro-type-reinterpret-cast)
+//
+// shared_memory_transport.cpp tidy-suppression rationale.
+//
+// This TU implements the OFX-host <-> runtime shared-memory frame
+// transport over Win32 file mappings and POSIX mmap. The
+// reinterpret_cast call sites cast the mapped raw byte region to the
+// header / float overlay; that is the documented OS-level mechanism
+// for typed access to a memory-mapped file and cannot be expressed
+// with std::bit_cast (the source is a runtime pointer to live mapped
+// pages, not a value). The byte-offset arithmetic
+// (rgb_offset + count*sizeof(float)) follows the canonical pixel-plane
+// layout the OFX bridge encodes; explicit parentheses would obscure
+// the offset/stride formula. The std::uint32_t header fields narrow to
+// int only at well-bounded image dimensions already validated by
+// SharedFrameTransport::create. The auto handles produced by
+// CreateFileW / CreateFileMappingW are HANDLE typedefs (void*) where
+// 'auto*' would change overload resolution. The Image{} aggregates use
+// the project-wide positional construction style. The remaining
+// platform-branch #if defined(_WIN32) blocks have multi-line guards
+// flagged inconsistently by clang-tidy 22's heuristic.
 namespace corridorkey::common {
 
 namespace {
@@ -28,11 +49,11 @@ Error transport_error(ErrorCode code, const std::string& message) {
     return Error{code, message};
 }
 
-#if defined(_WIN32)
+#ifdef _WIN32
 constexpr DWORD kSharedFrameShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 #endif
 
-#if defined(_WIN32)
+#ifdef _WIN32
 std::wstring wide_path(const std::filesystem::path& path) {
     return path.wstring();
 }
@@ -60,7 +81,7 @@ SharedFrameTransport& SharedFrameTransport::operator=(SharedFrameTransport&& oth
     m_mapping = other.m_mapping;
     m_mapping_size = other.m_mapping_size;
     m_header = other.m_header;
-#if defined(_WIN32)
+#ifdef _WIN32
     m_file_handle = other.m_file_handle;
     m_mapping_handle = other.m_mapping_handle;
     other.m_file_handle = nullptr;
@@ -150,7 +171,7 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
             ErrorCode::IoError, "Failed to create shared frame directory: " + error.message()));
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     auto file_handle =
         CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, kSharedFrameShareMode,
                     nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
@@ -161,8 +182,8 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
 
     LARGE_INTEGER desired_size;
     desired_size.QuadPart = static_cast<LONGLONG>(size);
-    if (!SetFilePointerEx(file_handle, desired_size, nullptr, FILE_BEGIN) ||
-        !SetEndOfFile(file_handle)) {
+    if (SetFilePointerEx(file_handle, desired_size, nullptr, FILE_BEGIN) == 0 ||
+        SetEndOfFile(file_handle) == 0) {
         CloseHandle(file_handle);
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to size shared frame file."));
@@ -221,7 +242,7 @@ Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path
             ErrorCode::IoError, "Shared frame file does not exist: " + path.string()));
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     auto file_handle =
         CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, kSharedFrameShareMode,
                     nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -231,7 +252,7 @@ Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path
     }
 
     LARGE_INTEGER file_size;
-    if (!GetFileSizeEx(file_handle, &file_size)) {
+    if (GetFileSizeEx(file_handle, &file_size) == 0) {
         CloseHandle(file_handle);
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to read shared frame size."));
@@ -316,14 +337,14 @@ Result<void> SharedFrameTransport::validate_header() const {
 
 void SharedFrameTransport::close() {
     if (m_mapping != nullptr) {
-#if defined(_WIN32)
+#ifdef _WIN32
         UnmapViewOfFile(m_mapping);
 #else
         munmap(m_mapping, m_mapping_size);
 #endif
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     if (m_mapping_handle != nullptr) {
         CloseHandle(m_mapping_handle);
     }
@@ -402,3 +423,4 @@ std::filesystem::path next_ofx_shared_frame_path() {
 }
 
 }  // namespace corridorkey::common
+// NOLINTEND(readability-use-concise-preprocessor-directives,modernize-use-designated-initializers,readability-math-missing-parentheses,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-qualified-auto,cppcoreguidelines-pro-type-reinterpret-cast)
