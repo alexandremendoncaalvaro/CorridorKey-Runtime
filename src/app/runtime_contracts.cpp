@@ -120,9 +120,9 @@ std::optional<std::string> detect_active_packaged_model_profile() {
             }
 
             nlohmann::json parsed = nlohmann::json::parse(stream, nullptr, true, true);
-            if (parsed.contains("model_profile") && parsed["model_profile"].is_string()) {
+            if (parsed.contains("model_profile") && parsed.at("model_profile").is_string()) {
                 return normalize_packaged_model_profile_name(
-                    parsed["model_profile"].get<std::string>());
+                    parsed.at("model_profile").get<std::string>());
             }
         } catch (...) {
             continue;
@@ -864,6 +864,13 @@ std::string job_event_type_to_string(JobEventType type) {
     return "progress";
 }
 
+// nlohmann::json's operator[] on an object auto-inserts; it does not have
+// the throw-on-missing semantic of std::vector::operator[] that the
+// cppcoreguidelines-pro-bounds-avoid-unchecked-container-access check
+// targets. Wrap the to_json/from_json blocks with NOLINTBEGIN/NOLINTEND
+// to silence the false positives for the standard JSON-build idiom; per-
+// line NOLINTNEXTLINE would dwarf the actual code.
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 nlohmann::json to_json(const Error& error) {
     nlohmann::json json;
     json["code"] = static_cast<int>(error.code);
@@ -1289,6 +1296,7 @@ nlohmann::json to_json(const RuntimeOptimizationProfile& profile) {
     json["unrestricted_quality_attempt"] = profile.unrestricted_quality_attempt;
     return json;
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 nlohmann::json to_json(const ArtifactRuntimeState& state) {
     nlohmann::json json;
