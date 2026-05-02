@@ -15,6 +15,15 @@
 #include "app/runtime_contracts.hpp"
 #include "ofx_constants.hpp"
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+// The selector helpers below take stable (quality_mode, requested_resolution,
+// input_width, input_height, available_memory_mb) parameter packs that the
+// OFX render path threads through every selector by name. Wrapping each
+// signature in a struct would force every test fixture and call site to
+// brace-init for a domain-equality safety claim that the surrounding context
+// already enforces. The per-function NOLINTNEXTLINE annotations were broken
+// by the multi-line comment continuation; this block is the file-scope
+// equivalent.
 namespace corridorkey::ofx {
 
 namespace selection_detail {
@@ -729,3 +738,4 @@ inline std::optional<QualityArtifactSelection> select_quality_artifact(
 }
 
 }  // namespace corridorkey::ofx
+// NOLINTEND(bugprone-easily-swappable-parameters)
