@@ -1,6 +1,6 @@
 #include "linux_cuda_probe.hpp"
 
-#if defined(__linux__)
+#ifdef __linux__
 
 #include <dlfcn.h>
 

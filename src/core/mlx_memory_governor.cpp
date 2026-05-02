@@ -3,7 +3,7 @@
 #include <atomic>
 #include <mutex>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 #include <sys/sysctl.h>
 #include <sys/types.h>
 
@@ -18,7 +18,7 @@ namespace corridorkey::core::mlx_memory {
 
 namespace {
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 std::size_t query_host_memsize_bytes() {
     std::size_t value = 0;
     std::size_t size = sizeof(value);
@@ -64,6 +64,12 @@ BaselineLimits derive_baseline_limits() {
 }
 #endif
 
+// std::once_flag and the MLX baseline-limits cache need to be at namespace
+// scope so initialize_defaults() can rerun against the same flag and the
+// session broker can read the current policy on the hot prepare path
+// without taking a mutex. Marking either as const would defeat
+// std::call_once / std::atomic.
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 std::once_flag g_initialize_once;
 #if CORRIDORKEY_WITH_MLX
 BaselineLimits g_baseline_limits;
@@ -74,6 +80,7 @@ BaselineLimits g_baseline_limits;
 // rather than a mutex because the read is on the hot prepare path and the
 // write fires from a dedicated serial dispatch queue.
 std::atomic<Policy> g_current_policy{Policy::Normal};
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 Snapshot current_snapshot() {
     Snapshot out;
@@ -86,7 +93,7 @@ Snapshot current_snapshot() {
     // the same value. There is no getter, so we cache the last applied values
     // on the module and read them back from the baseline / most-recent policy.
 #endif
-#if defined(__APPLE__)
+#ifdef __APPLE__
     // Metal driver's dynamic working-set ceiling. This is the same number
     // PyTorch MPS and llama.cpp consult; it shrinks automatically when the
     // system is under pressure. libmlx does not export the device_info()

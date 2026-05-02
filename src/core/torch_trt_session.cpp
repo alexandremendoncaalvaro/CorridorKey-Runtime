@@ -222,9 +222,7 @@ TorchTrtSession& TorchTrtSession::operator=(TorchTrtSession&&) noexcept = defaul
 
 Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
     const std::filesystem::path& ts_path, const DeviceInfo& device,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param) — matches MlxSession signature;
-    // std::function copy is cheap and the API is documented to accept nullptr.
-    StageTimingCallback on_stage) {
+    StageTimingCallback on_stage) {  // NOLINT(performance-unnecessary-value-param) — matches MlxSession signature.
     if (!std::filesystem::exists(ts_path)) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::ModelLoadFailed,

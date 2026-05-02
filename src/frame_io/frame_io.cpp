@@ -6,27 +6,35 @@
 namespace corridorkey::frame_io {
 
 Result<ImageBuffer> read_frame(const std::filesystem::path& path) {
-    auto ext = path.extension().string();
+    const auto ext = path.extension().string();
 
     if (ext == ".exr") {
         return read_exr(path);
-    } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
+    }
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") {
         return read_stb(path);
     }
 
-    return Unexpected(Error{ErrorCode::IoError, "Unsupported file format: " + ext});
+    return Unexpected(Error{
+        .code = ErrorCode::IoError,
+        .message = "Unsupported file format: " + ext,
+    });
 }
 
 Result<void> write_frame(const std::filesystem::path& path, const Image& image) {
-    auto ext = path.extension().string();
+    const auto ext = path.extension().string();
 
     if (ext == ".exr") {
         return write_exr(path, image);
-    } else if (ext == ".png") {
+    }
+    if (ext == ".png") {
         return write_png(path, image);
     }
 
-    return Unexpected(Error{ErrorCode::IoError, "Unsupported output format: " + ext});
+    return Unexpected(Error{
+        .code = ErrorCode::IoError,
+        .message = "Unsupported output format: " + ext,
+    });
 }
 
 Result<void> save_result(const std::filesystem::path& base_dir, const std::string& filename,
@@ -62,8 +70,10 @@ Result<void> save_result(const std::filesystem::path& base_dir, const std::strin
 
         return {};
     } catch (const std::exception& e) {
-        return Unexpected(
-            Error{ErrorCode::IoError, std::string("Failed to save result structure: ") + e.what()});
+        return Unexpected(Error{
+            .code = ErrorCode::IoError,
+            .message = std::string("Failed to save result structure: ") + e.what(),
+        });
     }
 }
 
