@@ -25,7 +25,7 @@ class CORRIDORKEY_API LocalJsonConnection {
     LocalJsonConnection& operator=(LocalJsonConnection&& other) noexcept;
 
     [[nodiscard]] bool valid() const;
-    Result<void> write_json(const nlohmann::json& json);
+    Result<void> write_json(const nlohmann::json& json) const;
     Result<nlohmann::json> read_json(int timeout_ms) const;
 
    private:
