@@ -2,6 +2,21 @@
 
 #include <array>
 
+// NOLINTBEGIN(modernize-use-designated-initializers,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+//
+// ofx_runtime_protocol.cpp tidy-suppression rationale.
+//
+// This TU is a pure JSON-marshalling layer between the OFX plugin and
+// the runtime broker. The struct constructions use the project-wide
+// positional aggregate-init style (matching every other Result<T>
+// boundary in src/app/), and switching only this file would diverge
+// from the rest of the codebase. The from_json walkers are long and
+// branchy by necessity: every wire field needs a presence + type check
+// + named error before the value is consumed, so cognitive complexity
+// and function size fall out of the schema width rather than from
+// nested logic. nlohmann::json::operator[] writes into a freshly
+// constructed object that the caller owns; bounds-checked .at() would
+// throw on the assignment path it is meant to create.
 namespace corridorkey::app {
 
 namespace {
@@ -702,3 +717,4 @@ Result<OfxRuntimeShutdownRequest> shutdown_request_from_json(const nlohmann::jso
 }
 
 }  // namespace corridorkey::app
+// NOLINTEND(modernize-use-designated-initializers,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
