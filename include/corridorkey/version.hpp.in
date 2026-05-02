@@ -1,8 +1,15 @@
 #pragma once
 
+// Version constants are #defines (rather than constexpr) because they need to
+// be spellable inside the preprocessor for build-system / packaging scripts
+// that string-substitute them at install time, and the *_STRING values are
+// concatenated into other string literals at use sites (which constexpr
+// std::string_view does not support without callsite churn).
+// NOLINTBEGIN(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum,cppcoreguidelines-macro-usage)
 #define CORRIDORKEY_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
 #define CORRIDORKEY_VERSION_MINOR @PROJECT_VERSION_MINOR@
 #define CORRIDORKEY_VERSION_PATCH @PROJECT_VERSION_PATCH@
 
 #define CORRIDORKEY_VERSION_STRING "@PROJECT_VERSION@"
 #define CORRIDORKEY_DISPLAY_VERSION_STRING "@CORRIDORKEY_VERSION_DISPLAY_STRING@"
+// NOLINTEND(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum,cppcoreguidelines-macro-usage)
