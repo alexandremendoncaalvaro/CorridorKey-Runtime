@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <corridorkey/engine.hpp>
@@ -25,7 +26,7 @@
 #include "ofx_runtime_client.hpp"
 #include "ofx_shared.hpp"
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 #include <crt_externs.h>
 #include <dlfcn.h>
 #include <spawn.h>
@@ -46,6 +47,24 @@ namespace corridorkey::ofx {
 void set_param_secret(OfxParamHandle param, bool secret);
 
 namespace {
+
+// ShellExecuteW returns an HINSTANCE convertible to intptr_t. Per
+// Microsoft's documentation, a return value greater than 32 indicates
+// success; smaller values are SE_ERR_* error codes. The threshold is a
+// platform constant, not a tunable.
+constexpr std::intptr_t kShellExecuteSuccessThreshold = 32;
+
+// Status-line truncation budgets for the runtime panel. Values picked to
+// keep the OFX status string readable in DaVinci Resolve's narrow inspector
+// pane while still surfacing enough detail to be actionable.
+constexpr std::size_t kStatusErrorMessageMaxLength = 160;
+constexpr std::size_t kStatusNoteMaxLength = 100;
+constexpr std::size_t kHotspotLabelMaxLength = 36;
+
+// Time-unit conversions used in stage-timing formatting and the runtime
+// client timeout knob (seconds <-> milliseconds).
+constexpr double kMillisecondsPerSecondD = 1000.0;
+constexpr int kMillisecondsPerSecondI = 1000;
 
 constexpr const char* kRepoHelpBaseUrl =
     "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/blob/"
@@ -89,7 +108,7 @@ void kickoff_global_update_check(bool force_refresh = false) {
         (void)app::check_for_update(options);
         auto cache = app::read_cache(app::default_cache_path());
         {
-            std::lock_guard<std::mutex> lock(state.mutex);
+            const std::scoped_lock lock(state.mutex);
             state.cache = cache;
         }
         state.done.store(true, std::memory_order_release);
@@ -101,7 +120,7 @@ std::optional<app::UpdateInfo> current_update_info(bool include_prereleases) {
     if (!state.done.load(std::memory_order_acquire)) {
         return std::nullopt;
     }
-    std::lock_guard<std::mutex> lock(state.mutex);
+    const std::scoped_lock lock(state.mutex);
     if (!state.cache.has_value()) {
         return std::nullopt;
     }
@@ -115,11 +134,16 @@ std::string update_banner_text(const app::UpdateInfo& info) {
 }
 
 bool open_external_url(const std::string& url) {
-#if defined(_WIN32)
-    std::wstring wide_url(url.begin(), url.end());
+#ifdef _WIN32
+    const std::wstring wide_url(url.begin(), url.end());
+    // ShellExecuteW returns HINSTANCE (an HMODULE-shaped opaque pointer)
+    // whose value-as-integer is the documented success/error code per
+    // Win32 SDK; reinterpret_cast is the canonical idiom Microsoft's docs
+    // demonstrate for inspecting that return.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     auto result = reinterpret_cast<std::intptr_t>(
         ShellExecuteW(nullptr, L"open", wide_url.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-    return result > 32;
+    return result > kShellExecuteSuccessThreshold;
 #elif defined(__APPLE__)
     char* const argv[] = {const_cast<char*>("/usr/bin/open"), const_cast<char*>(url.c_str()),
                           nullptr};
@@ -195,21 +219,8 @@ std::string processing_device_label(const DeviceInfo& device) {
     return processing_backend_label(device.backend);
 }
 
-bool environment_flag_enabled(const char* name) {
-    if (auto value = common::environment_variable_copy(name); value.has_value()) {
-        return *value == "1" || *value == "true" || *value == "TRUE";
-    }
-    return false;
-}
-
 bool runtime_server_binary_present(const std::filesystem::path& runtime_server_path) {
     return !runtime_server_path.empty() && std::filesystem::exists(runtime_server_path);
-}
-
-bool is_windows_gpu_backend(Backend backend) {
-    return backend == Backend::TensorRT || backend == Backend::CUDA ||
-           backend == Backend::DirectML || backend == Backend::WindowsML ||
-           backend == Backend::OpenVINO;
 }
 
 EngineCreateOptions ofx_engine_options(const DeviceInfo& requested_device) {
@@ -267,9 +278,14 @@ void sync_runtime_panel_state_from_active_session(InstanceData* data) {
         client_has_session ? data->runtime_client->session_ref_count() : 0;
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+// quality_mode and requested_resolution are both ints encoding distinct
+// domain values; the existing internal call sites name both locals so a
+// mistaken swap would surface in code review.
 void set_runtime_panel_state_for_failed_quality_request(
     InstanceData* data, int requested_quality_mode, int requested_resolution,
     bool cpu_quality_guardrail_active, const std::filesystem::path& artifact_path) {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     if (data == nullptr) {
         return;
     }
@@ -307,8 +323,8 @@ bool sync_runtime_panel_session_state_impl(InstanceData* data) {
 
 std::uint64_t mix_cache_token(std::uint64_t token, const std::string& value) {
     constexpr std::uint64_t kPrime = 1099511628211ULL;
-    for (unsigned char ch : value) {
-        token ^= ch;
+    for (const unsigned char byte_value : value) {
+        token ^= byte_value;
         token *= kPrime;
     }
     return token;
@@ -345,7 +361,7 @@ std::uint64_t models_bundle_token(const std::filesystem::path& models_root) {
             std::to_string(static_cast<long long>(write_time.time_since_epoch().count())));
     }
 
-    std::sort(entries.begin(), entries.end());
+    std::ranges::sort(entries);
     std::uint64_t token = kOffsetBasis;
     for (const auto& entry : entries) {
         token = mix_cache_token(token, entry);
@@ -382,32 +398,32 @@ std::string truncate_status_message(const std::string& message, std::size_t max_
     return message.substr(0, max_length - 3) + "...";
 }
 
-std::string format_duration_ms(double ms) {
-    if (ms <= 0.0) {
+std::string format_duration_ms(double duration_ms) {
+    if (duration_ms <= 0.0) {
         return "n/a";
     }
     std::ostringstream oss;
-    if (ms >= 1000.0) {
-        oss << std::fixed << std::setprecision(1) << (ms / 1000.0) << " s";
+    if (duration_ms >= kMillisecondsPerSecondD) {
+        oss << std::fixed << std::setprecision(1) << (duration_ms / kMillisecondsPerSecondD) << " s";
     } else {
-        oss << std::fixed << std::setprecision(1) << ms << " ms";
+        oss << std::fixed << std::setprecision(1) << duration_ms << " ms";
     }
     return oss.str();
 }
 
 std::string runtime_status_runtime_label_impl(const InstanceData& data) {
     if (!data.last_error.empty()) {
-        return "Error: " + truncate_status_message(data.last_error, 160);
+        return "Error: " + truncate_status_message(data.last_error, kStatusErrorMessageMaxLength);
     }
     std::string status;
     if (!data.color_management_status.empty()) {
-        status = truncate_status_message(data.color_management_status, 100);
+        status = truncate_status_message(data.color_management_status, kStatusNoteMaxLength);
     }
     if (!data.last_warning.empty()) {
         if (!status.empty()) {
             status += " | ";
         }
-        status += "Note: " + truncate_status_message(data.last_warning, 100);
+        status += "Note: " + truncate_status_message(data.last_warning, kStatusNoteMaxLength);
     }
     if (!status.empty()) {
         return status;
@@ -487,17 +503,17 @@ std::string runtime_path_runtime_label_impl(const InstanceData& data) {
 
 bool is_nested_stage_name(std::string_view stage_name, std::string_view candidate_parent_name) {
     return stage_name.size() > candidate_parent_name.size() + 1 &&
-           stage_name.compare(0, candidate_parent_name.size(), candidate_parent_name) == 0 &&
-           stage_name[candidate_parent_name.size()] == '_';
+           stage_name.starts_with(candidate_parent_name) &&
+           stage_name.at(candidate_parent_name.size()) == '_';
 }
 
 bool stage_has_parent(const std::vector<StageTiming>& timings, std::size_t stage_index) {
-    const auto& stage_name = timings[stage_index].name;
+    const auto& stage_name = timings.at(stage_index).name;
     for (std::size_t index = 0; index < timings.size(); ++index) {
         if (index == stage_index) {
             continue;
         }
-        if (is_nested_stage_name(stage_name, timings[index].name)) {
+        if (is_nested_stage_name(stage_name, timings.at(index).name)) {
             return true;
         }
     }
@@ -505,12 +521,12 @@ bool stage_has_parent(const std::vector<StageTiming>& timings, std::size_t stage
 }
 
 bool stage_has_children(const std::vector<StageTiming>& timings, std::size_t stage_index) {
-    const auto& stage_name = timings[stage_index].name;
+    const auto& stage_name = timings.at(stage_index).name;
     for (std::size_t index = 0; index < timings.size(); ++index) {
         if (index == stage_index) {
             continue;
         }
-        if (is_nested_stage_name(timings[index].name, stage_name)) {
+        if (is_nested_stage_name(timings.at(index).name, stage_name)) {
             return true;
         }
     }
@@ -523,7 +539,7 @@ double exclusive_stage_total_ms(const std::vector<StageTiming>& timings) {
         if (stage_has_parent(timings, index)) {
             continue;
         }
-        total_ms += timings[index].total_ms;
+        total_ms += timings.at(index).total_ms;
     }
     return total_ms;
 }
@@ -534,8 +550,8 @@ const StageTiming* hottest_actionable_stage(const std::vector<StageTiming>& timi
         if (stage_has_children(timings, index)) {
             continue;
         }
-        if (hottest_stage == nullptr || timings[index].total_ms > hottest_stage->total_ms) {
-            hottest_stage = &timings[index];
+        if (hottest_stage == nullptr || timings.at(index).total_ms > hottest_stage->total_ms) {
+            hottest_stage = &timings.at(index);
         }
     }
 
@@ -574,7 +590,8 @@ std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
             break;
     }
     if (hottest_stage != nullptr && hottest_stage->total_ms > 0.0 && !hottest_stage->name.empty()) {
-        label += " | Hotspot: " + truncate_status_message(hottest_stage->name, 36) + " " +
+        label += " | Hotspot: " +
+                 truncate_status_message(hottest_stage->name, kHotspotLabelMaxLength) + " " +
                  format_duration_ms(hottest_stage->total_ms);
     }
     return label;
@@ -672,12 +689,18 @@ void log_stage_timing(std::string_view scope, std::string_view phase,
                            " effective_resolution=" + std::to_string(effective_resolution));
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+// scope/event/phase are all distinct log fields, and the int/int pair
+// (requested_resolution, effective_resolution) is paired throughout the
+// engine event log; restructuring would force every call site to
+// brace-init for negligible review benefit.
 void log_engine_event(std::string_view scope, std::string_view event, std::string_view phase,
                       const DeviceInfo& requested_device, const DeviceInfo& effective_device,
                       const std::filesystem::path& artifact_path, int requested_resolution,
                       int effective_resolution,
                       const std::optional<BackendFallbackInfo>& fallback = std::nullopt,
                       std::string_view detail = {}) {
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     std::string message = "event=" + std::string(event) + " phase=" + std::string(phase) +
                           " requested_backend=" + backend_label(requested_device.backend) +
                           " effective_backend=" + backend_label(effective_device.backend) +
@@ -749,6 +772,14 @@ bool allow_unrestricted_quality_attempt_for_request_impl(const InstanceData& dat
                .unrestricted_quality_attempt;
 }
 
+// NOLINTBEGIN(readability-function-cognitive-complexity)
+// This function is the canonical OFX panel-flush sink: every host-visible
+// runtime-panel string flows through it exactly once per render or
+// instance-change tick, mediated by the host-quirks render-thread guard
+// described in the comment block below. Decomposing it would scatter the
+// guard logic across helpers that no other caller would benefit from;
+// every existing branch is a discrete panel field, not a logic split
+// point.
 void update_runtime_panel_values(InstanceData* data) {
     if (data == nullptr) {
         log_message("update_runtime_panel_values", "skip reason=null_data");
@@ -837,20 +868,27 @@ void update_runtime_panel_values(InstanceData* data) {
     log_message("update_runtime_panel_values",
                 std::string("exit ok banner=") + (show_banner ? "1" : "0"));
 }
+// NOLINTEND(readability-function-cognitive-complexity)
 
 std::optional<std::filesystem::path> plugin_module_path() {
-#if defined(_WIN32)
+#ifdef _WIN32
     HMODULE module = nullptr;
-    auto address = reinterpret_cast<LPCWSTR>(&plugin_module_path);
-    if (!GetModuleHandleExW(
+    // Win32 GetModuleHandleExW with GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+    // expects an LPCWSTR-typed pointer treated as a code address; the cast
+    // is the documented idiom for "look up the module that owns this
+    // function."
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto* address = reinterpret_cast<LPCWSTR>(&plugin_module_path);
+    if (GetModuleHandleExW(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            address, &module)) {
+            address, &module) == FALSE) {
         log_message("plugin_module_path", "GetModuleHandleExW failed.");
         return std::nullopt;
     }
 
     std::wstring buffer(MAX_PATH, L'\0');
-    DWORD length = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+    const DWORD length =
+        GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
     if (length == 0) {
         log_message("plugin_module_path", "GetModuleFileNameW returned empty path.");
         return std::nullopt;
@@ -874,7 +912,7 @@ std::filesystem::path resolve_models_root() {
     if (auto override_path = common::environment_variable_copy("CORRIDORKEY_MODELS_DIR");
         override_path.has_value()) {
         log_message("resolve_models_root", std::string("Using override: ") + *override_path);
-        return std::filesystem::path(*override_path);
+        return {*override_path};
     }
 
     if (auto module_path = plugin_module_path(); module_path.has_value()) {
@@ -965,6 +1003,11 @@ InstanceData* get_instance_data(OfxImageEffectHandle instance) {
     if (g_suites.property->propGetPointer(props, kOfxPropInstanceData, 0, &ptr) != kOfxStatOK) {
         return nullptr;
     }
+    // OFX stores per-instance state via propSetPointer/propGetPointer, which
+    // round-trips opaque void* through the host. The cast back to the
+    // original concrete type is a property of the OFX C ABI, not a code
+    // smell we can refactor away without leaving the OFX contract.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     return reinterpret_cast<InstanceData*>(ptr);
 }
 
@@ -980,7 +1023,6 @@ void set_instance_data(OfxImageEffectHandle instance, InstanceData* data) {
 }
 
 void set_param_enabled(OfxParamHandle param, bool enabled);
-void set_param_secret(OfxParamHandle param, bool secret);
 void sync_dependent_params(InstanceData* data);
 
 bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
@@ -1021,8 +1063,8 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
     OfxRuntimeClientOptions client_options;
     client_options.endpoint = common::default_ofx_runtime_endpoint();
     client_options.server_binary = data->runtime_server_path;
-    client_options.request_timeout_ms = render_timeout_s * 1000;
-    client_options.prepare_timeout_ms = prepare_timeout_s * 1000;
+    client_options.request_timeout_ms = render_timeout_s * kMillisecondsPerSecondI;
+    client_options.prepare_timeout_ms = prepare_timeout_s * kMillisecondsPerSecondI;
     auto runtime_client = OfxRuntimeClient::create(std::move(client_options));
     if (!runtime_client) {
         data->last_error = runtime_client.error().message;
@@ -1036,6 +1078,12 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
     return true;
 }
 
+// NOLINTBEGIN(readability-function-size)
+// create_instance is the canonical OFX kOfxImageEffectActionCreateInstance
+// handler: most of the body is the explicit list of paramGetHandle calls
+// that resolve every parameter the plugin exposes. That list is best read
+// as a single contract against describe_in_context, not split across
+// helpers that would obscure which params belong to the plugin.
 OfxStatus create_instance(OfxImageEffectHandle instance) {
     const auto create_start = std::chrono::steady_clock::now();
     const auto log_create_total = [&](std::string_view outcome, std::string_view detail = {}) {
@@ -1080,7 +1128,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatFailed;
     }
 
-    OfxParamSetHandle param_set;
+    OfxParamSetHandle param_set = nullptr;
     if (g_suites.image_effect->getParamSet(instance, &param_set) != kOfxStatOK) {
         log_message("create_instance", "Failed to get param set.");
         log_create_total("param_set_failed");
@@ -1204,7 +1252,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     log_message("create_instance",
                 "Device detection deferred to runtime server (out-of-process loader isolation).");
     RuntimeCapabilities capabilities;
-#if defined(__APPLE__)
+#ifdef __APPLE__
     capabilities.platform = "macos";
 #elif defined(_WIN32)
     capabilities.platform = "windows";
@@ -1259,7 +1307,17 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     log_create_total("success", "bootstrap=deferred");
     return kOfxStatOK;
 }
+// NOLINTEND(readability-function-size)
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size)
+// quality_mode and input_width/input_height are distinct domain ints and
+// the canonical OFX render plumbs all three by name from the host, so a
+// param struct is unnecessary friction. The function is the single
+// orchestration site for the quality-switch state machine documented in
+// the OFX panel guide; splitting it would scatter the linear "validate ->
+// pick candidate -> prepare session -> bind state" sequence across
+// helpers that no other caller would benefit from. Decomposition is
+// tracked as a follow-up when a second consumer of these stages exists.
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height, QualityFallbackMode fallback_mode,
                                int coarse_resolution_override, RefinementMode refinement_mode,
@@ -1518,10 +1576,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         }
         effective_device = prepare_result->session.effective_device;
         fallback = prepare_result->session.backend_fallback;
-        log_message("ensure_engine_for_quality",
-                    "Runtime session prepared. reused_existing_session=" +
-                        std::to_string(prepare_result->session.reused_existing_session) +
-                        " ref_count=" + std::to_string(prepare_result->session.ref_count));
+        log_message(
+            "ensure_engine_for_quality",
+            "Runtime session prepared. reused_existing_session=" +
+                std::string(prepare_result->session.reused_existing_session ? "1" : "0") +
+                " ref_count=" + std::to_string(prepare_result->session.ref_count));
 
         log_engine_event("ensure_engine_for_quality", "engine_create_result", kQualitySwitchPhase,
                          requested_device, effective_device, selection.executable_model_path,
@@ -1594,6 +1653,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     update_runtime_panel(data);
     return false;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size)
 
 void update_runtime_panel(InstanceData* data) {
     // update_runtime_panel_values now owns the render-thread guard. Mark
@@ -1664,9 +1724,9 @@ OfxStatus get_regions_of_interest(OfxImageEffectHandle /*instance*/, OfxProperty
         return kOfxStatReplyDefault;
     }
 
-    double roi[4] = {};
-    if (g_suites.property->propGetDoubleN(in_args, kOfxImageEffectPropRegionOfInterest, 4, roi) !=
-        kOfxStatOK) {
+    std::array<double, 4> roi{};
+    if (g_suites.property->propGetDoubleN(in_args, kOfxImageEffectPropRegionOfInterest, 4,
+                                          roi.data()) != kOfxStatOK) {
         return kOfxStatReplyDefault;
     }
 
@@ -1674,8 +1734,8 @@ OfxStatus get_regions_of_interest(OfxImageEffectHandle /*instance*/, OfxProperty
         std::string("OfxImageClipPropRoI_") + kOfxImageEffectSimpleSourceClipName;
     const std::string hint_roi_property = std::string("OfxImageClipPropRoI_") + kClipAlphaHint;
 
-    g_suites.property->propSetDoubleN(out_args, source_roi_property.c_str(), 4, roi);
-    g_suites.property->propSetDoubleN(out_args, hint_roi_property.c_str(), 4, roi);
+    g_suites.property->propSetDoubleN(out_args, source_roi_property.c_str(), 4, roi.data());
+    g_suites.property->propSetDoubleN(out_args, hint_roi_property.c_str(), 4, roi.data());
     return kOfxStatOK;
 }
 
@@ -1706,25 +1766,32 @@ void set_param_secret(OfxParamHandle param, bool secret) {
 
 void sync_dependent_params(InstanceData* data) {
     int tiling_enabled = 0;
-    if (data->enable_tiling_param) {
+    if (data->enable_tiling_param != nullptr) {
         g_suites.parameter->paramGetValue(data->enable_tiling_param, &tiling_enabled);
     }
     set_param_enabled(data->tile_overlap_param, tiling_enabled != 0);
 
     int despeckle_enabled = 0;
-    if (data->despeckle_param) {
+    if (data->despeckle_param != nullptr) {
         g_suites.parameter->paramGetValue(data->despeckle_param, &despeckle_enabled);
     }
     set_param_enabled(data->despeckle_size_param, despeckle_enabled != 0);
 
     int source_passthrough = 0;
-    if (data->source_passthrough_param) {
+    if (data->source_passthrough_param != nullptr) {
         g_suites.parameter->paramGetValue(data->source_passthrough_param, &source_passthrough);
     }
     set_param_enabled(data->edge_erode_param, source_passthrough != 0);
     set_param_enabled(data->edge_blur_param, source_passthrough != 0);
 }
 
+// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size)
+// instance_changed dispatches the OFX kOfxActionInstanceChanged event for
+// every named parameter the plugin exposes. Each branch is a short,
+// independent action handler (open URL, kick off update check, sync
+// dependent params, push timeout to runtime client, etc.); routing them
+// through a table-of-handlers would obscure the simple "if the param is
+// X, do Y" mapping the OFX spec requires here.
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args) {
     InstanceData* data = get_instance_data(instance);
     if (data == nullptr) {
@@ -1788,17 +1855,19 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 sync_dependent_params(data);
             }
             if (changed_param == kParamRenderTimeout || changed_param == kParamPrepareTimeout) {
-                if (data->runtime_client) {
+                if (data->runtime_client != nullptr) {
                     int render_t = common::kDefaultOfxRenderTimeoutSeconds;
                     int prepare_t = common::kDefaultOfxPrepareTimeoutSeconds;
-                    if (data->render_timeout_param) {
+                    if (data->render_timeout_param != nullptr) {
                         g_suites.parameter->paramGetValue(data->render_timeout_param, &render_t);
                     }
-                    if (data->prepare_timeout_param) {
+                    if (data->prepare_timeout_param != nullptr) {
                         g_suites.parameter->paramGetValue(data->prepare_timeout_param, &prepare_t);
                     }
-                    data->runtime_client->set_request_timeout_ms(render_t * 1000);
-                    data->runtime_client->set_prepare_timeout_ms(prepare_t * 1000);
+                    data->runtime_client->set_request_timeout_ms(render_t *
+                                                                 kMillisecondsPerSecondI);
+                    data->runtime_client->set_prepare_timeout_ms(prepare_t *
+                                                                 kMillisecondsPerSecondI);
                 }
             }
         }
@@ -1814,6 +1883,7 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
     }
     return kOfxStatOK;
 }
+// NOLINTEND(readability-function-cognitive-complexity,readability-function-size)
 
 OfxStatus sync_private_data(OfxImageEffectHandle instance) {
     InstanceData* data = get_instance_data(instance);
@@ -1845,6 +1915,12 @@ OfxStatus sync_private_data(OfxImageEffectHandle instance) {
 OfxStatus destroy_instance(OfxImageEffectHandle instance) {
     InstanceData* data = get_instance_data(instance);
     if (data != nullptr) {
+        // OFX hosts own the instance data slot via kOfxPropInstanceData;
+        // ownership is handed to us in create_instance via .release() and
+        // returned here through delete. A smart pointer cannot manage the
+        // raw pointer that was already stashed in the property set, so the
+        // tidy gsl::owner annotation does not apply here.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         delete data;
         set_instance_data(instance, nullptr);
     }
