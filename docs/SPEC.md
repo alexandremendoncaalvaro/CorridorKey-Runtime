@@ -142,6 +142,41 @@ uses conservative **safe quality ceilings** by backend and available memory to
 pick a direct artifact, downgrade automatically, or force an explicit error
 when the requested quality is outside the current validated tier.
 
+### 3.4.1 Screen Color Model Variants
+
+CorridorKey ships two model variants distinguished by training plate color:
+
+- **Green** (`corridorkey_fp16_<res>.onnx`): the canonical variant. Officially
+  packaged across the full validated resolution ladder for every official
+  product track.
+- **Blue** (`corridorkey_blue_fp16_<res>.onnx`): a dedicated variant for blue
+  screen plates. Officially packaged at the resolutions where the artifact
+  passes engine compilation on the official backend; resolutions where the
+  blue checkpoint cannot be served directly fall back to canonicalizing the
+  blue input into the green domain and routing through the green model.
+
+The runtime selects the variant by the user-provided screen color parameter.
+When a requested variant is not packaged at the requested resolution, the
+runtime applies the documented green-domain canonicalization fallback rather
+than failing.
+
+### 3.4.2 Model Pack Distribution
+
+Model artifacts are distributed as **selectable packs** rather than a single
+mandatory bundle. Each pack is identified by product track and screen color
+variant. Packs are hosted on Hugging Face and addressable through the
+`download_url` field on every catalog entry.
+
+The installer or first-run flow offers the user a pack selection: green only,
+blue only, or both. Selecting fewer packs reduces install footprint without
+disabling runtime features beyond the unselected variants. The
+`corridorkey doctor` command reports which packs are present, which are
+missing, and the canonical Hugging Face source for any missing pack.
+
+Models are data, not executable code. Pack downloads after install do not
+invalidate macOS notarization or Windows Authenticode signatures of the
+plugin, CLI, or GUI binaries.
+
 ### 3.5 Fallback Behavior
 
 Fallback is surface-dependent.
@@ -162,23 +197,44 @@ processing begins.
 
 - Native inference execution:
   - MLX for the official Apple Silicon track
-  - TensorRT RTX EP for the official Windows RTX track
+  - TensorRT RTX EP for the official Windows RTX track on NVIDIA RTX 30 series
+    and newer
   - DirectML for the experimental Windows DirectML track
   - CUDA EP via ONNX Runtime for the experimental Linux RTX track
   - ONNX CPU fallback for tolerant workflows
-- CLI surface with stable JSON and NDJSON output contracts
-- OFX plugin for DaVinci Resolve 20 on Apple Silicon, Windows, and Linux
+- CLI surface (`corridorkey`) with stable JSON and NDJSON output contracts
+- OFX plugin for DaVinci Resolve 20 and Foundry Nuke 17 on Apple Silicon,
+  Windows, and Linux
+- Tauri desktop GUI distributed as an independent installer that embeds the
+  runtime payload
+- Green and blue screen color model variants, distributed as independent
+  selectable packs
 - Alpha hint ingestion and rough-matte fallback generation
 - OFX runtime/status reporting for guide source, safe quality ceiling, and the
   actual runtime path used for the last render
 - Platform-specific model artifact packaging
 - `doctor`, `benchmark`, and `process` commands with structured diagnostics
 
+### 4.1.1 Curated Surface Set
+
+The four officially supported user surfaces are DaVinci Resolve OFX, Foundry
+Nuke OFX, the `corridorkey` CLI, and the Tauri desktop GUI. The OFX path is
+shared between Resolve and Nuke at the OFX 1.4 contract level. Per-host
+adjustments live in dedicated branches that never regress the path the other
+host depends on.
+
+These four surfaces form the curated boundary for the current product line.
+Other hosts (for example Adobe Premiere Pro and Adobe After Effects) are not
+part of the current scope; see Non-Goals.
+
 ### 4.2 Non-Goals
 
 - Training, fine-tuning, or exporting new model architectures
 - A generic plugin framework or SDK for third-party extension
-- Support for editing hosts other than DaVinci Resolve
+- Support for editing hosts beyond DaVinci Resolve and Foundry Nuke as part of
+  the current officially supported product line. Adobe Premiere Pro and Adobe
+  After Effects are out of the current scope and require dedicated host
+  integration work that has not been started
 - Browser, cloud, or server-side deployment
 - Real-time preview at full resolution without hardware acceleration
 

@@ -201,3 +201,116 @@ supported GPU (NVIDIA RTX 30 series or newer on Windows; Apple Silicon with
 MLX on macOS). Requesting `Backend::CPU` no longer resolves to a packaged
 artifact and surfaces a "no supported render backend" failure rather than
 falling back to a quality the renderer cannot ship.
+
+---
+
+## Tauri Desktop GUI Support Scope
+
+The Tauri desktop GUI is distributed as an independent installer that embeds
+its own copy of the runtime payload. It does not require an OFX host and does
+not require the OFX bundle to be present on the system.
+
+The GUI inherits the same backend and hardware support designations as the
+OFX plugin and CLI on the same machine. A configuration officially supported
+for the OFX plugin is officially supported for the GUI; experimental tracks
+remain experimental in the GUI.
+
+---
+
+## Host Application Coverage
+
+The current officially supported host applications are DaVinci Resolve and
+Foundry Nuke through the OFX plugin. The CLI is a host-independent surface.
+The Tauri GUI is an additional host-independent surface.
+
+Other editing applications, including Adobe Premiere Pro and Adobe After
+Effects, are not currently supported. They are not OFX hosts and require
+their own SDK integrations that have not been built.
+
+---
+
+## Screen Color Model Variants
+
+The runtime ships two model variants distinguished by the screen color the
+model was trained on. Each variant is distributed as an independent pack and
+each variant has its own per-resolution support status.
+
+### Green model variant
+
+The canonical CorridorKey model, trained on green screen plates.
+
+| Resolution | TensorRT RTX EP | MLX (Apple Silicon) | Status |
+|------------|-----------------|---------------------|--------|
+| 512px | Validated | Validated | Officially supported |
+| 1024px | Validated | Validated | Officially supported |
+| 1536px | Validated | Validated | Officially supported |
+| 2048px | Validated | Validated | Officially supported |
+
+Green packs are part of every official Windows RTX and macOS Apple Silicon
+installer.
+
+### Blue model variant
+
+A dedicated CorridorKey variant trained on blue screen plates. Blue runs on
+two distinct backends, each with its own resolution coverage:
+
+- **TensorRT RTX EP** is the historical Windows RTX backend. Engine compilation
+  on the blue checkpoint succeeds at 512px and fails at 1024px and above due
+  to FP16 numerical instability in the blue weights at those tensor sizes.
+- **Torch-TensorRT** is the second Windows RTX backend, tracked for blue
+  resolutions where TensorRT RTX EP cannot serve the artifact. The blue model
+  compiles cleanly under Torch-TRT at 1024px (FP16) and at 1536px and 2048px
+  (FP32, since FP16 still overflows at those sizes). Engines are
+  `hardware_compatible=True` so a single artifact runs on Ampere and newer
+  RTX families.
+
+#### Windows RTX coverage
+
+| Resolution | Backend | Status |
+|------------|---------|--------|
+| 512px | TensorRT RTX EP, FP16 | Officially supported - dedicated blue model |
+| 1024px | Torch-TensorRT, FP16 | Officially supported - dedicated blue model |
+| 1536px | Torch-TensorRT, FP32 | Officially supported - dedicated blue model |
+| 2048px | not currently packaged | When the dedicated artifact is not present, `corridorkey doctor`, the OFX runtime status surface, and the GUI report the gap and prompt the user to switch to a packaged blue resolution or to the green model at 2048px. The runtime does not silently substitute a different model |
+
+#### macOS Apple Silicon coverage
+
+| Resolution | Backend | Status |
+|------------|---------|--------|
+| 512px | MLX (canonicalization through green) | Officially supported |
+| 1024px | MLX (canonicalization through green) | Officially supported |
+| 1536px | MLX (canonicalization through green) | Officially supported |
+| 2048px | MLX (canonicalization through green) | Officially supported |
+
+There is no dedicated blue MLX artifact today. On Apple Silicon, blue plates
+are handled by canonicalizing the input into the green domain, running the
+green MLX model, and restoring the result. This is automatic and reported in
+`corridorkey doctor`.
+
+#### Missing artifact UX
+
+When a packaged dedicated blue artifact is required by the user's selection
+and the corresponding pack is not installed, the runtime surfaces the gap
+explicitly through the surface in use:
+
+- **CLI:** non-zero exit with a message naming the missing pack and the
+  resolutions that are currently servable.
+- **OFX plugin (Resolve, Nuke):** runtime status field reports
+  `missing_dedicated_blue_pack` with the requested resolution and a
+  human-readable suggestion. The render call returns an explicit error rather
+  than producing a fallback render.
+- **Tauri GUI:** the resolution selector surfaces the missing tier inline and
+  links to the model pack download flow.
+
+This behavior is product policy: blue users explicitly choose a quality tier,
+and a silent substitution would violate that contract. Users may switch to a
+packaged blue resolution, switch to the green model, or install the missing
+pack from the canonical Hugging Face source.
+
+### Pack distribution
+
+Model packs are selectable. The installer or first-run flow lets the user
+choose green only, blue only, or both. Packs not selected at install time can
+be added later through the same flow. Missing packs surface as missing
+artifacts in `corridorkey doctor`, with the canonical Hugging Face download
+location attached.
