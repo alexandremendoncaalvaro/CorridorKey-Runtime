@@ -623,7 +623,8 @@ TEST_CASE("blue screen request with dedicated artifact present uses dedicated pa
                                 QualityFallbackMode::Auto, 0, false, "blue");
 
     REQUIRE(selection.has_value());
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_blue_torchtrt_fp16_1024.ts");
+    REQUIRE(selection->executable_model_path.filename() ==
+            "corridorkey_blue_torchtrt_fp16_1024.ts");
     REQUIRE_FALSE(selection->used_fallback);
 }
 

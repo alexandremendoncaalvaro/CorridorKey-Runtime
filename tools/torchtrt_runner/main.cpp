@@ -14,14 +14,18 @@
 //   [OK] forward avg=<ms>ms alpha=[<min>,<max>]  no NaN/Inf
 // Non-zero exit on any failure.
 
+#include <algorithm>
+#include <array>
 #include <chrono>
-#include <cstdint>
 #include <cstdio>
-#include <cstring>
+#include <cstdlib>
 #include <filesystem>
-#include <iostream>
+#include <functional>
 #include <random>
+#include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -33,262 +37,384 @@
 
 namespace {
 
+constexpr int kDefaultIterations = 5;
+constexpr int kDefaultWarmup = 2;
+constexpr int kSyntheticInputChannels = 4;
+constexpr int kRgbChannels = 3;
+constexpr int kRandomSeedBase = 42;
+constexpr int kExitArgs = 2;
+constexpr int kExitDllStaging = 3;
+constexpr int kExitTsMissing = 4;
+constexpr int kExitNoCuda = 5;
+constexpr int kExitJitLoad = 6;
+constexpr int kExitWarmup = 7;
+constexpr int kExitForward = 8;
+constexpr int kExitForwardOutput = 9;
+constexpr int kExitNanOrInf = 10;
+
 struct Options {
     std::filesystem::path ts_path;
     std::filesystem::path bin_dir;
     int resolution = 0;  // auto-detect from filename if 0
-    int iterations = 5;
-    int warmup = 2;
+    int iterations = kDefaultIterations;
+    int warmup = kDefaultWarmup;
 };
 
-bool parse_int(const char* arg, int& out) {
+bool parse_int(std::string_view text, int& out) {
     try {
-        out = std::stoi(arg);
+        out = std::stoi(std::string{text});
         return true;
     } catch (...) {
         return false;
     }
 }
 
-bool parse_args(int argc, char* argv[], Options& options) {
-    for (int i = 1; i < argc; ++i) {
-        const std::string a = argv[i];
-        auto need = [&](const char* flag) -> const char* {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "[ERR] %s needs a value\n", flag);
-                return nullptr;
-            }
-            return argv[++i];
-        };
-        if (a == "--ts") {
-            const char* v = need("--ts");
-            if (!v) return false;
-            options.ts_path = v;
-        } else if (a == "--bin-dir") {
-            const char* v = need("--bin-dir");
-            if (!v) return false;
-            options.bin_dir = v;
-        } else if (a == "--resolution") {
-            const char* v = need("--resolution");
-            if (!v) return false;
-            if (!parse_int(v, options.resolution)) return false;
-        } else if (a == "--iterations") {
-            const char* v = need("--iterations");
-            if (!v) return false;
-            if (!parse_int(v, options.iterations)) return false;
-        } else if (a == "--warmup") {
-            const char* v = need("--warmup");
-            if (!v) return false;
-            if (!parse_int(v, options.warmup)) return false;
-        } else if (a == "--help" || a == "-h") {
-            std::printf(
-                "Usage: corridorkey-torchtrt-runner --ts <path> "
-                "[--resolution N] [--bin-dir DIR] [--iterations N] [--warmup N]\n");
+void log_error(std::string_view message) {
+    (void)std::fputs("[ERR] ", stderr);
+    (void)std::fputs(std::string{message}.c_str(), stderr);
+    (void)std::fputc('\n', stderr);
+}
+
+void log_ok(std::string_view message) {
+    (void)std::fputs("[ok] ", stdout);
+    (void)std::fputs(std::string{message}.c_str(), stdout);
+    (void)std::fputc('\n', stdout);
+}
+
+// Hand-rolled key/value arg parser. Per-flag dispatch is table-driven so
+// adding a new flag is one row and the parse_args body stays under the
+// cognitive-complexity threshold.
+using ArgHandler = std::function<bool(std::string_view value)>;
+
+std::vector<std::pair<std::string_view, ArgHandler>> build_arg_handlers(Options& options) {
+    auto require_value = [](std::string_view flag, std::string_view value) {
+        if (value.empty()) {
+            log_error(std::string{flag} + " needs a value");
             return false;
-        } else {
-            std::fprintf(stderr, "[ERR] unknown arg: %s\n", a.c_str());
+        }
+        return true;
+    };
+    return {
+        {"--ts",
+         [&options, require_value](std::string_view value) {
+             if (!require_value("--ts", value)) return false;
+             options.ts_path = std::string{value};
+             return true;
+         }},
+        {"--bin-dir",
+         [&options, require_value](std::string_view value) {
+             if (!require_value("--bin-dir", value)) return false;
+             options.bin_dir = std::string{value};
+             return true;
+         }},
+        {"--resolution",
+         [&options, require_value](std::string_view value) {
+             return require_value("--resolution", value) && parse_int(value, options.resolution);
+         }},
+        {"--iterations",
+         [&options, require_value](std::string_view value) {
+             return require_value("--iterations", value) && parse_int(value, options.iterations);
+         }},
+        {"--warmup",
+         [&options, require_value](std::string_view value) {
+             return require_value("--warmup", value) && parse_int(value, options.warmup);
+         }},
+    };
+}
+
+bool dispatch_arg(std::span<char*> args, std::size_t& index,
+                  const std::vector<std::pair<std::string_view, ArgHandler>>& handlers) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) — bounds
+    // checked by caller.
+    const std::string_view token{args[index]};
+    const auto found =
+        std::ranges::find_if(handlers, [&](const auto& pair) { return pair.first == token; });
+    if (found == handlers.end()) {
+        log_error("unknown arg: " + std::string{token});
+        return false;
+    }
+    const std::string_view value =
+        (index + 1 < args.size())
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            // — guarded above.
+            ? std::string_view{args[index + 1]}
+            : std::string_view{};
+    if (!found->second(value)) {
+        return false;
+    }
+    ++index;
+    return true;
+}
+
+bool parse_args(std::span<char*> args, Options& options) {
+    const auto handlers = build_arg_handlers(options);
+    for (std::size_t index = 1; index < args.size(); ++index) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) — bounds
+        // checked by loop guard.
+        const std::string_view token{args[index]};
+        if (token == "--help" || token == "-h") {
+            (void)std::puts(
+                "Usage: corridorkey-torchtrt-runner --ts <path> "
+                "[--resolution N] [--bin-dir DIR] [--iterations N] [--warmup N]");
+            return false;
+        }
+        if (!dispatch_arg(args, index, handlers)) {
             return false;
         }
     }
     if (options.ts_path.empty()) {
-        std::fprintf(stderr, "[ERR] --ts is required\n");
+        log_error("--ts is required");
         return false;
     }
     return true;
 }
 
-int infer_resolution_from_filename(const std::filesystem::path& p) {
+int infer_resolution_from_filename(const std::filesystem::path& path) {
     // corridorkey_torchtrt_fp16_<res>.ts  -> <res>
-    const auto stem = p.stem().string();
-    auto pos = stem.find_last_of('_');
-    if (pos == std::string::npos) return 0;
-    int res = 0;
-    if (!parse_int(stem.substr(pos + 1).c_str(), res)) return 0;
-    return res;
+    const auto stem = path.stem().string();
+    const auto separator = stem.find_last_of('_');
+    if (separator == std::string::npos) {
+        return 0;
+    }
+    int resolution = 0;
+    if (!parse_int(stem.substr(separator + 1), resolution)) {
+        return 0;
+    }
+    return resolution;
 }
 
 #ifdef _WIN32
 bool stage_dll_directory(const std::filesystem::path& bin_dir) {
-    if (bin_dir.empty()) return true;
+    if (bin_dir.empty()) {
+        return true;
+    }
     if (!std::filesystem::exists(bin_dir)) {
-        std::fprintf(stderr, "[ERR] --bin-dir does not exist: %s\n", bin_dir.string().c_str());
+        log_error("--bin-dir does not exist: " + bin_dir.string());
         return false;
     }
     // AddDllDirectory needs absolute wide path. The OS loader will then
     // search this directory when LoadLibraryEx-class calls request a DLL
-    // by short name. This is the same hook PR 3's TorchTrtSession will
-    // call from the blue model pack's runtime location.
+    // by short name. This is the same hook src/core/torch_trt_session.cpp
+    // uses from the blue model pack's runtime location.
     const auto absolute = std::filesystem::absolute(bin_dir);
-    auto cookie = AddDllDirectory(absolute.wstring().c_str());
+    auto* cookie = AddDllDirectory(absolute.wstring().c_str());
     if (cookie == nullptr) {
-        std::fprintf(stderr, "[ERR] AddDllDirectory failed for %s (GetLastError=%lu)\n",
-                     absolute.string().c_str(), GetLastError());
+        log_error("AddDllDirectory failed (GetLastError=" + std::to_string(GetLastError()) + ")");
         return false;
     }
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
 
-    // Force-load torchtrt.dll so its static initializers register the
-    // TorchScript custom ops the .ts engines reference. torch::jit::load
-    // dispatches to those custom op resolvers; without this the load
-    // raises "Unknown builtin op: tensorrt::execute_engine".
-    //
-    // Use absolute path to bypass DLL search rules entirely. The
-    // SetDefaultDllDirectories call above narrows the loader to
-    // AddDllDirectory'd dirs, which excludes the exe directory; passing
-    // the absolute torchtrt.dll path side-steps that restriction
-    // for this one explicit load while still letting torchtrt.dll's
-    // transitive deps resolve from the AddDllDirectory'd vendor/bin.
+    // Force-load torchtrt.dll by absolute path so its static initializers
+    // register the TorchScript custom ops the .ts engines reference.
+    // SetDefaultDllDirectories above narrows the loader to AddDllDirectory'd
+    // dirs, which excludes the exe directory; the absolute path side-steps
+    // that restriction for this one explicit load while still letting
+    // torchtrt.dll's transitive deps resolve from the AddDllDirectory'd
+    // vendor/bin.
     const auto torchtrt_path = (absolute / L"torchtrt.dll").wstring();
-    HMODULE handle = LoadLibraryExW(torchtrt_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    auto* handle = LoadLibraryExW(torchtrt_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (handle == nullptr) {
-        std::fprintf(stderr, "[ERR] LoadLibrary torchtrt.dll failed (GetLastError=%lu)\n",
-                     GetLastError());
+        log_error("LoadLibrary torchtrt.dll failed (GetLastError=" +
+                  std::to_string(GetLastError()) + ")");
         return false;
     }
-    std::printf("[ok] AddDllDirectory + LoadLibrary torchtrt.dll succeeded\n");
+    log_ok("AddDllDirectory + LoadLibrary torchtrt.dll succeeded");
     return true;
 }
 #else
-bool stage_dll_directory(const std::filesystem::path&) {
+bool stage_dll_directory(const std::filesystem::path& /*bin_dir*/) {
     return true;
 }
 #endif
 
+std::filesystem::path default_bin_dir_relative_to_exe() {
+    std::filesystem::path exe_dir;
+#ifdef _WIN32
+    std::array<wchar_t, MAX_PATH> buf{};
+    const DWORD count = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (count > 0 && count < buf.size()) {
+        exe_dir = std::filesystem::path(buf.data()).parent_path();
+    }
+#endif
+    if (exe_dir.empty()) {
+        return {};
+    }
+    // build/<preset>/tools/torchtrt_runner/<exe> -> ../../../vendor/torchtrt-windows/bin
+    return exe_dir / ".." / ".." / ".." / "vendor" / "torchtrt-windows" / "bin";
+}
+
+torch::Tensor make_synthetic_input(int resolution, std::mt19937& rng) {
+    std::uniform_real_distribution<float> dist(0.0F, 1.0F);
+    std::vector<float> host(static_cast<std::size_t>(1) * kSyntheticInputChannels *
+                            static_cast<std::size_t>(resolution) *
+                            static_cast<std::size_t>(resolution));
+    for (auto& value : host) {
+        value = dist(rng);
+    }
+    auto cpu_input =
+        torch::from_blob(host.data(), {1, kSyntheticInputChannels, resolution, resolution},
+                         torch::kFloat32)
+            .clone();
+    return cpu_input.to(torch::TensorOptions().dtype(torch::kFloat16).device(torch::kCUDA));
+}
+
 }  // namespace
 
-int main(int argc, char* argv[]) {
-    Options options;
-    if (!parse_args(argc, argv, options)) {
-        return 2;
-    }
+struct BenchOutcome {
+    int exit_code = 0;
+    double avg_ms = 0.0;
+    float alpha_min = 0.0F;
+    float alpha_max = 0.0F;
+    bool has_nan = false;
+    bool has_inf = false;
+};
+
+namespace {
+
+int finalise_options(Options& options) {
     if (options.bin_dir.empty()) {
-        // Default to the vendored runtime relative to this exe's location
-        // (CMake places the binary under build/<preset>/tools/torchtrt_runner/).
-        // Walk up to repo root and into vendor/torchtrt-windows/bin.
+        // Default to the vendored runtime relative to this exe's location.
         // If the user moves the exe, they must pass --bin-dir explicitly.
-        std::filesystem::path exe_dir;
-#ifdef _WIN32
-        wchar_t buf[MAX_PATH];
-        DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-        if (n > 0 && n < MAX_PATH) {
-            exe_dir = std::filesystem::path(buf).parent_path();
-        }
-#endif
-        // build/<preset>/tools/torchtrt_runner/<exe> -> ../../../vendor/torchtrt-windows/bin
-        if (!exe_dir.empty()) {
-            options.bin_dir = exe_dir / ".." / ".." / ".." / "vendor" / "torchtrt-windows" / "bin";
-        }
+        options.bin_dir = default_bin_dir_relative_to_exe();
     }
 
     if (options.resolution == 0) {
         options.resolution = infer_resolution_from_filename(options.ts_path);
         if (options.resolution == 0) {
-            std::fprintf(stderr,
-                         "[ERR] could not infer --resolution from filename %s; pass --resolution "
-                         "explicitly\n",
-                         options.ts_path.string().c_str());
-            return 2;
+            log_error("could not infer --resolution from filename " + options.ts_path.string() +
+                      "; pass --resolution explicitly");
+            return kExitArgs;
         }
-        std::printf("[ok] inferred resolution=%d from filename\n", options.resolution);
+        log_ok("inferred resolution=" + std::to_string(options.resolution) + " from filename");
     }
+    return 0;
+}
 
-    if (!stage_dll_directory(options.bin_dir)) {
-        return 3;
+torch::Tensor extract_alpha(const torch::IValue& output) {
+    if (output.isTuple()) {
+        return output.toTuple()->elements().at(0).toTensor();
     }
-
-    if (!std::filesystem::exists(options.ts_path)) {
-        std::fprintf(stderr, "[ERR] --ts not found: %s\n", options.ts_path.string().c_str());
-        return 4;
+    if (output.isTensor()) {
+        return output.toTensor();
     }
+    return {};
+}
 
-    if (!torch::cuda::is_available()) {
-        std::fprintf(stderr,
-                     "[ERR] CUDA not available - this runner expects an Ampere or newer GPU\n");
-        return 5;
-    }
+struct BenchSchedule {
+    int warmup_iterations = 0;
+    int timed_iterations = 0;
+};
 
-    torch::jit::script::Module module;
-    try {
-        const auto t0 = std::chrono::high_resolution_clock::now();
-        module = torch::jit::load(options.ts_path.string(), torch::Device(torch::kCUDA));
-        const auto load_ms = std::chrono::duration<double, std::milli>(
-                                 std::chrono::high_resolution_clock::now() - t0)
-                                 .count();
-        std::printf("[ok] torch::jit::load %.1f ms\n", load_ms);
-    } catch (const c10::Error& e) {
-        std::fprintf(stderr, "[ERR] torch::jit::load failed: %s\n", e.what());
-        return 6;
-    }
-    module.eval();
-
-    // Synthetic input: shape (1, 4, R, R), FP16 on CUDA. Same shape the
-    // Sprint 0 Python harness uses, kept apples-to-apples.
-    auto input_options = torch::TensorOptions().dtype(torch::kFloat16).device(torch::kCUDA);
-    std::mt19937 rng(42 + options.resolution);
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    std::vector<float> host(1 * 4 * static_cast<size_t>(options.resolution) *
-                            static_cast<size_t>(options.resolution));
-    for (auto& v : host) v = dist(rng);
-    auto cpu_input = torch::from_blob(host.data(), {1, 4, options.resolution, options.resolution},
-                                      torch::kFloat32)
-                         .clone();
-    auto input = cpu_input.to(input_options);
-
-    // Warmup + timed runs.
-    torch::NoGradGuard no_grad;
-    for (int i = 0; i < options.warmup; ++i) {
+BenchOutcome run_bench(torch::jit::script::Module& module, const torch::Tensor& input,
+                       BenchSchedule schedule) {
+    const int warmup = schedule.warmup_iterations;
+    const int iterations = schedule.timed_iterations;
+    BenchOutcome outcome;
+    const torch::NoGradGuard no_grad;
+    for (int iter = 0; iter < warmup; ++iter) {
         try {
             (void)module.forward({input});
         } catch (const c10::Error& e) {
-            std::fprintf(stderr, "[ERR] warmup forward failed: %s\n", e.what());
-            return 7;
+            log_error(std::string("warmup forward failed: ") + e.what());
+            outcome.exit_code = kExitWarmup;
+            return outcome;
         }
     }
-    if (torch::cuda::is_available()) {
-        torch::cuda::synchronize();
-    }
+    torch::cuda::synchronize();
 
     std::vector<double> latencies_ms;
-    latencies_ms.reserve(options.iterations);
+    latencies_ms.reserve(static_cast<std::size_t>(iterations));
     torch::Tensor last_alpha;
-    for (int i = 0; i < options.iterations; ++i) {
-        const auto t0 = std::chrono::high_resolution_clock::now();
+    for (int iter = 0; iter < iterations; ++iter) {
+        const auto run_t0 = std::chrono::high_resolution_clock::now();
         torch::IValue out;
         try {
             out = module.forward({input});
         } catch (const c10::Error& e) {
-            std::fprintf(stderr, "[ERR] forward iter %d failed: %s\n", i, e.what());
-            return 8;
+            log_error(std::string("forward iter ") + std::to_string(iter) + " failed: " + e.what());
+            outcome.exit_code = kExitForward;
+            return outcome;
         }
         torch::cuda::synchronize();
-        const double dt = std::chrono::duration<double, std::milli>(
-                              std::chrono::high_resolution_clock::now() - t0)
-                              .count();
-        latencies_ms.push_back(dt);
-
-        if (out.isTuple()) {
-            last_alpha = out.toTuple()->elements()[0].toTensor();
-        } else if (out.isTensor()) {
-            last_alpha = out.toTensor();
-        } else {
-            std::fprintf(stderr, "[ERR] unexpected forward return type\n");
-            return 9;
+        latencies_ms.push_back(std::chrono::duration<double, std::milli>(
+                                   std::chrono::high_resolution_clock::now() - run_t0)
+                                   .count());
+        last_alpha = extract_alpha(out);
+        if (!last_alpha.defined()) {
+            log_error("unexpected forward return type");
+            outcome.exit_code = kExitForwardOutput;
+            return outcome;
         }
     }
 
-    auto alpha_cpu = last_alpha.detach().to(torch::kCPU).to(torch::kFloat32);
-    auto alpha_min = alpha_cpu.min().item<float>();
-    auto alpha_max = alpha_cpu.max().item<float>();
-    bool has_nan = alpha_cpu.isnan().any().item<bool>();
-    bool has_inf = alpha_cpu.isinf().any().item<bool>();
+    const auto alpha_cpu = last_alpha.detach().to(torch::kCPU).to(torch::kFloat32);
+    outcome.alpha_min = alpha_cpu.min().item<float>();
+    outcome.alpha_max = alpha_cpu.max().item<float>();
+    outcome.has_nan = alpha_cpu.isnan().any().item<bool>();
+    outcome.has_inf = alpha_cpu.isinf().any().item<bool>();
 
     double sum_ms = 0;
-    for (auto v : latencies_ms) sum_ms += v;
-    const double avg_ms = sum_ms / static_cast<double>(latencies_ms.size());
+    for (const auto value : latencies_ms) {
+        sum_ms += value;
+    }
+    outcome.avg_ms = sum_ms / static_cast<double>(latencies_ms.size());
+    return outcome;
+}
 
-    std::printf("[OK] forward avg=%.1f ms  alpha=[%.4f, %.4f]  nan=%s inf=%s  iters=%d\n", avg_ms,
-                alpha_min, alpha_max, has_nan ? "true" : "false", has_inf ? "true" : "false",
-                options.iterations);
+}  // namespace
 
-    return (has_nan || has_inf) ? 10 : 0;
+// NOLINTNEXTLINE(bugprone-exception-escape) — top-level main; unrecoverable error path is process
+// exit.
+int main(int argc,
+         char* argv[]) {  // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    Options options;
+    const std::span<char*> args(argv, static_cast<std::size_t>(argc));
+    if (!parse_args(args, options)) {
+        return kExitArgs;
+    }
+    if (const int exit_code = finalise_options(options); exit_code != 0) {
+        return exit_code;
+    }
+    if (!stage_dll_directory(options.bin_dir)) {
+        return kExitDllStaging;
+    }
+    if (!std::filesystem::exists(options.ts_path)) {
+        log_error("--ts not found: " + options.ts_path.string());
+        return kExitTsMissing;
+    }
+    if (!torch::cuda::is_available()) {
+        log_error("CUDA not available - this runner expects an Ampere or newer GPU");
+        return kExitNoCuda;
+    }
+
+    torch::jit::script::Module module;
+    try {
+        const auto load_t0 = std::chrono::high_resolution_clock::now();
+        module = torch::jit::load(options.ts_path.string(), torch::Device(torch::kCUDA));
+        const auto load_ms = std::chrono::duration<double, std::milli>(
+                                 std::chrono::high_resolution_clock::now() - load_t0)
+                                 .count();
+        log_ok("torch::jit::load " + std::to_string(load_ms) + " ms");
+    } catch (const c10::Error& e) {
+        log_error(std::string("torch::jit::load failed: ") + e.what());
+        return kExitJitLoad;
+    }
+    module.eval();
+
+    std::mt19937 rng(static_cast<std::uint32_t>(kRandomSeedBase + options.resolution));
+    auto input = make_synthetic_input(options.resolution, rng);
+
+    const auto outcome = run_bench(
+        module, input,
+        BenchSchedule{.warmup_iterations = options.warmup, .timed_iterations = options.iterations});
+    if (outcome.exit_code != 0) {
+        return outcome.exit_code;
+    }
+
+    (void)std::printf("[OK] forward avg=%.1f ms  alpha=[%.4f, %.4f]  nan=%s inf=%s  iters=%d\n",
+                      outcome.avg_ms, outcome.alpha_min, outcome.alpha_max,
+                      outcome.has_nan ? "true" : "false", outcome.has_inf ? "true" : "false",
+                      options.iterations);
+
+    return (outcome.has_nan || outcome.has_inf) ? kExitNanOrInf : 0;
 }

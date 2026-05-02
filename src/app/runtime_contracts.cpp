@@ -362,16 +362,13 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         // Blue 1536+ ships as FP32 because Sprint 0 found FP16 NaNs at
         // those graph sizes (HANDOFF section 2.2).
         if (requested_device.available_memory_mb >= 24000) {
-            return pick("corridorkey_blue_torchtrt_fp32_2048.ts",
-                        "corridorkey_fp16_2048.onnx");
+            return pick("corridorkey_blue_torchtrt_fp32_2048.ts", "corridorkey_fp16_2048.onnx");
         }
         if (requested_device.available_memory_mb >= 16000) {
-            return pick("corridorkey_blue_torchtrt_fp32_1536.ts",
-                        "corridorkey_fp16_1536.onnx");
+            return pick("corridorkey_blue_torchtrt_fp32_1536.ts", "corridorkey_fp16_1536.onnx");
         }
         if (requested_device.available_memory_mb >= 10000) {
-            return pick("corridorkey_blue_torchtrt_fp16_1024.ts",
-                        "corridorkey_fp16_1024.onnx");
+            return pick("corridorkey_blue_torchtrt_fp16_1024.ts", "corridorkey_fp16_1024.onnx");
         }
         return pick("corridorkey_blue_torchtrt_fp16_512.ts", "corridorkey_fp16_512.onnx");
     };

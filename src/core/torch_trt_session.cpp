@@ -1,23 +1,48 @@
 #include "torch_trt_session.hpp"
 
-#include <chrono>
-#include <cstdio>
+#include <atomic>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <memory>
+#include <optional>
 #include <regex>
 #include <string>
+#include <system_error>
+#include <utility>
 
 #ifdef _WIN32
+// clang-format off
+// windows.h must precede LoadLibraryEx & friends; provides AddDllDirectory,
+// SetDefaultDllDirectories, GetLastError, HMODULE used by the runtime
+// arming path below.
 #include <windows.h>
+// clang-format on
 #endif
 
+// Pulling individual c10/torch headers piecemeal triggers CUDA include
+// resolution that the vendored torchtrt-windows tree intentionally
+// stubs out (the .ts is loaded by name and TensorRT plugins register
+// themselves at LoadLibrary time, so the application never directly
+// touches cuda_runtime_api.h). Stick to torch/script.h + torch/cuda.h:
+// the umbrella headers provide every torch:: + c10:: + at:: symbol we
+// reference (jit::load, jit::script::Module, IValue, NoGradGuard,
+// Tensor, Device, kCUDA, kFloat16/32, cuda::is_available,
+// cuda::synchronize, c10::Error) and pull only the slice of CUDA
+// declarations libtorch already proxies internally.
 #include <torch/cuda.h>
 #include <torch/script.h>
 
-#include "common/runtime_paths.hpp"
 #include "common/stage_profiler.hpp"
 
 namespace corridorkey::core {
 
 namespace {
+
+// Maximum number of ancestor directories we walk when looking for a
+// vendor/torchtrt-windows/bin layout. 8 covers the deepest known dev tree
+// layout (build/<preset>/tests/integration/<bin>/foo.ts) plus a margin.
+constexpr int kMaxAncestorWalkDepth = 8;
 
 std::optional<int> resolution_from_filename(const std::filesystem::path& path) {
     // corridorkey_torchtrt_fp16_<res>.ts | corridorkey_blue_torchtrt_fp16_<res>.ts
@@ -28,7 +53,7 @@ std::optional<int> resolution_from_filename(const std::filesystem::path& path) {
         return std::nullopt;
     }
     try {
-        return std::stoi(match[1].str());
+        return std::stoi(match.str(1));
     } catch (...) {
         return std::nullopt;
     }
@@ -56,9 +81,11 @@ std::optional<std::filesystem::path> resolve_torchtrt_runtime_bin(
     // Absolutise first: relative paths (e.g. "models/foo.ts") yield an
     // empty parent_path() chain after one or two steps, breaking the walk
     // loop before it reaches the repo root or any blue-pack-shaped layout.
-    std::error_code ec;
-    auto absolute_ts = std::filesystem::absolute(ts_path, ec);
-    if (ec) absolute_ts = ts_path;
+    std::error_code error;
+    auto absolute_ts = std::filesystem::absolute(ts_path, error);
+    if (error) {
+        absolute_ts = ts_path;
+    }
 
     auto pack_relative = absolute_ts.parent_path().parent_path() / "torchtrt-runtime" / "bin";
     if (std::filesystem::exists(pack_relative / "torchtrt.dll")) {
@@ -66,7 +93,8 @@ std::optional<std::filesystem::path> resolve_torchtrt_runtime_bin(
     }
     // Walk a few levels up looking for vendor/torchtrt-windows/bin.
     auto walk = absolute_ts.parent_path();
-    for (int i = 0; i < 8 && !walk.empty() && walk != walk.root_path(); ++i) {
+    for (int depth = 0; depth < kMaxAncestorWalkDepth && !walk.empty() && walk != walk.root_path();
+         ++depth) {
         auto candidate = walk / "vendor" / "torchtrt-windows" / "bin";
         if (std::filesystem::exists(candidate / "torchtrt.dll")) {
             return candidate;
@@ -82,12 +110,21 @@ std::optional<std::filesystem::path> resolve_torchtrt_runtime_bin(
     return std::nullopt;
 }
 
-bool g_torchtrt_runtime_armed = false;
+// One-shot arming flag. Wrapped in a function-local atomic accessor so
+// the cppcoreguidelines-avoid-non-const-global-variables check stays
+// happy: the atomic itself is const-init on first call, and the
+// arming is idempotent (the OS loader keeps the DLL once loaded).
+std::atomic_bool& torchtrt_runtime_armed_flag() {
+    static std::atomic_bool flag{false};
+    return flag;
+}
 
 bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out_error) {
-    if (g_torchtrt_runtime_armed) return true;
+    if (torchtrt_runtime_armed_flag().load(std::memory_order_acquire)) {
+        return true;
+    }
     const auto absolute = std::filesystem::absolute(bin_dir);
-    auto cookie = AddDllDirectory(absolute.wstring().c_str());
+    auto* cookie = AddDllDirectory(absolute.wstring().c_str());
     if (cookie == nullptr) {
         out_error = "AddDllDirectory failed for " + absolute.string() +
                     " (GetLastError=" + std::to_string(GetLastError()) + ")";
@@ -101,16 +138,44 @@ bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out
             "LoadLibrary torchtrt.dll failed (GetLastError=" + std::to_string(GetLastError()) + ")";
         return false;
     }
-    g_torchtrt_runtime_armed = true;
+    torchtrt_runtime_armed_flag().store(true, std::memory_order_release);
     return true;
 }
 #endif  // _WIN32
 
+// Splits the IValue returned by torch::jit::Module::forward into the
+// (alpha, foreground) tensor pair our pipeline expects. Returns an empty
+// pair on error so the caller can pick the right Error message; both
+// tensors stay default-constructed (.defined() == false) on failure.
+struct AlphaFgTensors {
+    torch::Tensor alpha;
+    torch::Tensor foreground;
+};
+
+std::optional<AlphaFgTensors> split_forward_output(const torch::IValue& raw_out) {
+    if (raw_out.isTuple()) {
+        const auto& elements = raw_out.toTuple()->elements();
+        if (elements.empty()) {
+            return std::nullopt;
+        }
+        AlphaFgTensors result;
+        result.alpha = elements.at(0).toTensor();
+        if (elements.size() > 1) {
+            result.foreground = elements.at(1).toTensor();
+        }
+        return result;
+    }
+    if (raw_out.isTensor()) {
+        return AlphaFgTensors{.alpha = raw_out.toTensor(), .foreground = {}};
+    }
+    return std::nullopt;
+}
+
 ImageBuffer materialize_alpha(const torch::Tensor& alpha_cuda, int resolution) {
     auto alpha_cpu = alpha_cuda.detach().to(torch::kCPU).to(torch::kFloat32).contiguous();
     ImageBuffer buf(resolution, resolution, 1);
-    auto v = buf.view();
-    std::memcpy(v.data.data(), alpha_cpu.data_ptr<float>(), v.data.size_bytes());
+    auto view = buf.view();
+    std::memcpy(view.data.data(), alpha_cpu.data_ptr<float>(), view.data.size_bytes());
     return buf;
 }
 
@@ -119,8 +184,8 @@ ImageBuffer materialize_rgb(const torch::Tensor& fg_cuda, int resolution) {
     auto fg_cpu = fg_cuda.detach().to(torch::kCPU).to(torch::kFloat32).contiguous();
     auto fg_hwc = fg_cpu.permute({0, 2, 3, 1}).contiguous();
     ImageBuffer buf(resolution, resolution, 3);
-    auto v = buf.view();
-    std::memcpy(v.data.data(), fg_hwc.data_ptr<float>(), v.data.size_bytes());
+    auto view = buf.view();
+    std::memcpy(view.data.data(), fg_hwc.data_ptr<float>(), view.data.size_bytes());
     return buf;
 }
 
@@ -156,31 +221,35 @@ TorchTrtSession::TorchTrtSession(TorchTrtSession&&) noexcept = default;
 TorchTrtSession& TorchTrtSession::operator=(TorchTrtSession&&) noexcept = default;
 
 Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
-    const std::filesystem::path& ts_path, const DeviceInfo& device, StageTimingCallback on_stage) {
+    const std::filesystem::path& ts_path, const DeviceInfo& device,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param) — matches MlxSession signature;
+    // std::function copy is cheap and the API is documented to accept nullptr.
+    StageTimingCallback on_stage) {
     if (!std::filesystem::exists(ts_path)) {
         return Unexpected<Error>{
-            Error{ErrorCode::ModelLoadFailed, "TorchTRT engine not found: " + ts_path.string()}};
+            Error{.code = ErrorCode::ModelLoadFailed,
+                  .message = "TorchTRT engine not found: " + ts_path.string()}};
     }
 
 #ifdef _WIN32
     auto runtime_bin = resolve_torchtrt_runtime_bin(ts_path);
     if (!runtime_bin.has_value()) {
-        return Unexpected<Error>{
-            Error{ErrorCode::HardwareNotSupported,
-                  "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
-                  "stage the blue model pack runtime alongside the .ts."}};
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::HardwareNotSupported,
+            .message = "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
+                       "stage the blue model pack runtime alongside the .ts."}};
     }
     std::string arm_error;
     if (!arm_torchtrt_runtime(*runtime_bin, arm_error)) {
-        return Unexpected<Error>{
-            Error{ErrorCode::HardwareNotSupported, "TorchTRT runtime arm failed: " + arm_error}};
+        return Unexpected<Error>{Error{.code = ErrorCode::HardwareNotSupported,
+                                       .message = "TorchTRT runtime arm failed: " + arm_error}};
     }
 #endif
 
     if (!torch::cuda::is_available()) {
-        return Unexpected<Error>{
-            Error{ErrorCode::HardwareNotSupported,
-                  "CUDA not available; TorchTRT engines require an Ampere or newer GPU."}};
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::HardwareNotSupported,
+            .message = "CUDA not available; TorchTRT engines require an Ampere or newer GPU."}};
     }
 
     auto session = std::unique_ptr<TorchTrtSession>(new TorchTrtSession());
@@ -188,9 +257,10 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
 
     auto inferred_res = resolution_from_filename(ts_path);
     if (!inferred_res.has_value()) {
-        return Unexpected<Error>{Error{
-            ErrorCode::ModelLoadFailed,
-            "Could not infer model resolution from .ts filename: " + ts_path.filename().string()}};
+        return Unexpected<Error>{
+            Error{.code = ErrorCode::ModelLoadFailed,
+                  .message = "Could not infer model resolution from .ts filename: " +
+                             ts_path.filename().string()}};
     }
     session->m_impl->resolution = *inferred_res;
     session->m_impl->input_dtype = infer_input_dtype(ts_path);
@@ -203,11 +273,12 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
         });
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
-            Error{ErrorCode::ModelLoadFailed, std::string("torch::jit::load failed: ") + e.what()}};
+            Error{.code = ErrorCode::ModelLoadFailed,
+                  .message = std::string("torch::jit::load failed: ") + e.what()}};
     } catch (const std::exception& e) {
         return Unexpected<Error>{
-            Error{ErrorCode::ModelLoadFailed,
-                  std::string("torch::jit::load std::exception: ") + e.what()}};
+            Error{.code = ErrorCode::ModelLoadFailed,
+                  .message = std::string("torch::jit::load std::exception: ") + e.what()}};
     }
 
     return session;
@@ -218,25 +289,27 @@ int TorchTrtSession::model_resolution() const {
 }
 
 Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_hint,
-                                           bool output_alpha_only, StageTimingCallback on_stage) {
+                                           bool output_alpha_only,
+                                           // NOLINTNEXTLINE(performance-unnecessary-value-param)
+                                           StageTimingCallback on_stage) {
     if (m_impl == nullptr) {
-        return Unexpected<Error>{
-            Error{ErrorCode::InferenceFailed, "TorchTrtSession in moved-from state"}};
+        return Unexpected<Error>{Error{.code = ErrorCode::InferenceFailed,
+                                       .message = "TorchTrtSession in moved-from state"}};
     }
     const int resolution = m_impl->resolution;
     if (rgb.width != resolution || rgb.height != resolution || rgb.channels != 3) {
-        return Unexpected<Error>{
-            Error{ErrorCode::InvalidParameters,
-                  "TorchTRT session expects RGB input at " + std::to_string(resolution) + "x" +
-                      std::to_string(resolution) + "x3; got " + std::to_string(rgb.width) + "x" +
-                      std::to_string(rgb.height) + "x" + std::to_string(rgb.channels)}};
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InvalidParameters,
+            .message = "TorchTRT session expects RGB input at " + std::to_string(resolution) + "x" +
+                       std::to_string(resolution) + "x3; got " + std::to_string(rgb.width) + "x" +
+                       std::to_string(rgb.height) + "x" + std::to_string(rgb.channels)}};
     }
     if (alpha_hint.width != resolution || alpha_hint.height != resolution ||
         alpha_hint.channels != 1) {
-        return Unexpected<Error>{Error{ErrorCode::InvalidParameters,
-                                       "TorchTRT session expects single-channel alpha_hint at " +
-                                           std::to_string(resolution) + "x" +
-                                           std::to_string(resolution) + "x1"}};
+        return Unexpected<Error>{
+            Error{.code = ErrorCode::InvalidParameters,
+                  .message = "TorchTRT session expects single-channel alpha_hint at " +
+                             std::to_string(resolution) + "x" + std::to_string(resolution) + "x1"}};
     }
 
     try {
@@ -245,60 +318,49 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         auto host_input = torch::empty({1, 4, resolution, resolution}, torch::kFloat32);
         const float* rgb_data = rgb.data.data();
         const float* hint_data = alpha_hint.data.data();
-        float* dst = host_input.data_ptr<float>();
-        const int64_t plane = static_cast<int64_t>(resolution) * resolution;
+        auto* dst = host_input.data_ptr<float>();
+        const auto plane = static_cast<int64_t>(resolution) * resolution;
         for (int64_t i = 0; i < plane; ++i) {
-            dst[0 * plane + i] = rgb_data[i * 3 + 0];
-            dst[1 * plane + i] = rgb_data[i * 3 + 1];
-            dst[2 * plane + i] = rgb_data[i * 3 + 2];
-            dst[3 * plane + i] = hint_data[i];
+            dst[(0 * plane) + i] = rgb_data[(i * 3) + 0];
+            dst[(1 * plane) + i] = rgb_data[(i * 3) + 1];
+            dst[(2 * plane) + i] = rgb_data[(i * 3) + 2];
+            dst[(3 * plane) + i] = hint_data[i];
         }
         auto cuda_input = host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype);
 
         torch::IValue raw_out;
         common::measure_stage(on_stage, "torchtrt_forward", [&]() {
-            torch::NoGradGuard no_grad;
+            const torch::NoGradGuard no_grad;
             raw_out = m_impl->module.forward({cuda_input});
             torch::cuda::synchronize();
         });
 
-        torch::Tensor alpha_tensor;
-        torch::Tensor fg_tensor;
-        if (raw_out.isTuple()) {
-            const auto elements = raw_out.toTuple()->elements();
-            if (elements.empty()) {
-                return Unexpected<Error>{
-                    Error{ErrorCode::InferenceFailed, "TorchTRT forward returned empty tuple"}};
-            }
-            alpha_tensor = elements[0].toTensor();
-            if (elements.size() > 1) {
-                fg_tensor = elements[1].toTensor();
-            }
-        } else if (raw_out.isTensor()) {
-            alpha_tensor = raw_out.toTensor();
-        } else {
+        auto split = split_forward_output(raw_out);
+        if (!split.has_value() || !split->alpha.defined()) {
             return Unexpected<Error>{
-                Error{ErrorCode::InferenceFailed, "Unexpected TorchTRT forward return type"}};
+                Error{.code = ErrorCode::InferenceFailed,
+                      .message = "TorchTRT forward returned no usable alpha tensor"}};
         }
 
         FrameResult result;
         common::measure_stage(on_stage, "torchtrt_extract_alpha", [&]() {
-            result.alpha = materialize_alpha(alpha_tensor, resolution);
+            result.alpha = materialize_alpha(split->alpha, resolution);
         });
 
-        if (!output_alpha_only && fg_tensor.defined()) {
+        if (!output_alpha_only && split->foreground.defined()) {
             common::measure_stage(on_stage, "torchtrt_extract_foreground", [&]() {
-                result.foreground = materialize_rgb(fg_tensor, resolution);
+                result.foreground = materialize_rgb(split->foreground, resolution);
             });
         }
         return result;
     } catch (const c10::Error& e) {
-        return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
-                                       std::string("TorchTRT forward c10 error: ") + e.what()}};
+        return Unexpected<Error>{
+            Error{.code = ErrorCode::InferenceFailed,
+                  .message = std::string("TorchTRT forward c10 error: ") + e.what()}};
     } catch (const std::exception& e) {
         return Unexpected<Error>{
-            Error{ErrorCode::InferenceFailed,
-                  std::string("TorchTRT forward std::exception: ") + e.what()}};
+            Error{.code = ErrorCode::InferenceFailed,
+                  .message = std::string("TorchTRT forward std::exception: ") + e.what()}};
     }
 }
 
