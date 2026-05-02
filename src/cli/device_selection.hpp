@@ -36,19 +36,30 @@ inline DeviceInfo select_device(const std::vector<DeviceInfo>& devices, std::str
 
     DeviceInfo fallback_device = devices.front();
     if (device_str == "auto") {
-        return DeviceInfo{"Auto", fallback_device.available_memory_mb, Backend::Auto};
+        return DeviceInfo{
+            .name = "Auto",
+            .available_memory_mb = fallback_device.available_memory_mb,
+            .backend = Backend::Auto,
+        };
     }
 
     try {
-        int index = std::stoi(device_str);
-        if (index >= 0 && index < static_cast<int>(devices.size())) {
-            return devices[static_cast<size_t>(index)];
+        const auto index = static_cast<std::size_t>(std::stoi(device_str));
+        if (index < devices.size()) {
+            return devices.at(index);
         }
-    } catch (...) {
+    } catch (const std::exception& parse_failure) {
+        // Non-numeric device_str (std::stoi throws std::invalid_argument
+        // or std::out_of_range): fall through to the named-backend match
+        // path below. The exception is intentional control flow, not an
+        // error to log; reference the variable so the empty-catch lint
+        // does not flag this.
+        (void)parse_failure;
     }
 
-    std::transform(device_str.begin(), device_str.end(), device_str.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    std::ranges::transform(device_str, device_str.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
     if (device_str == "rtx" || device_str == "trt") {
         device_str = "tensorrt";
     }
@@ -65,7 +76,11 @@ inline DeviceInfo select_device(const std::vector<DeviceInfo>& devices, std::str
     // probe). Synthesize a device entry so --device torchtrt routes to the
     // TorchTrtSession factory regardless of probe output.
     if (device_str == "torchtrt") {
-        return DeviceInfo{"TorchTRT", fallback_device.available_memory_mb, Backend::TorchTRT};
+        return DeviceInfo{
+            .name = "TorchTRT",
+            .available_memory_mb = fallback_device.available_memory_mb,
+            .backend = Backend::TorchTRT,
+        };
     }
 
     return fallback_device;
