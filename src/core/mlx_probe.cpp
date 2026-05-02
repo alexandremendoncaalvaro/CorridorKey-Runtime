@@ -13,6 +13,18 @@
 
 namespace corridorkey::core {
 
+// NOLINTBEGIN(modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,readability-identifier-length)
+//
+// mlx_probe.cpp tidy-suppression rationale.
+//
+// The Error{} aggregate appears at every failure path; switching every
+// site to designated initialisers would obscure the uniform error-
+// reporting pattern the engine uses across probe modules. The 10-byte
+// minimum is the smallest plausible safetensors prefix (header size
+// field plus at least one JSON brace) and the reinterpret_cast on the
+// header_size field is the canonical zero-copy way to read a fixed-
+// width LE prefix from a binary file. The single-character loop variable
+// `ch` matches established header-parsing idiom in this file.
 bool mlx_probe_available() {
 #if CORRIDORKEY_WITH_MLX
     return true;
@@ -109,3 +121,4 @@ Result<void> probe_mlx_function(const std::filesystem::path& function_path) {
 }
 
 }  // namespace corridorkey::core
+// NOLINTEND(modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,readability-identifier-length)
