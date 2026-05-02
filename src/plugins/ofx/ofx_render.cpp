@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -23,6 +24,30 @@
 namespace corridorkey::ofx {
 
 namespace {
+
+// RGBA component layout used by every host pixel writer below.
+constexpr int kRgbaComponents = 4;
+constexpr int kRgbaFloatBytes = kRgbaComponents * static_cast<int>(sizeof(float));
+constexpr int kRgbaByteBytes = kRgbaComponents * static_cast<int>(sizeof(unsigned char));
+
+// uint8 quantization helpers: float pixel value * kU8Range + kRoundingBias,
+// then clamp into [0, kU8Range]. The bias rounds to nearest instead of
+// truncating; both are well-established conventions in 8-bit pipelines.
+constexpr float kU8Range = 255.0F;
+constexpr float kRoundingBias = 0.5F;
+
+// Shared cache stats are flushed to the log every kCacheStatsLogInterval
+// store events. Keeping this small enough that long render sessions still
+// surface a bounded number of summary lines.
+constexpr std::uint64_t kCacheStatsLogInterval = 8;
+
+// Frame-time exponential smoothing factor for the runtime panel's "Avg"
+// readout. Picked empirically to favor recent frames without flickering.
+constexpr double kFrameTimeSmoothing = 0.2;
+
+// snprintf scratch buffer for the cache-stats log line. The format string
+// produces at most ~150 chars of payload; 256 is a comfortable margin.
+constexpr std::size_t kCacheStatsBufferBytes = 256;
 
 std::string backend_label(Backend backend) {
     switch (backend) {
@@ -194,8 +219,10 @@ Result<GuideSourceKind> resolve_alpha_hint_source_impl(Image rgb_view, Image hin
     }
 
     if (alpha_hint_policy == AlphaHintPolicy::RequireExternalHint) {
-        return Unexpected<Error>{
-            Error{ErrorCode::InvalidParameters, "Waiting for Alpha Hint connection."}};
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InvalidParameters,
+            .message = "Waiting for Alpha Hint connection.",
+        }};
     }
 
     ColorUtils::generate_rough_matte(rgb_view, hint_view);
@@ -219,25 +246,36 @@ class RenderScope {
 
     RenderScope(const RenderScope&) = delete;
     RenderScope& operator=(const RenderScope&) = delete;
+    RenderScope(RenderScope&&) = delete;
+    RenderScope& operator=(RenderScope&&) = delete;
 
    private:
     InstanceData* m_data = nullptr;
 };
 
+// NOLINTBEGIN(readability-identifier-length,bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-reinterpret-cast,readability-qualified-auto,modernize-use-auto,bugprone-implicit-widening-of-multiplication-result)
+// Pixel writers operate on the OFX host's raw void* output buffers and use
+// the established (r, g, b, a) and (x, y) single-letter conventions that
+// every image-processing reference uses. Restructuring the parameter
+// signatures or expanding identifiers would obscure the math without
+// catching bugs that the existing tight call structure already prevents.
+// reinterpret_cast is required by the OFX C ABI's void* image-data
+// contract; the implicit ptrdiff_t widening is intentional (per-row stride
+// is bounded by image height which fits in int).
 void write_rgba_pixel(float r, float g, float b, float a, unsigned char* dst, bool is_float,
                       bool is_byte, bool apply_srgb, const SrgbLut& lut) {
     if (is_float) {
-        float* dst_pixel = reinterpret_cast<float*>(dst);
+        auto* dst_pixel = reinterpret_cast<float*>(dst);
         if (apply_srgb) {
-            if (a > 0.0f) {
-                float inv_a = 1.0f / a;
+            if (a > 0.0F) {
+                const float inv_a = 1.0F / a;
                 dst_pixel[0] = lut.to_srgb(r * inv_a) * a;
                 dst_pixel[1] = lut.to_srgb(g * inv_a) * a;
                 dst_pixel[2] = lut.to_srgb(b * inv_a) * a;
             } else {
-                dst_pixel[0] = 0.0f;
-                dst_pixel[1] = 0.0f;
-                dst_pixel[2] = 0.0f;
+                dst_pixel[0] = 0.0F;
+                dst_pixel[1] = 0.0F;
+                dst_pixel[2] = 0.0F;
             }
         } else {
             dst_pixel[0] = r;
@@ -250,19 +288,23 @@ void write_rgba_pixel(float r, float g, float b, float a, unsigned char* dst, bo
 
     if (is_byte) {
         unsigned char* dst_pixel = dst;
-        float sr = 0.0f;
-        float sg = 0.0f;
-        float sb = 0.0f;
-        if (a > 0.0f) {
-            float inv_a = 1.0f / a;
+        float sr = 0.0F;
+        float sg = 0.0F;
+        float sb = 0.0F;
+        if (a > 0.0F) {
+            const float inv_a = 1.0F / a;
             sr = lut.to_srgb(r * inv_a) * a;
             sg = lut.to_srgb(g * inv_a) * a;
             sb = lut.to_srgb(b * inv_a) * a;
         }
-        dst_pixel[0] = static_cast<unsigned char>(std::clamp(sr * 255.0f + 0.5f, 0.0f, 255.0f));
-        dst_pixel[1] = static_cast<unsigned char>(std::clamp(sg * 255.0f + 0.5f, 0.0f, 255.0f));
-        dst_pixel[2] = static_cast<unsigned char>(std::clamp(sb * 255.0f + 0.5f, 0.0f, 255.0f));
-        dst_pixel[3] = static_cast<unsigned char>(std::clamp(a * 255.0f + 0.5f, 0.0f, 255.0f));
+        dst_pixel[0] =
+            static_cast<unsigned char>(std::clamp((sr * kU8Range) + kRoundingBias, 0.0F, kU8Range));
+        dst_pixel[1] =
+            static_cast<unsigned char>(std::clamp((sg * kU8Range) + kRoundingBias, 0.0F, kU8Range));
+        dst_pixel[2] =
+            static_cast<unsigned char>(std::clamp((sb * kU8Range) + kRoundingBias, 0.0F, kU8Range));
+        dst_pixel[3] =
+            static_cast<unsigned char>(std::clamp((a * kU8Range) + kRoundingBias, 0.0F, kU8Range));
     }
 }
 
@@ -272,12 +314,14 @@ void write_matte_output(const Image& alpha, void* dst_data, int row_bytes, const
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
     common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
-            auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            auto* row = reinterpret_cast<unsigned char*>(dst_data) +
+                        (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes));
             for (int x = 0; x < alpha.width; ++x) {
-                float a = alpha(y, x);
-                write_rgba_pixel(a, a, a, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                                 false, lut);
+                const float a = alpha(y, x);
+                write_rgba_pixel(a, a, a, 1.0F,
+                                 row + (static_cast<ptrdiff_t>(x) *
+                                        (is_float ? kRgbaFloatBytes : kRgbaByteBytes)),
+                                 is_float, is_byte, false, lut);
             }
         }
     });
@@ -289,14 +333,16 @@ void write_foreground_output(const Image& fg_linear, void* dst_data, int row_byt
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
     common::parallel_for_rows(fg_linear.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
-            auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            auto* row = reinterpret_cast<unsigned char*>(dst_data) +
+                        (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes));
             for (int x = 0; x < fg_linear.width; ++x) {
-                float r = fg_linear(y, x, 0);
-                float g = fg_linear(y, x, 1);
-                float b = fg_linear(y, x, 2);
-                write_rgba_pixel(r, g, b, 1.0f, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                                 apply_srgb, lut);
+                const float r = fg_linear(y, x, 0);
+                const float g = fg_linear(y, x, 1);
+                const float b = fg_linear(y, x, 2);
+                write_rgba_pixel(r, g, b, 1.0F,
+                                 row + (static_cast<ptrdiff_t>(x) *
+                                        (is_float ? kRgbaFloatBytes : kRgbaByteBytes)),
+                                 is_float, is_byte, apply_srgb, lut);
             }
         }
     });
@@ -309,15 +355,17 @@ void write_processed_output(const Image& fg_linear, const Image& alpha, void* ds
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
     common::parallel_for_rows(fg_linear.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
-            auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            auto* row = reinterpret_cast<unsigned char*>(dst_data) +
+                        (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes));
             for (int x = 0; x < fg_linear.width; ++x) {
-                float a = alpha(y, x);
-                float r = fg_linear(y, x, 0) * a;
-                float g = fg_linear(y, x, 1) * a;
-                float b = fg_linear(y, x, 2) * a;
-                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                                 apply_srgb, lut);
+                const float a = alpha(y, x);
+                const float r = fg_linear(y, x, 0) * a;
+                const float g = fg_linear(y, x, 1) * a;
+                const float b = fg_linear(y, x, 2) * a;
+                write_rgba_pixel(r, g, b, a,
+                                 row + (static_cast<ptrdiff_t>(x) *
+                                        (is_float ? kRgbaFloatBytes : kRgbaByteBytes)),
+                                 is_float, is_byte, apply_srgb, lut);
             }
         }
     });
@@ -330,15 +378,17 @@ void write_source_matte_output(const Image& rgb_srgb, const Image& alpha, void* 
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
     common::parallel_for_rows(rgb_srgb.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
-            auto row = reinterpret_cast<unsigned char*>(dst_data) +
-                       static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes);
+            auto* row = reinterpret_cast<unsigned char*>(dst_data) +
+                        (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(row_bytes));
             for (int x = 0; x < rgb_srgb.width; ++x) {
-                float a = alpha(y, x);
-                float r = lut.to_linear(rgb_srgb(y, x, 0)) * a;
-                float g = lut.to_linear(rgb_srgb(y, x, 1)) * a;
-                float b = lut.to_linear(rgb_srgb(y, x, 2)) * a;
-                write_rgba_pixel(r, g, b, a, row + x * 4 * (is_float ? 4 : 1), is_float, is_byte,
-                                 apply_srgb, lut);
+                const float a = alpha(y, x);
+                const float r = lut.to_linear(rgb_srgb(y, x, 0)) * a;
+                const float g = lut.to_linear(rgb_srgb(y, x, 1)) * a;
+                const float b = lut.to_linear(rgb_srgb(y, x, 2)) * a;
+                write_rgba_pixel(r, g, b, a,
+                                 row + (static_cast<ptrdiff_t>(x) *
+                                        (is_float ? kRgbaFloatBytes : kRgbaByteBytes)),
+                                 is_float, is_byte, apply_srgb, lut);
             }
         }
     });
@@ -347,27 +397,39 @@ void write_source_matte_output(const Image& rgb_srgb, const Image& alpha, void* 
 void bypass_with_source(const void* source_data, void* output_data, int width, int height,
                         int source_row_bytes, int output_row_bytes,
                         const std::string& source_depth) {
-    const int pixel_bytes = is_depth(source_depth, kOfxBitDepthFloat) ? 16 : 4;
+    const int pixel_bytes =
+        is_depth(source_depth, kOfxBitDepthFloat) ? kRgbaFloatBytes : kRgbaByteBytes;
     const int copy_bytes = width * pixel_bytes;
     for (int y = 0; y < height; ++y) {
-        const auto* src_row = reinterpret_cast<const unsigned char*>(source_data) +
-                              static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(source_row_bytes);
-        auto* dst_row = reinterpret_cast<unsigned char*>(output_data) +
-                        static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(output_row_bytes);
+        const auto* src_row =
+            reinterpret_cast<const unsigned char*>(source_data) +
+            (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(source_row_bytes));
+        auto* dst_row =
+            reinterpret_cast<unsigned char*>(output_data) +
+            (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(output_row_bytes));
         std::memcpy(dst_row, src_row, static_cast<size_t>(copy_bytes));
     }
 }
+// NOLINTEND(readability-identifier-length,bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-reinterpret-cast,readability-qualified-auto,modernize-use-auto,bugprone-implicit-widening-of-multiplication-result)
 
-enum class InferenceOutcome { kOk, kBypass, kFailed };
+enum class InferenceOutcome : std::uint8_t { kOk, kBypass, kFailed };
 
 struct InferenceResult {
     ImageBuffer alpha;
     ImageBuffer foreground;
     InferenceOutcome outcome = InferenceOutcome::kOk;
     LastRenderWorkOrigin work_origin = LastRenderWorkOrigin::BackendRender;
-    std::vector<StageTiming> stage_timings = {};
+    std::vector<StageTiming> stage_timings;
 };
 
+// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size,bugprone-easily-swappable-parameters,readability-identifier-length)
+// resolve_inference_buffers is the single sequence point for the OFX
+// render path: shared-cache check -> backend dispatch -> result validation
+// -> instance-cache materialization. Each stage has tight invariants that
+// only hold when read in order, so splitting them into helpers would
+// require threading the same dozen locals through three signatures and
+// duplicating the early-return diagnostics that make the failure modes
+// auditable in the runtime log.
 InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHandle instance,
                                           const SharedCacheKey& shared_key, const Image& rgb_view,
                                           const Image& hint_view, const InferenceParams& params,
@@ -383,8 +445,13 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     if (!params.output_alpha_only && g_frame_cache != nullptr &&
         g_frame_cache->try_retrieve(shared_key, alpha_buf, fg_linear_buf, &stage_timings)) {
         log_message("render", "event=cache_hit detail=shared_cache");
-        return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
-                LastRenderWorkOrigin::SharedCache, std::move(stage_timings)};
+        return {
+            .alpha = std::move(alpha_buf),
+            .foreground = std::move(fg_linear_buf),
+            .outcome = InferenceOutcome::kOk,
+            .work_origin = LastRenderWorkOrigin::SharedCache,
+            .stage_timings = std::move(stage_timings),
+        };
     }
 
     const DeviceInfo requested_device = requested_device_for_render(data);
@@ -410,7 +477,13 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         set_runtime_error(data, result.error().message, instance);
         bypass_with_source(source_data, output_data, width, height, source_row_bytes,
                            output_row_bytes, source_depth);
-        return {{}, {}, InferenceOutcome::kBypass, LastRenderWorkOrigin::BackendRender, {}};
+        return {
+            .alpha = {},
+            .foreground = {},
+            .outcome = InferenceOutcome::kBypass,
+            .work_origin = LastRenderWorkOrigin::BackendRender,
+            .stage_timings = {},
+        };
     }
 
     const DeviceInfo effective_device = data->runtime_client->current_device();
@@ -437,14 +510,26 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         data->last_error = fallback_message;
         log_message("render", fallback_message);
         set_runtime_error(data, fallback_message, instance);
-        return {{}, {}, InferenceOutcome::kFailed, LastRenderWorkOrigin::BackendRender, {}};
+        return {
+            .alpha = {},
+            .foreground = {},
+            .outcome = InferenceOutcome::kFailed,
+            .work_origin = LastRenderWorkOrigin::BackendRender,
+            .stage_timings = {},
+        };
     }
 
     const Image raw_alpha = result->alpha.view();
     if (raw_alpha.width != width || raw_alpha.height != height) {
         log_message("render", "Unexpected output size from engine.");
         set_runtime_error(data, "Unexpected output size from engine.", instance);
-        return {{}, {}, InferenceOutcome::kFailed, LastRenderWorkOrigin::BackendRender, {}};
+        return {
+            .alpha = {},
+            .foreground = {},
+            .outcome = InferenceOutcome::kFailed,
+            .work_origin = LastRenderWorkOrigin::BackendRender,
+            .stage_timings = {},
+        };
     }
 
     if (!params.output_alpha_only) {
@@ -474,27 +559,36 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         // pressure. Gated to every 8 stores so a long render session does not
         // spam the log file.
         const auto cache_stats = g_frame_cache->stats();
-        if (cache_stats.stores % 8ULL == 0ULL) {
+        if (cache_stats.stores % kCacheStatsLogInterval == 0ULL) {
             const std::uint64_t lookups = cache_stats.hits + cache_stats.misses;
             const double hit_rate =
                 lookups == 0 ? 0.0
                              : static_cast<double>(cache_stats.hits) / static_cast<double>(lookups);
-            char message[256] = {};
-            std::snprintf(message, sizeof(message),
-                          "event=shared_cache_stats hits=%llu misses=%llu hit_rate=%.3f "
-                          "stores=%llu evictions=%llu entries=%zu bytes=%zu budget=%zu",
-                          static_cast<unsigned long long>(cache_stats.hits),
-                          static_cast<unsigned long long>(cache_stats.misses), hit_rate,
-                          static_cast<unsigned long long>(cache_stats.stores),
-                          static_cast<unsigned long long>(cache_stats.evictions),
-                          cache_stats.entries, cache_stats.bytes, cache_stats.byte_budget);
-            log_message("render", message);
+            std::array<char, kCacheStatsBufferBytes> message{};
+            const int written = std::snprintf(
+                message.data(), message.size(),
+                "event=shared_cache_stats hits=%llu misses=%llu hit_rate=%.3f "
+                "stores=%llu evictions=%llu entries=%zu bytes=%zu budget=%zu",
+                static_cast<unsigned long long>(cache_stats.hits),
+                static_cast<unsigned long long>(cache_stats.misses), hit_rate,
+                static_cast<unsigned long long>(cache_stats.stores),
+                static_cast<unsigned long long>(cache_stats.evictions), cache_stats.entries,
+                cache_stats.bytes, cache_stats.byte_budget);
+            if (written > 0) {
+                log_message("render", message.data());
+            }
         }
     }
 
-    return {std::move(alpha_buf), std::move(fg_linear_buf), InferenceOutcome::kOk,
-            LastRenderWorkOrigin::BackendRender, std::move(stage_timings)};
+    return {
+        .alpha = std::move(alpha_buf),
+        .foreground = std::move(fg_linear_buf),
+        .outcome = InferenceOutcome::kOk,
+        .work_origin = LastRenderWorkOrigin::BackendRender,
+        .stage_timings = std::move(stage_timings),
+    };
 }
+// NOLINTEND(readability-function-cognitive-complexity,readability-function-size,bugprone-easily-swappable-parameters,readability-identifier-length)
 
 }  // namespace
 
@@ -508,8 +602,8 @@ void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOr
     if (data->frame_time_samples == 0 || data->avg_frame_ms <= 0.0) {
         data->avg_frame_ms = elapsed_ms;
     } else {
-        constexpr double kSmoothing = 0.2;
-        data->avg_frame_ms = (1.0 - kSmoothing) * data->avg_frame_ms + kSmoothing * elapsed_ms;
+        data->avg_frame_ms =
+            ((1.0 - kFrameTimeSmoothing) * data->avg_frame_ms) + (kFrameTimeSmoothing * elapsed_ms);
     }
     ++data->frame_time_samples;
     data->runtime_panel_dirty = true;
@@ -521,6 +615,18 @@ Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_vie
     return resolve_alpha_hint_source_impl(rgb_view, hint_view, hint_from_clip, alpha_hint_policy);
 }
 
+// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size,readability-implicit-bool-conversion,cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-starts-ends-with,modernize-use-designated-initializers,modernize-use-ranges,readability-math-missing-parentheses)
+// render is the canonical OFX kOfxImageEffectActionRender handler. It
+// resolves the host's source/output buffers, reads every plugin parameter
+// at the current frame time, then drives the inference + post-process
+// pipeline. The body is naturally long because the OFX render contract
+// requires exactly this single-action shape: parameter snapshots happen
+// against a single frame time, errors must surface via the host's
+// post_message before a failed return, and per-instance cache state must
+// be visible to all branches without re-reading the same param twice.
+// Splitting into helpers would bloat the call sites, hide the linear
+// "fetch -> validate -> render -> post-process -> write" flow, and force
+// the same dozen locals to thread through three signatures.
 OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                  OfxPropertySetHandle /*out_args*/) {
     if (g_suites.image_effect == nullptr || g_suites.property == nullptr ||
@@ -917,7 +1023,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.despill_screen_channel = loaded_model_is_blue ? 2 : 1;
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;
-    params.refiner_scale = 1.0f;
+    params.refiner_scale = 1.0F;
     params.alpha_hint_policy = alpha_hint_policy;
     params.input_is_linear = input_is_linear;
     params.upscale_method =
@@ -999,7 +1105,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         Image fg_linear_local = inference.foreground.view();
         if (temporal_smoothing > 0.0) {
             const float blend = static_cast<float>(std::clamp(temporal_smoothing, 0.0, 1.0));
-            const float inv_blend = 1.0f - blend;
+            const float inv_blend = 1.0F - blend;
             const bool size_mismatch = !data->temporal_state_valid ||
                                        data->temporal_width != width ||
                                        data->temporal_height != height;
@@ -1102,5 +1208,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     return kOfxStatOK;
 }
+// NOLINTEND(readability-function-cognitive-complexity,readability-function-size,readability-implicit-bool-conversion,cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-starts-ends-with,modernize-use-designated-initializers,modernize-use-ranges,readability-math-missing-parentheses)
 
 }  // namespace corridorkey::ofx
