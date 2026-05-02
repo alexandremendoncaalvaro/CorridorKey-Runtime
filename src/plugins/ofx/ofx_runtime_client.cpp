@@ -405,12 +405,12 @@ std::uint64_t OfxRuntimeClient::session_ref_count() const {
     return m_session.ref_count;
 }
 
-void OfxRuntimeClient::set_request_timeout_ms(int ms) {
-    m_options.request_timeout_ms = ms;
+void OfxRuntimeClient::set_request_timeout_ms(int timeout_ms) {
+    m_options.request_timeout_ms = timeout_ms;
 }
 
-void OfxRuntimeClient::set_prepare_timeout_ms(int ms) {
-    m_options.prepare_timeout_ms = ms;
+void OfxRuntimeClient::set_prepare_timeout_ms(int timeout_ms) {
+    m_options.prepare_timeout_ms = timeout_ms;
 }
 
 Result<void> OfxRuntimeClient::ensure_server_running() {

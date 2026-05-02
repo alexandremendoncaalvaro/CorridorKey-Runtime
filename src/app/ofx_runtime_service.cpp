@@ -511,7 +511,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
             auto response = error_response(request_json.error());
             logger.log("event=request_failed stage=read_json detail=" +
                        request_json.error().message);
-            (*client)->write_json(to_json(response));
+            (void)(*client)->write_json(to_json(response));
             continue;
         }
 
@@ -519,7 +519,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         if (!request) {
             auto response = error_response(request.error());
             logger.log("event=request_failed stage=parse detail=" + request.error().message);
-            (*client)->write_json(to_json(response));
+            (void)(*client)->write_json(to_json(response));
             continue;
         }
 
@@ -664,7 +664,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
             }
         }
 
-        (*client)->write_json(to_json(response));
+        (void)(*client)->write_json(to_json(response));
         const auto request_end = std::chrono::steady_clock::now();
         logger.log(
             "event=request_completed command=" + ofx_runtime_command_to_string(request->command) +

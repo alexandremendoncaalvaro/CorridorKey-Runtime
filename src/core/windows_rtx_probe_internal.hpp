@@ -5,14 +5,14 @@
 #include <optional>
 #include <vector>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
 namespace corridorkey::core::detail {
 
-#if defined(_WIN32)
+#ifdef _WIN32
 
 struct CudaDeviceIdentity {
     std::array<unsigned char, sizeof(LUID)> luid = {};
@@ -21,8 +21,15 @@ struct CudaDeviceIdentity {
     int compute_capability_minor = 0;
 };
 
+// TensorRT-RTX requires compute capability >= 7.5 (Turing+). The 7 / 5
+// pair encodes the canonical NVIDIA SM threshold; named constants make
+// the comparison readable while keeping the integer compare cheap.
+inline constexpr int kTensorRtRtxMinCcMajor = 7;
+inline constexpr int kTensorRtRtxMinCcMinor = 5;
+
 inline bool compute_capability_supports_tensorrt_rtx(int major, int minor) {
-    return major > 7 || (major == 7 && minor >= 5);
+    return major > kTensorRtRtxMinCcMajor ||
+           (major == kTensorRtRtxMinCcMajor && minor >= kTensorRtRtxMinCcMinor);
 }
 
 inline bool luid_matches(const LUID& adapter_luid,
