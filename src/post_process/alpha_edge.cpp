@@ -8,16 +8,31 @@
 #include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
 
+// NOLINTBEGIN(readability-identifier-length,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-math-missing-parentheses,cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-avoid-magic-numbers,readability-function-cognitive-complexity,readability-function-size,modernize-use-auto)
+//
+// alpha_edge tidy-suppression rationale.
+//
+// post-process pixel-math is OFX render hot path; per CLAUDE.md changes
+// here are gated by the phase_8_gpu_prepare 10% regression budget, so we
+// suppress diagnostics that would force restructuring without measurable
+// safety value. operator[] sites index validated state.temp / weights
+// buffers (resized to w*h or kernel+1 immediately above the loop), so
+// .at() would add a redundant bounds check on every pixel. The
+// (x, y, w, h, dx, dy, lo, fi) names are universal pixel-coord and
+// kernel-offset conventions, the kLutSize / 0.5F sigma factor / 2.0F
+// Gaussian-denominator are canonical filter constants, and the
+// separable two-pass blur / erode / dilate / gamma orchestrators have
+// linear flow whose helper extraction would obscure the math.
 namespace corridorkey {
 
 void alpha_levels(Image alpha, float black_point, float white_point) {
     if (alpha.empty()) return;
     float range = white_point - black_point;
-    if (range <= 0.0f) range = 1.0f;
-    float inv_range = 1.0f / range;
+    if (range <= 0.0F) range = 1.0F;
+    float inv_range = 1.0F / range;
 
-    const float low = 0.0f;
-    const float high = 1.0f;
+    const float low = 0.0F;
+    const float high = 1.0F;
 
     common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
@@ -31,8 +46,8 @@ void alpha_levels(Image alpha, float black_point, float white_point) {
 }
 
 void alpha_gamma_correct(Image alpha, float gamma) {
-    if (alpha.empty() || gamma <= 0.0f) return;
-    float inv_gamma = 1.0f / gamma;
+    if (alpha.empty() || gamma <= 0.0F) return;
+    float inv_gamma = 1.0F / gamma;
 
     constexpr int kLutSize = 1024;
     std::array<float, kLutSize + 1> lut{};
@@ -45,11 +60,11 @@ void alpha_gamma_correct(Image alpha, float gamma) {
         for (int y = y_begin; y < y_end; ++y) {
             for (int x = 0; x < alpha.width; ++x) {
                 float val = alpha(y, x);
-                if (val > 0.0f && val < 1.0f) {
+                if (val > 0.0F && val < 1.0F) {
                     float idx = val * static_cast<float>(kLutSize);
                     int lo = static_cast<int>(idx);
                     float frac = idx - static_cast<float>(lo);
-                    alpha(y, x) = lut[static_cast<std::size_t>(lo)] * (1.0f - frac) +
+                    alpha(y, x) = lut[static_cast<std::size_t>(lo)] * (1.0F - frac) +
                                   lut[static_cast<std::size_t>(lo) + 1] * frac;
                 }
             }
@@ -58,7 +73,7 @@ void alpha_gamma_correct(Image alpha, float gamma) {
 }
 
 void alpha_erode_dilate(Image alpha, float radius, AlphaEdgeState& state) {
-    if (alpha.empty() || radius == 0.0f) return;
+    if (alpha.empty() || radius == 0.0F) return;
 
     int w = alpha.width;
     int h = alpha.height;
@@ -67,7 +82,7 @@ void alpha_erode_dilate(Image alpha, float radius, AlphaEdgeState& state) {
     state.temp.resize(static_cast<size_t>(w) * h);
 
     // Erode = min filter, dilate = max filter
-    bool erode = radius < 0.0f;
+    bool erode = radius < 0.0F;
 
     // Horizontal pass
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
@@ -101,7 +116,7 @@ void alpha_erode_dilate(Image alpha, float radius, AlphaEdgeState& state) {
 }
 
 void alpha_blur(Image alpha, float radius, AlphaEdgeState& state) {
-    if (alpha.empty() || radius <= 0.0f) return;
+    if (alpha.empty() || radius <= 0.0F) return;
 
     int w = alpha.width;
     int h = alpha.height;
@@ -109,12 +124,12 @@ void alpha_blur(Image alpha, float radius, AlphaEdgeState& state) {
 
     // Build 1D Gaussian weights
     state.weights.resize(static_cast<size_t>(kernel) + 1);
-    float sigma = radius * 0.5f;
-    float sum = 0.0f;
+    float sigma = radius * 0.5F;
+    float sum = 0.0F;
     for (int i = 0; i <= kernel; ++i) {
         float fi = static_cast<float>(i);
-        state.weights[i] = std::exp(-(fi * fi) / (2.0f * sigma * sigma));
-        sum += (i == 0) ? state.weights[i] : 2.0f * state.weights[i];
+        state.weights[i] = std::exp(-(fi * fi) / (2.0F * sigma * sigma));
+        sum += (i == 0) ? state.weights[i] : 2.0F * state.weights[i];
     }
     for (int i = 0; i <= kernel; ++i) {
         state.weights[i] /= sum;
@@ -156,3 +171,4 @@ void alpha_blur(Image alpha, float radius, AlphaEdgeState& state) {
 }
 
 }  // namespace corridorkey
+// NOLINTEND(readability-identifier-length,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-math-missing-parentheses,cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-avoid-magic-numbers,readability-function-cognitive-complexity,readability-function-size,modernize-use-auto)
