@@ -1,13 +1,31 @@
 #include "despeckle.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <iostream>
+#include <cstdint>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include "common/parallel_for.hpp"
 
+// NOLINTBEGIN(readability-identifier-length,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-math-missing-parentheses,cppcoreguidelines-avoid-magic-numbers,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,modernize-use-auto,cppcoreguidelines-pro-bounds-constant-array-index,modernize-use-ranges,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+//
+// despeckle tidy-suppression rationale.
+//
+// post-process pixel-math is OFX render hot path; per CLAUDE.md changes
+// here are gated by the phase_8_gpu_prepare 10% regression budget, so we
+// suppress diagnostics that would force restructuring without measurable
+// safety value. operator[] sites index validated tensor strides
+// (row_offset = y * width with y, x already clamped to image bounds), so
+// .at() would add a redundant bounds check on every pixel. The
+// (r, g, b, a, x, y, h, w) and (dx, dy, kx, ky) names are universal
+// pixel-coord conventions; expanding them obscures the math. Magic
+// numbers (255, 0.5F, OpenCV's 0.3 sigma formula) are canonical uint8
+// quantization and Gaussian-kernel constants, and the union-find /
+// connected-components orchestrators have linear flow whose helper
+// extraction would just thread a dozen locals through new signatures.
 namespace corridorkey {
 namespace {
 
@@ -54,8 +72,8 @@ void find_components(const std::vector<uint8_t>& mask, int w, int h, std::vector
             labels[idx] = idx;
 
             // Check 4 already-visited neighbors (up-left, up, up-right, left)
-            constexpr int dy[] = {-1, -1, -1, 0};
-            constexpr int dx[] = {-1, 0, 1, -1};
+            constexpr std::array<int, 4> dy = {-1, -1, -1, 0};
+            constexpr std::array<int, 4> dx = {-1, 0, 1, -1};
             for (int d = 0; d < 4; ++d) {
                 int ny = y + dy[d];
                 int nx = x + dx[d];
@@ -93,7 +111,7 @@ std::vector<std::pair<int, int>> make_elliptical_kernel(int radius) {
     std::vector<std::pair<int, int>> offsets;
     int ksize = 2 * radius + 1;
     float center = static_cast<float>(radius);
-    float r_sq = (center + 0.5f) * (center + 0.5f);
+    float r_sq = (center + 0.5F) * (center + 0.5F);
 
     for (int ky = 0; ky < ksize; ++ky) {
         for (int kx = 0; kx < ksize; ++kx) {
@@ -142,7 +160,7 @@ void threshold_mask(const Image& alpha, std::vector<uint8_t>& mask) {
             size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(alpha.width);
             for (int x = 0; x < alpha.width; ++x) {
                 size_t index = row_offset + static_cast<size_t>(x);
-                mask[index] = alpha.data[index] > 0.5f ? 255 : 0;
+                mask[index] = alpha.data[index] > 0.5F ? 255 : 0;
             }
         }
     });
@@ -151,13 +169,13 @@ void threshold_mask(const Image& alpha, std::vector<uint8_t>& mask) {
 // 1D Gaussian kernel (OpenCV formula: sigma = 0.3*((ksize-1)*0.5 - 1) + 0.8 when sigma=0)
 std::vector<float> make_gaussian_kernel(int half_size) {
     int ksize = 2 * half_size + 1;
-    float sigma = 0.3f * (static_cast<float>(ksize - 1) * 0.5f - 1.0f) + 0.8f;
+    float sigma = 0.3F * (static_cast<float>(ksize - 1) * 0.5F - 1.0F) + 0.8F;
     std::vector<float> kernel(ksize);
-    float sum = 0.0f;
+    float sum = 0.0F;
 
     for (int i = 0; i < ksize; ++i) {
         float x = static_cast<float>(i - half_size);
-        kernel[i] = std::exp(-0.5f * (x * x) / (sigma * sigma));
+        kernel[i] = std::exp(-0.5F * (x * x) / (sigma * sigma));
         sum += kernel[i];
     }
     for (auto& v : kernel) v /= sum;
@@ -176,7 +194,7 @@ void gaussian_blur(std::vector<float>& data, std::vector<float>& temp, int w, in
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
             for (int x = 0; x < w; ++x) {
-                float sum = 0.0f;
+                float sum = 0.0F;
                 for (int k = 0; k < ksize; ++k) {
                     int sx = std::clamp(x + k - half_size, 0, w - 1);
                     sum += data[y * w + sx] * kernel[k];
@@ -190,7 +208,7 @@ void gaussian_blur(std::vector<float>& data, std::vector<float>& temp, int w, in
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
             for (int x = 0; x < w; ++x) {
-                float sum = 0.0f;
+                float sum = 0.0F;
                 for (int k = 0; k < ksize; ++k) {
                     int sy = std::clamp(y + k - half_size, 0, h - 1);
                     sum += temp[sy * w + x] * kernel[k];
@@ -222,7 +240,7 @@ void convert_cleaned_to_safe_zone(const std::vector<uint8_t>& cleaned,
             size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(w);
             for (int x = 0; x < w; ++x) {
                 size_t index = row_offset + static_cast<size_t>(x);
-                safe_zone[index] = cleaned[index] / 255.0f;
+                safe_zone[index] = cleaned[index] / 255.0F;
             }
         }
     });
@@ -278,3 +296,4 @@ void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilat
 }
 
 }  // namespace corridorkey
+// NOLINTEND(readability-identifier-length,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-math-missing-parentheses,cppcoreguidelines-avoid-magic-numbers,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,modernize-use-auto,cppcoreguidelines-pro-bounds-constant-array-index,modernize-use-ranges,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
