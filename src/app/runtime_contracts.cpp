@@ -130,39 +130,55 @@ std::optional<std::string> detect_active_packaged_model_profile() {
     return std::nullopt;
 }
 
+std::vector<std::string> windows_rtx_validation_tiers(std::int64_t available_memory_mb) {
+    std::vector<std::string> tiers;
+    if (available_memory_mb >= kVram8GbMiB) {
+        tiers.emplace_back("rtx_8gb");
+    }
+    if (available_memory_mb >= kVram10GbMiB) {
+        tiers.emplace_back("rtx_10gb");
+        tiers.emplace_back("rtx_10gb_plus");
+    }
+    if (available_memory_mb >= kVram16GbMiB) {
+        tiers.emplace_back("rtx_16gb_plus");
+    }
+    if (available_memory_mb >= kVram24GbMiB) {
+        tiers.emplace_back("rtx_24gb");
+    }
+    return tiers;
+}
+
+std::vector<std::string> apple_silicon_validation_tiers(std::int64_t available_memory_mb) {
+    std::vector<std::string> tiers;
+    if (available_memory_mb >= kVram8GbMiB) {
+        tiers.emplace_back("apple_silicon_8gb");
+    }
+    if (available_memory_mb >= kVram16GbMiB) {
+        tiers.emplace_back("apple_silicon_16gb");
+    }
+    return tiers;
+}
+
+bool is_windows_rtx_device(const DeviceInfo& device, const RuntimeCapabilities& capabilities) {
+    return capabilities.platform == "windows" &&
+           (device.backend == Backend::TensorRT || device.backend == Backend::CUDA);
+}
+
+bool is_apple_silicon_device(const DeviceInfo& device, const RuntimeCapabilities& capabilities) {
+    return capabilities.platform == "macos" &&
+           (device.backend == Backend::MLX || device.backend == Backend::CoreML ||
+            device.backend == Backend::Auto);
+}
+
 std::vector<std::string> validation_tiers_for_device(const DeviceInfo& device,
                                                      const RuntimeCapabilities& capabilities) {
-    std::vector<std::string> tiers;
-
-    if (capabilities.platform == "windows" &&
-        (device.backend == Backend::TensorRT || device.backend == Backend::CUDA)) {
-        if (device.available_memory_mb >= kVram8GbMiB) {
-            tiers.emplace_back("rtx_8gb");
-        }
-        if (device.available_memory_mb >= kVram10GbMiB) {
-            tiers.emplace_back("rtx_10gb");
-            tiers.emplace_back("rtx_10gb_plus");
-        }
-        if (device.available_memory_mb >= kVram16GbMiB) {
-            tiers.emplace_back("rtx_16gb_plus");
-        }
-        if (device.available_memory_mb >= kVram24GbMiB) {
-            tiers.emplace_back("rtx_24gb");
-        }
+    if (is_windows_rtx_device(device, capabilities)) {
+        return windows_rtx_validation_tiers(device.available_memory_mb);
     }
-
-    if (capabilities.platform == "macos" &&
-        (device.backend == Backend::MLX || device.backend == Backend::CoreML ||
-         device.backend == Backend::Auto)) {
-        if (device.available_memory_mb >= kVram8GbMiB) {
-            tiers.emplace_back("apple_silicon_8gb");
-        }
-        if (device.available_memory_mb >= kVram16GbMiB) {
-            tiers.emplace_back("apple_silicon_16gb");
-        }
+    if (is_apple_silicon_device(device, capabilities)) {
+        return apple_silicon_validation_tiers(device.available_memory_mb);
     }
-
-    return tiers;
+    return {};
 }
 
 bool has_validated_tier_for_device(const ModelCatalogEntry& model, const DeviceInfo& device,
