@@ -4,6 +4,20 @@
 #include <OpenEXR/ImfHeader.h>
 #include <OpenEXR/ImfRgbaFile.h>
 
+// NOLINTBEGIN(modernize-use-designated-initializers,readability-identifier-length,readability-uppercase-literal-suffix,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,bugprone-implicit-widening-of-multiplication-result,readability-math-missing-parentheses)
+//
+// exr_io.cpp tidy-suppression rationale.
+//
+// This translation unit is the offline OpenEXR read/write path and is
+// not on the OFX render hot path. The pixel-conversion loops use the
+// universal short identifiers (dw for OpenEXR's dataWindow, p for the
+// per-pixel Rgba reference) that mirror the OpenEXR sample-code
+// vocabulary, and the 1.0F sRGB-alpha defaults are documented at the
+// call site. setFrameBuffer/readPixels/writePixels follow the
+// canonical OpenEXR pointer-arithmetic shape (`&pixels[0][0] -
+// dw.min.x - dw.min.y * width`) prescribed by the IlmBase API; the
+// suppressions cover the implicit ptrdiff widening and unchecked
+// container access that arise inevitably from that API contract.
 namespace corridorkey {
 
 Result<ImageBuffer> read_exr(const std::filesystem::path& path) {
@@ -82,3 +96,4 @@ Result<void> write_exr(const std::filesystem::path& path, const Image& image) {
 }
 
 }  // namespace corridorkey
+// NOLINTEND(modernize-use-designated-initializers,readability-identifier-length,readability-uppercase-literal-suffix,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,bugprone-implicit-widening-of-multiplication-result,readability-math-missing-parentheses)
