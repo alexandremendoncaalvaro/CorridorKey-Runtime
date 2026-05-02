@@ -1,23 +1,13 @@
 # Optimization Measurements
 
-## Resumed after the 0.7.5 detour
-
-This ledger was pruned during the 0.7.5 shipping phase on the assumption
-that the matching release artifacts superseded it. The assumption was
-wrong: the 0.7.5 track then introduced changes to the hot render path
-without running the corpus against the `phase_8_gpu_prepare` baseline.
-The protocol below is reinstated and the 14 historical checkpoints
-still stand as the reference for what "fast and stable" looks like on
-Windows RTX — `phase_8_gpu_prepare` remains the target to match. New
-entries resume at `phase_9_*`.
-
 ## Why This Document Exists
 
 This document defines the comparison protocol for optimization work and keeps
 the recorded checkpoints in one place. The goal is to compare each slice
 against a stable baseline instead of relying on memory or one-off tests.
-
-Use this file together with [OPTIMIZATION_CHECKLIST.md](./OPTIMIZATION_CHECKLIST.md).
+`phase_8_gpu_prepare` is the standing baseline for the Windows RTX hot
+render path — every change to that path must be measured against it via
+`scripts/run_corpus.sh` and `scripts/compare_benchmarks.py`.
 
 ## TL;DR
 
