@@ -390,7 +390,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // and set them as secret at the end of create_instance when no banner
     // is yet known. Subsequent reveals (when the GitHub update check
     // completes and a banner is available) are then permitted.
-    // Reference: https://github.com/MrKepzie/Natron/wiki/OpenFX-plugin-programming-guide-(Advanced-issues)
+    // Reference:
+    // https://github.com/MrKepzie/Natron/wiki/OpenFX-plugin-programming-guide-(Advanced-issues)
     define_info_param(param_set, kParamUpdateStatus, "", "",
                       "Shows when a newer CorridorKey release is available on GitHub.",
                       "runtime_group", false);
@@ -457,8 +458,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     if (is_nuke_host()) {
         tutorial_hint = "Open step-by-step CorridorKey workflows for Foundry Nuke on GitHub.";
     } else if (is_resolve_host()) {
-        tutorial_hint =
-            "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.";
+        tutorial_hint = "Open step-by-step CorridorKey workflows for DaVinci Resolve on GitHub.";
     } else {
         tutorial_hint = "Open step-by-step CorridorKey workflows on GitHub.";
     }

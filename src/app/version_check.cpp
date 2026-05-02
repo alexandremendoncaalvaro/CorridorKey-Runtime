@@ -85,9 +85,8 @@ std::string strip_git_describe_suffix(std::string_view prerelease) {
         return std::string(prerelease);
     }
     const auto sha = remaining.substr(g_pos + 2);
-    if (sha.size() < 7 || !std::all_of(sha.begin(), sha.end(), [](unsigned char c) {
-            return std::isxdigit(c) != 0;
-        })) {
+    if (sha.size() < 7 || !std::all_of(sha.begin(), sha.end(),
+                                       [](unsigned char c) { return std::isxdigit(c) != 0; })) {
         return std::string(prerelease);
     }
 

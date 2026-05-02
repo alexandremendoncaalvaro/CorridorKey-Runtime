@@ -92,8 +92,8 @@ TEST_CASE("fixed mlx quality resolves the exact requested bridge", "[unit][ofx][
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_2048.mlxfn");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840,
-                                             2160);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840, 2160);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -108,8 +108,8 @@ TEST_CASE("fixed mlx quality fails when the exact bridge is unavailable",
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_512.mlxfn");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840,
-                                             2160);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityMaximum, 3840, 2160);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -121,8 +121,8 @@ TEST_CASE("auto mlx quality may fall back to the highest available lower bridge"
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1024.mlxfn");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1536.mlxfn");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityAuto, 4096,
-                                             2160);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityAuto, 4096, 2160);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -138,8 +138,8 @@ TEST_CASE("fixed windows tensorRT quality fails when the exact model is unavaila
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum,
-                                             4096, 2160);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -150,8 +150,8 @@ TEST_CASE("fixed windows tensorRT preview resolves the exact 512 model when pack
     touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityPreview,
-                                             1920, 1080);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityPreview, 1920, 1080);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 512);
@@ -185,16 +185,16 @@ TEST_CASE("fixed windows tensorRT ultra and maximum resolve exact packaged model
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
 
-    auto ultra = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 2560,
-                                         1440);
+    auto ultra =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 2560, 1440);
     REQUIRE(ultra.has_value());
     REQUIRE(ultra->requested_resolution == 1536);
     REQUIRE(ultra->effective_resolution == 1536);
     REQUIRE_FALSE(ultra->used_fallback);
     REQUIRE(ultra->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
 
-    auto maximum = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum,
-                                           4096, 2160);
+    auto maximum =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160);
     REQUIRE(maximum.has_value());
     REQUIRE(maximum->requested_resolution == 2048);
     REQUIRE(maximum->effective_resolution == 2048);
@@ -232,9 +232,8 @@ TEST_CASE("automatic coarse-to-fine selection chooses a safer coarse artifact",
     TempDirGuard temp_dir("corridorkey-ofx-quality-coarse-to-fine");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160,
-                                10240, QualityFallbackMode::Auto);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum,
+                                             4096, 2160, 10240, QualityFallbackMode::Auto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -249,9 +248,8 @@ TEST_CASE("automatic coarse-to-fine selection falls back to lower packaged coars
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum, 4096, 2160,
-                                10240, QualityFallbackMode::Auto);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityMaximum,
+                                             4096, 2160, 10240, QualityFallbackMode::Auto);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -266,9 +264,8 @@ TEST_CASE("fixed windows tensorRT manual override may attempt 1536 on a 10 GB RT
     TempDirGuard temp_dir("corridorkey-ofx-quality-ultra-10gb-direct");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
-                                10240, QualityFallbackMode::Auto, 0, true);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra,
+                                             3200, 1800, 10240, QualityFallbackMode::Auto, 0, true);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 1536);
@@ -283,9 +280,8 @@ TEST_CASE("coarse-to-fine override requires the exact requested coarse artifact"
     TempDirGuard temp_dir("corridorkey-ofx-quality-coarse-to-fine-exact-override");
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
 
-    auto selection =
-        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra, 3200, 1800,
-                                10240, QualityFallbackMode::Auto, 1024);
+    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityUltra,
+                                             3200, 1800, 10240, QualityFallbackMode::Auto, 1024);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -448,8 +444,8 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_1024.onnx");
     REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096,
-                                             2160);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 2048);
@@ -465,8 +461,8 @@ TEST_CASE("auto windows tensorRT resolves small inputs to the 512 rung",
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 960,
-                                             540, 10240);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 960, 540, 10240);
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->requested_resolution == 512);
@@ -547,9 +543,8 @@ TEST_CASE("missing quality artifact message names the expected model and folder"
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-missing-quality-message");
 
-    auto message =
-        missing_quality_artifact_message(temp_dir.path(), Backend::TensorRT, kQualityUltra, 2560,
-                                         1440, 16384);
+    auto message = missing_quality_artifact_message(temp_dir.path(), Backend::TensorRT,
+                                                    kQualityUltra, 2560, 1440, 16384);
 
     REQUIRE(message.find("Ultra (1536)") != std::string::npos);
     REQUIRE(message.find("corridorkey_fp16_1536.onnx") != std::string::npos);
@@ -571,8 +566,8 @@ TEST_CASE("auto windows tensorRT ignores the deprecated 768 fp16 artifact",
     TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-prefers-fp16");
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 1920,
-                                             1080);
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 1920, 1080);
 
     REQUIRE_FALSE(selection.has_value());
 }
@@ -621,14 +616,14 @@ TEST_CASE("blue screen request with dedicated artifact present uses dedicated pa
           "[unit][ofx][screen-color]") {
     TempDirGuard temp_dir("corridorkey-ofx-blue-dedicated");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
-    touch_file(temp_dir.path() / "corridorkey_blue_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_blue_torchtrt_fp16_1024.ts");
 
-    auto selection = select_quality_artifact(
-        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
-        QualityFallbackMode::Auto, 0, false, "blue");
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+                                QualityFallbackMode::Auto, 0, false, "blue");
 
     REQUIRE(selection.has_value());
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_blue_fp16_1024.onnx");
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_blue_torchtrt_fp16_1024.ts");
     REQUIRE_FALSE(selection->used_fallback);
 }
 
@@ -637,9 +632,9 @@ TEST_CASE("blue screen request without dedicated artifact falls back to packaged
     TempDirGuard temp_dir("corridorkey-ofx-blue-fallback");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
 
-    auto selection = select_quality_artifact(
-        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
-        QualityFallbackMode::Auto, 0, false, "blue");
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+                                QualityFallbackMode::Auto, 0, false, "blue");
 
     // The selection layer hands back the green rung; ofx_render detects the
     // mismatch (entry.screen_color=="green" while the request was "blue") and
@@ -652,11 +647,11 @@ TEST_CASE("green screen request stays on green even when blue artifact is staged
           "[unit][ofx][screen-color]") {
     TempDirGuard temp_dir("corridorkey-ofx-green-with-blue-staged");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
-    touch_file(temp_dir.path() / "corridorkey_blue_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_blue_torchtrt_fp16_1024.ts");
 
-    auto selection = select_quality_artifact(
-        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
-        QualityFallbackMode::Auto, 0, false, "green");
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+                                QualityFallbackMode::Auto, 0, false, "green");
 
     REQUIRE(selection.has_value());
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
@@ -666,12 +661,12 @@ TEST_CASE("expected_quality_artifact_paths surfaces blue rung first under blue r
           "[unit][ofx][screen-color]") {
     TempDirGuard temp_dir("corridorkey-ofx-blue-expected-paths");
 
-    const auto expected = expected_quality_artifact_paths(
-        temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
-        QualityFallbackMode::Auto, 0, false, "blue");
+    const auto expected =
+        expected_quality_artifact_paths(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920,
+                                        1080, 10240, QualityFallbackMode::Auto, 0, false, "blue");
 
     REQUIRE_FALSE(expected.empty());
-    REQUIRE(expected.front().filename() == "corridorkey_blue_fp16_1024.onnx");
+    REQUIRE(expected.front().filename() == "corridorkey_blue_torchtrt_fp16_1024.ts");
     // Green rung still in the list so missing-artifact diagnostics stay
     // accurate and the bundle validator can report "blue missing, green
     // fallback present".
@@ -696,12 +691,14 @@ TEST_CASE("artifact_path_for_backend resolves blue artifacts when screen_color='
 
     SECTION("TensorRT + blue returns the dedicated blue filename") {
         const auto path = artifact_path_for_backend(models_root, Backend::TensorRT, 1024, "blue");
-        REQUIRE(path.filename().string() == "corridorkey_blue_fp16_1024.onnx");
+        REQUIRE(path.filename().string() == "corridorkey_blue_torchtrt_fp16_1024.ts");
     }
 
     SECTION("CUDA + blue returns the dedicated blue filename") {
+        // Sprint 1 PR 4: blue 2048 ships as FP32 (Sprint 0 found FP16 NaN
+        // at this graph size for the blue checkpoint).
         const auto path = artifact_path_for_backend(models_root, Backend::CUDA, 2048, "blue");
-        REQUIRE(path.filename().string() == "corridorkey_blue_fp16_2048.onnx");
+        REQUIRE(path.filename().string() == "corridorkey_blue_torchtrt_fp32_2048.ts");
     }
 
     SECTION("MLX path is unaffected by screen_color") {

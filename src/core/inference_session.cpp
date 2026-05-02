@@ -631,8 +631,7 @@ void append_tensorrt_rtx_execution_provider(Ort::SessionOptions& session_options
     //     scenario) is unsubstantiated in official docs; the documented
     //     gain is CPU launch overhead reduction. Needs measurement
     //     before being made default.
-    if (auto cuda_graph =
-            common::environment_variable_copy("CORRIDORKEY_TRT_CUDA_GRAPH");
+    if (auto cuda_graph = common::environment_variable_copy("CORRIDORKEY_TRT_CUDA_GRAPH");
         cuda_graph.has_value() && std::string_view(*cuda_graph) == "1") {
         provider_options.emplace(tensorrt_rtx_option_names::kCudaGraphEnable, "1");
         debug_log("TensorRT RTX CUDA graph capture enabled");
@@ -861,8 +860,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             const auto logs_dir = common::default_logs_root();
             std::error_code ec;
             std::filesystem::create_directories(logs_dir, ec);
-            const auto prefix_path =
-                logs_dir / (std::string("ort_profile_v") + CORRIDORKEY_DISPLAY_VERSION_STRING + "_");
+            const auto prefix_path = logs_dir / (std::string("ort_profile_v") +
+                                                 CORRIDORKEY_DISPLAY_VERSION_STRING + "_");
 #ifdef _WIN32
             // ORT on Windows expects a wide-char path prefix; std::filesystem::path
             // already stores as wchar_t, so use native() directly.
@@ -1488,8 +1487,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
         on_stage, "post_despill",
         [&]() {
             despill(result.foreground.view(), params.despill_strength,
-                    static_cast<SpillMethod>(params.spill_method),
-                    params.despill_screen_channel);
+                    static_cast<SpillMethod>(params.spill_method), params.despill_screen_channel);
         },
         1);
 

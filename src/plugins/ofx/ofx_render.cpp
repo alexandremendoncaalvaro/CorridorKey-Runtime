@@ -759,8 +759,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     // but the install does not ship the dedicated weights.
     const std::string loaded_artifact_filename =
         data->model_path.empty() ? std::string{} : data->model_path.filename().string();
-    const bool loaded_model_is_blue =
-        loaded_artifact_filename.rfind("corridorkey_blue_", 0) == 0;
+    const bool loaded_model_is_blue = loaded_artifact_filename.rfind("corridorkey_blue_", 0) == 0;
     const bool blue_requested = (screen_color_mode == ScreenColorMode::Blue);
     // When ensure_engine_for_quality fails on a non-fixed quality request the
     // render falls through with data->model_path possibly empty (first-render

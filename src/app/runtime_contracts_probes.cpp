@@ -16,19 +16,17 @@
 // helpers are re-evaluated whenever the contract changes by reviewers
 // touching this file.
 
-#include "runtime_contracts.hpp"
-
 #include <algorithm>
 #include <cctype>
+#include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <utility>
 
-#include <corridorkey/engine.hpp>
-
 #include "../core/mlx_probe.hpp"
 #include "../frame_io/video_io.hpp"
+#include "runtime_contracts.hpp"
 
 namespace corridorkey {
 

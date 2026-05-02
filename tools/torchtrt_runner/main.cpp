@@ -28,15 +28,15 @@
 #include <windows.h>
 #endif
 
-#include <torch/script.h>
 #include <torch/cuda.h>
+#include <torch/script.h>
 
 namespace {
 
 struct Options {
     std::filesystem::path ts_path;
     std::filesystem::path bin_dir;
-    int resolution = 0;     // auto-detect from filename if 0
+    int resolution = 0;  // auto-detect from filename if 0
     int iterations = 5;
     int warmup = 2;
 };
@@ -125,8 +125,7 @@ bool stage_dll_directory(const std::filesystem::path& bin_dir) {
                      absolute.string().c_str(), GetLastError());
         return false;
     }
-    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS |
-                             LOAD_LIBRARY_SEARCH_USER_DIRS);
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
 
     // Force-load torchtrt.dll so its static initializers register the
     // TorchScript custom ops the .ts engines reference. torch::jit::load
@@ -140,8 +139,7 @@ bool stage_dll_directory(const std::filesystem::path& bin_dir) {
     // for this one explicit load while still letting torchtrt.dll's
     // transitive deps resolve from the AddDllDirectory'd vendor/bin.
     const auto torchtrt_path = (absolute / L"torchtrt.dll").wstring();
-    HMODULE handle = LoadLibraryExW(torchtrt_path.c_str(), nullptr,
-                                     LOAD_WITH_ALTERED_SEARCH_PATH);
+    HMODULE handle = LoadLibraryExW(torchtrt_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (handle == nullptr) {
         std::fprintf(stderr, "[ERR] LoadLibrary torchtrt.dll failed (GetLastError=%lu)\n",
                      GetLastError());
@@ -151,7 +149,9 @@ bool stage_dll_directory(const std::filesystem::path& bin_dir) {
     return true;
 }
 #else
-bool stage_dll_directory(const std::filesystem::path&) { return true; }
+bool stage_dll_directory(const std::filesystem::path&) {
+    return true;
+}
 #endif
 
 }  // namespace
@@ -183,7 +183,9 @@ int main(int argc, char* argv[]) {
     if (options.resolution == 0) {
         options.resolution = infer_resolution_from_filename(options.ts_path);
         if (options.resolution == 0) {
-            std::fprintf(stderr, "[ERR] could not infer --resolution from filename %s; pass --resolution explicitly\n",
+            std::fprintf(stderr,
+                         "[ERR] could not infer --resolution from filename %s; pass --resolution "
+                         "explicitly\n",
                          options.ts_path.string().c_str());
             return 2;
         }
@@ -200,7 +202,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (!torch::cuda::is_available()) {
-        std::fprintf(stderr, "[ERR] CUDA not available - this runner expects an Ampere or newer GPU\n");
+        std::fprintf(stderr,
+                     "[ERR] CUDA not available - this runner expects an Ampere or newer GPU\n");
         return 5;
     }
 
@@ -209,7 +212,8 @@ int main(int argc, char* argv[]) {
         const auto t0 = std::chrono::high_resolution_clock::now();
         module = torch::jit::load(options.ts_path.string(), torch::Device(torch::kCUDA));
         const auto load_ms = std::chrono::duration<double, std::milli>(
-                                 std::chrono::high_resolution_clock::now() - t0).count();
+                                 std::chrono::high_resolution_clock::now() - t0)
+                                 .count();
         std::printf("[ok] torch::jit::load %.1f ms\n", load_ms);
     } catch (const c10::Error& e) {
         std::fprintf(stderr, "[ERR] torch::jit::load failed: %s\n", e.what());
@@ -225,9 +229,9 @@ int main(int argc, char* argv[]) {
     std::vector<float> host(1 * 4 * static_cast<size_t>(options.resolution) *
                             static_cast<size_t>(options.resolution));
     for (auto& v : host) v = dist(rng);
-    auto cpu_input = torch::from_blob(host.data(),
-                                      {1, 4, options.resolution, options.resolution},
-                                      torch::kFloat32).clone();
+    auto cpu_input = torch::from_blob(host.data(), {1, 4, options.resolution, options.resolution},
+                                      torch::kFloat32)
+                         .clone();
     auto input = cpu_input.to(input_options);
 
     // Warmup + timed runs.
@@ -258,7 +262,8 @@ int main(int argc, char* argv[]) {
         }
         torch::cuda::synchronize();
         const double dt = std::chrono::duration<double, std::milli>(
-                              std::chrono::high_resolution_clock::now() - t0).count();
+                              std::chrono::high_resolution_clock::now() - t0)
+                              .count();
         latencies_ms.push_back(dt);
 
         if (out.isTuple()) {
@@ -281,9 +286,9 @@ int main(int argc, char* argv[]) {
     for (auto v : latencies_ms) sum_ms += v;
     const double avg_ms = sum_ms / static_cast<double>(latencies_ms.size());
 
-    std::printf("[OK] forward avg=%.1f ms  alpha=[%.4f, %.4f]  nan=%s inf=%s  iters=%d\n",
-                avg_ms, alpha_min, alpha_max, has_nan ? "true" : "false",
-                has_inf ? "true" : "false", options.iterations);
+    std::printf("[OK] forward avg=%.1f ms  alpha=[%.4f, %.4f]  nan=%s inf=%s  iters=%d\n", avg_ms,
+                alpha_min, alpha_max, has_nan ? "true" : "false", has_inf ? "true" : "false",
+                options.iterations);
 
     return (has_nan || has_inf) ? 10 : 0;
 }

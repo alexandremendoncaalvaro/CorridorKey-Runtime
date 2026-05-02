@@ -433,8 +433,7 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
                                         : std::nullopt,
             argc, argv);
 
-        auto selected_model =
-            default_model_for_request(capabilities, device, resolved.preset);
+        auto selected_model = default_model_for_request(capabilities, device, resolved.preset);
         if (!selected_model.has_value()) {
             return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                            "Could not resolve a default model for this device."}};

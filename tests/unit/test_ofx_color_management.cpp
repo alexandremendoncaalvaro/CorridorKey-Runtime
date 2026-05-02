@@ -539,9 +539,8 @@ TEST_CASE("describe_in_context makes blue-screen canonicalization explicit in OF
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
               .front()
               .find("dedicated CorridorKey model") != std::string::npos);
-    CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
-              .front()
-              .find("CorridorKeyBlue") != std::string::npos);
+    CHECK(prop_strings(screen_color_props, kOfxParamPropHint).front().find("CorridorKeyBlue") !=
+          std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
               .front()
               .find("canonicalization workaround") != std::string::npos);
@@ -639,8 +638,7 @@ TEST_CASE("describe_in_context keeps runtime first and help second with advanced
 // the paramDefine return status, so a duplicate would otherwise be invisible
 // in production logs. This regression test catches that class of bug at
 // build time so the panel never reaches a strict host with duplicates.
-TEST_CASE("describe_in_context defines every param exactly once",
-          "[unit][ofx][regression]") {
+TEST_CASE("describe_in_context defines every param exactly once", "[unit][ofx][regression]") {
     SuiteScope suites;
     FakeEffect descriptor;
 
@@ -792,9 +790,9 @@ TEST_CASE("output colourspace defers to native handling on Foundry Nuke",
     output_mode->int_value = kOutputProcessed;
     auto previous_host_name = g_host_name;
     g_host_name = kHostNameNuke;
-    const auto status = get_output_colourspace(reinterpret_cast<OfxImageEffectHandle>(&instance),
-                                               nullptr,
-                                               reinterpret_cast<OfxPropertySetHandle>(&out_args));
+    const auto status =
+        get_output_colourspace(reinterpret_cast<OfxImageEffectHandle>(&instance), nullptr,
+                               reinterpret_cast<OfxPropertySetHandle>(&out_args));
     g_host_name = previous_host_name;
 
     CHECK(status == kOfxStatReplyDefault);

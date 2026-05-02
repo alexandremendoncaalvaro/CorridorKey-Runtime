@@ -778,8 +778,8 @@ void update_runtime_panel_values(InstanceData* data) {
         data->runtime_panel_dirty = true;
         log_message("update_runtime_panel_values",
                     std::string("defer reason=render_thread in_render=") +
-                        (data->in_render ? "1" : "0") + " in_render_sequence=" +
-                        (data->in_render_sequence ? "1" : "0"));
+                        (data->in_render ? "1" : "0") +
+                        " in_render_sequence=" + (data->in_render_sequence ? "1" : "0"));
         return;
     }
     log_message("update_runtime_panel_values", "enter flush=full");
@@ -787,8 +787,7 @@ void update_runtime_panel_values(InstanceData* data) {
 
     sync_runtime_panel_session_state_impl(data);
 
-    const bool has_session =
-        data->runtime_client != nullptr && data->runtime_client->has_session();
+    const bool has_session = data->runtime_client != nullptr && data->runtime_client->has_session();
     const bool is_loading = !has_session && data->last_error.empty();
     const bool has_recorded_frame_timing =
         data->last_frame_ms > 0.0 || !data->last_render_stage_timings.empty();
@@ -1004,8 +1003,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         // uniqueness is keyed on basename). The runtime server lives in a
         // separate process, so its loader is independent. Refuse to start
         // without it rather than papering over the failure.
-        data->last_error =
-            "CorridorKey runtime server binary not found alongside the OFX bundle.";
+        data->last_error = "CorridorKey runtime server binary not found alongside the OFX bundle.";
         log_message("ensure_runtime_client", data->last_error);
         post_message(kOfxMessageError, data->last_error.c_str(), instance);
         return false;
@@ -1252,7 +1250,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     // no cached update result, so default to hidden. The flush triggered by
     // the next instance_changed or sync_private_data reveals the banner if
     // the GitHub update-check thread reports one.
-    // Reference: https://github.com/MrKepzie/Natron/wiki/OpenFX-plugin-programming-guide-(Advanced-issues)
+    // Reference:
+    // https://github.com/MrKepzie/Natron/wiki/OpenFX-plugin-programming-guide-(Advanced-issues)
     set_param_secret(data->update_status_param, true);
     set_param_secret(data->open_update_page_param, true);
 
@@ -1290,9 +1289,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     const int requested_quality_mode = quality_mode;
     const int requested_resolution =
         resolve_target_resolution(requested_quality_mode, input_width, input_height);
-    const bool allow_unrestricted_quality_attempt =
-        allow_unrestricted_quality_attempt_for_request(*data, requested_quality_mode,
-                                                       requested_device);
+    const bool allow_unrestricted_quality_attempt = allow_unrestricted_quality_attempt_for_request(
+        *data, requested_quality_mode, requested_device);
     const std::string manual_override_warning =
         manual_override_warning_message(requested_device, requested_quality_mode,
                                         requested_resolution, allow_unrestricted_quality_attempt);
@@ -1483,9 +1481,10 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                std::string(quality_mode_label(requested_quality_mode)) + " using " +
                                selection.executable_model_path.filename().string() + ": " +
                                prepare_result.error().message;
-            log_engine_event("ensure_engine_for_quality", "engine_create_error", kQualitySwitchPhase,
-                             requested_device, requested_device, selection.executable_model_path,
-                             requested_resolution, selection.effective_resolution, std::nullopt,
+            log_engine_event("ensure_engine_for_quality", "engine_create_error",
+                             kQualitySwitchPhase, requested_device, requested_device,
+                             selection.executable_model_path, requested_resolution,
+                             selection.effective_resolution, std::nullopt,
                              prepare_result.error().message);
             log_message("ensure_engine_for_quality", data->last_error);
             // Out-of-memory during a live quality switch is actionable:
@@ -1836,8 +1835,8 @@ OfxStatus sync_private_data(OfxImageEffectHandle instance) {
     // that distinguishes those three possibilities in the next UAT.
     log_message("sync_private_data",
                 std::string("enter dirty=") + (data->runtime_panel_dirty ? "1" : "0") +
-                    " in_render=" + (data->in_render ? "1" : "0") + " in_render_sequence=" +
-                    (data->in_render_sequence ? "1" : "0"));
+                    " in_render=" + (data->in_render ? "1" : "0") +
+                    " in_render_sequence=" + (data->in_render_sequence ? "1" : "0"));
     flush_runtime_panel(data);
     log_message("sync_private_data", "exit ok");
     return kOfxStatOK;

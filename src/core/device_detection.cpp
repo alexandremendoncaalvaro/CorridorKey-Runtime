@@ -204,8 +204,8 @@ std::vector<DeviceInfo> list_devices() {
     for (size_t i = 0; i < linux_gpus.size(); ++i) {
         const auto& gpu = linux_gpus[i];
         if (gpu.cuda_available) {
-            devices.push_back({gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb,
-                               Backend::CUDA, static_cast<int>(i)});
+            devices.push_back({gpu.adapter_name + " (CUDA)", gpu.dedicated_memory_mb, Backend::CUDA,
+                               static_cast<int>(i)});
         }
     }
     devices.push_back({"Linux CPU Baseline", 0, Backend::CPU, 0});

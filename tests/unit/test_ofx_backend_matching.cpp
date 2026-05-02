@@ -44,8 +44,7 @@ TEST_CASE("backend_matches_request treats Backend::Auto requested as a wildcard"
     //   "Quality switch requested backend auto for corridorkey_fp16_1024.onnx
     //    but the runtime is using tensorrt." → continues to int8_1024 → server
     //   crashes (Socket closed before JSON message completed).
-    REQUIRE(backend_matches_request(windows_rtx_effective_device(),
-                                    placeholder_path_b_device()));
+    REQUIRE(backend_matches_request(windows_rtx_effective_device(), placeholder_path_b_device()));
 }
 
 TEST_CASE("backend_matches_request matches identical backends (sanity)",

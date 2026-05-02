@@ -93,14 +93,12 @@ bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out
                     " (GetLastError=" + std::to_string(GetLastError()) + ")";
         return false;
     }
-    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS |
-                             LOAD_LIBRARY_SEARCH_USER_DIRS);
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
     const auto torchtrt_path = (absolute / L"torchtrt.dll").wstring();
-    HMODULE handle = LoadLibraryExW(torchtrt_path.c_str(), nullptr,
-                                     LOAD_WITH_ALTERED_SEARCH_PATH);
+    HMODULE handle = LoadLibraryExW(torchtrt_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (handle == nullptr) {
-        out_error = "LoadLibrary torchtrt.dll failed (GetLastError=" +
-                    std::to_string(GetLastError()) + ")";
+        out_error =
+            "LoadLibrary torchtrt.dll failed (GetLastError=" + std::to_string(GetLastError()) + ")";
         return false;
     }
     g_torchtrt_runtime_armed = true;
@@ -158,25 +156,24 @@ TorchTrtSession::TorchTrtSession(TorchTrtSession&&) noexcept = default;
 TorchTrtSession& TorchTrtSession::operator=(TorchTrtSession&&) noexcept = default;
 
 Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
-    const std::filesystem::path& ts_path, const DeviceInfo& device,
-    StageTimingCallback on_stage) {
+    const std::filesystem::path& ts_path, const DeviceInfo& device, StageTimingCallback on_stage) {
     if (!std::filesystem::exists(ts_path)) {
-        return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
-                                       "TorchTRT engine not found: " + ts_path.string()}};
+        return Unexpected<Error>{
+            Error{ErrorCode::ModelLoadFailed, "TorchTRT engine not found: " + ts_path.string()}};
     }
 
 #ifdef _WIN32
     auto runtime_bin = resolve_torchtrt_runtime_bin(ts_path);
     if (!runtime_bin.has_value()) {
-        return Unexpected<Error>{Error{
-            ErrorCode::HardwareNotSupported,
-            "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
-            "stage the blue model pack runtime alongside the .ts."}};
+        return Unexpected<Error>{
+            Error{ErrorCode::HardwareNotSupported,
+                  "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
+                  "stage the blue model pack runtime alongside the .ts."}};
     }
     std::string arm_error;
     if (!arm_torchtrt_runtime(*runtime_bin, arm_error)) {
-        return Unexpected<Error>{Error{ErrorCode::HardwareNotSupported,
-                                       "TorchTRT runtime arm failed: " + arm_error}};
+        return Unexpected<Error>{
+            Error{ErrorCode::HardwareNotSupported, "TorchTRT runtime arm failed: " + arm_error}};
     }
 #endif
 
@@ -191,9 +188,9 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
 
     auto inferred_res = resolution_from_filename(ts_path);
     if (!inferred_res.has_value()) {
-        return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
-                                       "Could not infer model resolution from .ts filename: " +
-                                           ts_path.filename().string()}};
+        return Unexpected<Error>{Error{
+            ErrorCode::ModelLoadFailed,
+            "Could not infer model resolution from .ts filename: " + ts_path.filename().string()}};
     }
     session->m_impl->resolution = *inferred_res;
     session->m_impl->input_dtype = infer_input_dtype(ts_path);
@@ -205,38 +202,41 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
             session->m_impl->module.eval();
         });
     } catch (const c10::Error& e) {
-        return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
-                                       std::string("torch::jit::load failed: ") + e.what()}};
+        return Unexpected<Error>{
+            Error{ErrorCode::ModelLoadFailed, std::string("torch::jit::load failed: ") + e.what()}};
     } catch (const std::exception& e) {
-        return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
-                                       std::string("torch::jit::load std::exception: ") + e.what()}};
+        return Unexpected<Error>{
+            Error{ErrorCode::ModelLoadFailed,
+                  std::string("torch::jit::load std::exception: ") + e.what()}};
     }
 
     return session;
 }
 
-int TorchTrtSession::model_resolution() const { return m_impl ? m_impl->resolution : 0; }
+int TorchTrtSession::model_resolution() const {
+    return m_impl ? m_impl->resolution : 0;
+}
 
 Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_hint,
-                                           bool output_alpha_only,
-                                           StageTimingCallback on_stage) {
+                                           bool output_alpha_only, StageTimingCallback on_stage) {
     if (m_impl == nullptr) {
-        return Unexpected<Error>{Error{ErrorCode::InferenceFailed, "TorchTrtSession in moved-from state"}};
+        return Unexpected<Error>{
+            Error{ErrorCode::InferenceFailed, "TorchTrtSession in moved-from state"}};
     }
     const int resolution = m_impl->resolution;
     if (rgb.width != resolution || rgb.height != resolution || rgb.channels != 3) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "TorchTRT session expects RGB input at " + std::to_string(resolution) + "x" +
-                std::to_string(resolution) + "x3; got " + std::to_string(rgb.width) + "x" +
-                std::to_string(rgb.height) + "x" + std::to_string(rgb.channels)}};
+        return Unexpected<Error>{
+            Error{ErrorCode::InvalidParameters,
+                  "TorchTRT session expects RGB input at " + std::to_string(resolution) + "x" +
+                      std::to_string(resolution) + "x3; got " + std::to_string(rgb.width) + "x" +
+                      std::to_string(rgb.height) + "x" + std::to_string(rgb.channels)}};
     }
     if (alpha_hint.width != resolution || alpha_hint.height != resolution ||
         alpha_hint.channels != 1) {
-        return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "TorchTRT session expects single-channel alpha_hint at " + std::to_string(resolution) +
-                "x" + std::to_string(resolution) + "x1"}};
+        return Unexpected<Error>{Error{ErrorCode::InvalidParameters,
+                                       "TorchTRT session expects single-channel alpha_hint at " +
+                                           std::to_string(resolution) + "x" +
+                                           std::to_string(resolution) + "x1"}};
     }
 
     try {
@@ -267,8 +267,8 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         if (raw_out.isTuple()) {
             const auto elements = raw_out.toTuple()->elements();
             if (elements.empty()) {
-                return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
-                                               "TorchTRT forward returned empty tuple"}};
+                return Unexpected<Error>{
+                    Error{ErrorCode::InferenceFailed, "TorchTRT forward returned empty tuple"}};
             }
             alpha_tensor = elements[0].toTensor();
             if (elements.size() > 1) {
@@ -277,8 +277,8 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         } else if (raw_out.isTensor()) {
             alpha_tensor = raw_out.toTensor();
         } else {
-            return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
-                                           "Unexpected TorchTRT forward return type"}};
+            return Unexpected<Error>{
+                Error{ErrorCode::InferenceFailed, "Unexpected TorchTRT forward return type"}};
         }
 
         FrameResult result;
@@ -296,9 +296,9 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
                                        std::string("TorchTRT forward c10 error: ") + e.what()}};
     } catch (const std::exception& e) {
-        return Unexpected<Error>{Error{ErrorCode::InferenceFailed,
-                                       std::string("TorchTRT forward std::exception: ") +
-                                           e.what()}};
+        return Unexpected<Error>{
+            Error{ErrorCode::InferenceFailed,
+                  std::string("TorchTRT forward std::exception: ") + e.what()}};
     }
 }
 

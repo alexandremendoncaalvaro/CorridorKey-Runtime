@@ -37,8 +37,10 @@ using Fn_nvmlDeviceGetMemoryInfo = nvmlReturn_t (*)(nvmlDevice_t, nvmlMemory_t*)
 using Fn_nvmlDeviceGetCudaComputeCapability = nvmlReturn_t (*)(nvmlDevice_t, int*, int*);
 
 class NvmlLoader {
-  public:
-    NvmlLoader() { load(); }
+   public:
+    NvmlLoader() {
+        load();
+    }
 
     ~NvmlLoader() {
         if (m_handle != nullptr && shutdown_fn != nullptr) {
@@ -50,7 +52,9 @@ class NvmlLoader {
     NvmlLoader(const NvmlLoader&) = delete;
     NvmlLoader& operator=(const NvmlLoader&) = delete;
 
-    bool available() const { return m_ready; }
+    bool available() const {
+        return m_ready;
+    }
 
     Fn_nvmlDeviceGetCount_v2 get_count_fn = nullptr;
     Fn_nvmlDeviceGetHandleByIndex_v2 get_handle_fn = nullptr;
@@ -59,7 +63,7 @@ class NvmlLoader {
     Fn_nvmlDeviceGetCudaComputeCapability get_cc_fn = nullptr;
     Fn_nvmlSystemGetDriverVersion get_driver_fn = nullptr;
 
-  private:
+   private:
     void load() {
         m_handle = ::dlopen("libnvidia-ml.so.1", RTLD_NOW | RTLD_LOCAL);
         if (m_handle == nullptr) {
@@ -71,12 +75,12 @@ class NvmlLoader {
 
         auto init_fn = reinterpret_cast<Fn_nvmlInit_v2>(::dlsym(m_handle, "nvmlInit_v2"));
         shutdown_fn = reinterpret_cast<Fn_nvmlShutdown>(::dlsym(m_handle, "nvmlShutdown"));
-        get_count_fn = reinterpret_cast<Fn_nvmlDeviceGetCount_v2>(
-            ::dlsym(m_handle, "nvmlDeviceGetCount_v2"));
+        get_count_fn =
+            reinterpret_cast<Fn_nvmlDeviceGetCount_v2>(::dlsym(m_handle, "nvmlDeviceGetCount_v2"));
         get_handle_fn = reinterpret_cast<Fn_nvmlDeviceGetHandleByIndex_v2>(
             ::dlsym(m_handle, "nvmlDeviceGetHandleByIndex_v2"));
-        get_name_fn = reinterpret_cast<Fn_nvmlDeviceGetName>(
-            ::dlsym(m_handle, "nvmlDeviceGetName"));
+        get_name_fn =
+            reinterpret_cast<Fn_nvmlDeviceGetName>(::dlsym(m_handle, "nvmlDeviceGetName"));
         get_memory_fn = reinterpret_cast<Fn_nvmlDeviceGetMemoryInfo>(
             ::dlsym(m_handle, "nvmlDeviceGetMemoryInfo"));
         get_cc_fn = reinterpret_cast<Fn_nvmlDeviceGetCudaComputeCapability>(
@@ -186,8 +190,12 @@ bool cuda_provider_available_linux() {
 
 namespace corridorkey::core {
 
-std::vector<LinuxGpuInfo> list_linux_gpus() { return {}; }
-bool cuda_provider_available_linux() { return false; }
+std::vector<LinuxGpuInfo> list_linux_gpus() {
+    return {};
+}
+bool cuda_provider_available_linux() {
+    return false;
+}
 
 }  // namespace corridorkey::core
 

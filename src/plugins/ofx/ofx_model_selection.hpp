@@ -290,8 +290,12 @@ inline std::filesystem::path artifact_path_for_backend(const std::filesystem::pa
         return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
     }
     if (screen_color == "blue") {
-        return models_root /
-               ("corridorkey_blue_fp16_" + std::to_string(resolution) + ".onnx");
+        // Sprint 1 PR 4: blue ships as TorchTRT .ts engines. Blue 1536 +
+        // 2048 use FP32 because Sprint 0 found FP16 NaNs at those graph
+        // sizes for the blue checkpoint (HANDOFF section 2.2).
+        const char* precision = (resolution >= 1536) ? "fp32" : "fp16";
+        return models_root / (std::string("corridorkey_blue_torchtrt_") + precision + "_" +
+                              std::to_string(resolution) + ".ts");
     }
     return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
 }

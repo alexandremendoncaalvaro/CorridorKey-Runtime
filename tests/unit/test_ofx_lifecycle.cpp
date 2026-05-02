@@ -369,8 +369,7 @@ void wire_runtime_status_param_handles(InstanceData& data) {
 
 }  // namespace
 
-TEST_CASE("Foundry Nuke defers paramSetValue inside Render action",
-          "[unit][ofx][regression]") {
+TEST_CASE("Foundry Nuke defers paramSetValue inside Render action", "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     data.in_render = true;
@@ -426,8 +425,7 @@ TEST_CASE("Foundry Nuke defers paramSetValue inside the BeginSequenceRender wind
 // via kOfxPropName, so we take the permissive path on Resolve to preserve
 // the long-standing live runtime-status UX. Reference:
 // https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
-TEST_CASE("DaVinci Resolve flushes paramSetValue live during render",
-          "[unit][ofx][regression]") {
+TEST_CASE("DaVinci Resolve flushes paramSetValue live during render", "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     data.in_render = true;
@@ -475,8 +473,7 @@ TEST_CASE("update_runtime_panel flushes paramSetValue on the main thread",
     CHECK_FALSE(data.runtime_panel_dirty);
 }
 
-TEST_CASE("flush_runtime_panel is a no-op when nothing is pending",
-          "[unit][ofx][regression]") {
+TEST_CASE("flush_runtime_panel is a no-op when nothing is pending", "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     data.runtime_panel_dirty = false;
@@ -493,8 +490,7 @@ TEST_CASE("flush_runtime_panel is a no-op when nothing is pending",
     CHECK(g_param_set_value_count == 0);
 }
 
-TEST_CASE("sync_private_data drains a deferred render-thread update",
-          "[unit][ofx][regression]") {
+TEST_CASE("sync_private_data drains a deferred render-thread update", "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     // Simulate a render-sequence call that deferred paramSetValue.

@@ -197,8 +197,9 @@ Result<void> feed_next_video_frame_pair(std::unique_ptr<VideoReader>& rgb_reader
             return Unexpected(retry.error());
         }
         if (retry->buffer.view().empty()) {
-            return Unexpected(Error{ErrorCode::IoError,
-                                    "Reopened video returned EOF on first frame: " + path.string()});
+            return Unexpected(
+                Error{ErrorCode::IoError,
+                      "Reopened video returned EOF on first frame: " + path.string()});
         }
         return std::move(*retry);
     };
@@ -217,11 +218,11 @@ Result<void> feed_next_video_frame_pair(std::unique_ptr<VideoReader>& rgb_reader
     const Image rgb_view = rgb_frame->buffer.view();
     if (rgb_view.width != transport_rgb.width || rgb_view.height != transport_rgb.height ||
         rgb_view.channels != transport_rgb.channels) {
-        return Unexpected(Error{
-            ErrorCode::InvalidParameters,
-            "Input video dimensions do not match transport: rgb_view=" +
-                std::to_string(rgb_view.width) + "x" + std::to_string(rgb_view.height) + "x" +
-                std::to_string(rgb_view.channels)});
+        return Unexpected(Error{ErrorCode::InvalidParameters,
+                                "Input video dimensions do not match transport: rgb_view=" +
+                                    std::to_string(rgb_view.width) + "x" +
+                                    std::to_string(rgb_view.height) + "x" +
+                                    std::to_string(rgb_view.channels)});
     }
     std::memcpy(transport_rgb.data.data(), rgb_view.data.data(),
                 rgb_view.data.size() * sizeof(float));
@@ -231,10 +232,10 @@ Result<void> feed_next_video_frame_pair(std::unique_ptr<VideoReader>& rgb_reader
     // single-channel hint plane.
     const Image hint_view = hint_frame->buffer.view();
     if (hint_view.width != transport_hint.width || hint_view.height != transport_hint.height) {
-        return Unexpected(Error{
-            ErrorCode::InvalidParameters,
-            "Hint video dimensions do not match transport: hint_view=" +
-                std::to_string(hint_view.width) + "x" + std::to_string(hint_view.height)});
+        return Unexpected(Error{ErrorCode::InvalidParameters,
+                                "Hint video dimensions do not match transport: hint_view=" +
+                                    std::to_string(hint_view.width) + "x" +
+                                    std::to_string(hint_view.height)});
     }
     const int pixel_count = hint_view.width * hint_view.height;
     const int hint_channels = hint_view.channels;
@@ -312,12 +313,13 @@ int main(int argc, char* argv[]) {
         options.frame_height = rgb_reader->height();
         if (hint_reader->width() != options.frame_width ||
             hint_reader->height() != options.frame_height) {
-            std::cout << failure_json("--input-video and --hint-video must share the same "
-                                      "dimensions; got " +
-                                      std::to_string(rgb_reader->width()) + "x" +
-                                      std::to_string(rgb_reader->height()) + " and " +
-                                      std::to_string(hint_reader->width()) + "x" +
-                                      std::to_string(hint_reader->height()))
+            std::cout << failure_json(
+                             "--input-video and --hint-video must share the same "
+                             "dimensions; got " +
+                             std::to_string(rgb_reader->width()) + "x" +
+                             std::to_string(rgb_reader->height()) + " and " +
+                             std::to_string(hint_reader->width()) + "x" +
+                             std::to_string(hint_reader->height()))
                              .dump(4)
                       << std::endl;
             return 1;
@@ -385,9 +387,9 @@ int main(int argc, char* argv[]) {
         if (video_mode) {
             Image transport_rgb = transport.rgb_view();
             Image transport_hint = transport.hint_view();
-            auto feed_res = feed_next_video_frame_pair(
-                rgb_reader, hint_reader, options.input_video_path, options.hint_video_path,
-                transport_rgb, transport_hint);
+            auto feed_res =
+                feed_next_video_frame_pair(rgb_reader, hint_reader, options.input_video_path,
+                                           options.hint_video_path, transport_rgb, transport_hint);
             if (!feed_res) {
                 std::filesystem::remove(transport_path, cleanup_error);
                 std::cout << failure_json(feed_res.error().message).dump(4) << std::endl;

@@ -240,11 +240,10 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     const auto win64_dir = bundle_dir / "Contents" / "Win64";
     const auto models_dir = bundle_dir / "Contents" / "Resources" / "models";
 
-    for (const auto& filename :
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx",
-          "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1024_ctx.onnx",
-          "corridorkey_fp16_1536.onnx", "corridorkey_fp16_1536_ctx.onnx",
-          "corridorkey_fp16_2048.onnx", "corridorkey_fp16_2048_ctx.onnx"}) {
+    for (const auto& filename : {"corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx",
+                                 "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1024_ctx.onnx",
+                                 "corridorkey_fp16_1536.onnx", "corridorkey_fp16_1536_ctx.onnx",
+                                 "corridorkey_fp16_2048.onnx", "corridorkey_fp16_2048_ctx.onnx"}) {
         touch_file(models_dir / filename);
     }
 
@@ -318,9 +317,8 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
     const auto win64_dir = bundle_dir / "Contents" / "Win64";
     const auto models_dir = bundle_dir / "Contents" / "Resources" / "models";
 
-    for (const auto& filename :
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx"}) {
+    for (const auto& filename : {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx",
+                                 "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}) {
         touch_file(models_dir / filename);
     }
 

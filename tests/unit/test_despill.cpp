@@ -1,6 +1,5 @@
-#include <catch2/catch_all.hpp>
-
 #include <array>
+#include <catch2/catch_all.hpp>
 #include <cmath>
 
 #include "post_process/despill.hpp"
@@ -289,8 +288,7 @@ TEST_CASE("despill is symmetric under green-blue channel swap", "[unit][despill]
         return std::array<float, 3>{rgb.data[0], rgb.data[1], rgb.data[2]};
     };
 
-    for (auto method :
-         {SpillMethod::Average, SpillMethod::DoubleLimit, SpillMethod::Neutral}) {
+    for (auto method : {SpillMethod::Average, SpillMethod::DoubleLimit, SpillMethod::Neutral}) {
         auto blue_native = run(0.30f, 0.18f, 0.85f, /*screen=*/2, method);
         auto swapped = run(0.30f, 0.85f, 0.18f, /*screen=*/1, method);
         // Compare blue_native against swapped with G/B swapped back.

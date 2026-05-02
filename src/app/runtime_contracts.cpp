@@ -243,16 +243,13 @@ Result<std::pair<int, bool>> search_resolution_for_request(
     return std::pair<int, bool>{*coarse_resolution, true};
 }
 
-ModelCatalogEntry make_model_entry(const std::string& variant, int resolution,
-                                   const std::string& filename, const std::string& artifact_family,
-                                   const std::string& recommended_backend,
-                                   const std::string& description, const std::string& intended_use,
-                                   bool validated_for_macos, bool packaged_for_macos,
-                                   bool packaged_for_windows,
-                                   std::vector<std::string> validated_platforms,
-                                   std::vector<std::string> intended_platforms,
-                                   std::vector<std::string> validated_hardware_tiers,
-                                   std::string screen_color = "green") {
+ModelCatalogEntry make_model_entry(
+    const std::string& variant, int resolution, const std::string& filename,
+    const std::string& artifact_family, const std::string& recommended_backend,
+    const std::string& description, const std::string& intended_use, bool validated_for_macos,
+    bool packaged_for_macos, bool packaged_for_windows,
+    std::vector<std::string> validated_platforms, std::vector<std::string> intended_platforms,
+    std::vector<std::string> validated_hardware_tiers, std::string screen_color = "green") {
     ModelCatalogEntry entry;
     entry.variant = variant;
     entry.resolution = resolution;
@@ -360,16 +357,23 @@ std::optional<ModelCatalogEntry> default_model_for_request(
             return find_model_by_filename(green_name);
         };
 
+        // Sprint 1 PR 4: blue Windows RTX entries are now TorchTRT .ts
+        // engines (Strategy C). Green stays on the ONNX -> TRT-RTX EP path.
+        // Blue 1536+ ships as FP32 because Sprint 0 found FP16 NaNs at
+        // those graph sizes (HANDOFF section 2.2).
         if (requested_device.available_memory_mb >= 24000) {
-            return pick("corridorkey_blue_fp16_2048.onnx", "corridorkey_fp16_2048.onnx");
+            return pick("corridorkey_blue_torchtrt_fp32_2048.ts",
+                        "corridorkey_fp16_2048.onnx");
         }
         if (requested_device.available_memory_mb >= 16000) {
-            return pick("corridorkey_blue_fp16_1536.onnx", "corridorkey_fp16_1536.onnx");
+            return pick("corridorkey_blue_torchtrt_fp32_1536.ts",
+                        "corridorkey_fp16_1536.onnx");
         }
         if (requested_device.available_memory_mb >= 10000) {
-            return pick("corridorkey_blue_fp16_1024.onnx", "corridorkey_fp16_1024.onnx");
+            return pick("corridorkey_blue_torchtrt_fp16_1024.ts",
+                        "corridorkey_fp16_1024.onnx");
         }
-        return pick("corridorkey_blue_fp16_512.onnx", "corridorkey_fp16_512.onnx");
+        return pick("corridorkey_blue_torchtrt_fp16_512.ts", "corridorkey_fp16_512.onnx");
     };
 
     auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
@@ -455,25 +459,25 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Windows RTX blue-screen pack (Torch-TensorRT) for 8 GB tiers.",
                          "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb"}, "blue"),
-        make_model_entry("fp16-blue", 1024, "corridorkey_blue_torchtrt_fp16_1024.ts", "torchtrt",
-                         "torchtrt",
-                         "Windows RTX blue-screen pack (Torch-TensorRT) for 10 GB and higher tiers.",
-                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_10gb_plus"}, "blue"),
+        make_model_entry(
+            "fp16-blue", 1024, "corridorkey_blue_torchtrt_fp16_1024.ts", "torchtrt", "torchtrt",
+            "Windows RTX blue-screen pack (Torch-TensorRT) for 10 GB and higher tiers.",
+            "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+            {"rtx_10gb_plus"}, "blue"),
         // Blue 1536 ships as FP32 because Sprint 0 found FP16 NaNs at this
         // graph size for the blue checkpoint (HANDOFF.md section 2.2).
         // Blue 2048 follows the same precision constraint and is staged via
         // cloud GPU compile per HANDOFF Sprint 2.
-        make_model_entry("fp32-blue", 1536, "corridorkey_blue_torchtrt_fp32_1536.ts", "torchtrt",
-                         "torchtrt",
-                         "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 16 GB VRAM systems.",
-                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_16gb_plus"}, "blue"),
-        make_model_entry("fp32-blue", 2048, "corridorkey_blue_torchtrt_fp32_2048.ts", "torchtrt",
-                         "torchtrt",
-                         "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 24 GB VRAM systems.",
-                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_24gb"}, "blue"),
+        make_model_entry(
+            "fp32-blue", 1536, "corridorkey_blue_torchtrt_fp32_1536.ts", "torchtrt", "torchtrt",
+            "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 16 GB VRAM systems.",
+            "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+            {"rtx_16gb_plus"}, "blue"),
+        make_model_entry(
+            "fp32-blue", 2048, "corridorkey_blue_torchtrt_fp32_2048.ts", "torchtrt", "torchtrt",
+            "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 24 GB VRAM systems.",
+            "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+            {"rtx_24gb"}, "blue"),
         make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
                          false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
@@ -1030,8 +1034,8 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
             continue;
         }
 
-        auto artifact_paths = candidate_artifact_paths_for_request(
-            models_root, requested_device.backend, resolution);
+        auto artifact_paths =
+            candidate_artifact_paths_for_request(models_root, requested_device.backend, resolution);
         expected.insert(expected.end(), artifact_paths.begin(), artifact_paths.end());
     }
 
@@ -1074,8 +1078,8 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
             continue;
         }
 
-        auto artifact_paths = candidate_artifact_paths_for_request(
-            models_root, requested_device.backend, resolution);
+        auto artifact_paths =
+            candidate_artifact_paths_for_request(models_root, requested_device.backend, resolution);
         bool found_for_resolution = false;
         for (const auto& artifact_path : artifact_paths) {
             if (!std::filesystem::exists(artifact_path)) {

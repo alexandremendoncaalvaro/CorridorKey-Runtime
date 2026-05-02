@@ -16,10 +16,9 @@ namespace corridorkey::core {
 // hardware_compatible=True so the same .ts runs on RTX 30/40/50.
 class TorchTrtSession {
    public:
-    static Result<std::unique_ptr<TorchTrtSession>> create(
-        const std::filesystem::path& ts_path,
-        const DeviceInfo& device,
-        StageTimingCallback on_stage = nullptr);
+    static Result<std::unique_ptr<TorchTrtSession>> create(const std::filesystem::path& ts_path,
+                                                           const DeviceInfo& device,
+                                                           StageTimingCallback on_stage = nullptr);
 
     ~TorchTrtSession();
 
