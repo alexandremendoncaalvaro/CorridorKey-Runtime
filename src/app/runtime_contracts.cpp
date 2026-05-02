@@ -14,13 +14,11 @@
 
 namespace corridorkey {
 
-// Forward declarations for the probe-using entry points whose definitions
-// live in runtime_contracts_probes.cpp (corridorkey_core). The wrappers in
-// the corridorkey::app namespace below dispatch to them by qualified name,
-// and corridorkey_common cannot define them because they pull device-
-// detection probes that link against ONNX Runtime.
-RuntimeCapabilities runtime_capabilities();
-std::optional<PresetDefinition> find_preset_by_selector(const std::string& selector);
+// runtime_capabilities() is declared in include/corridorkey/engine.hpp and
+// defined in runtime_contracts_probes.cpp (corridorkey_core); the wrappers
+// in the corridorkey::app namespace below dispatch to it by qualified name.
+// find_preset_by_selector lives in runtime_contracts.hpp (already included
+// at the top of this file).
 
 namespace {
 
@@ -536,84 +534,90 @@ std::vector<ModelCatalogEntry> model_catalog() {
 std::vector<PresetDefinition> preset_catalog() {
     return {
         PresetDefinition{
-            "mac-balanced",
-            "Mac Balanced",
-            "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
-            "and no implicit cleanup.",
-            make_preset_inference_params(kTargetResolutionAuto, false, true, kDefaultTilePadding),
-            "corridorkey_mlx.safetensors",
-            "apple_acceleration_primary",
-            true,
-            false,
-            {"macos_apple_silicon"},
-            {"macos_apple_silicon"},
-            {"apple_silicon_16gb"},
+            .id = "mac-balanced",
+            .name = "Mac Balanced",
+            .description =
+                "Default Apple Silicon preset using the native MLX model pack with automatic "
+                "tiling and no implicit cleanup.",
+            .params =
+                make_preset_inference_params(kTargetResolutionAuto, false, true, kDefaultTilePadding),
+            .recommended_model = "corridorkey_mlx.safetensors",
+            .intended_use = "apple_acceleration_primary",
+            .default_for_macos = true,
+            .default_for_windows = false,
+            .validated_platforms = {"macos_apple_silicon"},
+            .intended_platforms = {"macos_apple_silicon"},
+            .validated_hardware_tiers = {"apple_silicon_16gb"},
         },
         PresetDefinition{
-            "mac-max-quality",
-            "Mac Max Quality",
-            "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
-            make_preset_inference_params(kTargetResolutionAuto, true, true, kDefaultTilePadding),
-            "corridorkey_mlx.safetensors",
-            "native_resolution_examples",
-            false,
-            false,
-            {"macos_apple_silicon"},
-            {"macos_apple_silicon"},
-            {"apple_silicon_16gb_plus"},
+            .id = "mac-max-quality",
+            .name = "Mac Max Quality",
+            .description = "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
+            .params =
+                make_preset_inference_params(kTargetResolutionAuto, true, true, kDefaultTilePadding),
+            .recommended_model = "corridorkey_mlx.safetensors",
+            .intended_use = "native_resolution_examples",
+            .default_for_macos = false,
+            .default_for_windows = false,
+            .validated_platforms = {"macos_apple_silicon"},
+            .intended_platforms = {"macos_apple_silicon"},
+            .validated_hardware_tiers = {"apple_silicon_16gb_plus"},
         },
         PresetDefinition{
-            "win-rtx-balanced",
-            "Windows RTX Balanced",
-            "Default Windows RTX preset with FP16 inference, runtime cache enabled, and tiling "
-            "ready for portable bundles.",
-            make_preset_inference_params(kRes1024, false, true, kDefaultTilePadding),
-            "corridorkey_fp16_1024.onnx",
-            "windows_rtx_primary",
-            false,
-            true,
-            {"windows_rtx_30_plus"},
-            {"windows_rtx_30_plus"},
-            {"rtx_10gb_plus"},
+            .id = "win-rtx-balanced",
+            .name = "Windows RTX Balanced",
+            .description = "Default Windows RTX preset with FP16 inference, runtime cache enabled, "
+                           "and tiling ready for portable bundles.",
+            .params = make_preset_inference_params(kRes1024, false, true, kDefaultTilePadding),
+            .recommended_model = "corridorkey_fp16_1024.onnx",
+            .intended_use = "windows_rtx_primary",
+            .default_for_macos = false,
+            .default_for_windows = true,
+            .validated_platforms = {"windows_rtx_30_plus"},
+            .intended_platforms = {"windows_rtx_30_plus"},
+            .validated_hardware_tiers = {"rtx_10gb_plus"},
         },
         PresetDefinition{
-            "win-rtx-max-quality",
-            "Windows RTX Max Quality",
-            "Higher-quality Windows RTX preset with cleanup enabled for the 10 GB and up tier.",
-            make_preset_inference_params(kRes1024, true, true, kDefaultTilePadding),
-            "corridorkey_fp16_1024.onnx",
-            "windows_rtx_primary",
-            false,
-            false,
-            {"windows_rtx_30_plus"},
-            {"windows_rtx_30_plus"},
-            {"rtx_10gb_plus"},
+            .id = "win-rtx-max-quality",
+            .name = "Windows RTX Max Quality",
+            .description =
+                "Higher-quality Windows RTX preset with cleanup enabled for the 10 GB and up tier.",
+            .params = make_preset_inference_params(kRes1024, true, true, kDefaultTilePadding),
+            .recommended_model = "corridorkey_fp16_1024.onnx",
+            .intended_use = "windows_rtx_primary",
+            .default_for_macos = false,
+            .default_for_windows = false,
+            .validated_platforms = {"windows_rtx_30_plus"},
+            .intended_platforms = {"windows_rtx_30_plus"},
+            .validated_hardware_tiers = {"rtx_10gb_plus"},
         },
         PresetDefinition{
-            "win-rtx-ultra-quality",
-            "Windows RTX Ultra Quality",
-            "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
-            make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
-            "corridorkey_fp16_2048.onnx",
-            "windows_rtx_primary",
-            false,
-            false,
-            {"windows_rtx_30_plus"},
-            {"windows_rtx_30_plus"},
-            {"rtx_24gb"},
+            .id = "win-rtx-ultra-quality",
+            .name = "Windows RTX Ultra Quality",
+            .description =
+                "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
+            .params = make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
+            .recommended_model = "corridorkey_fp16_2048.onnx",
+            .intended_use = "windows_rtx_primary",
+            .default_for_macos = false,
+            .default_for_windows = false,
+            .validated_platforms = {"windows_rtx_30_plus"},
+            .intended_platforms = {"windows_rtx_30_plus"},
+            .validated_hardware_tiers = {"rtx_24gb"},
         },
         PresetDefinition{
-            "mac-ultra-quality",
-            "Mac Ultra Quality",
-            "Extreme quality Apple Silicon preset using 2048px MLX bridge with cleanup enabled.",
-            make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
-            "corridorkey_mlx.safetensors",
-            "native_resolution_examples",
-            false,
-            false,
-            {"macos_apple_silicon"},
-            {"macos_apple_silicon"},
-            {"apple_silicon_16gb_plus"},
+            .id = "mac-ultra-quality",
+            .name = "Mac Ultra Quality",
+            .description =
+                "Extreme quality Apple Silicon preset using 2048px MLX bridge with cleanup enabled.",
+            .params = make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
+            .recommended_model = "corridorkey_mlx.safetensors",
+            .intended_use = "native_resolution_examples",
+            .default_for_macos = false,
+            .default_for_windows = false,
+            .validated_platforms = {"macos_apple_silicon"},
+            .intended_platforms = {"macos_apple_silicon"},
+            .validated_hardware_tiers = {"apple_silicon_16gb_plus"},
         },
     };
 }
@@ -633,12 +637,12 @@ std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& ca
     }
 
     auto prefer_backend = [&](Backend backend) -> std::optional<DeviceInfo> {
-        auto it = std::ranges::find_if(devices,
-                               [&](const DeviceInfo& device) { return device.backend == backend; });
-        if (it == devices.end()) {
+        auto found = std::ranges::find_if(
+            devices, [&](const DeviceInfo& device) { return device.backend == backend; });
+        if (found == devices.end()) {
             return std::nullopt;
         }
-        return *it;
+        return *found;
     };
 
     if (capabilities.platform == "windows") {
@@ -748,20 +752,19 @@ ArtifactRuntimeState artifact_runtime_state_for_device(const ModelCatalogEntry& 
 
     if (capabilities.platform == "windows") {
         state.certified_for_active_track =
-            std::any_of(model.validated_hardware_tiers.begin(),
-                        model.validated_hardware_tiers.end(),
-                        [](const std::string& tier) { return tier.rfind("rtx_", 0) == 0; }) ||
-            std::any_of(
-                model.validated_platforms.begin(), model.validated_platforms.end(),
-                [](const std::string& platform) { return platform.rfind("windows", 0) == 0; });
+            std::ranges::any_of(model.validated_hardware_tiers,
+                                [](const std::string& tier) { return tier.starts_with("rtx_"); }) ||
+            std::ranges::any_of(model.validated_platforms, [](const std::string& platform) {
+                return platform.starts_with("windows");
+            });
         state.certified_for_active_device =
             state.certified_for_active_track &&
             has_validated_tier_for_device(model, device, capabilities);
     } else if (capabilities.platform == "macos") {
         state.certified_for_active_track =
             model.validated_for_macos ||
-            std::find(model.validated_platforms.begin(), model.validated_platforms.end(),
-                      "macos_apple_silicon") != model.validated_platforms.end();
+            std::ranges::find(model.validated_platforms, "macos_apple_silicon") !=
+                model.validated_platforms.end();
         state.certified_for_active_device =
             state.certified_for_active_track &&
             (model.validated_hardware_tiers.empty() ||
@@ -881,7 +884,7 @@ nlohmann::json to_json(const Error& error) {
 std::optional<int> max_supported_resolution_for_device(const DeviceInfo& requested_device) {
     switch (requested_device.backend) {
         case Backend::CPU:
-            return 512;
+            return kRes512;
         case Backend::TensorRT:
         case Backend::CUDA:
             return windows_tensorrt_resolution_ceiling(requested_device.available_memory_mb);
@@ -898,21 +901,21 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
     switch (backend) {
         case Backend::TensorRT:
         case Backend::CUDA:
-            if (resolution >= 2048) {
-                return 24000;
+            if (resolution >= kRes2048) {
+                return static_cast<int>(kVram24GbMiB);
             }
-            if (resolution >= 1536) {
-                return 16000;
+            if (resolution >= kRes1536) {
+                return static_cast<int>(kVram16GbMiB);
             }
-            if (resolution >= 1024) {
-                return 10000;
+            if (resolution >= kRes1024) {
+                return static_cast<int>(kVram10GbMiB);
             }
             return std::nullopt;
         case Backend::DirectML:
         case Backend::WindowsML:
         case Backend::OpenVINO:
-            if (resolution >= 1024) {
-                return 10000;
+            if (resolution >= kRes1024) {
+                return static_cast<int>(kVram10GbMiB);
             }
             return std::nullopt;
         default:
@@ -980,8 +983,8 @@ std::optional<int> packaged_model_resolution(const std::filesystem::path& model_
     if (token.empty()) {
         return std::nullopt;
     }
-    for (char ch : token) {
-        if (ch < '0' || ch > '9') {
+    for (char digit : token) {
+        if (digit < '0' || digit > '9') {
             return std::nullopt;
         }
     }
@@ -995,7 +998,7 @@ bool is_packaged_corridorkey_model(const std::filesystem::path& model_path) {
     }
 
     const std::string filename = model_path.filename().string();
-    return filename.rfind("corridorkey_", 0) == 0 &&
+    return filename.starts_with("corridorkey_") &&
            packaged_model_resolution(model_path).has_value();
 }
 
@@ -1028,9 +1031,10 @@ Result<void> validate_refinement_mode_for_artifact(const std::filesystem::path& 
     }
 
     return Unexpected<Error>{Error{
-        ErrorCode::InvalidParameters,
-        "The selected runtime artifact does not advertise a validated refinement strategy "
-        "override. Use refinement mode 'auto' with the current packaged model family: " +
+        .code = ErrorCode::InvalidParameters,
+        .message =
+            "The selected runtime artifact does not advertise a validated refinement strategy "
+            "override. Use refinement mode 'auto' with the current packaged model family: " +
             model_path.filename().string(),
     }};
 }
@@ -1042,15 +1046,15 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     bool allow_unrestricted_quality_attempt) {
     if (requested_resolution <= 0) {
         return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Requested quality resolution must be greater than zero.",
+            .code = ErrorCode::InvalidParameters,
+            .message = "Requested quality resolution must be greater than zero.",
         }};
     }
     if (coarse_resolution_override > 0 && coarse_resolution_override >= requested_resolution) {
         return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
-            "quality.",
+            .code = ErrorCode::InvalidParameters,
+            .message = "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
+                       "quality.",
         }};
     }
 
@@ -1067,7 +1071,7 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
         !allow_lower_resolution_fallback && (!coarse_to_fine || coarse_resolution_override > 0);
 
     std::vector<std::filesystem::path> expected;
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 512};
+    constexpr std::array<int, 4> kFallbackResolutions = {kRes2048, kRes1536, kRes1024, kRes512};
     for (int resolution : kFallbackResolutions) {
         if (resolution > search_resolution) {
             continue;
@@ -1110,7 +1114,7 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
 
     std::vector<ArtifactSelection> selections;
     bool exact_artifact_available = false;
-    constexpr int kFallbackResolutions[] = {2048, 1536, 1024, 512};
+    constexpr std::array<int, 4> kFallbackResolutions = {kRes2048, kRes1536, kRes1024, kRes512};
     for (int resolution : kFallbackResolutions) {
         if (resolution > search_resolution) {
             continue;
@@ -1129,11 +1133,11 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
             }
             found_for_resolution = true;
             selections.push_back(ArtifactSelection{
-                artifact_path,
-                requested_resolution,
-                resolution,
-                resolution != requested_resolution || coarse_to_fine,
-                coarse_to_fine,
+                .executable_model_path = artifact_path,
+                .requested_resolution = requested_resolution,
+                .effective_resolution = resolution,
+                .used_fallback = resolution != requested_resolution || coarse_to_fine,
+                .coarse_to_fine = coarse_to_fine,
             });
         }
 
@@ -1191,9 +1195,11 @@ nlohmann::json to_json(const StageTiming& timing) {
     json["total_ms"] = timing.total_ms;
     json["sample_count"] = timing.sample_count;
     json["work_units"] = timing.work_units;
-    json["avg_ms"] = timing.sample_count > 0 ? timing.total_ms / timing.sample_count : 0.0;
+    json["avg_ms"] = timing.sample_count > 0
+                         ? timing.total_ms / static_cast<double>(timing.sample_count)
+                         : 0.0;
     if (timing.work_units > 0) {
-        json["ms_per_unit"] = timing.total_ms / timing.work_units;
+        json["ms_per_unit"] = timing.total_ms / static_cast<double>(timing.work_units);
     }
     return json;
 }
@@ -1296,8 +1302,6 @@ nlohmann::json to_json(const RuntimeOptimizationProfile& profile) {
     json["unrestricted_quality_attempt"] = profile.unrestricted_quality_attempt;
     return json;
 }
-// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-
 nlohmann::json to_json(const ArtifactRuntimeState& state) {
     nlohmann::json json;
     json["packaged_for_active_track"] = state.packaged_for_active_track;
@@ -1308,5 +1312,6 @@ nlohmann::json to_json(const ArtifactRuntimeState& state) {
     json["state"] = state.state;
     return json;
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 }  // namespace corridorkey::app
