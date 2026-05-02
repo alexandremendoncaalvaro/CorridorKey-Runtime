@@ -24,14 +24,51 @@ std::optional<PresetDefinition> find_preset_by_selector(const std::string& selec
 
 namespace {
 
+// Resolution rungs the model catalog ships across all officially supported
+// product tracks. Centralising them as constexpr removes the magic-number
+// drift that accumulated when the catalog grew (cppcoreguidelines-avoid-magic-numbers).
+constexpr int kRes512 = 512;
+constexpr int kRes768 = 768;
+constexpr int kRes1024 = 1024;
+constexpr int kRes1536 = 1536;
+constexpr int kRes2048 = 2048;
+
+// VRAM tier breakpoints (MiB). Match the validation_tiers_for_device labels
+// (rtx_8gb, rtx_10gb_plus, rtx_16gb_plus, rtx_24gb) and the resolution
+// ceilings tables. Any tier change must move both the value and the matching
+// validated_hardware_tiers metadata in the catalog entries below.
+constexpr std::int64_t kVram8GbMiB = 8000;
+constexpr std::int64_t kVram10GbMiB = 10000;
+constexpr std::int64_t kVram16GbMiB = 16000;
+constexpr std::int64_t kVram24GbMiB = 24000;
+
+// Synthetic input dimensions used by the bench / probe paths in this TU.
+constexpr int kProbeFrameDim = 64;
+
+// Default despeckle window size when no caller-provided value is set.
+// Chosen empirically — keep stable so the user-visible default remains
+// reproducible across runs.
+constexpr int kDefaultDespeckleSize = 400;
+
+// Default tile padding for preset-built InferenceParams. Matches the
+// padding the OFX render path uses when seam-blending tiled outputs.
+constexpr int kDefaultTilePadding = 64;
+
+// Sentinel target_resolution meaning "let the runtime pick based on the
+// active artifact's recommended resolution". Used by the macOS presets
+// where the MLX bridge is fixed at its compile resolution.
+constexpr int kTargetResolutionAuto = 0;
+
 bool has_backend(const RuntimeCapabilities& capabilities, Backend backend) {
-    return std::find(capabilities.supported_backends.begin(), capabilities.supported_backends.end(),
-                     backend) != capabilities.supported_backends.end();
+    return std::ranges::find(capabilities.supported_backends, backend) !=
+           capabilities.supported_backends.end();
 }
 
 std::string normalized_lower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    std::ranges::transform(value, value.begin(),
+                           [](unsigned char character) {
+                               return static_cast<char>(std::tolower(character));
+                           });
     return value;
 }
 
@@ -44,7 +81,7 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
 }
 
 std::string normalize_packaged_model_profile_name(const std::string& value) {
-    const auto normalized = normalized_lower(value);
+    auto normalized = normalized_lower(value);
     if (normalized == "rtx-lite" || normalized == "rtx-stable" || normalized == "rtx-full" ||
         normalized == "windows-rtx") {
         return "windows-rtx";
@@ -101,29 +138,29 @@ std::vector<std::string> validation_tiers_for_device(const DeviceInfo& device,
 
     if (capabilities.platform == "windows" &&
         (device.backend == Backend::TensorRT || device.backend == Backend::CUDA)) {
-        if (device.available_memory_mb >= 8000) {
-            tiers.push_back("rtx_8gb");
+        if (device.available_memory_mb >= kVram8GbMiB) {
+            tiers.emplace_back("rtx_8gb");
         }
-        if (device.available_memory_mb >= 10000) {
-            tiers.push_back("rtx_10gb");
-            tiers.push_back("rtx_10gb_plus");
+        if (device.available_memory_mb >= kVram10GbMiB) {
+            tiers.emplace_back("rtx_10gb");
+            tiers.emplace_back("rtx_10gb_plus");
         }
-        if (device.available_memory_mb >= 16000) {
-            tiers.push_back("rtx_16gb_plus");
+        if (device.available_memory_mb >= kVram16GbMiB) {
+            tiers.emplace_back("rtx_16gb_plus");
         }
-        if (device.available_memory_mb >= 24000) {
-            tiers.push_back("rtx_24gb");
+        if (device.available_memory_mb >= kVram24GbMiB) {
+            tiers.emplace_back("rtx_24gb");
         }
     }
 
     if (capabilities.platform == "macos" &&
         (device.backend == Backend::MLX || device.backend == Backend::CoreML ||
          device.backend == Backend::Auto)) {
-        if (device.available_memory_mb >= 8000) {
-            tiers.push_back("apple_silicon_8gb");
+        if (device.available_memory_mb >= kVram8GbMiB) {
+            tiers.emplace_back("apple_silicon_8gb");
         }
-        if (device.available_memory_mb >= 16000) {
-            tiers.push_back("apple_silicon_16gb");
+        if (device.available_memory_mb >= kVram16GbMiB) {
+            tiers.emplace_back("apple_silicon_16gb");
         }
     }
 
@@ -133,19 +170,19 @@ std::vector<std::string> validation_tiers_for_device(const DeviceInfo& device,
 bool has_validated_tier_for_device(const ModelCatalogEntry& model, const DeviceInfo& device,
                                    const RuntimeCapabilities& capabilities) {
     auto device_tiers = validation_tiers_for_device(device, capabilities);
-    return std::any_of(model.validated_hardware_tiers.begin(), model.validated_hardware_tiers.end(),
+    return std::ranges::any_of(model.validated_hardware_tiers,
                        [&](const std::string& tier) {
-                           return std::find(device_tiers.begin(), device_tiers.end(), tier) !=
+                           return std::ranges::find(device_tiers, tier) !=
                                   device_tiers.end();
                        });
 }
 
 bool windows_tensorrt_packaged_resolution_supported(int resolution) {
     switch (resolution) {
-        case 512:
-        case 1024:
-        case 1536:
-        case 2048:
+        case kRes512:
+        case kRes1024:
+        case kRes1536:
+        case kRes2048:
             return true;
         default:
             return false;
@@ -156,26 +193,26 @@ std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_me
     if (available_memory_mb <= 0) {
         return std::nullopt;
     }
-    if (available_memory_mb >= 24000) {
-        return 2048;
+    if (available_memory_mb >= kVram24GbMiB) {
+        return kRes2048;
     }
-    if (available_memory_mb >= 16000) {
-        return 1536;
+    if (available_memory_mb >= kVram16GbMiB) {
+        return kRes1536;
     }
-    if (available_memory_mb >= 10000) {
-        return 1024;
+    if (available_memory_mb >= kVram10GbMiB) {
+        return kRes1024;
     }
-    return 512;
+    return kRes512;
 }
 
 std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_memory_mb) {
     if (available_memory_mb <= 0) {
         return std::nullopt;
     }
-    if (available_memory_mb >= 10000) {
-        return 1024;
+    if (available_memory_mb >= kVram10GbMiB) {
+        return kRes1024;
     }
-    return 512;
+    return kRes512;
 }
 
 std::string resolve_platform_preset_alias(const std::string& selector,
@@ -234,9 +271,10 @@ Result<std::pair<int, bool>> search_resolution_for_request(
         requested_device, requested_resolution, coarse_resolution_override);
     if (!coarse_resolution.has_value() || *coarse_resolution >= requested_resolution) {
         return Unexpected<Error>{Error{
-            ErrorCode::InvalidParameters,
-            "Coarse-to-fine requested a smaller coarse artifact, but no valid packaged coarse "
-            "resolution could be resolved for this request.",
+            .code = ErrorCode::InvalidParameters,
+            .message =
+                "Coarse-to-fine requested a smaller coarse artifact, but no valid packaged coarse "
+                "resolution could be resolved for this request.",
         }};
     }
 
@@ -276,7 +314,7 @@ InferenceParams make_preset_inference_params(int target_resolution, bool auto_de
     params.despill_strength = 1.0F;
     params.spill_method = 0;
     params.auto_despeckle = auto_despeckle;
-    params.despeckle_size = 400;
+    params.despeckle_size = kDefaultDespeckleSize;
     params.refiner_scale = 1.0F;
     params.alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
     params.input_is_linear = false;
@@ -361,20 +399,20 @@ std::optional<ModelCatalogEntry> default_model_for_request(
         // engines (Strategy C). Green stays on the ONNX -> TRT-RTX EP path.
         // Blue 1536+ ships as FP32 because Sprint 0 found FP16 NaNs at
         // those graph sizes (HANDOFF section 2.2).
-        if (requested_device.available_memory_mb >= 24000) {
+        if (requested_device.available_memory_mb >= kVram24GbMiB) {
             return pick("corridorkey_blue_torchtrt_fp32_2048.ts", "corridorkey_fp16_2048.onnx");
         }
-        if (requested_device.available_memory_mb >= 16000) {
+        if (requested_device.available_memory_mb >= kVram16GbMiB) {
             return pick("corridorkey_blue_torchtrt_fp32_1536.ts", "corridorkey_fp16_1536.onnx");
         }
-        if (requested_device.available_memory_mb >= 10000) {
+        if (requested_device.available_memory_mb >= kVram10GbMiB) {
             return pick("corridorkey_blue_torchtrt_fp16_1024.ts", "corridorkey_fp16_1024.onnx");
         }
         return pick("corridorkey_blue_torchtrt_fp16_512.ts", "corridorkey_fp16_512.onnx");
     };
 
     auto windows_universal_model = [&]() -> std::optional<ModelCatalogEntry> {
-        if (requested_device.available_memory_mb >= 10000) {
+        if (requested_device.available_memory_mb >= kVram10GbMiB) {
             return find_model_by_filename("corridorkey_fp16_1024.onnx");
         }
         return find_model_by_filename("corridorkey_fp16_512.onnx");
@@ -421,27 +459,27 @@ std::optional<ModelCatalogEntry> default_model_for_request(
 
 std::vector<ModelCatalogEntry> model_catalog() {
     return {
-        make_model_entry("mlx", 2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
+        make_model_entry("mlx", kRes2048, "corridorkey_mlx.safetensors", "safetensors", "mlx",
                          "Official Apple Silicon model pack for the first native MLX backend.",
                          "apple_acceleration_primary", true, true, false, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
-        make_model_entry("fp16", 512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
+        make_model_entry("fp16", kRes512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
                          "Lower-memory Windows RTX reference variant for lab bring-up.",
                          "windows_rtx_reference", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb"}),
-        make_model_entry("fp16", 768, "corridorkey_fp16_768.onnx", "onnx", "tensorrt",
+        make_model_entry("fp16", kRes768, "corridorkey_fp16_768.onnx", "onnx", "tensorrt",
                          "Reference-only Windows RTX artifact retained for 768px investigation.",
                          "reference_validation", false, false, false, {}, {"windows_rtx_30_plus"},
                          {}),
-        make_model_entry("fp16", 1024, "corridorkey_fp16_1024.onnx", "onnx", "tensorrt",
+        make_model_entry("fp16", kRes1024, "corridorkey_fp16_1024.onnx", "onnx", "tensorrt",
                          "Maximum quality Windows RTX pack for 10 GB and higher tiers.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_10gb_plus"}),
-        make_model_entry("fp16", 1536, "corridorkey_fp16_1536.onnx", "onnx", "tensorrt",
+        make_model_entry("fp16", kRes1536, "corridorkey_fp16_1536.onnx", "onnx", "tensorrt",
                          "High-fidelity Windows RTX pack for 16 GB VRAM systems.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_16gb_plus"}),
-        make_model_entry("fp16", 2048, "corridorkey_fp16_2048.onnx", "onnx", "tensorrt",
+        make_model_entry("fp16", kRes2048, "corridorkey_fp16_2048.onnx", "onnx", "tensorrt",
                          "Extreme quality Windows RTX pack for 24 GB VRAM systems.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_24gb"}),
@@ -451,13 +489,13 @@ std::vector<ModelCatalogEntry> model_catalog() {
         // TorchTRT loads cleanly at every resolution. The runtime DLL set
         // ships INSIDE the blue model pack rather than the base bundle, so
         // green users do not pay the ~5 GB cost.
-        make_model_entry("fp16-blue", 512, "corridorkey_blue_torchtrt_fp16_512.ts", "torchtrt",
+        make_model_entry("fp16-blue", kRes512, "corridorkey_blue_torchtrt_fp16_512.ts", "torchtrt",
                          "torchtrt",
                          "Windows RTX blue-screen pack (Torch-TensorRT) for 8 GB tiers.",
                          "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb"}, "blue"),
         make_model_entry(
-            "fp16-blue", 1024, "corridorkey_blue_torchtrt_fp16_1024.ts", "torchtrt", "torchtrt",
+            "fp16-blue", kRes1024, "corridorkey_blue_torchtrt_fp16_1024.ts", "torchtrt", "torchtrt",
             "Windows RTX blue-screen pack (Torch-TensorRT) for 10 GB and higher tiers.",
             "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
             {"rtx_10gb_plus"}, "blue"),
@@ -466,29 +504,29 @@ std::vector<ModelCatalogEntry> model_catalog() {
         // Blue 2048 follows the same precision constraint and is staged via
         // cloud GPU compile per HANDOFF Sprint 2.
         make_model_entry(
-            "fp32-blue", 1536, "corridorkey_blue_torchtrt_fp32_1536.ts", "torchtrt", "torchtrt",
+            "fp32-blue", kRes1536, "corridorkey_blue_torchtrt_fp32_1536.ts", "torchtrt", "torchtrt",
             "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 16 GB VRAM systems.",
             "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
             {"rtx_16gb_plus"}, "blue"),
         make_model_entry(
-            "fp32-blue", 2048, "corridorkey_blue_torchtrt_fp32_2048.ts", "torchtrt", "torchtrt",
+            "fp32-blue", kRes2048, "corridorkey_blue_torchtrt_fp32_2048.ts", "torchtrt", "torchtrt",
             "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 24 GB VRAM systems.",
             "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
             {"rtx_24gb"}, "blue"),
-        make_model_entry("fp32", 512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
+        make_model_entry("fp32", kRes512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
                          false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
-        make_model_entry("fp32", 768, "corridorkey_fp32_768.onnx", "onnx", "cpu",
+        make_model_entry("fp32", kRes768, "corridorkey_fp32_768.onnx", "onnx", "cpu",
                          "Higher resolution reference validation variant.", "reference_validation",
                          false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
-        make_model_entry("fp32", 1024, "corridorkey_fp32_1024.onnx", "onnx", "cpu",
+        make_model_entry("fp32", kRes1024, "corridorkey_fp32_1024.onnx", "onnx", "cpu",
                          "High resolution reference validation variant.", "reference_validation",
                          false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
-        make_model_entry("fp32", 1536, "corridorkey_fp32_1536.onnx", "onnx", "cpu",
+        make_model_entry("fp32", kRes1536, "corridorkey_fp32_1536.onnx", "onnx", "cpu",
                          "Ultra resolution variant for near-native 1080p inference.",
                          "reference_validation", false, false, false, {},
                          {"macos_apple_silicon", "windows_rtx"}, {}),
-        make_model_entry("fp32", 2048, "corridorkey_fp32_2048.onnx", "onnx", "cpu",
+        make_model_entry("fp32", kRes2048, "corridorkey_fp32_2048.onnx", "onnx", "cpu",
                          "Maximum resolution variant matching Python reference pipeline.",
                          "reference_validation", false, false, false, {},
                          {"macos_apple_silicon", "windows_rtx"}, {}),
@@ -502,7 +540,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Mac Balanced",
             "Default Apple Silicon preset using the native MLX model pack with automatic tiling "
             "and no implicit cleanup.",
-            make_preset_inference_params(0, false, true, 64),
+            make_preset_inference_params(kTargetResolutionAuto, false, true, kDefaultTilePadding),
             "corridorkey_mlx.safetensors",
             "apple_acceleration_primary",
             true,
@@ -515,7 +553,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-max-quality",
             "Mac Max Quality",
             "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
-            make_preset_inference_params(0, true, true, 64),
+            make_preset_inference_params(kTargetResolutionAuto, true, true, kDefaultTilePadding),
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",
             false,
@@ -529,7 +567,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "Windows RTX Balanced",
             "Default Windows RTX preset with FP16 inference, runtime cache enabled, and tiling "
             "ready for portable bundles.",
-            make_preset_inference_params(1024, false, true, 64),
+            make_preset_inference_params(kRes1024, false, true, kDefaultTilePadding),
             "corridorkey_fp16_1024.onnx",
             "windows_rtx_primary",
             false,
@@ -542,7 +580,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-rtx-max-quality",
             "Windows RTX Max Quality",
             "Higher-quality Windows RTX preset with cleanup enabled for the 10 GB and up tier.",
-            make_preset_inference_params(1024, true, true, 64),
+            make_preset_inference_params(kRes1024, true, true, kDefaultTilePadding),
             "corridorkey_fp16_1024.onnx",
             "windows_rtx_primary",
             false,
@@ -555,7 +593,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "win-rtx-ultra-quality",
             "Windows RTX Ultra Quality",
             "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
-            make_preset_inference_params(2048, true, true, 64),
+            make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
             "corridorkey_fp16_2048.onnx",
             "windows_rtx_primary",
             false,
@@ -568,7 +606,7 @@ std::vector<PresetDefinition> preset_catalog() {
             "mac-ultra-quality",
             "Mac Ultra Quality",
             "Extreme quality Apple Silicon preset using 2048px MLX bridge with cleanup enabled.",
-            make_preset_inference_params(2048, true, true, 64),
+            make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
             "corridorkey_mlx.safetensors",
             "native_resolution_examples",
             false,
@@ -595,7 +633,7 @@ std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& ca
     }
 
     auto prefer_backend = [&](Backend backend) -> std::optional<DeviceInfo> {
-        auto it = std::find_if(devices.begin(), devices.end(),
+        auto it = std::ranges::find_if(devices,
                                [&](const DeviceInfo& device) { return device.backend == backend; });
         if (it == devices.end()) {
             return std::nullopt;
@@ -621,7 +659,7 @@ std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& ca
         }
     }
 
-    auto non_cpu = std::find_if(devices.begin(), devices.end(), [](const DeviceInfo& device) {
+    auto non_cpu = std::ranges::find_if(devices, [](const DeviceInfo& device) {
         return device.backend != Backend::CPU;
     });
     if (non_cpu != devices.end()) {
