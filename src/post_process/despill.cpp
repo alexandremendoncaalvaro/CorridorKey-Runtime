@@ -11,10 +11,24 @@
 #define EXEC_POLICY
 #endif
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,readability-math-missing-parentheses,readability-function-cognitive-complexity)
+//
+// despill tidy-suppression rationale.
+//
+// post-process pixel-math is OFX render hot path; per CLAUDE.md changes
+// here are gated by the phase_8_gpu_prepare 10% regression budget, so we
+// suppress diagnostics that would force restructuring without measurable
+// safety value. The (a, b, x, y, w, h) names are universal pixel-coord
+// and channel-pair conventions; the 0.5F fill split, 1/3 neutral
+// average, and 1e-6F divide-by-zero guard are canonical despill
+// constants. The screen / other_a / other_b dispatch is one fused
+// per-pixel orchestrator whose linear flow would be obscured if the
+// switch / spill / neutral-vs-average branches were extracted into
+// helpers.
 namespace corridorkey {
 
 void despill(Image rgb, float strength, SpillMethod method, int screen_channel) {
-    if (rgb.empty() || strength <= 0.0f) return;
+    if (rgb.empty() || strength <= 0.0F) return;
     if (screen_channel < 0 || screen_channel > 2) return;
 
     int h = rgb.height;
@@ -31,31 +45,31 @@ void despill(Image rgb, float strength, SpillMethod method, int screen_channel) 
             float a = rgb(y, x, other_a);
             float b = rgb(y, x, other_b);
 
-            float limit = 0.0f;
+            float limit = 0.0F;
             switch (method) {
                 case SpillMethod::DoubleLimit:
                     limit = std::max(a, b);
                     break;
                 case SpillMethod::Neutral:
                 case SpillMethod::Average:
-                    limit = (a + b) * 0.5f;
+                    limit = (a + b) * 0.5F;
                     break;
             }
 
-            float spill = std::max(0.0f, screen - limit);
-            if (spill > 0.0f) {
+            float spill = std::max(0.0F, screen - limit);
+            if (spill > 0.0F) {
                 float effective_spill = spill * strength;
                 float new_screen = screen - effective_spill;
                 rgb(y, x, screen_channel) = new_screen;
 
                 if (method == SpillMethod::Neutral) {
-                    float gray = (a + new_screen + b) / 3.0f;
-                    float fill = effective_spill * 0.5f;
-                    rgb(y, x, other_a) = a + fill * (gray / std::max(a, 1e-6f));
-                    rgb(y, x, other_b) = b + fill * (gray / std::max(b, 1e-6f));
+                    float gray = (a + new_screen + b) / 3.0F;
+                    float fill = effective_spill * 0.5F;
+                    rgb(y, x, other_a) = a + fill * (gray / std::max(a, 1e-6F));
+                    rgb(y, x, other_b) = b + fill * (gray / std::max(b, 1e-6F));
                 } else {
-                    rgb(y, x, other_a) = a + effective_spill * 0.5f;
-                    rgb(y, x, other_b) = b + effective_spill * 0.5f;
+                    rgb(y, x, other_a) = a + effective_spill * 0.5F;
+                    rgb(y, x, other_b) = b + effective_spill * 0.5F;
                 }
             }
         }
@@ -63,3 +77,4 @@ void despill(Image rgb, float strength, SpillMethod method, int screen_channel) 
 }
 
 }  // namespace corridorkey
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,readability-math-missing-parentheses,readability-function-cognitive-complexity)
