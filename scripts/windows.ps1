@@ -9,6 +9,14 @@ param(
     [ValidateSet("rtx", "dml", "all")]
     [string]$Track = "all",
     [string]$DisplayVersionLabel = "",
+    # Modern installer flavor (Inno Setup 6). When empty, package-ofx
+    # produces the legacy NSIS installer only - kept as fallback during
+    # the migration. When set to "online" or "offline", an Inno Setup
+    # installer is produced ALONGSIDE the legacy NSIS one (same staged
+    # bundle) so the operator can compare or pick. Once Inno is the
+    # default, the NSIS path retires in a follow-up commit.
+    [ValidateSet("", "online", "offline")]
+    [string]$Flavor = "",
     [string[]]$ForwardArguments = @()
 )
 
@@ -204,6 +212,38 @@ switch ($Task) {
             $arguments += $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_ofx_installer_windows.ps1" -Arguments $arguments
             Assert-CorridorKeyVariantDoctorHealthy -Version $resolvedVersion -ReleaseSuffix $variant.Suffix -DisplayVersionLabel $DisplayVersionLabel
+
+            # Modern installer (Inno Setup 6, scripts/installer/). Only
+            # the RTX variant is wired right now; DirectML is a separate
+            # downstream slice that retains the legacy NSIS path until
+            # we migrate it. The Inno builder reuses the staged OFX
+            # bundle the legacy packager just produced (same Plugin
+            # Payload, same DLLs, same model layout); the only
+            # difference is the surrounding installer shell.
+            if (-not [string]::IsNullOrWhiteSpace($Flavor) -and $variant.Suffix -eq "RTX") {
+                $stagedTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $resolvedVersion } else { $DisplayVersionLabel }
+                $stagedBundle = Join-Path $repoRoot ("dist\CorridorKey_OFX_v${stagedTag}_Windows_$($variant.Suffix)\CorridorKey.ofx.bundle")
+                if (-not (Test-Path $stagedBundle)) {
+                    throw "Inno Setup builder requires the legacy packager's staged bundle, not found at $stagedBundle. The legacy packager either failed silently or was skipped."
+                }
+
+                $innoArgs = @(
+                    "-Flavor", $Flavor,
+                    "-Version", $resolvedVersion,
+                    "-DisplayVersionLabel", $stagedTag,
+                    "-PluginPayloadDir", $stagedBundle
+                )
+                if ($Flavor -eq "offline") {
+                    # Offline staging not yet wired - tracked as the
+                    # next commit on this branch. The builder fails
+                    # cleanly with a "ModelPayloadDir not found" so the
+                    # operator gets a clear pointer to the missing
+                    # piece rather than an opaque ISCC error.
+                    $offlineRoot = Join-Path $repoRoot "dist\_offline_payload"
+                    $innoArgs += @("-ModelPayloadDir", $offlineRoot)
+                }
+                Invoke-CorridorKeyScript -ScriptName "installer\build_installer.ps1" -Arguments $innoArgs
+            }
         }
         break
     }
