@@ -1,24 +1,12 @@
 #include "torch_trt_session.hpp"
 
-#include <atomic>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <regex>
 #include <string>
-#include <system_error>
 #include <utility>
-
-#ifdef _WIN32
-// clang-format off
-// windows.h must precede LoadLibraryEx & friends; provides AddDllDirectory,
-// SetDefaultDllDirectories, GetLastError, HMODULE used by the runtime
-// arming path below.
-#include <windows.h>
-// clang-format on
-#endif
 
 // Pulling individual c10/torch headers piecemeal triggers CUDA include
 // resolution that the vendored torchtrt-windows tree intentionally
@@ -34,15 +22,17 @@
 #include <torch/script.h>
 
 #include "common/stage_profiler.hpp"
+// Strategy C, Sprint 1 PR 1 follow-up: the runtime DLL arming
+// (AddDllDirectory + LoadLibraryEx of torchtrt.dll +
+// corridorkey_torchtrt.dll) lives in a torch-free TU compiled into
+// corridorkey_core, so the base runtime can prepare the loader before
+// triggering the delay-load of this DLL. Calling arm_torchtrt_runtime
+// from inside this TU would defeat the indirection because reaching
+// any symbol here implies the DLL is already resolved.
 
 namespace corridorkey::core {
 
 namespace {
-
-// Maximum number of ancestor directories we walk when looking for a
-// vendor/torchtrt-windows/bin layout. 8 covers the deepest known dev tree
-// layout (build/<preset>/tests/integration/<bin>/foo.ts) plus a margin.
-constexpr int kMaxAncestorWalkDepth = 8;
 
 std::optional<int> resolution_from_filename(const std::filesystem::path& path) {
     // corridorkey_torchtrt_fp16_<res>.ts | corridorkey_blue_torchtrt_fp16_<res>.ts
@@ -58,90 +48,6 @@ std::optional<int> resolution_from_filename(const std::filesystem::path& path) {
         return std::nullopt;
     }
 }
-
-#ifdef _WIN32
-// Strategy C delayed-load entry. The TorchTRT runtime DLLs ship inside the
-// blue model pack, not in the base Windows RTX bundle. At session creation
-// we point the OS loader at the pack's runtime dir so torchtrt.dll's
-// transitive deps (libtorch + cuDNN + nvinfer) resolve from there.
-//
-// Lookup order:
-//   1. CORRIDORKEY_TORCHTRT_RUNTIME_DIR env override (dev / CI)
-//   2. <ts file dir>/../torchtrt-runtime/bin (blue pack layout, PR 4)
-//   3. <repo>/vendor/torchtrt-windows/bin (dev fallback when running from
-//      the build tree before a pack is assembled)
-std::optional<std::filesystem::path> resolve_torchtrt_runtime_bin(
-    const std::filesystem::path& ts_path) {
-    if (const char* env = std::getenv("CORRIDORKEY_TORCHTRT_RUNTIME_DIR")) {
-        std::filesystem::path candidate{env};
-        if (std::filesystem::exists(candidate / "torchtrt.dll")) {
-            return candidate;
-        }
-    }
-    // Absolutise first: relative paths (e.g. "models/foo.ts") yield an
-    // empty parent_path() chain after one or two steps, breaking the walk
-    // loop before it reaches the repo root or any blue-pack-shaped layout.
-    std::error_code error;
-    auto absolute_ts = std::filesystem::absolute(ts_path, error);
-    if (error) {
-        absolute_ts = ts_path;
-    }
-
-    auto pack_relative = absolute_ts.parent_path().parent_path() / "torchtrt-runtime" / "bin";
-    if (std::filesystem::exists(pack_relative / "torchtrt.dll")) {
-        return pack_relative;
-    }
-    // Walk a few levels up looking for vendor/torchtrt-windows/bin.
-    auto walk = absolute_ts.parent_path();
-    for (int depth = 0; depth < kMaxAncestorWalkDepth && !walk.empty() && walk != walk.root_path();
-         ++depth) {
-        auto candidate = walk / "vendor" / "torchtrt-windows" / "bin";
-        if (std::filesystem::exists(candidate / "torchtrt.dll")) {
-            return candidate;
-        }
-        walk = walk.parent_path();
-    }
-    // Last try at the absolute root (covers `C:\<repo>` setups where the
-    // walk above stops one level early).
-    auto root_candidate = walk / "vendor" / "torchtrt-windows" / "bin";
-    if (std::filesystem::exists(root_candidate / "torchtrt.dll")) {
-        return root_candidate;
-    }
-    return std::nullopt;
-}
-
-// One-shot arming flag. Wrapped in a function-local atomic accessor so
-// the cppcoreguidelines-avoid-non-const-global-variables check stays
-// happy: the atomic itself is const-init on first call, and the
-// arming is idempotent (the OS loader keeps the DLL once loaded).
-std::atomic_bool& torchtrt_runtime_armed_flag() {
-    static std::atomic_bool flag{false};
-    return flag;
-}
-
-bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out_error) {
-    if (torchtrt_runtime_armed_flag().load(std::memory_order_acquire)) {
-        return true;
-    }
-    const auto absolute = std::filesystem::absolute(bin_dir);
-    auto* cookie = AddDllDirectory(absolute.wstring().c_str());
-    if (cookie == nullptr) {
-        out_error = "AddDllDirectory failed for " + absolute.string() +
-                    " (GetLastError=" + std::to_string(GetLastError()) + ")";
-        return false;
-    }
-    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
-    const auto torchtrt_path = (absolute / L"torchtrt.dll").wstring();
-    HMODULE handle = LoadLibraryExW(torchtrt_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (handle == nullptr) {
-        out_error =
-            "LoadLibrary torchtrt.dll failed (GetLastError=" + std::to_string(GetLastError()) + ")";
-        return false;
-    }
-    torchtrt_runtime_armed_flag().store(true, std::memory_order_release);
-    return true;
-}
-#endif  // _WIN32
 
 // Splits the IValue returned by torch::jit::Module::forward into the
 // (alpha, foreground) tensor pair our pipeline expects. Returns an empty
@@ -229,20 +135,13 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
                   .message = "TorchTRT engine not found: " + ts_path.string()}};
     }
 
-#ifdef _WIN32
-    auto runtime_bin = resolve_torchtrt_runtime_bin(ts_path);
-    if (!runtime_bin.has_value()) {
-        return Unexpected<Error>{Error{
-            .code = ErrorCode::HardwareNotSupported,
-            .message = "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
-                       "stage the blue model pack runtime alongside the .ts."}};
-    }
-    std::string arm_error;
-    if (!arm_torchtrt_runtime(*runtime_bin, arm_error)) {
-        return Unexpected<Error>{Error{.code = ErrorCode::HardwareNotSupported,
-                                       .message = "TorchTRT runtime arm failed: " + arm_error}};
-    }
-#endif
+    // Strategy C, Sprint 1 PR 1 follow-up: the caller is responsible for
+    // arming the runtime via torch_trt_loader::arm_torchtrt_runtime
+    // BEFORE invoking any symbol from this DLL. By the time control
+    // reaches this function, the OS has already resolved every torch /
+    // torchtrt / cuda dependency through the delay-loaded
+    // corridorkey_torchtrt.dll, which means AddDllDirectory inside this
+    // TU is too late.
 
     if (!torch::cuda::is_available()) {
         return Unexpected<Error>{Error{

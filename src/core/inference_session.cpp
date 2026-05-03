@@ -45,6 +45,7 @@
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
+#include "torch_trt_loader.hpp"
 #include "torch_trt_session.hpp"
 #endif
 #include "ort_process_context.hpp"
@@ -1150,6 +1151,28 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
         }
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
         if (requested_device.backend == Backend::TorchTRT) {
+            // Strategy C, Sprint 1 PR 1 follow-up: arm the runtime
+            // BEFORE triggering the delay-load of corridorkey_torchtrt.dll
+            // by calling any of its symbols. arm_torchtrt_runtime sits in
+            // a torch-free TU compiled into corridorkey_core, so the
+            // base exe / OFX bundle can run AddDllDirectory and
+            // pre-load the torch / torchtrt DLLs from the blue pack
+            // (or vendor/torchtrt-windows in dev) without ever
+            // touching torch headers from this layer. Once the cache
+            // is populated, the next implicit resolve from the
+            // delay-load helper is a hit.
+            auto runtime_bin = core::resolve_torchtrt_runtime_bin(model_path);
+            if (runtime_bin.empty()) {
+                return Unexpected(Error{
+                    ErrorCode::HardwareNotSupported,
+                    "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
+                    "stage the blue model pack runtime alongside the .ts."});
+            }
+            std::string arm_error;
+            if (!core::arm_torchtrt_runtime(runtime_bin, arm_error)) {
+                return Unexpected(Error{ErrorCode::HardwareNotSupported,
+                                        "TorchTRT runtime arm failed: " + arm_error});
+            }
             auto torch_trt_res =
                 core::TorchTrtSession::create(model_path, requested_device, on_stage);
             if (!torch_trt_res) {

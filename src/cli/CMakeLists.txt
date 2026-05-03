@@ -39,22 +39,17 @@ if(WIN32)
         COMMAND_EXPAND_LISTS
     )
 
-    # Sprint 1 PR 3 dev-only: when corridorkey_core is linked against
-    # libtorch (CORRIDORKEY_HAS_TORCHTRT), copy the curated TorchTRT
-    # runtime payload next to the CLI exe so it can launch at all (the
-    # static-link path requires torch_cpu/c10/etc to be on the loader path
-    # at process start - AddDllDirectory inside main is too late).
-    # Production blue-pack delivery (PR 4 follow-up) will refactor
-    # torch_trt_session.cpp into a separate dynamic library that the base
-    # exe loads on demand, so green-only users do not pay the ~5 GB cost.
-    if(CORRIDORKEY_HAS_TORCHTRT AND DEFINED CORRIDORKEY_TORCHTRT_RUNTIME_DIR)
-        add_custom_command(TARGET corridorkey_cli POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}"
-                $<TARGET_FILE_DIR:corridorkey_cli>
-            COMMENT "Staging vendored TorchTRT DLLs next to corridorkey.exe (dev only)"
-            VERBATIM
-        )
+    # Strategy C, Sprint 1 PR 1 follow-up landed: corridorkey_torchtrt is
+    # now a SHARED library that the CLI links via /DELAYLOAD. The OS
+    # loader does not pull libtorch when only Backend::TensorRT (green)
+    # paths run, so the green-only user no longer pays the ~5 GB cost.
+    # The TorchTRT runtime DLLs themselves ship inside the blue model
+    # pack at <pack>/torchtrt-runtime/bin/ (production) or in
+    # vendor/torchtrt-windows/bin/ (dev), and arm_torchtrt_runtime in
+    # corridorkey_core resolves them on the first Backend::TorchTRT
+    # session creation.
+    if(CORRIDORKEY_HAS_TORCHTRT)
+        corridorkey_apply_torchtrt_delayload(corridorkey_cli)
     endif()
 elseif(UNIX AND NOT APPLE)
     # Make the OFX plugin wait on the CLI so the Linux bundle's POST_BUILD

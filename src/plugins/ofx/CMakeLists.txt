@@ -53,6 +53,15 @@ if(WIN32)
     corridorkey_apply_windows_common_compile_defs(corridorkey_ofx_runtime_server)
     corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx_runtime_server)
 
+    # Strategy C, Sprint 1 PR 1 follow-up: the runtime server links
+    # corridorkey_core which now references corridorkey_torchtrt SHARED.
+    # Delay-load that DLL so the green-only install does not pay the
+    # libtorch DLL load on startup (the OFX bundle Win64/ does not ship
+    # torch DLLs; they live in the blue model pack).
+    if(CORRIDORKEY_HAS_TORCHTRT)
+        corridorkey_apply_torchtrt_delayload(corridorkey_ofx_runtime_server)
+    endif()
+
     if(MSVC)
         target_compile_options(corridorkey_ofx_runtime_server PRIVATE /W4 /WX /permissive-)
     else()
