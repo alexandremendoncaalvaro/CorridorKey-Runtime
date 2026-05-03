@@ -70,10 +70,44 @@ bool fetch_suites() {
         g_host->fetchSuite(g_host->host, kOfxParameterSuite, 1));
 
     const void* message_suite = g_host->fetchSuite(g_host->host, kOfxMessageSuite, 2);
+    bool fetched_v2 = (message_suite != nullptr);
     if (message_suite == nullptr) {
         message_suite = g_host->fetchSuite(g_host->host, kOfxMessageSuite, 1);
     }
     g_suites.message = static_cast<const OfxMessageSuiteV2*>(message_suite);
+
+    // OFX 1.4 progress suite. Both Nuke 10+ and Resolve 12.5+ advertise
+    // OfxProgressSuite (openfx-misc README-hosts.txt). Try V2 first because
+    // it accepts a stable messageId for i18n; fall back to V1 otherwise.
+    g_suites.progress_v2 = static_cast<const OfxProgressSuiteV2*>(
+        g_host->fetchSuite(g_host->host, kOfxProgressSuite, 2));
+    g_suites.progress_v1 = static_cast<const OfxProgressSuiteV1*>(
+        g_host->fetchSuite(g_host->host, kOfxProgressSuite, 1));
+    log_message("fetch_suites",
+                std::string("event=ofx_progress_suite v2_fetched=") +
+                    (g_suites.progress_v2 != nullptr ? "1" : "0") + " v1_fetched=" +
+                    (g_suites.progress_v1 != nullptr ? "1" : "0"));
+
+    // Surface the V2-suite capability so the runtime log answers
+    // "did the host actually expose setPersistentMessage" without a
+    // debugger session. openfx-misc README-hosts.txt notes that some
+    // hosts return a V2 struct with NULL setPersistentMessage /
+    // clearPersistentMessage pointers; capturing this once at suite
+    // fetch lets us correlate the absence of node alerts with the
+    // host's actual capability vector.
+    if (g_suites.message == nullptr) {
+        log_message("fetch_suites", "event=ofx_message_suite v2_fetched=0 v1_fetched=0 (none)");
+    } else {
+        const bool has_message = g_suites.message->message != nullptr;
+        const bool has_setpersist = g_suites.message->setPersistentMessage != nullptr;
+        const bool has_clearpersist = g_suites.message->clearPersistentMessage != nullptr;
+        log_message("fetch_suites",
+                    std::string("event=ofx_message_suite v2_fetched=") +
+                        (fetched_v2 ? "1" : "0") + " has_message=" +
+                        (has_message ? "1" : "0") + " has_setPersistentMessage=" +
+                        (has_setpersist ? "1" : "0") + " has_clearPersistentMessage=" +
+                        (has_clearpersist ? "1" : "0"));
+    }
 
     if (!g_suites.property || !g_suites.image_effect || !g_suites.parameter) {
         log_message("fetch_suites", "Missing required OpenFX suites.");
@@ -108,9 +142,86 @@ void set_persistent_message(const char* message_type, const char* message_id,
                             const char* message, OfxImageEffectHandle effect) {
     if (g_suites.message == nullptr || g_suites.message->setPersistentMessage == nullptr ||
         effect == nullptr || message == nullptr) {
+        log_message("set_persistent_message",
+                    std::string("skip reason=missing suite_null=") +
+                        (g_suites.message == nullptr ? "1" : "0") + " set_fn_null=" +
+                        ((g_suites.message != nullptr &&
+                          g_suites.message->setPersistentMessage == nullptr)
+                             ? "1"
+                             : "0") +
+                        " effect_null=" + (effect == nullptr ? "1" : "0") + " message_null=" +
+                        (message == nullptr ? "1" : "0"));
         return;
     }
-    g_suites.message->setPersistentMessage(effect, message_type, message_id, "%s", message);
+    const OfxStatus status =
+        g_suites.message->setPersistentMessage(effect, message_type, message_id, "%s", message);
+    log_message("set_persistent_message",
+                std::string("event=posted type=") + (message_type ? message_type : "(null)") +
+                    " id=" + (message_id ? message_id : "(null)") +
+                    " status=" + std::to_string(status) +
+                    " body_len=" + std::to_string(message ? std::strlen(message) : 0));
+}
+
+// ProgressScope implementation. The scope owns one progressStart /
+// progressEnd pair per construction; update() forwards progress in [0, 1]
+// to the host and returns false on user cancel. The destructor always
+// calls progressEnd() so a thrown exception or early return cannot leak
+// the modal dialog. ofxProgress.h:17-27 documents Cancel as
+// "kOfxStatReplyNo returned during progressUpdate".
+ProgressScope::ProgressScope(OfxImageEffectHandle effect, const char* label,
+                             const char* message_id)
+    : m_effect(effect) {
+    if (m_effect == nullptr || label == nullptr) {
+        return;
+    }
+    if (g_suites.progress_v2 != nullptr && g_suites.progress_v2->progressStart != nullptr) {
+        const OfxStatus status = g_suites.progress_v2->progressStart(
+            m_effect, label, message_id != nullptr ? message_id : "");
+        m_use_v2 = true;
+        m_started = (status == kOfxStatOK);
+        log_message("progress_scope", std::string("event=start version=v2 status=") +
+                                          std::to_string(status) + " label=" + label);
+        return;
+    }
+    if (g_suites.progress_v1 != nullptr && g_suites.progress_v1->progressStart != nullptr) {
+        const OfxStatus status = g_suites.progress_v1->progressStart(m_effect, label);
+        m_use_v2 = false;
+        m_started = (status == kOfxStatOK);
+        log_message("progress_scope", std::string("event=start version=v1 status=") +
+                                          std::to_string(status) + " label=" + label);
+        return;
+    }
+    log_message("progress_scope", "event=start_skipped reason=no_progress_suite");
+}
+
+ProgressScope::~ProgressScope() {
+    if (!m_started || m_effect == nullptr) {
+        return;
+    }
+    if (m_use_v2 && g_suites.progress_v2 != nullptr &&
+        g_suites.progress_v2->progressEnd != nullptr) {
+        g_suites.progress_v2->progressEnd(m_effect);
+    } else if (!m_use_v2 && g_suites.progress_v1 != nullptr &&
+               g_suites.progress_v1->progressEnd != nullptr) {
+        g_suites.progress_v1->progressEnd(m_effect);
+    }
+}
+
+bool ProgressScope::update(double progress) {
+    if (!m_started || m_effect == nullptr) {
+        return true;
+    }
+    if (progress < 0.0) progress = 0.0;
+    if (progress > 1.0) progress = 1.0;
+    OfxStatus status = kOfxStatReplyDefault;
+    if (m_use_v2 && g_suites.progress_v2 != nullptr &&
+        g_suites.progress_v2->progressUpdate != nullptr) {
+        status = g_suites.progress_v2->progressUpdate(m_effect, progress);
+    } else if (!m_use_v2 && g_suites.progress_v1 != nullptr &&
+               g_suites.progress_v1->progressUpdate != nullptr) {
+        status = g_suites.progress_v1->progressUpdate(m_effect, progress);
+    }
+    return status != kOfxStatReplyNo;
 }
 
 void clear_persistent_message(OfxImageEffectHandle effect) {
@@ -118,7 +229,9 @@ void clear_persistent_message(OfxImageEffectHandle effect) {
         effect == nullptr) {
         return;
     }
-    g_suites.message->clearPersistentMessage(effect);
+    const OfxStatus status = g_suites.message->clearPersistentMessage(effect);
+    log_message("clear_persistent_message",
+                std::string("event=cleared status=") + std::to_string(status));
 }
 
 OfxStatus on_load() {

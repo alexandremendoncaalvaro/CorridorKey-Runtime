@@ -38,4 +38,23 @@ void clear_persistent_message(OfxImageEffectHandle effect) {
     (void)effect;
 }
 
+// ProgressScope stub mirrors the production helper from ofx_plugin.cpp
+// but does no host-side work. The unit test target does not compile
+// ofx_plugin.cpp (it owns the global suite-fetch machinery the tests stub
+// manually); test cases that exercise progress-suite behaviour install
+// their own table on g_suites.
+ProgressScope::ProgressScope(OfxImageEffectHandle effect, const char* label,
+                             const char* message_id)
+    : m_effect(effect) {
+    (void)label;
+    (void)message_id;
+}
+
+ProgressScope::~ProgressScope() = default;
+
+bool ProgressScope::update(double progress) {
+    (void)progress;
+    return true;
+}
+
 }  // namespace corridorkey::ofx

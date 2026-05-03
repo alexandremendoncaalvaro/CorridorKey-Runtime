@@ -457,3 +457,55 @@ TEST_CASE("compose_runtime_node_summary annotates instance/shared cache hits",
         CHECK(summary.body.find("Instance cache hit") != std::string::npos);
     }
 }
+
+// Pins the dedup contract that update_runtime_node_indicator depends on:
+// the (severity, body) pair returned by compose_runtime_node_summary is
+// stable when InstanceData fields that don't affect the indicator change.
+// If this regresses, every render frame would push setPersistentMessage
+// even when the surface message is identical, refilling Nuke's Error
+// Console line-by-line (the v0.8.2-win.x failure mode behind issue #56's
+// follow-up "screenshot of console full of duplicate WARNINGs").
+TEST_CASE("compose_runtime_node_summary is stable under non-display field churn",
+          "[unit][ofx][runtime][panel]") {
+    InstanceData data{};
+    data.device.backend = corridorkey::Backend::TensorRT;
+    data.device.name = "NVIDIA GeForce RTX 3080";
+    data.runtime_panel_state.effective_resolution = 1024;
+    data.last_frame_ms = 100.0;
+    data.render_count = 1;
+
+    const auto initial = compose_runtime_node_summary(data);
+
+    // render_count and frame_time_samples advance every frame but are
+    // not surfaced by the body. The dedup at update_runtime_node_indicator
+    // only re-emits when the body or severity literally differs, so these
+    // fields must NOT mutate the summary payload.
+    data.render_count = 99;
+    data.frame_time_samples = 99;
+
+    const auto after = compose_runtime_node_summary(data);
+
+    CHECK(after.body == initial.body);
+    CHECK(std::string(after.severity) == std::string(initial.severity));
+}
+
+// Pins the (severity, body) split: a state that warrants only a neutral
+// info message must not escalate the host-side node indicator. Foundry
+// Nuke colours the node thumbnail by severity (red = error, yellow =
+// warning, neutral = message); a regression that always returned
+// kOfxMessageWarning would paint every node yellow regardless of state.
+TEST_CASE("compose_runtime_node_summary keeps neutral severity on healthy state",
+          "[unit][ofx][runtime][panel]") {
+    InstanceData data{};
+    data.device.backend = corridorkey::Backend::TensorRT;
+    data.device.name = "NVIDIA GeForce RTX 3080";
+    data.runtime_panel_state.effective_resolution = 1024;
+    data.last_frame_ms = 100.0;
+    data.render_count = 1;
+
+    REQUIRE(data.last_error.empty());
+    REQUIRE(data.last_warning.empty());
+
+    const auto summary = compose_runtime_node_summary(data);
+    CHECK(std::string(summary.severity) == kOfxMessageMessage);
+}

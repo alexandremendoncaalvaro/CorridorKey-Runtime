@@ -13,6 +13,7 @@
 #include "ofxImageEffect.h"
 #include "ofxMessage.h"
 #include "ofxParam.h"
+#include "ofxProgress.h"
 #include "ofxProperty.h"
 #include "ofx_constants.hpp"
 #include "ofx_model_selection.hpp"
@@ -99,6 +100,7 @@ constexpr const char* kParamUpdateStatus = "update_status";
 constexpr const char* kParamOpenUpdatePage = "open_update_page";
 constexpr const char* kParamCheckUpdates = "check_updates";
 constexpr const char* kParamIncludePreReleases = "include_pre_releases";
+constexpr const char* kParamOpenLogFolder = "open_log_folder";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
 
@@ -107,6 +109,13 @@ struct OfxSuites {
     const OfxImageEffectSuiteV1* image_effect = nullptr;
     const OfxParameterSuiteV1* parameter = nullptr;
     const OfxMessageSuiteV2* message = nullptr;
+    // Both V1 and V2 of the OFX progress suite are kept side-by-side so the
+    // plugin can call the richest API the host advertises. README-hosts.txt
+    // confirms Resolve and Nuke both expose at least V1 in their suite list.
+    // Either pointer may be null on hosts that omit the optional suite; the
+    // ProgressScope helper degrades to a no-op rather than failing the action.
+    const OfxProgressSuiteV1* progress_v1 = nullptr;
+    const OfxProgressSuiteV2* progress_v2 = nullptr;
 };
 
 struct RuntimePanelState {
@@ -228,6 +237,17 @@ struct InstanceData {
     bool in_render_sequence = false;
     bool runtime_panel_dirty = false;
 
+    // Last (severity, body) pushed to the OFX message suite via
+    // setPersistentMessage. setPersistentMessage replaces the alert bound to
+    // the message_id every call, but Nuke 17's Error Console *appends* a
+    // line per call rather than coalescing — so calling it every frame with
+    // identical content fills the console with duplicates (issue #56 user
+    // report). Dedup at our layer: only re-emit when severity or body
+    // actually changed since the last call. Empty body means "currently
+    // cleared" so the next non-empty call re-emits.
+    std::string last_persistent_severity = {};
+    std::string last_persistent_body = {};
+
     FrameResult cached_result = {};
     bool cached_result_valid = false;
     double cached_time = 0.0;
@@ -314,6 +334,31 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 void set_persistent_message(const char* message_type, const char* message_id,
                             const char* message, OfxImageEffectHandle effect);
 void clear_persistent_message(OfxImageEffectHandle effect);
+
+// kOfxProgressSuite (V1 + V2) wrapper used during long-running prepare /
+// warmup operations such as TensorRT engine compile. Both Foundry Nuke and
+// DaVinci Resolve advertise this suite (openfx-misc README-hosts.txt) and
+// surface it as a modal "Loading..." dialog with a Cancel button. The
+// wrapper degrades to a no-op when the host does not expose the suite or
+// when the effect handle is null. ofxProgress.h:17-27 documents that
+// plugins performing analysis should "raise the progress monitor in a
+// modal manner" and poll for cancellation.
+class ProgressScope {
+   public:
+    ProgressScope(OfxImageEffectHandle effect, const char* label, const char* message_id);
+    ProgressScope(const ProgressScope&) = delete;
+    ProgressScope& operator=(const ProgressScope&) = delete;
+    ~ProgressScope();
+    // Returns false when the host has signalled cancel (kOfxStatReplyNo on
+    // progressUpdate). Pass progress in [0, 1]. Safe to call when the
+    // host does not expose the progress suite (no-op, returns true).
+    bool update(double progress);
+
+   private:
+    OfxImageEffectHandle m_effect = nullptr;
+    bool m_started = false;
+    bool m_use_v2 = false;
+};
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);

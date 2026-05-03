@@ -1544,13 +1544,35 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         // flushes the latest status. The transient spinner is the canonical
         // OFX trade-off for thread-safe paramSetValue.
         update_runtime_panel(data);
+        // OFX 1.4 progress suite. ofxProgress.h:17-27 documents this as the
+        // canonical channel for "plugins that perform analysis" — exactly our
+        // case. Both Nuke and Resolve advertise it; on Nuke 17 it surfaces as
+        // a modal "Loading..." dialog with Cancel, on Resolve 18+ it appears
+        // in the lower status bar. The label includes the artefact filename
+        // and effective resolution so the user knows *what* is compiling
+        // (TensorRT engine compile dominates first-launch wall time per
+        // help/TROUBLESHOOTING.md "First-Run Warmup").
+        const std::string progress_label =
+            std::string("CorridorKey: preparing ") +
+            quality_mode_label(requested_quality_mode) + " engine (" +
+            std::to_string(selection.effective_resolution) + "px) — first launch may take 10-30s";
+        ProgressScope progress_scope(data->effect, progress_label.c_str(),
+                                     "corridorkey_prepare_session");
+        progress_scope.update(0.05);
         auto prepare_result = data->runtime_client->prepare_session(
             build_prepare_request(requested_device, selection, requested_quality_mode),
             [&](const StageTiming& timing) {
                 log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase, requested_device,
                                  selection.executable_model_path, requested_resolution,
                                  selection.effective_resolution, timing);
+                // Heuristic: tick the progress bar each time the runtime
+                // emits a stage timing. ProgressScope ignores out-of-range
+                // values so we cap at 0.95 and let the post-call update(1.0)
+                // close it cleanly. ofxProgress.h does not require strictly
+                // increasing values; hosts are documented to clamp.
+                progress_scope.update(0.5);
             });
+        progress_scope.update(1.0);
         if (!prepare_result) {
             data->last_error = "Failed to prepare runtime session for " +
                                std::string(quality_mode_label(requested_quality_mode)) + " using " +
@@ -1691,13 +1713,41 @@ void update_runtime_node_indicator(InstanceData* data) {
     if (data == nullptr || data->effect == nullptr) {
         return;
     }
+    // openfx-misc README-hosts.txt:75 — "Resolve 14: claims it has OpenFX
+    // message suite V2, but setPersistentMessage is NULL and
+    // clearPersistentMessage is garbage." The set_persistent_message helper
+    // already null-checks the function pointers, but skip the work entirely
+    // when the host is Resolve so we don't waste cycles formatting a body
+    // that nothing will display. Resolve users get their dynamic feedback
+    // through the panel params instead (Resolve allows mid-render
+    // paramSetValue).
+    if (is_resolve_host()) {
+        return;
+    }
     const RuntimeNodeSummary summary = compose_runtime_node_summary_impl(*data);
+    const std::string severity_str = summary.severity != nullptr ? summary.severity : "";
+
+    // Dedup: setPersistentMessage replaces the alert per (effect, message_id)
+    // on spec-compliant hosts, but Foundry Nuke 17's Error Console appends
+    // each call instead of coalescing — calling every render frame floods
+    // the console. Only re-emit when severity or body changed.
     if (summary.body.empty()) {
+        if (data->last_persistent_body.empty() && data->last_persistent_severity.empty()) {
+            return;
+        }
         clear_persistent_message(data->effect);
+        data->last_persistent_severity.clear();
+        data->last_persistent_body.clear();
+        return;
+    }
+    if (severity_str == data->last_persistent_severity &&
+        summary.body == data->last_persistent_body) {
         return;
     }
     set_persistent_message(summary.severity, "corridorkey_runtime_status",
                            summary.body.c_str(), data->effect);
+    data->last_persistent_severity = severity_str;
+    data->last_persistent_body = summary.body;
 }
 
 void update_runtime_panel(InstanceData* data) {
@@ -1857,6 +1907,25 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
             if (changed_param == kParamCheckUpdates) {
                 kickoff_global_update_check(true);
                 data->runtime_panel_dirty = true;
+                return kOfxStatOK;
+            }
+            if (changed_param == kParamOpenLogFolder) {
+                // Surface the per-user log directory in the system file
+                // browser. common::default_logs_root() resolves to:
+                //   Windows: %LOCALAPPDATA%\CorridorKey\Logs
+                //   macOS:   ~/Library/Logs/CorridorKey
+                //   Linux:   $XDG_CACHE_HOME/.../tmp fallback
+                // Path is created on demand so the click never lands on a
+                // non-existent folder when the plugin has not yet logged
+                // anything (fresh install before first render).
+                std::filesystem::path log_dir = common::default_logs_root();
+                std::error_code ec;
+                std::filesystem::create_directories(log_dir, ec);
+                if (!open_external_url(log_dir.string())) {
+                    post_message(
+                        kOfxMessageError,
+                        ("Failed to open log folder: " + log_dir.string()).c_str(), instance);
+                }
                 return kOfxStatOK;
             }
             if (changed_param == kParamIncludePreReleases) {
