@@ -1,0 +1,249 @@
+; CorridorKey Windows installer (Inno Setup 6.4+).
+;
+; This template is consumed by scripts/package_ofx_installer_windows.ps1,
+; which substitutes @@TOKEN@@ placeholders against a per-build context
+; (display label, pack manifest, build dir, flavor) and then invokes
+; ISCC.exe to compile the resulting .iss into the final installer
+; executable. The template is the single source of truth for installer
+; structure; the PowerShell packager only injects values, never logic.
+;
+; Two flavors are produced from the SAME template via the `Flavor`
+; preprocessor directive:
+;
+;   ONLINE  - small stub installer (~50 MB). Plugin base bundled,
+;             every model + runtime pack downloaded at install time
+;             from Hugging Face with SHA256 verification.
+;   OFFLINE - large self-contained installer (~7 GB). All packs
+;             bundled inside the installer; no network access during
+;             install.
+;
+; Component selection (green / blue / hint / gui) is identical across
+; flavors. The difference is purely transport: download-on-demand vs
+; pre-bundled bytes. arm_torchtrt_runtime in
+; src/core/torch_trt_loader.cpp walks for blue runtime DLLs at
+; <install>/Contents/Resources/torchtrt-runtime/bin/ regardless of
+; how the bytes got there.
+;
+; Reference: docs/RELEASE_GUIDELINES.md "Windows installer (modern
+; flow)".
+
+#define MyAppName "CorridorKey"
+#define MyAppPublisher "CorridorKey"
+#define MyAppURL "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime"
+#define MyDisplayLabel "@@DISPLAY_LABEL@@"
+#define MyBaseVersion "@@BASE_VERSION@@"
+#define PluginPayloadDir "@@PLUGIN_PAYLOAD_DIR@@"
+#define ModelPayloadDir "@@MODEL_PAYLOAD_DIR@@"
+#define OutputDir "@@OUTPUT_DIR@@"
+#define OutputBaseFilename "@@OUTPUT_BASE_FILENAME@@"
+#define InstallerIcon "@@INSTALLER_ICON@@"
+#define ManifestPath "@@MANIFEST_PATH@@"
+; Flavor MUST be one of: "online" | "offline".
+#define Flavor "@@FLAVOR@@"
+
+[Setup]
+AppId={{8B8C9CF7-9C20-4D8E-9E36-C3A4F0F1E0B0}}
+AppName={#MyAppName}
+AppVersion={#MyBaseVersion}
+AppVerName={#MyAppName} {#MyDisplayLabel}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+VersionInfoVersion={#MyBaseVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} OFX plugin installer
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyDisplayLabel}
+
+; OFX plugins MUST install under <CommonFiles>\OFX\Plugins\<bundle>.
+; The host (Resolve, Nuke, Fusion) discovers .ofx bundles by scanning
+; this directory at startup. Anything else means the plugin does not
+; load. {commoncf64} resolves to C:\Program Files\Common Files on a
+; standard 64-bit Windows install; passing /DIR=... at the command
+; line still works for unattended deployments that target a custom
+; OFX root.
+DefaultDirName={commoncf64}\OFX\Plugins\{#MyAppName}.ofx.bundle
+DisableDirPage=auto
+DisableProgramGroupPage=yes
+DisableReadyPage=no
+UninstallDisplayName={#MyAppName} {#MyDisplayLabel}
+UninstallDisplayIcon={app}\Contents\Win64\corridorkey.exe
+
+; Modern wizard with dynamic light/dark following Windows + Win11
+; flat aesthetic. Documented in
+; https://jrsoftware.org/ishelp/topic_setup_wizardstyle.htm
+WizardStyle=modern dynamic windows11
+WizardSizePercent=110
+
+; Native 64-bit only - we link against TensorRT, libtorch and ONNX
+; Runtime CUDA builds, none of which ship 32-bit binaries.
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+
+; Compression: lzma2 with ultra preset for the offline flavor where
+; the installer carries the full payload. The online stub barely
+; benefits from compression (only the plugin binaries inside) so the
+; same setting is harmless there.
+Compression=lzma2/ultra
+SolidCompression=yes
+LZMAUseSeparateProcess=yes
+
+OutputDir={#OutputDir}
+OutputBaseFilename={#OutputBaseFilename}
+SetupIconFile={#InstallerIcon}
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+
+[Types]
+Name: "minimum"; Description: "Mínimo (apenas Verde)"
+Name: "recommended"; Description: "Recomendado (Verde + Azul)"
+Name: "full"; Description: "Completo (Verde + Azul + Hint Tracker)"
+Name: "custom"; Description: "Personalizado"; Flags: iscustom
+
+[Components]
+; Plugin base is always installed - it is the OFX bundle the host
+; loads, plus the green-track ONNX Runtime DLLs that ship in every
+; flavor. The fixed flag prevents the user from unchecking it.
+Name: "pluginbase"; Description: "Plugin OFX base (CLI + runtime ONNX)"; \
+    Types: minimum recommended full custom; Flags: fixed
+
+Name: "green"; Description: "Pack Verde - modelos chroma key verde (~700 MB)"; \
+    Types: minimum recommended full custom
+
+Name: "blue"; Description: "Pack Azul - modelos chroma key azul + runtime libtorch (~6 GB)"; \
+    Types: recommended full
+
+Name: "hint"; Description: "Pack Hint Tracker - assistente de seleção (~150 MB)"; \
+    Types: full
+
+[Files]
+; Plugin base payload. Always installed. Path layout matches the
+; OFX bundle convention plus the existing CMake POST_BUILD layout
+; (CorridorKey.ofx + corridorkey.exe + corridorkey_ofx_runtime_server.exe
+; + ORT/CUDA/MSVC redist DLLs co-located in Contents\Win64).
+Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
+    DestDir: "{app}\Contents\Win64"; \
+    Components: pluginbase; \
+    Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Per-build wrapper DLL (corridorkey_torchtrt.dll) ships next to the
+; rest of the runtime DLLs of the blue pack. It is built from this
+; repo and changes per commit, so it is staged as part of plugin
+; base (Win64\) and copied into the runtime dir on first blue
+; session activation by arm_torchtrt_runtime. Including it here keeps
+; the upstream HF runtime archive stable across our code changes.
+
+#if Flavor == "offline"
+; ----------------------------------------------------------------------
+; OFFLINE flavor: every selected pack is pre-bundled inside the
+; installer, no network access at install time. The PowerShell
+; packager places the per-pack files under {#ModelPayloadDir} (rooted
+; at the manifest pack's dest_subdir) before invoking ISCC.
+; ----------------------------------------------------------------------
+
+@@OFFLINE_FILES_BLOCK@@
+
+#endif
+
+#if Flavor == "online"
+; ----------------------------------------------------------------------
+; ONLINE flavor: per-pack files arrive via DownloadTemporaryFile into
+; {tmp} and the [Files] section claims them with the `external` flag
+; so they land in the install dir at the bundle layout the runtime
+; expects. The download itself is wired in [Code] below.
+; ----------------------------------------------------------------------
+
+@@ONLINE_EXTERNAL_FILES_BLOCK@@
+
+#endif
+
+[Tasks]
+; No optional checkboxes for now. Reserved for future: "create
+; desktop shortcut", "add to PATH", etc.
+
+[Run]
+; The OFX host (Resolve / Nuke) auto-discovers the bundle on its
+; next launch; nothing to launch from the installer beyond an
+; optional README (post-install verification step).
+
+[UninstallDelete]
+; Sweep downloaded packs on uninstall. The installer-tracked files
+; are removed automatically; this block catches any directory left
+; behind under Resources/ (typical when a download wrote into a
+; subdir that the installer did not pre-register, e.g. an
+; extractarchive payload).
+Type: filesandordirs; Name: "{app}\Contents\Resources\models"
+Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
+
+[Code]
+{
+  CorridorKey installer code.
+
+  Online flavor:
+    - Creates a download wizard page after wpReady.
+    - Adds one entry per file from the selected packs, using the
+      sha256 baked into the page's Add() call so Inno Setup's
+      built-in DownloadTemporaryFile path verifies integrity before
+      the file leaves {tmp}.
+    - Aborts the install on download or hash failure (no silent
+      fallback - a partial install of the blue pack would surface
+      as opaque DLL load failures at runtime).
+
+  Offline flavor:
+    - No-op in [Code]: every file is staged via [Files] entries
+      written by the PowerShell packager.
+
+  Pattern based on the official CodeDownloadFiles.iss example shipped
+  with Inno Setup; see
+  https://raw.githubusercontent.com/jrsoftware/issrc/main/Examples/CodeDownloadFiles.iss
+}
+
+#if Flavor == "online"
+var
+  DownloadPage: TDownloadWizardPage;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage(
+    SetupMessage(msgWizardPreparing),
+    'Baixando os pacotes selecionados de Hugging Face. SHA-256 verificado a cada arquivo.',
+    nil);
+  DownloadPage.ShowBaseNameInsteadOfUrl := True;
+end;
+
+@@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ErrorMessage: String;
+begin
+  if CurPageID = wpReady then begin
+    DownloadPage.Clear;
+    CorridorKeyEnqueueDownloads(DownloadPage);
+    DownloadPage.Show;
+    try
+      try
+        DownloadPage.Download;
+        Result := True;
+      except
+        if DownloadPage.AbortedByUser then begin
+          Log('Download aborted by user.');
+          Result := False;
+        end else begin
+          ErrorMessage := Format('%s: %s', [DownloadPage.LastBaseNameOrUrl, GetExceptionMessage]);
+          SuppressibleMsgBox(AddPeriod(ErrorMessage), mbCriticalError, MB_OK, IDOK);
+          Result := False;
+        end;
+      end;
+    finally
+      DownloadPage.Hide;
+    end;
+  end else
+    Result := True;
+end;
+#endif
