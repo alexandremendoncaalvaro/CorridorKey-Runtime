@@ -373,6 +373,55 @@ if ($requiresCudaRuntime) {
     Write-Host "Skipping CUDA runtime staging because no CUDA/TensorRT provider was found."
 }
 
+# Stage the Visual C++ Redistributable DLLs that CMake's
+# InstallRequiredSystemLibraries module copied into the build tree's
+# CorridorKey.ofx.bundle/Contents/Win64/ during the OFX target's POST_BUILD
+# step. The staged bundle here is built from scratch (it does not start from
+# the build-tree bundle), so without this step the dist bundle ships without
+# the app-local C++ runtime.
+#
+# Without these DLLs in Contents\Win64\, the spawned OFX runtime server
+# inherits Foundry Nuke's altered DLL search order (Nuke calls
+# SetDllDirectory on its own process; per Microsoft
+# https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order
+# that order propagates to children) and ends up importing Nuke's older
+# MSVCP140.dll. ABI mismatch with what TensorRT-RTX / ORT were built against
+# crashes the import-fixup pre-wWinMain — Issue #56.
+#
+# Source of truth: the CMake-staged bundle. If a DLL is missing there, this
+# script intentionally fails so a release cannot ship without the fix in
+# place. The expected name list mirrors CorridorKeyExpectedBundledRuntimeList
+# in scripts/validate_ofx_win.ps1 and tests/regression/test_regression_0056_bundle_vcruntime.cpp.
+$cmakeBundleWin64 = Join-Path $BuildDir "CorridorKey.ofx.bundle\Contents\Win64"
+$expectedVcRedistNames = @(
+    "VCRUNTIME140.dll", "VCRUNTIME140_1.dll",
+    "MSVCP140.dll", "MSVCP140_1.dll", "MSVCP140_2.dll",
+    "MSVCP140_atomic_wait.dll", "MSVCP140_codecvt_ids.dll"
+)
+$missingVcRedist = @()
+foreach ($redistName in $expectedVcRedistNames) {
+    $redistSource = Join-Path $cmakeBundleWin64 $redistName
+    if (-not (Test-Path $redistSource)) {
+        $missingVcRedist += $redistName
+        continue
+    }
+    Copy-Item $redistSource $win64Dir -Force
+}
+if ($missingVcRedist.Count -gt 0) {
+    throw "Visual C++ Redistributable DLLs missing from CMake-staged bundle at $cmakeBundleWin64. Missing: $($missingVcRedist -join ', '). Expected CMake's InstallRequiredSystemLibraries module to populate these via the corridorkey_ofx POST_BUILD step. Verify the root CMakeLists.txt include and the MSVC toolchain has the C++ Redistributable component installed."
+}
+Write-Host "Copied Visual C++ Redistributable DLLs (Issue #56 app-local mitigation): $($expectedVcRedistNames -join ', ')"
+
+# concrt140.dll comes from the same MSVC redist set when the toolchain ships
+# it. It is technically optional (only legacy Concurrency Runtime symbols),
+# but staging it is harmless and keeps the bundle layout identical to what
+# the CMake POST_BUILD path produces, so future audits comparing the two
+# never report a phantom diff.
+$concrtSource = Join-Path $cmakeBundleWin64 "concrt140.dll"
+if (Test-Path $concrtSource) {
+    Copy-Item $concrtSource $win64Dir -Force
+}
+
 if ($null -ne $tensorrtProvider) {
     Write-Host "Validating packaged TensorRT backend loadability..." -ForegroundColor Cyan
     $envPathOld = $env:PATH
