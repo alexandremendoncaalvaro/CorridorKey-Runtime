@@ -117,8 +117,8 @@
           "remote_path": "torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
           "filename": "corridorkey_blue_torchtrt_runtime.7z",
           "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
-          "sha256": "d6d2dd40c428dd04295f2764c09ab80f22b7da0ff472ea9fc570a7b5ca3da28a",
-          "size_bytes": 2111121611,
+          "sha256": "83779c34a270e9ae71e356abfe8681298bcbd02fa118df528e30a607d984330b",
+          "size_bytes": 2111121577,
           "status": "ready"
         }
       ]
