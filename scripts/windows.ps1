@@ -234,11 +234,15 @@ switch ($Task) {
                     "-PluginPayloadDir", $stagedBundle
                 )
                 if ($Flavor -eq "offline") {
-                    # Offline staging not yet wired - tracked as the
-                    # next commit on this branch. The builder fails
-                    # cleanly with a "ModelPayloadDir not found" so the
-                    # operator gets a clear pointer to the missing
-                    # piece rather than an opaque ISCC error.
+                    # Offline flavor needs every pack file laid out on
+                    # disk before ISCC compiles. stage_offline_payload
+                    # downloads each "ready" entry from Hugging Face
+                    # into dist/_offline_payload/ with SHA256 verify.
+                    # The helper is idempotent (skips files whose
+                    # local sha256 already matches the manifest) so a
+                    # repeated package-ofx run only re-downloads what
+                    # actually changed.
+                    Invoke-CorridorKeyScript -ScriptName "installer\stage_offline_payload.ps1" -Arguments @()
                     $offlineRoot = Join-Path $repoRoot "dist\_offline_payload"
                     $innoArgs += @("-ModelPayloadDir", $offlineRoot)
                 }
