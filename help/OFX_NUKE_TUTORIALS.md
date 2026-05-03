@@ -38,6 +38,35 @@ but the manual fallback above always works.
 
 CorridorKey appears in the node menu under **OFX > Keying > CorridorKey**.
 
+## How CorridorKey Surfaces Its State in Nuke
+
+The OFX 1.4 spec (`ofxParam.h:1088`) forbids `paramSetValue` from the
+render thread, and Foundry Nuke 17 enforces it strictly. As a result,
+fields like *Last Frame* timing or *Runtime Path* would always lag the
+actual frame in Nuke -- so they are hidden on Nuke and CorridorKey routes
+the live signals through the channels Nuke does keep current:
+
+- **Modal "Loading..." dialog with Cancel** during the first TensorRT
+  engine compile of any quality (the `OfxProgressSuiteV2` channel). This
+  is the 10-30 s cold-start window documented in `TROUBLESHOOTING.md`.
+- **Coloured indicator on the node in the Node Graph and in the Viewer**
+  for warnings and errors. Foundry's own error-handling docs describe
+  this verbatim: *"an error alert displays in the Viewer and on the node
+  that has a problem in the Node Graph."* Hover the node for the
+  message; one line per state change appears in the Error Console pane.
+  Open it via *content menu > Windows > Error Console*.
+- **Static configuration fields** (Backend, Device, Effective Quality,
+  Safe Quality Ceiling, Loaded Artifact, Runtime Session, Status) stay
+  in the panel and refresh whenever you touch any control. They reflect
+  the actual session state at that moment, not the most recent frame.
+- **Open Log Folder button** (top of the runtime group) opens
+  `%LOCALAPPDATA%\CorridorKey\Logs` in Explorer for the rich per-frame
+  telemetry: stage timings, GPU detection, TRT compile traces.
+
+In DaVinci Resolve those same per-frame fields stay visible in the panel
+because Resolve allows mid-render `paramSetValue`; the difference is
+intentional and follows what each host respects.
+
 ## License Requirement (Non-commercial Will Not Work)
 
 Nuke Non-commercial does not load any third-party OFX plug-in -- this is a

@@ -70,6 +70,17 @@ if(WIN32)
         list(APPEND _corridorkey_ofx_runtime_server_runtime_dlls
             ${_corridorkey_ofx_runtime_server_ort_runtime_dlls})
     endif()
+    # Stage the discovered Visual C++ Redistributable DLLs next to the
+    # runtime-server executable in the dev build dir so an out-of-bundle
+    # invocation (test_integration, ofx_rpc_benchmark_harness, manual repro
+    # from a CMD shell) resolves them via search-order step #1 instead of
+    # falling through to whatever VC++ Redist is currently registered on
+    # the host. The same DLLs are also staged into the OFX bundle below.
+    # Rationale + MS doc citations are in the root CMakeLists.txt.
+    if(WIN32 AND MSVC AND CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        list(APPEND _corridorkey_ofx_runtime_server_runtime_dlls
+            ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
+    endif()
 
     add_custom_command(TARGET corridorkey_ofx_runtime_server POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -141,6 +152,17 @@ if(WIN32)
         endforeach()
     endif()
 
+    # Visual C++ Redistributable DLLs to ship app-local in the bundle.
+    # Discovered by InstallRequiredSystemLibraries in the root CMakeLists.txt
+    # (rationale and MS-doc citations live there). Empty list on non-MSVC or
+    # when the toolchain is missing the Redist component, in which case the
+    # post-build commands below degrade to the historical staging.
+    set(_corridorkey_ofx_vcredist_dlls)
+    if(MSVC AND CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        list(APPEND _corridorkey_ofx_vcredist_dlls
+            ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
+    endif()
+
     if(_corridorkey_ofx_runtime_dlls)
         add_custom_command(TARGET corridorkey_ofx POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -160,11 +182,17 @@ if(WIN32)
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
 
-            # Copy transitive runtime DLLs (e.g. libcurl/OpenSSL/zlib pulled in by
-            # cpr for the in-plugin update check). Empty generator expression is
-            # a no-op, so this is safe when the plugin has no dynamic deps.
+            # Copy transitive runtime DLLs (cpr/libcurl/OpenSSL/zlib for the
+            # in-plugin update check) PLUS the Visual C++ Redistributable
+            # DLLs discovered by InstallRequiredSystemLibraries. The Redist
+            # set is what makes the sidecar bind a known-good MSVCP140.dll
+            # next to its own .exe instead of inheriting whatever the host
+            # process pinned via SetDllDirectory (Issue #56). Empty generator
+            # expression / list is a no-op, so this stays safe on toolchains
+            # without dynamic deps or without the Redist component installed.
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${_corridorkey_ofx_cuda_dlls}
+                ${_corridorkey_ofx_vcredist_dlls}
                 $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
                 "${_ofx_bundle_dir}/Contents/Win64/"
 
@@ -188,11 +216,11 @@ if(WIN32)
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
 
-            # Copy transitive runtime DLLs (e.g. libcurl/OpenSSL/zlib pulled in by
-            # cpr for the in-plugin update check). Empty generator expression is
-            # a no-op, so this is safe when the plugin has no dynamic deps.
+            # Copy transitive runtime DLLs + Visual C++ Redistributable.
+            # See the parallel block above for the per-list rationale.
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${_corridorkey_ofx_cuda_dlls}
+                ${_corridorkey_ofx_vcredist_dlls}
                 $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
                 "${_ofx_bundle_dir}/Contents/Win64/"
 

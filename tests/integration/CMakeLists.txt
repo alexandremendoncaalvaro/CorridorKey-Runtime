@@ -37,16 +37,30 @@ target_include_directories(test_integration PRIVATE ${PROJECT_SOURCE_DIR}/vendor
 
 corridorkey_stage_ort_runtime(test_integration)
 
+# Tiny helper executable used by the early-child-death regression test for
+# issue #56. Spawning a real sidecar that exits immediately on launch is the
+# only way to exercise the "process died before binding the port" path
+# end-to-end through OfxRuntimeClient::launch_server() and the wait loop in
+# ensure_server_running().
+add_executable(ofx_runtime_test_quick_exit ofx_runtime_test_quick_exit.cpp)
+corridorkey_apply_windows_common_compile_defs(ofx_runtime_test_quick_exit)
+if(NOT MSVC)
+    target_compile_options(ofx_runtime_test_quick_exit PRIVATE -Wall -Wextra -Wpedantic -Werror)
+else()
+    target_compile_options(ofx_runtime_test_quick_exit PRIVATE /W4 /WX /permissive-)
+endif()
+
 target_compile_definitions(test_integration PRIVATE
     PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
     OFX_PLUGIN_PATH="$<TARGET_FILE:corridorkey_ofx>"
+    OFX_RUNTIME_TEST_QUICK_EXIT_PATH="$<TARGET_FILE:ofx_runtime_test_quick_exit>"
 )
 
 # test_ofx_plugin_exceptions dlopen's the built OFX bundle at runtime — the
 # generator-expression path alone does not imply a build-order edge, so without
 # this dependency a targeted "ninja test_integration" leaves the plugin unbuilt
 # and the test fails with a nullptr handle.
-add_dependencies(test_integration corridorkey_ofx)
+add_dependencies(test_integration corridorkey_ofx ofx_runtime_test_quick_exit)
 
 # corridorkey_core carries -fsanitize=address under ENABLE_ASAN while
 # test_integration itself does not. When the test dlopen's CorridorKey.ofx the

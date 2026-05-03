@@ -907,4 +907,68 @@ TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime 
     REQUIRE_FALSE(server_error.has_value());
 }
 
+// Regression test for issue #56: when the spawned sidecar exits before
+// binding its port, the client must detect the dead PID and surface an
+// actionable error within a small fraction of launch_timeout_ms. Before
+// this guard the client polled Health for the full timeout and returned
+// only a generic "Timed out" string, leaving the user no pointer to the
+// server log path.
+TEST_CASE("ofx runtime client detects sidecar that exits during startup",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path quick_exit_binary = OFX_RUNTIME_TEST_QUICK_EXIT_PATH;
+    REQUIRE(std::filesystem::exists(quick_exit_binary));
+
+    const auto port = reserve_local_port();
+
+    OfxRuntimeClientOptions options;
+    options.endpoint = LocalJsonEndpoint{"127.0.0.1", port};
+    options.server_binary = quick_exit_binary;
+    // The headline diagnostic claim is "early-exit detection short-circuits
+    // the wait_for_server_ready loop before launch_timeout_ms expires". To
+    // assert that without overspecifying machine performance, set a 10 s
+    // launch_timeout_ms and require elapsed < launch_timeout_ms / 2. The
+    // assertion remains tight enough to catch a regression where the loop
+    // falls through to the timeout (which would push elapsed close to the
+    // full budget) while staying robust to first-launch AV scan latency
+    // observed on Windows hosts.
+    options.launch_timeout_ms = 10000;
+    options.request_timeout_ms = 500;
+    options.prepare_timeout_ms = 1000;
+
+    auto client = OfxRuntimeClient::create(options);
+    REQUIRE(client.has_value());
+
+    OfxRuntimePrepareSessionRequest prepare_request;
+    prepare_request.client_instance_id = "client-quick-exit";
+    prepare_request.model_path = "models/corridorkey_fp16_512.onnx";
+    prepare_request.artifact_name = "corridorkey_fp16_512.onnx";
+    prepare_request.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
+    prepare_request.requested_quality_mode = 1;
+    prepare_request.requested_resolution = 512;
+    prepare_request.effective_resolution = 512;
+    prepare_request.engine_options.allow_cpu_fallback = false;
+    prepare_request.engine_options.disable_cpu_ep_fallback = true;
+
+    const auto start = std::chrono::steady_clock::now();
+    auto prepared = (*client)->prepare_session(prepare_request);
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - start)
+                                .count();
+
+    REQUIRE_FALSE(prepared.has_value());
+    INFO("elapsed_ms=" << elapsed_ms);
+    INFO("error.message=" << prepared.error().message);
+    CHECK(prepared.error().message.find("exited during startup") != std::string::npos);
+    // Confirm the message names the artefacts the user needs (TROUBLESHOOTING.md
+    // "Logs and Bug Report Guidance" already directs users at the LOCALAPPDATA
+    // log directory; the dialog should now name the exact log filename).
+    CHECK(prepared.error().message.find("server_log=") != std::string::npos);
+    CHECK(prepared.error().message.find("server_binary=") != std::string::npos);
+    // Performance guarantee: early-exit detection must short-circuit the
+    // wait_for_server_ready loop well before launch_timeout_ms expires.
+    // A regression that left the loop polling Health for the full timeout
+    // would push elapsed_ms close to launch_timeout_ms.
+    CHECK(elapsed_ms < options.launch_timeout_ms / 2);
+}
+
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

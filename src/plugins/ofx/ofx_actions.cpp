@@ -154,7 +154,7 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
 
 void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, const char* label,
                                  const char* default_value, const char* hint,
-                                 const char* parent = nullptr) {
+                                 const char* parent = nullptr, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     OfxStatus status =
         g_suites.parameter->paramDefine(param_set, kOfxParamTypeString, name, &param_props);
@@ -168,6 +168,16 @@ void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, 
     g_suites.property->propSetString(param_props, kOfxParamPropStringMode, 0,
                                      kRuntimeStatusStringMode);
     g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, kRuntimeStatusEnabled);
+    if (secret) {
+        // openfx-misc README-hosts.txt:150 documents Nuke's quirk:
+        // "Params that are described as secret can never be 'revealed',
+        // they are doomed to remain secret". Callers pass secret=true only
+        // for params that should stay invisible for the lifetime of the
+        // descriptor on the active host (e.g. per-frame fields on Nuke,
+        // where ofxParam.h:1088 forbids the render-thread paramSetValue
+        // that would be needed to refresh them mid-session).
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
+    }
     g_suites.property->propSetInt(param_props, kOfxParamPropEvaluateOnChange, 0, 0);
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
@@ -359,6 +369,33 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         std::string("CorridorKey v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
+    // "Open Log Folder" is the rich-telemetry escape hatch documented in
+    // help/TROUBLESHOOTING.md "Logs and Bug Report Guidance". Mocha Pro 2021+
+    // uses the same pattern (out-of-process plugin + button to surface the
+    // log directory). Placed at the top of runtime_group so users can find
+    // it without scrolling, regardless of host.
+    define_push_button_param(param_set, kParamOpenLogFolder, "Open Log Folder",
+                             "Open the CorridorKey log folder in the system file browser. "
+                             "Logs include per-frame timings, GPU/backend selection details, "
+                             "and full TensorRT engine compile traces.",
+                             "runtime_group");
+
+    // Per-host visibility decision for runtime telemetry params. Foundry
+    // Nuke 17 enforces ofxParam.h:1088 strictly: paramSetValue must run on
+    // the main thread, never from the render action. The plugin defers
+    // those updates correctly (in_render guard in update_runtime_panel_values)
+    // but the side effect is that on Nuke the per-frame fields *cannot*
+    // refresh until the user touches a control. Showing them anyway is
+    // dishonest UI -- they always lag. So we hide them on Nuke and let the
+    // node-graph badge + Open Log Folder carry the live signal there.
+    // Resolve has no such constraint: paramSetValue from the render thread
+    // is observed live, so the same fields are real-time feedback there.
+    //
+    // openfx-misc README-hosts.txt:150 verbatim: "Params that are described
+    // as secret can never be 'revealed', they are doomed to remain secret".
+    // That quirk is exactly what we want here -- hidden-on-Nuke is a
+    // permanent decision for that descriptor.
+    const bool hide_per_frame_on_host = is_nuke_host();
     define_runtime_status_param(
         param_set, kParamRuntimeProcessing, "Processing Backend", "Initializing...",
         "Shows the backend currently used by this OFX instance.", "runtime_group");
@@ -373,7 +410,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         param_set, kParamRuntimeGuideSource, "Guide Source", "Initializing...",
         "Shows whether CorridorKey used an external Alpha Hint or generated a rough fallback "
         "guide for the last render.",
-        "runtime_group");
+        "runtime_group", hide_per_frame_on_host);
     define_runtime_status_param(
         param_set, kParamRuntimeSession, "Runtime Session", "Initializing...",
         "Shows whether this OFX instance is using a dedicated runtime session or a shared one.",
@@ -388,7 +425,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Shows the last frame render time CorridorKey associates with the visible result, plus "
         "the rolling average. This value persists across playback sequences until a new frame is "
         "computed.",
-        "runtime_group");
+        "runtime_group", hide_per_frame_on_host);
     // kParamRuntimePath and kParamRuntimeBackendWork live in the
     // runtime_details_group subgroup further below. They are defined exactly
     // once per OFX 1.5 spec (vendor/openfx/include/ofxParam.h:912 verbatim:
@@ -436,16 +473,20 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                 "Shows the actual model or bridge file loaded for the current "
                                 "quality mode.",
                                 "runtime_details_group");
+    // Same per-host visibility rule as the top-level params above:
+    // Runtime Path and Backend Work are recomputed every render frame and
+    // cannot refresh on Nuke without violating ofxParam.h:1088. Hidden on
+    // Nuke; visible on Resolve where mid-render paramSetValue works.
     define_runtime_status_param(
         param_set, kParamRuntimePath, "Runtime Path", "Initializing...",
         "Shows whether the last render used the direct path, artifact fallback, or full-model "
         "tiling.",
-        "runtime_details_group");
+        "runtime_details_group", hide_per_frame_on_host);
     define_runtime_status_param(
         param_set, kParamRuntimeBackendWork, "Backend Work", "Initializing...",
         "Shows whether the last frame result came from a backend render, shared cache, or "
         "instance cache.",
-        "runtime_details_group");
+        "runtime_details_group", hide_per_frame_on_host);
 
     const std::string start_here_hint =
         host_qualified_phrase(g_host_name, "Open the quick-start guide for CorridorKey") + ".";

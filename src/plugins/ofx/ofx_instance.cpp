@@ -611,6 +611,84 @@ std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
     }
 }
 
+// Compose the one-line node-indicator summary that mirrors the runtime
+// panel telemetry into a form OFX MessageSuiteV2 setPersistentMessage
+// can carry. Used so Foundry Nuke (which does not allow render-thread
+// paramSetValue and therefore leaves the runtime panel showing
+// "Initializing..." between user clicks per the OFX 1.5 paramSetValue
+// rule in ofxParam.h:1088) still surfaces dynamic backend / effective
+// quality / last-frame telemetry on the node icon. Resolve users see
+// both surfaces; Nuke users see the node indicator only.
+//
+// The body text follows the same field ordering the panel uses but
+// collapses each line into a single readable token so the host's
+// tooltip display stays compact. Severity drives the host's colour
+// indicator (Foundry Nuke renders the node red on Error, yellow on
+// Warning, neutral on Message per the OFX 1.5 reference for the
+// MessageSuiteV2 setPersistentMessage behaviour).
+//
+// The struct itself is declared at namespace scope in ofx_shared.hpp so
+// the unit tests can validate the formatting contract directly.
+RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
+    RuntimeNodeSummary summary;
+
+    if (!data.last_error.empty()) {
+        summary.severity = kOfxMessageError;
+        summary.body = "Error: " + truncate_status_message(data.last_error, 200);
+        return summary;
+    }
+
+    const bool has_session =
+        data.runtime_client != nullptr && data.runtime_client->has_session();
+    const bool has_recorded_frame_timing =
+        data.last_frame_ms > 0.0 || !data.last_render_stage_timings.empty();
+    if (!has_session && !has_recorded_frame_timing) {
+        summary.severity = kOfxMessageMessage;
+        summary.body = "Loading...";
+        return summary;
+    }
+
+    std::string body;
+    body += processing_backend_label(data.device.backend);
+    body += " · ";
+    body += processing_device_label(data.device);
+    body += " · Effective: ";
+    body += effective_quality_label(data.runtime_panel_state.effective_resolution);
+
+    const double backend_total_ms = exclusive_stage_total_ms(data.last_render_stage_timings);
+    const double last_ms = data.last_frame_ms > 0.0 ? data.last_frame_ms : backend_total_ms;
+    if (last_ms > 0.0) {
+        body += " · Last: " + format_duration_ms(last_ms);
+    }
+    if (const StageTiming* hot = hottest_actionable_stage(data.last_render_stage_timings);
+        hot != nullptr && hot->total_ms > 0.0 && !hot->name.empty()) {
+        body += " · Hot: " + truncate_status_message(hot->name, 32) + " " +
+                format_duration_ms(hot->total_ms);
+    }
+    switch (data.last_render_work_origin) {
+        case LastRenderWorkOrigin::SharedCache:
+            body += " · Shared cache hit";
+            break;
+        case LastRenderWorkOrigin::InstanceCache:
+            body += " · Instance cache hit";
+            break;
+        case LastRenderWorkOrigin::BackendRender:
+        case LastRenderWorkOrigin::None:
+        default:
+            break;
+    }
+
+    if (!data.last_warning.empty()) {
+        body += " · Note: " + truncate_status_message(data.last_warning, 120);
+        summary.severity = kOfxMessageWarning;
+    } else {
+        summary.severity = kOfxMessageMessage;
+    }
+
+    summary.body = body;
+    return summary;
+}
+
 void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
     if (data == nullptr) {
         return;
@@ -1527,13 +1605,35 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         // flushes the latest status. The transient spinner is the canonical
         // OFX trade-off for thread-safe paramSetValue.
         update_runtime_panel(data);
+        // OFX 1.4 progress suite. ofxProgress.h:17-27 documents this as the
+        // canonical channel for "plugins that perform analysis" — exactly our
+        // case. Both Nuke and Resolve advertise it; on Nuke 17 it surfaces as
+        // a modal "Loading..." dialog with Cancel, on Resolve 18+ it appears
+        // in the lower status bar. The label includes the artefact filename
+        // and effective resolution so the user knows *what* is compiling
+        // (TensorRT engine compile dominates first-launch wall time per
+        // help/TROUBLESHOOTING.md "First-Run Warmup").
+        const std::string progress_label =
+            std::string("CorridorKey: preparing ") +
+            quality_mode_label(requested_quality_mode) + " engine (" +
+            std::to_string(selection.effective_resolution) + "px) — first launch may take 10-30s";
+        ProgressScope progress_scope(data->effect, progress_label.c_str(),
+                                     "corridorkey_prepare_session");
+        progress_scope.update(0.05);
         auto prepare_result = data->runtime_client->prepare_session(
             build_prepare_request(requested_device, selection, requested_quality_mode),
             [&](const StageTiming& timing) {
                 log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase, requested_device,
                                  selection.executable_model_path, requested_resolution,
                                  selection.effective_resolution, timing);
+                // Heuristic: tick the progress bar each time the runtime
+                // emits a stage timing. ProgressScope ignores out-of-range
+                // values so we cap at 0.95 and let the post-call update(1.0)
+                // close it cleanly. ofxProgress.h does not require strictly
+                // increasing values; hosts are documented to clamp.
+                progress_scope.update(0.5);
             });
+        progress_scope.update(1.0);
         if (!prepare_result) {
             data->last_error = "Failed to prepare runtime session for " +
                                std::string(quality_mode_label(requested_quality_mode)) + " using " +
@@ -1655,6 +1755,65 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 }
 // NOLINTEND(bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
+// Public wrapper for unit tests; the impl is the local helper above.
+RuntimeNodeSummary compose_runtime_node_summary(const InstanceData& data) {
+    return compose_runtime_node_summary_impl(data);
+}
+
+// Push the same telemetry the panel displays onto the OFX node indicator
+// via OFX MessageSuiteV2 setPersistentMessage. Unlike the param-driven
+// panel update, this is callable from any plugin action including the
+// render thread (ofxMessage.h:118-142 imposes no threading restriction
+// equivalent to ofxParam.h:1088). On hosts that allow render-thread
+// paramSetValue (DaVinci Resolve) this is a duplicate channel; on hosts
+// that defer paramSetValue to the next user interaction (Foundry Nuke 17)
+// this is the only live surface for dynamic runtime state.
+//
+// Safe to invoke when the host does not implement setPersistentMessage:
+// the helper in ofx_plugin.cpp null-checks the V2 function pointer per
+// the openfx-misc README-hosts.txt note that some hosts (Resolve 14)
+// fetch a V2 suite struct whose setPersistentMessage pointer is NULL.
+void update_runtime_node_indicator(InstanceData* data) {
+    if (data == nullptr || data->effect == nullptr) {
+        return;
+    }
+    // openfx-misc README-hosts.txt:75 — "Resolve 14: claims it has OpenFX
+    // message suite V2, but setPersistentMessage is NULL and
+    // clearPersistentMessage is garbage." The set_persistent_message helper
+    // already null-checks the function pointers, but skip the work entirely
+    // when the host is Resolve so we don't waste cycles formatting a body
+    // that nothing will display. Resolve users get their dynamic feedback
+    // through the panel params instead (Resolve allows mid-render
+    // paramSetValue).
+    if (is_resolve_host()) {
+        return;
+    }
+    const RuntimeNodeSummary summary = compose_runtime_node_summary_impl(*data);
+    const std::string severity_str = summary.severity != nullptr ? summary.severity : "";
+
+    // Dedup: setPersistentMessage replaces the alert per (effect, message_id)
+    // on spec-compliant hosts, but Foundry Nuke 17's Error Console appends
+    // each call instead of coalescing — calling every render frame floods
+    // the console. Only re-emit when severity or body changed.
+    if (summary.body.empty()) {
+        if (data->last_persistent_body.empty() && data->last_persistent_severity.empty()) {
+            return;
+        }
+        clear_persistent_message(data->effect);
+        data->last_persistent_severity.clear();
+        data->last_persistent_body.clear();
+        return;
+    }
+    if (severity_str == data->last_persistent_severity &&
+        summary.body == data->last_persistent_body) {
+        return;
+    }
+    set_persistent_message(summary.severity, "corridorkey_runtime_status",
+                           summary.body.c_str(), data->effect);
+    data->last_persistent_severity = severity_str;
+    data->last_persistent_body = summary.body;
+}
+
 void update_runtime_panel(InstanceData* data) {
     // update_runtime_panel_values now owns the render-thread guard. Mark
     // dirty up front so a deferred call still has the right signal even when
@@ -1663,6 +1822,10 @@ void update_runtime_panel(InstanceData* data) {
         return;
     }
     data->runtime_panel_dirty = true;
+    // Push the persistent node-indicator first because it does not depend
+    // on the param-set threading rule: Nuke can receive the latest state
+    // even when the param-driven panel update below is deferred.
+    update_runtime_node_indicator(data);
     update_runtime_panel_values(data);
 }
 
@@ -1817,6 +1980,25 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 data->runtime_panel_dirty = true;
                 return kOfxStatOK;
             }
+            if (changed_param == kParamOpenLogFolder) {
+                // Surface the per-user log directory in the system file
+                // browser. common::default_logs_root() resolves to:
+                //   Windows: %LOCALAPPDATA%\CorridorKey\Logs
+                //   macOS:   ~/Library/Logs/CorridorKey
+                //   Linux:   $XDG_CACHE_HOME/.../tmp fallback
+                // Path is created on demand so the click never lands on a
+                // non-existent folder when the plugin has not yet logged
+                // anything (fresh install before first render).
+                std::filesystem::path log_dir = common::default_logs_root();
+                std::error_code ec;
+                std::filesystem::create_directories(log_dir, ec);
+                if (!open_external_url(log_dir.string())) {
+                    post_message(
+                        kOfxMessageError,
+                        ("Failed to open log folder: " + log_dir.string()).c_str(), instance);
+                }
+                return kOfxStatOK;
+            }
             if (changed_param == kParamIncludePreReleases) {
                 data->runtime_panel_dirty = true;
             }
@@ -1913,6 +2095,12 @@ OfxStatus sync_private_data(OfxImageEffectHandle instance) {
 }
 
 OfxStatus destroy_instance(OfxImageEffectHandle instance) {
+    // Clear the persistent node indicator before tearing down so the host
+    // does not keep a stale "Last frame: ..." tooltip on a node whose
+    // backing instance no longer exists. Spec-allowed from any action
+    // (ofxMessage.h:145-157); helper no-ops on hosts that do not
+    // implement clearPersistentMessage.
+    clear_persistent_message(instance);
     InstanceData* data = get_instance_data(instance);
     if (data != nullptr) {
         // OFX hosts own the instance data slot via kOfxPropInstanceData;
