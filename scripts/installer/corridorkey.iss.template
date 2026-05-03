@@ -50,11 +50,17 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
+; VersionInfoVersion + VersionInfoProductVersion are numeric Windows
+; resource fields and only accept X.Y, X.Y.Z, or X.Y.Z.W. The friendly
+; display label (which CAN contain `-win.N`, sha suffixes, etc) flows
+; into AppVerName + UninstallDisplayName instead, where Inno accepts
+; arbitrary strings.
 VersionInfoVersion={#MyBaseVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} OFX plugin installer
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyDisplayLabel}
+VersionInfoProductVersion={#MyBaseVersion}
+VersionInfoProductTextVersion={#MyDisplayLabel}
 
 ; OFX plugins MUST install under <CommonFiles>\OFX\Plugins\<bundle>.
 ; The host (Resolve, Nuke, Fusion) discovers .ofx bundles by scanning
@@ -88,6 +94,14 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Compression=lzma2/ultra
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
+
+; The blue-runtime pack ships as a 7z archive that the installer
+; extracts on disk via the `extractarchive` flag in [Files]. The
+; default ArchiveExtraction value ("basic") only handles ZIP, so 7z
+; payload extraction requires the "full" extractor (which Inno Setup
+; bundles). "auto" picks "full" when the operator already has 7-Zip /
+; the archive extractor available, falling back to "basic" otherwise.
+ArchiveExtraction=full
 
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputBaseFilename}
@@ -181,27 +195,28 @@ Type: filesandordirs; Name: "{app}\Contents\Resources\models"
 Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
 
 [Code]
-{
-  CorridorKey installer code.
-
-  Online flavor:
-    - Creates a download wizard page after wpReady.
-    - Adds one entry per file from the selected packs, using the
-      sha256 baked into the page's Add() call so Inno Setup's
-      built-in DownloadTemporaryFile path verifies integrity before
-      the file leaves {tmp}.
-    - Aborts the install on download or hash failure (no silent
-      fallback - a partial install of the blue pack would surface
-      as opaque DLL load failures at runtime).
-
-  Offline flavor:
-    - No-op in [Code]: every file is staged via [Files] entries
-      written by the PowerShell packager.
-
-  Pattern based on the official CodeDownloadFiles.iss example shipped
-  with Inno Setup; see
-  https://raw.githubusercontent.com/jrsoftware/issrc/main/Examples/CodeDownloadFiles.iss
-}
+// CorridorKey installer code. Pascal Script `{ ... }` block comments
+// do NOT nest, so we use `//` line comments throughout to keep
+// literal `{tmp}` references in the prose from prematurely closing
+// a comment block. (Learned the hard way during the first compile.)
+//
+// Online flavor:
+//   - Creates a download wizard page after wpReady.
+//   - Adds one entry per file from the selected packs, using the
+//     sha256 baked into the page's Add() call so Inno Setup's
+//     built-in DownloadTemporaryFile path verifies integrity before
+//     the file leaves the temp dir.
+//   - Aborts the install on download or hash failure (no silent
+//     fallback - a partial install of the blue pack would surface
+//     as opaque DLL load failures at runtime).
+//
+// Offline flavor:
+//   - No-op in [Code]: every file is staged via [Files] entries
+//     written by the PowerShell packager.
+//
+// Pattern based on the official CodeDownloadFiles.iss example shipped
+// with Inno Setup; see
+// https://raw.githubusercontent.com/jrsoftware/issrc/main/Examples/CodeDownloadFiles.iss
 
 #if Flavor == "online"
 var

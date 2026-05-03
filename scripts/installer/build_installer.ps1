@@ -150,7 +150,13 @@ function Resolve-IsccPath {
         }
         return $Override
     }
+    # Search order: user-scope first (winget --scope user puts it
+    # under %LOCALAPPDATA%\Programs), then machine-wide install paths.
+    # Inno Setup 7 paths are listed for forward-compat once the 7.x
+    # series ships; the 6.x layout is what we author against today.
     $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 7\ISCC.exe"),
         "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
         "C:\Program Files\Inno Setup 6\ISCC.exe",
         "C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
