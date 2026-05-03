@@ -166,7 +166,7 @@ bool is_process_alive(int server_pid) {
         return false;
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(server_pid));
     if (process == nullptr) {
         return false;

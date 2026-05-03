@@ -246,8 +246,8 @@ struct InstanceData {
     // report). Dedup at our layer: only re-emit when severity or body
     // actually changed since the last call. Empty body means "currently
     // cleared" so the next non-empty call re-emits.
-    std::string last_persistent_severity = {};
-    std::string last_persistent_body = {};
+    std::string last_persistent_severity;
+    std::string last_persistent_body;
 
     FrameResult cached_result = {};
     bool cached_result_valid = false;
@@ -359,22 +359,30 @@ void clear_persistent_message(OfxImageEffectHandle effect);
 // when the effect handle is null. ofxProgress.h:17-27 documents that
 // plugins performing analysis should "raise the progress monitor in a
 // modal manner" and poll for cancellation.
+// NOLINTBEGIN(performance-trivially-destructible)
+// The destructor body lives in ofx_plugin.cpp and calls progressEnd via
+// the OFX progress suite — declaring it out-of-line is intentional and
+// performance-trivially-destructible cannot see the implementation
+// across the TU boundary.
 class ProgressScope {
    public:
     ProgressScope(OfxImageEffectHandle effect, const char* label, const char* message_id);
     ProgressScope(const ProgressScope&) = delete;
     ProgressScope& operator=(const ProgressScope&) = delete;
+    ProgressScope(ProgressScope&&) = delete;
+    ProgressScope& operator=(ProgressScope&&) = delete;
     ~ProgressScope();
     // Returns false when the host has signalled cancel (kOfxStatReplyNo on
     // progressUpdate). Pass progress in [0, 1]. Safe to call when the
     // host does not expose the progress suite (no-op, returns true).
-    bool update(double progress);
+    [[nodiscard]] bool update(double progress);
 
    private:
     OfxImageEffectHandle m_effect = nullptr;
     bool m_started = false;
     bool m_use_v2 = false;
 };
+// NOLINTEND(performance-trivially-destructible)
 
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);

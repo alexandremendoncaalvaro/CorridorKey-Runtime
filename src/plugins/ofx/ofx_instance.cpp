@@ -629,12 +629,21 @@ std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
 //
 // The struct itself is declared at namespace scope in ofx_shared.hpp so
 // the unit tests can validate the formatting contract directly.
+// Truncation budgets for the OFX node-indicator one-liner. The widths are
+// tuned to fit Foundry Nuke's persistent-message footer plus DaVinci
+// Resolve's inspector ribbon without scrolling; the values are
+// host-experiment-driven, not arbitrary tunables.
+constexpr std::size_t kNodeSummaryErrorMaxLen = 200;
+constexpr std::size_t kNodeSummaryHotStageMaxLen = 32;
+constexpr std::size_t kNodeSummaryWarningMaxLen = 120;
+
 RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
     RuntimeNodeSummary summary;
 
     if (!data.last_error.empty()) {
         summary.severity = kOfxMessageError;
-        summary.body = "Error: " + truncate_status_message(data.last_error, 200);
+        summary.body =
+            "Error: " + truncate_status_message(data.last_error, kNodeSummaryErrorMaxLen);
         return summary;
     }
 
@@ -662,8 +671,8 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
     }
     if (const StageTiming* hot = hottest_actionable_stage(data.last_render_stage_timings);
         hot != nullptr && hot->total_ms > 0.0 && !hot->name.empty()) {
-        body += " · Hot: " + truncate_status_message(hot->name, 32) + " " +
-                format_duration_ms(hot->total_ms);
+        body += " · Hot: " + truncate_status_message(hot->name, kNodeSummaryHotStageMaxLen) +
+                " " + format_duration_ms(hot->total_ms);
     }
     switch (data.last_render_work_origin) {
         case LastRenderWorkOrigin::SharedCache:
@@ -679,7 +688,8 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
     }
 
     if (!data.last_warning.empty()) {
-        body += " · Note: " + truncate_status_message(data.last_warning, 120);
+        body += " · Note: " +
+                truncate_status_message(data.last_warning, kNodeSummaryWarningMaxLen);
         summary.severity = kOfxMessageWarning;
     } else {
         summary.severity = kOfxMessageMessage;
@@ -1617,23 +1627,26 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             std::string("CorridorKey: preparing ") +
             quality_mode_label(requested_quality_mode) + " engine (" +
             std::to_string(selection.effective_resolution) + "px) — first launch may take 10-30s";
+        // Progress-bar tick fractions for the OFX progress suite. The 5%
+        // initial tick gives the host a non-empty first frame, the 50% tick
+        // surfaces mid-compile activity, and the 100% tick closes the modal.
+        // ofxProgress.h does not require strictly-increasing values; hosts
+        // are documented to clamp.
+        constexpr double kProgressInitialTick = 0.05;
+        constexpr double kProgressMidTick = 0.5;
+        constexpr double kProgressFinalTick = 1.0;
         ProgressScope progress_scope(data->effect, progress_label.c_str(),
                                      "corridorkey_prepare_session");
-        progress_scope.update(0.05);
+        (void)progress_scope.update(kProgressInitialTick);
         auto prepare_result = data->runtime_client->prepare_session(
             build_prepare_request(requested_device, selection, requested_quality_mode),
             [&](const StageTiming& timing) {
                 log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase, requested_device,
                                  selection.executable_model_path, requested_resolution,
                                  selection.effective_resolution, timing);
-                // Heuristic: tick the progress bar each time the runtime
-                // emits a stage timing. ProgressScope ignores out-of-range
-                // values so we cap at 0.95 and let the post-call update(1.0)
-                // close it cleanly. ofxProgress.h does not require strictly
-                // increasing values; hosts are documented to clamp.
-                progress_scope.update(0.5);
+                (void)progress_scope.update(kProgressMidTick);
             });
-        progress_scope.update(1.0);
+        (void)progress_scope.update(kProgressFinalTick);
         if (!prepare_result) {
             data->last_error = "Failed to prepare runtime session for " +
                                std::string(quality_mode_label(requested_quality_mode)) + " using " +
@@ -1990,8 +2003,8 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 // non-existent folder when the plugin has not yet logged
                 // anything (fresh install before first render).
                 std::filesystem::path log_dir = common::default_logs_root();
-                std::error_code ec;
-                std::filesystem::create_directories(log_dir, ec);
+                std::error_code error;
+                std::filesystem::create_directories(log_dir, error);
                 if (!open_external_url(log_dir.string())) {
                     post_message(
                         kOfxMessageError,

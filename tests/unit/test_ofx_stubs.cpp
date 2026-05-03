@@ -67,6 +67,9 @@ ProgressScope::ProgressScope(OfxImageEffectHandle effect, const char* label,
 
 ProgressScope::~ProgressScope() = default;
 
+// Mirrors the production ProgressScope::update signature — making the
+// stub static would break the symbol the test harness expects.
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 bool ProgressScope::update(double progress) {
     (void)progress;
     return true;

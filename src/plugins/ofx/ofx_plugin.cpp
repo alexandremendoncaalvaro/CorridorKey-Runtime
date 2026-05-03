@@ -170,11 +170,12 @@ void set_persistent_message(const char* message_type, const char* message_id,
     }
     const OfxStatus status =
         g_suites.message->setPersistentMessage(effect, message_type, message_id, "%s", message);
-    log_message("set_persistent_message",
-                std::string("event=posted type=") + (message_type ? message_type : "(null)") +
-                    " id=" + (message_id ? message_id : "(null)") +
-                    " status=" + std::to_string(status) +
-                    " body_len=" + std::to_string(message ? std::strlen(message) : 0));
+    log_message(
+        "set_persistent_message",
+        std::string("event=posted type=") + (message_type != nullptr ? message_type : "(null)") +
+            " id=" + (message_id != nullptr ? message_id : "(null)") +
+            " status=" + std::to_string(status) +
+            " body_len=" + std::to_string(message != nullptr ? std::strlen(message) : 0));
 }
 
 // ProgressScope implementation. The scope owns one progressStart /
