@@ -1122,11 +1122,15 @@ function Get-CorridorKeyPreparedModelList {
         "corridorkey_fp16_1536.onnx",
         "corridorkey_fp16_2048.onnx"
     )
+    # Blue ladder is Torch-TensorRT compiled engines (.ts), per Sprint 1
+    # PR 3 catalog swap. Filenames + precision (FP16 below 1536, FP32 at /
+    # above) must match src/app/runtime_contracts.cpp blue rows and
+    # src/plugins/ofx/ofx_model_selection.hpp::artifact_path_for_backend.
     $blue = @(
-        "corridorkey_blue_fp16_512.onnx",
-        "corridorkey_blue_fp16_1024.onnx",
-        "corridorkey_blue_fp16_1536.onnx",
-        "corridorkey_blue_fp16_2048.onnx"
+        "corridorkey_blue_torchtrt_fp16_512.ts",
+        "corridorkey_blue_torchtrt_fp16_1024.ts",
+        "corridorkey_blue_torchtrt_fp32_1536.ts",
+        "corridorkey_blue_torchtrt_fp32_2048.ts"
     )
 
     switch ($Variant) {
