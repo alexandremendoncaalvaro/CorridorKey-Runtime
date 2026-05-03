@@ -306,6 +306,15 @@ inline std::string host_qualified_phrase(std::string_view host_name, const char*
 }
 void post_message(const char* message_type, const char* message, OfxImageEffectHandle effect);
 
+// Persistent node-indicator hooks (OFX MessageSuiteV2). See body in
+// ofx_plugin.cpp for the spec citation and Resolve-14 NULL-pointer
+// safety note. These exist so render-thread code can surface dynamic
+// runtime telemetry on hosts that do not allow render-thread
+// paramSetValue (Foundry Nuke 17).
+void set_persistent_message(const char* message_type, const char* message_id,
+                            const char* message, OfxImageEffectHandle effect);
+void clear_persistent_message(OfxImageEffectHandle effect);
+
 InstanceData* get_instance_data(OfxImageEffectHandle instance);
 void set_instance_data(OfxImageEffectHandle instance, InstanceData* data);
 
@@ -331,6 +340,18 @@ std::string runtime_backend_work_runtime_label(const InstanceData& data);
 std::string runtime_safe_quality_ceiling_runtime_label(const InstanceData& data);
 std::string runtime_guide_source_runtime_label(const InstanceData& data);
 std::string runtime_path_runtime_label(const InstanceData& data);
+
+// One-line node-indicator summary surfaced through OFX MessageSuiteV2
+// setPersistentMessage. The body mirrors the runtime panel telemetry; the
+// severity drives the host's coloured node indicator (red on Error,
+// yellow on Warning, neutral on Message). Exposed at namespace scope so
+// the unit tests can validate the formatting contract without spinning
+// up an OFX host.
+struct RuntimeNodeSummary {
+    std::string body;
+    const char* severity = kOfxMessageMessage;
+};
+RuntimeNodeSummary compose_runtime_node_summary(const InstanceData& data);
 void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOrigin work_origin);
 Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
                                                   bool hint_from_clip,

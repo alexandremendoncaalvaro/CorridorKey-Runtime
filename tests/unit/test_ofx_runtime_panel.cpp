@@ -1,9 +1,12 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
+#include <corridorkey/types.hpp>
 #include <cstring>
 
 #include "plugins/ofx/ofx_runtime_client.hpp"
 #include "plugins/ofx/ofx_shared.hpp"
+
+using corridorkey::StageTiming;
 
 using namespace corridorkey::ofx;
 
@@ -346,5 +349,111 @@ TEST_CASE("alpha hint policy prefers external hints and falls back to rough guid
         CHECK(result.error().code == corridorkey::ErrorCode::InvalidParameters);
         CHECK(result.error().message.find("Waiting for Alpha Hint connection.") !=
               std::string::npos);
+    }
+}
+
+// Persistent node-indicator summary — the contract that mirrors the
+// runtime panel telemetry into a one-line OFX MessageSuiteV2 body.
+// Foundry Nuke disallows render-thread paramSetValue (ofxParam.h:1088)
+// so on Nuke the persistent message is the only live channel for these
+// fields. The unit tests below pin the formatting + severity contract
+// so a future refactor cannot silently drop fields that the user docs
+// reference.
+TEST_CASE("compose_runtime_node_summary surfaces idle state",
+          "[unit][ofx][runtime][panel]") {
+    InstanceData data{};
+    data.last_render_work_origin = LastRenderWorkOrigin::None;
+
+    const auto summary = compose_runtime_node_summary(data);
+    CHECK(summary.body == "Loading...");
+    CHECK(std::string(summary.severity) == kOfxMessageMessage);
+}
+
+TEST_CASE("compose_runtime_node_summary reports backend, device and effective quality on ready state",
+          "[unit][ofx][runtime][panel]") {
+    InstanceData data{};
+    data.device.backend = corridorkey::Backend::TensorRT;
+    data.device.name = "NVIDIA GeForce RTX 3080";
+    data.runtime_panel_state.effective_resolution = 2048;
+    data.last_frame_ms = 1300.0;
+    StageTiming hot;
+    hot.name = "ort_run";
+    hot.total_ms = 454.0;
+    data.last_render_stage_timings = {hot};
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    data.render_count = 1;
+
+    const auto summary = compose_runtime_node_summary(data);
+    INFO("body=" << summary.body);
+    CHECK(summary.body.find("TensorRT") != std::string::npos);
+    CHECK(summary.body.find("RTX 3080") != std::string::npos);
+    CHECK(summary.body.find("Effective: ") != std::string::npos);
+    CHECK(summary.body.find("2048") != std::string::npos);
+    CHECK(summary.body.find("Last:") != std::string::npos);
+    CHECK(summary.body.find("Hot:") != std::string::npos);
+    CHECK(summary.body.find("ort_run") != std::string::npos);
+    CHECK(std::string(summary.severity) == kOfxMessageMessage);
+}
+
+TEST_CASE("compose_runtime_node_summary escalates severity on warning",
+          "[unit][ofx][runtime][panel]") {
+    InstanceData data{};
+    data.device.backend = corridorkey::Backend::TensorRT;
+    data.device.name = "NVIDIA GeForce RTX 3080";
+    data.runtime_panel_state.effective_resolution = 1024;
+    data.last_frame_ms = 850.0;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    data.render_count = 1;
+    data.last_warning = "Quality fell back to High (1024) for this frame.";
+
+    const auto summary = compose_runtime_node_summary(data);
+    INFO("body=" << summary.body);
+    CHECK(summary.body.find("Note:") != std::string::npos);
+    CHECK(summary.body.find("Quality fell back") != std::string::npos);
+    CHECK(std::string(summary.severity) == kOfxMessageWarning);
+}
+
+TEST_CASE("compose_runtime_node_summary escalates severity to error and short-circuits other fields",
+          "[unit][ofx][runtime][panel]") {
+    InstanceData data{};
+    data.device.backend = corridorkey::Backend::TensorRT;
+    data.device.name = "NVIDIA GeForce RTX 3080";
+    data.runtime_panel_state.effective_resolution = 2048;
+    data.last_frame_ms = 1300.0;
+    data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
+    data.render_count = 1;
+    data.last_error = "OFX runtime server process exited during startup.";
+
+    const auto summary = compose_runtime_node_summary(data);
+    INFO("body=" << summary.body);
+    CHECK(summary.body.rfind("Error: ", 0) == 0);
+    CHECK(summary.body.find("OFX runtime server process exited during startup.") !=
+          std::string::npos);
+    // Error path is exclusive — the backend/device/timing chain is not
+    // mixed in so the user sees the actionable message immediately.
+    CHECK(summary.body.find("Effective:") == std::string::npos);
+    CHECK(summary.body.find("Last:") == std::string::npos);
+    CHECK(std::string(summary.severity) == kOfxMessageError);
+}
+
+TEST_CASE("compose_runtime_node_summary annotates instance/shared cache hits",
+          "[unit][ofx][runtime][panel]") {
+    InstanceData data{};
+    data.device.backend = corridorkey::Backend::TensorRT;
+    data.device.name = "NVIDIA GeForce RTX 3080";
+    data.runtime_panel_state.effective_resolution = 2048;
+    data.last_frame_ms = 12.0;
+    data.render_count = 5;
+
+    SECTION("shared cache hit") {
+        data.last_render_work_origin = LastRenderWorkOrigin::SharedCache;
+        const auto summary = compose_runtime_node_summary(data);
+        CHECK(summary.body.find("Shared cache hit") != std::string::npos);
+    }
+
+    SECTION("instance cache hit") {
+        data.last_render_work_origin = LastRenderWorkOrigin::InstanceCache;
+        const auto summary = compose_runtime_node_summary(data);
+        CHECK(summary.body.find("Instance cache hit") != std::string::npos);
     }
 }

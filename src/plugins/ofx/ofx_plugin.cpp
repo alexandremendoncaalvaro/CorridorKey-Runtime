@@ -90,6 +90,37 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
     g_suites.message->message(effect, message_type, "", "%s", message);
 }
 
+// OFX 1.5 setPersistentMessage / clearPersistentMessage: allowed from any
+// plugin action (including kOfxImageEffectActionRender), not gated by the
+// paramSetValue threading rule in ofxParam.h:1088. Nuke renders the
+// posted message as a node indicator (icon + tooltip) that survives
+// between renders until cleared. ofxMessage.h:118-142 (MessageSuiteV2)
+// is the spec; openfx-misc/README-hosts.txt confirms Foundry Nuke 17
+// supports the V2 suite.
+//
+// Per the same openfx-misc compatibility note, "Resolve 14 claims to have
+// OpenFX message suite V2, but setPersistentMessage is NULL and
+// clearPersistentMessage is garbage." Both helpers therefore null-check
+// the function pointers individually; on hosts where they are absent
+// the call degrades to a no-op and the in-panel display remains the
+// only telemetry surface (which is the historical behavior).
+void set_persistent_message(const char* message_type, const char* message_id,
+                            const char* message, OfxImageEffectHandle effect) {
+    if (g_suites.message == nullptr || g_suites.message->setPersistentMessage == nullptr ||
+        effect == nullptr || message == nullptr) {
+        return;
+    }
+    g_suites.message->setPersistentMessage(effect, message_type, message_id, "%s", message);
+}
+
+void clear_persistent_message(OfxImageEffectHandle effect) {
+    if (g_suites.message == nullptr || g_suites.message->clearPersistentMessage == nullptr ||
+        effect == nullptr) {
+        return;
+    }
+    g_suites.message->clearPersistentMessage(effect);
+}
+
 OfxStatus on_load() {
     log_message("on_load", "Load requested.");
     if (!fetch_suites()) {
