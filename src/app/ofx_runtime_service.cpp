@@ -424,6 +424,12 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
 
     auto server = common::LocalJsonServer::listen(options.endpoint);
     if (!server) {
+        // Without this log line the operator sees event=server_start followed
+        // by silence whenever bind/listen fails (port collision, permission
+        // denial, loopback filter). Issue #56 hit exactly that diagnostic gap;
+        // mirror the existing event vocabulary so log readers stay greppable.
+        logger.log("event=server_listen_failed port=" + std::to_string(options.endpoint.port) +
+                   " detail=" + sanitize_log_token(server.error().message));
         return Unexpected<Error>(server.error());
     }
 

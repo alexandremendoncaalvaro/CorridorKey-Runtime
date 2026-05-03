@@ -85,8 +85,9 @@ function Get-CorridorKeyPeImports {
 }
 
 # System DLLs that are always resolvable from Windows and must not be bundled.
-# Extends the list shared by build_ort_windows_rtx.ps1 with networking/UI deps
-# that cpr/libcurl can pull in (wintrust, crypt32, bcrypt variants).
+# Networking / UI deps that cpr/libcurl pulls in (wintrust, crypt32, bcrypt) plus
+# the Universal CRT, which Microsoft requires to come from the OS image and
+# explicitly forbids redistributing app-local on modern Windows.
 $script:CorridorKeySystemDllAllowlist = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($dll in @(
         "KERNEL32.dll","KERNELBASE.dll","USER32.dll","GDI32.dll","GDI32FULL.dll",
@@ -96,7 +97,6 @@ foreach ($dll in @(
         "SECUR32.dll","NCRYPT.dll","WINTRUST.dll","IPHLPAPI.dll",
         "NTDLL.dll","PSAPI.DLL","COMDLG32.dll","DXGI.dll","SETUPAPI.dll",
         "IMM32.dll","USERENV.dll","POWRPROF.dll",
-        "VCRUNTIME140.dll","VCRUNTIME140_1.dll","MSVCP140.dll","MSVCP140_1.dll","MSVCP140_2.dll",
         "UCRTBASE.dll","MSVCRT.dll",
         "api-ms-win-crt-runtime-l1-1-0.dll","api-ms-win-crt-heap-l1-1-0.dll",
         "api-ms-win-crt-stdio-l1-1-0.dll","api-ms-win-crt-string-l1-1-0.dll",
@@ -107,6 +107,41 @@ foreach ($dll in @(
         "api-ms-win-crt-process-l1-1-0.dll"
     )) {
     [void]$script:CorridorKeySystemDllAllowlist.Add($dll)
+}
+
+# Visual C++ Redistributable DLLs that the OFX bundle ships APP-LOCAL.
+# They were previously on the system allowlist (treated as "must not be
+# bundled") on the assumption that the default Win32 search order would
+# always resolve them from %WINDIR%\System32. Issue #56 disproved that
+# assumption: Foundry Nuke calls SetDllDirectory on its own process and
+# Microsoft documents
+# (https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)
+# that this alters the search order INHERITED BY CHILD PROCESSES, placing
+# the host install dir ahead of System32. Nuke 17.0v2 ships an older
+# MSVCP140 v14.36 that is ABI-incompatible with what TensorRT-RTX / ORT
+# build against today, and the spawned sidecar crashed at MSVCP140!0x12f58
+# with EXCEPTION_ACCESS_VIOLATION before reaching wWinMain.
+#
+# The fix follows Microsoft's documented "Install individual redistributable
+# files" path
+# (https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files):
+# CMake's InstallRequiredSystemLibraries module discovers the active
+# toolchain's redist set and src/plugins/ofx/CMakeLists.txt copies it into
+# the bundle's Contents/Win64/. Win32 search-order step #1 ("the folder from
+# which the application loaded") is evaluated BEFORE any SetDllDirectory-
+# altered step, so the bundled copy wins regardless of host behavior.
+#
+# Each entry in this list is therefore EXPECTED inside the bundle, and any
+# import resolving to one of them must find the bundle copy — not the
+# system copy. Missing-from-bundle is now a release blocker; the allowlist
+# above intentionally no longer covers them.
+$script:CorridorKeyExpectedBundledRuntimeList = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($dll in @(
+        "VCRUNTIME140.dll","VCRUNTIME140_1.dll",
+        "MSVCP140.dll","MSVCP140_1.dll","MSVCP140_2.dll",
+        "MSVCP140_atomic_wait.dll","MSVCP140_codecvt_ids.dll"
+    )) {
+    [void]$script:CorridorKeyExpectedBundledRuntimeList.Add($dll)
 }
 
 function Test-CorridorKeyPeImportsResolvable {
@@ -126,9 +161,32 @@ function Test-CorridorKeyPeImportsResolvable {
         if ($import -like "api-ms-win-*.dll" -or $import -like "ext-ms-*.dll") {
             continue
         }
+        # Visual C++ Redistributable: must be present app-local in the bundle
+        # (see CorridorKeyExpectedBundledRuntimeList above for the rationale
+        # and the Issue #56 backstory). Falls through to the same bundled-path
+        # check below; not finding it surfaces the same "missing" report.
         $bundledPath = Join-Path $BundleDir $import
         if (-not (Test-Path $bundledPath)) {
             $missing += $import
+        }
+    }
+    return ,$missing
+}
+
+function Test-CorridorKeyExpectedRuntimeFilesPresent {
+    param(
+        [string]$BundleDir
+    )
+
+    # Bundle layout requires every entry in the expected app-local Visual
+    # C++ Redistributable list to exist next to corridorkey_ofx_runtime_server.exe
+    # before the bundle is considered releasable. See
+    # CorridorKeyExpectedBundledRuntimeList for the per-DLL rationale.
+    $missing = @()
+    foreach ($name in $script:CorridorKeyExpectedBundledRuntimeList) {
+        $candidate = Join-Path $BundleDir $name
+        if (-not (Test-Path $candidate)) {
+            $missing += $name
         }
     }
     return ,$missing
@@ -313,6 +371,24 @@ if ($null -eq $dumpbinPath) {
         $summary = ($importScanFailures | ForEach-Object { "$($_.image) -> $($_.missing -join ', ')" }) -join '; '
         throw "PE import scan failed. Unbundled dependencies would prevent Resolve from loading the plugin: $summary"
     }
+}
+
+# Regression guard for Issue #56: the OFX bundle MUST ship the Visual C++
+# Redistributable DLLs app-local. Without them, the spawned sidecar inherits
+# the host's altered DLL search order (Foundry Nuke's SetDllDirectory call
+# propagates per
+# https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)
+# and can load an ABI-incompatible MSVCP140 from the host install dir,
+# crashing pre-wWinMain. CMake's InstallRequiredSystemLibraries module
+# stages them via src/plugins/ofx/CMakeLists.txt; if a future refactor
+# breaks that path, this validation step fails the release before
+# anyone ships a bundle that reproduces #56.
+$missingExpectedRuntime = Test-CorridorKeyExpectedRuntimeFilesPresent -BundleDir $win64Dir
+if ($missingExpectedRuntime.Count -eq 0) {
+    Write-Host "[PASS] Visual C++ Redistributable DLLs are bundled app-local" -ForegroundColor Green
+} else {
+    Write-Host "[FAIL] OFX bundle is missing app-local Visual C++ Redistributable DLLs: $($missingExpectedRuntime -join ', ')" -ForegroundColor Red
+    throw "Bundle missing required app-local Visual C++ Redistributable DLLs ($($missingExpectedRuntime -join ', ')). See Issue #56; verify InstallRequiredSystemLibraries discovered the redist set during CMake configure."
 }
 
 $supportedBackends = @()

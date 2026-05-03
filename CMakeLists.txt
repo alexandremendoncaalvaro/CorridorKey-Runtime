@@ -13,7 +13,7 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.8.2
+    VERSION 0.8.3
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
@@ -365,6 +365,62 @@ find_package(cxxopts REQUIRED)
 find_package(cpr CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Catch2 3 REQUIRED)
+
+# --- Windows: app-local Visual C++ Redistributable ---
+#
+# Why we ship the VC++ Redist DLLs (MSVCP140.dll, VCRUNTIME140.dll, et al.)
+# next to corridorkey_ofx_runtime_server.exe inside the OFX bundle:
+#
+# Foundry Nuke calls SetDllDirectory("C:\Program Files\Nuke<ver>") on its
+# own process to pin its app-local C++ runtime. Per Microsoft's documented
+# DLL search order
+# (https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order),
+#
+#     "The standard search order of the process will also be affected by
+#      calling the SetDllDirectory function in the parent process before
+#      the start of the current process."
+#
+# That altered order places Nuke's directory ABOVE %WINDIR%\System32, so
+# children spawned via CreateProcessW inherit a search where Nuke's older
+# MSVCP140 wins over System32's. Issue #56 reproduced this on Nuke 17.0v2:
+# the spawned sidecar imported MSVCP140 v14.36 from Nuke instead of v14.50
+# from System32 and crashed at MSVCP140!0x12f58 with EXCEPTION_ACCESS_VIOLATION
+# before reaching wWinMain (verified in the Application event log).
+#
+# The fix is the deployment Microsoft documents at
+# https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+# under "Install individual redistributable files":
+#
+#     "It's also possible to directly install the Redistributable DLLs in
+#      the application local folder. The application local folder is the
+#      folder that contains your executable application file."
+#
+# Search-order step #1 ("the folder from which the application loaded") is
+# evaluated BEFORE any SetDllDirectory-altered step, so an app-local copy
+# wins regardless of host process behavior. CMake's
+# InstallRequiredSystemLibraries module discovers the redist DLLs from the
+# active MSVC toolchain; src/plugins/ofx/CMakeLists.txt copies them into
+# the bundle's Contents/Win64/ during the standard POST_BUILD staging.
+#
+# CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP=TRUE prevents the module from
+# adding its own install(PROGRAMS ...) rule — we only want the discovered
+# library list, not a CPack install rule (we ship through NSIS, not CPack).
+if(WIN32 AND MSVC)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        message(STATUS
+            "Discovered ${CMAKE_BUILD_TYPE} VC++ Redistributable DLLs for app-local "
+            "bundling: ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}")
+    else()
+        message(WARNING
+            "InstallRequiredSystemLibraries did not populate "
+            "CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS; the OFX bundle will not ship "
+            "the Visual C++ Redistributable app-local. Foundry Nuke hosts "
+            "may load an incompatible MSVCP140.dll into the runtime server "
+            "(Issue #56). Confirm a Visual Studio C++ workload is installed.")
+    endif()
+endif()
 
 # --- Project Structure ---
 

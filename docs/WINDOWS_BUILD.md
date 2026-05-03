@@ -224,6 +224,69 @@ embed the version — they never collide across installs.
 Logs accumulate across installs and can be compared version-over-
 version for the optimization ledger.
 
+### 3.8 OFX runtime server crashes pre-`event=server_start` in Foundry Nuke
+
+**Symptom.** The plugin panel shows
+`OFX runtime server process (pid=N) exited during startup` (the
+post-#56 diagnostic dialog). The corresponding
+`%LOCALAPPDATA%\CorridorKey\Logs\ofx_runtime_server_v<label>.log`
+contains no entries for the dead PID — the process exited before
+`OfxRuntimeService::run` opened the logger. Resolve sessions on the
+same bundle work normally. The Windows Application event log carries
+an `Application Error` (Event ID 1000) entry with
+`Faulting module: MSVCP140.dll` and a path under the host install
+directory (for Nuke 17 typically
+`C:\Program Files\Nuke<ver>\MSVCP140.dll`).
+
+**Root cause.** Foundry Nuke calls `SetDllDirectory` on its own
+process to pin its app-local C++ runtime, and Microsoft documents at
+[Dynamic-link library search order — Win32 apps](https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order)
+that this propagates to children:
+
+> *"The standard search order of the process will also be affected by
+> calling the SetDllDirectory function in the parent process before
+> the start of the current process."*
+
+The altered search order places the host install directory above
+`%WINDIR%\System32`. When `corridorkey_ofx_runtime_server.exe` is
+spawned from Nuke and its Contents/Win64 dir does not provide
+`MSVCP140.dll`, the loader resolves to Nuke's app-local copy. Nuke
+ships an older redist (e.g. v14.36.32532.0) that is ABI-incompatible
+with what TensorRT-RTX and ORT were built against (v14.50+ in the
+canonical pipeline), and the import fixup crashes with
+`EXCEPTION_ACCESS_VIOLATION` inside MSVCP140 before `wWinMain` runs.
+
+**Fix in-tree.** The CMake build now bundles the Visual C++
+Redistributable DLLs app-local in the OFX bundle's Contents/Win64
+directory. The mechanism follows the deployment Microsoft documents at
+[Redistribute Visual C++ Files](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files)
+under "Install individual redistributable files":
+
+> *"It's also possible to directly install the Redistributable DLLs in
+> the application local folder. The application local folder is the
+> folder that contains your executable application file."*
+
+Search-order step #1 ("the folder from which the application
+loaded") is evaluated BEFORE any `SetDllDirectory`-altered step, so
+the bundled copy wins regardless of host process behavior. The
+discovery is driven by CMake's
+[`InstallRequiredSystemLibraries`](https://cmake.org/cmake/help/latest/module/InstallRequiredSystemLibraries.html)
+module wired in the root `CMakeLists.txt`; the staging is in
+`src/plugins/ofx/CMakeLists.txt` next to the existing CUDA / ORT
+copy commands. The release validator
+(`scripts\validate_ofx_win.ps1`) treats every entry in
+`CorridorKeyExpectedBundledRuntimeList` as a release blocker if it is
+absent from the bundle; the regression test
+`tests/regression/test_regression_0056_bundle_vcruntime.cpp` asserts
+the same invariant during `ctest` so a future refactor can not strip
+the redist staging without failing the local quality gate.
+
+The Universal CRT (`UCRTBASE.dll` and the `api-ms-win-crt-*.dll`
+forwarders) is intentionally NOT bundled — Microsoft requires it to
+come from the OS image on Windows 8+, and Win11 (the supported
+target) always provides it. Only the `VCRUNTIME140*` and `MSVCP140*`
+families are shipped app-local.
+
 ## 4. Running the local benchmark
 
 `tests/integration/ofx_benchmark_harness.exe` drives the same
