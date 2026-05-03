@@ -455,22 +455,15 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
         const auto start_time = std::chrono::steady_clock::now();
         while (std::chrono::steady_clock::now() - start_time <
                std::chrono::milliseconds(m_options.launch_timeout_ms)) {
-            auto poll = send_command_without_launch(app::OfxRuntimeCommand::Health,
-                                                    nlohmann::json::object());
-            if (poll) {
-                auto health = app::health_response_from_json(*poll);
-                if (health) {
-                    update_server_health(*health);
-                    log_message("ofx_runtime_client",
-                                "event=server_ready pid=" + std::to_string(m_server_pid));
-                    return {};
-                }
-                return Unexpected<Error>(health.error());
-            }
-            // The sidecar PID was captured by launch_server() before this
-            // poll loop runs. If it has already exited, polling Health for
-            // the remaining timeout is wasted time and produces a generic
-            // "Timed out" error that does not point at the real cause.
+            // Check liveness BEFORE the Health probe. On Windows, connect()
+            // to a loopback port with no listener does not return WSAECONN-
+            // REFUSED immediately: the TCP/IP stack retries SYN with backoff
+            // and the call typically blocks ~2 s before failing. If the
+            // sidecar has already exited there is no listener to find, and
+            // paying that retry cost on every iteration would mask the
+            // dead-process signal we have in hand. Probing the kernel
+            // process object first turns the dead-sidecar case into a
+            // sub-millisecond return.
             if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
                 const std::string reason = "OFX runtime server process (pid=" +
                                            std::to_string(m_server_pid) +
@@ -483,6 +476,18 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
                                                    m_options.launch_timeout_ms,
                                                    m_options.server_binary),
                 });
+            }
+            auto poll = send_command_without_launch(app::OfxRuntimeCommand::Health,
+                                                    nlohmann::json::object());
+            if (poll) {
+                auto health = app::health_response_from_json(*poll);
+                if (health) {
+                    update_server_health(*health);
+                    log_message("ofx_runtime_client",
+                                "event=server_ready pid=" + std::to_string(m_server_pid));
+                    return {};
+                }
+                return Unexpected<Error>(health.error());
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(150));
         }
@@ -618,18 +623,10 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
     const auto start_time = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - start_time <
            std::chrono::milliseconds(m_options.launch_timeout_ms)) {
-        auto poll =
-            send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
-        if (poll) {
-            auto health = app::health_response_from_json(*poll);
-            if (health) {
-                update_server_health(*health);
-                log_message("ofx_runtime_client",
-                            "event=restart_server_result pid=" + std::to_string(m_server_pid));
-                return {};
-            }
-            return Unexpected<Error>(health.error());
-        }
+        // Liveness before Health probe — see the parallel reasoning in
+        // wait_for_server_ready above. Avoids paying the Windows
+        // connect-refused TCP retry cost on every iteration after the
+        // restarted sidecar has already exited.
         if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
             const std::string exit_reason = "Restarted OFX runtime server process (pid=" +
                                             std::to_string(m_server_pid) +
@@ -642,6 +639,18 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
                                                m_options.launch_timeout_ms,
                                                m_options.server_binary),
             });
+        }
+        auto poll =
+            send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
+        if (poll) {
+            auto health = app::health_response_from_json(*poll);
+            if (health) {
+                update_server_health(*health);
+                log_message("ofx_runtime_client",
+                            "event=restart_server_result pid=" + std::to_string(m_server_pid));
+                return {};
+            }
+            return Unexpected<Error>(health.error());
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
     }

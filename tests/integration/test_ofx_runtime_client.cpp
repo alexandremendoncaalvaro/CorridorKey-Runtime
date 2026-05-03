@@ -908,10 +908,15 @@ TEST_CASE("ofx runtime client detects sidecar that exits during startup",
     OfxRuntimeClientOptions options;
     options.endpoint = LocalJsonEndpoint{"127.0.0.1", port};
     options.server_binary = quick_exit_binary;
-    // Pick a generous timeout so a real timeout wait would dominate the
-    // test runtime if the early-exit detector regressed. The detector
-    // should short-circuit well below this budget.
-    options.launch_timeout_ms = 5000;
+    // The headline diagnostic claim is "early-exit detection short-circuits
+    // the wait_for_server_ready loop before launch_timeout_ms expires". To
+    // assert that without overspecifying machine performance, set a 10 s
+    // launch_timeout_ms and require elapsed < launch_timeout_ms / 2. The
+    // assertion remains tight enough to catch a regression where the loop
+    // falls through to the timeout (which would push elapsed close to the
+    // full budget) while staying robust to first-launch AV scan latency
+    // observed on Windows hosts.
+    options.launch_timeout_ms = 10000;
     options.request_timeout_ms = 500;
     options.prepare_timeout_ms = 1000;
 
@@ -931,17 +936,22 @@ TEST_CASE("ofx runtime client detects sidecar that exits during startup",
 
     const auto start = std::chrono::steady_clock::now();
     auto prepared = (*client)->prepare_session(prepare_request);
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::steady_clock::now() - start)
-                             .count();
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - start)
+                                .count();
 
     REQUIRE_FALSE(prepared.has_value());
+    INFO("elapsed_ms=" << elapsed_ms);
+    INFO("error.message=" << prepared.error().message);
     CHECK(prepared.error().message.find("exited during startup") != std::string::npos);
-    // The early-exit detector polls every 150 ms; one or two iterations is
-    // plenty to notice. Set the budget at 1500 ms (10x the poll interval)
-    // so transient scheduling jitter under heavy CI load does not flake.
-    CHECK(elapsed < 1500);
-    // Confirm the message names the artefacts the user needs.
+    // Confirm the message names the artefacts the user needs (TROUBLESHOOTING.md
+    // "Logs and Bug Report Guidance" already directs users at the LOCALAPPDATA
+    // log directory; the dialog should now name the exact log filename).
     CHECK(prepared.error().message.find("server_log=") != std::string::npos);
     CHECK(prepared.error().message.find("server_binary=") != std::string::npos);
+    // Performance guarantee: early-exit detection must short-circuit the
+    // wait_for_server_ready loop well before launch_timeout_ms expires.
+    // A regression that left the loop polling Health for the full timeout
+    // would push elapsed_ms close to launch_timeout_ms.
+    CHECK(elapsed_ms < options.launch_timeout_ms / 2);
 }
