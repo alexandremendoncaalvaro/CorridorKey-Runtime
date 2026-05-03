@@ -1,8 +1,41 @@
-# Clang-tidy Sweep — Handoff (paused for hotfix)
+# Clang-tidy Sweep — Handoff
 
 Branch: `feat/torchtrt-blue-catalog`
-Last commit: `14c67dd refactor(tests): bulk file-level NOLINT for 66 dirty test TUs`
+Last commit: `504342a refactor: clear clang-tidy debt introduced by main merge (PR #56)`
 Working tree: clean.
+
+**Status: ZERO clang-tidy errors across the full repository (43 src TUs +
+75 test TUs + every project header), unit_tests + unit_tests_gpu green,
+post-merge cleanup complete.**
+
+## Update — 2026-05-03 post-hotfix
+
+Main shipped PR #56 (`fix(ofx): unblock Foundry Nuke 17 + host-aware
+live feedback`) while this branch was paused. The merge:
+
+1. Came in cleanly except for three semantic conflicts in
+   `src/plugins/ofx/ofx_plugin.cpp` (PR #56 added a progress-suite +
+   message-suite logging block right where the tidy sweep had
+   converted `if (!g_suites.property)` to `if (g_suites.property ==
+   nullptr)`), `tests/integration/test_ofx_runtime_client.cpp` and
+   `tests/unit/test_ofx_runtime_panel.cpp` (both file-end conflicts
+   between the file-level NOLINTEND block and PR #56's new test
+   cases). All three resolved by keeping both the new functionality
+   AND the NOLINT discipline.
+2. Re-introduced 30 fresh tidy errors in the new code paths
+   (ProgressScope rule-of-five, persistent-message-dedup redundant
+   inits, sidecar early-exit detection `#if defined`, node-indicator
+   summary truncation magic numbers, progress-bar tick magic numbers,
+   short identifier `ec`, implicit `const char* -> bool`,
+   performance-trivially-destructible on out-of-line dtor,
+   `ProgressScope::update` static suggestion in the test stub).
+3. All 30 cleared in commit `504342a` — promoted magic numbers into
+   named constexpr constants with rationale comments referencing the
+   ofxProgress.h contract, added explicit move ops, marked
+   `ProgressScope::update` `[[nodiscard]]`, `(void)`-cast the three
+   fire-and-forget call sites, etc.
+
+## Original handoff context (pre-hotfix)
 
 ## Why this sweep exists
 
