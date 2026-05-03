@@ -70,7 +70,8 @@ function Resolve-CorridorKeyDumpbinPath {
 function Get-CorridorKeyPeImports {
     param(
         [string]$DumpbinPath,
-        [string]$ImagePath
+        [string]$ImagePath,
+        [switch]$IncludeDelayLoaded
     )
 
     $output = & $DumpbinPath /DEPENDENTS $ImagePath 2>$null
@@ -78,10 +79,39 @@ function Get-CorridorKeyPeImports {
         return @()
     }
 
-    return $output |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -match '^[A-Za-z0-9_.-]+\.dll$' } |
-        Select-Object -Unique
+    # `dumpbin /DEPENDENTS` emits two DLL sections back-to-back when an
+    # image uses delay-loading: first "Image has the following dependencies"
+    # (normal imports the OS resolves at process start) and then "Image has
+    # the following delay load dependencies" (resolved on first call by the
+    # delay-load helper). Strategy C ships corridorkey_torchtrt.dll in the
+    # blue model pack only and links it /DELAYLOAD; the base RTX bundle
+    # must NOT contain it. Treating delay-load entries as required would
+    # block the bundle on a DLL we deliberately omitted, so this parser
+    # keeps the two sections separate and only the normal imports drive
+    # the bundle-completeness check (callers opt into delay-loaded scanning
+    # via -IncludeDelayLoaded).
+    $imports = [System.Collections.Generic.List[string]]::new()
+    $inDelayLoadSection = $false
+    foreach ($rawLine in $output) {
+        $line = $rawLine.Trim()
+        if ($line -match '^Image has the following delay load dependencies:?$') {
+            $inDelayLoadSection = $true
+            continue
+        }
+        if ($line -match '^Image has the following dependencies:?$') {
+            $inDelayLoadSection = $false
+            continue
+        }
+        if ($line -notmatch '^[A-Za-z0-9_.-]+\.dll$') {
+            continue
+        }
+        if ($inDelayLoadSection -and -not $IncludeDelayLoaded.IsPresent) {
+            continue
+        }
+        [void]$imports.Add($line)
+    }
+
+    return $imports | Select-Object -Unique
 }
 
 # System DLLs that are always resolvable from Windows and must not be bundled.
