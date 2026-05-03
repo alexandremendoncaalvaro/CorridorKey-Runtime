@@ -1,0 +1,38 @@
+version: '3.8'
+
+# Compose file lives under packaging/docker/. The build context is the
+# repo root (../..) because Dockerfile.nvidia executes `COPY . /workspace/`
+# which needs the full source tree, and the volumes map the repo's
+# assets/ outputs/ models/ into /app for inference runs.
+#
+# Run from anywhere with:
+#   docker compose -f packaging/docker/docker-compose.yml up
+#
+# Compose resolves all relative paths against the file's directory, so
+# `context: ../..` and `../../<repo-subdir>` are stable regardless of
+# the operator's CWD.
+
+services:
+  corridorkey-gpu:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile.nvidia
+    image: corridorkey-runtime:nvidia
+    container_name: corridorkey_inference
+    # Pass-through all available GPUs (requires NVIDIA Container Toolkit on host)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Map the repo subdirs into the container.
+    volumes:
+      - ../../assets:/app/assets
+      - ../../outputs:/app/outputs
+      - ../../models:/app/models
+    # Prevent container from exiting immediately if run in detached mode
+    tty: true
+    # Default command mapping (example)
+    command: ["corridorkey", "process", "--input", "assets/video_samples/greenscreen_1769569137.mp4", "--output", "outputs/docker_result.mp4", "--model", "models/corridorkey_int8_512.onnx"]

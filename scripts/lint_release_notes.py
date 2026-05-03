@@ -35,16 +35,20 @@ Rules
 
 Usage
 -----
+   # Release notes live at build/release_notes/v<X.Y.Z-platform.N>.md
+   # per docs/RELEASE_GUIDELINES.md section 5. Pass that path to the
+   # linter explicitly; the script does not assume any default location.
+
    # CI Tier 2: validate against packaged artifacts on disk
-   python3 scripts/lint_release_notes.py release_notes.md \
+   python3 scripts/lint_release_notes.py build/release_notes/v0.8.3-win.2.md \
        --assets-file dist/asset_manifest.txt
 
    # CI Tier 3: validate against the actual GitHub release
-   python3 scripts/lint_release_notes.py release_notes.md \
-       --release-tag v0.7.5
+   python3 scripts/lint_release_notes.py build/release_notes/v0.8.3-win.2.md \
+       --release-tag v0.8.3-win.2
 
    # Dry-run / explain mode (no exit code change)
-   python3 scripts/lint_release_notes.py release_notes.md \
+   python3 scripts/lint_release_notes.py build/release_notes/v0.8.3-win.2.md \
        --assets-file dist/asset_manifest.txt --warn-only
 
 Assets-file format: one filename per line, blank lines and `#` comments ignored.
