@@ -208,6 +208,16 @@ function Build-OnlineExternalFilesBlock {
 }
 
 function Build-OfflineFilesBlock {
+    # Offline flavor: every pack file is staged on disk under
+    # $PayloadRoot/<dest_subdir>/<filename>. For "regular" packs we emit
+    # one [Files] entry per file (granular + clear in the .iss). For
+    # archive packs (is_archive + extract = true) the offline staging
+    # script has ALREADY pre-extracted the archive into the same
+    # subdir (Inno Setup's `extractarchive` flag is download-only;
+    # bundling the .7z and trying to unpack at install raises
+    # "Flag 'external' must be used"), so we emit a single
+    # recursesubdirs entry that bakes every extracted file into the
+    # installer.
     param([object]$Manifest, [string]$PayloadRoot)
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('[Files]')
@@ -215,19 +225,29 @@ function Build-OfflineFilesBlock {
         $packMeta = $pack.Value
         $component = $packMeta.component
         $destSubdir = $packMeta.dest_subdir -replace '/', '\'
+        $packDir = Join-Path $PayloadRoot $destSubdir
+        $isExtractArchive = ($packMeta.PSObject.Properties.Match('is_archive').Count -gt 0 -and $packMeta.is_archive) `
+                      -and ($packMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $packMeta.extract)
+        if ($isExtractArchive) {
+            if (-not (Test-Path $packDir)) {
+                throw "Offline payload missing pre-extracted archive dir: $packDir. Re-run scripts/installer/stage_offline_payload.ps1."
+            }
+            $hasContent = @(Get-ChildItem -Path $packDir -File -ErrorAction SilentlyContinue).Count -gt 0
+            if (-not $hasContent) {
+                throw "Offline payload pre-extraction dir is empty: $packDir. The archive download may have failed; re-run staging."
+            }
+            $sourceForIss = ((Join-Path $packDir '*') -replace '/', '\') -replace '\\\\', '\'
+            [void]$sb.AppendLine("Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion recursesubdirs createallsubdirs")
+            continue
+        }
         foreach ($file in $packMeta.files) {
             if ($file.status -ne 'ready') { continue }
-            $relativeSource = $file.filename
-            $sourcePath = Join-Path (Join-Path $PayloadRoot $destSubdir) $relativeSource
+            $sourcePath = Join-Path $packDir $file.filename
             if (-not (Test-Path $sourcePath)) {
                 throw "Offline payload missing file: $sourcePath. Pre-populate before invoking with -Flavor offline."
             }
             $sourceForIss = ($sourcePath -replace '/', '\') -replace '\\\\', '\'
-            $line = "Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion"
-            if ($packMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $packMeta.extract) {
-                $line += " extractarchive recursesubdirs"
-            }
-            [void]$sb.AppendLine($line)
+            [void]$sb.AppendLine("Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion")
         }
     }
     return $sb.ToString().TrimEnd()

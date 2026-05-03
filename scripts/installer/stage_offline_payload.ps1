@@ -120,20 +120,65 @@ function Get-FileFromHuggingFace {
     Move-Item -Path $partial -Destination $DestPath
 }
 
+function Get-SevenZipPath {
+    $candidates = @(
+        "C:\Program Files\7-Zip\7z.exe",
+        "C:\Program Files (x86)\7-Zip\7z.exe"
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    $cmd = Get-Command "7z.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $cmd) { return $cmd.Source }
+    return ""
+}
+
+function Expand-ArchiveAndDelete {
+    # Pre-extracts the downloaded archive in place so the offline flavor's
+    # Inno Setup [Files] block can ship the extracted contents as plain
+    # files (Inno's `extractarchive` flag is download-only - it errors
+    # out with "Flag 'external' must be used if flag 'extractarchive' is
+    # used" when the source is bundled). Also removes the archive after
+    # extraction so the payload dir matches the install-dir layout the
+    # runtime expects (arm_torchtrt_runtime walks for *.dll, not for an
+    # archive).
+    param(
+        [string]$ArchivePath,
+        [string]$DestDir
+    )
+    $sevenZip = Get-SevenZipPath
+    if ([string]::IsNullOrWhiteSpace($sevenZip)) {
+        throw "7-Zip not found. Install 7-Zip (https://www.7-zip.org) so stage_offline_payload can extract archive packs."
+    }
+    if (-not (Test-Path $DestDir)) {
+        New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+    }
+    Write-Host "  [extract] $(Split-Path -Leaf $ArchivePath) -> $DestDir" -ForegroundColor Cyan
+    & $sevenZip x -y -o"$DestDir" $ArchivePath | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "7-Zip extraction failed for $ArchivePath (exit $LASTEXITCODE)"
+    }
+    Remove-Item $ArchivePath -Force
+}
+
 $totalReady = 0
 $totalSkipped = 0
 foreach ($pack in $manifest.packs.PSObject.Properties) {
     $packMeta = $pack.Value
     Write-Host "[$($pack.Name)] -> $($packMeta.dest_subdir)" -ForegroundColor Yellow
     $destSubdir = $packMeta.dest_subdir -replace '/', '\'
+    $isExtractArchive = ($packMeta.PSObject.Properties.Match('is_archive').Count -gt 0 -and $packMeta.is_archive) `
+                  -and ($packMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $packMeta.extract)
     foreach ($file in $packMeta.files) {
         if ($file.status -ne "ready") {
             Write-Host "  [pending] $($file.filename) (status=$($file.status); skip)" -ForegroundColor Yellow
             $totalSkipped++
             continue
         }
-        $destPath = Join-Path (Join-Path $OutputDir $destSubdir) $file.filename
+        $packDir = Join-Path $OutputDir $destSubdir
+        $destPath = Join-Path $packDir $file.filename
         Get-FileFromHuggingFace -Url $file.url -DestPath $destPath -ExpectedSha256 $file.sha256
+        if ($isExtractArchive) {
+            Expand-ArchiveAndDelete -ArchivePath $destPath -DestDir $packDir
+        }
         $totalReady++
     }
 }
