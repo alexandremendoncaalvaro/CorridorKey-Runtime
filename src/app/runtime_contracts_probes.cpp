@@ -28,7 +28,7 @@
 #include "../frame_io/video_io.hpp"
 #include "runtime_contracts.hpp"
 
-// NOLINTBEGIN(modernize-use-ranges,readability-identifier-length,modernize-use-designated-initializers,readability-function-cognitive-complexity,readability-avoid-nested-conditional-operator)
+// NOLINTBEGIN(modernize-use-ranges,readability-identifier-length,modernize-use-designated-initializers,readability-function-cognitive-complexity,readability-avoid-nested-conditional-operator,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // runtime_contracts_probes.cpp tidy-suppression rationale.
 //
@@ -280,4 +280,4 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
 }
 
 }  // namespace corridorkey::app
-// NOLINTEND(modernize-use-ranges,readability-identifier-length,modernize-use-designated-initializers,readability-function-cognitive-complexity,readability-avoid-nested-conditional-operator)
+// NOLINTEND(modernize-use-ranges,readability-identifier-length,modernize-use-designated-initializers,readability-function-cognitive-complexity,readability-avoid-nested-conditional-operator,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

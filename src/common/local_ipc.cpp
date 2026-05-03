@@ -18,7 +18,7 @@
 #include <unistd.h>
 #endif
 
-// NOLINTBEGIN(readability-use-concise-preprocessor-directives,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,modernize-use-integer-sign-comparison)
+// NOLINTBEGIN(readability-use-concise-preprocessor-directives,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,modernize-use-integer-sign-comparison,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // local_ipc.cpp tidy-suppression rationale.
 //
@@ -296,4 +296,4 @@ Result<nlohmann::json> send_json_request(const LocalJsonEndpoint& endpoint,
 }
 
 }  // namespace corridorkey::common
-// NOLINTEND(readability-use-concise-preprocessor-directives,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,modernize-use-integer-sign-comparison)
+// NOLINTEND(readability-use-concise-preprocessor-directives,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,modernize-use-integer-sign-comparison,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

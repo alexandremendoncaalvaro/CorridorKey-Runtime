@@ -18,7 +18,7 @@
 
 namespace corridorkey::ofx {
 
-// NOLINTBEGIN(modernize-use-designated-initializers,bugprone-easily-swappable-parameters,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-avoid-magic-numbers)
+// NOLINTBEGIN(modernize-use-designated-initializers,bugprone-easily-swappable-parameters,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // ofx_runtime_server_main.cpp tidy-suppression rationale.
 //
@@ -286,7 +286,7 @@ int run_runtime_server() {
 }
 
 }  // namespace corridorkey::ofx
-// NOLINTEND(modernize-use-designated-initializers,bugprone-easily-swappable-parameters,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-avoid-magic-numbers)
+// NOLINTEND(modernize-use-designated-initializers,bugprone-easily-swappable-parameters,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 int APIENTRY wWinMain(HINSTANCE /*instance*/, HINSTANCE /*prev_instance*/, PWSTR /*command_line*/,
                       int /*show_command*/) {

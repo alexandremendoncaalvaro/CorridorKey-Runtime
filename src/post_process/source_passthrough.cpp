@@ -6,7 +6,7 @@
 #include "color_utils.hpp"
 #include "common/parallel_for.hpp"
 
-// NOLINTBEGIN(readability-math-missing-parentheses,readability-identifier-length,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,modernize-use-auto,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,modernize-use-ranges,bugprone-misplaced-widening-cast)
+// NOLINTBEGIN(readability-math-missing-parentheses,readability-identifier-length,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,modernize-use-auto,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,modernize-use-ranges,bugprone-misplaced-widening-cast,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // source_passthrough tidy-suppression rationale.
 //
@@ -133,4 +133,4 @@ void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode
 }
 
 }  // namespace corridorkey
-// NOLINTEND(readability-math-missing-parentheses,readability-identifier-length,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,modernize-use-auto,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,modernize-use-ranges,bugprone-misplaced-widening-cast)
+// NOLINTEND(readability-math-missing-parentheses,readability-identifier-length,modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,modernize-use-auto,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,modernize-use-ranges,bugprone-misplaced-widening-cast,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

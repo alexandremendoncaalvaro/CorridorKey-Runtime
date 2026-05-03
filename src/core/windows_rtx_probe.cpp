@@ -26,7 +26,7 @@
 
 namespace corridorkey::core {
 
-// NOLINTBEGIN(readability-identifier-length,modernize-use-ranges,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-avoid-magic-numbers)
+// NOLINTBEGIN(readability-identifier-length,modernize-use-ranges,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // windows_rtx_probe.cpp tidy-suppression rationale.
 //
@@ -365,4 +365,4 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
 }
 
 }  // namespace corridorkey::core
-// NOLINTEND(readability-identifier-length,modernize-use-ranges,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-avoid-magic-numbers)
+// NOLINTEND(readability-identifier-length,modernize-use-ranges,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

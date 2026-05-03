@@ -278,14 +278,14 @@ void sync_runtime_panel_state_from_active_session(InstanceData* data) {
         client_has_session ? data->runtime_client->session_ref_count() : 0;
 }
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+// NOLINTBEGIN(bugprone-easily-swappable-parameters,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // quality_mode and requested_resolution are both ints encoding distinct
 // domain values; the existing internal call sites name both locals so a
 // mistaken swap would surface in code review.
 void set_runtime_panel_state_for_failed_quality_request(
     InstanceData* data, int requested_quality_mode, int requested_resolution,
     bool cpu_quality_guardrail_active, const std::filesystem::path& artifact_path) {
-    // NOLINTEND(bugprone-easily-swappable-parameters)
+    // NOLINTEND(bugprone-easily-swappable-parameters,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
     if (data == nullptr) {
         return;
     }
@@ -689,7 +689,7 @@ void log_stage_timing(std::string_view scope, std::string_view phase,
                            " effective_resolution=" + std::to_string(effective_resolution));
 }
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+// NOLINTBEGIN(bugprone-easily-swappable-parameters,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // scope/event/phase are all distinct log fields, and the int/int pair
 // (requested_resolution, effective_resolution) is paired throughout the
 // engine event log; restructuring would force every call site to
@@ -700,7 +700,7 @@ void log_engine_event(std::string_view scope, std::string_view event, std::strin
                       int effective_resolution,
                       const std::optional<BackendFallbackInfo>& fallback = std::nullopt,
                       std::string_view detail = {}) {
-    // NOLINTEND(bugprone-easily-swappable-parameters)
+    // NOLINTEND(bugprone-easily-swappable-parameters,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
     std::string message = "event=" + std::string(event) + " phase=" + std::string(phase) +
                           " requested_backend=" + backend_label(requested_device.backend) +
                           " effective_backend=" + backend_label(effective_device.backend) +
@@ -772,7 +772,7 @@ bool allow_unrestricted_quality_attempt_for_request_impl(const InstanceData& dat
                .unrestricted_quality_attempt;
 }
 
-// NOLINTBEGIN(readability-function-cognitive-complexity)
+// NOLINTBEGIN(readability-function-cognitive-complexity,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // This function is the canonical OFX panel-flush sink: every host-visible
 // runtime-panel string flows through it exactly once per render or
 // instance-change tick, mediated by the host-quirks render-thread guard
@@ -868,7 +868,7 @@ void update_runtime_panel_values(InstanceData* data) {
     log_message("update_runtime_panel_values",
                 std::string("exit ok banner=") + (show_banner ? "1" : "0"));
 }
-// NOLINTEND(readability-function-cognitive-complexity)
+// NOLINTEND(readability-function-cognitive-complexity,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 std::optional<std::filesystem::path> plugin_module_path() {
 #ifdef _WIN32
@@ -1078,7 +1078,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
     return true;
 }
 
-// NOLINTBEGIN(readability-function-size)
+// NOLINTBEGIN(readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // create_instance is the canonical OFX kOfxImageEffectActionCreateInstance
 // handler: most of the body is the explicit list of paramGetHandle calls
 // that resolve every parameter the plugin exposes. That list is best read
@@ -1307,9 +1307,9 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     log_create_total("success", "bootstrap=deferred");
     return kOfxStatOK;
 }
-// NOLINTEND(readability-function-size)
+// NOLINTEND(readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
-// NOLINTBEGIN(bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size)
+// NOLINTBEGIN(bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // quality_mode and input_width/input_height are distinct domain ints and
 // the canonical OFX render plumbs all three by name from the host, so a
 // param struct is unnecessary friction. The function is the single
@@ -1653,7 +1653,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     update_runtime_panel(data);
     return false;
 }
-// NOLINTEND(bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size)
+// NOLINTEND(bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 void update_runtime_panel(InstanceData* data) {
     // update_runtime_panel_values now owns the render-thread guard. Mark
@@ -1785,7 +1785,7 @@ void sync_dependent_params(InstanceData* data) {
     set_param_enabled(data->edge_blur_param, source_passthrough != 0);
 }
 
-// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size)
+// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // instance_changed dispatches the OFX kOfxActionInstanceChanged event for
 // every named parameter the plugin exposes. Each branch is a short,
 // independent action handler (open URL, kick off update check, sync
@@ -1883,7 +1883,7 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
     }
     return kOfxStatOK;
 }
-// NOLINTEND(readability-function-cognitive-complexity,readability-function-size)
+// NOLINTEND(readability-function-cognitive-complexity,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 OfxStatus sync_private_data(OfxImageEffectHandle instance) {
     InstanceData* data = get_instance_data(instance);

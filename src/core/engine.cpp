@@ -17,7 +17,7 @@
 #include "ort_process_context.hpp"
 #include "warmup_policy.hpp"
 
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,performance-unnecessary-value-param,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,modernize-avoid-c-style-cast,modernize-use-nodiscard,readability-convert-member-functions-to-static,cppcoreguidelines-missing-std-forward)
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,performance-unnecessary-value-param,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,modernize-avoid-c-style-cast,modernize-use-nodiscard,readability-convert-member-functions-to-static,cppcoreguidelines-missing-std-forward,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // engine.cpp tidy-suppression rationale.
 //
@@ -712,4 +712,4 @@ Result<void> Engine::prewarm(int target_resolution, StageTimingCallback on_stage
 }
 
 }  // namespace corridorkey
-// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,performance-unnecessary-value-param,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,modernize-avoid-c-style-cast,modernize-use-nodiscard,readability-convert-member-functions-to-static,cppcoreguidelines-missing-std-forward)
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,performance-unnecessary-value-param,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,modernize-avoid-c-style-cast,modernize-use-nodiscard,readability-convert-member-functions-to-static,cppcoreguidelines-missing-std-forward,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

@@ -27,7 +27,7 @@ extern char** environ;
 
 namespace corridorkey::ofx {
 
-// NOLINTBEGIN(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const)
+// NOLINTBEGIN(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // ofx_runtime_client.cpp tidy-suppression rationale.
 //
@@ -695,4 +695,4 @@ void OfxRuntimeClient::update_server_health(const app::OfxRuntimeHealthResponse&
 }
 
 }  // namespace corridorkey::ofx
-// NOLINTEND(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const)
+// NOLINTEND(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

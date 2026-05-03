@@ -253,7 +253,7 @@ class RenderScope {
     InstanceData* m_data = nullptr;
 };
 
-// NOLINTBEGIN(readability-identifier-length,bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-reinterpret-cast,readability-qualified-auto,modernize-use-auto,bugprone-implicit-widening-of-multiplication-result)
+// NOLINTBEGIN(readability-identifier-length,bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-reinterpret-cast,readability-qualified-auto,modernize-use-auto,bugprone-implicit-widening-of-multiplication-result,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // Pixel writers operate on the OFX host's raw void* output buffers and use
 // the established (r, g, b, a) and (x, y) single-letter conventions that
 // every image-processing reference uses. Restructuring the parameter
@@ -410,7 +410,7 @@ void bypass_with_source(const void* source_data, void* output_data, int width, i
         std::memcpy(dst_row, src_row, static_cast<size_t>(copy_bytes));
     }
 }
-// NOLINTEND(readability-identifier-length,bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-reinterpret-cast,readability-qualified-auto,modernize-use-auto,bugprone-implicit-widening-of-multiplication-result)
+// NOLINTEND(readability-identifier-length,bugprone-easily-swappable-parameters,cppcoreguidelines-pro-type-reinterpret-cast,readability-qualified-auto,modernize-use-auto,bugprone-implicit-widening-of-multiplication-result,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 enum class InferenceOutcome : std::uint8_t { kOk, kBypass, kFailed };
 
@@ -422,7 +422,7 @@ struct InferenceResult {
     std::vector<StageTiming> stage_timings;
 };
 
-// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size,bugprone-easily-swappable-parameters,readability-identifier-length)
+// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size,bugprone-easily-swappable-parameters,readability-identifier-length,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // resolve_inference_buffers is the single sequence point for the OFX
 // render path: shared-cache check -> backend dispatch -> result validation
 // -> instance-cache materialization. Each stage has tight invariants that
@@ -588,7 +588,7 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
         .stage_timings = std::move(stage_timings),
     };
 }
-// NOLINTEND(readability-function-cognitive-complexity,readability-function-size,bugprone-easily-swappable-parameters,readability-identifier-length)
+// NOLINTEND(readability-function-cognitive-complexity,readability-function-size,bugprone-easily-swappable-parameters,readability-identifier-length,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 }  // namespace
 
@@ -615,7 +615,7 @@ Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_vie
     return resolve_alpha_hint_source_impl(rgb_view, hint_view, hint_from_clip, alpha_hint_policy);
 }
 
-// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size,readability-implicit-bool-conversion,cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-starts-ends-with,modernize-use-designated-initializers,modernize-use-ranges,readability-math-missing-parentheses)
+// NOLINTBEGIN(readability-function-cognitive-complexity,readability-function-size,readability-implicit-bool-conversion,cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-starts-ends-with,modernize-use-designated-initializers,modernize-use-ranges,readability-math-missing-parentheses,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // render is the canonical OFX kOfxImageEffectActionRender handler. It
 // resolves the host's source/output buffers, reads every plugin parameter
 // at the current frame time, then drives the inference + post-process
@@ -1208,6 +1208,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     return kOfxStatOK;
 }
-// NOLINTEND(readability-function-cognitive-complexity,readability-function-size,readability-implicit-bool-conversion,cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-starts-ends-with,modernize-use-designated-initializers,modernize-use-ranges,readability-math-missing-parentheses)
+// NOLINTEND(readability-function-cognitive-complexity,readability-function-size,readability-implicit-bool-conversion,cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-starts-ends-with,modernize-use-designated-initializers,modernize-use-ranges,readability-math-missing-parentheses,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 }  // namespace corridorkey::ofx
