@@ -891,3 +891,57 @@ TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime 
     server_thread.join();
     REQUIRE_FALSE(server_error.has_value());
 }
+
+// Regression test for issue #56: when the spawned sidecar exits before
+// binding its port, the client must detect the dead PID and surface an
+// actionable error within a small fraction of launch_timeout_ms. Before
+// this guard the client polled Health for the full timeout and returned
+// only a generic "Timed out" string, leaving the user no pointer to the
+// server log path.
+TEST_CASE("ofx runtime client detects sidecar that exits during startup",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path quick_exit_binary = OFX_RUNTIME_TEST_QUICK_EXIT_PATH;
+    REQUIRE(std::filesystem::exists(quick_exit_binary));
+
+    const auto port = reserve_local_port();
+
+    OfxRuntimeClientOptions options;
+    options.endpoint = LocalJsonEndpoint{"127.0.0.1", port};
+    options.server_binary = quick_exit_binary;
+    // Pick a generous timeout so a real timeout wait would dominate the
+    // test runtime if the early-exit detector regressed. The detector
+    // should short-circuit well below this budget.
+    options.launch_timeout_ms = 5000;
+    options.request_timeout_ms = 500;
+    options.prepare_timeout_ms = 1000;
+
+    auto client = OfxRuntimeClient::create(options);
+    REQUIRE(client.has_value());
+
+    OfxRuntimePrepareSessionRequest prepare_request;
+    prepare_request.client_instance_id = "client-quick-exit";
+    prepare_request.model_path = "models/corridorkey_fp16_512.onnx";
+    prepare_request.artifact_name = "corridorkey_fp16_512.onnx";
+    prepare_request.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
+    prepare_request.requested_quality_mode = 1;
+    prepare_request.requested_resolution = 512;
+    prepare_request.effective_resolution = 512;
+    prepare_request.engine_options.allow_cpu_fallback = false;
+    prepare_request.engine_options.disable_cpu_ep_fallback = true;
+
+    const auto start = std::chrono::steady_clock::now();
+    auto prepared = (*client)->prepare_session(prepare_request);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+
+    REQUIRE_FALSE(prepared.has_value());
+    CHECK(prepared.error().message.find("exited during startup") != std::string::npos);
+    // The early-exit detector polls every 150 ms; one or two iterations is
+    // plenty to notice. Set the budget at 1500 ms (10x the poll interval)
+    // so transient scheduling jitter under heavy CI load does not flake.
+    CHECK(elapsed < 1500);
+    // Confirm the message names the artefacts the user needs.
+    CHECK(prepared.error().message.find("server_log=") != std::string::npos);
+    CHECK(prepared.error().message.find("server_binary=") != std::string::npos);
+}

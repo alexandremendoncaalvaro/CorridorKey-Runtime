@@ -128,6 +128,67 @@ Result<void> terminate_server_process(int server_pid) {
 #endif
 }
 
+// Probe whether a previously-spawned sidecar PID is still alive.
+//
+// Why this exists: when a Health probe times out during sidecar startup we
+// otherwise cannot tell apart "process is alive but slow to bind" from
+// "process exited before binding the port". Issue #56 produced exactly the
+// second case (Nuke 17.0v2 host) and the client polled a dead PID for the
+// full launch_timeout_ms before surfacing a generic "Timed out" string.
+// Returning false here lets the caller short-circuit with an actionable
+// "process exited during startup" error.
+//
+// Failure to open the PID handle is treated as "exited" so the caller
+// fails fast. The conservative direction is well-defined: if the sidecar
+// is somehow alive but the handle cannot be opened, the next Health poll
+// will succeed and recover; if the sidecar is dead, we save the user the
+// remaining timeout.
+bool is_process_alive(int server_pid) {
+    if (server_pid <= 0) {
+        return false;
+    }
+
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(server_pid));
+    if (process == nullptr) {
+        return false;
+    }
+    const DWORD wait_result = WaitForSingleObject(process, 0);
+    CloseHandle(process);
+    return wait_result == WAIT_TIMEOUT;
+#else
+    if (kill(server_pid, 0) == 0) {
+        return true;
+    }
+    return errno != ESRCH;
+#endif
+}
+
+// Compose a timeout / early-exit error message that names every artefact
+// the user needs to diagnose the failure: the resolved loopback port, the
+// configured timeout, the server log path, and the server binary path.
+// help/TROUBLESHOOTING.md "Logs and Bug Report Guidance" already directs
+// users at the LOCALAPPDATA log directory; embedding the exact filename
+// here turns the failure dialog into a one-step pointer.
+std::string compose_launch_failure_message(const std::string& reason,
+                                           const common::LocalJsonEndpoint& endpoint,
+                                           int timeout_ms,
+                                           const std::filesystem::path& server_binary) {
+    std::string message = reason;
+    message += " (endpoint=";
+    message += endpoint.host;
+    message += ":";
+    message += std::to_string(endpoint.port);
+    message += ", timeout=";
+    message += std::to_string(timeout_ms);
+    message += "ms, server_log=";
+    message += common::ofx_runtime_server_log_path().string();
+    message += ", server_binary=";
+    message += server_binary.string();
+    message += ").";
+    return message;
+}
+
 void replay_stage_timings(const std::vector<StageTiming>& timings, StageTimingCallback on_stage) {
     if (!on_stage) {
         return;
@@ -406,11 +467,32 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
                 }
                 return Unexpected<Error>(health.error());
             }
+            // The sidecar PID was captured by launch_server() before this
+            // poll loop runs. If it has already exited, polling Health for
+            // the remaining timeout is wasted time and produces a generic
+            // "Timed out" error that does not point at the real cause.
+            if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
+                const std::string reason = "OFX runtime server process (pid=" +
+                                           std::to_string(m_server_pid) +
+                                           ") exited during startup";
+                log_message("ofx_runtime_client", "event=server_exited_during_startup pid=" +
+                                                      std::to_string(m_server_pid));
+                return Unexpected<Error>(Error{
+                    ErrorCode::IoError,
+                    compose_launch_failure_message(reason, m_options.endpoint,
+                                                   m_options.launch_timeout_ms,
+                                                   m_options.server_binary),
+                });
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(150));
         }
 
-        return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Timed out waiting for the OFX runtime server to start."});
+        return Unexpected<Error>(Error{
+            ErrorCode::IoError,
+            compose_launch_failure_message("Timed out waiting for the OFX runtime server to start",
+                                           m_options.endpoint, m_options.launch_timeout_ms,
+                                           m_options.server_binary),
+        });
     };
 
     auto health_response =
@@ -548,11 +630,28 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
             }
             return Unexpected<Error>(health.error());
         }
+        if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
+            const std::string exit_reason = "Restarted OFX runtime server process (pid=" +
+                                            std::to_string(m_server_pid) +
+                                            ") exited during startup";
+            log_message("ofx_runtime_client", "event=restart_server_exited pid=" +
+                                                  std::to_string(m_server_pid));
+            return Unexpected<Error>(Error{
+                ErrorCode::IoError,
+                compose_launch_failure_message(exit_reason, m_options.endpoint,
+                                               m_options.launch_timeout_ms,
+                                               m_options.server_binary),
+            });
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
     }
 
-    return Unexpected<Error>(
-        Error{ErrorCode::IoError, "Timed out waiting for the restarted OFX runtime server."});
+    return Unexpected<Error>(Error{
+        ErrorCode::IoError,
+        compose_launch_failure_message("Timed out waiting for the restarted OFX runtime server",
+                                       m_options.endpoint, m_options.launch_timeout_ms,
+                                       m_options.server_binary),
+    });
 }
 
 Result<void> OfxRuntimeClient::launch_server() {
@@ -583,6 +682,16 @@ Result<void> OfxRuntimeClient::launch_server() {
             Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
     }
 
+    // Capture the spawned PID before closing the handles so the wait loop
+    // in ensure_server_running() / restart_server() can probe whether the
+    // child is still alive. Without this, m_server_pid stays 0 until a
+    // Health response arrives; in the failure mode behind issue #56 that
+    // response never arrives, and the client polls a dead process for the
+    // full launch_timeout_ms. The handles themselves do not need to remain
+    // open: is_process_alive() reopens by PID via OpenProcess(SYNCHRONIZE).
+    m_server_pid = static_cast<int>(process_info.dwProcessId);
+    log_message("ofx_runtime_client",
+                "event=launch_server_spawned pid=" + std::to_string(m_server_pid));
     CloseHandle(process_info.hThread);
     CloseHandle(process_info.hProcess);
 #else
@@ -647,6 +756,13 @@ Result<void> OfxRuntimeClient::launch_server() {
             Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
     }
 #endif
+    // Mirrors the Win32 branch above: capture the spawned PID before the
+    // wait loop runs so a child that exits before binding the port can be
+    // detected and surfaced instead of polling a dead process for the full
+    // launch_timeout_ms.
+    m_server_pid = static_cast<int>(pid);
+    log_message("ofx_runtime_client",
+                "event=launch_server_spawned pid=" + std::to_string(m_server_pid));
 #endif
 
     return {};
