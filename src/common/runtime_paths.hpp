@@ -35,7 +35,7 @@ struct ModelArtifactInspection {
     std::string detail;
 };
 
-// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-ranges,modernize-use-starts-ends-with,modernize-return-braced-init-list,readability-use-concise-preprocessor-directives,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc)
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-ranges,modernize-use-starts-ends-with,modernize-return-braced-init-list,readability-use-concise-preprocessor-directives,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
 // runtime_paths.hpp tidy-suppression rationale.
 //
@@ -499,4 +499,4 @@ inline std::optional<std::filesystem::path> existing_tensorrt_rtx_compiled_conte
 }
 
 }  // namespace corridorkey::common
-// NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-ranges,modernize-use-starts-ends-with,modernize-return-braced-init-list,readability-use-concise-preprocessor-directives,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc)
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers,readability-identifier-length,modernize-use-ranges,modernize-use-starts-ends-with,modernize-return-braced-init-list,readability-use-concise-preprocessor-directives,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

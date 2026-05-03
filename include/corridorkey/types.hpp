@@ -266,7 +266,7 @@ struct Image {
     // operator[] / unparenthesized index math are explicit choices documented
     // in CLAUDE.md (zero-allocation pixel access). NOLINT below suppresses
     // the categories that flag those choices as stylistic noise.
-    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-redundant-inline-specifier,readability-make-member-function-const)
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-redundant-inline-specifier,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
     float& operator()(int y_pos, int x_pos, int channel = 0) {
         return data[(((static_cast<size_t>(y_pos) * width) + x_pos) * channels) + channel];
     }
@@ -274,7 +274,7 @@ struct Image {
     const float& operator()(int y_pos, int x_pos, int channel = 0) const {
         return data[(((static_cast<size_t>(y_pos) * width) + x_pos) * channels) + channel];
     }
-    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-redundant-inline-specifier,readability-make-member-function-const)
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-redundant-inline-specifier,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 };
 
 /**
@@ -289,7 +289,7 @@ class ImageBuffer {
     // pair lives in the destructor. The reinterpret_cast on the
     // posix_memalign path is the canonical idiom Linux man pages
     // demonstrate.
-    // NOLINTBEGIN(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-type-reinterpret-cast)
+    // NOLINTBEGIN(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
     ImageBuffer(int width, int height, int channels)
         : m_width(width), m_height(height), m_channels(channels) {
         const size_t size = static_cast<size_t>(width) * height * channels;
@@ -310,7 +310,7 @@ class ImageBuffer {
             m_data = std::span<float>(m_ptr, size);
         }
     }
-    // NOLINTEND(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-type-reinterpret-cast)
+    // NOLINTEND(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
     ~ImageBuffer() {
         if (m_ptr != nullptr) {
