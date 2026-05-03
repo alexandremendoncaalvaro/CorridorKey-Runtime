@@ -92,20 +92,17 @@ def main():
         default="portable-ort",
         help="Select the optimization profile for the generated artifacts."
     )
-    parser.add_argument(
-        "--variant",
-        type=str,
-        choices=("green", "blue"),
-        default="green",
-        help="Screen-color variant. 'green' keeps the historical "
-             "corridorkey_{fp32,fp16}_<res>.onnx names; 'blue' switches to "
-             "corridorkey_blue_{fp32,fp16}_<res>.onnx so the dedicated "
-             "CorridorKeyBlue artifacts can sit alongside green in models/."
-    )
+    # The blue variant is not exposed here: the production blue path is
+    # Torch-TensorRT compiled engines (.ts), not ONNX. The blue ONNX export
+    # was retired after the blue FP16 ONNX was shown to NaN on the TensorRT
+    # and CUDA execution providers (see docs/OPTIMIZATION_MEASUREMENTS.md
+    # "Blue dedicated baselines"). To produce a blue .ts engine, use
+    # tools/model_exporter/compile_torchtrt.py instead. Green remains the
+    # only ONNX-optimised variant.
     args = parser.parse_args()
 
     models_dir = os.path.abspath(args.dir)
-    prefix = "corridorkey" if args.variant == "green" else "corridorkey_blue"
+    prefix = "corridorkey"
 
     resolutions = [512, 768, 1024, 1536, 2048]
 

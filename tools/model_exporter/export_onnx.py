@@ -146,8 +146,12 @@ def export_resolution(args, resolution):
     disable_torch_compile_for_export(torch)
 
     # Per-resolution static is the contract the canonical pipeline expects:
-    # corridorkey[_blue]_fp32_<res>.onnx regardless of static-ness, with the
+    # corridorkey_fp32_<res>.onnx regardless of static-ness, with the
     # static export only applied to the rungs TensorRT requires (1536, 2048).
+    # Blue no longer flows through this ONNX path in production -- it is
+    # served by Torch-TensorRT engines (.ts) compiled via
+    # tools/model_exporter/compile_torchtrt.py. The blue branch here is
+    # retained only for the INT8 web experiment that still consumes ONNX.
     # The legacy --static flag is retained, but it keeps the historical
     # _static_<res>.onnx suffix to avoid breaking any standalone caller that
     # already relied on it.
