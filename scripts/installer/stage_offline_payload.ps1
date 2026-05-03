@@ -111,7 +111,10 @@ function Get-FileFromHuggingFace {
     $actual = (Get-FileHash -Path $partial -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actual -ne $ExpectedSha256.ToLowerInvariant()) {
         Remove-Item $partial -Force
-        throw "SHA256 mismatch for $Url: expected $ExpectedSha256, got $actual"
+        # ${Url} delimited form: PowerShell otherwise reads `$Url:` as a
+        # drive-qualified variable lookup ("$<drive>:<var>") and bails
+        # at parse time with "InvalidVariableReferenceWithDrive".
+        throw "SHA256 mismatch for ${Url}: expected $ExpectedSha256, got $actual"
     }
     if (Test-Path $DestPath) { Remove-Item $DestPath -Force }
     Move-Item -Path $partial -Destination $DestPath

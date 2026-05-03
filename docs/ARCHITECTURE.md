@@ -209,7 +209,26 @@ Standalone auxiliary tools. Must not leak dependencies into the main build.
 ```text
 tools/
 |-- model_exporter/     Python scripts to export PyTorch models to ONNX
-`-- hint_generator/     Reference auto-hint implementation
+|-- torchtrt_compiler/  Python scripts to compile blue checkpoints to .ts
+|-- torchtrt_runner/    C++ smoke test that loads a .ts engine standalone
+`-- coreml_student/     Apple Neural Engine distillation toolkit
+```
+
+### `scripts/installer/`
+
+Modern Windows installer authoring (Inno Setup 6). The legacy NSIS
+inline script in `scripts/package_ofx_installer_windows.ps1` is kept
+as fallback during migration; once the Inno path passes UAT it
+retires. See `docs/RELEASE_GUIDELINES.md` "Modern installer (Inno
+Setup)" for the operator workflow.
+
+```text
+scripts/installer/
+|-- corridorkey.iss.template       Inno Setup source consumed by ISCC
+|-- build_installer.ps1            Driver: expands template, runs ISCC
+|-- build_distribution_manifest.py Regenerates manifest from HF state
+|-- distribution_manifest.json     Pack URLs + SHA256 (committed)
+`-- stage_offline_payload.ps1      Downloads packs into _offline_payload/
 ```
 
 ---

@@ -321,7 +321,11 @@ The Windows wrapper tasks are intentionally different:
     artifact manifest without regenerating the `.onnx` files from the
     checkpoint
 - `package-ofx`
-  - package Windows installers from an already certified model set
+  - package Windows installers from an already certified model set. The
+    legacy NSIS installer (one large `.exe` with every model bundled) is
+    always produced. The modern Inno Setup installer is also produced when
+    `-Flavor online|offline` is passed; see "Modern installer (Inno Setup)"
+    below for the flavor semantics.
 - `release`
   - package the official Windows release tracks from the currently staged,
     validated inputs
@@ -329,6 +333,59 @@ The Windows wrapper tasks are intentionally different:
   - regenerate the Windows RTX artifacts from the checkpoint, certify them on
     the active RTX host, write the certified artifact manifest, and then
     package the Windows RTX installer
+
+### Modern installer (Inno Setup)
+
+Authoring lives under `scripts/installer/`:
+
+- `corridorkey.iss.template` - Inno Setup 6 source consumed by ISCC.
+  Components/Types (mínimo / recomendado / completo / personalizado) and
+  modern Windows 11-themed wizard
+  (`WizardStyle=modern dynamic windows11`).
+- `build_installer.ps1` - PowerShell driver that expands the template and
+  invokes ISCC.exe. Reads `distribution_manifest.json` for pack URLs and
+  SHA256 hashes.
+- `build_distribution_manifest.py` - regenerates `distribution_manifest.json`
+  from authoritative Hugging Face state.
+- `stage_offline_payload.ps1` - downloads every "ready" pack file into
+  `dist/_offline_payload/` for the OFFLINE flavor build.
+
+Two flavors are produced from the SAME template via the `Flavor`
+preprocessor define:
+
+| Flavor    | Size  | Network at install time | When to use |
+|-----------|-------|-------------------------|-------------|
+| `online`  | ~85 MB | Required | Default. Stub installer downloads selected packs from Hugging Face with SHA256 verification. |
+| `offline` | ~7 GB  | None     | Air-gapped or low-bandwidth installs. Every selected pack is pre-bundled inside the .exe. |
+
+Component selection (Plugin base / Pack Verde / Pack Azul / Hint Tracker)
+is identical across flavors. The difference is purely transport: the
+green-only operator pays only for green-track bytes; the blue operator
+pays for the libtorch + TensorRT runtime DLLs only when blue is
+selected.
+
+Producing either flavor:
+
+```powershell
+# Online (small stub, downloads packs)
+.\scripts\windows.ps1 -Task package-ofx -Track rtx -Flavor online \
+    -DisplayVersionLabel <label>
+
+# Offline (self-contained)
+.\scripts\windows.ps1 -Task package-ofx -Track rtx -Flavor offline \
+    -DisplayVersionLabel <label>
+```
+
+The wrapper produces BOTH the legacy NSIS .exe AND the chosen Inno
+Setup flavor in the same run, against the same staged OFX bundle.
+Once the modern installer is validated end-to-end the legacy NSIS
+path retires.
+
+Pack source-of-truth lives in `scripts/installer/distribution_manifest.json`,
+which records the Hugging Face URL, SHA256, and size of every shipped
+artifact. The Inno Setup `[Code]` block uses Inno Setup 6.1+'s built-in
+`CreateDownloadPage` API (no third-party plugin) which natively verifies
+each download against the manifest's SHA256 and aborts on mismatch.
 
 The supported repo-local runtime locations are only
 `vendor\onnxruntime-windows-rtx` and `vendor\onnxruntime-windows-dml`.
