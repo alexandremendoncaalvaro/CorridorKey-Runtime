@@ -86,9 +86,33 @@ $resolvedVersion = Initialize-CorridorKeyVersion `
     -Version $Version `
     -SyncGuiMetadata:$syncGuiMetadata
 
+# Validate any user-provided override BEFORE we attempt to derive a
+# label from git. The strict X.Y.Z-win.N format only applies when the
+# operator explicitly opts in to the published-prerelease label shape;
+# the derived form (mechanism #3 in docs/RELEASE_GUIDELINES.md
+# "Windows Release Label Plumbing") is the longer git-describe shape
+# `0.8.2-win.2-82-g4a75ef2[-dirty]` and is intentionally allowed to
+# bypass that strict format.
 Assert-CorridorKeyWindowsReleaseLabelFormat `
     -Version $resolvedVersion `
     -DisplayVersionLabel $DisplayVersionLabel
+
+# Mechanism #3: derive the local-build label from `git describe` when
+# the operator did not pass an explicit override. Without this the
+# packaged binary's `CORRIDORKEY_DISPLAY_VERSION_STRING` falls back to
+# the bare CMakeLists `PROJECT_VERSION`, which collides across every
+# local build of the same X.Y.Z cycle and defeats the operator's
+# ability to confirm a fresh build loaded in the editor (the OFX
+# panel just shows "0.8.3" no matter how many rebuilds happened).
+# Empty derivation result keeps the historical fallback (CMake
+# version), so old branches without matching tags do not regress.
+if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+    $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
+    if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
+        $DisplayVersionLabel = $derivedLabel
+        Write-Host "[windows] Derived display version label from git: $DisplayVersionLabel" -ForegroundColor Yellow
+    }
+}
 
 $prepareArguments = @("-Version", $resolvedVersion, "-BuildPreset", $Preset)
 if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {

@@ -885,6 +885,64 @@ function Sync-CorridorKeyGuiVersionMetadata {
     return $Version
 }
 
+function Get-CorridorKeyDerivedDisplayLabel {
+    <#
+    .SYNOPSIS
+        Derives the local-build display label from `git describe` per the
+        rule documented in docs/RELEASE_GUIDELINES.md section "Windows
+        Release Label Plumbing", priority mechanism #3.
+
+    .DESCRIPTION
+        For builds produced without `-DisplayVersionLabel` and without
+        `-PublishGithub`, the canonical local label comes from
+        `git describe --tags --dirty --match "v*-win.*"` with the leading
+        `v` stripped. The derived label naturally encodes:
+
+        - The closest published prerelease tag in HEAD's ancestry (e.g.
+          `v0.8.2-win.2`).
+        - The number of commits HEAD is past that tag (e.g. `-82-`).
+        - The short SHA of HEAD (e.g. `g4a75ef2`).
+        - A `-dirty` suffix when the working tree has uncommitted changes.
+
+        Two builds at the same commit produce the same label (because the
+        same git state derives the same description); two builds at
+        different commits differ at minimum in the SHA. This is what the
+        OFX panel and CLI `--version` should report so the operator
+        always knows exactly which source produced the build they are
+        loading.
+
+        Returns an empty string when no matching tag exists in HEAD's
+        ancestry. The caller is expected to fall back to the CMakeLists
+        `PROJECT_VERSION` in that case (preserving the historical
+        behaviour for very early branches).
+
+    .PARAMETER RepoRoot
+        Repository root passed to `git -C` so the helper works regardless
+        of the caller's CWD.
+
+    .PARAMETER PlatformMatch
+        Glob passed to `git describe --match`. Defaults to `v*-win.*`,
+        which is the Windows prerelease tag shape per
+        docs/RELEASE_GUIDELINES.md section 1. macOS/Linux callers can
+        pass their own platform glob.
+    #>
+    param(
+        [string]$RepoRoot,
+        [string]$PlatformMatch = "v*-win.*"
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot) -or -not (Test-Path $RepoRoot)) {
+        return ""
+    }
+
+    $gitArgs = @("-C", $RepoRoot, "describe", "--tags", "--dirty", "--match", $PlatformMatch)
+    $rawLabel = & git @gitArgs 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($rawLabel)) {
+        return ""
+    }
+    return ($rawLabel | Select-Object -First 1).ToString().Trim() -replace '^v', ''
+}
+
 function Initialize-CorridorKeyVersion {
     param(
         [string]$RepoRoot,
