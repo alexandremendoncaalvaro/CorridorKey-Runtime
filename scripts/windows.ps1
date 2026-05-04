@@ -209,6 +209,9 @@ switch ($Task) {
             if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
                 $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
             }
+            if (-not [string]::IsNullOrWhiteSpace($Flavor) -and $variant.Suffix -eq "RTX") {
+                $arguments += @("-SkipNsisInstaller")
+            }
             $arguments += $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_ofx_installer_windows.ps1" -Arguments $arguments
             Assert-CorridorKeyVariantDoctorHealthy -Version $resolvedVersion -ReleaseSuffix $variant.Suffix -DisplayVersionLabel $DisplayVersionLabel
@@ -217,14 +220,14 @@ switch ($Task) {
             # the RTX variant is wired right now; DirectML is a separate
             # downstream slice that retains the legacy NSIS path until
             # we migrate it. The Inno builder reuses the staged OFX
-            # bundle the legacy packager just produced (same Plugin
+            # bundle the OFX packager just produced (same Plugin
             # Payload, same DLLs, same model layout); the only
             # difference is the surrounding installer shell.
             if (-not [string]::IsNullOrWhiteSpace($Flavor) -and $variant.Suffix -eq "RTX") {
                 $stagedTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $resolvedVersion } else { $DisplayVersionLabel }
                 $stagedBundle = Join-Path $repoRoot ("dist\CorridorKey_OFX_v${stagedTag}_Windows_$($variant.Suffix)\CorridorKey.ofx.bundle")
                 if (-not (Test-Path $stagedBundle)) {
-                    throw "Inno Setup builder requires the legacy packager's staged bundle, not found at $stagedBundle. The legacy packager either failed silently or was skipped."
+                    throw "Inno Setup builder requires the staged OFX bundle, not found at $stagedBundle. The OFX packager either failed silently or was skipped."
                 }
 
                 $innoArgs = @(
@@ -270,6 +273,9 @@ switch ($Task) {
         )
         if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
             $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Flavor)) {
+            $arguments += @("-Flavor", $Flavor)
         }
         $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments

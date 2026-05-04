@@ -339,8 +339,8 @@ The Windows wrapper tasks are intentionally different:
 Authoring lives under `scripts/installer/`:
 
 - `corridorkey.iss.template` - Inno Setup 6 source consumed by ISCC.
-  Components/Types (mínimo / recomendado / completo / personalizado) and
-  modern Windows 11-themed wizard
+  Components/Types (minimum / recommended / custom) and modern Windows
+  11-themed wizard
   (`WizardStyle=modern dynamic windows11`).
 - `build_installer.ps1` - PowerShell driver that expands the template and
   invokes ISCC.exe. Reads `distribution_manifest.json` for pack URLs and
@@ -358,11 +358,24 @@ preprocessor define:
 | `online`  | ~85 MB | Required | Default. Stub installer downloads selected packs from Hugging Face with SHA256 verification. |
 | `offline` | ~7 GB  | None     | Air-gapped or low-bandwidth installs. Every selected pack is pre-bundled inside the .exe. |
 
-Component selection (Plugin base / Pack Verde / Pack Azul / Hint Tracker)
-is identical across flavors. The difference is purely transport: the
-green-only operator pays only for green-track bytes; the blue operator
-pays for the libtorch + TensorRT runtime DLLs only when blue is
-selected.
+Local release validation builds use the `online` flavor. The `offline`
+flavor is produced only when validating the no-network installer path or
+serving an environment that cannot download packs at install time.
+
+Component selection (Plugin base / Pack Verde / Pack Azul) is identical
+across flavors. The difference is purely transport: the green-only
+operator pays only for green-track bytes; the blue operator pays for the
+dynamic blue TorchScript artifact and its runtime DLLs only when blue is
+selected. The Tauri GUI is a separate desktop installer surface and is not
+an OFX installer component.
+
+The modern installer treats selected model packs and the blue runtime DLL
+pack as immutable caches keyed by the manifest SHA256. When a selected
+pack file already matches the manifest, upgrades preserve it and skip the
+download or copy while still refreshing plugin binaries. When a selected
+pack file is missing or invalid, the installer replaces that file from the
+verified source. Packs that are not selected are removed from the install
+tree.
 
 Producing either flavor:
 
@@ -376,10 +389,9 @@ Producing either flavor:
     -DisplayVersionLabel <label>
 ```
 
-The wrapper produces BOTH the legacy NSIS .exe AND the chosen Inno
-Setup flavor in the same run, against the same staged OFX bundle.
-Once the modern installer is validated end-to-end the legacy NSIS
-path retires.
+When a modern flavor is selected, the wrapper stages and validates the
+OFX bundle, then produces only the chosen Inno Setup installer. The
+legacy NSIS installer is not emitted for modern local validation builds.
 
 Pack source-of-truth lives in `scripts/installer/distribution_manifest.json`,
 which records the Hugging Face URL, SHA256, and size of every shipped
@@ -459,14 +471,16 @@ user-visible surface on Windows. It flows through CMake into
 `corridorkey --version` CLI, and the runtime-server log filename
 (`ofx_runtime_server_v<label>.log`) all read. The packaging scripts
 also bake the label into the dist artifact names when present:
-`CorridorKey_Resolve_v<label>_Windows_RTX_Installer.exe`,
-`CorridorKey_Resolve_v<label>_Windows_RTX\\`.
+`CorridorKey_OFX_v<label>_Windows_RTX_Install.exe`,
+`CorridorKey_OFX_v<label>_Windows_RTX\\`.
 
 The label is produced by one of three mechanisms, in priority order:
 
 1. `-DisplayVersionLabel <string>` explicitly passed. Override for
    narrow cases (bespoke tester build, reproducing a historical label).
-   No validation beyond shape.
+   The wrapper validates the label shape before build, and packaging
+   validates that the staged CLI reports the same label through
+   `corridorkey --version`.
 2. Publication flow (`-Task release -PublishGithub`). The pipeline
    computes the next canonical tag `vX.Y.Z-win.N` and uses that, after
    enforcing the dirty-tree rule.
@@ -480,6 +494,13 @@ semantics are documented in section 1 "Pre-release labels". On Windows,
 published labels must be of the form `X.Y.Z-win.N`; local labels are
 free to be the longer `git describe` form ending in `-<count>-g<sha>`
 or `-<count>-g<sha>-dirty`.
+
+When a label override is used for a local installer, the binaries and the
+installer must carry the same label. Build with that label first, then package
+with that same label. `package-ofx` validates the staged bundle before it emits
+an installer and fails when the installer label differs from the packaged CLI
+label. This keeps the installer filename, OFX panel, CLI version output, and
+runtime-server log filename aligned.
 
 Use the following commands according to the state you have:
 
@@ -524,9 +545,9 @@ unavailable.
 Windows RTX now ships as a single installer that replaces the same OFX bundle
 path during installation.
 
-- `Windows RTX` packages the public FP16 ladder through `2048px`. INT8 ONNX
-  and CPU rendering have been retired; FP16 on RTX is the only quality and
-  only backend the installer ships.
+- `Windows RTX` packages the public green FP16 ONNX ladder through `2048px`
+  and the single dynamic blue TorchScript artifact. INT8 ONNX and CPU
+  rendering have been retired from the official Windows RTX installer.
 - `Auto` continues to respect the safe quality ceiling of the active GPU tier.
 - Manual fixed quality may attempt a higher packaged rung directly and then
   follow the established runtime failure path if that quality cannot execute.

@@ -17,9 +17,9 @@
 ;             bundled inside the installer; no network access during
 ;             install.
 ;
-; Component selection (green / blue / hint / gui) is identical across
-; flavors. The difference is purely transport: download-on-demand vs
-; pre-bundled bytes. arm_torchtrt_runtime in
+; Component selection (green / blue) is identical across flavors. The
+; difference is purely transport: download-on-demand vs pre-bundled
+; bytes. arm_torchtrt_runtime in
 ; src/core/torch_trt_loader.cpp walks for blue runtime DLLs at
 ; <install>/Contents/Resources/torchtrt-runtime/bin/ regardless of
 ; how the bytes got there.
@@ -114,9 +114,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
 [Types]
-Name: "minimum"; Description: "Mínimo (apenas Verde)"
+Name: "minimum"; Description: "Minimo (apenas Verde)"
 Name: "recommended"; Description: "Recomendado (Verde + Azul)"
-Name: "full"; Description: "Completo (Verde + Azul + Hint Tracker)"
 Name: "custom"; Description: "Personalizado"; Flags: iscustom
 
 [Components]
@@ -124,16 +123,13 @@ Name: "custom"; Description: "Personalizado"; Flags: iscustom
 ; loads, plus the green-track ONNX Runtime DLLs that ship in every
 ; flavor. The fixed flag prevents the user from unchecking it.
 Name: "pluginbase"; Description: "Plugin OFX base (CLI + runtime ONNX)"; \
-    Types: minimum recommended full custom; Flags: fixed
+    Types: minimum recommended custom; Flags: fixed
 
-Name: "green"; Description: "Pack Verde - modelos chroma key verde (~700 MB)"; \
-    Types: minimum recommended full custom
+Name: "green"; Description: "Pack Verde - modelos chroma key verde (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+    Types: minimum recommended custom
 
-Name: "blue"; Description: "Pack Azul - modelos chroma key azul + runtime libtorch (~6 GB)"; \
-    Types: recommended full
-
-Name: "hint"; Description: "Pack Hint Tracker - assistente de seleção (~150 MB)"; \
-    Types: full
+Name: "blue"; Description: "Pack Azul - modelo chroma key azul + runtime libtorch (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+    Types: recommended custom
 
 [Files]
 ; Plugin base payload. Always installed. Path layout matches the
@@ -147,10 +143,12 @@ Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
 
 ; Per-build wrapper DLL (corridorkey_torchtrt.dll) ships next to the
 ; rest of the runtime DLLs of the blue pack. It is built from this
-; repo and changes per commit, so it is staged as part of plugin
-; base (Win64\) and copied into the runtime dir on first blue
-; session activation by arm_torchtrt_runtime. Including it here keeps
-; the upstream HF runtime archive stable across our code changes.
+; repo and changes per commit, so it ships from the plugin payload
+; instead of the upstream HF runtime archive.
+Source: "{#PluginPayloadDir}\Contents\Resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll"; \
+    DestDir: "{app}\Contents\Resources\torchtrt-runtime\bin"; \
+    Components: blue; \
+    Flags: ignoreversion
 
 #if Flavor == "offline"
 ; ----------------------------------------------------------------------
@@ -182,8 +180,8 @@ Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
 
 [Run]
 ; The OFX host (Resolve / Nuke) auto-discovers the bundle on its
-; next launch; nothing to launch from the installer beyond an
-; optional README (post-install verification step).
+; next launch. PATH registration is handled in [Code] so failures can
+; be logged without aborting a successful plugin install.
 
 [UninstallDelete]
 ; Sweep downloaded packs on uninstall. The installer-tracked files
@@ -202,32 +200,271 @@ Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
 //
 // Online flavor:
 //   - Creates a download wizard page after wpReady.
-//   - Adds one entry per file from the selected packs, using the
-//     sha256 baked into the page's Add() call so Inno Setup's
-//     built-in DownloadTemporaryFile path verifies integrity before
-//     the file leaves the temp dir.
+//   - Adds only selected pack files that are missing or whose installed
+//     SHA256 does not match the manifest. Each queued download still has
+//     the sha256 baked into the page's Add() call so Inno Setup verifies
+//     integrity before the file leaves the temp dir.
 //   - Aborts the install on download or hash failure (no silent
 //     fallback - a partial install of the blue pack would surface
 //     as opaque DLL load failures at runtime).
 //
 // Offline flavor:
-//   - No-op in [Code]: every file is staged via [Files] entries
-//     written by the PowerShell packager.
+//   - Every file is staged via [Files] entries written by the PowerShell
+//     packager. The same SHA256 cache checks skip files that are already
+//     installed and valid.
 //
 // Pattern based on the official CodeDownloadFiles.iss example shipped
 // with Inno Setup; see
 // https://raw.githubusercontent.com/jrsoftware/issrc/main/Examples/CodeDownloadFiles.iss
 
+const
+  BLUE_RUNTIME_SHA256 = '@@BLUE_RUNTIME_SHA256@@';
+  BLUE_RUNTIME_INSTALLED_SIZE_BYTES = @@BLUE_RUNTIME_INSTALLED_SIZE_BYTES@@;
+  BLUE_RUNTIME_INSTALLED_FILE_COUNT = @@BLUE_RUNTIME_INSTALLED_FILE_COUNT@@;
+
+procedure StopProcessByImageName(const ImageName: String);
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM "' + ImageName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure StopCorridorKeyAndHosts;
+begin
+  StopProcessByImageName('Resolve.exe');
+  StopProcessByImageName('Nuke*.exe');
+  StopProcessByImageName('corridorkey_ofx_runtime_server.exe');
+  StopProcessByImageName('corridorkey.exe');
+end;
+
+procedure ClearHostOfxCaches;
+begin
+  DeleteFile(ExpandConstant('{userappdata}\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml'));
+  DelTree(ExpandConstant('{localappdata}\Temp\nuke\ofxplugincache'), True, True, True);
+end;
+
+function CorridorKeyResourceFilePath(
+  const DestSubdir, FileName: String): String;
+begin
+  Result := ExpandConstant('{app}\Contents\Resources\' + DestSubdir + '\' + FileName);
+end;
+
+function CorridorKeyResourceFileSha256Matches(
+  const DestSubdir, FileName, ExpectedSha256: String): Boolean;
+var
+  Path: String;
+begin
+  Path := CorridorKeyResourceFilePath(DestSubdir, FileName);
+  Result := FileExists(Path) and
+    (CompareText(GetSHA256OfFile(Path), ExpectedSha256) = 0);
+end;
+
+function CorridorKeyShouldInstallResourceFile(
+  const DestSubdir, FileName, ExpectedSha256: String): Boolean;
+begin
+  Result := not CorridorKeyResourceFileSha256Matches(DestSubdir, FileName, ExpectedSha256);
+end;
+
+procedure CorridorKeyDeleteResourceFile(
+  const DestSubdir, FileName: String);
+begin
+  DeleteFile(CorridorKeyResourceFilePath(DestSubdir, FileName));
+end;
+
+procedure CorridorKeyDeleteResourceFileIfInvalid(
+  const DestSubdir, FileName, ExpectedSha256: String);
+var
+  Path: String;
+begin
+  Path := CorridorKeyResourceFilePath(DestSubdir, FileName);
+  if FileExists(Path) and not CorridorKeyResourceFileSha256Matches(DestSubdir, FileName, ExpectedSha256) then begin
+    DeleteFile(Path);
+  end;
+end;
+
+function CorridorKeyBlueRuntimeBinPath: String;
+begin
+  Result := ExpandConstant('{app}\Contents\Resources\torchtrt-runtime\bin');
+end;
+
+function CorridorKeyBlueRuntimeMarkerPath: String;
+begin
+  Result := CorridorKeyBlueRuntimeBinPath + '\corridorkey_blue_runtime.sha256';
+end;
+
+function CorridorKeyBlueRuntimeMarkerMatches: Boolean;
+var
+  MarkerValue: AnsiString;
+begin
+  Result := LoadStringFromFile(CorridorKeyBlueRuntimeMarkerPath, MarkerValue) and
+    (CompareText(Trim(String(MarkerValue)), BLUE_RUNTIME_SHA256) = 0);
+end;
+
+function CorridorKeyBlueRuntimeFilesMatch: Boolean;
+var
+  FindRec: TFindRec;
+  FileCount: Integer;
+  TotalBytes: Int64;
+  RuntimeBinPath: String;
+begin
+  RuntimeBinPath := CorridorKeyBlueRuntimeBinPath;
+  FileCount := 0;
+  TotalBytes := 0;
+
+  if FindFirst(RuntimeBinPath + '\*.dll', FindRec) then begin
+    try
+      repeat
+        if CompareText(FindRec.Name, 'corridorkey_torchtrt.dll') <> 0 then begin
+          FileCount := FileCount + 1;
+          TotalBytes := TotalBytes + (Int64(FindRec.SizeHigh) shl 32) + FindRec.SizeLow;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+
+  Result :=
+    FileExists(RuntimeBinPath + '\torch_cuda.dll') and
+    FileExists(RuntimeBinPath + '\torchtrt.dll') and
+    FileExists(RuntimeBinPath + '\nvinfer_10.dll') and
+    (FileCount = BLUE_RUNTIME_INSTALLED_FILE_COUNT) and
+    (TotalBytes = BLUE_RUNTIME_INSTALLED_SIZE_BYTES);
+end;
+
+function CorridorKeyBlueRuntimeCacheValid: Boolean;
+begin
+  Result := CorridorKeyBlueRuntimeMarkerMatches or CorridorKeyBlueRuntimeFilesMatch;
+end;
+
+procedure CorridorKeyWriteBlueRuntimeCacheMarker;
+begin
+  if CorridorKeyBlueRuntimeFilesMatch then begin
+    SaveStringToFile(CorridorKeyBlueRuntimeMarkerPath, BLUE_RUNTIME_SHA256, False);
+  end;
+end;
+
+@@PACK_CACHE_PREPARE_PROCEDURE@@
+
+procedure CorridorKeyCleanInstallDir;
+begin
+  if not DirExists(ExpandConstant('{app}')) then begin
+    Exit;
+  end;
+
+  DelTree(ExpandConstant('{app}\Contents\Win64'), True, True, True);
+  DeleteFile(ExpandConstant('{app}\artifact_manifest.json'));
+  DeleteFile(ExpandConstant('{app}\bundle_validation.json'));
+  DeleteFile(ExpandConstant('{app}\doctor_report.json'));
+  CorridorKeyPrepareSelectedPackCaches;
+end;
+
+procedure UpdateCorridorKeyPath(const Mode: String);
+var
+  ResultCode: Integer;
+  ScriptPath: String;
+begin
+  ScriptPath := ExpandConstant('{app}\Contents\Win64\update_path.ps1');
+  if FileExists(ScriptPath) then begin
+    Exec('powershell.exe',
+      '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '" -Mode ' + Mode,
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopCorridorKeyAndHosts;
+  CorridorKeyCleanInstallDir;
+  Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then begin
+    UpdateCorridorKeyPath('Install');
+    CorridorKeyWriteBlueRuntimeCacheMarker;
+    ClearHostOfxCaches;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then begin
+    StopCorridorKeyAndHosts;
+    UpdateCorridorKeyPath('Uninstall');
+    ClearHostOfxCaches;
+  end;
+end;
+
 #if Flavor == "online"
 var
   DownloadPage: TDownloadWizardPage;
+  DownloadCount: Integer;
+  DownloadFile: Integer;
+  PreviousDownloadUrl: String;
+  DownloadTotalBytes: Int64;
+
+function CorridorKeyFormatBytes(const Bytes: Int64): String;
+var
+  Whole: Int64;
+  Tenths: Int64;
+begin
+  if Bytes >= 1073741824 then begin
+    Whole := Bytes div 1073741824;
+    Tenths := ((Bytes mod 1073741824) * 10) div 1073741824;
+    Result := Format('%d.%d GB', [Whole, Tenths]);
+  end else begin
+    Whole := Bytes div 1048576;
+    Tenths := ((Bytes mod 1048576) * 10) div 1048576;
+    Result := Format('%d.%d MB', [Whole, Tenths]);
+  end;
+end;
+
+procedure CorridorKeyResetDownloadPlan;
+begin
+  DownloadCount := 0;
+  DownloadFile := 0;
+  PreviousDownloadUrl := '';
+  DownloadTotalBytes := 0;
+end;
+
+procedure CorridorKeyTrackPlannedDownload(const SizeBytes: Int64);
+begin
+  DownloadCount := DownloadCount + 1;
+  DownloadTotalBytes := DownloadTotalBytes + SizeBytes;
+end;
+
+function CorridorKeyOnDownloadProgress(
+  const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
+begin
+  if Url <> PreviousDownloadUrl then begin
+    DownloadFile := DownloadFile + 1;
+    PreviousDownloadUrl := Url;
+  end;
+
+  DownloadPage.Msg1Label.Caption :=
+    Format('Baixando arquivo %d de %d', [DownloadFile, DownloadCount]);
+  if ProgressMax > 0 then begin
+    DownloadPage.Msg2Label.Caption :=
+      FileName + ' (' + CorridorKeyFormatBytes(Progress) + ' de ' +
+      CorridorKeyFormatBytes(ProgressMax) + '). Total selecionado: ' +
+      CorridorKeyFormatBytes(DownloadTotalBytes);
+  end else begin
+    DownloadPage.Msg2Label.Caption :=
+      FileName + ' (' + CorridorKeyFormatBytes(Progress) +
+      ' baixados). Total selecionado: ' + CorridorKeyFormatBytes(DownloadTotalBytes);
+  end;
+
+  Result := True;
+end;
 
 procedure InitializeWizard;
 begin
   DownloadPage := CreateDownloadPage(
     SetupMessage(msgWizardPreparing),
     'Baixando os pacotes selecionados de Hugging Face. SHA-256 verificado a cada arquivo.',
-    nil);
+    @CorridorKeyOnDownloadProgress);
   DownloadPage.ShowBaseNameInsteadOfUrl := True;
 end;
 
@@ -239,7 +476,16 @@ var
 begin
   if CurPageID = wpReady then begin
     DownloadPage.Clear;
+    CorridorKeyResetDownloadPlan;
     CorridorKeyEnqueueDownloads(DownloadPage);
+    if DownloadCount = 0 then begin
+      Result := True;
+      Exit;
+    end;
+    DownloadPage.Msg1Label.Caption :=
+      Format('Preparando %d arquivo(s) para baixar', [DownloadCount]);
+    DownloadPage.Msg2Label.Caption :=
+      Format('Total selecionado: %s', [CorridorKeyFormatBytes(DownloadTotalBytes)]);
     DownloadPage.Show;
     try
       try

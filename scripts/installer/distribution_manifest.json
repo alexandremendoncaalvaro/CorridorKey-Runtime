@@ -76,32 +76,16 @@
       ]
     },
     "blue-models": {
-      "label": "Pack Azul - modelos Torch-TensorRT",
+      "label": "Pack Azul - modelo TorchScript dinamico",
       "component": "blue",
       "dest_subdir": "models",
       "files": [
         {
-          "remote_path": "torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_512.ts",
-          "filename": "corridorkey_blue_torchtrt_fp16_512.ts",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_512.ts",
-          "sha256": "99c298acdc2e4012559937e6ae9fa247bed9150f5af480523c7dab1fbcde3334",
-          "size_bytes": 390030166,
-          "status": "ready"
-        },
-        {
-          "remote_path": "torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_1024.ts",
-          "filename": "corridorkey_blue_torchtrt_fp16_1024.ts",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_1024.ts",
-          "sha256": "51fd515a68e8db7d4c44951f3fcddd225e00fd32631cd0c0c089f927db6add8f",
-          "size_bytes": 220330851,
-          "status": "ready"
-        },
-        {
-          "remote_path": "torchtrt/fp32-blue/corridorkey_blue_torchtrt_fp32_1536.ts",
-          "filename": "corridorkey_blue_torchtrt_fp32_1536.ts",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/fp32-blue/corridorkey_blue_torchtrt_fp32_1536.ts",
-          "sha256": "1efa3da60ed7da6d8d6b8c893c39b4cc2e04306fbabd5cc6667d01b33137da4c",
-          "size_bytes": 470207019,
+          "remote_path": "torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts",
+          "filename": "corridorkey_dynamic_blue_fp16.ts",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts",
+          "sha256": "9f99b2ec9de1f8fd88937d2c5ae974f4ce2acd3046211d728852f23b30ce3780",
+          "size_bytes": 145140062,
           "status": "ready"
         }
       ]
@@ -112,6 +96,8 @@
       "dest_subdir": "torchtrt-runtime/bin",
       "is_archive": true,
       "extract": true,
+      "installed_size_bytes": 5011471040,
+      "installed_file_count": 41,
       "files": [
         {
           "remote_path": "torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
@@ -119,53 +105,6 @@
           "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
           "sha256": "83779c34a270e9ae71e356abfe8681298bcbd02fa118df528e30a607d984330b",
           "size_bytes": 2111121577,
-          "status": "ready"
-        }
-      ]
-    },
-    "hint-tracker": {
-      "label": "Pack Hint Tracker (assistente sele\u00e7\u00e3o)",
-      "component": "hint",
-      "dest_subdir": "models",
-      "files": [
-        {
-          "remote_path": "hint/mobilesam_image_encoder_fp16.onnx",
-          "filename": "mobilesam_image_encoder_fp16.onnx",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/hint/mobilesam_image_encoder_fp16.onnx",
-          "sha256": "99117bbc01949882c26ceb3788ac1de72244d0d908ed0f86236f1da5a3050d53",
-          "size_bytes": 14347062,
-          "status": "ready"
-        },
-        {
-          "remote_path": "hint/mobilesam_prompt_decoder_fp16.onnx",
-          "filename": "mobilesam_prompt_decoder_fp16.onnx",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/hint/mobilesam_prompt_decoder_fp16.onnx",
-          "sha256": "ddf211c66f486783f525132033ecf7da8beff6ce8104030e3c9f7a16f1ea66eb",
-          "size_bytes": 8224865,
-          "status": "ready"
-        },
-        {
-          "remote_path": "hint/cutie_feature_extractor_fp16.onnx",
-          "filename": "cutie_feature_extractor_fp16.onnx",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/hint/cutie_feature_extractor_fp16.onnx",
-          "sha256": "363726da678ffb11d2ffff4a727ea1819c1c3fead75a89f65ad49304ed7180e0",
-          "size_bytes": 17614918,
-          "status": "ready"
-        },
-        {
-          "remote_path": "hint/cutie_init_memory_fp16.onnx",
-          "filename": "cutie_init_memory_fp16.onnx",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/hint/cutie_init_memory_fp16.onnx",
-          "sha256": "9bf79ca9685cb5b6ad70d33cb774b8cb5f587807d629477a6a89d482415eed08",
-          "size_bytes": 956337,
-          "status": "ready"
-        },
-        {
-          "remote_path": "hint/cutie_tracking_memory_fp16.onnx",
-          "filename": "cutie_tracking_memory_fp16.onnx",
-          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/hint/cutie_tracking_memory_fp16.onnx",
-          "sha256": "e5e4b18243e734e8fe0fee302790b1f2ad133dfa5c1a41100a6de509ea9cc809",
-          "size_bytes": 966516,
           "status": "ready"
         }
       ]

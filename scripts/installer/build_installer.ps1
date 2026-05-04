@@ -187,6 +187,78 @@ function ConvertTo-IssEscapedString {
     return $Value -replace "'", "''"
 }
 
+function Format-InstallerSizeLabel {
+    param([Int64]$Bytes)
+    if ($Bytes -ge 1000000000) {
+        return ("{0:0.0} GB" -f ($Bytes / 1000000000.0))
+    }
+    return ("{0:0} MB" -f ($Bytes / 1000000.0))
+}
+
+function Get-PackDownloadSizeBytes {
+    param([object]$PackMeta)
+    $sum = [Int64]0
+    foreach ($file in $PackMeta.files) {
+        if ($file.status -ne 'ready' -or $null -eq $file.size_bytes) { continue }
+        $sum += [Int64]$file.size_bytes
+    }
+    return $sum
+}
+
+function Get-PackInstalledSizeBytes {
+    param([object]$PackMeta)
+    $explicit = $PackMeta.PSObject.Properties.Match('installed_size_bytes')
+    if ($explicit.Count -gt 0 -and $null -ne $PackMeta.installed_size_bytes) {
+        return [Int64]$PackMeta.installed_size_bytes
+    }
+    return Get-PackDownloadSizeBytes -PackMeta $PackMeta
+}
+
+function Get-ComponentSizeLabel {
+    param([object]$Manifest, [string]$Component)
+    $downloadBytes = [Int64]0
+    $installedBytes = [Int64]0
+    foreach ($pack in $Manifest.packs.PSObject.Properties) {
+        $packMeta = $pack.Value
+        if ($packMeta.component -ne $Component) { continue }
+        $downloadBytes += Get-PackDownloadSizeBytes -PackMeta $packMeta
+        $installedBytes += Get-PackInstalledSizeBytes -PackMeta $packMeta
+    }
+    $installedLabel = Format-InstallerSizeLabel -Bytes $installedBytes
+    $downloadLabel = Format-InstallerSizeLabel -Bytes $downloadBytes
+    if ($installedBytes -eq $downloadBytes) {
+        return $installedLabel
+    }
+    return "$installedLabel instalado, $downloadLabel download"
+}
+
+function Get-PackByName {
+    param([object]$Manifest, [string]$PackName)
+    $match = $Manifest.packs.PSObject.Properties.Match($PackName)
+    if ($match.Count -eq 0) {
+        throw "Distribution manifest missing pack: $PackName"
+    }
+    return $match[0].Value
+}
+
+function Test-PackExtractsArchive {
+    param([object]$PackMeta)
+    return ($PackMeta.PSObject.Properties.Match('is_archive').Count -gt 0 -and $PackMeta.is_archive) `
+        -and ($PackMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $PackMeta.extract)
+}
+
+function Get-ResourceCacheCheck {
+    param(
+        [string]$DestSubdir,
+        [string]$Filename,
+        [string]$Sha256
+    )
+    $subdir = ConvertTo-IssEscapedString -Value ($DestSubdir -replace '/', '\')
+    $name = ConvertTo-IssEscapedString -Value $Filename
+    $hash = ConvertTo-IssEscapedString -Value $Sha256
+    return "CorridorKeyShouldInstallResourceFile('$subdir', '$name', '$hash')"
+}
+
 function Build-OnlineExternalFilesBlock {
     param([object]$Manifest)
     $sb = [System.Text.StringBuilder]::new()
@@ -195,11 +267,17 @@ function Build-OnlineExternalFilesBlock {
         $packMeta = $pack.Value
         $component = $packMeta.component
         $destSubdir = $packMeta.dest_subdir -replace '/', '\'
+        $isExtractArchive = Test-PackExtractsArchive -PackMeta $packMeta
         foreach ($file in $packMeta.files) {
             if ($file.status -ne 'ready') { continue }
-            $line = "Source: `"{tmp}\$($file.filename)`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: external ignoreversion"
-            if ($packMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $packMeta.extract) {
+            $line = "Source: `"{tmp}\$($file.filename)`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; ExternalSize: $($file.size_bytes); Flags: external ignoreversion"
+            if ($isExtractArchive) {
                 $line += " extractarchive recursesubdirs"
+                if ($pack.Name -eq "blue-runtime") {
+                    $line += "; Check: not CorridorKeyBlueRuntimeCacheValid"
+                }
+            } else {
+                $line += "; Check: $(Get-ResourceCacheCheck -DestSubdir $destSubdir -Filename $file.filename -Sha256 $file.sha256)"
             }
             [void]$sb.AppendLine($line)
         }
@@ -226,8 +304,7 @@ function Build-OfflineFilesBlock {
         $component = $packMeta.component
         $destSubdir = $packMeta.dest_subdir -replace '/', '\'
         $packDir = Join-Path $PayloadRoot $destSubdir
-        $isExtractArchive = ($packMeta.PSObject.Properties.Match('is_archive').Count -gt 0 -and $packMeta.is_archive) `
-                      -and ($packMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $packMeta.extract)
+        $isExtractArchive = Test-PackExtractsArchive -PackMeta $packMeta
         if ($isExtractArchive) {
             if (-not (Test-Path $packDir)) {
                 throw "Offline payload missing pre-extracted archive dir: $packDir. Re-run scripts/installer/stage_offline_payload.ps1."
@@ -237,7 +314,11 @@ function Build-OfflineFilesBlock {
                 throw "Offline payload pre-extraction dir is empty: $packDir. The archive download may have failed; re-run staging."
             }
             $sourceForIss = ((Join-Path $packDir '*') -replace '/', '\') -replace '\\\\', '\'
-            [void]$sb.AppendLine("Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion recursesubdirs createallsubdirs")
+            $line = "Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion recursesubdirs createallsubdirs"
+            if ($pack.Name -eq "blue-runtime") {
+                $line += "; Check: not CorridorKeyBlueRuntimeCacheValid"
+            }
+            [void]$sb.AppendLine($line)
             continue
         }
         foreach ($file in $packMeta.files) {
@@ -247,9 +328,58 @@ function Build-OfflineFilesBlock {
                 throw "Offline payload missing file: $sourcePath. Pre-populate before invoking with -Flavor offline."
             }
             $sourceForIss = ($sourcePath -replace '/', '\') -replace '\\\\', '\'
-            [void]$sb.AppendLine("Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion")
+            [void]$sb.AppendLine("Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion; Check: $(Get-ResourceCacheCheck -DestSubdir $destSubdir -Filename $file.filename -Sha256 $file.sha256)")
         }
     }
+    return $sb.ToString().TrimEnd()
+}
+
+function Build-PackCachePrepareProcedure {
+    param([object]$Manifest)
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine('procedure CorridorKeyPrepareSelectedPackCaches;')
+    [void]$sb.AppendLine('begin')
+    foreach ($component in @('green', 'blue')) {
+        $componentPacks = @($Manifest.packs.PSObject.Properties | Where-Object { $_.Value.component -eq $component })
+        if ($componentPacks.Count -eq 0) { continue }
+        [void]$sb.AppendLine("  if WizardIsComponentSelected('$component') then begin")
+        foreach ($pack in $componentPacks) {
+            $packMeta = $pack.Value
+            $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+            if (Test-PackExtractsArchive -PackMeta $packMeta) {
+                if ($pack.Name -eq "blue-runtime") {
+                    [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
+                    [void]$sb.AppendLine('      DelTree(CorridorKeyBlueRuntimeBinPath, True, True, True);')
+                    [void]$sb.AppendLine('    end;')
+                }
+                continue
+            }
+            foreach ($file in $packMeta.files) {
+                if ($file.status -ne 'ready') { continue }
+                $name = ConvertTo-IssEscapedString -Value $file.filename
+                $hash = ConvertTo-IssEscapedString -Value $file.sha256
+                [void]$sb.AppendLine("    CorridorKeyDeleteResourceFileIfInvalid('$destSubdir', '$name', '$hash');")
+            }
+        }
+        [void]$sb.AppendLine('  end else begin')
+        foreach ($pack in $componentPacks) {
+            $packMeta = $pack.Value
+            $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+            if (Test-PackExtractsArchive -PackMeta $packMeta) {
+                if ($pack.Name -eq "blue-runtime") {
+                    [void]$sb.AppendLine("    DelTree(ExpandConstant('{app}\Contents\Resources\torchtrt-runtime'), True, True, True);")
+                }
+                continue
+            }
+            foreach ($file in $packMeta.files) {
+                if ($file.status -ne 'ready') { continue }
+                $name = ConvertTo-IssEscapedString -Value $file.filename
+                [void]$sb.AppendLine("    CorridorKeyDeleteResourceFile('$destSubdir', '$name');")
+            }
+        }
+        [void]$sb.AppendLine('  end;')
+    }
+    [void]$sb.AppendLine('end;')
     return $sb.ToString().TrimEnd()
 }
 
@@ -268,7 +398,18 @@ function Build-OnlineDownloadQueueProcedure {
             $url = ConvertTo-IssEscapedString -Value $file.url
             $name = ConvertTo-IssEscapedString -Value $file.filename
             $hash = $file.sha256
-            [void]$sb.AppendLine("    DownloadPage.Add('$url', '$name', '$hash');")
+            if ($pack.Name -eq "blue-runtime") {
+                [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
+                [void]$sb.AppendLine("      DownloadPage.Add('$url', '$name', '$hash');")
+                [void]$sb.AppendLine("      CorridorKeyTrackPlannedDownload($($file.size_bytes));")
+                [void]$sb.AppendLine('    end;')
+            } else {
+                $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+                [void]$sb.AppendLine("    if not CorridorKeyResourceFileSha256Matches('$destSubdir', '$name', '$hash') then begin")
+                [void]$sb.AppendLine("      DownloadPage.Add('$url', '$name', '$hash');")
+                [void]$sb.AppendLine("      CorridorKeyTrackPlannedDownload($($file.size_bytes));")
+                [void]$sb.AppendLine('    end;')
+            }
         }
         [void]$sb.AppendLine('  end;')
     }
@@ -282,10 +423,18 @@ function Build-OnlineDownloadQueueProcedure {
 
 $manifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
 $iscc = Resolve-IsccPath -Override $ISCCPath
+$greenComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "green"
+$blueComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "blue"
+$blueRuntimePack = Get-PackByName -Manifest $manifest -PackName "blue-runtime"
+$blueRuntimeFile = @($blueRuntimePack.files | Where-Object { $_.status -eq 'ready' })[0]
+$blueRuntimeSha256 = $blueRuntimeFile.sha256
+$blueRuntimeInstalledSizeBytes = [Int64]$blueRuntimePack.installed_size_bytes
+$blueRuntimeInstalledFileCount = [Int64]$blueRuntimePack.installed_file_count
 
 $onlineFilesBlock = ""
 $offlineFilesBlock = ""
 $downloadQueueProcedure = ""
+$packCachePrepareProcedure = Build-PackCachePrepareProcedure -Manifest $manifest
 if ($Flavor -eq "online") {
     $onlineFilesBlock = Build-OnlineExternalFilesBlock -Manifest $manifest
     $downloadQueueProcedure = Build-OnlineDownloadQueueProcedure -Manifest $manifest
@@ -306,7 +455,12 @@ $rendered = $template `
     -replace '@@OUTPUT_BASE_FILENAME@@', $outputBaseFilename `
     -replace '@@INSTALLER_ICON@@', ($InstallerIcon -replace '/', '\') `
     -replace '@@MANIFEST_PATH@@', ($ManifestPath -replace '/', '\') `
-    -replace '@@FLAVOR@@', $flavorLower
+    -replace '@@FLAVOR@@', $flavorLower `
+    -replace '@@GREEN_COMPONENT_SIZE_LABEL@@', $greenComponentSizeLabel `
+    -replace '@@BLUE_COMPONENT_SIZE_LABEL@@', $blueComponentSizeLabel `
+    -replace '@@BLUE_RUNTIME_SHA256@@', $blueRuntimeSha256 `
+    -replace '@@BLUE_RUNTIME_INSTALLED_SIZE_BYTES@@', $blueRuntimeInstalledSizeBytes `
+    -replace '@@BLUE_RUNTIME_INSTALLED_FILE_COUNT@@', $blueRuntimeInstalledFileCount
 
 # Inject generated Pascal/.iss blocks AFTER simple token replacement.
 # These blocks may contain regex metacharacters (`$`, `{`), so use
@@ -314,6 +468,7 @@ $rendered = $template `
 $rendered = $rendered.Replace('@@OFFLINE_FILES_BLOCK@@', $offlineFilesBlock)
 $rendered = $rendered.Replace('@@ONLINE_EXTERNAL_FILES_BLOCK@@', $onlineFilesBlock)
 $rendered = $rendered.Replace('@@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@', $downloadQueueProcedure)
+$rendered = $rendered.Replace('@@PACK_CACHE_PREPARE_PROCEDURE@@', $packCachePrepareProcedure)
 
 $tempIssDir = Join-Path $env:TEMP ("corridorkey_iss_" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempIssDir -Force | Out-Null

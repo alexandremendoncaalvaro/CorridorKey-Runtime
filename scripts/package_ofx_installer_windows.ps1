@@ -8,7 +8,8 @@ param(
     [ValidateSet("windows-rtx", "windows-universal")]
     [string]$ModelProfile = "",
     [string]$DisplayVersionLabel = "",
-    [switch]$Skip2048
+    [switch]$Skip2048,
+    [switch]$SkipNsisInstaller
 )
 
 Set-StrictMode -Version Latest
@@ -167,8 +168,6 @@ $bundlePath = Join-Path $releaseDir "CorridorKey.ofx.bundle"
 $installerPath = Join-Path $repoRoot ("dist\" + $releaseBasename + "_Install.exe")
 $installScriptPath = Join-Path $releaseDir "install_plugin.bat"
 $readmePath = Join-Path $releaseDir "README.txt"
-$nsisCompiler = Resolve-NsisCompiler
-$tempNsiPath = Join-Path $env:TEMP ("corridorkey_ofx_installer_" + [System.Guid]::NewGuid().ToString("N") + ".nsi")
 
 Write-Host "[1/5] Preparing release directory..." -ForegroundColor Cyan
 if (Test-Path $releaseDir) {
@@ -202,7 +201,13 @@ if ($LASTEXITCODE -ne 0) {
 Write-PathUpdateScript -BundlePath $bundlePath
 
 Write-Host "[3/5] Validating the OFX bundle..." -ForegroundColor Cyan
-& (Join-Path $repoRoot "scripts\validate_ofx_win.ps1") -BundlePath $bundlePath
+if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+    & (Join-Path $repoRoot "scripts\validate_ofx_win.ps1") -BundlePath $bundlePath
+} else {
+    & (Join-Path $repoRoot "scripts\validate_ofx_win.ps1") `
+        -BundlePath $bundlePath `
+        -ExpectedDisplayVersionLabel $DisplayVersionLabel
+}
 if ($LASTEXITCODE -ne 0) {
     throw "Windows OFX bundle validation failed."
 }
@@ -220,6 +225,15 @@ Write-ReleaseReadme -Path $readmePath `
     -ReleaseLabel $releaseLabel `
     -ModelProfile $ModelProfile
 
+if ($SkipNsisInstaller.IsPresent) {
+    Write-Host "[5/5] Skipping the legacy NSIS installer build." -ForegroundColor Cyan
+    Write-Host "Release directory ready at: $releaseDir" -ForegroundColor Green
+    Write-Host "Legacy NSIS installer intentionally not produced: $installerPath" -ForegroundColor Yellow
+    exit 0
+}
+
+$nsisCompiler = Resolve-NsisCompiler
+$tempNsiPath = Join-Path $env:TEMP ("corridorkey_ofx_installer_" + [System.Guid]::NewGuid().ToString("N") + ".nsi")
 $escapedBundlePath = $bundlePath.Replace('\', '\\')
 $escapedInstallerPath = $installerPath.Replace('\', '\\')
 $nsiScript = @"

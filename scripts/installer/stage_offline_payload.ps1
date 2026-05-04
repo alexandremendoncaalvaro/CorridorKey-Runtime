@@ -13,9 +13,10 @@
 
     This helper downloads every "ready" file from Hugging Face into
     the payload tree, verifying SHA256 against the manifest. The
-    blue runtime archive (~2 GB) is downloaded as-is; the Inno Setup
-    `extractarchive` flag handles extraction at install time, so we
-    do NOT pre-extract here.
+    blue runtime archive (~2 GB) is downloaded, verified, pre-extracted
+    into the runtime pack directory, and then removed. The offline Inno
+    Setup build bundles the extracted files directly because
+    `extractarchive` is only valid for external download entries.
 
     The payload tree layout under -OutputDir matches what
     build_installer.ps1 -Flavor offline expects:
@@ -25,7 +26,9 @@
             corridorkey_fp16_512.onnx
             ...
           torchtrt-runtime/bin/
-            corridorkey_blue_torchtrt_runtime.7z
+            torch_cuda.dll
+            torchtrt.dll
+            nvinfer_10.dll
 
 .PARAMETER OutputDir
     Where to stage the payload. Defaults to dist/_offline_payload/.

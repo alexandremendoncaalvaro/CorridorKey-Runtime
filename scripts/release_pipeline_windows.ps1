@@ -2,6 +2,8 @@ param(
     [string]$Version = "",
     [ValidateSet("rtx", "dml", "all")]
     [string]$Track = "rtx",
+    [ValidateSet("", "online", "offline")]
+    [string]$Flavor = "",
     [string]$DisplayVersionLabel = "",
     [switch]$SkipTests,
     [switch]$CleanOnly,
@@ -47,6 +49,7 @@ function Publish-CorridorKeyGithubRelease {
         [string]$Version,
         [string]$DisplayVersionLabel,
         [string]$Track,
+        [string]$Flavor,
         [string]$GithubRepo,
         [string]$RepoRoot,
         [string]$NotesFile
@@ -97,7 +100,11 @@ function Publish-CorridorKeyGithubRelease {
 
     $assetGlobs = @()
     foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
-        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_OFX_v${tagLabel}_Windows_$($variant.Suffix)_Install.exe"))
+        if (-not [string]::IsNullOrWhiteSpace($Flavor) -and $variant.Suffix -eq "RTX") {
+            $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_v${tagLabel}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"))
+        } else {
+            $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_OFX_v${tagLabel}_Windows_$($variant.Suffix)_Install.exe"))
+        }
     }
     foreach ($asset in $assetGlobs) {
         if (-not (Test-Path $asset)) {
@@ -166,7 +173,7 @@ try {
     if ($needsRtxTrack) {
         $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
         if (-not (Test-Path $rtxOrtRoot)) {
-            throw "Curated RTX runtime not found at $rtxOrtRoot. Build it with scripts\prepare_windows_rtx_release.ps1 or scripts\build_ort_windows_rtx.ps1 first."
+            throw "Curated RTX runtime not found at $rtxOrtRoot. Stage it with scripts\windows.ps1 -Task prepare-rtx first."
         }
     }
     if ($needsDirectMlTrack) {
@@ -243,11 +250,46 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
             $packageArgs += @("-DisplayVersionLabel", $DisplayVersionLabel)
         }
+        $isModernInnoInstaller = (-not [string]::IsNullOrWhiteSpace($Flavor)) -and ($v.Suffix -eq "RTX")
+        if ($isModernInnoInstaller) {
+            $packageArgs += @("-SkipNsisInstaller")
+        }
         & powershell.exe -NoProfile -File "scripts/package_ofx_installer_windows.ps1" @packageArgs
 
         if ($LASTEXITCODE -ne 0) { throw "Packaging failed for variant: $($v.Suffix)" }
 
-        $expectedInstaller = Join-Path $repoRoot "dist/CorridorKey_OFX_v${artifactVersionTag}_Windows_$($v.Suffix)_Install.exe"
+        if ($isModernInnoInstaller) {
+            $stagedBundle = Join-Path $repoRoot ("dist\CorridorKey_OFX_v${artifactVersionTag}_Windows_$($v.Suffix)\CorridorKey.ofx.bundle")
+            if (-not (Test-Path $stagedBundle)) {
+                throw "Inno Setup builder requires the staged OFX bundle, not found at $stagedBundle."
+            }
+
+            $innoArgs = @(
+                "-Flavor", $Flavor,
+                "-Version", $Version,
+                "-DisplayVersionLabel", $artifactVersionTag,
+                "-PluginPayloadDir", $stagedBundle
+            )
+            if ($Flavor -eq "offline") {
+                & powershell.exe -NoProfile -File "scripts\installer\stage_offline_payload.ps1"
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Offline payload staging failed."
+                }
+                $offlineRoot = Join-Path $repoRoot "dist\_offline_payload"
+                $innoArgs += @("-ModelPayloadDir", $offlineRoot)
+            }
+
+            & powershell.exe -NoProfile -File "scripts\installer\build_installer.ps1" @innoArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw "Inno Setup installer build failed for flavor '$Flavor'."
+            }
+        }
+
+        $expectedInstaller = if ($isModernInnoInstaller) {
+            Join-Path $repoRoot "dist/CorridorKey_v${artifactVersionTag}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"
+        } else {
+            Join-Path $repoRoot "dist/CorridorKey_OFX_v${artifactVersionTag}_Windows_$($v.Suffix)_Install.exe"
+        }
         if (-not (Test-Path $expectedInstaller)) {
             throw "CRITICAL: Pipeline claimed success but installer was NOT found at: $expectedInstaller"
         }
@@ -287,6 +329,7 @@ try {
             -Version $Version `
             -DisplayVersionLabel $DisplayVersionLabel `
             -Track $Track `
+            -Flavor $Flavor `
             -GithubRepo $GithubRepo `
             -RepoRoot $repoRoot `
             -NotesFile $resolvedNotesFile
