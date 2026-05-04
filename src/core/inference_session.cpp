@@ -176,6 +176,9 @@ namespace corridorkey {
 
 namespace {
 
+constexpr float kDefaultSourcePassthroughAlphaThreshold = 0.95F;
+constexpr float kBlueSourceRecoveryAlphaThreshold = 0.0F;
+
 template <typename T>
 class AlignedTensorBuffer {
    public:
@@ -1562,9 +1565,15 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
         common::measure_stage(
             on_stage, "post_source_passthrough",
             [&]() {
+                const bool recover_blue_source = params.despill_screen_channel == 2;
+                const int erode_px = recover_blue_source ? 0 : params.sp_erode_px;
+                const int blur_px = recover_blue_source ? 0 : params.sp_blur_px;
+                const float alpha_threshold = recover_blue_source
+                                                  ? kBlueSourceRecoveryAlphaThreshold
+                                                  : kDefaultSourcePassthroughAlphaThreshold;
                 corridorkey::source_passthrough(source_rgb, result.foreground.view(),
-                                                result.alpha.view(), params.sp_erode_px,
-                                                params.sp_blur_px, m_color_utils_state);
+                                                result.alpha.view(), erode_px, blur_px,
+                                                m_color_utils_state, alpha_threshold);
             },
             1);
     }

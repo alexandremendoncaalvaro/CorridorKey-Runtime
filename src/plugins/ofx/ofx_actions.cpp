@@ -563,9 +563,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_bool_param(param_set, kParamSourcePassthrough, "Recover Original Details",
                       kDefaultSourcePassthroughEnabled,
                       "Blend original source pixels back into opaque interior regions for "
-                      "sharper texture. This is not an edge-fix tool. Dedicated Blue keeps the "
-                      "model foreground authoritative to avoid reintroducing blue-screen edge "
-                      "color.",
+                      "sharper texture. Dedicated Blue uses the recovered source color through "
+                      "the matte because its dynamic model is authoritative for alpha, not "
+                      "foreground colour.",
                       "interior_detail_group");
     // --- Group 5: Matte (refine the AI-generated alpha) ---
     define_group_param(param_set, "matte_group", "Matte", true);
