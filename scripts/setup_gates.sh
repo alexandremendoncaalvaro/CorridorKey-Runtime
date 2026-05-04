@@ -11,4 +11,4 @@ mkdir -p .git/hooks
 cp .githooks/pre-push .git/hooks/pre-push
 chmod +x .git/hooks/pre-push
 
-echo "✅ Quality gates installed successfully."
+echo "Quality gates installed successfully."

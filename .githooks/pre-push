@@ -109,4 +109,4 @@ echo "Running Unit Tests..."
 echo "Running Integration Tests..."
 "$REPO_ROOT/${BUILD_DIR}/tests/integration/test_integration"
 
-echo "✅ All local checks passed. Pushing to remote..."
+echo "All local checks passed. Pushing to remote..."
