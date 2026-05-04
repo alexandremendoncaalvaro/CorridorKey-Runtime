@@ -1039,8 +1039,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                     (loaded_model_is_blue ? "1" : "0") + " requested_source_passthrough=" +
                     (source_passthrough_requested ? "1" : "0") +
                     " effective_source_passthrough=" + (params.source_passthrough ? "1" : "0") +
-                    " blue_source_recovery=" +
-                    (dedicated_blue_requested && params.source_passthrough ? "1" : "0") +
                     " despill_screen_channel=" +
                     std::to_string(params.despill_screen_channel) + " spill_method=" +
                     std::to_string(params.spill_method) + " sp_erode_px=" +

@@ -431,10 +431,7 @@ struct InferenceParams {
 
     UpscaleMethod upscale_method = UpscaleMethod::Lanczos4;
 
-    // Source passthrough: blend original source pixels back into the model
-    // foreground. Green keeps the historical opaque-interior behavior; blue
-    // uses alpha-covered source recovery so the dedicated blue model can
-    // provide matte geometry without tinting foreground colour.
+    // Source passthrough: blend original source pixels in opaque regions
     bool source_passthrough = true;
     int sp_erode_px = kDefaultSpErodePx;  // Erosion radius for interior mask
     int sp_blur_px = kDefaultSpBlurPx;    // Blur radius for transition smoothing

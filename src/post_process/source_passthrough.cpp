@@ -24,11 +24,13 @@ namespace corridorkey {
 
 namespace {
 
-void threshold_alpha(Image alpha, Image mask, float alpha_threshold) {
+constexpr float kInteriorThreshold = 0.95F;
+
+void threshold_alpha(Image alpha, Image mask) {
     common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
             for (int x = 0; x < alpha.width; ++x) {
-                mask(y, x) = alpha(y, x) > alpha_threshold ? 1.0F : 0.0F;
+                mask(y, x) = alpha(y, x) > kInteriorThreshold ? 1.0F : 0.0F;
             }
         }
     });
@@ -100,11 +102,11 @@ void blend_source(Image source_rgb, Image model_fg, Image mask) {
     });
 }
 
-void keep_mask_inside_alpha_threshold(Image alpha, Image mask, float alpha_threshold) {
+void keep_mask_inside_opaque_alpha(Image alpha, Image mask) {
     common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
             for (int x = 0; x < alpha.width; ++x) {
-                if (alpha(y, x) <= alpha_threshold) {
+                if (alpha(y, x) <= kInteriorThreshold) {
                     mask(y, x) = 0.0F;
                 }
             }
@@ -115,9 +117,8 @@ void keep_mask_inside_alpha_threshold(Image alpha, Image mask, float alpha_thres
 }  // namespace
 
 void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode_px, int blur_px,
-                        ColorUtils::State& state, float alpha_threshold) {
+                        ColorUtils::State& state) {
     if (source_rgb.empty() || model_fg.empty() || alpha.empty()) return;
-    const float threshold = std::clamp(alpha_threshold, 0.0F, 1.0F);
 
     size_t size_1c = static_cast<size_t>(alpha.width) * alpha.height;
     state.sp_mask.resize(size_1c);
@@ -125,7 +126,7 @@ void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode
 
     // 1. Threshold alpha to binary interior mask
     Image mask = {alpha.width, alpha.height, 1, state.sp_mask};
-    threshold_alpha(alpha, mask, threshold);
+    threshold_alpha(alpha, mask);
 
     // 2. Erode inward to create safety margin at edges
     Image temp_view = {alpha.width, alpha.height, 1, state.sp_temp};
@@ -137,7 +138,7 @@ void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode
         float ksize = static_cast<float>(blur_px * 2 + 1);
         float sigma = 0.3F * ((ksize - 1.0F) * 0.5F - 1.0F) + 0.8F;
         ColorUtils::gaussian_blur(mask, sigma, state);
-        keep_mask_inside_alpha_threshold(alpha, mask, threshold);
+        keep_mask_inside_opaque_alpha(alpha, mask);
     }
 
     // 4. Blend: mask * source + (1 - mask) * model_fg

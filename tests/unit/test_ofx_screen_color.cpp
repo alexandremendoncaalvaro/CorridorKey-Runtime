@@ -126,9 +126,9 @@ TEST_CASE("screen color helpers preserve anchors and roundtrip blue input",
         CHECK(screen_color_mode_from_choice(99) == ScreenColorMode::Green);
     }
 
-    SECTION("all deterministic screen modes allow source color recovery") {
+    SECTION("dedicated blue does not recover original plate pixels") {
         CHECK(screen_color_allows_source_passthrough(ScreenColorMode::Green));
-        CHECK(screen_color_allows_source_passthrough(ScreenColorMode::Blue));
+        CHECK_FALSE(screen_color_allows_source_passthrough(ScreenColorMode::Blue));
         CHECK(screen_color_allows_source_passthrough(ScreenColorMode::BlueGreen));
     }
 

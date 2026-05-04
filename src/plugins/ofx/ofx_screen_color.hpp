@@ -56,8 +56,8 @@ inline bool screen_color_requires_green_domain_canonicalization(ScreenColorMode 
     return mode == ScreenColorMode::BlueGreen;
 }
 
-inline bool screen_color_allows_source_passthrough(ScreenColorMode) {
-    return true;
+inline bool screen_color_allows_source_passthrough(ScreenColorMode mode) {
+    return mode != ScreenColorMode::Blue;
 }
 
 inline std::array<float, 9> identity_matrix_3x3() {

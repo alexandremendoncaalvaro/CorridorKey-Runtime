@@ -12,6 +12,6 @@ namespace corridorkey {
 /// erode_px: erosion radius for the binary interior mask (elliptical structuring element)
 /// blur_px: blur radius for transition smoothing
 void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode_px, int blur_px,
-                        ColorUtils::State& state, float alpha_threshold = 0.95F);
+                        ColorUtils::State& state);
 
 }  // namespace corridorkey
