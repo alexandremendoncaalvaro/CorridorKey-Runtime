@@ -882,16 +882,15 @@ void update_runtime_panel_values(InstanceData* data) {
     // GetFramesNeeded) defer by marking dirty so the next main-thread
     // action flushes the panel.
     //
-    // Resolve advertises enough tolerance that this path used to flush
-    // runtime status live during render. Resolve logs show each flush
-    // triggering a burst of InstanceChanged callbacks while model selection
-    // is in flight, so all hosts now follow the OFX-safe deferred path during
-    // render actions.
+    // DaVinci Resolve tolerates render-thread paramSetValue and its inspector
+    // panel is the validated live telemetry surface for per-frame render
+    // timing. Foundry Nuke rejects the same dynamic parameter writes, so Nuke
+    // and any unvalidated host take the canonical defer-to-main-thread path.
     // References:
     // https://openfx.readthedocs.io/en/main/Reference/ofxThreadSafety.html
     // https://openfx.readthedocs.io/en/main/Reference/ofxRendering.html
     // https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
-    if (data->in_render || data->in_render_sequence) {
+    if ((data->in_render || data->in_render_sequence) && !is_resolve_host()) {
         data->runtime_panel_dirty = true;
         log_message("update_runtime_panel_values",
                     std::string("defer reason=render_thread in_render=") +

@@ -435,13 +435,15 @@ TEST_CASE("Foundry Nuke defers paramSetValue inside the BeginSequenceRender wind
     CHECK(data.runtime_panel_dirty);
 }
 
-// Resolve render logs showed live paramSetValue flushing can trigger
-// InstanceChanged bursts while model selection is in flight, so Resolve now
-// follows the same OFX-safe render-thread deferral as strict hosts.
-TEST_CASE("DaVinci Resolve defers paramSetValue during render", "[unit][ofx][regression]") {
+// DaVinci Resolve has historically tolerated render-thread paramSetValue
+// through internal locking. The live runtime panel is the validated Resolve
+// feedback path for per-frame timings; strict hosts still defer above.
+TEST_CASE("DaVinci Resolve flushes paramSetValue live during render",
+          "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     data.in_render = true;
+    data.in_render_sequence = true;
 
     auto previous_host_name = g_host_name;
     g_host_name = kHostNameResolve;
@@ -459,8 +461,8 @@ TEST_CASE("DaVinci Resolve defers paramSetValue during render", "[unit][ofx][reg
     g_suites.property = previous_property;
     g_host_name = previous_host_name;
 
-    CHECK(g_param_set_value_count == 0);
-    CHECK(data.runtime_panel_dirty);
+    CHECK(g_param_set_value_count > 0);
+    CHECK_FALSE(data.runtime_panel_dirty);
 }
 
 TEST_CASE("update_runtime_panel flushes paramSetValue on the main thread",
