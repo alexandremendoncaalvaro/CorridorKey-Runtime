@@ -315,6 +315,7 @@ nlohmann::json to_json(const InferenceParams& params) {
         {"coarse_resolution_override", params.coarse_resolution_override},
         {"despill_strength", params.despill_strength},
         {"spill_method", params.spill_method},
+        {"despill_screen_channel", params.despill_screen_channel},
         {"auto_despeckle", params.auto_despeckle},
         {"despeckle_size", params.despeckle_size},
         {"refiner_scale", params.refiner_scale},
@@ -370,6 +371,13 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
         int method = json.at("spill_method").get<int>();
         if (method >= 0 && method <= 2) {
             params.spill_method = method;
+        }
+    }
+    if (json.contains("despill_screen_channel") &&
+        json.at("despill_screen_channel").is_number_integer()) {
+        int channel = json.at("despill_screen_channel").get<int>();
+        if (channel >= 0 && channel <= 2) {
+            params.despill_screen_channel = channel;
         }
     }
     auto auto_despeckle = required_bool(json, "auto_despeckle");

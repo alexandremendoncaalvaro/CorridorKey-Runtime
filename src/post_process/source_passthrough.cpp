@@ -102,6 +102,18 @@ void blend_source(Image source_rgb, Image model_fg, Image mask) {
     });
 }
 
+void keep_mask_inside_opaque_alpha(Image alpha, Image mask) {
+    common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = 0; x < alpha.width; ++x) {
+                if (alpha(y, x) <= kInteriorThreshold) {
+                    mask(y, x) = 0.0F;
+                }
+            }
+        }
+    });
+}
+
 }  // namespace
 
 void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode_px, int blur_px,
@@ -126,6 +138,7 @@ void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode
         float ksize = static_cast<float>(blur_px * 2 + 1);
         float sigma = 0.3F * ((ksize - 1.0F) * 0.5F - 1.0F) + 0.8F;
         ColorUtils::gaussian_blur(mask, sigma, state);
+        keep_mask_inside_opaque_alpha(alpha, mask);
     }
 
     // 4. Blend: mask * source + (1 - mask) * model_fg

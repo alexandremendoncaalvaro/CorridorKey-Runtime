@@ -172,6 +172,16 @@ if(WIN32)
             ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
     endif()
 
+    if(CORRIDORKEY_HAS_TORCHTRT)
+        set(_corridorkey_ofx_copy_torchtrt_wrapper
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:corridorkey_torchtrt>
+                "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin/")
+    else()
+        set(_corridorkey_ofx_copy_torchtrt_wrapper
+            COMMAND ${CMAKE_COMMAND} -E true)
+    endif()
+
     if(_corridorkey_ofx_runtime_dlls)
         add_custom_command(TARGET corridorkey_ofx POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -182,11 +192,13 @@ if(WIN32)
             # Create bundle directories
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin"
 
             # Copy the plugin binary
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
+            ${_corridorkey_ofx_copy_torchtrt_wrapper}
 
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"
@@ -216,11 +228,13 @@ if(WIN32)
             # Create bundle directories
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin"
 
             # Copy the plugin binary
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
+            ${_corridorkey_ofx_copy_torchtrt_wrapper}
 
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_dir}/Contents/Win64/"

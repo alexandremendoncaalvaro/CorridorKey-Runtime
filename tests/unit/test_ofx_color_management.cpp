@@ -535,7 +535,7 @@ TEST_CASE("describe_in_context exposes the current public quality ladder",
           std::vector<std::string>{"Recommended", "512", "1024", "1536", "2048"});
 }
 
-TEST_CASE("describe_in_context makes blue-screen canonicalization explicit in OFX copy",
+TEST_CASE("describe_in_context makes deterministic screen paths explicit in OFX copy",
           "[unit][ofx][regression]") {
     SuiteScope suites;
     FakeEffect descriptor;
@@ -553,12 +553,12 @@ TEST_CASE("describe_in_context makes blue-screen canonicalization explicit in OF
               .find("chroma screen keyer") != std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
               .front()
-              .find("dedicated CorridorKey model") != std::string::npos);
+              .find("deterministic screen path") != std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint).front().find("CorridorKeyBlue") !=
           std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
               .front()
-              .find("canonicalization workaround") != std::string::npos);
+              .find("Blue-Green") != std::string::npos);
     CHECK(prop_strings(despill_props, kOfxParamPropHint).front().find("selected screen color") !=
           std::string::npos);
     CHECK(prop_strings(spill_method_props, kOfxParamPropHint)

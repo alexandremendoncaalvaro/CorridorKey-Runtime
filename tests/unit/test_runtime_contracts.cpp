@@ -324,7 +324,7 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
     REQUIRE(windows_universal_model->filename == "corridorkey_fp16_1024.onnx");
 }
 
-TEST_CASE("blue screen routes to dedicated CorridorKeyBlue artifacts on Windows RTX",
+TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows RTX",
           "[unit][runtime][screen-color]") {
     RuntimeCapabilities windows_capabilities;
     windows_capabilities.platform = "windows";
@@ -341,42 +341,27 @@ TEST_CASE("blue screen routes to dedicated CorridorKeyBlue artifacts on Windows 
         REQUIRE(entry->screen_color == "green");
     }
 
-    SECTION("Blue request at 10 GB tier returns blue 1024 TorchTRT entry") {
-        // Sprint 1 PR 4: blue Windows RTX entries route through TorchTRT
-        // (.ts engines compiled in Sprint 0). The ONNX -> TRT-RTX EP path
-        // failed for blue at 1024+ resolutions; TorchTRT loads cleanly.
+    SECTION("Blue request at 10 GB tier returns the dynamic blue TorchScript entry") {
         auto entry = default_model_for_request(windows_capabilities,
                                                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
                                                windows_default, "blue");
         REQUIRE(entry.has_value());
-        REQUIRE(entry->filename == "corridorkey_blue_torchtrt_fp16_1024.ts");
-        REQUIRE(entry->artifact_family == "torchtrt");
+        REQUIRE(entry->filename == "corridorkey_dynamic_blue_fp16.ts");
+        REQUIRE(entry->artifact_family == "torchscript");
         REQUIRE(entry->recommended_backend == "torchtrt");
+        REQUIRE(entry->resolution == 0);
         REQUIRE(entry->screen_color == "blue");
     }
 
-    SECTION("Blue request at 24 GB tier returns blue 2048 TorchTRT entry") {
-        // Blue 1536 + 2048 ship as FP32 because Sprint 0 found FP16 NaNs at
-        // those graph sizes for the blue checkpoint (HANDOFF section 2.2).
-        auto entry = default_model_for_request(windows_capabilities,
-                                               DeviceInfo{"RTX 4090", 24576, Backend::TensorRT},
-                                               windows_default, "blue");
-        REQUIRE(entry.has_value());
-        REQUIRE(entry->filename == "corridorkey_blue_torchtrt_fp32_2048.ts");
-        REQUIRE(entry->artifact_family == "torchtrt");
-        REQUIRE(entry->recommended_backend == "torchtrt");
-        REQUIRE(entry->screen_color == "blue");
-    }
-
-    SECTION("Blue request at 8 GB tier returns blue 512 TorchTRT entry") {
-        auto entry = default_model_for_request(windows_capabilities,
-                                               DeviceInfo{"RTX 3070", 8192, Backend::TensorRT},
-                                               windows_default, "blue");
-        REQUIRE(entry.has_value());
-        REQUIRE(entry->filename == "corridorkey_blue_torchtrt_fp16_512.ts");
-        REQUIRE(entry->artifact_family == "torchtrt");
-        REQUIRE(entry->recommended_backend == "torchtrt");
-        REQUIRE(entry->screen_color == "blue");
+    SECTION("Blue request returns the same artifact across VRAM tiers") {
+        for (const auto memory_mb : {8192, 10240, 16384, 24576}) {
+            auto entry = default_model_for_request(
+                windows_capabilities, DeviceInfo{"RTX", memory_mb, Backend::TensorRT},
+                windows_default, "blue");
+            REQUIRE(entry.has_value());
+            REQUIRE(entry->filename == "corridorkey_dynamic_blue_fp16.ts");
+            REQUIRE(entry->screen_color == "blue");
+        }
     }
 
     SECTION("Default screen_color argument preserves green semantics") {
@@ -389,14 +374,15 @@ TEST_CASE("blue screen routes to dedicated CorridorKeyBlue artifacts on Windows 
     }
 
     SECTION("find_model_by_filename surfaces blue entries with screen_color='blue'") {
-        auto blue_entry = find_model_by_filename("corridorkey_blue_torchtrt_fp16_1024.ts");
+        auto blue_entry = find_model_by_filename("corridorkey_dynamic_blue_fp16.ts");
         REQUIRE(blue_entry.has_value());
         REQUIRE(blue_entry->screen_color == "blue");
         REQUIRE(blue_entry->packaged_for_windows);
+        REQUIRE(blue_entry->resolution == 0);
     }
 
     SECTION("to_json exposes screen_color so CLI / API consumers can route") {
-        auto blue_entry = find_model_by_filename("corridorkey_blue_torchtrt_fp16_1024.ts");
+        auto blue_entry = find_model_by_filename("corridorkey_dynamic_blue_fp16.ts");
         REQUIRE(blue_entry.has_value());
         const auto blue_json = to_json(*blue_entry);
         REQUIRE(blue_json.contains("screen_color"));

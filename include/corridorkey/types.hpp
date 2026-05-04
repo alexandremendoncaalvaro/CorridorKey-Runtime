@@ -144,9 +144,7 @@ enum class Backend : std::uint8_t {
     MLX,
     WindowsML,
     OpenVINO,
-    /// Torch-TensorRT in-process backend (Windows blue-pack, Sprint 1).
-    /// Loads a .ts engine via torch::jit::load and runs forward through
-    /// the bundled TorchTRT custom ops. See src/core/torch_trt_session.cpp.
+    /// Windows RTX blue-pack backend for packaged Torch-TensorRT artifacts.
     TorchTRT
 };
 /**

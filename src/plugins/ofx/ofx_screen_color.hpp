@@ -30,6 +30,7 @@ namespace corridorkey::ofx {
 enum class ScreenColorMode {
     Green,
     Blue,
+    BlueGreen,
 };
 
 struct ScreenColorTransform {
@@ -42,11 +43,17 @@ struct ScreenColorTransform {
 };
 
 inline ScreenColorMode screen_color_mode_from_choice(int screen_color_choice) {
-    return screen_color_choice == kScreenColorBlue ? ScreenColorMode::Blue : ScreenColorMode::Green;
+    if (screen_color_choice == kScreenColorBlue) {
+        return ScreenColorMode::Blue;
+    }
+    if (screen_color_choice == kScreenColorBlueGreen) {
+        return ScreenColorMode::BlueGreen;
+    }
+    return ScreenColorMode::Green;
 }
 
 inline bool screen_color_requires_green_domain_canonicalization(ScreenColorMode mode) {
-    return mode == ScreenColorMode::Blue;
+    return mode == ScreenColorMode::BlueGreen;
 }
 
 inline std::array<float, 9> identity_matrix_3x3() {
@@ -58,7 +65,7 @@ inline std::array<float, 9> legacy_green_blue_swap_matrix() {
 }
 
 inline int screen_color_channel(ScreenColorMode mode) {
-    return mode == ScreenColorMode::Blue ? 2 : 1;
+    return mode == ScreenColorMode::Blue || mode == ScreenColorMode::BlueGreen ? 2 : 1;
 }
 
 inline int first_non_screen_channel(ScreenColorMode mode) {
@@ -66,11 +73,11 @@ inline int first_non_screen_channel(ScreenColorMode mode) {
 }
 
 inline int second_non_screen_channel(ScreenColorMode mode) {
-    return mode == ScreenColorMode::Blue ? 1 : 2;
+    return mode == ScreenColorMode::Blue || mode == ScreenColorMode::BlueGreen ? 1 : 2;
 }
 
 inline std::array<float, 3> default_screen_reference(ScreenColorMode mode) {
-    if (mode == ScreenColorMode::Blue) {
+    if (mode == ScreenColorMode::Blue || mode == ScreenColorMode::BlueGreen) {
         return {0.08F, 0.16F, 0.84F};
     }
     return {0.08F, 0.84F, 0.08F};
@@ -210,7 +217,7 @@ inline std::array<float, 3> estimate_screen_reference(Image image, ScreenColorMo
 inline ScreenColorTransform make_screen_mapping_transform(
     const std::array<float, 3>& source_screen, const std::array<float, 3>& target_screen) {
     ScreenColorTransform transform;
-    transform.mode = ScreenColorMode::Blue;
+    transform.mode = ScreenColorMode::BlueGreen;
     transform.estimated_screen = source_screen;
     transform.canonical_screen = target_screen;
     transform.is_identity = false;

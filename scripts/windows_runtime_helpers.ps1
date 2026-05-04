@@ -1165,10 +1165,10 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 }
 
 function Get-CorridorKeyPreparedModelList {
-    # Defaults to "green" so the existing prepare-rtx flow keeps regenerating
-    # only the green ladder from CorridorKey_v1.0.pth. Pass -Variant blue to
-    # produce the dedicated CorridorKeyBlue ladder; pass -Variant all to
-    # ask for both (typically only used by inventory/bundle reporting).
+    # Defaults to "green" so the prepare-rtx flow keeps regenerating only the
+    # optimized green ONNX ladder from CorridorKey_v1.0.pth. Pass -Variant
+    # blue to report the dynamic CorridorKeyBlue TorchScript pack; pass
+    # -Variant all to ask for both.
     param(
         [ValidateSet("green", "blue", "all")]
         [string]$Variant = "green"
@@ -1180,15 +1180,8 @@ function Get-CorridorKeyPreparedModelList {
         "corridorkey_fp16_1536.onnx",
         "corridorkey_fp16_2048.onnx"
     )
-    # Blue ladder is Torch-TensorRT compiled engines (.ts), per Sprint 1
-    # PR 3 catalog swap. Filenames + precision (FP16 below 1536, FP32 at /
-    # above) must match src/app/runtime_contracts.cpp blue rows and
-    # src/plugins/ofx/ofx_model_selection.hpp::artifact_path_for_backend.
     $blue = @(
-        "corridorkey_blue_torchtrt_fp16_512.ts",
-        "corridorkey_blue_torchtrt_fp16_1024.ts",
-        "corridorkey_blue_torchtrt_fp32_1536.ts",
-        "corridorkey_blue_torchtrt_fp32_2048.ts"
+        "corridorkey_dynamic_blue_fp16.ts"
     )
 
     switch ($Variant) {

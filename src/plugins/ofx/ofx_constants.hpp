@@ -204,6 +204,7 @@ inline bool input_color_runtime_mode_is_linear(InputColorRuntimeMode mode) {
 // Screen color
 constexpr int kScreenColorGreen = 0;
 constexpr int kScreenColorBlue = 1;
+constexpr int kScreenColorBlueGreen = 2;
 
 constexpr int kDefaultSourcePassthroughEnabled = 1;
 constexpr int kDefaultEdgeErode = 3;

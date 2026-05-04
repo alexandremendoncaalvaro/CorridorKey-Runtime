@@ -1,5 +1,6 @@
 #include "torch_trt_session.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -35,7 +36,8 @@ namespace corridorkey::core {
 namespace {
 
 std::optional<int> resolution_from_filename(const std::filesystem::path& path) {
-    // corridorkey_torchtrt_fp16_<res>.ts | corridorkey_blue_torchtrt_fp16_<res>.ts
+    // Fixed TorchTRT engines carry a trailing resolution token; dynamic
+    // TorchScript artifacts intentionally do not.
     static const std::regex pattern(R"(.*_(\d+)\.ts$)");
     std::smatch match;
     auto filename = path.filename().string();
@@ -77,21 +79,88 @@ std::optional<AlphaFgTensors> split_forward_output(const torch::IValue& raw_out)
     return std::nullopt;
 }
 
-ImageBuffer materialize_alpha(const torch::Tensor& alpha_cuda, int resolution) {
+bool tensor_has_shape(const torch::Tensor& tensor, int channels, int width, int height) {
+    return tensor.defined() && tensor.dim() == 4 && tensor.size(0) == 1 &&
+           tensor.size(1) == channels && tensor.size(2) == height && tensor.size(3) == width;
+}
+
+constexpr int kDynamicInputAlignment = 32;
+
+int round_up_to_multiple(int value, int multiple) {
+    return ((value + multiple - 1) / multiple) * multiple;
+}
+
+struct DynamicPadding {
+    int top = 0;
+    int left = 0;
+    int height = 0;
+    int width = 0;
+};
+
+DynamicPadding dynamic_padding_for_input(int width, int height, bool dynamic_resolution) {
+    if (!dynamic_resolution) {
+        return {.height = height, .width = width};
+    }
+    const int padded_width = round_up_to_multiple(width, kDynamicInputAlignment);
+    const int padded_height = round_up_to_multiple(height, kDynamicInputAlignment);
+    return {
+        .top = (padded_height - height) / 2,
+        .left = (padded_width - width) / 2,
+        .height = padded_height,
+        .width = padded_width,
+    };
+}
+
+int reflect_index(int index, int size) {
+    if (size <= 1) {
+        return 0;
+    }
+    const int period = (2 * size) - 2;
+    int reflected = index % period;
+    if (reflected < 0) {
+        reflected += period;
+    }
+    if (reflected >= size) {
+        reflected = period - reflected;
+    }
+    return reflected;
+}
+
+ImageBuffer materialize_alpha(const torch::Tensor& alpha_cuda, int output_width, int output_height,
+                              int tensor_width, int pad_top, int pad_left) {
     auto alpha_cpu = alpha_cuda.detach().to(torch::kCPU).to(torch::kFloat32).contiguous();
-    ImageBuffer buf(resolution, resolution, 1);
+    ImageBuffer buf(output_width, output_height, 1);
     auto view = buf.view();
-    std::memcpy(view.data.data(), alpha_cpu.data_ptr<float>(), view.data.size_bytes());
+    const auto* src = alpha_cpu.data_ptr<float>();
+    auto* dst = view.data.data();
+    const auto row_bytes = static_cast<std::size_t>(output_width) * sizeof(float);
+    for (int y = 0; y < output_height; ++y) {
+        std::memcpy(dst + (static_cast<std::ptrdiff_t>(y) * output_width),
+                    src + (static_cast<std::ptrdiff_t>(y + pad_top) * tensor_width) + pad_left,
+                    row_bytes);
+    }
     return buf;
 }
 
-ImageBuffer materialize_rgb(const torch::Tensor& fg_cuda, int resolution) {
-    // fg_cuda is (1, 3, R, R) channel-first; convert to (R, R, 3) interleaved.
+ImageBuffer materialize_rgb(const torch::Tensor& fg_cuda, int output_width, int output_height,
+                            int tensor_width, int tensor_height, int pad_top, int pad_left) {
     auto fg_cpu = fg_cuda.detach().to(torch::kCPU).to(torch::kFloat32).contiguous();
-    auto fg_hwc = fg_cpu.permute({0, 2, 3, 1}).contiguous();
-    ImageBuffer buf(resolution, resolution, 3);
+    ImageBuffer buf(output_width, output_height, 3);
     auto view = buf.view();
-    std::memcpy(view.data.data(), fg_hwc.data_ptr<float>(), view.data.size_bytes());
+    const auto* src = fg_cpu.data_ptr<float>();
+    const auto plane = static_cast<std::ptrdiff_t>(tensor_width) * tensor_height;
+    auto* dst = view.data.data();
+    for (int y = 0; y < output_height; ++y) {
+        for (int x = 0; x < output_width; ++x) {
+            const auto src_index =
+                (static_cast<std::ptrdiff_t>(y + pad_top) * tensor_width) + x + pad_left;
+            const auto dst_index =
+                ((static_cast<std::ptrdiff_t>(y) * output_width) + x) * 3;
+            dst[dst_index + 0] = src[src_index];
+            dst[dst_index + 1] = src[plane + src_index];
+            dst[dst_index + 2] = src[(2 * plane) + src_index];
+        }
+    }
     return buf;
 }
 
@@ -153,13 +222,7 @@ Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
     session->m_impl->device = device;
 
     auto inferred_res = resolution_from_filename(ts_path);
-    if (!inferred_res.has_value()) {
-        return Unexpected<Error>{
-            Error{.code = ErrorCode::ModelLoadFailed,
-                  .message = "Could not infer model resolution from .ts filename: " +
-                             ts_path.filename().string()}};
-    }
-    session->m_impl->resolution = *inferred_res;
+    session->m_impl->resolution = inferred_res.value_or(0);
     session->m_impl->input_dtype = infer_input_dtype(ts_path);
 
     try {
@@ -193,35 +256,56 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         return Unexpected<Error>{Error{.code = ErrorCode::InferenceFailed,
                                        .message = "TorchTrtSession in moved-from state"}};
     }
-    const int resolution = m_impl->resolution;
-    if (rgb.width != resolution || rgb.height != resolution || rgb.channels != 3) {
+    const int fixed_resolution = m_impl->resolution;
+    const bool dynamic_resolution = fixed_resolution == 0;
+    const int width = rgb.width;
+    const int height = rgb.height;
+    if (rgb.channels != 3 || width <= 0 || height <= 0) {
         return Unexpected<Error>{Error{
             .code = ErrorCode::InvalidParameters,
-            .message = "TorchTRT session expects RGB input at " + std::to_string(resolution) + "x" +
-                       std::to_string(resolution) + "x3; got " + std::to_string(rgb.width) + "x" +
+            .message = "TorchScript RTX session expects RGB input with positive width/height and "
+                       "3 channels; got " +
+                       std::to_string(rgb.width) + "x" +
                        std::to_string(rgb.height) + "x" + std::to_string(rgb.channels)}};
     }
-    if (alpha_hint.width != resolution || alpha_hint.height != resolution ||
-        alpha_hint.channels != 1) {
+    if (!dynamic_resolution && (width != fixed_resolution || height != fixed_resolution)) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InvalidParameters,
-                  .message = "TorchTRT session expects single-channel alpha_hint at " +
-                             std::to_string(resolution) + "x" + std::to_string(resolution) + "x1"}};
+                  .message = "TorchTRT session expects input at " +
+                             std::to_string(fixed_resolution) + "x" +
+                             std::to_string(fixed_resolution) + "; got " +
+                             std::to_string(width) + "x" + std::to_string(height)}};
+    }
+    if (alpha_hint.width != width || alpha_hint.height != height || alpha_hint.channels != 1) {
+        return Unexpected<Error>{
+            Error{.code = ErrorCode::InvalidParameters,
+                  .message = "TorchScript RTX session expects alpha_hint at " +
+                             std::to_string(width) + "x" + std::to_string(height) + "x1"}};
     }
 
     try {
-        // Pack RGB + hint into (1, 4, R, R) channel-first FP16 on CUDA.
+        const DynamicPadding padding = dynamic_padding_for_input(width, height, dynamic_resolution);
+        const int inference_width = padding.width;
+        const int inference_height = padding.height;
+        // Pack RGB + hint into (1, 4, H, W) channel-first before CUDA upload.
         // RGB is interleaved (R,G,B,R,G,B,...) on host; we convert to planar.
-        auto host_input = torch::empty({1, 4, resolution, resolution}, torch::kFloat32);
+        auto host_input = torch::empty({1, 4, inference_height, inference_width}, torch::kFloat32);
         const float* rgb_data = rgb.data.data();
         const float* hint_data = alpha_hint.data.data();
         auto* dst = host_input.data_ptr<float>();
-        const auto plane = static_cast<int64_t>(resolution) * resolution;
-        for (int64_t i = 0; i < plane; ++i) {
-            dst[(0 * plane) + i] = rgb_data[(i * 3) + 0];
-            dst[(1 * plane) + i] = rgb_data[(i * 3) + 1];
-            dst[(2 * plane) + i] = rgb_data[(i * 3) + 2];
-            dst[(3 * plane) + i] = hint_data[i];
+        const auto inference_plane =
+            static_cast<std::ptrdiff_t>(inference_width) * inference_height;
+        for (int y = 0; y < inference_height; ++y) {
+            const int src_y = reflect_index(y - padding.top, height);
+            for (int x = 0; x < inference_width; ++x) {
+                const int src_x = reflect_index(x - padding.left, width);
+                const auto dst_index = (static_cast<std::ptrdiff_t>(y) * inference_width) + x;
+                const auto reflected_index = (static_cast<std::ptrdiff_t>(src_y) * width) + src_x;
+                dst[(0 * inference_plane) + dst_index] = rgb_data[(reflected_index * 3) + 0];
+                dst[(1 * inference_plane) + dst_index] = rgb_data[(reflected_index * 3) + 1];
+                dst[(2 * inference_plane) + dst_index] = rgb_data[(reflected_index * 3) + 2];
+                dst[(3 * inference_plane) + dst_index] = hint_data[reflected_index];
+            }
         }
         auto cuda_input = host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype);
 
@@ -238,15 +322,33 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
                 Error{.code = ErrorCode::InferenceFailed,
                       .message = "TorchTRT forward returned no usable alpha tensor"}};
         }
+        if (!tensor_has_shape(split->alpha, 1, inference_width, inference_height)) {
+            return Unexpected<Error>{
+                Error{.code = ErrorCode::InferenceFailed,
+                      .message = "TorchScript RTX alpha output shape did not match input " +
+                                 std::to_string(inference_width) + "x" +
+                                 std::to_string(inference_height)}};
+        }
+        if (!output_alpha_only && split->foreground.defined() &&
+            !tensor_has_shape(split->foreground, 3, inference_width, inference_height)) {
+            return Unexpected<Error>{
+                Error{.code = ErrorCode::InferenceFailed,
+                      .message = "TorchScript RTX foreground output shape did not match input " +
+                                 std::to_string(inference_width) + "x" +
+                                 std::to_string(inference_height)}};
+        }
 
         FrameResult result;
         common::measure_stage(on_stage, "torchtrt_extract_alpha", [&]() {
-            result.alpha = materialize_alpha(split->alpha, resolution);
+            result.alpha = materialize_alpha(split->alpha, width, height, inference_width,
+                                             padding.top, padding.left);
         });
 
         if (!output_alpha_only && split->foreground.defined()) {
             common::measure_stage(on_stage, "torchtrt_extract_foreground", [&]() {
-                result.foreground = materialize_rgb(split->foreground, resolution);
+                result.foreground =
+                    materialize_rgb(split->foreground, width, height, inference_width,
+                                    inference_height, padding.top, padding.left);
             });
         }
         return result;

@@ -532,13 +532,11 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, "setup_group", "Key Setup", true);
 
     define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
-                        {"Green", "Blue"},
-                        "Select the dominant screen color. Each color routes to its dedicated "
-                        "CorridorKey model: Green uses the original weights and cleans green "
-                        "spill; Blue uses CorridorKeyBlue and cleans blue spill natively. "
-                        "Installs missing the dedicated blue pack fall back to a "
-                        "canonicalization workaround on the green model and log a one-time "
-                        "warning.",
+                        {"Green", "Blue", "Blue-Green Channel Swap"},
+                        "Select the deterministic screen path. Green uses the optimized green "
+                        "model. Blue uses the dedicated CorridorKeyBlue model. Blue-Green "
+                        "Channel Swap maps a blue screen into the green model domain for the "
+                        "explicit channel-swap fallback path.",
                         "setup_group");
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityPreview,
@@ -601,8 +599,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
                         "Strength of spill suppression for the selected screen color on "
-                        "foreground edges. Blue mode applies the same cleanup after screen-aware "
-                        "normalization into the internal green domain.",
+                        "foreground edges. Dedicated Blue suppresses the blue channel without "
+                        "adding warm fill; Blue-Green Channel Swap uses the green-model path.",
                         "edge_spill_group");
 
     // --- Group 7: Output ---
@@ -679,10 +677,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_matte_group");
     define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
                         {"Average", "Double Limit", "Neutral"},
-                        "How removed spill color is replaced after screen-aware screen-color "
-                        "normalization. Average redistributes across the two non-screen channels. "
-                        "Double Limit uses the stronger non-screen channel. Neutral replaces with "
-                        "gray to avoid color shifts.",
+                        "How removed spill color is replaced for Green and Blue-Green Channel "
+                        "Swap. Average redistributes across the two non-screen channels. Double "
+                        "Limit uses the stronger non-screen channel. Neutral replaces with gray. "
+                        "Dedicated Blue uses screen-only suppression.",
                         "advanced_processing_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},

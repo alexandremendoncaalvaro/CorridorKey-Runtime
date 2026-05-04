@@ -120,20 +120,19 @@ bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out
     // The DLL sits next to torchtrt.dll in both the dev build (POST_
     // BUILD copy from src/core into vendor/torchtrt-windows/bin) and
     // the blue pack (`<pack>/torchtrt-runtime/bin/`).
-    const auto wrapper_path = (absolute / L"corridorkey_torchtrt.dll").wstring();
-    if (std::filesystem::exists(wrapper_path)) {
-        HMODULE wrapper_handle =
-            LoadLibraryExW(wrapper_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-        if (wrapper_handle == nullptr) {
-            out_error = "LoadLibrary corridorkey_torchtrt.dll failed (GetLastError=" +
-                        std::to_string(GetLastError()) + ")";
-            return false;
-        }
+    const auto wrapper_path = absolute / L"corridorkey_torchtrt.dll";
+    if (!std::filesystem::exists(wrapper_path)) {
+        out_error = "corridorkey_torchtrt.dll not found next to torchtrt.dll in " +
+                    absolute.string();
+        return false;
     }
-    // If the wrapper DLL is not next to torchtrt.dll, leave resolution
-    // to the loader's default rules; the arm still succeeded for the
-    // torch / TensorRT side, and downstream consumers may be linking
-    // the wrapper from a different staging dir (e.g. dev test runs).
+    HMODULE wrapper_handle = LoadLibraryExW(wrapper_path.wstring().c_str(), nullptr,
+                                            LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (wrapper_handle == nullptr) {
+        out_error = "LoadLibrary corridorkey_torchtrt.dll failed (GetLastError=" +
+                    std::to_string(GetLastError()) + ")";
+        return false;
+    }
 
     torchtrt_runtime_armed_flag().store(true, std::memory_order_release);
     return true;

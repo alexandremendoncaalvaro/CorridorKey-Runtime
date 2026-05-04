@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "plugins/ofx/ofx_model_selection.hpp"
+#include "plugins/ofx/ofx_screen_color.hpp"
 #include "plugins/ofx/ofx_shared.hpp"
 
 using namespace corridorkey;
@@ -375,6 +376,8 @@ TEST_CASE("fixed TensorRT abort predicate only trips on the exact requested arti
                                              2048, 2048, false};
     QualityArtifactSelection fallback_selection{std::filesystem::path("corridorkey_fp16_1536.onnx"),
                                                 2048, 1536, true};
+    QualityArtifactSelection dynamic_blue_selection{
+        std::filesystem::path("corridorkey_dynamic_blue_fp16.ts"), 2048, 2048, false};
 
     REQUIRE(should_abort_quality_fallback_after_compile_failure(Backend::TensorRT, kQualityMaximum,
                                                                 false, exact_selection));
@@ -382,6 +385,8 @@ TEST_CASE("fixed TensorRT abort predicate only trips on the exact requested arti
         Backend::TensorRT, kQualityMaximum, false, fallback_selection));
     REQUIRE_FALSE(should_abort_quality_fallback_after_compile_failure(
         Backend::TensorRT, kQualityAuto, false, exact_selection));
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(
+        Backend::TensorRT, kQualityMaximum, false, dynamic_blue_selection));
 }
 
 TEST_CASE("auto TensorRT quality skips cached compile failures and keeps working fallback",
@@ -408,6 +413,29 @@ TEST_CASE("auto TensorRT quality skips cached compile failures and keeps working
     REQUIRE(filtered.size() == 1);
     REQUIRE(filtered.front().effective_resolution == 1024);
     REQUIRE(filtered.front().used_fallback);
+}
+
+TEST_CASE("dynamic blue compile failure cache blocks implicit green fallback",
+          "[unit][ofx][screen-color]") {
+    const QualityCompileFailureCacheContext context{
+        .models_root = "C:/models",
+        .models_bundle_token = 13,
+        .backend = Backend::TensorRT,
+        .device_index = 0,
+        .available_memory_mb = 16384,
+    };
+
+    std::vector<QualityArtifactSelection> candidates{
+        {std::filesystem::path("corridorkey_dynamic_blue_fp16.ts"), 1024, 1024, false},
+    };
+
+    QualityCompileFailureCache cache;
+    record_quality_compile_failure(cache, context, candidates.front(), "blue init failed");
+
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(
+        Backend::TensorRT, kQualityHigh, false, candidates.front()));
+    auto filtered = filter_quality_artifacts_with_compile_cache(candidates, cache, context);
+    REQUIRE(filtered.empty());
 }
 
 TEST_CASE("quality compile failure cache invalidates when backend device or model bundle changes",
@@ -631,19 +659,29 @@ TEST_CASE("blue screen request with dedicated artifact present uses dedicated pa
           "[unit][ofx][screen-color]") {
     TempDirGuard temp_dir("corridorkey-ofx-blue-dedicated");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
-    touch_file(temp_dir.path() / "corridorkey_blue_torchtrt_fp16_1024.ts");
+    touch_file(temp_dir.path() / "corridorkey_dynamic_blue_fp16.ts");
 
     auto selection =
         select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
                                 QualityFallbackMode::Auto, 0, false, "blue");
 
     REQUIRE(selection.has_value());
-    REQUIRE(selection->executable_model_path.filename() ==
-            "corridorkey_blue_torchtrt_fp16_1024.ts");
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_dynamic_blue_fp16.ts");
     REQUIRE_FALSE(selection->used_fallback);
+    REQUIRE(selection->requested_resolution == 1024);
+    REQUIRE(selection->effective_resolution == 1024);
 }
 
-TEST_CASE("blue screen request without dedicated artifact falls back to packaged green",
+TEST_CASE("blue artifact helpers recognize dynamic and legacy dedicated filenames",
+          "[unit][ofx][screen-color]") {
+    REQUIRE(is_dynamic_blue_artifact_filename("corridorkey_dynamic_blue_fp16.ts"));
+    REQUIRE(is_dedicated_blue_artifact_filename("corridorkey_dynamic_blue_fp16.ts"));
+    REQUIRE(is_dedicated_blue_artifact_filename("corridorkey_blue_1024.onnx"));
+    REQUIRE_FALSE(is_dynamic_blue_artifact_filename("corridorkey_blue_1024.onnx"));
+    REQUIRE_FALSE(is_dedicated_blue_artifact_filename("corridorkey_fp16_1024.onnx"));
+}
+
+TEST_CASE("blue screen request without dedicated artifact does not fall back to packaged green",
           "[unit][ofx][screen-color]") {
     TempDirGuard temp_dir("corridorkey-ofx-blue-fallback");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
@@ -652,18 +690,31 @@ TEST_CASE("blue screen request without dedicated artifact falls back to packaged
         select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
                                 QualityFallbackMode::Auto, 0, false, "blue");
 
-    // The selection layer hands back the green rung; ofx_render detects the
-    // mismatch (entry.screen_color=="green" while the request was "blue") and
-    // runs the canonicalization workaround plus the one-shot warning.
+    REQUIRE_FALSE(selection.has_value());
+}
+
+TEST_CASE("explicit blue-green path selects the packaged green artifact",
+          "[unit][ofx][screen-color]") {
+    TempDirGuard temp_dir("corridorkey-ofx-blue-green-explicit");
+    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_dynamic_blue_fp16.ts");
+
+    auto selection =
+        select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
+                                QualityFallbackMode::Auto, 0, false, "green");
+
     REQUIRE(selection.has_value());
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
+    REQUIRE(screen_color_mode_from_choice(kScreenColorBlueGreen) == ScreenColorMode::BlueGreen);
+    REQUIRE(screen_color_requires_green_domain_canonicalization(ScreenColorMode::BlueGreen));
+    REQUIRE_FALSE(screen_color_requires_green_domain_canonicalization(ScreenColorMode::Blue));
 }
 
 TEST_CASE("green screen request stays on green even when blue artifact is staged",
           "[unit][ofx][screen-color]") {
     TempDirGuard temp_dir("corridorkey-ofx-green-with-blue-staged");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
-    touch_file(temp_dir.path() / "corridorkey_blue_torchtrt_fp16_1024.ts");
+    touch_file(temp_dir.path() / "corridorkey_dynamic_blue_fp16.ts");
 
     auto selection =
         select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityHigh, 1920, 1080, 10240,
@@ -673,7 +724,7 @@ TEST_CASE("green screen request stays on green even when blue artifact is staged
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
 }
 
-TEST_CASE("expected_quality_artifact_paths surfaces blue rung first under blue request",
+TEST_CASE("expected_quality_artifact_paths surfaces only blue under blue request",
           "[unit][ofx][screen-color]") {
     TempDirGuard temp_dir("corridorkey-ofx-blue-expected-paths");
 
@@ -682,18 +733,8 @@ TEST_CASE("expected_quality_artifact_paths surfaces blue rung first under blue r
                                         1080, 10240, QualityFallbackMode::Auto, 0, false, "blue");
 
     REQUIRE_FALSE(expected.empty());
-    REQUIRE(expected.front().filename() == "corridorkey_blue_torchtrt_fp16_1024.ts");
-    // Green rung still in the list so missing-artifact diagnostics stay
-    // accurate and the bundle validator can report "blue missing, green
-    // fallback present".
-    bool green_present = false;
-    for (const auto& path : expected) {
-        if (path.filename() == "corridorkey_fp16_1024.onnx") {
-            green_present = true;
-            break;
-        }
-    }
-    REQUIRE(green_present);
+    REQUIRE(expected.front().filename() == "corridorkey_dynamic_blue_fp16.ts");
+    REQUIRE(expected.size() == 1);
 }
 
 TEST_CASE("artifact_path_for_backend resolves blue artifacts when screen_color='blue'",
@@ -707,14 +748,12 @@ TEST_CASE("artifact_path_for_backend resolves blue artifacts when screen_color='
 
     SECTION("TensorRT + blue returns the dedicated blue filename") {
         const auto path = artifact_path_for_backend(models_root, Backend::TensorRT, 1024, "blue");
-        REQUIRE(path.filename().string() == "corridorkey_blue_torchtrt_fp16_1024.ts");
+        REQUIRE(path.filename().string() == "corridorkey_dynamic_blue_fp16.ts");
     }
 
-    SECTION("CUDA + blue returns the dedicated blue filename") {
-        // Sprint 1 PR 4: blue 2048 ships as FP32 (Sprint 0 found FP16 NaN
-        // at this graph size for the blue checkpoint).
+    SECTION("CUDA + blue returns the same dynamic blue filename") {
         const auto path = artifact_path_for_backend(models_root, Backend::CUDA, 2048, "blue");
-        REQUIRE(path.filename().string() == "corridorkey_blue_torchtrt_fp32_2048.ts");
+        REQUIRE(path.filename().string() == "corridorkey_dynamic_blue_fp16.ts");
     }
 
     SECTION("MLX path is unaffected by screen_color") {
@@ -727,6 +766,29 @@ TEST_CASE("artifact_path_for_backend resolves blue artifacts when screen_color='
     SECTION("Default screen_color preserves green semantics") {
         const auto path = artifact_path_for_backend(models_root, Backend::TensorRT, 1024);
         REQUIRE(path.filename().string() == "corridorkey_fp16_1024.onnx");
+    }
+}
+
+TEST_CASE("quality artifact runtime backend follows the selected file format",
+          "[unit][ofx][regression]") {
+    SECTION("dynamic TorchScript artifacts run through TorchTRT") {
+        REQUIRE(runtime_backend_for_quality_artifact(
+                    Backend::TensorRT, std::filesystem::path{"corridorkey_dynamic_blue_fp16.ts"}) ==
+                Backend::TorchTRT);
+    }
+
+    SECTION("ONNX fallback after a TorchTRT blue attempt returns to TensorRT") {
+        REQUIRE(runtime_backend_for_quality_artifact(Backend::TorchTRT,
+                                                    std::filesystem::path{
+                                                        "corridorkey_fp16_1024.onnx"}) ==
+                Backend::TensorRT);
+    }
+
+    SECTION("green TensorRT ONNX selections stay on TensorRT") {
+        REQUIRE(runtime_backend_for_quality_artifact(Backend::TensorRT,
+                                                    std::filesystem::path{
+                                                        "corridorkey_fp16_1024.onnx"}) ==
+                Backend::TensorRT);
     }
 }
 

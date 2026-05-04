@@ -276,10 +276,10 @@ struct InstanceData {
 
     AlphaEdgeState alpha_edge_state = {};
 
-    // One-shot guard so the "blue requested but dedicated artifact missing"
-    // warning fires once per instance instead of per frame. Reset implicitly
-    // on plugin reload because InstanceData is recreated.
-    bool blue_fallback_warning_logged = false;
+    // One-shot guard so the explicit Blue-Green path notice fires once per
+    // instance instead of per frame. Reset implicitly on plugin reload because
+    // InstanceData is recreated.
+    bool blue_green_path_warning_logged = false;
 };
 
 class SharedFrameCache;

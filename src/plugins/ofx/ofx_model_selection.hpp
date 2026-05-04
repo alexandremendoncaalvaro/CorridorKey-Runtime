@@ -45,10 +45,7 @@ constexpr int kAutoThreshold2048 = 3000;
 constexpr int kBytesPerMib = 1024;
 constexpr int kCeilToMib = kBytesPerMib - 1;
 
-// FP precision boundary for blue TorchTRT artifacts. Resolutions at or above
-// this rung use FP32 because Sprint 0 measured FP16 NaNs at those graph sizes
-// for the blue checkpoint (HANDOFF section 2.2).
-constexpr int kBluePrecisionFp32Threshold = kRes1536;
+constexpr std::string_view kDynamicBlueModelFilename = "corridorkey_dynamic_blue_fp16.ts";
 
 // build_bootstrap_candidates extraction limit on per-candidate-builder nesting.
 // (Used only as a documentation anchor — no runtime constant required.)
@@ -64,6 +61,44 @@ struct BootstrapEngineCandidate {
 };
 
 using QualityArtifactSelection = app::ArtifactSelection;
+
+inline bool is_dynamic_blue_artifact_filename(std::string_view filename) {
+    return filename == selection_detail::kDynamicBlueModelFilename;
+}
+
+inline bool is_legacy_blue_artifact_filename(std::string_view filename) {
+    return filename.rfind("corridorkey_blue_", 0) == 0;
+}
+
+inline bool is_dedicated_blue_artifact_filename(std::string_view filename) {
+    return is_dynamic_blue_artifact_filename(filename) ||
+           is_legacy_blue_artifact_filename(filename);
+}
+
+inline bool is_dynamic_blue_artifact_path(const std::filesystem::path& path) {
+    return is_dynamic_blue_artifact_filename(path.filename().string());
+}
+
+inline bool backend_supports_dynamic_blue(Backend backend) {
+    return backend == Backend::Auto || backend == Backend::TensorRT || backend == Backend::CUDA ||
+           backend == Backend::TorchTRT;
+}
+
+inline Backend runtime_backend_for_quality_artifact(Backend requested_backend,
+                                                    const std::filesystem::path& artifact_path) {
+    const auto extension = artifact_path.extension().string();
+    if (extension == ".ts") {
+        return Backend::TorchTRT;
+    }
+    if (requested_backend == Backend::TorchTRT && extension == ".onnx") {
+        return Backend::TensorRT;
+    }
+    return requested_backend;
+}
+
+inline bool is_dedicated_blue_artifact_path(const std::filesystem::path& path) {
+    return is_dedicated_blue_artifact_filename(path.filename().string());
+}
 
 struct QualityCompileFailureCacheContext {
     std::filesystem::path models_root;
@@ -339,13 +374,8 @@ inline std::filesystem::path artifact_path_for_backend(const std::filesystem::pa
         return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
     }
     if (screen_color == "blue") {
-        // Sprint 1 PR 4: blue ships as TorchTRT .ts engines. Blue 1536 +
-        // 2048 use FP32 because Sprint 0 found FP16 NaNs at those graph
-        // sizes for the blue checkpoint (HANDOFF section 2.2).
-        const char* precision =
-            (resolution >= selection_detail::kBluePrecisionFp32Threshold) ? "fp32" : "fp16";
-        return models_root / (std::string("corridorkey_blue_torchtrt_") + precision + "_" +
-                              std::to_string(resolution) + ".ts");
+        (void)resolution;
+        return models_root / selection_detail::kDynamicBlueModelFilename;
     }
     return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
 }
@@ -382,6 +412,10 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     std::string_view screen_color = "green") {
     const int requested_resolution =
         resolve_target_resolution(quality_mode, input_width, input_height);
+    if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
+        return {artifact_path_for_backend(models_root, backend, requested_resolution, "blue")};
+    }
+
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     const DeviceInfo device{
         .name = "",
@@ -394,22 +428,6 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
         coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!expected) {
         return {};
-    }
-
-    // When the user picked a Blue screen, surface the dedicated artifact in
-    // diagnostics so missing-blue messages stay actionable. Falls in front of
-    // the existing green ladder so error text reads "expected blue, got
-    // green" naturally. The actual selection prefers blue separately in
-    // quality_artifact_candidates below.
-    if (screen_color == "blue" && (backend == Backend::TensorRT || backend == Backend::CUDA)) {
-        std::vector<std::filesystem::path> result;
-        result.reserve(expected->size() + 1);
-        result.push_back(
-            artifact_path_for_backend(models_root, backend, requested_resolution, "blue"));
-        for (const auto& path : *expected) {
-            result.push_back(path);
-        }
-        return result;
     }
 
     return *expected;
@@ -440,6 +458,14 @@ inline std::string missing_quality_artifact_message(
     std::string_view screen_color = "green") {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
+    if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
+        return missing_artifact_message(
+            "Requested quality " + std::string(quality_mode_label(quality_mode)) +
+                " is missing the required dedicated blue model artifact",
+            models_root,
+            {artifact_path_for_backend(models_root, backend, requested_resolution, "blue")});
+    }
+
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
     const DeviceInfo device{
         .name = "",
@@ -453,17 +479,10 @@ inline std::string missing_quality_artifact_message(
         return expected.error().message;
     }
 
-    std::vector<std::filesystem::path> expected_paths = *expected;
-    if (screen_color == "blue" && (backend == Backend::TensorRT || backend == Backend::CUDA)) {
-        expected_paths.insert(
-            expected_paths.begin(),
-            artifact_path_for_backend(models_root, backend, requested_resolution, "blue"));
-    }
-
     return missing_artifact_message("Requested quality " +
                                         std::string(quality_mode_label(quality_mode)) +
                                         " is missing the required model artifact",
-                                    models_root, expected_paths);
+                                    models_root, *expected);
 }
 inline bool path_exists(const std::filesystem::path& path) {
     std::error_code error;
@@ -548,11 +567,9 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
 
     std::vector<QualityArtifactSelection> selections;
 
-    // Prepend the dedicated blue artifact when the user picked a Blue screen
-    // and the file is staged. The downstream engine-creation loop will pick
-    // the first candidate that actually loads, so green-rung selections keep
-    // their role as the canonicalization fallback when blue is missing.
-    if (screen_color == "blue" && (backend == Backend::TensorRT || backend == Backend::CUDA)) {
+    // Blue is deterministic: use the dedicated dynamic artifact only. The
+    // explicit Blue-Green UI mode is the green-model fallback path.
+    if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
         const auto blue_path =
             artifact_path_for_backend(models_root, backend, requested_resolution, "blue");
         std::error_code blue_ec;
@@ -565,6 +582,7 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
             blue_selection.coarse_to_fine = false;
             selections.push_back(std::move(blue_selection));
         }
+        return selections;
     }
 
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);

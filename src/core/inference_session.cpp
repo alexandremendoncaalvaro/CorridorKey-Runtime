@@ -1580,8 +1580,13 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     common::measure_stage(
         on_stage, "post_despill",
         [&]() {
-            despill(result.foreground.view(), params.despill_strength,
-                    static_cast<SpillMethod>(params.spill_method), params.despill_screen_channel);
+            const SpillMethod requested_spill_method =
+                static_cast<SpillMethod>(params.spill_method);
+            const SpillMethod effective_spill_method =
+                params.despill_screen_channel == 2 ? SpillMethod::ScreenOnly
+                                                   : requested_spill_method;
+            despill(result.foreground.view(), params.despill_strength, effective_spill_method,
+                    params.despill_screen_channel);
         },
         1);
 
@@ -1997,9 +2002,106 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                                                 StageTimingCallback on_stage) {
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
     if (m_torch_trt_session != nullptr) {
-        auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
-        if (!batch_res) return Unexpected(batch_res.error());
-        return std::move((*batch_res)[0]);
+        const int target_res =
+            params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
+        if (target_res <= 0 || (rgb.width == target_res && rgb.height == target_res)) {
+            auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
+            if (!batch_res) return Unexpected(batch_res.error());
+            return std::move((*batch_res)[0]);
+        }
+
+        Image prepared_rgb = {};
+        Image prepared_hint = {};
+        auto ensure_resize_buffer = [&](std::size_t index, int channels) -> Image {
+            if (m_resize_pool.size() <= index) {
+                m_resize_pool.resize(index + 1);
+            }
+            Image current = m_resize_pool[index].view();
+            if (current.width != target_res || current.height != target_res ||
+                current.channels != channels) {
+                m_resize_pool[index] = ImageBuffer(target_res, target_res, channels);
+                current = m_resize_pool[index].view();
+            }
+            return current;
+        };
+
+        auto prepare_res = common::measure_stage(
+            on_stage, "frame_prepare_inputs",
+            [&]() -> Result<void> {
+                prepared_rgb = ensure_resize_buffer(0, 3);
+                prepared_hint = ensure_resize_buffer(1, 1);
+                ColorUtils::resize_area_into(rgb, prepared_rgb, m_color_utils_state);
+                ColorUtils::resize_area_into(alpha_hint, prepared_hint, m_color_utils_state);
+                return {};
+            },
+            1);
+        if (!prepare_res) {
+            return Unexpected(prepare_res.error());
+        }
+
+        auto raw_res =
+            m_torch_trt_session->infer(prepared_rgb, prepared_hint, params.output_alpha_only,
+                                       on_stage);
+        if (!raw_res) {
+            return Unexpected(raw_res.error());
+        }
+
+        FrameResult result;
+        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
+        if (!params.output_alpha_only && !raw_res->foreground.view().empty()) {
+            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+        }
+        const bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+        auto resize_res = common::measure_stage(
+            on_stage, "frame_extract_outputs_resize",
+            [&]() -> Result<void> {
+                if (use_lanczos) {
+                    ColorUtils::resize_lanczos_into(raw_res->alpha.view(), result.alpha.view(),
+                                                    m_color_utils_state);
+                    if (!result.foreground.view().empty()) {
+                        ColorUtils::resize_lanczos_into(raw_res->foreground.view(),
+                                                        result.foreground.view(),
+                                                        m_color_utils_state);
+                    }
+                } else {
+                    ColorUtils::resize_into(raw_res->alpha.view(), result.alpha.view());
+                    if (!result.foreground.view().empty()) {
+                        ColorUtils::resize_into(raw_res->foreground.view(),
+                                                result.foreground.view());
+                    }
+                }
+                return {};
+            },
+            1);
+        if (!resize_res) {
+            return Unexpected(resize_res.error());
+        }
+
+        auto finalize_res = common::measure_stage(
+            on_stage, "frame_extract_outputs_finalize",
+            [&]() -> Result<void> {
+                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+                auto alpha_final_res =
+                    finalize_output_image(m_device, target_res, result.alpha.view(),
+                                          "alpha_resized_output");
+                if (!alpha_final_res) {
+                    return Unexpected(alpha_final_res.error());
+                }
+                if (!result.foreground.view().empty()) {
+                    auto fg_final_res =
+                        finalize_output_image(m_device, target_res, result.foreground.view(),
+                                              "fg_resized_output");
+                    if (!fg_final_res) {
+                        return Unexpected(fg_final_res.error());
+                    }
+                }
+                return {};
+            },
+            1);
+        if (!finalize_res) {
+            return Unexpected(finalize_res.error());
+        }
+        return result;
     }
 #endif
     if (m_mlx_session != nullptr) {
@@ -2264,6 +2366,13 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
 Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,
                                           const InferenceParams& params,
                                           StageTimingCallback on_stage) {
+#if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
+    const bool dynamic_torchtrt_session =
+        m_torch_trt_session != nullptr && m_recommended_resolution == 0;
+    if (dynamic_torchtrt_session) {
+        return run_direct(rgb, alpha_hint, params, on_stage);
+    }
+#endif
     if (core::should_use_coarse_to_fine_path(params, m_recommended_resolution)) {
         return run_coarse_to_fine(rgb, alpha_hint, params, on_stage);
     }

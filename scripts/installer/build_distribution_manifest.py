@@ -58,16 +58,11 @@ PACKS = {
         ],
     },
     "blue-models": {
-        "label": "Pack Azul - modelos Torch-TensorRT",
+        "label": "Pack Azul - modelo TorchScript dinamico",
         "component": "blue",
         "dest_subdir": "models",
         "files": [
-            "torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_512.ts",
-            "torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_1024.ts",
-            "torchtrt/fp32-blue/corridorkey_blue_torchtrt_fp32_1536.ts",
-            # 2048 absent: RTX 3080 cannot compile (TensorRT builder
-            # peaks at 17.4 GB, exceeds the 10 GB card budget). Cloud
-            # GPU compile is tracked as a separate task.
+            "torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts",
         ],
     },
     "blue-runtime": {
@@ -78,24 +73,14 @@ PACKS = {
         "extract": True,
         "files": [
             # Single 7z bundle containing the curated TorchTRT runtime
-            # DLLs (~5 GB raw, ~3.5 GB compressed). Built from
+            # DLLs. Built from
             # vendor/torchtrt-windows/bin/ excluding our per-build
             # wrapper corridorkey_torchtrt.dll (which ships inside the
             # installer Win64 dir directly because it changes per build).
             "torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
         ],
-    },
-    "hint-tracker": {
-        "label": "Pack Hint Tracker (assistente seleção)",
-        "component": "hint",
-        "dest_subdir": "models",
-        "files": [
-            "hint/mobilesam_image_encoder_fp16.onnx",
-            "hint/mobilesam_prompt_decoder_fp16.onnx",
-            "hint/cutie_feature_extractor_fp16.onnx",
-            "hint/cutie_init_memory_fp16.onnx",
-            "hint/cutie_tracking_memory_fp16.onnx",
-        ],
+        "installed_size_bytes": 5011471040,
+        "installed_file_count": 41,
     },
 }
 

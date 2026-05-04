@@ -133,7 +133,7 @@ TEST_CASE("screen-aware canonicalization improves rough matte on a real fixture"
 
     ImageBuffer screen_aware = copy_image(blue_fixture.view());
     const ScreenColorTransform screen_color_transform =
-        make_screen_color_transform(screen_aware.view(), ScreenColorMode::Blue);
+        make_screen_color_transform(screen_aware.view(), ScreenColorMode::BlueGreen);
     canonicalize_to_green_domain(screen_aware.view(), screen_color_transform);
     ImageBuffer screen_aware_matte(screen_aware.view().width, screen_aware.view().height, 1);
     ColorUtils::generate_rough_matte(screen_aware.view(), screen_aware_matte.view());
@@ -153,7 +153,7 @@ TEST_CASE(
 
     ImageBuffer screen_aware = copy_image(blue_fixture.view());
     const ScreenColorTransform screen_color_transform =
-        make_screen_color_transform(screen_aware.view(), ScreenColorMode::Blue);
+        make_screen_color_transform(screen_aware.view(), ScreenColorMode::BlueGreen);
     canonicalize_to_green_domain(screen_aware.view(), screen_color_transform);
     CHECK(mean_channel(blue_fixture.view(), 2) > mean_channel(blue_fixture.view(), 1));
     CHECK(mean_channel(screen_aware.view(), 1) > mean_channel(screen_aware.view(), 2));

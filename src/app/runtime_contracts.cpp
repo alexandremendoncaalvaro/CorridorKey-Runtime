@@ -56,6 +56,7 @@ constexpr int kDefaultTilePadding = 64;
 // active artifact's recommended resolution". Used by the macOS presets
 // where the MLX bridge is fixed at its compile resolution.
 constexpr int kTargetResolutionAuto = 0;
+constexpr std::string_view kDynamicBlueModelFilename = "corridorkey_dynamic_blue_fp16.ts";
 
 bool has_backend(const RuntimeCapabilities& capabilities, Backend backend) {
     return std::ranges::find(capabilities.supported_backends, backend) !=
@@ -381,56 +382,39 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 namespace {
 
-// Bundles the blue / green filename pair for a single resolution tier.
-// Wrapping the two const char* into a named struct removes the
-// bugprone-easily-swappable-parameters risk (otherwise blue and green could
-// be reversed at the call site without the compiler noticing) and reads
-// naturally at the table sites below.
-struct BlueGreenFilenames {
-    const char* blue;
-    const char* green;
-};
-
 // Picks the blue artifact when requested and packaged, otherwise falls back
 // to the green rung. Encapsulates the "blue requested but not packaged ->
 // green canonicalization fallback" rule the OFX render path detects via
 // the returned entry's screen_color.
 std::optional<ModelCatalogEntry> pick_blue_or_green(std::string_view screen_color,
-                                                    BlueGreenFilenames filenames) {
+                                                    const char* green_filename) {
     if (screen_color == "blue") {
-        if (auto blue = app::find_model_by_filename(filenames.blue);
+        if (auto blue = app::find_model_by_filename(std::string(kDynamicBlueModelFilename));
             blue.has_value() && blue->packaged_for_windows) {
             return blue;
         }
         // Fall through to green rung; OFX render path canonicalises blue input.
     }
-    return app::find_model_by_filename(filenames.green);
+    return app::find_model_by_filename(green_filename);
 }
 
 // Resolves the Windows RTX (TensorRT or CUDA) catalog entry for the given
-// memory tier. Sprint 1 PR 4: blue ships as TorchTRT .ts; blue 1536+ uses
-// FP32 because Sprint 0 found FP16 NaNs at those graph sizes (HANDOFF
-// section 2.2). Green stays on ONNX -> TRT-RTX EP.
+// memory tier. Green stays on the optimized ONNX -> TensorRT RTX EP ladder.
+// Blue uses the single dynamic TorchScript artifact validated by the
+// TorchTRT runner and falls back to green-domain canonicalization when the
+// blue pack is not staged.
 std::optional<ModelCatalogEntry> windows_rtx_catalog_entry_for_tier(
     std::int64_t available_memory_mb, std::string_view screen_color) {
     if (available_memory_mb >= kVram24GbMiB) {
-        return pick_blue_or_green(screen_color,
-                                  BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp32_2048.ts",
-                                                     .green = "corridorkey_fp16_2048.onnx"});
+        return pick_blue_or_green(screen_color, "corridorkey_fp16_2048.onnx");
     }
     if (available_memory_mb >= kVram16GbMiB) {
-        return pick_blue_or_green(screen_color,
-                                  BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp32_1536.ts",
-                                                     .green = "corridorkey_fp16_1536.onnx"});
+        return pick_blue_or_green(screen_color, "corridorkey_fp16_1536.onnx");
     }
     if (available_memory_mb >= kVram10GbMiB) {
-        return pick_blue_or_green(screen_color,
-                                  BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp16_1024.ts",
-                                                     .green = "corridorkey_fp16_1024.onnx"});
+        return pick_blue_or_green(screen_color, "corridorkey_fp16_1024.onnx");
     }
-    return pick_blue_or_green(screen_color,
-                              BlueGreenFilenames{.blue = "corridorkey_blue_torchtrt_fp16_512.ts",
-                                                 .green = "corridorkey_fp16_512.onnx"});
+    return pick_blue_or_green(screen_color, "corridorkey_fp16_512.onnx");
 }
 
 // Picks a Windows RTX entry, prioritising the preset's recommended model when
@@ -547,36 +531,12 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Extreme quality Windows RTX pack for 24 GB VRAM systems.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_24gb"}),
-        // Strategy C, Sprint 1 PR 4: blue Windows RTX is delivered via the
-        // Torch-TensorRT runtime (HANDOFF.md "Sprint 0 outcome" + Sprint 1
-        // plan). The ONNX -> TRT-RTX EP path NaN'd at >=1024 for blue;
-        // TorchTRT loads cleanly at every resolution. The runtime DLL set
-        // ships INSIDE the blue model pack rather than the base bundle, so
-        // green users do not pay the ~5 GB cost.
-        make_model_entry("fp16-blue", kRes512, "corridorkey_blue_torchtrt_fp16_512.ts", "torchtrt",
-                         "torchtrt",
-                         "Windows RTX blue-screen pack (Torch-TensorRT) for 8 GB tiers.",
-                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_8gb"}, "blue"),
         make_model_entry(
-            "fp16-blue", kRes1024, "corridorkey_blue_torchtrt_fp16_1024.ts", "torchtrt", "torchtrt",
-            "Windows RTX blue-screen pack (Torch-TensorRT) for 10 GB and higher tiers.",
+            "dynamic-blue", kTargetResolutionAuto, std::string(kDynamicBlueModelFilename),
+            "torchscript", "torchtrt",
+            "Windows RTX blue-screen pack with dynamic runtime resolution.",
             "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-            {"rtx_10gb_plus"}, "blue"),
-        // Blue 1536 ships as FP32 because Sprint 0 found FP16 NaNs at this
-        // graph size for the blue checkpoint (HANDOFF.md section 2.2).
-        // Blue 2048 follows the same precision constraint and is staged via
-        // cloud GPU compile per HANDOFF Sprint 2.
-        make_model_entry(
-            "fp32-blue", kRes1536, "corridorkey_blue_torchtrt_fp32_1536.ts", "torchtrt", "torchtrt",
-            "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 16 GB VRAM systems.",
-            "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-            {"rtx_16gb_plus"}, "blue"),
-        make_model_entry(
-            "fp32-blue", kRes2048, "corridorkey_blue_torchtrt_fp32_2048.ts", "torchtrt", "torchtrt",
-            "Windows RTX blue-screen pack (Torch-TensorRT, FP32) for 24 GB VRAM systems.",
-            "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-            {"rtx_24gb"}, "blue"),
+            {"rtx_8gb", "rtx_10gb_plus", "rtx_16gb_plus", "rtx_24gb"}, "blue"),
         make_model_entry("fp32", kRes512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
                          false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),

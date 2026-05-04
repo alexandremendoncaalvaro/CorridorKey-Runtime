@@ -98,6 +98,8 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     params.coarse_resolution_override = 1024;
     params.alpha_hint_policy = AlphaHintPolicy::RequireExternalHint;
     params.despill_strength = 0.35F;
+    params.spill_method = 1;
+    params.despill_screen_channel = 2;
     params.auto_despeckle = true;
     params.despeckle_size = 640;
     params.refiner_scale = 1.0F;
@@ -120,6 +122,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     request.render_index = 7;
 
     auto request_json = to_json(request);
+    REQUIRE(request_json.at("params").at("despill_screen_channel").get<int>() == 2);
     auto parsed_request = render_frame_request_from_json(request_json);
     REQUIRE(parsed_request.has_value());
     CHECK(parsed_request->session_id == request.session_id);
@@ -132,6 +135,8 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     CHECK(parsed_request->params.refinement_mode == RefinementMode::Tiled);
     CHECK(parsed_request->params.coarse_resolution_override == 1024);
     CHECK(parsed_request->params.alpha_hint_policy == AlphaHintPolicy::RequireExternalHint);
+    CHECK(parsed_request->params.spill_method == 1);
+    CHECK(parsed_request->params.despill_screen_channel == 2);
     CHECK(parsed_request->params.output_alpha_only);
     CHECK(parsed_request->render_index == 7);
 

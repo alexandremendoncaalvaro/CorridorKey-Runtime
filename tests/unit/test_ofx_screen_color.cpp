@@ -122,6 +122,7 @@ TEST_CASE("screen color helpers preserve anchors and roundtrip blue input",
     SECTION("choice mapping defaults to green") {
         CHECK(screen_color_mode_from_choice(kScreenColorGreen) == ScreenColorMode::Green);
         CHECK(screen_color_mode_from_choice(kScreenColorBlue) == ScreenColorMode::Blue);
+        CHECK(screen_color_mode_from_choice(kScreenColorBlueGreen) == ScreenColorMode::BlueGreen);
         CHECK(screen_color_mode_from_choice(99) == ScreenColorMode::Green);
     }
 
@@ -137,14 +138,18 @@ TEST_CASE("screen color helpers preserve anchors and roundtrip blue input",
         require_images_equal(green.view(), original.view());
     }
 
-    SECTION("blue mode keeps white and red stable while mapping screen colors closer to green") {
+    SECTION("blue mode is native and blue-green maps screen colors closer to green") {
         ImageBuffer blue = make_anchor_probe();
         ImageBuffer original = copy_image(blue.view());
         ImageBuffer swapped = copy_image(blue.view());
         swap_green_blue_channels(swapped.view());
 
-        const ScreenColorTransform transform =
+        const ScreenColorTransform native_transform =
             make_screen_color_transform(blue.view(), ScreenColorMode::Blue);
+        CHECK(native_transform.is_identity);
+
+        const ScreenColorTransform transform =
+            make_screen_color_transform(blue.view(), ScreenColorMode::BlueGreen);
         const std::array<float, 3> target =
             canonical_green_reference_from_blue(synthetic_offaxis_blue_reference());
 
@@ -181,7 +186,7 @@ TEST_CASE("screen-aware canonicalization improves rough matte on off-axis blue i
 
     ImageBuffer screen_aware = copy_image(blue_source.view());
     const ScreenColorTransform transform =
-        make_screen_color_transform(screen_aware.view(), ScreenColorMode::Blue);
+        make_screen_color_transform(screen_aware.view(), ScreenColorMode::BlueGreen);
     canonicalize_to_green_domain(screen_aware.view(), transform);
     ImageBuffer screen_aware_matte(2, 2, 1);
     ColorUtils::generate_rough_matte(screen_aware.view(), screen_aware_matte.view());
@@ -214,7 +219,7 @@ TEST_CASE("screen-aware canonicalization improves blue-screen despill coherence"
 
     ImageBuffer screen_aware = copy_image(blue_source.view());
     const ScreenColorTransform screen_color_transform =
-        make_screen_color_transform(screen_aware.view(), ScreenColorMode::Blue);
+        make_screen_color_transform(screen_aware.view(), ScreenColorMode::BlueGreen);
     canonicalize_to_green_domain(screen_aware.view(), screen_color_transform);
     despill(screen_aware.view(), kStrength, SpillMethod::Average);
     restore_from_green_domain(screen_aware.view(), screen_color_transform);

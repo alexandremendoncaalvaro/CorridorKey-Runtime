@@ -839,8 +839,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     const ScreenColorMode screen_color_mode = screen_color_mode_from_choice(screen_color);
-    const std::string_view screen_color_label =
-        (screen_color_mode == ScreenColorMode::Blue) ? "blue" : "green";
+    const bool dedicated_blue_requested = screen_color_mode == ScreenColorMode::Blue;
+    const bool blue_green_requested = screen_color_mode == ScreenColorMode::BlueGreen;
+    const std::string_view screen_color_label = dedicated_blue_requested ? "blue" : "green";
 
     if (!ensure_engine_for_quality(
             data, quality_mode, width, height,
@@ -859,33 +860,25 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         log_message("render", quality_error + " Using current engine.");
     }
 
-    // Decide which screen-color path to run now that the engine is bound. The
-    // dedicated CorridorKeyBlue artifact accepts blue plates natively, so the
-    // canonicalization workaround is only invoked when the user picked Blue
-    // but the install does not ship the dedicated weights.
+    // Decide which screen-color path to run now that the engine is bound.
+    // Green and Blue are deterministic model selections. Blue-Green is the
+    // explicit channel-mapping fallback that feeds blue plates to the green
+    // model domain.
     const std::string loaded_artifact_filename =
         data->model_path.empty() ? std::string{} : data->model_path.filename().string();
-    const bool loaded_model_is_blue = loaded_artifact_filename.rfind("corridorkey_blue_", 0) == 0;
-    const bool blue_requested = (screen_color_mode == ScreenColorMode::Blue);
-    // When ensure_engine_for_quality fails on a non-fixed quality request the
-    // render falls through with data->model_path possibly empty (first-render
-    // case) or stale. Treating that as "fallback to canonicalization" would
-    // emit a spurious blue_fallback_active warning even though no model is
-    // about to run -- the render actually bypasses with source. Guard the
-    // fallback decision on a real load so the warning only fires when the
-    // green model is genuinely about to handle a blue plate.
-    const bool blue_canonicalization_fallback =
-        blue_requested && !loaded_model_is_blue && !loaded_artifact_filename.empty();
+    const bool loaded_model_is_blue =
+        is_dedicated_blue_artifact_filename(loaded_artifact_filename);
+    const bool blue_canonicalization_fallback = blue_green_requested && !loaded_model_is_blue &&
+                                                !loaded_artifact_filename.empty();
 
     ScreenColorTransform screen_color_transform;
     if (blue_canonicalization_fallback) {
         screen_color_transform = make_screen_color_transform(rgb_view, screen_color_mode);
-        if (!data->blue_fallback_warning_logged) {
+        if (!data->blue_green_path_warning_logged) {
             log_message("render",
-                        "event=blue_fallback_active reason=dedicated_blue_artifact_missing "
-                        "running canonicalization workaround. Install the blue model pack "
-                        "to enable the dedicated path.");
-            data->blue_fallback_warning_logged = true;
+                        "event=blue_green_path_active reason=explicit_channel_swap "
+                        "running blue-to-green canonicalization on the green model.");
+            data->blue_green_path_warning_logged = true;
         }
     } else {
         screen_color_transform.mode = screen_color_mode;
@@ -1018,8 +1011,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.spill_method = spill_method;
     // Despill operates on the channel of whatever model produced the
     // foreground. Dedicated blue weights leave the input in the blue domain,
-    // so spill cleaning targets channel 2; the green model (default and
-    // canonicalization fallback) keeps the historical channel-1 behavior.
+    // so spill cleaning targets channel 2; green and Blue-Green use the
+    // green-model domain.
     params.despill_screen_channel = loaded_model_is_blue ? 2 : 1;
     params.auto_despeckle = despeckle_enabled != 0;
     params.despeckle_size = despeckle_size;

@@ -240,6 +240,35 @@ TEST_CASE("despill cleans blue channel when screen_channel=2", "[unit][despill]"
     REQUIRE(rgb.data[2] == Catch::Approx(0.2f));
 }
 
+TEST_CASE("screen-only blue despill avoids warm semi-transparent edge fill",
+          "[unit][despill][regression]") {
+    constexpr float kEdgeAlpha = 0.35F;
+
+    ImageBuffer average_buf(1, 1, 3);
+    Image average_rgb = average_buf.view();
+    average_rgb.data[0] = 0.20F;
+    average_rgb.data[1] = 0.12F;
+    average_rgb.data[2] = 0.92F;
+
+    ImageBuffer screen_only_buf(1, 1, 3);
+    Image screen_only_rgb = screen_only_buf.view();
+    screen_only_rgb.data[0] = average_rgb.data[0];
+    screen_only_rgb.data[1] = average_rgb.data[1];
+    screen_only_rgb.data[2] = average_rgb.data[2];
+
+    despill(average_rgb, 1.0F, SpillMethod::Average, /*screen_channel=*/2);
+    despill(screen_only_rgb, 1.0F, SpillMethod::ScreenOnly, /*screen_channel=*/2);
+
+    const float average_warmth = (average_rgb.data[0] + average_rgb.data[1]) * 0.5F;
+    const float screen_only_warmth = (screen_only_rgb.data[0] + screen_only_rgb.data[1]) * 0.5F;
+
+    CHECK(average_warmth > average_rgb.data[2]);
+    CHECK(screen_only_rgb.data[0] == Catch::Approx(0.20F));
+    CHECK(screen_only_rgb.data[1] == Catch::Approx(0.12F));
+    CHECK(screen_only_rgb.data[2] == Catch::Approx(screen_only_warmth));
+    CHECK(screen_only_warmth * kEdgeAlpha < average_warmth * kEdgeAlpha);
+}
+
 TEST_CASE("despill blue DoubleLimit uses max(R,G) as limit", "[unit][despill]") {
     ImageBuffer rgb_buf(1, 1, 3);
     Image rgb = rgb_buf.view();
@@ -303,7 +332,9 @@ TEST_CASE("despill is symmetric under green-blue channel swap", "[unit][despill]
         return std::array<float, 3>{rgb.data[0], rgb.data[1], rgb.data[2]};
     };
 
-    for (auto method : {SpillMethod::Average, SpillMethod::DoubleLimit, SpillMethod::Neutral}) {
+    for (auto method :
+         {SpillMethod::Average, SpillMethod::DoubleLimit, SpillMethod::Neutral,
+          SpillMethod::ScreenOnly}) {
         auto blue_native = run(0.30f, 0.18f, 0.85f, /*screen=*/2, method);
         auto swapped = run(0.30f, 0.85f, 0.18f, /*screen=*/1, method);
         // Compare blue_native against swapped with G/B swapped back.

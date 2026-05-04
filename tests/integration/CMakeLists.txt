@@ -80,6 +80,23 @@ endif()
 add_test(NAME integration_tests COMMAND test_integration)
 set_tests_properties(integration_tests PROPERTIES LABELS "integration")
 
+if(CORRIDORKEY_HAS_TORCHTRT AND TARGET corridorkey-torchtrt-runner)
+    add_test(
+        NAME torchtrt_dynamic_runner_smoke
+        COMMAND
+            ${CMAKE_COMMAND}
+            -DRUNNER_EXE=$<TARGET_FILE:corridorkey-torchtrt-runner>
+            -DTS_PATH=${PROJECT_SOURCE_DIR}/temp/dynamic-rtx/corridorkey_dynamic_blue_fp16.ts
+            -DBIN_DIR=${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/run_optional_torchtrt_runner.cmake
+    )
+    set_tests_properties(torchtrt_dynamic_runner_smoke PROPERTIES
+        LABELS "integration;torchtrt;dynamic;hardware"
+        SKIP_REGULAR_EXPRESSION "^SKIP:"
+        TIMEOUT 300
+    )
+endif()
+
 add_executable(ofx_benchmark_harness
     ofx_benchmark_harness.cpp
 )

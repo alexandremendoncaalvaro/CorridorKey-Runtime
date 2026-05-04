@@ -51,6 +51,7 @@ void despill(Image rgb, float strength, SpillMethod method, int screen_channel) 
                     limit = std::max(a, b);
                     break;
                 case SpillMethod::Neutral:
+                case SpillMethod::ScreenOnly:
                 case SpillMethod::Average:
                     limit = (a + b) * 0.5F;
                     break;
@@ -61,6 +62,10 @@ void despill(Image rgb, float strength, SpillMethod method, int screen_channel) 
                 float effective_spill = spill * strength;
                 float new_screen = screen - effective_spill;
                 rgb(y, x, screen_channel) = new_screen;
+
+                if (method == SpillMethod::ScreenOnly) {
+                    continue;
+                }
 
                 if (method == SpillMethod::Neutral) {
                     float gray = (a + new_screen + b) / 3.0F;

@@ -882,18 +882,16 @@ void update_runtime_panel_values(InstanceData* data) {
     // GetFramesNeeded) defer by marking dirty so the next main-thread
     // action flushes the panel.
     //
-    // DaVinci Resolve has historically tolerated render-thread paramSetValue
-    // through internal locking, and the Resolve user experience has long
-    // depended on the runtime status panel updating live during render.
-    // Per the OFX 1.4 spec on kOfxPropName, plugins are expected to apply
-    // host-specific workarounds for known host quirks. Resolve therefore
-    // takes the permissive path here while Foundry Nuke and any other host
-    // we have not validated take the canonical defer-to-main-thread path.
+    // Resolve advertises enough tolerance that this path used to flush
+    // runtime status live during render. Resolve logs show each flush
+    // triggering a burst of InstanceChanged callbacks while model selection
+    // is in flight, so all hosts now follow the OFX-safe deferred path during
+    // render actions.
     // References:
     // https://openfx.readthedocs.io/en/main/Reference/ofxThreadSafety.html
     // https://openfx.readthedocs.io/en/main/Reference/ofxRendering.html
     // https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
-    if ((data->in_render || data->in_render_sequence) && !is_resolve_host()) {
+    if (data->in_render || data->in_render_sequence) {
         data->runtime_panel_dirty = true;
         log_message("update_runtime_panel_values",
                     std::string("defer reason=render_thread in_render=") +
@@ -1031,6 +1029,20 @@ app::OfxRuntimePrepareSessionRequest build_prepare_request(
     request.requested_resolution = selection.requested_resolution;
     request.effective_resolution = selection.effective_resolution;
     return request;
+}
+
+DeviceInfo requested_device_for_quality_selection(const DeviceInfo& requested_device,
+                                                  const QualityArtifactSelection& selection) {
+    DeviceInfo candidate_device = requested_device;
+    candidate_device.backend = runtime_backend_for_quality_artifact(
+        requested_device.backend, selection.executable_model_path);
+    if (candidate_device.backend == Backend::TorchTRT &&
+        is_dynamic_blue_artifact_path(selection.executable_model_path)) {
+        if (candidate_device.name.empty()) {
+            candidate_device.name = "Torch-TensorRT dynamic blue";
+        }
+    }
+    return candidate_device;
 }
 
 }  // namespace
@@ -1576,9 +1588,12 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     if (data->runtime_client != nullptr && data->runtime_client->has_session()) {
         data->device = data->runtime_client->current_device();
     }
-    bool current_backend_matches = backend_matches_request(data->device, requested_device);
 
     for (const auto& selection : selections) {
+        const DeviceInfo candidate_requested_device =
+            requested_device_for_quality_selection(requested_device, selection);
+        const bool current_backend_matches =
+            backend_matches_request(data->device, candidate_requested_device);
         const bool session_alive =
             data->runtime_client != nullptr && data->runtime_client->has_session();
         if (current_backend_matches && session_alive &&
@@ -1603,10 +1618,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
 
         constexpr std::string_view kQualitySwitchPhase = "quality_switch";
         log_engine_event("ensure_engine_for_quality", "engine_create_begin", kQualitySwitchPhase,
-                         requested_device, requested_device, selection.executable_model_path,
-                         requested_resolution, selection.effective_resolution);
+                         candidate_requested_device, candidate_requested_device,
+                         selection.executable_model_path, requested_resolution,
+                         selection.effective_resolution);
 
-        DeviceInfo effective_device = requested_device;
+        DeviceInfo effective_device = candidate_requested_device;
         std::optional<BackendFallbackInfo> fallback = std::nullopt;
         // The previous code called set_string_param_value directly here to
         // surface a transient "Preparing ..." spinner on the runtime status
@@ -1639,11 +1655,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                      "corridorkey_prepare_session");
         (void)progress_scope.update(kProgressInitialTick);
         auto prepare_result = data->runtime_client->prepare_session(
-            build_prepare_request(requested_device, selection, requested_quality_mode),
+            build_prepare_request(candidate_requested_device, selection, requested_quality_mode),
             [&](const StageTiming& timing) {
-                log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase, requested_device,
-                                 selection.executable_model_path, requested_resolution,
-                                 selection.effective_resolution, timing);
+                log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
+                                 candidate_requested_device, selection.executable_model_path,
+                                 requested_resolution, selection.effective_resolution, timing);
                 (void)progress_scope.update(kProgressMidTick);
             });
         (void)progress_scope.update(kProgressFinalTick);
@@ -1653,9 +1669,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                selection.executable_model_path.filename().string() + ": " +
                                prepare_result.error().message;
             log_engine_event("ensure_engine_for_quality", "engine_create_error",
-                             kQualitySwitchPhase, requested_device, requested_device,
-                             selection.executable_model_path, requested_resolution,
-                             selection.effective_resolution, std::nullopt,
+                             kQualitySwitchPhase, candidate_requested_device,
+                             candidate_requested_device, selection.executable_model_path,
+                             requested_resolution, selection.effective_resolution, std::nullopt,
                              prepare_result.error().message);
             log_message("ensure_engine_for_quality", data->last_error);
             // Out-of-memory during a live quality switch is actionable:
@@ -1675,8 +1691,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                                compile_cache_context, selection, data->last_error);
             }
             if (should_abort_quality_fallback_after_compile_failure(
-                    requested_device.backend, requested_quality_mode, cpu_quality_guardrail_active,
-                    selection)) {
+                    candidate_requested_device.backend, requested_quality_mode,
+                    cpu_quality_guardrail_active, selection)) {
                 data->last_warning.clear();
                 set_runtime_panel_state_for_failed_quality_request(
                     data, requested_quality_mode, requested_resolution,
@@ -1696,12 +1712,14 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                 " ref_count=" + std::to_string(prepare_result->session.ref_count));
 
         log_engine_event("ensure_engine_for_quality", "engine_create_result", kQualitySwitchPhase,
-                         requested_device, effective_device, selection.executable_model_path,
-                         requested_resolution, selection.effective_resolution, fallback);
-        if (!backend_matches_request(effective_device, requested_device)) {
+                         candidate_requested_device, effective_device,
+                         selection.executable_model_path, requested_resolution,
+                         selection.effective_resolution, fallback);
+        if (!backend_matches_request(effective_device, candidate_requested_device)) {
             data->last_error =
-                "Quality switch requested backend " + backend_label(requested_device.backend) +
-                " for " + selection.executable_model_path.filename().string() +
+                "Quality switch requested backend " +
+                backend_label(candidate_requested_device.backend) + " for " +
+                selection.executable_model_path.filename().string() +
                 " but the runtime is using " + backend_label(effective_device.backend) + ".";
             if (fallback.has_value() && !fallback->reason.empty()) {
                 data->last_error += " Reason: " + fallback->reason;
@@ -1712,8 +1730,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                                compile_cache_context, selection, data->last_error);
             }
             if (should_abort_quality_fallback_after_compile_failure(
-                    requested_device.backend, requested_quality_mode, cpu_quality_guardrail_active,
-                    selection)) {
+                    candidate_requested_device.backend, requested_quality_mode,
+                    cpu_quality_guardrail_active, selection)) {
                 data->last_warning.clear();
                 set_runtime_panel_state_for_failed_quality_request(
                     data, requested_quality_mode, requested_resolution,

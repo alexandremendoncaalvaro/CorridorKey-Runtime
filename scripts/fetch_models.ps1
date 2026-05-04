@@ -15,7 +15,7 @@
 .PARAMETER Profile
     Model set to download:
       windows-rtx           : FP16 ONNX models + Torch-TensorRT TorchScript engines (default)
-      windows-rtx-blue      : Dedicated CorridorKeyBlue Torch-TensorRT (.ts) engines for blue-screen plates (512/1024 FP16, 1536/2048 FP32)
+      windows-rtx-blue      : Dedicated CorridorKeyBlue dynamic TorchScript (.ts) model for blue-screen plates
       windows-turing-source : Reference FP16 ONNX ladder + upstream green training checkpoint
       windows-all           : FP16 + FP16 context ONNX models + Torch-TensorRT (green and blue)
       apple                 : MLX safetensors + bridge files
@@ -81,19 +81,11 @@ $windowsRtxFiles = @{
     "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
 }
 
-# Sprint 1 PR 3 swapped the blue ladder from ONNX/TRT-RTX-EP to
-# Torch-TensorRT (.ts) compiled engines. Filenames + precision must match
-# src/app/runtime_contracts.cpp (`make_model_entry("fp16-blue", ...)` /
-# `"fp32-blue"`) and src/plugins/ofx/ofx_model_selection.hpp
-# (`artifact_path_for_backend`, `kBluePrecisionFp32Threshold`). 512 /
-# 1024 are FP16; 1536 / 2048 use FP32 because Sprint 0 measured FP16
-# NaNs at those graph sizes for the blue checkpoint (see
-# temp/blue-diagnose/HANDOFF.md section 2.2).
+# The blue Windows RTX pack is a single dynamic TorchScript artifact.
+# Keep this filename aligned with src/app/runtime_contracts.cpp and
+# src/plugins/ofx/ofx_model_selection.hpp.
 $windowsRtxBlueFiles = @{
-    "torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_512.ts"  = "corridorkey_blue_torchtrt_fp16_512.ts"
-    "torchtrt/fp16-blue/corridorkey_blue_torchtrt_fp16_1024.ts" = "corridorkey_blue_torchtrt_fp16_1024.ts"
-    "torchtrt/fp32-blue/corridorkey_blue_torchtrt_fp32_1536.ts" = "corridorkey_blue_torchtrt_fp32_1536.ts"
-    "torchtrt/fp32-blue/corridorkey_blue_torchtrt_fp32_2048.ts" = "corridorkey_blue_torchtrt_fp32_2048.ts"
+    "torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts" = "corridorkey_dynamic_blue_fp16.ts"
 }
 
 $windowsTorchTensorRtFiles = @{

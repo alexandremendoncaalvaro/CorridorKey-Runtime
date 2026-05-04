@@ -35,6 +35,11 @@ std::filesystem::path sprint0_torchtrt_artifact(int resolution) {
            ("corridorkey_torchtrt_fp16_" + std::to_string(resolution) + ".ts");
 }
 
+std::filesystem::path dynamic_torchscript_artifact() {
+    return std::filesystem::path(PROJECT_ROOT) / "temp" / "dynamic-rtx" /
+           "corridorkey_dynamic_green_fp16.ts";
+}
+
 }  // namespace
 
 TEST_CASE("TorchTRT session loads and runs a green .ts engine end-to-end",
@@ -135,6 +140,49 @@ TEST_CASE("TorchTRT session honours output_alpha_only by skipping foreground mat
     REQUIRE(result->alpha.view().width == kRes);
     // Foreground is intentionally unfilled when output_alpha_only is set.
     REQUIRE(result->foreground.view().data.empty());
+#endif
+}
+
+TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple resolutions",
+          "[integration][torchtrt][dynamic]") {
+#if !defined(_WIN32)
+    SUCCEED("TorchTRT in-process backend is Windows-only in Sprint 1.");
+#else
+    const auto model_path = dynamic_torchscript_artifact();
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
+            model_path, "dynamic TorchScript RTX artifact");
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
+    if (!engine.has_value()) {
+        SKIP("Engine::create failed: " + engine.error().message);
+    }
+    REQUIRE(engine.value()->current_device().backend == Backend::TorchTRT);
+    REQUIRE(engine.value()->recommended_resolution() == 0);
+
+    struct ResolutionCase {
+        int width;
+        int height;
+    };
+
+    for (const auto resolution : {ResolutionCase{512, 512}, ResolutionCase{1024, 1024},
+                                  ResolutionCase{640, 360}}) {
+        ImageBuffer rgb(resolution.width, resolution.height, 3);
+        ImageBuffer hint(resolution.width, resolution.height, 1);
+        std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.5F);
+        std::fill(hint.view().data.begin(), hint.view().data.end(), 1.0F);
+
+        InferenceParams params;
+        params.target_resolution = 512;
+        auto result = engine.value()->process_frame(rgb.view(), hint.view(), params);
+        REQUIRE(result.has_value());
+        REQUIRE(result->alpha.view().width == resolution.width);
+        REQUIRE(result->alpha.view().height == resolution.height);
+        REQUIRE(result->foreground.view().width == resolution.width);
+        REQUIRE(result->foreground.view().height == resolution.height);
+    }
 #endif
 }
 
