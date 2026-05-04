@@ -105,7 +105,8 @@ curated execution tracks.
 The current official product tracks are:
 
 - Apple Silicon via MLX model pack and bridge exports
-- Windows RTX via ONNX Runtime TensorRT RTX EP on NVIDIA RTX 30 series and
+- Windows RTX via ONNX Runtime TensorRT RTX EP for the green model and a
+  dynamic TorchScript path for the blue model on NVIDIA RTX 30 series and
   newer
 
 The current experimental product tracks are:
@@ -149,22 +150,16 @@ CorridorKey ships two model variants distinguished by training plate color:
 - **Green** (`corridorkey_fp16_<res>.onnx`): the canonical variant. Officially
   packaged across the full validated resolution ladder for every official
   product track. Served via the canonical ONNX backend on every host.
-- **Blue** (`corridorkey_blue_torchtrt_{fp16,fp32}_<res>.ts`): a dedicated
-  variant for blue screen plates. On the Windows RTX track, blue is served
-  by precompiled Torch-TensorRT engines (`.ts`) rather than ONNX, because
-  the blue checkpoint's FP16 ONNX produces all-NaN inference output on the
-  TensorRT and CUDA execution providers; the `.ts` engine bypasses the EP
-  layer entirely. Precision splits at 1536 (FP16 below, FP32 at and above)
-  because FP16 trace-time conversion of the blue weights NaNs out at the
-  upper resolutions. Officially packaged at the resolutions where the
-  engine compiles on the official backend; resolutions where blue cannot
-  be served directly fall back to canonicalizing the blue input into the
-  green domain and routing through the green model.
+- **Blue** (`corridorkey_dynamic_blue_fp16.ts`): the dedicated Windows RTX
+  variant for blue screen plates. Blue is distributed as one dynamic
+  TorchScript artifact instead of a per-resolution ladder. The runtime uses
+  the requested quality resolution at execution time and keeps the green ONNX
+  ladder unchanged.
 
 The runtime selects the variant by the user-provided screen color parameter.
-When a requested variant is not packaged at the requested resolution, the
-runtime applies the documented green-domain canonicalization fallback rather
-than failing.
+When the blue pack is not installed or cannot initialize, the runtime applies
+the documented green-domain canonicalization fallback rather than substituting
+another blue resolution.
 
 ### 3.4.2 Model Pack Distribution
 

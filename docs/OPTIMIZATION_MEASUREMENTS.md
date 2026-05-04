@@ -33,6 +33,7 @@ remain the source of truth for methodology and caveats.
 | `phase_7_gpu_resize` | `0.7.4-11` | device-resident tensor flow and GPU-accelerated NPP bilinear resize | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `28%`; `frame_extract_outputs_resize` down to `27ms` | keep; massive win effectively eliminating the strongest remaining CPU hotspot |
 | `phase_8_gpu_prepare` | `0.7.4-12` | GPU-accelerated input preparation via NPP resizing, splitting, and normalization | full-frame `2048 -> 3840x2160` OFX-style harness `frame_prepare_inputs` improved by `~74%` | keep; effectively eliminates the final CPU bottleneck, achieving end-to-end device residence |
 | `phase_9_blue_dedicated_screen_color` | `0.8.3-win.1` (proposed) | dedicated CorridorKeyBlue catalog + screen-color OFX selection / render branching + despill `screen_channel` generalization | green-path bench gate within +1.5% (`avg_latency_ms`) and +4.3% (`ort_run`); blue dedicated baseline pending FP32-I/O wrapper re-export | gate passes; blue 512 measured; 1024 / 1536 / 2048 to be re-recorded after the in-flight re-export |
+| `phase_10_blue_dynamic_hybrid` | `0.8.3-win.1` | single dynamic blue TorchScript artifact with green kept on the optimized ONNX TensorRT RTX EP ladder | dynamic TorchScript loads and produces finite output at `512`, `1024`, and `2048`; dynamic green is `~40%` to `~54%` slower than the optimized green ONNX path | keep green on ONNX; use the dynamic artifact for blue |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -957,7 +958,7 @@ package must replace the first one before any user-visible conclusion is kept.
   `main` at `6268dc8`. Adds the dedicated CorridorKeyBlue catalog entries,
   screen-color-aware OFX selection / render branching, the despill
   generalization with `screen_channel`, and the export-pipeline tooling
-  needed to turn `CorridorKeyBlue_1.0.pth` into the four-rung FP16 ladder.
+  needed to evaluate per-resolution CorridorKeyBlue artifacts.
 - Display version label: pending (`0.8.3-win.1` proposed once packaged)
 - Local test artifact path: pending packaging
 - Corpus output root: `build/runtime_corpus_after/` (this branch),
@@ -1030,6 +1031,32 @@ package must replace the first one before any user-visible conclusion is kept.
   isolated, and the OFX render falls back to the canonicalization
   workaround on the green model whenever a missing blue rung is
   requested. Re-revisit this entry once the GPU NaN root cause lands.
+
+### `phase_10_blue_dynamic_hybrid`
+
+This checkpoint compares the validated green ONNX TensorRT RTX EP path against
+dynamic TorchScript candidates exported from the green and blue checkpoints.
+The purpose is to decide whether Windows RTX should become fully dynamic or
+stay hybrid.
+
+- Dynamic TorchScript validation:
+  - green dynamic artifact: finite output at `512`, `1024`, and `2048`
+  - blue dynamic artifact: finite output at `512`, `1024`, and `2048`
+  - C++ runner loads the same dynamic `.ts` file at multiple runtime
+    resolutions
+- Green performance comparison:
+  - `512`: optimized ONNX green `30.8 ms`; dynamic green `43.0 ms`
+  - `1024`: optimized ONNX green `102.8 ms`; dynamic green `158.7 ms`
+  - `2048`: optimized ONNX green `503.0 ms`; dynamic green `764.4 ms`
+- Blue dynamic baseline:
+  - `512`: `44.5 ms`
+  - `1024`: `156.9 ms`
+  - `2048`: `753.4 ms`
+- Decision:
+  - keep green on the current optimized ONNX TensorRT RTX EP ladder
+  - use `corridorkey_dynamic_blue_fp16.ts` as the single Windows RTX blue
+    artifact
+  - keep the blue runtime path isolated from the green fast path
 
 ### `phase_8_gpu_prepare`
 

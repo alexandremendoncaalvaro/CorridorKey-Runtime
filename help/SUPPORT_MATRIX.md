@@ -112,9 +112,9 @@ packaged and validated.
 
 **Windows RTX installer policy:**
 - `Windows RTX` is the official Windows installer for NVIDIA RTX 30 series and
-  newer. It packages the complete FP16 ladder through `2048px`. INT8 ONNX and
-  CPU rendering have been retired: FP16 on RTX is the only quality and only
-  backend the installer ships.
+  newer. It packages the complete green FP16 ONNX ladder through `2048px` and
+  the optional dynamic blue TorchScript pack. INT8 ONNX and CPU rendering have
+  been retired from the official Windows RTX installer.
 - In `Auto`, `Windows RTX` respects the current safe quality ceiling for the
   detected VRAM tier.
 - In fixed modes, `Windows RTX` can attempt a packaged quality above the safe
@@ -232,8 +232,9 @@ their own SDK integrations that have not been built.
 ## Screen Color Model Variants
 
 The runtime ships two model variants distinguished by the screen color the
-model was trained on. Each variant is distributed as an independent pack and
-each variant has its own per-resolution support status.
+model was trained on. Green is distributed as a per-resolution ladder. Blue on
+Windows RTX is distributed as one dynamic artifact that accepts the runtime
+quality resolution.
 
 ### Green model variant
 
@@ -251,27 +252,19 @@ installer.
 
 ### Blue model variant
 
-A dedicated CorridorKey variant trained on blue screen plates. Blue runs on
-two distinct backends, each with its own resolution coverage:
-
-- **TensorRT RTX EP** is the historical Windows RTX backend. Engine compilation
-  on the blue checkpoint succeeds at 512px and fails at 1024px and above due
-  to FP16 numerical instability in the blue weights at those tensor sizes.
-- **Torch-TensorRT** is the second Windows RTX backend, tracked for blue
-  resolutions where TensorRT RTX EP cannot serve the artifact. The blue model
-  compiles cleanly under Torch-TRT at 1024px (FP16) and at 1536px and 2048px
-  (FP32, since FP16 still overflows at those sizes). Engines are
-  `hardware_compatible=True` so a single artifact runs on Ampere and newer
-  RTX families.
+A dedicated CorridorKey variant trained on blue screen plates. On Windows RTX,
+blue uses a dynamic TorchScript artifact instead of the green ONNX TensorRT RTX
+EP ladder. This keeps blue independent from per-resolution engine files while
+preserving the existing green optimized path.
 
 #### Windows RTX coverage
 
 | Resolution | Backend | Status |
 |------------|---------|--------|
-| 512px | TensorRT RTX EP, FP16 | Officially supported - dedicated blue model |
-| 1024px | Torch-TensorRT, FP16 | Officially supported - dedicated blue model |
-| 1536px | Torch-TensorRT, FP32 | Officially supported - dedicated blue model |
-| 2048px | not currently packaged | When the dedicated artifact is not present, `corridorkey doctor`, the OFX runtime status surface, and the GUI report the gap and prompt the user to switch to a packaged blue resolution or to the green model at 2048px. The runtime does not silently substitute a different model |
+| 512px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 1024px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 1536px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 2048px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
 
 #### macOS Apple Silicon coverage
 
@@ -289,23 +282,10 @@ green MLX model, and restoring the result. This is automatic and reported in
 
 #### Missing artifact UX
 
-When a packaged dedicated blue artifact is required by the user's selection
-and the corresponding pack is not installed, the runtime surfaces the gap
-explicitly through the surface in use:
-
-- **CLI:** non-zero exit with a message naming the missing pack and the
-  resolutions that are currently servable.
-- **OFX plugin (Resolve, Nuke):** runtime status field reports
-  `missing_dedicated_blue_pack` with the requested resolution and a
-  human-readable suggestion. The render call returns an explicit error rather
-  than producing a fallback render.
-- **Tauri GUI:** the resolution selector surfaces the missing tier inline and
-  links to the model pack download flow.
-
-This behavior is product policy: blue users explicitly choose a quality tier,
-and a silent substitution would violate that contract. Users may switch to a
-packaged blue resolution, switch to the green model, or install the missing
-pack from the canonical Hugging Face source.
+When the dynamic blue pack is not installed or cannot initialize, the runtime
+reports the blue artifact condition through diagnostics and applies the
+green-domain canonicalization fallback. The fallback uses the green model at
+the requested quality path; it does not substitute a lower blue resolution.
 
 ### Pack distribution
 
