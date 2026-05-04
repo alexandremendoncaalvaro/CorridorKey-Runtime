@@ -622,6 +622,15 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                         " target_resolution=" +
                         std::to_string(render_request->params.target_resolution) +
                         " tiling=" + (render_request->params.enable_tiling ? "1" : "0") +
+                        " source_passthrough=" +
+                        (render_request->params.source_passthrough ? "1" : "0") +
+                        " despill_screen_channel=" +
+                        std::to_string(render_request->params.despill_screen_channel) +
+                        " spill_method=" + std::to_string(render_request->params.spill_method) +
+                        " sp_erode_px=" + std::to_string(render_request->params.sp_erode_px) +
+                        " sp_blur_px=" + std::to_string(render_request->params.sp_blur_px) +
+                        " output_alpha_only=" +
+                        (render_request->params.output_alpha_only ? "1" : "0") +
                         " mlx_active_mb=" + format_mb(memory_snap.active_bytes) +
                         " mlx_cache_mb=" + format_mb(memory_snap.cache_bytes) +
                         " stage_total_ms=" + format_ms(total_stage_ms(render_response->timings)) +

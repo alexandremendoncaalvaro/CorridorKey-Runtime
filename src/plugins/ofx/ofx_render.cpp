@@ -842,6 +842,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const bool dedicated_blue_requested = screen_color_mode == ScreenColorMode::Blue;
     const bool blue_green_requested = screen_color_mode == ScreenColorMode::BlueGreen;
     const std::string_view screen_color_label = dedicated_blue_requested ? "blue" : "green";
+    const std::string_view screen_color_mode_label =
+        dedicated_blue_requested ? "blue" : (blue_green_requested ? "blue_green" : "green");
 
     if (!ensure_engine_for_quality(
             data, quality_mode, width, height,
@@ -999,6 +1001,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         scale_integer_pixels_to_source_long_edge(edge_erode, width, height);
     const int effective_edge_blur =
         scale_integer_pixels_to_source_long_edge(edge_blur, width, height);
+    const bool source_passthrough_requested = source_passthrough_enabled != 0;
+    const bool source_passthrough_allowed =
+        screen_color_allows_source_passthrough(screen_color_mode);
 
     InferenceParams params;
     params.target_resolution = data->active_resolution;
@@ -1023,10 +1028,22 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         upscale_method == kUpscaleBilinear ? UpscaleMethod::Bilinear : UpscaleMethod::Lanczos4;
     params.enable_tiling = enable_tiling != 0;
     params.tile_padding = tile_overlap;
-    params.source_passthrough = source_passthrough_enabled != 0;
+    params.source_passthrough = source_passthrough_requested && source_passthrough_allowed;
     params.sp_erode_px = effective_edge_erode;
     params.sp_blur_px = effective_edge_blur;
     params.output_alpha_only = !output_mode_requires_model_foreground(output_mode);
+
+    log_message("render",
+                std::string("event=postprocess_params screen_color=") +
+                    std::string(screen_color_mode_label) + " loaded_model_is_blue=" +
+                    (loaded_model_is_blue ? "1" : "0") + " requested_source_passthrough=" +
+                    (source_passthrough_requested ? "1" : "0") +
+                    " effective_source_passthrough=" + (params.source_passthrough ? "1" : "0") +
+                    " despill_screen_channel=" +
+                    std::to_string(params.despill_screen_channel) + " spill_method=" +
+                    std::to_string(params.spill_method) + " sp_erode_px=" +
+                    std::to_string(params.sp_erode_px) + " sp_blur_px=" +
+                    std::to_string(params.sp_blur_px));
 
     data->last_guide_source = *guide_source;
     data->last_runtime_path = classify_runtime_path(data, params, width, height);

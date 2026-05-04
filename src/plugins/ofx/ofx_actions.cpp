@@ -563,8 +563,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_bool_param(param_set, kParamSourcePassthrough, "Recover Original Details",
                       kDefaultSourcePassthroughEnabled,
                       "Blend original source pixels back into opaque interior regions for "
-                      "sharper texture. This is not an edge-fix tool. The recovered pixels still "
-                      "flow through despill after the blend.",
+                      "sharper texture. This is not an edge-fix tool. Dedicated Blue keeps the "
+                      "model foreground authoritative to avoid reintroducing blue-screen edge "
+                      "color.",
                       "interior_detail_group");
     // --- Group 5: Matte (refine the AI-generated alpha) ---
     define_group_param(param_set, "matte_group", "Matte", true);
@@ -599,8 +600,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
 
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
                         "Strength of spill suppression for the selected screen color on "
-                        "foreground edges. Dedicated Blue suppresses the blue channel without "
-                        "adding warm fill; Blue-Green Channel Swap uses the green-model path.",
+                        "foreground edges. Dedicated Blue targets the blue channel directly; "
+                        "Blue-Green Channel Swap uses the green-model path.",
                         "edge_spill_group");
 
     // --- Group 7: Output ---
@@ -677,10 +678,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_matte_group");
     define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
                         {"Average", "Double Limit", "Neutral"},
-                        "How removed spill color is replaced for Green and Blue-Green Channel "
-                        "Swap. Average redistributes across the two non-screen channels. Double "
-                        "Limit uses the stronger non-screen channel. Neutral replaces with gray. "
-                        "Dedicated Blue uses screen-only suppression.",
+                        "How removed spill color is replaced. Average redistributes across the "
+                        "two non-screen channels. Double Limit uses the stronger non-screen "
+                        "channel. Neutral replaces with gray.",
                         "advanced_processing_group");
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},

@@ -1580,12 +1580,8 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     common::measure_stage(
         on_stage, "post_despill",
         [&]() {
-            const SpillMethod requested_spill_method =
-                static_cast<SpillMethod>(params.spill_method);
-            const SpillMethod effective_spill_method =
-                params.despill_screen_channel == 2 ? SpillMethod::ScreenOnly
-                                                   : requested_spill_method;
-            despill(result.foreground.view(), params.despill_strength, effective_spill_method,
+            despill(result.foreground.view(), params.despill_strength,
+                    static_cast<SpillMethod>(params.spill_method),
                     params.despill_screen_channel);
         },
         1);
