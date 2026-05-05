@@ -5,18 +5,19 @@
 
 .DESCRIPTION
     The offline installer (`scripts/installer/build_installer.ps1
-    -Flavor offline`) bundles every selected pack inside the .exe
-    so end users never need network access at install time. To do
-    that, the Inno Setup `[Files]` block needs every file laid out
-    on disk in the pack's `dest_subdir` shape (see
+    -Flavor offline`) bundles every distribution-manifest pack inside
+    the .exe so end users never need network access at install time.
+    To do that, the Inno Setup `[Files]` block needs every file laid
+    out on disk in the pack's `dest_subdir` shape (see
     distribution_manifest.json).
 
-    This helper downloads every "ready" file from Hugging Face into
-    the payload tree, verifying SHA256 against the manifest. The
-    blue runtime archive (~2 GB) is downloaded, verified, pre-extracted
-    into the runtime pack directory, and then removed. The offline Inno
-    Setup build bundles the extracted files directly because
-    `extractarchive` is only valid for external download entries.
+    This helper requires every manifest file to be "ready", then
+    downloads it from Hugging Face into the payload tree, verifying
+    SHA256 against the manifest. The blue runtime archive (~2 GB) is
+    downloaded, verified, pre-extracted into the runtime pack
+    directory, and then removed. The offline Inno Setup build bundles
+    the extracted files directly because `extractarchive` is only
+    valid for external download entries.
 
     The payload tree layout under -OutputDir matches what
     build_installer.ps1 -Flavor offline expects:
@@ -163,7 +164,6 @@ function Expand-ArchiveAndDelete {
 }
 
 $totalReady = 0
-$totalSkipped = 0
 foreach ($pack in $manifest.packs.PSObject.Properties) {
     $packMeta = $pack.Value
     Write-Host "[$($pack.Name)] -> $($packMeta.dest_subdir)" -ForegroundColor Yellow
@@ -172,9 +172,7 @@ foreach ($pack in $manifest.packs.PSObject.Properties) {
                   -and ($packMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $packMeta.extract)
     foreach ($file in $packMeta.files) {
         if ($file.status -ne "ready") {
-            Write-Host "  [pending] $($file.filename) (status=$($file.status); skip)" -ForegroundColor Yellow
-            $totalSkipped++
-            continue
+            throw "Offline installer requires every manifest file to be ready; $($pack.Name)/$($file.filename) has status '$($file.status)'."
         }
         $packDir = Join-Path $OutputDir $destSubdir
         $destPath = Join-Path $packDir $file.filename
@@ -187,5 +185,5 @@ foreach ($pack in $manifest.packs.PSObject.Properties) {
 }
 
 Write-Host ""
-Write-Host "[done] Staged $totalReady file(s) under $OutputDir; $totalSkipped pending entries skipped." -ForegroundColor Green
+Write-Host "[done] Staged $totalReady file(s) under $OutputDir." -ForegroundColor Green
 Write-Host "[done] Pass this dir as -ModelPayloadDir to build_installer.ps1 -Flavor offline." -ForegroundColor Green

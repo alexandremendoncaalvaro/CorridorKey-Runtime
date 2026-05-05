@@ -145,6 +145,9 @@ function Publish-CorridorKeyGithubRelease {
 try {
     $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version -SyncGuiMetadata
     Assert-CorridorKeyWindowsReleaseLabel -Version $Version -DisplayVersionLabel $DisplayVersionLabel
+    if ($PublishGithub -and $Flavor -ne "online") {
+        throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
+    }
 
     $needsRtxTrack = $Track -in @("rtx", "all")
     $needsDirectMlTrack = $Track -in @("dml", "all")

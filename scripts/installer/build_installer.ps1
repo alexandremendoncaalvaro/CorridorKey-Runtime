@@ -10,9 +10,10 @@
     to compile the resulting .iss into the final installer .exe.
 
     Online flavor produces a small stub installer (~50 MB) that
-    downloads selected packs from Hugging Face during install. Offline
-    flavor produces a self-contained installer (~7 GB) with every pack
-    pre-bundled.
+    downloads every selected pack from Hugging Face during install,
+    with Green + Blue selected by default. Offline flavor produces a
+    self-contained installer (~7 GB) with every manifest pack
+    pre-bundled and fixed for install.
 
     The PowerShell side here is intentionally thin: it injects values
     into the template (display label, output path, per-pack file
@@ -198,7 +199,7 @@ function Resolve-IsccPath {
     throw "ISCC.exe was not found. Install Inno Setup 6 (https://jrsoftware.org/isdl.php) or pass -ISCCPath."
 }
 
-function New-IconPngFrameBytes {
+function New-IconDibFrameBytes {
     param(
         [object]$SourceImage,
         [int]$Size
@@ -233,8 +234,40 @@ function New-IconPngFrameBytes {
 
         $memory = [System.IO.MemoryStream]::new()
         try {
-            $bitmap.Save($memory, [System.Drawing.Imaging.ImageFormat]::Png)
-            return $memory.ToArray()
+            $writer = [System.IO.BinaryWriter]::new($memory)
+            try {
+                $xorStride = $Size * 4
+                $andStride = [int]([Math]::Ceiling($Size / 32.0) * 4)
+                $xorBytes = $xorStride * $Size
+                $andBytes = $andStride * $Size
+
+                $writer.Write([UInt32]40)
+                $writer.Write([Int32]$Size)
+                $writer.Write([Int32]($Size * 2))
+                $writer.Write([UInt16]1)
+                $writer.Write([UInt16]32)
+                $writer.Write([UInt32]0)
+                $writer.Write([UInt32]$xorBytes)
+                $writer.Write([Int32]0)
+                $writer.Write([Int32]0)
+                $writer.Write([UInt32]0)
+                $writer.Write([UInt32]0)
+
+                for ($y = $Size - 1; $y -ge 0; $y--) {
+                    for ($x = 0; $x -lt $Size; $x++) {
+                        $pixel = $bitmap.GetPixel($x, $y)
+                        $writer.Write([byte]$pixel.B)
+                        $writer.Write([byte]$pixel.G)
+                        $writer.Write([byte]$pixel.R)
+                        $writer.Write([byte]$pixel.A)
+                    }
+                }
+
+                $writer.Write([byte[]]::new($andBytes))
+                return $memory.ToArray()
+            } finally {
+                $writer.Dispose()
+            }
         } finally {
             $memory.Dispose()
         }
@@ -266,7 +299,7 @@ function New-InstallerSetupIcon {
         foreach ($size in @(16, 32, 48, 64, 256)) {
             $frames += , [ordered]@{
                 size = $size
-                bytes = New-IconPngFrameBytes -SourceImage $sourceImage -Size $size
+                bytes = New-IconDibFrameBytes -SourceImage $sourceImage -Size $size
             }
         }
 
@@ -369,7 +402,7 @@ function Get-ComponentSizeLabel {
     if ($installedBytes -eq $downloadBytes) {
         return $installedLabel
     }
-    return "$installedLabel instalado, $downloadLabel download"
+    return "$installedLabel installed, $downloadLabel download"
 }
 
 function Get-PackByName {
