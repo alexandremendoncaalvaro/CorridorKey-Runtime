@@ -12,14 +12,14 @@
 ;
 ;   ONLINE  - small stub installer (~50 MB). Plugin base bundled,
 ;             every model + runtime pack downloaded at install time
-;             from Hugging Face with SHA256 verification.
+;             from Hugging Face with SHA256 verification. Recommended
+;             installs select every available pack by default.
 ;   OFFLINE - large self-contained installer (~7 GB). All packs
-;             bundled inside the installer; no network access during
-;             install.
+;             bundled and installed; no network access during install.
 ;
-; Component selection (green / blue) is identical across flavors. The
-; difference is purely transport: download-on-demand vs pre-bundled
-; bytes. arm_torchtrt_runtime in
+; ONLINE keeps component selection so a green-only operator can avoid
+; the blue runtime download. OFFLINE is complete by construction: all
+; available packs are fixed and installed. arm_torchtrt_runtime in
 ; src/core/torch_trt_loader.cpp walks for blue runtime DLLs at
 ; <install>/Contents/Resources/torchtrt-runtime/bin/ regardless of
 ; how the bytes got there.
@@ -124,14 +124,28 @@ ShowLanguageDialog=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Types]
-Name: "minimum"; Description: "Minimum (Green only)"
+#if Flavor == "offline"
+Name: "complete"; Description: "Complete (Green + Blue)"
+#else
 Name: "recommended"; Description: "Recommended (Green + Blue)"
+Name: "minimum"; Description: "Minimum (Green only)"
 Name: "custom"; Description: "Custom"; Flags: iscustom
+#endif
 
 [Components]
 ; Plugin base is always installed - it is the OFX bundle the host
 ; loads, plus the green-track ONNX Runtime DLLs that ship in every
 ; flavor. The fixed flag prevents the user from unchecking it.
+#if Flavor == "offline"
+Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
+    Types: complete; Flags: fixed
+
+Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+    Types: complete; Flags: fixed
+
+Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+    Types: complete; Flags: fixed
+#else
 Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
     Types: minimum recommended custom; Flags: fixed
 
@@ -140,6 +154,7 @@ Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMP
 
 Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
     Types: recommended custom
+#endif
 
 [Files]
 ; Plugin base payload. Always installed. Path layout matches the
@@ -162,7 +177,7 @@ Source: "{#PluginPayloadDir}\Contents\Resources\torchtrt-runtime\bin\corridorkey
 
 #if Flavor == "offline"
 ; ----------------------------------------------------------------------
-; OFFLINE flavor: every selected pack is pre-bundled inside the
+; OFFLINE flavor: every manifest pack is pre-bundled inside the
 ; installer, no network access at install time. The PowerShell
 ; packager places the per-pack files under {#ModelPayloadDir} (rooted
 ; at the manifest pack's dest_subdir) before invoking ISCC.
@@ -353,6 +368,13 @@ begin
     SaveStringToFile(CorridorKeyBlueRuntimeMarkerPath, BLUE_RUNTIME_SHA256, False);
   end;
 end;
+
+#if Flavor == "offline"
+function ShouldSkipPage(CurPageID: Integer): Boolean;
+begin
+  Result := CurPageID = wpSelectComponents;
+end;
+#endif
 
 @@PACK_CACHE_PREPARE_PROCEDURE@@
 

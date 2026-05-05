@@ -94,6 +94,11 @@ $resolvedVersion = Initialize-CorridorKeyVersion `
     -Version $Version `
     -SyncGuiMetadata:$syncGuiMetadata
 
+$publishGithubRequested = $additionalArguments | Where-Object { $_ -eq "-PublishGithub" -or $_ -eq "/PublishGithub" }
+if ($Task -eq "release" -and $publishGithubRequested -and $Flavor -ne "online") {
+    throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
+}
+
 # Validate any user-provided override BEFORE we attempt to derive a
 # label from git. The strict X.Y.Z-win.N format only applies when the
 # operator explicitly opts in to the published-prerelease label shape;
@@ -239,8 +244,9 @@ switch ($Task) {
                 if ($Flavor -eq "offline") {
                     # Offline flavor needs every pack file laid out on
                     # disk before ISCC compiles. stage_offline_payload
-                    # downloads each "ready" entry from Hugging Face
-                    # into dist/_offline_payload/ with SHA256 verify.
+                    # requires every manifest entry to be ready, then
+                    # downloads each file from Hugging Face into
+                    # dist/_offline_payload/ with SHA256 verify.
                     # The helper is idempotent (skips files whose
                     # local sha256 already matches the manifest) so a
                     # repeated package-ofx run only re-downloads what
