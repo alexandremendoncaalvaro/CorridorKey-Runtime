@@ -25,6 +25,14 @@ if(NOT EXISTS "${BIN_DIR}")
     return()
 endif()
 
+if(MSVC_TOOLCHAIN AND BUILD_TYPE STREQUAL "Debug")
+    message(
+        "SKIP: vendored LibTorch/TorchTRT is a Release distribution; "
+        "PyTorch documents Windows Debug and Release LibTorch builds as ABI-incompatible."
+    )
+    return()
+endif()
+
 foreach(resolution IN ITEMS 512 1024 2048)
     execute_process(
         COMMAND "${RUNNER_EXE}"

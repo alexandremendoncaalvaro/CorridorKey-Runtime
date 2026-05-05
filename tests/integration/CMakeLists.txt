@@ -88,6 +88,8 @@ if(CORRIDORKEY_HAS_TORCHTRT AND TARGET corridorkey-torchtrt-runner)
             -DRUNNER_EXE=$<TARGET_FILE:corridorkey-torchtrt-runner>
             -DTS_PATH=${PROJECT_SOURCE_DIR}/temp/dynamic-rtx/corridorkey_dynamic_blue_fp16.ts
             -DBIN_DIR=${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}
+            -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DMSVC_TOOLCHAIN=$<BOOL:${MSVC}>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/run_optional_torchtrt_runner.cmake
     )
     set_tests_properties(torchtrt_dynamic_runner_smoke PROPERTIES

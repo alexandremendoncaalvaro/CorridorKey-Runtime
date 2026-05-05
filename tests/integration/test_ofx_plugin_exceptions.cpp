@@ -77,7 +77,7 @@ TEST_CASE("OFX C-API Boundary catches exceptions and returns kOfxStatFailed",
     SKIP(
         "ASAN-instrumented dependency aborts on late dlopen; "
         "coverage ships via non-sanitized preset runs.");
-#endif
+#else
 
     // Resolve the path to the built DLL
 #if defined(_WIN32)
@@ -119,6 +119,7 @@ TEST_CASE("OFX C-API Boundary catches exceptions and returns kOfxStatFailed",
     FreeLibrary(handle);
 #else
     dlclose(handle);
+#endif
 #endif
 }
 
