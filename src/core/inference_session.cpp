@@ -40,7 +40,9 @@
 #include "common/runtime_paths.hpp"
 #include "common/srgb_lut.hpp"
 #include "common/stage_profiler.hpp"
+#include "core/model_input_normalization.hpp"
 #include "core/pinned_buffer.hpp"
+#include "core/postprocess_policy.hpp"
 #include "inference_output_validation.hpp"
 #include "inference_session_metadata.hpp"
 #include "mlx_session.hpp"
@@ -107,13 +109,6 @@
 // preprocessor #if defined() vs #ifdef) are fixed inline rather than
 // suppressed.
 namespace {
-
-constexpr std::array<float, 3> kCorridorKeyRgbMean = {0.485F, 0.456F, 0.406F};
-constexpr std::array<float, 3> kCorridorKeyRgbInvStddev = {
-    1.0F / 0.229F,
-    1.0F / 0.224F,
-    1.0F / 0.225F,
-};
 
 // debug_log scratch buffer for ctime_s. ctime expands its 24-char
 // timestamp plus a NUL into a 25-byte target; 32 leaves margin for the
@@ -1581,7 +1576,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
         on_stage, "post_despill",
         [&]() {
             despill(result.foreground.view(), params.despill_strength,
-                    static_cast<SpillMethod>(params.spill_method),
+                    effective_despill_method(params.spill_method, params.despill_screen_channel),
                     params.despill_screen_channel);
         },
         1);

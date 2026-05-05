@@ -23,6 +23,7 @@
 #include <torch/script.h>
 
 #include "common/stage_profiler.hpp"
+#include "core/model_input_normalization.hpp"
 // Strategy C, Sprint 1 PR 1 follow-up: the runtime DLL arming
 // (AddDllDirectory + LoadLibraryEx of torchtrt.dll +
 // corridorkey_torchtrt.dll) lives in a torch-free TU compiled into
@@ -301,9 +302,12 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
                 const int src_x = reflect_index(x - padding.left, width);
                 const auto dst_index = (static_cast<std::ptrdiff_t>(y) * inference_width) + x;
                 const auto reflected_index = (static_cast<std::ptrdiff_t>(src_y) * width) + src_x;
-                dst[(0 * inference_plane) + dst_index] = rgb_data[(reflected_index * 3) + 0];
-                dst[(1 * inference_plane) + dst_index] = rgb_data[(reflected_index * 3) + 1];
-                dst[(2 * inference_plane) + dst_index] = rgb_data[(reflected_index * 3) + 2];
+                dst[(0 * inference_plane) + dst_index] =
+                    normalize_corridorkey_rgb(rgb_data[(reflected_index * 3) + 0], 0);
+                dst[(1 * inference_plane) + dst_index] =
+                    normalize_corridorkey_rgb(rgb_data[(reflected_index * 3) + 1], 1);
+                dst[(2 * inference_plane) + dst_index] =
+                    normalize_corridorkey_rgb(rgb_data[(reflected_index * 3) + 2], 2);
                 dst[(3 * inference_plane) + dst_index] = hint_data[reflected_index];
             }
         }
