@@ -43,7 +43,7 @@ REVISION = "main"
 # working when the blue pack lands in `Resources/torchtrt-runtime/bin/`.
 PACKS = {
     "green-models": {
-        "label": "Pack Verde (modelos ONNX)",
+        "label": "Green pack (ONNX models)",
         "component": "green",
         "dest_subdir": "models",
         "files": [
@@ -58,7 +58,7 @@ PACKS = {
         ],
     },
     "blue-models": {
-        "label": "Pack Azul - modelo TorchScript dinamico",
+        "label": "Blue pack - dynamic TorchScript model",
         "component": "blue",
         "dest_subdir": "models",
         "files": [
@@ -66,7 +66,7 @@ PACKS = {
         ],
     },
     "blue-runtime": {
-        "label": "Pack Azul - runtime DLLs (libtorch + CUDA + TensorRT)",
+        "label": "Blue pack - runtime DLLs (LibTorch + CUDA + TensorRT)",
         "component": "blue",
         "dest_subdir": "torchtrt-runtime/bin",
         "is_archive": True,

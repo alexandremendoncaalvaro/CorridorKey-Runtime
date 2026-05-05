@@ -108,27 +108,27 @@ OutputBaseFilename={#OutputBaseFilename}
 SetupIconFile={#InstallerIcon}
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
+ShowLanguageDialog=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
 [Types]
-Name: "minimum"; Description: "Minimo (apenas Verde)"
-Name: "recommended"; Description: "Recomendado (Verde + Azul)"
-Name: "custom"; Description: "Personalizado"; Flags: iscustom
+Name: "minimum"; Description: "Minimum (Green only)"
+Name: "recommended"; Description: "Recommended (Green + Blue)"
+Name: "custom"; Description: "Custom"; Flags: iscustom
 
 [Components]
 ; Plugin base is always installed - it is the OFX bundle the host
 ; loads, plus the green-track ONNX Runtime DLLs that ship in every
 ; flavor. The fixed flag prevents the user from unchecking it.
-Name: "pluginbase"; Description: "Plugin OFX base (CLI + runtime ONNX)"; \
+Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
     Types: minimum recommended custom; Flags: fixed
 
-Name: "green"; Description: "Pack Verde - modelos chroma key verde (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
     Types: minimum recommended custom
 
-Name: "blue"; Description: "Pack Azul - modelo chroma key azul + runtime libtorch (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
     Types: recommended custom
 
 [Files]
@@ -444,16 +444,16 @@ begin
   end;
 
   DownloadPage.Msg1Label.Caption :=
-    Format('Baixando arquivo %d de %d', [DownloadFile, DownloadCount]);
+    Format('Downloading file %d of %d', [DownloadFile, DownloadCount]);
   if ProgressMax > 0 then begin
     DownloadPage.Msg2Label.Caption :=
-      FileName + ' (' + CorridorKeyFormatBytes(Progress) + ' de ' +
-      CorridorKeyFormatBytes(ProgressMax) + '). Total selecionado: ' +
+      FileName + ' (' + CorridorKeyFormatBytes(Progress) + ' of ' +
+      CorridorKeyFormatBytes(ProgressMax) + '). Selected total: ' +
       CorridorKeyFormatBytes(DownloadTotalBytes);
   end else begin
     DownloadPage.Msg2Label.Caption :=
       FileName + ' (' + CorridorKeyFormatBytes(Progress) +
-      ' baixados). Total selecionado: ' + CorridorKeyFormatBytes(DownloadTotalBytes);
+      ' downloaded). Selected total: ' + CorridorKeyFormatBytes(DownloadTotalBytes);
   end;
 
   Result := True;
@@ -463,7 +463,7 @@ procedure InitializeWizard;
 begin
   DownloadPage := CreateDownloadPage(
     SetupMessage(msgWizardPreparing),
-    'Baixando os pacotes selecionados de Hugging Face. SHA-256 verificado a cada arquivo.',
+    'Downloading selected packs from Hugging Face. SHA-256 is verified for every file.',
     @CorridorKeyOnDownloadProgress);
   DownloadPage.ShowBaseNameInsteadOfUrl := True;
 end;
@@ -483,9 +483,9 @@ begin
       Exit;
     end;
     DownloadPage.Msg1Label.Caption :=
-      Format('Preparando %d arquivo(s) para baixar', [DownloadCount]);
+      Format('Preparing %d file(s) to download', [DownloadCount]);
     DownloadPage.Msg2Label.Caption :=
-      Format('Total selecionado: %s', [CorridorKeyFormatBytes(DownloadTotalBytes)]);
+      Format('Selected total: %s', [CorridorKeyFormatBytes(DownloadTotalBytes)]);
     DownloadPage.Show;
     try
       try
