@@ -4,6 +4,8 @@
 #include <cuda_runtime_api.h>
 #include <npp.h>
 #include <nppi.h>
+
+#include "npp_stream_context.hpp"
 #endif
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-math-missing-parentheses,bugprone-implicit-widening-of-multiplication-result,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,performance-unnecessary-value-param,cppcoreguidelines-special-member-functions,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions)
@@ -73,12 +75,18 @@ struct GpuPrepState {
 
     bool gpu_available = false;
     cudaStream_t stream = nullptr;
+    NppStreamContext npp_context{};
 
     GpuPrepState() {
         int device_count = 0;
         if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0) {
             if (cudaStreamCreate(&stream) == cudaSuccess) {
-                gpu_available = true;
+                if (detail::make_npp_stream_context(stream, npp_context)) {
+                    gpu_available = true;
+                } else {
+                    cudaStreamDestroy(stream);
+                    stream = nullptr;
+                }
             }
         }
     }
@@ -191,8 +199,6 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
         return Unexpected(Error{ErrorCode::InferenceFailed, "Failed to allocate GPU prep buffers"});
     }
 
-    nppSetStream(m_state->stream);
-
     const size_t model_pixels = static_cast<size_t>(model_width) * model_height;
 
     // 1. Upload interleaved RGB (C3) to device
@@ -215,9 +221,10 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
     const int src_rgb_step = rgb.width * 3 * static_cast<int>(sizeof(float));
     const int dst_rgb_step = model_width * 3 * static_cast<int>(sizeof(float));
 
-    NppStatus status = nppiResize_32f_C3R(m_state->src_rgb_dev, src_rgb_step, src_rgb_size,
-                                          src_rgb_roi, m_state->resized_rgb_dev, dst_rgb_step,
-                                          dst_size, dst_roi, NPPI_INTER_LINEAR);
+    const NppStreamContext npp_context = m_state->npp_context;
+    NppStatus status = nppiResize_32f_C3R_Ctx(
+        m_state->src_rgb_dev, src_rgb_step, src_rgb_size, src_rgb_roi, m_state->resized_rgb_dev,
+        dst_rgb_step, dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -230,9 +237,9 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
     const int src_hint_step = hint.width * static_cast<int>(sizeof(float));
     const int dst_hint_step = model_width * static_cast<int>(sizeof(float));
 
-    status = nppiResize_32f_C1R(m_state->src_hint_dev, src_hint_step, src_hint_size, src_hint_roi,
-                                m_state->resized_hint_dev, dst_hint_step, dst_size, dst_roi,
-                                NPPI_INTER_LINEAR);
+    status = nppiResize_32f_C1R_Ctx(m_state->src_hint_dev, src_hint_step, src_hint_size,
+                                    src_hint_roi, m_state->resized_hint_dev, dst_hint_step,
+                                    dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -244,8 +251,8 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
     Npp32f* planar_ptrs[3] = {m_state->planar_dev, m_state->planar_dev + model_pixels,
                               m_state->planar_dev + 2 * model_pixels};
 
-    status = nppiCopy_32f_C3P3R(m_state->resized_rgb_dev, dst_rgb_step, planar_ptrs, dst_hint_step,
-                                dst_size);
+    status = nppiCopy_32f_C3P3R_Ctx(m_state->resized_rgb_dev, dst_rgb_step, planar_ptrs,
+                                    dst_hint_step, dst_size, npp_context);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -256,13 +263,14 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
     for (int channel = 0; channel < 3; ++channel) {
         Npp32f* plane = m_state->planar_dev + static_cast<size_t>(channel) * model_pixels;
 
-        status = nppiSubC_32f_C1IR(mean[channel], plane, dst_hint_step, dst_size);
+        status = nppiSubC_32f_C1IR_Ctx(mean[channel], plane, dst_hint_step, dst_size, npp_context);
         if (status != NPP_SUCCESS) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
                                     "NPP SubC failed on channel " + std::to_string(channel)});
         }
 
-        status = nppiMulC_32f_C1IR(inv_stddev[channel], plane, dst_hint_step, dst_size);
+        status =
+            nppiMulC_32f_C1IR_Ctx(inv_stddev[channel], plane, dst_hint_step, dst_size, npp_context);
         if (status != NPP_SUCCESS) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
                                     "NPP MulC failed on channel " + std::to_string(channel)});
@@ -271,8 +279,8 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
 
     // 7. Copy resized hint into the 4th planar channel
     Npp32f* hint_plane = m_state->planar_dev + 3 * model_pixels;
-    status = nppiCopy_32f_C1R(m_state->resized_hint_dev, dst_hint_step, hint_plane, dst_hint_step,
-                              dst_size);
+    status = nppiCopy_32f_C1R_Ctx(m_state->resized_hint_dev, dst_hint_step, hint_plane,
+                                  dst_hint_step, dst_size, npp_context);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
