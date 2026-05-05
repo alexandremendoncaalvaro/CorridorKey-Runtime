@@ -62,6 +62,7 @@ class OfxRuntimeClient {
     Result<void> launch_server();
     Result<void> recover_runtime_session(StageTimingCallback on_stage);
     Result<void> restart_server(const std::string& reason);
+    [[nodiscard]] bool session_belongs_to_current_server() const;
     void invalidate_session(const std::string& reason);
     void update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot);
     void update_server_health(const app::OfxRuntimeHealthResponse& health);
@@ -70,6 +71,7 @@ class OfxRuntimeClient {
     app::OfxRuntimeSessionSnapshot m_session;
     std::optional<app::OfxRuntimePrepareSessionRequest> m_last_prepare_request;
     int m_server_pid = 0;
+    int m_session_server_pid = 0;
 };
 
 std::filesystem::path resolve_ofx_runtime_server_binary(
