@@ -32,6 +32,7 @@ $cliBinary = Join-Path $BuildDir "src\cli\corridorkey.exe"
 $runtimeServerBinary = Join-Path $BuildDir "src\plugins\ofx\corridorkey_ofx_runtime_server.exe"
 $win64Dir = Join-Path $OutputDir "Contents\Win64"
 $resourcesDir = Join-Path $OutputDir "Contents\Resources\models"
+$torchTrtRuntimeDir = Join-Path $OutputDir "Contents\Resources\torchtrt-runtime\bin"
 $modelInventoryPath = Join-Path $OutputDir "model_inventory.json"
 $artifactManifestOutputPath = Join-Path $OutputDir "artifact_manifest.json"
 
@@ -238,6 +239,7 @@ if (Test-Path $OutputDir) {
 
 New-Item -ItemType Directory -Path $win64Dir -Force | Out-Null
 New-Item -ItemType Directory -Path $resourcesDir -Force | Out-Null
+New-Item -ItemType Directory -Path $torchTrtRuntimeDir -Force | Out-Null
 
 Assert-FileExists -Path $pluginBinary -Message "OpenFX plugin binary not found at $pluginBinary"
 Assert-FileExists -Path $cliBinary -Message "CLI binary not found at $cliBinary"
@@ -421,6 +423,13 @@ $concrtSource = Join-Path $cmakeBundleWin64 "concrt140.dll"
 if (Test-Path $concrtSource) {
     Copy-Item $concrtSource $win64Dir -Force
 }
+
+$cmakeTorchTrtWrapper = Join-Path $BuildDir "CorridorKey.ofx.bundle\Contents\Resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll"
+if (-not (Test-Path $cmakeTorchTrtWrapper)) {
+    throw "TorchTRT wrapper DLL missing from CMake-staged bundle at $cmakeTorchTrtWrapper. The blue runtime pack loads corridorkey_torchtrt.dll from Contents\Resources\torchtrt-runtime\bin, and omitting it causes the delay-loaded backend to terminate the CLI/runtime server before it can report a recoverable error."
+}
+Copy-Item $cmakeTorchTrtWrapper $torchTrtRuntimeDir -Force
+Write-Host "Copied TorchTRT wrapper DLL: corridorkey_torchtrt.dll"
 
 if ($null -ne $tensorrtProvider) {
     Write-Host "Validating packaged TensorRT backend loadability..." -ForegroundColor Cyan

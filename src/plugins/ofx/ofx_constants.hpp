@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <corridorkey/types.hpp>
+#include <cstdint>
 #include <string_view>
 
 #include "ofxColour.h"
@@ -89,16 +90,24 @@ constexpr int kCoarseResolution1024 = 2;
 constexpr int kCoarseResolution1536 = 3;
 constexpr int kCoarseResolution2048 = 4;
 
+// Quality-ladder pixel sizes returned by the choice-index helpers below.
+// Promoted out of inline switch arms so cppcoreguidelines-avoid-magic-
+// numbers stays clean and the per-tier resolution is named at the source.
+constexpr int kCoarseResolutionPx512 = 512;
+constexpr int kCoarseResolutionPx1024 = 1024;
+constexpr int kCoarseResolutionPx1536 = 1536;
+constexpr int kCoarseResolutionPx2048 = 2048;
+
 inline int coarse_resolution_override_from_choice(int choice) {
     switch (choice) {
         case kCoarseResolution512:
-            return 512;
+            return kCoarseResolutionPx512;
         case kCoarseResolution1024:
-            return 1024;
+            return kCoarseResolutionPx1024;
         case kCoarseResolution1536:
-            return 1536;
+            return kCoarseResolutionPx1536;
         case kCoarseResolution2048:
-            return 2048;
+            return kCoarseResolutionPx2048;
         default:
             return 0;
     }
@@ -152,7 +161,7 @@ constexpr int kInputColorSrgb = 0;
 constexpr int kInputColorLinear = 1;
 constexpr int kInputColorAutoHostManaged = 2;
 
-enum class InputColorRuntimeMode {
+enum class InputColorRuntimeMode : std::uint8_t {
     ManualSrgb,
     ManualLinear,
     HostManagedSrgbTx,
@@ -195,6 +204,7 @@ inline bool input_color_runtime_mode_is_linear(InputColorRuntimeMode mode) {
 // Screen color
 constexpr int kScreenColorGreen = 0;
 constexpr int kScreenColorBlue = 1;
+constexpr int kScreenColorBlueGreen = 2;
 
 constexpr int kDefaultSourcePassthroughEnabled = 1;
 constexpr int kDefaultEdgeErode = 3;

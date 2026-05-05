@@ -29,14 +29,14 @@ struct OfxRuntimeRequestEnvelope {
 struct OfxRuntimeResponseEnvelope {
     int protocol_version = kOfxRuntimeProtocolVersion;
     bool success = false;
-    std::string error = "";
+    std::string error;
     nlohmann::json payload = nlohmann::json::object();
 };
 
 struct OfxRuntimePrepareSessionRequest {
-    std::string client_instance_id = "";
+    std::string client_instance_id;
     std::filesystem::path model_path = {};
-    std::string artifact_name = "";
+    std::string artifact_name;
     DeviceInfo requested_device = {};
     EngineCreateOptions engine_options = {};
     int requested_quality_mode = 0;
@@ -50,12 +50,12 @@ struct OfxRuntimePrepareSessionRequest {
 };
 
 struct OfxRuntimeSessionSnapshot {
-    std::string session_id = "";
+    std::string session_id;
     std::filesystem::path model_path = {};
-    std::string artifact_name = "";
+    std::string artifact_name;
     DeviceInfo requested_device = {};
     DeviceInfo effective_device = {};
-    std::optional<BackendFallbackInfo> backend_fallback = std::nullopt;
+    std::optional<BackendFallbackInfo> backend_fallback;
     int requested_quality_mode = 0;
     int requested_resolution = 0;
     int effective_resolution = 0;
@@ -66,11 +66,11 @@ struct OfxRuntimeSessionSnapshot {
 
 struct OfxRuntimePrepareSessionResponse {
     OfxRuntimeSessionSnapshot session = {};
-    std::vector<StageTiming> timings = {};
+    std::vector<StageTiming> timings;
 };
 
 struct OfxRuntimeRenderFrameRequest {
-    std::string session_id = "";
+    std::string session_id;
     std::filesystem::path shared_frame_path = {};
     int width = 0;
     int height = 0;
@@ -80,11 +80,11 @@ struct OfxRuntimeRenderFrameRequest {
 
 struct OfxRuntimeRenderFrameResponse {
     OfxRuntimeSessionSnapshot session = {};
-    std::vector<StageTiming> timings = {};
+    std::vector<StageTiming> timings;
 };
 
 struct OfxRuntimeReleaseSessionRequest {
-    std::string session_id = "";
+    std::string session_id;
 };
 
 struct OfxRuntimeHealthResponse {
@@ -94,7 +94,7 @@ struct OfxRuntimeHealthResponse {
 };
 
 struct OfxRuntimeShutdownRequest {
-    std::string reason = "";
+    std::string reason;
 };
 
 CORRIDORKEY_API std::string ofx_runtime_command_to_string(OfxRuntimeCommand command);

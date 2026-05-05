@@ -1,8 +1,15 @@
 #pragma once
 
+// Version constants are #defines (rather than constexpr) because they need to
+// be spellable inside the preprocessor for build-system / packaging scripts
+// that string-substitute them at install time, and the *_STRING values are
+// concatenated into other string literals at use sites (which constexpr
+// std::string_view does not support without callsite churn).
+// NOLINTBEGIN(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum,cppcoreguidelines-macro-usage,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 #define CORRIDORKEY_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
 #define CORRIDORKEY_VERSION_MINOR @PROJECT_VERSION_MINOR@
 #define CORRIDORKEY_VERSION_PATCH @PROJECT_VERSION_PATCH@
 
 #define CORRIDORKEY_VERSION_STRING "@PROJECT_VERSION@"
 #define CORRIDORKEY_DISPLAY_VERSION_STRING "@CORRIDORKEY_VERSION_DISPLAY_STRING@"
+// NOLINTEND(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum,cppcoreguidelines-macro-usage,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

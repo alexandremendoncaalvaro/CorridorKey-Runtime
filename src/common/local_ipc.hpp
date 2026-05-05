@@ -25,8 +25,8 @@ class CORRIDORKEY_API LocalJsonConnection {
     LocalJsonConnection& operator=(LocalJsonConnection&& other) noexcept;
 
     [[nodiscard]] bool valid() const;
-    Result<void> write_json(const nlohmann::json& json);
-    Result<nlohmann::json> read_json(int timeout_ms) const;
+    [[nodiscard]] Result<void> write_json(const nlohmann::json& json) const;
+    [[nodiscard]] Result<nlohmann::json> read_json(int timeout_ms) const;
 
    private:
     friend class LocalJsonServer;
@@ -48,7 +48,7 @@ class CORRIDORKEY_API LocalJsonServer {
     LocalJsonServer(LocalJsonServer&& other) noexcept;
     LocalJsonServer& operator=(LocalJsonServer&& other) noexcept;
 
-    Result<std::optional<LocalJsonConnection>> accept_one(int timeout_ms) const;
+    [[nodiscard]] Result<std::optional<LocalJsonConnection>> accept_one(int timeout_ms) const;
 
    private:
     explicit LocalJsonServer(std::intptr_t socket_handle);

@@ -21,22 +21,38 @@ def disable_torch_compile_for_export(torch_module):
     torch_module.compile = passthrough_compile
 
 
+# Empirically validated against the green and blue checkpoints currently in
+# C:\Dev\CorridorKey\CorridorKeyModule\checkpoints (CorridorKey_v1.0.pth from
+# 2026-04-14 and CorridorKeyBlue_1.0.pth from 2026-04-30): with this exact
+# upstream SHA, load_state_dict produces empty missing/unexpected key lists
+# after the pos_embed interpolation pass. Bumping this pin requires re-running
+# `uv run python export_onnx.py --ckpt <pth>` for both checkpoints and
+# confirming that "Missing keys" / "Unexpected keys" lines stay absent.
+NIKO_UPSTREAM_PIN = "422f9999d1d83323534d2da9d776086a3134050d"
+
+
 def clone_original_repo():
-    print("[Info] Cloning original CorridorKey repository for export dependencies...")
+    print(f"[Info] Cloning original CorridorKey repository (pinned to {NIKO_UPSTREAM_PIN[:12]})...")
     temp_dir = tempfile.mkdtemp(prefix="corridorkey_repo_")
     try:
+        # Full clone (no --depth) so we can checkout the pinned SHA. Shallow
+        # clones cannot reach arbitrary commits without server-side allowance.
         subprocess.run(
-            ["git", "clone", "--depth", "1", "https://github.com/nikopueringer/CorridorKey.git", temp_dir],
+            ["git", "clone", "https://github.com/nikopueringer/CorridorKey.git", temp_dir],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        subprocess.run(
+            ["git", "-C", temp_dir, "checkout", "--quiet", NIKO_UPSTREAM_PIN],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         return temp_dir
     except subprocess.CalledProcessError as e:
-        print(f"[Error] Failed to clone original repository: {e}")
+        print(f"[Error] Failed to clone or checkout pinned upstream: {e}")
         shutil.rmtree(temp_dir, ignore_errors=True)
         sys.exit(1)
 
 
-def load_model_with_pos_embed_interpolation(checkpoint_path, img_size):
+def load_model_with_pos_embed_interpolation(checkpoint_path, img_size, allow_key_drift=False):
     """Load GreenFormer with position embedding interpolation for arbitrary resolutions.
 
     Replicates the logic from CorridorKeyEngine._load_model() but works on all
@@ -86,10 +102,41 @@ def load_model_with_pos_embed_interpolation(checkpoint_path, img_size):
         new_state_dict[k] = v
 
     missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
-    if missing:
-        print(f"  [Warning] Missing keys: {missing}")
-    if unexpected:
-        print(f"  [Warning] Unexpected keys: {unexpected}")
+
+    # After the pos_embed interpolation pass, missing/unexpected lists must be
+    # empty. A non-empty list means the upstream GreenFormer architecture has
+    # drifted from the checkpoint we are loading -- strict=False would silently
+    # leave layers either untrained (missing) or unused (unexpected), producing
+    # an ONNX whose math no longer matches the original PyTorch model. Fail
+    # loudly so this never reaches a release. --allow-key-drift exists for
+    # deliberate upstream-bump or training experiments; never use it in CI or
+    # when packaging shipped models.
+    if missing or unexpected:
+        message_lines = [
+            "[Error] state_dict mismatch between checkpoint and GreenFormer.",
+            f"  checkpoint: {checkpoint_path}",
+            f"  resolution: {img_size}",
+        ]
+        if missing:
+            message_lines.append(f"  missing keys ({len(missing)}): {missing}")
+        if unexpected:
+            message_lines.append(f"  unexpected keys ({len(unexpected)}): {unexpected}")
+        message_lines.append(
+            "  Bump NIKO_UPSTREAM_PIN to a commit whose GreenFormer matches this "
+            "checkpoint, or pass --repo-path to a known-good local checkout."
+        )
+        if not allow_key_drift:
+            for line in message_lines:
+                print(line, file=sys.stderr)
+            print(
+                "  Pass --allow-key-drift to override (training experiments only -- "
+                "the resulting ONNX has untrained or stranded layers).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        for line in message_lines:
+            print(line.replace("[Error]", "[Warning]"))
+        print("  --allow-key-drift was set; continuing despite drift.")
 
     return model
 
@@ -98,13 +145,28 @@ def export_resolution(args, resolution):
     import torch
     disable_torch_compile_for_export(torch)
 
-    static = getattr(args, 'static', False)
-    suffix = f'_static_{resolution}' if static else f'_{resolution}'
+    # Per-resolution static is the contract the canonical pipeline expects:
+    # corridorkey_fp32_<res>.onnx regardless of static-ness, with the
+    # static export only applied to the rungs TensorRT requires (1536, 2048).
+    # Blue no longer flows through this ONNX path in production -- it is
+    # served by Torch-TensorRT engines (.ts) compiled via
+    # tools/model_exporter/compile_torchtrt.py. The blue branch here is
+    # retained only for the INT8 web experiment that still consumes ONNX.
+    # The legacy --static flag is retained, but it keeps the historical
+    # _static_<res>.onnx suffix to avoid breaking any standalone caller that
+    # already relied on it.
+    static_resolutions = getattr(args, 'static_resolutions', None) or []
+    static_global = getattr(args, 'static', False)
+    static = (resolution in static_resolutions) or static_global
+    use_legacy_naming = static_global and not static_resolutions
+    suffix = f'_static_{resolution}' if (static and use_legacy_naming) else f'_{resolution}'
     out_path = args.out.replace('.onnx', f'{suffix}.onnx')
     mode_label = "STATIC" if static else "DYNAMIC"
     print(f"\n[Info] === Exporting Resolution {resolution}x{resolution} ({mode_label}) ===")
 
-    base_model = load_model_with_pos_embed_interpolation(args.ckpt, resolution)
+    base_model = load_model_with_pos_embed_interpolation(
+        args.ckpt, resolution, allow_key_drift=getattr(args, 'allow_key_drift', False)
+    )
 
     class ONNXWrapper(torch.nn.Module):
         def __init__(self, model):
@@ -119,8 +181,23 @@ def export_resolution(args, resolution):
     model = ONNXWrapper(base_model)
     dummy_x = torch.randn(1, 4, resolution, resolution, device=device)
 
-    if resolution >= 1536:
-        print(f"[Info] Forcing FP16 mode for {resolution}px to save memory...")
+    # FP16 export at trace time produces an ONNX with FP16 weights AND FP16
+    # I/O. TensorRT serves that ONNX correctly but the runtime's FP32 host
+    # pipeline costs roughly 100x more per frame on RTX 3080 because the EP
+    # cannot fuse FP32 host pinned input with an FP16-typed entry point.
+    # The production layout (FP32 I/O + FP16 internal weights with Cast only
+    # at the I/O boundary) is produced by `optimize_model.py` running
+    # `convert_float_to_float16(keep_io_types=True)` on a plain FP32 export.
+    # Default policy: never force FP16 at trace time; let optimize_model
+    # produce the canonical layout. Resolutions beyond `--fp16-from-resolution`
+    # opt in if the host cannot fit the FP32 trace; this preserves the
+    # legacy >=1536 escape valve for hosts with limited RAM.
+    fp16_resolutions = getattr(args, 'fp16_resolutions', None) or []
+    fp16_threshold = getattr(args, 'fp16_from_resolution', 1536)
+    use_fp16 = (resolution in fp16_resolutions) or (resolution >= fp16_threshold)
+    if use_fp16:
+        print(f"[Info] Forcing FP16 export at trace time for {resolution}px "
+              f"(--fp16-resolutions opt-in or --fp16-from-resolution threshold).")
         model = model.half()
         dummy_x = dummy_x.half()
 
@@ -149,12 +226,15 @@ def export_resolution(args, resolution):
         warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
         from torch.nn.attention import SDPBackend, sdpa_kernel
 
-        # Force the legacy TorchScript-based exporter (dynamo=False). The Hiera model uses 5D
-        # SDPA tensors [batch, units, tokens, heads, dim] that the dynamo exporter cannot
-        # translate. With SDPBackend.MATH, PyTorch decomposes SDPA into matmul+softmax before
-        # the tracer sees it — matching the PyTorch 2.3.1 behavior that produced existing models.
+        # Use the TorchScript-based exporter that ships in torch 2.3.1+cu121
+        # (the version pinned in pyproject.toml). The Hiera model uses 5D SDPA
+        # tensors [batch, units, tokens, heads, dim] that the dynamo-based
+        # exporter (introduced in torch 2.5) cannot translate. SDPBackend.MATH
+        # decomposes SDPA into matmul+softmax before the tracer sees it.
+        # The legacy exporter is the only torch.onnx.export() path in 2.3.1, so
+        # there is no `dynamo=` kwarg to set.
         with sdpa_kernel(SDPBackend.MATH):
-            torch.onnx.export(model, dummy_x, out_path, dynamo=False, **export_kwargs)
+            torch.onnx.export(model, dummy_x, out_path, **export_kwargs)
     print(f"[Success] Exported ONNX {'static' if static else 'FP32'} {resolution}px model to {out_path}")
 
 
@@ -165,10 +245,36 @@ def main():
     parser.add_argument("--resolutions", type=int, nargs="+", default=[512, 768, 1024, 1536, 2048],
                         help="Resolutions to export (default: 512 768 1024 1536 2048)")
     parser.add_argument("--static", action="store_true",
-                        help="Export with fully static shapes (batch_size=1 baked in). "
-                             "Required for TensorRT at 1536+ resolutions.")
+                        help="Export every resolution with fully static shapes "
+                             "(batch_size=1 baked in). Legacy global flag; output filenames "
+                             "carry a _static_<res> suffix.")
+    parser.add_argument("--static-resolutions", type=int, nargs="+", default=[],
+                        help="Resolutions in this list are exported with static shapes; "
+                             "all others stay dynamic. Output filenames keep the canonical "
+                             "<base>_<res>.onnx form, which is what optimize_model.py and "
+                             "the windows-rtx pipeline expect. Use this to enable TensorRT "
+                             "at 1536+ resolutions without breaking downstream naming.")
+    parser.add_argument("--fp16-resolutions", type=int, nargs="+", default=[],
+                        help="Resolutions to export directly in FP16 (model.half() before "
+                             "torch.onnx.export). Bypasses the post-export "
+                             "onnxconverter_common cast that produced all-NaN models for "
+                             "CorridorKeyBlue at 1024px in TensorRT and CUDA. Use this "
+                             "for any resolution where the cast path is suspect. "
+                             "Resolutions >= --fp16-from-resolution always use FP16 export "
+                             "regardless of this list.")
+    parser.add_argument("--fp16-from-resolution", type=int, default=1536,
+                        help="Resolutions at or above this threshold always use FP16 export "
+                             "(default: 1536, which is the documented memory ceiling for "
+                             "FP32 tracing of the Hiera_base_plus model).")
     parser.add_argument("--repo-path", type=str,
-                        help="Path to local CorridorKey repo (cloned automatically if omitted)")
+                        help="Path to local CorridorKey repo (cloned automatically if omitted). "
+                             "When omitted, the upstream is cloned and pinned to "
+                             f"{NIKO_UPSTREAM_PIN[:12]} -- the SHA empirically validated against "
+                             "the green and blue checkpoints currently shipped.")
+    parser.add_argument("--allow-key-drift", action="store_true",
+                        help="Continue export even when the checkpoint's state_dict has missing or "
+                             "unexpected keys against the upstream GreenFormer. Default behavior is "
+                             "to fail hard so we never silently ship an ONNX with untrained layers.")
     args = parser.parse_args()
 
     repo_to_clean = None

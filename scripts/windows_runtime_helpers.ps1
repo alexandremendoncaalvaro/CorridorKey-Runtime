@@ -18,6 +18,40 @@ function Get-CorridorKeyWindowsRtxBuildContract {
     }
 }
 
+function Get-CorridorKeyWindowsTorchTrtBuildContract {
+    # Pinned versions for the Windows blue-pack TorchTRT runtime payload.
+    # Sprint 0 in temp/blue-diagnose/ proved this exact triple compiles
+    # blue .ts engines that load round-trip on the local RTX 3080.
+    # NVIDIA does not publish a Windows libtorchtrt zip; the runtime
+    # DLLs come from three pip wheels (see prepare_windows_torchtrt_release.ps1).
+    return [pscustomobject]@{
+        torch_version = "2.8.0+cu128"
+        torch_index_url = "https://download.pytorch.org/whl/cu128"
+        torch_tensorrt_version = "2.8.0"
+        tensorrt_cu12_version = "10.12.0.36"
+        required_cuda_version = "12.8"
+        required_python_version = "3.12"
+        required_python_abi_tag = "cp312"
+        # DLL exclusion list (everything in torch/lib EXCEPT these gets
+        # vendored). This intentional inversion: bringing up
+        # tools/torchtrt_runner taught us libtorch's DLL graph has too many
+        # delay-loaded transitive deps to safely curate by allowlist (every
+        # missing dep surfaced as opaque GetLastError=126 with no symbol).
+        # The single big win we keep is excluding nvinfer_builder_resource_10.dll
+        # (1.8 GB), which is the engine BUILDER and never used at runtime
+        # deserialization. Net curated payload is ~3.5 GB instead of ~9 GB.
+        # Future maintainers: prune more only if a dumpbin sweep proves
+        # nothing in torch_cpu/torch_cuda/torchtrt/nvinfer_10 references
+        # the candidate.
+        torch_lib_exclusions = @()
+        torch_tensorrt_lib_exclusions = @()
+        tensorrt_lib_exclusions = @(
+            # 1.8 GB engine builder; runtime deserialization never invokes it.
+            "nvinfer_builder_resource_10.dll"
+        )
+    }
+}
+
 function Test-CorridorKeyUsableCheckpointFile {
     param([string]$Path)
 
@@ -851,6 +885,64 @@ function Sync-CorridorKeyGuiVersionMetadata {
     return $Version
 }
 
+function Get-CorridorKeyDerivedDisplayLabel {
+    <#
+    .SYNOPSIS
+        Derives the local-build display label from `git describe` per the
+        rule documented in docs/RELEASE_GUIDELINES.md section "Windows
+        Release Label Plumbing", priority mechanism #3.
+
+    .DESCRIPTION
+        For builds produced without `-DisplayVersionLabel` and without
+        `-PublishGithub`, the canonical local label comes from
+        `git describe --tags --dirty --match "v*-win.*"` with the leading
+        `v` stripped. The derived label naturally encodes:
+
+        - The closest published prerelease tag in HEAD's ancestry (e.g.
+          `v0.8.2-win.2`).
+        - The number of commits HEAD is past that tag (e.g. `-82-`).
+        - The short SHA of HEAD (e.g. `g4a75ef2`).
+        - A `-dirty` suffix when the working tree has uncommitted changes.
+
+        Two builds at the same commit produce the same label (because the
+        same git state derives the same description); two builds at
+        different commits differ at minimum in the SHA. This is what the
+        OFX panel and CLI `--version` should report so the operator
+        always knows exactly which source produced the build they are
+        loading.
+
+        Returns an empty string when no matching tag exists in HEAD's
+        ancestry. The caller is expected to fall back to the CMakeLists
+        `PROJECT_VERSION` in that case (preserving the historical
+        behaviour for very early branches).
+
+    .PARAMETER RepoRoot
+        Repository root passed to `git -C` so the helper works regardless
+        of the caller's CWD.
+
+    .PARAMETER PlatformMatch
+        Glob passed to `git describe --match`. Defaults to `v*-win.*`,
+        which is the Windows prerelease tag shape per
+        docs/RELEASE_GUIDELINES.md section 1. macOS/Linux callers can
+        pass their own platform glob.
+    #>
+    param(
+        [string]$RepoRoot,
+        [string]$PlatformMatch = "v*-win.*"
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot) -or -not (Test-Path $RepoRoot)) {
+        return ""
+    }
+
+    $gitArgs = @("-C", $RepoRoot, "describe", "--tags", "--dirty", "--match", $PlatformMatch)
+    $rawLabel = & git @gitArgs 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($rawLabel)) {
+        return ""
+    }
+    return ($rawLabel | Select-Object -First 1).ToString().Trim() -replace '^v', ''
+}
+
 function Initialize-CorridorKeyVersion {
     param(
         [string]$RepoRoot,
@@ -1073,21 +1165,46 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 }
 
 function Get-CorridorKeyPreparedModelList {
-    return @(
+    # Defaults to "green" so the prepare-rtx flow keeps regenerating only the
+    # optimized green ONNX ladder from CorridorKey_v1.0.pth. Pass -Variant
+    # blue to report the dynamic CorridorKeyBlue TorchScript pack; pass
+    # -Variant all to ask for both.
+    param(
+        [ValidateSet("green", "blue", "all")]
+        [string]$Variant = "green"
+    )
+
+    $green = @(
         "corridorkey_fp16_512.onnx",
         "corridorkey_fp16_1024.onnx",
         "corridorkey_fp16_1536.onnx",
         "corridorkey_fp16_2048.onnx"
     )
+    $blue = @(
+        "corridorkey_dynamic_blue_fp16.ts"
+    )
+
+    switch ($Variant) {
+        "green" { return $green }
+        "blue"  { return $blue }
+        default { return $green + $blue }
+    }
 }
 
 function Get-CorridorKeyWindowsRtxPromotedModelList {
-    return @(
-        "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_1024.onnx",
-        "corridorkey_fp16_1536.onnx",
-        "corridorkey_fp16_2048.onnx"
+    # Bundle-facing list. Defaults to "green" so the existing package-ofx +
+    # certify-rtx-artifacts flow stays bit-for-bit compatible while blue is
+    # not yet promoted through the canonical pipeline. Pass -Variant blue or
+    # -Variant all explicitly to advertise blue in the OFX bundle inventory
+    # (the runtime catalog already declares blue intent via packaged_for_windows
+    # = true; missing blue files surface as missing in bundle_validation.json
+    # per the documented Windows Model Availability Policy).
+    param(
+        [ValidateSet("green", "blue", "all")]
+        [string]$Variant = "green"
     )
+
+    return @(Get-CorridorKeyPreparedModelList -Variant $Variant)
 }
 
 function Get-CorridorKeyIntermediateModelList {

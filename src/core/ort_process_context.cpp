@@ -8,7 +8,7 @@ constexpr const char* kOrtLogId = "CorridorKey";
 
 }  // namespace
 
-OrtProcessContext::OrtProcessContext() : m_threading_options(), m_cpu_arena_cfg(0, -1, -1, -1) {}
+OrtProcessContext::OrtProcessContext() : m_cpu_arena_cfg(0, -1, -1, -1) {}
 
 Ort::Env& OrtProcessContext::acquire_env(OrtLoggingLevel log_severity) {
     std::scoped_lock lock(m_mutex);

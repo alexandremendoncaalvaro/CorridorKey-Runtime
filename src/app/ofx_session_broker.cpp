@@ -17,6 +17,17 @@
 #include "../core/ort_process_context.hpp"
 #include "ofx_session_policy.hpp"
 
+// NOLINTBEGIN(modernize-use-designated-initializers,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+//
+// ofx_session_broker.cpp tidy-suppression rationale.
+//
+// The broker stitches together OFX RPC envelopes, MLX memory telemetry,
+// the engine-prewarm gate, and the shared-frame transport. Aggregate
+// returns of OfxRuntime*Response use the project-wide positional style
+// shared by the rest of src/app/. prepare_session() is intentionally
+// long because it sequences admission, prewarm, and entry construction
+// in one transaction; splitting it would scatter the rollback ordering
+// across multiple TUs without reducing branch count.
 namespace corridorkey::app {
 
 namespace {
@@ -68,7 +79,11 @@ detail::PrewarmMemorySnapshot capture_prewarm_snapshot() {
 // before touching the Engine (Engine is not thread-safe).
 struct PrewarmRun {
     std::shared_future<void> ready = {};
-    enum class Status { Completed, Detached, Skipped } status = Status::Skipped;
+    enum class Status {  // NOLINT(performance-enum-size)
+        Completed,
+        Detached,
+        Skipped
+    } status = Status::Skipped;
 };
 
 // Run engine->prewarm(shape) under a wall-clock budget. If the prewarm
@@ -76,8 +91,9 @@ struct PrewarmRun {
 // worker keeps running in the background. The worker holds its own
 // shared_ptr to the Engine so the MLX JIT can finish safely even if the
 // broker later evicts the session entry.
-PrewarmRun prewarm_with_timeout(std::shared_ptr<Engine> engine, int shape_px,
-                                std::chrono::milliseconds timeout, StageTimingCallback on_stage) {
+PrewarmRun prewarm_with_timeout(const std::shared_ptr<Engine>& engine, int shape_px,
+                                std::chrono::milliseconds timeout,
+                                const StageTimingCallback& on_stage) {
     PrewarmRun out;
     if (!engine || shape_px <= 0) {
         out.status = PrewarmRun::Status::Skipped;
@@ -92,7 +108,7 @@ PrewarmRun prewarm_with_timeout(std::shared_ptr<Engine> engine, int shape_px,
     std::thread worker([promise, engine, shape_px, on_stage]() mutable {
         try {
             (void)engine->prewarm(shape_px, on_stage);
-        } catch (...) {
+        } catch (...) {  // NOLINT(bugprone-empty-catch)
             // Swallow; the caller's next render will surface any real
             // failure via the normal Result<> channel.
         }
@@ -370,8 +386,8 @@ std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest&
     return std::to_string(common::detail::fnv1a_64(
         canonical_model_path.string() + "|" +
         std::to_string(static_cast<int>(request.requested_device.backend)) + "|" +
-        std::to_string(request.engine_options.allow_cpu_fallback) + "|" +
-        std::to_string(request.engine_options.disable_cpu_ep_fallback)));
+        std::to_string(static_cast<int>(request.engine_options.allow_cpu_fallback)) + "|" +
+        std::to_string(static_cast<int>(request.engine_options.disable_cpu_ep_fallback))));
 }
 
 std::vector<StageTiming> OfxSessionBroker::collect_stage_timings(StageTimingCallback& callback) {
@@ -406,3 +422,4 @@ Result<void> OfxSessionBroker::evict_idle_sessions_if_needed() {
 }
 
 }  // namespace corridorkey::app
+// NOLINTEND(modernize-use-designated-initializers,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

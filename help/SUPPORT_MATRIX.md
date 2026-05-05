@@ -112,9 +112,9 @@ packaged and validated.
 
 **Windows RTX installer policy:**
 - `Windows RTX` is the official Windows installer for NVIDIA RTX 30 series and
-  newer. It packages the complete FP16 ladder through `2048px`. INT8 ONNX and
-  CPU rendering have been retired: FP16 on RTX is the only quality and only
-  backend the installer ships.
+  newer. It packages the complete green FP16 ONNX ladder through `2048px` and
+  the optional dynamic blue TorchScript pack. INT8 ONNX and CPU rendering have
+  been retired from the official Windows RTX installer.
 - In `Auto`, `Windows RTX` respects the current safe quality ceiling for the
   detected VRAM tier.
 - In fixed modes, `Windows RTX` can attempt a packaged quality above the safe
@@ -201,3 +201,96 @@ supported GPU (NVIDIA RTX 30 series or newer on Windows; Apple Silicon with
 MLX on macOS). Requesting `Backend::CPU` no longer resolves to a packaged
 artifact and surfaces a "no supported render backend" failure rather than
 falling back to a quality the renderer cannot ship.
+
+---
+
+## Tauri Desktop GUI Support Scope
+
+The Tauri desktop GUI is distributed as an independent installer that embeds
+its own copy of the runtime payload. It does not require an OFX host and does
+not require the OFX bundle to be present on the system.
+
+The GUI inherits the same backend and hardware support designations as the
+OFX plugin and CLI on the same machine. A configuration officially supported
+for the OFX plugin is officially supported for the GUI; experimental tracks
+remain experimental in the GUI.
+
+---
+
+## Host Application Coverage
+
+The current officially supported host applications are DaVinci Resolve and
+Foundry Nuke through the OFX plugin. The CLI is a host-independent surface.
+The Tauri GUI is an additional host-independent surface.
+
+Other editing applications, including Adobe Premiere Pro and Adobe After
+Effects, are not currently supported. They are not OFX hosts and require
+their own SDK integrations that have not been built.
+
+---
+
+## Screen Color Model Variants
+
+The runtime ships two model variants distinguished by the screen color the
+model was trained on. Green is distributed as a per-resolution ladder. Blue on
+Windows RTX is distributed as one dynamic artifact that accepts the runtime
+quality resolution.
+
+### Green model variant
+
+The canonical CorridorKey model, trained on green screen plates.
+
+| Resolution | TensorRT RTX EP | MLX (Apple Silicon) | Status |
+|------------|-----------------|---------------------|--------|
+| 512px | Validated | Validated | Officially supported |
+| 1024px | Validated | Validated | Officially supported |
+| 1536px | Validated | Validated | Officially supported |
+| 2048px | Validated | Validated | Officially supported |
+
+Green packs are part of every official Windows RTX and macOS Apple Silicon
+installer.
+
+### Blue model variant
+
+A dedicated CorridorKey variant trained on blue screen plates. On Windows RTX,
+blue uses a dynamic TorchScript artifact instead of the green ONNX TensorRT RTX
+EP ladder. This keeps blue independent from per-resolution engine files while
+preserving the existing green optimized path.
+
+#### Windows RTX coverage
+
+| Resolution | Backend | Status |
+|------------|---------|--------|
+| 512px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 1024px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 1536px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 2048px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+
+#### macOS Apple Silicon coverage
+
+| Resolution | Backend | Status |
+|------------|---------|--------|
+| 512px | MLX (canonicalization through green) | Officially supported |
+| 1024px | MLX (canonicalization through green) | Officially supported |
+| 1536px | MLX (canonicalization through green) | Officially supported |
+| 2048px | MLX (canonicalization through green) | Officially supported |
+
+There is no dedicated blue MLX artifact today. On Apple Silicon, blue plates
+are handled by canonicalizing the input into the green domain, running the
+green MLX model, and restoring the result. This is automatic and reported in
+`corridorkey doctor`.
+
+#### Missing artifact UX
+
+When the dynamic blue pack is not installed or cannot initialize, the runtime
+reports the blue artifact condition through diagnostics and applies the
+green-domain canonicalization fallback. The fallback uses the green model at
+the requested quality path; it does not substitute a lower blue resolution.
+
+### Pack distribution
+
+Model packs are selectable. The installer or first-run flow lets the user
+choose green only, blue only, or both. Packs not selected at install time can
+be added later through the same flow. Missing packs surface as missing
+artifacts in `corridorkey doctor`, with the canonical Hugging Face download
+location attached.

@@ -43,7 +43,7 @@ uv sync
 
 ## Teacher and student checkpoints
 
-The teacher checkpoint (`models/CorridorKey.pth`) and any trained student weights are hosted on Hugging Face at `alexandrealvaro/corridorkey-models`. The helper in `teacher.py` downloads automatically when the file is not present locally, falling back to the repo-local `models/` directory.
+The teacher checkpoint (`models/CorridorKey.pth` or `models/CorridorKey_v1.0.pth`) is the upstream training weight published at [`nikopueringer/CorridorKey_v1.0`](https://huggingface.co/nikopueringer/CorridorKey_v1.0). Place it under `models/` before invoking `teacher.py`. Trained student checkpoints stay local to the experiment workspace.
 
 ## Workflow
 

@@ -1,8 +1,8 @@
 """Verify ORT loadability for a directory of runtime models.
 
-Invoked by scripts/prepare_windows_rtx_release.ps1 after a reuse or regenerate
-pass to confirm that every file in the prepared model set can be opened by
-onnxruntime on CPU without hitting an op/schema mismatch.
+Invoked by the canonical Windows wrapper after a reuse or regenerate pass to
+confirm that every file in the prepared model set can be opened by onnxruntime
+on CPU without hitting an op/schema mismatch.
 
 This is not a numerical parity check -- that lives in validate_export_parity.py
 and only runs on fresh FP32 intermediates. The goal here is to catch a bundle

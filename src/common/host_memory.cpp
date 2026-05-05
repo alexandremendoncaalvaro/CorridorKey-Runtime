@@ -1,6 +1,6 @@
 #include "host_memory.hpp"
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 #include <mach/mach.h>
 #include <mach/mach_host.h>
 #include <mach/vm_statistics.h>
@@ -11,7 +11,7 @@ namespace corridorkey::common {
 
 HostMemoryStats query_host_memory_stats() {
     HostMemoryStats out;
-#if defined(__APPLE__)
+#ifdef __APPLE__
     vm_statistics64_data_t info{};
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
     if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&info),

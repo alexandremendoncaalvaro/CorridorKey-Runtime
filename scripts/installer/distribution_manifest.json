@@ -1,0 +1,113 @@
+{
+  "manifest_version": 1,
+  "repo": "alexandrealvaro/CorridorKey",
+  "revision": "main",
+  "generated_by": "scripts/installer/build_distribution_manifest.py",
+  "packs": {
+    "green-models": {
+      "label": "Green pack (ONNX models)",
+      "component": "green",
+      "dest_subdir": "models",
+      "files": [
+        {
+          "remote_path": "onnx/fp16/corridorkey_fp16_512.onnx",
+          "filename": "corridorkey_fp16_512.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16/corridorkey_fp16_512.onnx",
+          "sha256": "02fbd11e448405de16926ae56d6ae38b1855fc989efe574b9a601624de7edad4",
+          "size_bytes": 144861873,
+          "status": "ready"
+        },
+        {
+          "remote_path": "onnx/fp16/corridorkey_fp16_1024.onnx",
+          "filename": "corridorkey_fp16_1024.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16/corridorkey_fp16_1024.onnx",
+          "sha256": "9e764280cd41ca7241af19f5f778dd9031e995f55e191199c87791a7e09452f8",
+          "size_bytes": 155871862,
+          "status": "ready"
+        },
+        {
+          "remote_path": "onnx/fp16/corridorkey_fp16_1536.onnx",
+          "filename": "corridorkey_fp16_1536.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16/corridorkey_fp16_1536.onnx",
+          "sha256": "8b9d1712a32eeee0f3a6a9ce19bdabfa7d2dd7086737777628b3e497e204227f",
+          "size_bytes": 174222105,
+          "status": "ready"
+        },
+        {
+          "remote_path": "onnx/fp16/corridorkey_fp16_2048.onnx",
+          "filename": "corridorkey_fp16_2048.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16/corridorkey_fp16_2048.onnx",
+          "sha256": "a26031b5732dc663fcf5c451c9cfb315f59b0acb5361d7ceab5428f9e70a0c62",
+          "size_bytes": 199912223,
+          "status": "ready"
+        },
+        {
+          "remote_path": "onnx/fp16_ctx/corridorkey_fp16_512_ctx.onnx",
+          "filename": "corridorkey_fp16_512_ctx.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16_ctx/corridorkey_fp16_512_ctx.onnx",
+          "sha256": "7adb45dfc35f1cf50c3e4ce59c50df601c9197a3d7076c3ad352b0b9ecf523f7",
+          "size_bytes": 167321829,
+          "status": "ready"
+        },
+        {
+          "remote_path": "onnx/fp16_ctx/corridorkey_fp16_1024_ctx.onnx",
+          "filename": "corridorkey_fp16_1024_ctx.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16_ctx/corridorkey_fp16_1024_ctx.onnx",
+          "sha256": "674fb14d50dd8320d1737a579b0490b840efe6ee409071b6b5f3965f22a910e7",
+          "size_bytes": 178513844,
+          "status": "ready"
+        },
+        {
+          "remote_path": "onnx/fp16_ctx/corridorkey_fp16_1536_ctx.onnx",
+          "filename": "corridorkey_fp16_1536_ctx.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16_ctx/corridorkey_fp16_1536_ctx.onnx",
+          "sha256": "bc8c095324080becb73f06ab84de1804bb641990a783e801015609e57c161043",
+          "size_bytes": 196867486,
+          "status": "ready"
+        },
+        {
+          "remote_path": "onnx/fp16_ctx/corridorkey_fp16_2048_ctx.onnx",
+          "filename": "corridorkey_fp16_2048_ctx.onnx",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/onnx/fp16_ctx/corridorkey_fp16_2048_ctx.onnx",
+          "sha256": "2a610afdeaa7dbad3edd467203c5a1d7720e29ddafa3ba943de56ae830c5c624",
+          "size_bytes": 222558622,
+          "status": "ready"
+        }
+      ]
+    },
+    "blue-models": {
+      "label": "Blue pack - dynamic TorchScript model",
+      "component": "blue",
+      "dest_subdir": "models",
+      "files": [
+        {
+          "remote_path": "torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts",
+          "filename": "corridorkey_dynamic_blue_fp16.ts",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts",
+          "sha256": "9f99b2ec9de1f8fd88937d2c5ae974f4ce2acd3046211d728852f23b30ce3780",
+          "size_bytes": 145140062,
+          "status": "ready"
+        }
+      ]
+    },
+    "blue-runtime": {
+      "label": "Blue pack - runtime DLLs (LibTorch + CUDA + TensorRT)",
+      "component": "blue",
+      "dest_subdir": "torchtrt-runtime/bin",
+      "is_archive": true,
+      "extract": true,
+      "installed_size_bytes": 5011471040,
+      "installed_file_count": 41,
+      "files": [
+        {
+          "remote_path": "torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
+          "filename": "corridorkey_blue_torchtrt_runtime.7z",
+          "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
+          "sha256": "83779c34a270e9ae71e356abfe8681298bcbd02fa118df528e30a607d984330b",
+          "size_bytes": 2111121577,
+          "status": "ready"
+        }
+      ]
+    }
+  }
+}

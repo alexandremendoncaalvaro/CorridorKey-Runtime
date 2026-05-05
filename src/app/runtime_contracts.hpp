@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace corridorkey::app {
@@ -19,13 +20,13 @@ struct ArtifactSelection {
 };
 
 struct RuntimeOptimizationProfile {
-    std::string id = "";
-    std::string label = "";
-    std::string intended_track = "";
-    std::string backend_intent = "";
-    std::string fallback_policy = "";
-    std::string warmup_policy = "";
-    std::string certification_tier = "";
+    std::string id;
+    std::string label;
+    std::string intended_track;
+    std::string backend_intent;
+    std::string fallback_policy;
+    std::string warmup_policy;
+    std::string certification_tier;
     bool unrestricted_quality_attempt = false;
 };
 
@@ -35,7 +36,7 @@ struct ArtifactRuntimeState {
     bool certified_for_active_track = false;
     bool certified_for_active_device = false;
     bool recommended_for_active_device = false;
-    std::string state = "";
+    std::string state;
 };
 
 std::string backend_to_string(Backend backend);
@@ -57,7 +58,7 @@ CORRIDORKEY_API std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities);
 CORRIDORKEY_API std::optional<ModelCatalogEntry> default_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
-    const std::optional<PresetDefinition>& preset);
+    const std::optional<PresetDefinition>& preset, std::string_view screen_color = "green");
 CORRIDORKEY_API std::optional<int> max_supported_resolution_for_device(
     const DeviceInfo& requested_device);
 CORRIDORKEY_API std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend,

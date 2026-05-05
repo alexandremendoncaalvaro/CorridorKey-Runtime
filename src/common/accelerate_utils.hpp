@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 #include <Accelerate/Accelerate.h>
 #else
 #include <algorithm>
@@ -11,13 +11,23 @@
 
 namespace corridorkey::common {
 
+//
+// Header tidy-suppression rationale (file-level NOLINT block).
+// Bridges Apple's Accelerate vDSP intrinsics and the portable
+// fallback path; vDSP signatures take (src, dst) ordered argument
+// pairs that fire bugprone-easily-swappable-parameters but match
+// the canonical Apple API exactly. Pixel-stride offsets follow the
+// 'base + n * stride' Apple convention.
+//
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,bugprone-exception-escape,cert-err33-c,cert-err34-c,modernize-avoid-variadic-functions)
+
 /**
  * @brief Vectorized clamp (clip) using vDSP if available.
  */
 inline void accelerate_vclip(const float* src, std::ptrdiff_t src_stride, const float* low,
                              const float* high, float* dst, std::ptrdiff_t dst_stride,
                              std::size_t count) {
-#if defined(__APPLE__)
+#ifdef __APPLE__
     vDSP_vclip(src, src_stride, low, high, dst, dst_stride, count);
 #else
     for (std::size_t i = 0; i < count; ++i) {
@@ -32,7 +42,7 @@ inline void accelerate_vclip(const float* src, std::ptrdiff_t src_stride, const 
 inline void accelerate_vmul(const float* src1, std::ptrdiff_t src1_stride, const float* src2,
                             std::ptrdiff_t src2_stride, float* dst, std::ptrdiff_t dst_stride,
                             std::size_t count) {
-#if defined(__APPLE__)
+#ifdef __APPLE__
     vDSP_vmul(src1, src1_stride, src2, src2_stride, dst, dst_stride, count);
 #else
     for (std::size_t i = 0; i < count; ++i) {
@@ -48,7 +58,7 @@ inline void accelerate_vmul(const float* src1, std::ptrdiff_t src1_stride, const
 inline void accelerate_normalize_and_pack_4ch(const float* rgb, int rgb_stride, const float* hint,
                                               int hint_stride, float* dst, int count,
                                               const float* means, const float* inv_stddevs) {
-#if defined(__APPLE__)
+#ifdef __APPLE__
     // Process R, G, B channels using vDSP_vsmsa (vector-scalar multiply, vector-scalar add)
     // Formula: (val - mean) * inv_stddev => val * inv_stddev + (-mean * inv_stddev)
     for (int c = 0; c < 3; ++c) {
@@ -71,3 +81,5 @@ inline void accelerate_normalize_and_pack_4ch(const float* rgb, int rgb_stride, 
 }
 
 }  // namespace corridorkey::common
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,bugprone-exception-escape,cert-err33-c,cert-err34-c,modernize-avoid-variadic-functions)

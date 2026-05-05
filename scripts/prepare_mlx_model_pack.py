@@ -8,15 +8,25 @@ import shutil
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CANONICAL_CHECKPOINT = REPO_ROOT / "models" / "CorridorKey.pth"
+# Local checkpoint candidates. Accept both the historical bare name and
+# the upstream-canonical `CorridorKey_v1.0.pth` that nikopueringer
+# publishes. First match wins.
+CANONICAL_CHECKPOINT_CANDIDATES = (
+    REPO_ROOT / "models" / "CorridorKey.pth",
+    REPO_ROOT / "models" / "CorridorKey_v1.0.pth",
+)
 DEFAULT_BRIDGE_RESOLUTIONS = "512,768,1024,1536,2048"
 
-# Primary artifact host. Hugging Face handles large model files with no budget
-# ceiling and cleaner version history than a GitHub Release, so the default
-# download path goes there first. The GitHub Release fallback stays wired so
-# existing machines without a Hugging Face account continue to work.
-DEFAULT_HF_MODEL_REPO = "alexandrealvaro/corridorkey-models"
+# Primary artifact host. Hugging Face handles large model files with no
+# budget ceiling and cleaner version history than a GitHub Release, so
+# the default download path goes there first. The GitHub Release
+# fallback below stays wired so machines without huggingface_hub
+# installed can still pick up the weights pack.
+DEFAULT_HF_MODEL_REPO = "alexandrealvaro/CorridorKey"
 DEFAULT_HF_REVISION = "main"
+# All MLX artefacts (safetensors weights and per-resolution bridges)
+# live under this prefix in the canonical repo.
+HF_MLX_PREFIX = "mlx/"
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,8 +113,9 @@ def copy_file(source: Path, target: Path, force: bool) -> Path:
 
 
 def default_checkpoint_path() -> Path | None:
-    if CANONICAL_CHECKPOINT.exists():
-        return CANONICAL_CHECKPOINT
+    for candidate in CANONICAL_CHECKPOINT_CANDIDATES:
+        if candidate.exists():
+            return candidate
     return None
 
 
@@ -212,7 +223,11 @@ def main() -> int:
         else:
             convert_checkpoint(checkpoint_path, weights_target)
             weights_path = weights_target
-        source = "canonical_checkpoint" if checkpoint_path == CANONICAL_CHECKPOINT else "converted_checkpoint"
+        source = (
+            "canonical_checkpoint"
+            if checkpoint_path in CANONICAL_CHECKPOINT_CANDIDATES
+            else "converted_checkpoint"
+        )
     else:
         # Prefer Hugging Face when the repo is reachable; fall back to the
         # GitHub Release channel only if the HF hop fails (offline machine,
@@ -220,7 +235,7 @@ def main() -> int:
         # --hf-repo "" to opt out).
         hf_path = download_from_huggingface(
             repo_id=args.hf_repo,
-            filename=args.asset_name,
+            filename=f"{HF_MLX_PREFIX}{args.asset_name}",
             local_path=weights_target,
             revision=args.hf_revision,
             force=args.force,
@@ -258,7 +273,7 @@ def main() -> int:
                 # new checkout.
                 hf_path = download_from_huggingface(
                     repo_id=args.hf_repo,
-                    filename=export_path.name,
+                    filename=f"{HF_MLX_PREFIX}{export_path.name}",
                     local_path=export_path,
                     revision=args.hf_revision,
                     force=args.force,

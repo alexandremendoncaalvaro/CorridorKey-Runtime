@@ -178,6 +178,12 @@ if(BUILD_TESTING)
     # test static library exposes every internal symbol without rewriting
     # the per-subdir source lists.
     get_target_property(_core_sources corridorkey_core SOURCES)
+    # Sprint 1 PR 3: torch_trt_session.cpp pulls libtorch headers (~hundreds
+    # of MB) and is compile-gated on CORRIDORKEY_HAS_TORCHTRT only inside
+    # corridorkey_core. The test static lib does not link torch and does not
+    # need TorchTRT coverage; strip it from the inherited source list to
+    # avoid dragging libtorch into every test binary.
+    list(FILTER _core_sources EXCLUDE REGEX "torch_trt_session\\.cpp$")
     target_sources(corridorkey_core_static PRIVATE ${_core_sources})
     get_target_property(_common_sources corridorkey_common SOURCES)
     target_sources(corridorkey_core_static PRIVATE ${_common_sources})

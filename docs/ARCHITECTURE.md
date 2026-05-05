@@ -30,11 +30,12 @@ plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
 3. **Predictable Operations.** Diagnostics, fallback behavior, and error
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
-   through MLX and Windows RTX through ONNX Runtime TensorRT RTX EP on NVIDIA
-   RTX 30 series and newer. Windows DirectML and Linux RTX (CUDA EP via ONNX
-   Runtime) are explicit experimental product tracks. Other provider hooks
-   present in the core runtime do not become support claims unless they are
-   packaged and validated. See [Support Matrix](../help/SUPPORT_MATRIX.md).
+   through MLX and Windows RTX through ONNX Runtime TensorRT RTX EP for green
+   and the dynamic TorchScript path for blue on NVIDIA RTX 30 series and
+   newer. Windows DirectML and Linux RTX (CUDA EP via ONNX Runtime) are
+   explicit experimental product tracks. Other provider hooks present in the
+   core runtime do not become support claims unless they are packaged and
+   validated. See [Support Matrix](../help/SUPPORT_MATRIX.md).
 5. **Shared Runtime, Curated Artifacts.** The runtime contract is stable
    across product tracks. Model artifacts and backend adapters may differ by
    platform when required for predictable performance.
@@ -47,10 +48,10 @@ plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
 
 The engine, math, and I/O capabilities.
 
-- **Inference:** Backend adapters and session management for the official MLX
-  and TensorRT RTX EP product tracks, the experimental DirectML and Linux
-  CUDA EP tracks, and other internal provider hooks used for diagnostics,
-  bring-up, or future packaging work.
+- **Inference:** Backend adapters and session management for the official MLX,
+  TensorRT RTX EP, and dynamic TorchScript product paths, the experimental
+  DirectML and Linux CUDA EP tracks, and other internal provider hooks used for
+  diagnostics, bring-up, or future packaging work.
 - **Hardware:** Device detection and provider selection.
 - **Video Pipeline:** FFmpeg integration for direct memory processing.
 - **Math:** Color space conversion, despill, despeckle algorithms.
@@ -209,7 +210,26 @@ Standalone auxiliary tools. Must not leak dependencies into the main build.
 ```text
 tools/
 |-- model_exporter/     Python scripts to export PyTorch models to ONNX
-`-- hint_generator/     Reference auto-hint implementation
+|-- torchtrt_compiler/  Python scripts to export dynamic blue TorchScript artifacts
+|-- torchtrt_runner/    C++ smoke test that loads a .ts engine standalone
+`-- coreml_student/     Apple Neural Engine distillation toolkit
+```
+
+### `scripts/installer/`
+
+Modern Windows installer authoring (Inno Setup 6). The legacy NSIS
+inline script in `scripts/package_ofx_installer_windows.ps1` is kept
+as fallback during migration; once the Inno path passes UAT it
+retires. See `docs/RELEASE_GUIDELINES.md` "Modern installer (Inno
+Setup)" for the operator workflow.
+
+```text
+scripts/installer/
+|-- corridorkey.iss.template       Inno Setup source consumed by ISCC
+|-- build_installer.ps1            Driver: expands template, runs ISCC
+|-- build_distribution_manifest.py Regenerates manifest from HF state
+|-- distribution_manifest.json     Pack URLs + SHA256 (committed)
+`-- stage_offline_payload.ps1      Downloads packs into _offline_payload/
 ```
 
 ---

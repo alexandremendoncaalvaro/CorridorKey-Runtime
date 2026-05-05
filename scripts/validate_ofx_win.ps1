@@ -1,5 +1,6 @@
 param(
-    [string]$BundlePath = ""
+    [string]$BundlePath = "",
+    [string]$ExpectedDisplayVersionLabel = ""
 )
 
 Set-StrictMode -Version Latest
@@ -70,7 +71,8 @@ function Resolve-CorridorKeyDumpbinPath {
 function Get-CorridorKeyPeImports {
     param(
         [string]$DumpbinPath,
-        [string]$ImagePath
+        [string]$ImagePath,
+        [switch]$IncludeDelayLoaded
     )
 
     $output = & $DumpbinPath /DEPENDENTS $ImagePath 2>$null
@@ -78,10 +80,37 @@ function Get-CorridorKeyPeImports {
         return @()
     }
 
-    return $output |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -match '^[A-Za-z0-9_.-]+\.dll$' } |
-        Select-Object -Unique
+    # `dumpbin /DEPENDENTS` emits two DLL sections back-to-back when an
+    # image uses delay-loading: first "Image has the following dependencies"
+    # (normal imports the OS resolves at process start) and then "Image has
+    # the following delay load dependencies" (resolved on first call by the
+    # delay-load helper). Strategy C links corridorkey_torchtrt.dll via
+    # /DELAYLOAD so the green path does not load libtorch on process
+    # startup. The wrapper ships under Contents\Resources\torchtrt-runtime
+    # with the blue component, not in Contents\Win64, so normal import
+    # validation stays scoped to the startup DLL set.
+    $imports = [System.Collections.Generic.List[string]]::new()
+    $inDelayLoadSection = $false
+    foreach ($rawLine in $output) {
+        $line = $rawLine.Trim()
+        if ($line -match '^Image has the following delay load dependencies:?$') {
+            $inDelayLoadSection = $true
+            continue
+        }
+        if ($line -match '^Image has the following dependencies:?$') {
+            $inDelayLoadSection = $false
+            continue
+        }
+        if ($line -notmatch '^[A-Za-z0-9_.-]+\.dll$') {
+            continue
+        }
+        if ($inDelayLoadSection -and -not $IncludeDelayLoaded.IsPresent) {
+            continue
+        }
+        [void]$imports.Add($line)
+    }
+
+    return $imports | Select-Object -Unique
 }
 
 # System DLLs that are always resolvable from Windows and must not be bundled.
@@ -263,6 +292,7 @@ $bundleDescriptor = [System.IO.Path]::GetFullPath($BundlePath)
 $bundleRoot = Split-Path -Parent $bundleDescriptor
 $win64Dir = Join-Path $bundleDescriptor "Contents\Win64"
 $resourcesDir = Join-Path $bundleDescriptor "Contents\Resources\models"
+$torchTrtWrapperPath = Join-Path $bundleDescriptor "Contents\Resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll"
 $modelInventoryPath = Join-Path $bundleDescriptor "model_inventory.json"
 $artifactManifestPath = Join-Path $bundleDescriptor "artifact_manifest.json"
 $bundleValidationPath = Join-Path $bundleRoot "bundle_validation.json"
@@ -284,6 +314,13 @@ if (-not (Test-Path $resourcesDir)) {
 }
 
 Write-Host "[PASS] Bundle directory structure exists" -ForegroundColor Green
+
+if ($defaultModelProfile -eq "windows-rtx") {
+    if (-not (Test-Path $torchTrtWrapperPath)) {
+        throw "Missing TorchTRT wrapper DLL at $torchTrtWrapperPath"
+    }
+    Write-Host "[PASS] Found corridorkey_torchtrt.dll for blue TorchTRT runtime" -ForegroundColor Green
+}
 
 # CRITICAL: Check for correct ONNX Runtime DLL name
 $onnxDll = Join-Path $win64Dir "onnxruntime.dll"
@@ -346,6 +383,34 @@ Write-Host "[PASS] Found CLI binary ($([math]::Round($cliBinarySize / 1MB, 2)) M
 
 $runtimeServerSize = (Get-Item $runtimeServer).Length
 Write-Host "[PASS] Found runtime server binary ($([math]::Round($runtimeServerSize / 1MB, 2)) MB)" -ForegroundColor Green
+
+$cliVersionOutput = ""
+$cliDisplayVersion = ""
+Push-Location $win64Dir
+try {
+    $versionLines = & ".\corridorkey.exe" --version 2>&1
+    $versionExitCode = $LASTEXITCODE
+    $cliVersionOutput = ($versionLines | Out-String).Trim()
+    if ($versionExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($cliVersionOutput)) {
+        throw "Packaged CLI version probe failed."
+    }
+
+    $versionMatch = [regex]::Match($cliVersionOutput, '^CorridorKey Runtime v(?<label>\S+)$')
+    if (-not $versionMatch.Success) {
+        throw "Packaged CLI version output has unexpected format: $cliVersionOutput"
+    }
+
+    $cliDisplayVersion = $versionMatch.Groups["label"].Value
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDisplayVersionLabel) -and
+        $cliDisplayVersion -ne $ExpectedDisplayVersionLabel) {
+        Write-Host "[FAIL] Packaged CLI display label mismatch. Expected $ExpectedDisplayVersionLabel, got $cliDisplayVersion" -ForegroundColor Red
+        throw "Packaged CLI display label mismatch. Rebuild with the same -DisplayVersionLabel before packaging."
+    }
+
+    Write-Host "[PASS] Packaged CLI display label: $cliDisplayVersion" -ForegroundColor Green
+} finally {
+    Pop-Location
+}
 
 # Regression guard: any import beyond the system allowlist must be packaged
 # in Contents\Win64\. Catches the failure mode where a new target_link_libraries
@@ -762,6 +827,9 @@ $validationPayload = [ordered]@{
     validation_passed = $true
     runtime_probe = [ordered]@{
         supported_backends = @($supportedBackends)
+        cli_version_output = $cliVersionOutput
+        display_version = $cliDisplayVersion
+        expected_display_version = $ExpectedDisplayVersionLabel
     }
     models = [ordered]@{
         model_profile = $modelProfile

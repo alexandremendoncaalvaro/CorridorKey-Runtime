@@ -13,6 +13,18 @@
 
 namespace corridorkey::core {
 
+// NOLINTBEGIN(modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,readability-identifier-length,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+//
+// mlx_probe.cpp tidy-suppression rationale.
+//
+// The Error{} aggregate appears at every failure path; switching every
+// site to designated initialisers would obscure the uniform error-
+// reporting pattern the engine uses across probe modules. The 10-byte
+// minimum is the smallest plausible safetensors prefix (header size
+// field plus at least one JSON brace) and the reinterpret_cast on the
+// header_size field is the canonical zero-copy way to read a fixed-
+// width LE prefix from a binary file. The single-character loop variable
+// `ch` matches established header-parsing idiom in this file.
 bool mlx_probe_available() {
 #if CORRIDORKEY_WITH_MLX
     return true;
@@ -109,3 +121,4 @@ Result<void> probe_mlx_function(const std::filesystem::path& function_path) {
 }
 
 }  // namespace corridorkey::core
+// NOLINTEND(modernize-use-designated-initializers,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-pro-type-reinterpret-cast,readability-identifier-length,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

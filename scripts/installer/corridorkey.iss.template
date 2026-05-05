@@ -1,0 +1,520 @@
+; CorridorKey Windows installer (Inno Setup 6.4+).
+;
+; This template is consumed by scripts/package_ofx_installer_windows.ps1,
+; which substitutes @@TOKEN@@ placeholders against a per-build context
+; (display label, pack manifest, build dir, flavor) and then invokes
+; ISCC.exe to compile the resulting .iss into the final installer
+; executable. The template is the single source of truth for installer
+; structure; the PowerShell packager only injects values, never logic.
+;
+; Two flavors are produced from the SAME template via the `Flavor`
+; preprocessor directive:
+;
+;   ONLINE  - small stub installer (~50 MB). Plugin base bundled,
+;             every model + runtime pack downloaded at install time
+;             from Hugging Face with SHA256 verification.
+;   OFFLINE - large self-contained installer (~7 GB). All packs
+;             bundled inside the installer; no network access during
+;             install.
+;
+; Component selection (green / blue) is identical across flavors. The
+; difference is purely transport: download-on-demand vs pre-bundled
+; bytes. arm_torchtrt_runtime in
+; src/core/torch_trt_loader.cpp walks for blue runtime DLLs at
+; <install>/Contents/Resources/torchtrt-runtime/bin/ regardless of
+; how the bytes got there.
+;
+; Reference: docs/RELEASE_GUIDELINES.md "Windows installer (modern
+; flow)".
+
+#define MyAppName "CorridorKey"
+#define MyAppPublisher "CorridorKey"
+#define MyAppURL "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime"
+#define MyDisplayLabel "@@DISPLAY_LABEL@@"
+#define MyBaseVersion "@@BASE_VERSION@@"
+#define PluginPayloadDir "@@PLUGIN_PAYLOAD_DIR@@"
+#define ModelPayloadDir "@@MODEL_PAYLOAD_DIR@@"
+#define OutputDir "@@OUTPUT_DIR@@"
+#define OutputBaseFilename "@@OUTPUT_BASE_FILENAME@@"
+#define InstallerIcon "@@INSTALLER_ICON@@"
+#define InstallerWizardImage "@@WIZARD_IMAGE@@"
+#define ManifestPath "@@MANIFEST_PATH@@"
+; Flavor MUST be one of: "online" | "offline".
+#define Flavor "@@FLAVOR@@"
+
+[Setup]
+AppId={{8B8C9CF7-9C20-4D8E-9E36-C3A4F0F1E0B0}}
+AppName={#MyAppName}
+AppVersion={#MyBaseVersion}
+AppVerName={#MyAppName} {#MyDisplayLabel}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+; VersionInfoVersion + VersionInfoProductVersion are numeric Windows
+; resource fields and only accept X.Y, X.Y.Z, or X.Y.Z.W. The friendly
+; display label (which CAN contain `-win.N`, sha suffixes, etc) flows
+; into AppVerName + UninstallDisplayName instead, where Inno accepts
+; arbitrary strings.
+VersionInfoVersion={#MyBaseVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} OFX plugin installer
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyBaseVersion}
+VersionInfoProductTextVersion={#MyDisplayLabel}
+
+; OFX plugins MUST install under <CommonFiles>\OFX\Plugins\<bundle>.
+; The host (Resolve, Nuke, Fusion) discovers .ofx bundles by scanning
+; this directory at startup. Anything else means the plugin does not
+; load. {commoncf64} resolves to C:\Program Files\Common Files on a
+; standard 64-bit Windows install; passing /DIR=... at the command
+; line still works for unattended deployments that target a custom
+; OFX root.
+DefaultDirName={commoncf64}\OFX\Plugins\{#MyAppName}.ofx.bundle
+DisableWelcomePage=no
+DisableDirPage=auto
+DisableProgramGroupPage=yes
+DisableReadyPage=no
+UninstallDisplayName={#MyAppName} {#MyDisplayLabel}
+UninstallDisplayIcon={app}\Contents\Win64\corridorkey.exe
+
+; Modern wizard with dynamic light/dark following Windows + Win11
+; flat aesthetic. Documented in
+; https://jrsoftware.org/ishelp/topic_setup_wizardstyle.htm
+WizardStyle=modern dynamic windows11
+WizardSizePercent=110
+; Native wizard artwork. WizardImageFile is the documented full-height
+; side image for the Welcome and Setup Completed pages. The small
+; upper-right image is explicitly disabled so the product artwork is
+; never reduced to a thumbnail.
+WizardImageFile={#InstallerWizardImage}
+WizardImageFileDynamicDark={#InstallerWizardImage}
+WizardSmallImageFile=
+WizardImageBackColor=black
+
+; Native 64-bit only - we link against TensorRT, libtorch and ONNX
+; Runtime CUDA builds, none of which ship 32-bit binaries.
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+
+; Compression: lzma2 with ultra preset for the offline flavor where
+; the installer carries the full payload. The online stub barely
+; benefits from compression (only the plugin binaries inside) so the
+; same setting is harmless there.
+Compression=lzma2/ultra
+SolidCompression=yes
+LZMAUseSeparateProcess=yes
+
+; The blue-runtime pack ships as a 7z archive that the installer
+; extracts on disk via the `extractarchive` flag in [Files]. The
+; default ArchiveExtraction value ("basic") only handles ZIP, so 7z
+; payload extraction requires the "full" extractor (which Inno Setup
+; bundles). "auto" picks "full" when the operator already has 7-Zip /
+; the archive extractor available, falling back to "basic" otherwise.
+ArchiveExtraction=full
+
+OutputDir={#OutputDir}
+OutputBaseFilename={#OutputBaseFilename}
+SetupIconFile={#InstallerIcon}
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog
+ShowLanguageDialog=no
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Types]
+Name: "minimum"; Description: "Minimum (Green only)"
+Name: "recommended"; Description: "Recommended (Green + Blue)"
+Name: "custom"; Description: "Custom"; Flags: iscustom
+
+[Components]
+; Plugin base is always installed - it is the OFX bundle the host
+; loads, plus the green-track ONNX Runtime DLLs that ship in every
+; flavor. The fixed flag prevents the user from unchecking it.
+Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
+    Types: minimum recommended custom; Flags: fixed
+
+Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+    Types: minimum recommended custom
+
+Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+    Types: recommended custom
+
+[Files]
+; Plugin base payload. Always installed. Path layout matches the
+; OFX bundle convention plus the existing CMake POST_BUILD layout
+; (CorridorKey.ofx + corridorkey.exe + corridorkey_ofx_runtime_server.exe
+; + ORT/CUDA/MSVC redist DLLs co-located in Contents\Win64).
+Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
+    DestDir: "{app}\Contents\Win64"; \
+    Components: pluginbase; \
+    Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Per-build wrapper DLL (corridorkey_torchtrt.dll) ships next to the
+; rest of the runtime DLLs of the blue pack. It is built from this
+; repo and changes per commit, so it ships from the plugin payload
+; instead of the upstream HF runtime archive.
+Source: "{#PluginPayloadDir}\Contents\Resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll"; \
+    DestDir: "{app}\Contents\Resources\torchtrt-runtime\bin"; \
+    Components: blue; \
+    Flags: ignoreversion
+
+#if Flavor == "offline"
+; ----------------------------------------------------------------------
+; OFFLINE flavor: every selected pack is pre-bundled inside the
+; installer, no network access at install time. The PowerShell
+; packager places the per-pack files under {#ModelPayloadDir} (rooted
+; at the manifest pack's dest_subdir) before invoking ISCC.
+; ----------------------------------------------------------------------
+
+@@OFFLINE_FILES_BLOCK@@
+
+#endif
+
+#if Flavor == "online"
+; ----------------------------------------------------------------------
+; ONLINE flavor: per-pack files arrive via DownloadTemporaryFile into
+; {tmp} and the [Files] section claims them with the `external` flag
+; so they land in the install dir at the bundle layout the runtime
+; expects. The download itself is wired in [Code] below.
+; ----------------------------------------------------------------------
+
+@@ONLINE_EXTERNAL_FILES_BLOCK@@
+
+#endif
+
+[Tasks]
+; No optional checkboxes for now. Reserved for future: "create
+; desktop shortcut", "add to PATH", etc.
+
+[Run]
+; The OFX host (Resolve / Nuke) auto-discovers the bundle on its
+; next launch. PATH registration is handled in [Code] so failures can
+; be logged without aborting a successful plugin install.
+
+[UninstallDelete]
+; Sweep downloaded packs on uninstall. The installer-tracked files
+; are removed automatically; this block catches any directory left
+; behind under Resources/ (typical when a download wrote into a
+; subdir that the installer did not pre-register, e.g. an
+; extractarchive payload).
+Type: filesandordirs; Name: "{app}\Contents\Resources\models"
+Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
+
+[Code]
+// CorridorKey installer code. Pascal Script `{ ... }` block comments
+// do NOT nest, so we use `//` line comments throughout to keep
+// literal `{tmp}` references in the prose from prematurely closing
+// a comment block. (Learned the hard way during the first compile.)
+//
+// Online flavor:
+//   - Creates a download wizard page after wpReady.
+//   - Adds only selected pack files that are missing or whose installed
+//     SHA256 does not match the manifest. Each queued download still has
+//     the sha256 baked into the page's Add() call so Inno Setup verifies
+//     integrity before the file leaves the temp dir.
+//   - Aborts the install on download or hash failure (no silent
+//     fallback - a partial install of the blue pack would surface
+//     as opaque DLL load failures at runtime).
+//
+// Offline flavor:
+//   - Every file is staged via [Files] entries written by the PowerShell
+//     packager. The same SHA256 cache checks skip files that are already
+//     installed and valid.
+//
+// Pattern based on the official CodeDownloadFiles.iss example shipped
+// with Inno Setup; see
+// https://raw.githubusercontent.com/jrsoftware/issrc/main/Examples/CodeDownloadFiles.iss
+
+const
+  BLUE_RUNTIME_SHA256 = '@@BLUE_RUNTIME_SHA256@@';
+  BLUE_RUNTIME_INSTALLED_SIZE_BYTES = @@BLUE_RUNTIME_INSTALLED_SIZE_BYTES@@;
+  BLUE_RUNTIME_INSTALLED_FILE_COUNT = @@BLUE_RUNTIME_INSTALLED_FILE_COUNT@@;
+
+procedure StopProcessByImageName(const ImageName: String);
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM "' + ImageName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure StopCorridorKeyAndHosts;
+begin
+  StopProcessByImageName('Resolve.exe');
+  StopProcessByImageName('Nuke*.exe');
+  StopProcessByImageName('corridorkey_ofx_runtime_server.exe');
+  StopProcessByImageName('corridorkey.exe');
+end;
+
+procedure ClearHostOfxCaches;
+begin
+  DeleteFile(ExpandConstant('{userappdata}\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml'));
+  DelTree(ExpandConstant('{localappdata}\Temp\nuke\ofxplugincache'), True, True, True);
+end;
+
+function CorridorKeyResourceFilePath(
+  const DestSubdir, FileName: String): String;
+begin
+  Result := ExpandConstant('{app}\Contents\Resources\' + DestSubdir + '\' + FileName);
+end;
+
+function CorridorKeyResourceFileSha256Matches(
+  const DestSubdir, FileName, ExpectedSha256: String): Boolean;
+var
+  Path: String;
+begin
+  Path := CorridorKeyResourceFilePath(DestSubdir, FileName);
+  Result := FileExists(Path) and
+    (CompareText(GetSHA256OfFile(Path), ExpectedSha256) = 0);
+end;
+
+function CorridorKeyShouldInstallResourceFile(
+  const DestSubdir, FileName, ExpectedSha256: String): Boolean;
+begin
+  Result := not CorridorKeyResourceFileSha256Matches(DestSubdir, FileName, ExpectedSha256);
+end;
+
+procedure CorridorKeyDeleteResourceFile(
+  const DestSubdir, FileName: String);
+begin
+  DeleteFile(CorridorKeyResourceFilePath(DestSubdir, FileName));
+end;
+
+procedure CorridorKeyDeleteResourceFileIfInvalid(
+  const DestSubdir, FileName, ExpectedSha256: String);
+var
+  Path: String;
+begin
+  Path := CorridorKeyResourceFilePath(DestSubdir, FileName);
+  if FileExists(Path) and not CorridorKeyResourceFileSha256Matches(DestSubdir, FileName, ExpectedSha256) then begin
+    DeleteFile(Path);
+  end;
+end;
+
+function CorridorKeyBlueRuntimeBinPath: String;
+begin
+  Result := ExpandConstant('{app}\Contents\Resources\torchtrt-runtime\bin');
+end;
+
+function CorridorKeyBlueRuntimeMarkerPath: String;
+begin
+  Result := CorridorKeyBlueRuntimeBinPath + '\corridorkey_blue_runtime.sha256';
+end;
+
+function CorridorKeyBlueRuntimeMarkerMatches: Boolean;
+var
+  MarkerValue: AnsiString;
+begin
+  Result := LoadStringFromFile(CorridorKeyBlueRuntimeMarkerPath, MarkerValue) and
+    (CompareText(Trim(String(MarkerValue)), BLUE_RUNTIME_SHA256) = 0);
+end;
+
+function CorridorKeyBlueRuntimeFilesMatch: Boolean;
+var
+  FindRec: TFindRec;
+  FileCount: Integer;
+  TotalBytes: Int64;
+  RuntimeBinPath: String;
+begin
+  RuntimeBinPath := CorridorKeyBlueRuntimeBinPath;
+  FileCount := 0;
+  TotalBytes := 0;
+
+  if FindFirst(RuntimeBinPath + '\*.dll', FindRec) then begin
+    try
+      repeat
+        if CompareText(FindRec.Name, 'corridorkey_torchtrt.dll') <> 0 then begin
+          FileCount := FileCount + 1;
+          TotalBytes := TotalBytes + (Int64(FindRec.SizeHigh) shl 32) + FindRec.SizeLow;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+
+  Result :=
+    FileExists(RuntimeBinPath + '\torch_cuda.dll') and
+    FileExists(RuntimeBinPath + '\torchtrt.dll') and
+    FileExists(RuntimeBinPath + '\nvinfer_10.dll') and
+    (FileCount = BLUE_RUNTIME_INSTALLED_FILE_COUNT) and
+    (TotalBytes = BLUE_RUNTIME_INSTALLED_SIZE_BYTES);
+end;
+
+function CorridorKeyBlueRuntimeCacheValid: Boolean;
+begin
+  Result := CorridorKeyBlueRuntimeMarkerMatches or CorridorKeyBlueRuntimeFilesMatch;
+end;
+
+procedure CorridorKeyWriteBlueRuntimeCacheMarker;
+begin
+  if CorridorKeyBlueRuntimeFilesMatch then begin
+    SaveStringToFile(CorridorKeyBlueRuntimeMarkerPath, BLUE_RUNTIME_SHA256, False);
+  end;
+end;
+
+@@PACK_CACHE_PREPARE_PROCEDURE@@
+
+procedure CorridorKeyCleanInstallDir;
+begin
+  if not DirExists(ExpandConstant('{app}')) then begin
+    Exit;
+  end;
+
+  DelTree(ExpandConstant('{app}\Contents\Win64'), True, True, True);
+  DeleteFile(ExpandConstant('{app}\artifact_manifest.json'));
+  DeleteFile(ExpandConstant('{app}\bundle_validation.json'));
+  DeleteFile(ExpandConstant('{app}\doctor_report.json'));
+  CorridorKeyPrepareSelectedPackCaches;
+end;
+
+procedure UpdateCorridorKeyPath(const Mode: String);
+var
+  ResultCode: Integer;
+  ScriptPath: String;
+begin
+  ScriptPath := ExpandConstant('{app}\Contents\Win64\update_path.ps1');
+  if FileExists(ScriptPath) then begin
+    Exec('powershell.exe',
+      '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptPath + '" -Mode ' + Mode,
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopCorridorKeyAndHosts;
+  CorridorKeyCleanInstallDir;
+  Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then begin
+    UpdateCorridorKeyPath('Install');
+    CorridorKeyWriteBlueRuntimeCacheMarker;
+    ClearHostOfxCaches;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then begin
+    StopCorridorKeyAndHosts;
+    UpdateCorridorKeyPath('Uninstall');
+    ClearHostOfxCaches;
+  end;
+end;
+
+#if Flavor == "online"
+var
+  DownloadPage: TDownloadWizardPage;
+  DownloadCount: Integer;
+  DownloadFile: Integer;
+  PreviousDownloadUrl: String;
+  DownloadTotalBytes: Int64;
+
+function CorridorKeyFormatBytes(const Bytes: Int64): String;
+var
+  Whole: Int64;
+  Tenths: Int64;
+begin
+  if Bytes >= 1073741824 then begin
+    Whole := Bytes div 1073741824;
+    Tenths := ((Bytes mod 1073741824) * 10) div 1073741824;
+    Result := Format('%d.%d GB', [Whole, Tenths]);
+  end else begin
+    Whole := Bytes div 1048576;
+    Tenths := ((Bytes mod 1048576) * 10) div 1048576;
+    Result := Format('%d.%d MB', [Whole, Tenths]);
+  end;
+end;
+
+procedure CorridorKeyResetDownloadPlan;
+begin
+  DownloadCount := 0;
+  DownloadFile := 0;
+  PreviousDownloadUrl := '';
+  DownloadTotalBytes := 0;
+end;
+
+procedure CorridorKeyTrackPlannedDownload(const SizeBytes: Int64);
+begin
+  DownloadCount := DownloadCount + 1;
+  DownloadTotalBytes := DownloadTotalBytes + SizeBytes;
+end;
+
+function CorridorKeyOnDownloadProgress(
+  const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
+begin
+  if Url <> PreviousDownloadUrl then begin
+    DownloadFile := DownloadFile + 1;
+    PreviousDownloadUrl := Url;
+  end;
+
+  DownloadPage.Msg1Label.Caption :=
+    Format('Downloading file %d of %d', [DownloadFile, DownloadCount]);
+  if ProgressMax > 0 then begin
+    DownloadPage.Msg2Label.Caption :=
+      FileName + ' (' + CorridorKeyFormatBytes(Progress) + ' of ' +
+      CorridorKeyFormatBytes(ProgressMax) + '). Selected total: ' +
+      CorridorKeyFormatBytes(DownloadTotalBytes);
+  end else begin
+    DownloadPage.Msg2Label.Caption :=
+      FileName + ' (' + CorridorKeyFormatBytes(Progress) +
+      ' downloaded). Selected total: ' + CorridorKeyFormatBytes(DownloadTotalBytes);
+  end;
+
+  Result := True;
+end;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage(
+    SetupMessage(msgWizardPreparing),
+    'Downloading selected packs from Hugging Face. SHA-256 is verified for every file.',
+    @CorridorKeyOnDownloadProgress);
+  DownloadPage.ShowBaseNameInsteadOfUrl := True;
+end;
+
+@@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ErrorMessage: String;
+begin
+  if CurPageID = wpReady then begin
+    DownloadPage.Clear;
+    CorridorKeyResetDownloadPlan;
+    CorridorKeyEnqueueDownloads(DownloadPage);
+    if DownloadCount = 0 then begin
+      Result := True;
+      Exit;
+    end;
+    DownloadPage.Msg1Label.Caption :=
+      Format('Preparing %d file(s) to download', [DownloadCount]);
+    DownloadPage.Msg2Label.Caption :=
+      Format('Selected total: %s', [CorridorKeyFormatBytes(DownloadTotalBytes)]);
+    DownloadPage.Show;
+    try
+      try
+        DownloadPage.Download;
+        Result := True;
+      except
+        if DownloadPage.AbortedByUser then begin
+          Log('Download aborted by user.');
+          Result := False;
+        end else begin
+          ErrorMessage := Format('%s: %s', [DownloadPage.LastBaseNameOrUrl, GetExceptionMessage]);
+          SuppressibleMsgBox(AddPeriod(ErrorMessage), mbCriticalError, MB_OK, IDOK);
+          Result := False;
+        end;
+      end;
+    finally
+      DownloadPage.Hide;
+    end;
+  end else
+    Result := True;
+end;
+#endif

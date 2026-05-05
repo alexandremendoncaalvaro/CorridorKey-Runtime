@@ -557,29 +557,31 @@ if (-not [string]::IsNullOrWhiteSpace($CommitBranch)) {
 
 $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
 if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
-    $stageRuntimeArguments = @(
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", (Join-Path $repoRoot "scripts\prepare_windows_rtx_release.ps1")
-    )
+    $stageRuntimeScript = Join-Path $repoRoot "scripts\windows.ps1"
+    $stageRuntimeParameters = @{
+        Task = "prepare-rtx"
+        ForwardArguments = @(
+            "-BootstrapOrtSource",
+            "-SkipModelPreparation",
+            "-SkipRuntimeBuild",
+            "-SkipPackage"
+        )
+    }
     if (-not [string]::IsNullOrWhiteSpace($Version)) {
-        $stageRuntimeArguments += @("-Version", $Version)
+        $stageRuntimeParameters.Version = $Version
     }
     if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
-        $stageRuntimeArguments += @("-Checkpoint", $Checkpoint)
+        $stageRuntimeParameters.Checkpoint = $Checkpoint
     }
     if (-not [string]::IsNullOrWhiteSpace($CorridorKeyRepo)) {
-        $stageRuntimeArguments += @("-CorridorKeyRepo", $CorridorKeyRepo)
+        $stageRuntimeParameters.CorridorKeyRepo = $CorridorKeyRepo
     }
-    $stageRuntimeArguments += @(
-        "-BootstrapOrtSource",
-        "-SkipModelPreparation",
-        "-SkipRuntimeBuild",
-        "-SkipPackage"
-    )
 
     Write-Host "[collaborator] Step 3/5: Staging the curated Windows RTX runtime" -ForegroundColor Cyan
-    Invoke-RepoCommand -FilePath "powershell.exe" -Arguments $stageRuntimeArguments
+    & $stageRuntimeScript @stageRuntimeParameters
+    if ($LASTEXITCODE -ne 0) {
+        throw "Script failed: $stageRuntimeScript"
+    }
     if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
         throw "Curated Windows RTX runtime staging did not produce $rtxOrtRoot"
     }

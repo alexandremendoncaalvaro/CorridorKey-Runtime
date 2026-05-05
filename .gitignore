@@ -45,6 +45,7 @@ vendor/cuda-*/
 vendor/CUDA-*/
 vendor/openfx/
 vendor/onnxruntime-universal/
+vendor/torchtrt-windows/
 
 # Compiled objects
 *.o
@@ -106,3 +107,11 @@ temp/
 Nv*.onnx
 .build_number
 .venv*
+
+# Transient packaging logs from scripts/installer/* and scripts/windows.ps1
+# (the wrapper writes to <topic>.log when invoked with PowerShell Out-File
+# capture; these are intermediate diagnostic files, not release artifacts).
+final_*.log
+package_*.log
+build_*.log
+offline_stage.log

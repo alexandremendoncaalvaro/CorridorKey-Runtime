@@ -1,4 +1,14 @@
 ---
+# Restrict header diagnostics to project-owned headers. Without this,
+# clang-tidy walks every transitively-included header (OpenFX SDK,
+# vcpkg-installed third-party libs, MSVC standard library, MLX, ONNX
+# Runtime, libtorch, etc.) and surfaces hundreds of diagnostics we
+# neither control nor can suppress at the source. Pattern matches the
+# canonical project layout: include/corridorkey/ for the public API,
+# src/ for internal headers, build/release/generated/include/ for the
+# CMake-generated headers (e.g. corridorkey/version.hpp).
+HeaderFilterRegex: '(include[\\/]corridorkey|src[\\/]|build[\\/].+[\\/]generated[\\/]include[\\/]corridorkey)'
+
 Checks: >
   clang-diagnostic-*,
   clang-analyzer-*,

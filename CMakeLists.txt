@@ -13,7 +13,7 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.8.3
+    VERSION 0.8.4
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
@@ -337,6 +337,50 @@ if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-windows-rtx"
     endif()
 endif()
 
+# Optional Windows TorchTRT runtime payload (blue-pack backend, Sprint 1).
+# Staged by `scripts/windows.ps1 -Task prepare-torchtrt`. Absence is fine —
+# blocks below in src/core only enable the TorchTrtSession when the imported
+# targets are defined, so green continues to build with ONNX→TRT-RTX EP only.
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/torchtrt-windows")
+    set(_corridorkey_torchtrt_root "${CMAKE_CURRENT_SOURCE_DIR}/vendor/torchtrt-windows")
+    set(_corridorkey_torchtrt_bin "${_corridorkey_torchtrt_root}/bin")
+    set(_corridorkey_torchtrt_lib "${_corridorkey_torchtrt_root}/lib")
+    set(_corridorkey_torchtrt_include "${_corridorkey_torchtrt_root}/include/torch")
+
+    function(_corridorkey_declare_torchtrt_target target_name dll_name lib_name)
+        set(_dll "${_corridorkey_torchtrt_bin}/${dll_name}")
+        set(_lib "${_corridorkey_torchtrt_lib}/${lib_name}")
+        if(EXISTS "${_dll}" AND EXISTS "${_lib}")
+            add_library(${target_name} SHARED IMPORTED)
+            set_target_properties(${target_name} PROPERTIES
+                IMPORTED_LOCATION "${_dll}"
+                IMPORTED_IMPLIB "${_lib}"
+            )
+        endif()
+    endfunction()
+
+    _corridorkey_declare_torchtrt_target(torch::c10 c10.dll c10.lib)
+    _corridorkey_declare_torchtrt_target(torch::c10_cuda c10_cuda.dll c10_cuda.lib)
+    _corridorkey_declare_torchtrt_target(torch::torch torch.dll torch.lib)
+    _corridorkey_declare_torchtrt_target(torch::torch_cpu torch_cpu.dll torch_cpu.lib)
+    _corridorkey_declare_torchtrt_target(torch::torch_cuda torch_cuda.dll torch_cuda.lib)
+    _corridorkey_declare_torchtrt_target(torchtrt::torchtrt torchtrt.dll torchtrt.lib)
+
+    if(TARGET torch::torch AND TARGET torchtrt::torchtrt)
+        set(CORRIDORKEY_HAS_TORCHTRT TRUE)
+        set(CORRIDORKEY_TORCHTRT_INCLUDE_DIRS "${_corridorkey_torchtrt_include}")
+        set(CORRIDORKEY_TORCHTRT_RUNTIME_DIR "${_corridorkey_torchtrt_bin}")
+        message(STATUS "Using vendored Windows TorchTRT runtime at: ${_corridorkey_torchtrt_root}")
+    else()
+        set(CORRIDORKEY_HAS_TORCHTRT FALSE)
+        message(WARNING
+            "vendor/torchtrt-windows is present but expected DLLs/import libs are missing. "
+            "Re-run scripts/windows.ps1 -Task prepare-torchtrt.")
+    endif()
+else()
+    set(CORRIDORKEY_HAS_TORCHTRT FALSE)
+endif()
+
 find_package(OpenEXR REQUIRED)
 find_package(PNG REQUIRED)
 
@@ -440,6 +484,14 @@ add_subdirectory(src)
 
 # CLI Application
 add_subdirectory(src/cli)
+
+# Optional standalone tools that depend on vendored payloads. Kept under
+# tools/ per ARCHITECTURE.md "Standalone auxiliary tools. Must not leak
+# dependencies into the main build." Each subdirectory is self-gated; the
+# torchtrt_runner only builds when the Windows TorchTRT vendor is staged.
+if(CORRIDORKEY_HAS_TORCHTRT)
+    add_subdirectory(tools/torchtrt_runner)
+endif()
 
 # Testing
 if(BUILD_TESTING)

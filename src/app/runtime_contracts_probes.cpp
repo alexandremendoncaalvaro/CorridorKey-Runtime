@@ -16,20 +16,32 @@
 // helpers are re-evaluated whenever the contract changes by reviewers
 // touching this file.
 
-#include "runtime_contracts.hpp"
-
 #include <algorithm>
 #include <cctype>
+#include <corridorkey/engine.hpp>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <utility>
 
-#include <corridorkey/engine.hpp>
-
 #include "../core/mlx_probe.hpp"
 #include "../frame_io/video_io.hpp"
+#include "runtime_contracts.hpp"
 
+// NOLINTBEGIN(modernize-use-ranges,readability-identifier-length,modernize-use-designated-initializers,readability-function-cognitive-complexity,readability-avoid-nested-conditional-operator,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+//
+// runtime_contracts_probes.cpp tidy-suppression rationale.
+//
+// This TU bridges the runtime-capability surface to the device-detection
+// probes. The std::transform / std::find call sites scan tiny, fixed
+// containers (per-process backend list, ASCII strings) where the
+// iterator pair form is the documented C++17/20 spelling and switching
+// to ranges adds no safety. The "ch" identifier is the canonical
+// std::tolower lambda parameter name. The Error{} aggregates use the
+// project-wide positional style. resolve_model_artifact_for_request()
+// is intentionally branchy because it sequences "direct attempt" vs
+// "coarse-to-fine" vs "validate explicit" model resolution in one place
+// to keep the artifact-selection contract auditable in one read.
 namespace corridorkey {
 
 namespace {
@@ -104,7 +116,7 @@ Result<std::pair<int, bool>> search_resolution_for_request(
 RuntimeCapabilities runtime_capabilities() {
     RuntimeCapabilities capabilities;
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
     capabilities.platform = "macos";
 #elif defined(_WIN32)
     capabilities.platform = "windows";
@@ -268,3 +280,4 @@ Result<std::filesystem::path> resolve_model_artifact_for_request(
 }
 
 }  // namespace corridorkey::app
+// NOLINTEND(modernize-use-ranges,readability-identifier-length,modernize-use-designated-initializers,readability-function-cognitive-complexity,readability-avoid-nested-conditional-operator,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

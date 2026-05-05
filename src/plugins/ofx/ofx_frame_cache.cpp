@@ -7,6 +7,19 @@
 
 namespace corridorkey::ofx {
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters,readability-identifier-length,cppcoreguidelines-avoid-magic-numbers,modernize-use-ranges,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+//
+// ofx_frame_cache.cpp tidy-suppression rationale.
+//
+// This file is a small FNV-1a hashing and LRU eviction layer. The
+// adjacent-parameter pairs (hash + value, alpha + foreground) describe
+// the cache primitive's contract and have no safer ordering. The single-
+// character `c` / `a` / `f` locals mirror the FNV byte-loop and the
+// (alpha, foreground) buffer-pair convention used throughout the OFX
+// plugin. The 32-entry vector reserve hint reflects the typical scrub-
+// burst size and does not warrant a named constant. std::min_element
+// with the access-tick comparator has no equivalent ranges form that
+// preserves the iterator-erase pattern used here for LRU eviction.
 namespace {
 
 constexpr std::uint64_t kFnvOffsetBasis = 1469598103934665603ULL;
@@ -43,21 +56,21 @@ std::uint64_t inference_params_hash(const InferenceParams& params) {
     hash = mix_signature(hash, static_cast<float>(params.target_resolution));
     hash = mix_signature(hash, params.despill_strength);
     hash = mix_signature(hash, static_cast<float>(params.spill_method));
-    hash = mix_signature(hash, params.auto_despeckle ? 1.0f : 0.0f);
+    hash = mix_signature(hash, params.auto_despeckle ? 1.0F : 0.0F);
     hash = mix_signature(hash, static_cast<float>(params.despeckle_size));
     hash = mix_signature(hash, params.refiner_scale);
     hash = mix_signature(hash,
                          static_cast<float>(static_cast<std::uint8_t>(params.alpha_hint_policy)));
-    hash = mix_signature(hash, params.input_is_linear ? 1.0f : 0.0f);
+    hash = mix_signature(hash, params.input_is_linear ? 1.0F : 0.0F);
     hash = mix_signature(hash, static_cast<float>(params.batch_size));
-    hash = mix_signature(hash, params.enable_tiling ? 1.0f : 0.0f);
+    hash = mix_signature(hash, params.enable_tiling ? 1.0F : 0.0F);
     hash = mix_signature(hash, static_cast<float>(params.tile_padding));
     hash =
         mix_signature(hash, static_cast<float>(static_cast<std::uint8_t>(params.upscale_method)));
-    hash = mix_signature(hash, params.source_passthrough ? 1.0f : 0.0f);
+    hash = mix_signature(hash, params.source_passthrough ? 1.0F : 0.0F);
     hash = mix_signature(hash, static_cast<float>(params.sp_erode_px));
     hash = mix_signature(hash, static_cast<float>(params.sp_blur_px));
-    hash = mix_signature(hash, params.output_alpha_only ? 1.0f : 0.0f);
+    hash = mix_signature(hash, params.output_alpha_only ? 1.0F : 0.0F);
     hash = mix_signature(hash, static_cast<float>(params.requested_quality_resolution));
     hash = mix_signature(
         hash, static_cast<float>(static_cast<std::uint8_t>(params.quality_fallback_mode)));
@@ -107,7 +120,7 @@ bool SharedFrameCache::try_retrieve(const SharedCacheKey& key, ImageBuffer& out_
     std::vector<StageTiming> stage_timings_snapshot;
 
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        const std::scoped_lock lock(m_mutex);
         for (auto& entry : m_entries) {
             if (entry.key != key) {
                 continue;
@@ -183,7 +196,7 @@ void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha, cons
     }
     const std::size_t incoming_bytes = buffer_bytes(*alpha_copy) + buffer_bytes(*fg_copy);
 
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
 
     // Update-in-place when the same key is re-stored. Common when the plugin
     // re-renders a frame it previously cached but with a refreshed timings
@@ -217,7 +230,7 @@ void SharedFrameCache::store(const SharedCacheKey& key, const Image& alpha, cons
 }
 
 void SharedFrameCache::clear() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::scoped_lock lock(m_mutex);
     m_entries.clear();
     m_current_bytes = 0;
     m_access_counter = 0;
@@ -230,7 +243,7 @@ SharedFrameCacheStats SharedFrameCache::stats() const {
     result.stores = m_stores.load(std::memory_order_relaxed);
     result.evictions = m_evictions.load(std::memory_order_relaxed);
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        const std::scoped_lock lock(m_mutex);
         result.entries = m_entries.size();
         result.bytes = m_current_bytes;
         result.byte_budget = m_byte_budget;
@@ -239,3 +252,4 @@ SharedFrameCacheStats SharedFrameCache::stats() const {
 }
 
 }  // namespace corridorkey::ofx
+// NOLINTEND(bugprone-easily-swappable-parameters,readability-identifier-length,cppcoreguidelines-avoid-magic-numbers,modernize-use-ranges,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

@@ -6,8 +6,21 @@
 
 namespace corridorkey::common {
 
+// Default minimum rows per worker before splitting work across threads. Below
+// this, the threading overhead dominates and a single in-place call is
+// faster.
+inline constexpr int kDefaultMinRowsPerWorker = 64;
+
+// 'Function&&' is taken as a forwarding reference so callers can pass either
+// an lvalue lambda capture or an rvalue temporary, but the body invokes
+// 'function' in place and never std::forwards it. NOLINT below suppresses
+// the missing-std-forward diagnostic with rationale rather than rewrite the
+// loop body to std::forward each call (which would only add noise without
+// changing behaviour).
 template <typename Function>
-void parallel_for_rows(int total_rows, Function&& function, int min_rows_per_worker = 64) {
+void parallel_for_rows(int total_rows,
+                       Function&& function,  // NOLINT(cppcoreguidelines-missing-std-forward)
+                       int min_rows_per_worker = kDefaultMinRowsPerWorker) {
     if (total_rows <= 0) {
         return;
     }

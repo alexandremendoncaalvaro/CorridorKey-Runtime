@@ -11,7 +11,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 
 if ([string]::IsNullOrWhiteSpace($env:VCPKG_ROOT)) {
-    throw "VCPKG_ROOT is required by CMakePresets.json. Set VCPKG_ROOT before running scripts/build.ps1."
+    throw "VCPKG_ROOT is required by CMakePresets.json. Set VCPKG_ROOT before running scripts\windows.ps1 -Task build."
 }
 
 if (-not (Test-Path $env:VCPKG_ROOT)) {

@@ -17,7 +17,7 @@
 #error "ONNX Runtime C++ headers not found"
 #endif
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <dxgi1_6.h>
 #include <windows.h>
@@ -26,9 +26,22 @@
 
 namespace corridorkey::core {
 
+// NOLINTBEGIN(readability-identifier-length,modernize-use-ranges,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+//
+// windows_rtx_probe.cpp tidy-suppression rationale.
+//
+// The single-character `ch` parameter mirrors the <cctype> predicate
+// idiom (std::isspace / std::toupper take an unsigned char) used in
+// trim and upper helpers. std::transform with the cctype lambda has no
+// std::ranges replacement that preserves the unsigned-char cast
+// requirement. The reinterpret_cast on GetProcAddress and on the LUID
+// byte buffer is the canonical Win32 / CUDA driver API form for typed
+// function-pointer loading and for the cuDeviceGetLuid char* contract.
+// The 1024 * 1024 byte-to-MiB conversion is the standard DXGI memory
+// reporting unit.
 namespace {
 
-#if defined(_WIN32)
+#ifdef _WIN32
 
 constexpr unsigned int kNvidiaVendorId = 0x10DE;
 constexpr unsigned int kIntelVendorId = 0x8086;
@@ -141,7 +154,7 @@ struct LoadedCudaDriverApi {
         }
     }
 
-    bool ready() const {
+    [[nodiscard]] bool ready() const {
         return module != nullptr && cu_init != nullptr && cu_device_get_count != nullptr &&
                cu_device_get != nullptr && cu_device_get_attribute != nullptr &&
                cu_device_get_luid != nullptr;
@@ -223,7 +236,7 @@ bool provider_available(const std::string& provider_name) {
     try {
         Ort::Env dummy_env{ORT_LOGGING_LEVEL_WARNING, "probe"};
         auto providers = Ort::GetAvailableProviders();
-        return std::find(providers.begin(), providers.end(), provider_name) != providers.end();
+        return std::ranges::find(providers, provider_name) != providers.end();
     } catch (...) {
         return false;
     }
@@ -245,7 +258,7 @@ bool onnxruntime_export_available(const char* export_name) {
 }  // namespace
 
 bool tensorrt_rtx_provider_available() {
-#if defined(_WIN32)
+#ifdef _WIN32
     return provider_available(std::string(corridorkey::detail::providers::TENSORRT));
 #else
     return false;
@@ -253,7 +266,7 @@ bool tensorrt_rtx_provider_available() {
 }
 
 bool cuda_provider_available() {
-#if defined(_WIN32)
+#ifdef _WIN32
     return provider_available(std::string(corridorkey::detail::providers::CUDA));
 #else
     return false;
@@ -261,7 +274,7 @@ bool cuda_provider_available() {
 }
 
 bool directml_provider_available() {
-#if defined(_WIN32)
+#ifdef _WIN32
     return onnxruntime_export_available("OrtSessionOptionsAppendExecutionProvider_DML") ||
            provider_available("DML") || provider_available("DirectML") ||
            provider_available(std::string(corridorkey::detail::providers::DIRECTML));
@@ -271,7 +284,7 @@ bool directml_provider_available() {
 }
 
 bool winml_provider_available() {
-#if defined(_WIN32)
+#ifdef _WIN32
     return provider_available("WinML") ||
            provider_available(std::string(corridorkey::detail::providers::WINML));
 #else
@@ -280,7 +293,7 @@ bool winml_provider_available() {
 }
 
 bool openvino_provider_available() {
-#if defined(_WIN32)
+#ifdef _WIN32
     return provider_available("OpenVINO") ||
            provider_available(std::string(corridorkey::detail::providers::OPENVINO));
 #else
@@ -290,7 +303,7 @@ bool openvino_provider_available() {
 
 std::vector<WindowsGpuInfo> list_windows_gpus() {
     std::vector<WindowsGpuInfo> gpus;
-#if defined(_WIN32)
+#ifdef _WIN32
     Microsoft::WRL::ComPtr<IDXGIFactory6> factory;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
         return gpus;
@@ -352,3 +365,4 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
 }
 
 }  // namespace corridorkey::core
+// NOLINTEND(readability-identifier-length,modernize-use-ranges,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

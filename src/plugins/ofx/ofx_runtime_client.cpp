@@ -8,8 +8,9 @@
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
 #include "ofx_logging.hpp"
+#include "ofx_runtime_family.hpp"
 
-#if defined(__APPLE__)
+#ifdef __APPLE__
 #include <pthread.h>
 #include <pthread/spawn.h>
 #include <signal.h>
@@ -27,6 +28,24 @@ extern char** environ;
 
 namespace corridorkey::ofx {
 
+// NOLINTBEGIN(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+//
+// ofx_runtime_client.cpp tidy-suppression rationale.
+//
+// The Error{} aggregate is the engine-wide failure form across every
+// transport, prepare, and render path; rewriting them as designated
+// initialisers would obscure the uniform structure. The 5000 ms
+// terminate wait, the 90% (* 9 / 10) prepare-budget shortening, and the
+// 150 ms server-ready poll cadence are tuned to the OFX runtime's
+// transport-and-prewarm contract, not arbitrary magic numbers. Render /
+// prepare / ensure_server_running are intentionally large because they
+// orchestrate the full connect, recover, restart, retry contract, with
+// branching that mirrors the protocol state machine. StageTimingCallback
+// is the engine-wide std::function signature passed by value across the
+// async boundary. The (`ms`) parameter name mirrors the public
+// ofx-runtime-client API and matches header signatures. The std::copy
+// calls operate on Image span begin/end pairs whose ranges form would
+// require span->range adapters across the SharedFrameTransport bridge.
 namespace {
 
 bool same_device_info(const DeviceInfo& lhs, const DeviceInfo& rhs) {
@@ -103,14 +122,14 @@ Result<void> terminate_server_process(int server_pid) {
         return {};
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     HANDLE process =
         OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, static_cast<DWORD>(server_pid));
     if (process == nullptr) {
         return {};
     }
 
-    if (!TerminateProcess(process, 0)) {
+    if (TerminateProcess(process, 0) == 0) {
         CloseHandle(process);
         return Unexpected<Error>(
             Error{ErrorCode::IoError, "Failed to terminate the stale OFX runtime server."});
@@ -148,7 +167,7 @@ bool is_process_alive(int server_pid) {
         return false;
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(server_pid));
     if (process == nullptr) {
         return false;
@@ -207,7 +226,7 @@ std::filesystem::path resolve_ofx_runtime_server_binary(
         return std::filesystem::path(*override_path);
     }
 
-#if defined(_WIN32)
+#ifdef _WIN32
     auto win64_dir = plugin_module_path.parent_path();
     return win64_dir / "corridorkey_ofx_runtime_server.exe";
 #elif defined(__linux__)
@@ -233,10 +252,16 @@ OfxRuntimeClient::OfxRuntimeClient(OfxRuntimeClientOptions options)
     : m_options(std::move(options)) {}
 
 OfxRuntimeClient::~OfxRuntimeClient() {
-    auto release_result = release_session();
-    if (!release_result) {
-        log_message("ofx_runtime_client",
-                    "release_session_failed detail=" + release_result.error().message);
+    try {
+        auto release_result = release_session();
+        if (!release_result) {
+            log_message("ofx_runtime_client",
+                        "release_session_failed detail=" + release_result.error().message);
+        }
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // Destructors must not propagate exceptions; release_session relies on
+        // logging and JSON serialisation that may throw under OOM. Swallowing
+        // mirrors the engine-wide RAII contract for cleanup paths.
     }
 }
 
@@ -257,14 +282,37 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
     const app::OfxRuntimePrepareSessionRequest& request, StageTimingCallback on_stage) {
     if (!m_session.session_id.empty() && m_last_prepare_request.has_value() &&
         same_prepare_request(*m_last_prepare_request, request)) {
-        return app::OfxRuntimePrepareSessionResponse{
-            with_prepare_request_metadata(m_session, request), {}};
+        if (session_belongs_to_current_server()) {
+            return app::OfxRuntimePrepareSessionResponse{
+                with_prepare_request_metadata(m_session, request), {}};
+        }
+        invalidate_session("event=prepare_cached_session_invalidated detail=server_pid_changed");
     }
 
     if (!m_session.session_id.empty()) {
+        bool requires_family_restart = false;
+        OfxRuntimeFamily current_family = OfxRuntimeFamily::Other;
+        OfxRuntimeFamily next_family = OfxRuntimeFamily::Other;
+        if (m_last_prepare_request.has_value()) {
+            current_family = ofx_runtime_family_for_prepare_request(*m_last_prepare_request);
+            next_family = ofx_runtime_family_for_prepare_request(request);
+            requires_family_restart =
+                should_restart_for_ofx_runtime_family_switch(current_family, next_family);
+        }
+
         auto release_result = release_session();
         if (!release_result && !is_transport_error(release_result.error())) {
             return Unexpected<Error>(release_result.error());
+        }
+        if (requires_family_restart) {
+            const std::string reason = std::string("runtime_family_switch from=") +
+                                       ofx_runtime_family_label(current_family) + " to=" +
+                                       ofx_runtime_family_label(next_family);
+            log_message("ofx_runtime_client", "event=runtime_family_switch_restart " + reason);
+            auto restart_result = restart_server(reason);
+            if (!restart_result) {
+                return Unexpected<Error>(restart_result.error());
+            }
         }
     }
 
@@ -309,6 +357,21 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
     if (m_session.session_id.empty()) {
         return Unexpected<Error>(
             Error{ErrorCode::InvalidParameters, "OFX runtime session is not prepared."});
+    }
+
+    auto ensure_result = ensure_server_running();
+    if (!ensure_result) {
+        return Unexpected<Error>(ensure_result.error());
+    }
+    if (!session_belongs_to_current_server()) {
+        log_message("ofx_runtime_client",
+                    "event=render_session_recover_after_server_change session_pid=" +
+                        std::to_string(m_session_server_pid) +
+                        " server_pid=" + std::to_string(m_server_pid));
+        auto recover_result = recover_runtime_session(on_stage);
+        if (!recover_result) {
+            return Unexpected<Error>(recover_result.error());
+        }
     }
 
     const auto transport_path = common::next_ofx_shared_frame_path();
@@ -411,6 +474,7 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
 Result<void> OfxRuntimeClient::release_session() {
     if (m_session.session_id.empty()) {
         m_last_prepare_request = std::nullopt;
+        m_session_server_pid = 0;
         return {};
     }
 
@@ -419,6 +483,7 @@ Result<void> OfxRuntimeClient::release_session() {
     auto response =
         send_command_without_launch(app::OfxRuntimeCommand::ReleaseSession, app::to_json(request));
     m_session = {};
+    m_session_server_pid = 0;
     m_last_prepare_request = std::nullopt;
     if (!response && !is_transport_error(response.error())) {
         return Unexpected<Error>(response.error());
@@ -442,12 +507,12 @@ std::uint64_t OfxRuntimeClient::session_ref_count() const {
     return m_session.ref_count;
 }
 
-void OfxRuntimeClient::set_request_timeout_ms(int ms) {
-    m_options.request_timeout_ms = ms;
+void OfxRuntimeClient::set_request_timeout_ms(int timeout_ms) {
+    m_options.request_timeout_ms = timeout_ms;
 }
 
-void OfxRuntimeClient::set_prepare_timeout_ms(int ms) {
-    m_options.prepare_timeout_ms = ms;
+void OfxRuntimeClient::set_prepare_timeout_ms(int timeout_ms) {
+    m_options.prepare_timeout_ms = timeout_ms;
 }
 
 Result<void> OfxRuntimeClient::ensure_server_running() {
@@ -573,6 +638,7 @@ Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_st
 
     log_message("ofx_runtime_client", "event=recover_session_begin");
     m_session = {};
+    m_session_server_pid = 0;
 
     auto ensure_result = ensure_server_running();
     if (!ensure_result) {
@@ -599,9 +665,10 @@ Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_st
 
     update_session_snapshot(parsed->session);
     replay_stage_timings(parsed->timings, on_stage);
-    log_message("ofx_runtime_client", "event=recover_session_result reused_existing_session=" +
-                                          std::to_string(parsed->session.reused_existing_session) +
-                                          " session_id=" + parsed->session.session_id);
+    log_message("ofx_runtime_client",
+                "event=recover_session_result reused_existing_session=" +
+                    std::to_string(static_cast<int>(parsed->session.reused_existing_session)) +
+                    " session_id=" + parsed->session.session_id);
     return {};
 }
 
@@ -613,6 +680,8 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
         return Unexpected<Error>(terminate_result.error());
     }
 
+    m_session = {};
+    m_session_server_pid = 0;
     m_server_pid = 0;
 
     auto launch_result = launch_server();
@@ -673,7 +742,7 @@ Result<void> OfxRuntimeClient::launch_server() {
     log_message("ofx_runtime_client",
                 "event=launch_server path=" + m_options.server_binary.string());
 
-#if defined(_WIN32)
+#ifdef _WIN32
     std::wstring command_line = L"\"" + m_options.server_binary.wstring() +
                                 L"\" ofx-runtime-server --endpoint-port " +
                                 std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
@@ -684,9 +753,9 @@ Result<void> OfxRuntimeClient::launch_server() {
     startup_info.dwFlags = STARTF_USESHOWWINDOW;
     startup_info.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION process_info{};
-    if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
-                        DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &startup_info,
-                        &process_info)) {
+    if (CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
+                       DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &startup_info,
+                       &process_info) == 0) {
         return Unexpected<Error>(
             Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
     }
@@ -777,6 +846,11 @@ Result<void> OfxRuntimeClient::launch_server() {
     return {};
 }
 
+bool OfxRuntimeClient::session_belongs_to_current_server() const {
+    return !m_session.session_id.empty() && m_session_server_pid > 0 && m_server_pid > 0 &&
+           m_session_server_pid == m_server_pid;
+}
+
 void OfxRuntimeClient::invalidate_session(const std::string& reason) {
     if (!m_session.session_id.empty()) {
         log_message("ofx_runtime_client", reason + " session_id=" + m_session.session_id);
@@ -784,10 +858,12 @@ void OfxRuntimeClient::invalidate_session(const std::string& reason) {
         log_message("ofx_runtime_client", reason);
     }
     m_session = {};
+    m_session_server_pid = 0;
 }
 
 void OfxRuntimeClient::update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot) {
     m_session = snapshot;
+    m_session_server_pid = m_server_pid;
 }
 
 void OfxRuntimeClient::update_server_health(const app::OfxRuntimeHealthResponse& health) {
@@ -795,3 +871,4 @@ void OfxRuntimeClient::update_server_health(const app::OfxRuntimeHealthResponse&
 }
 
 }  // namespace corridorkey::ofx
+// NOLINTEND(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

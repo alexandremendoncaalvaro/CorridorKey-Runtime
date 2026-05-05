@@ -3,26 +3,34 @@
     Downloads CorridorKey model files from Hugging Face Hub into the local models/ directory.
 
 .DESCRIPTION
-    Fetches ONNX, Torch-TensorRT TorchScript, MLX, and PyTorch model files from the Hugging Face repository
-    (alexandrealvaro/CorridorKey) into the local models/ directory. The release
-    pipeline and runtime continue to read models from this directory unchanged.
+    Fetches the runtime model variants (ONNX, Torch-TensorRT TorchScript,
+    MLX, hint-tracker fixtures) from alexandrealvaro/CorridorKey into the
+    local models/ directory. Training checkpoints (.pth) are pulled
+    direct from the upstream nikopueringer/* repos and never republished
+    by us.
 
-    By default, the Windows RTX profile downloads the FP16 ONNX ladder and any
-    packaged Torch-TensorRT TorchScript artifacts used by the experimental
-    Windows RTX engine selector. INT8 ONNX models were retired together with
-    CPU rendering: FP16 is now the only quality the runtime ships.
+    INT8 ONNX models stay shipped for the browser experiment; the
+    OFX render path uses FP16 + TensorRT-RTX EP exclusively.
 
 .PARAMETER Profile
     Model set to download:
-      windows-rtx  : FP16 ONNX models + Torch-TensorRT TorchScript artifacts (default)
-      windows-turing-source : checkpoint + reference FP16 ONNX models for the Turing collaboration kit
-      windows-all  : FP16 + FP16 context ONNX models + Torch-TensorRT TorchScript artifacts
-      apple        : MLX safetensors + bridge files
-      pytorch      : Training checkpoint (.pth)
-      all          : Everything
+      windows-rtx           : FP16 ONNX models + Torch-TensorRT TorchScript engines (default)
+      windows-rtx-blue      : Dedicated CorridorKeyBlue dynamic TorchScript (.ts) model for blue-screen plates
+      windows-turing-source : Reference FP16 ONNX ladder + upstream green training checkpoint
+      windows-all           : FP16 + FP16 context ONNX models + Torch-TensorRT (green and blue)
+      apple                 : MLX safetensors + bridge files
+      pytorch               : Upstream green and blue training checkpoints (from nikopueringer/*)
+      hint-tracker          : MobileSAM + Cutie auxiliary fixtures for alpha-hint generation
+      all                   : Everything
 
 .PARAMETER HfRepo
-    Hugging Face repository identifier. Defaults to alexandrealvaro/CorridorKey.
+    Hugging Face repository for our re-exported runtime variants. Defaults to alexandrealvaro/CorridorKey.
+
+.PARAMETER HfUpstreamGreenRepo
+    Upstream green training checkpoint repo. Defaults to nikopueringer/CorridorKey_v1.0.
+
+.PARAMETER HfUpstreamBlueRepo
+    Upstream blue training checkpoint repo. Defaults to nikopueringer/CorridorKeyBlue_1.0.
 
 .PARAMETER Revision
     Branch, tag, or commit to download from. Defaults to main.
@@ -37,10 +45,17 @@
 #>
 
 param(
-    [ValidateSet("windows-rtx", "windows-turing-source", "windows-all", "apple", "pytorch", "hint-tracker", "all")]
+    [ValidateSet("windows-rtx", "windows-rtx-blue", "windows-turing-source", "windows-all",
+                 "apple", "pytorch", "hint-tracker", "all")]
     [string]$Profile = "windows-rtx",
 
     [string]$HfRepo = "alexandrealvaro/CorridorKey",
+    # Upstream training checkpoints. The runtime ships the re-exported
+    # ONNX / Torch-TensorRT / MLX variants under $HfRepo above; the .pth
+    # checkpoints themselves live at the canonical author-published
+    # locations and we never republish them.
+    [string]$HfUpstreamGreenRepo = "nikopueringer/CorridorKey_v1.0",
+    [string]$HfUpstreamBlueRepo = "nikopueringer/CorridorKeyBlue_1.0",
     [string]$Revision = "main",
     [switch]$Force
 )
@@ -56,12 +71,21 @@ if (-not (Test-Path $modelsDir)) {
 }
 
 $hfBaseUrl = "https://huggingface.co/$HfRepo/resolve/$Revision"
+$hfUpstreamGreenBaseUrl = "https://huggingface.co/$HfUpstreamGreenRepo/resolve/$Revision"
+$hfUpstreamBlueBaseUrl = "https://huggingface.co/$HfUpstreamBlueRepo/resolve/$Revision"
 
 $windowsRtxFiles = @{
     "onnx/fp16/corridorkey_fp16_512.onnx"   = "corridorkey_fp16_512.onnx"
     "onnx/fp16/corridorkey_fp16_1024.onnx"  = "corridorkey_fp16_1024.onnx"
     "onnx/fp16/corridorkey_fp16_1536.onnx"  = "corridorkey_fp16_1536.onnx"
     "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
+}
+
+# The blue Windows RTX pack is a single dynamic TorchScript artifact.
+# Keep this filename aligned with src/app/runtime_contracts.cpp and
+# src/plugins/ofx/ofx_model_selection.hpp.
+$windowsRtxBlueFiles = @{
+    "torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts" = "corridorkey_dynamic_blue_fp16.ts"
 }
 
 $windowsTorchTensorRtFiles = @{
@@ -76,7 +100,17 @@ $windowsTuringSourceFiles = @{
     "onnx/fp16/corridorkey_fp16_1024.onnx"  = "corridorkey_fp16_1024.onnx"
     "onnx/fp16/corridorkey_fp16_1536.onnx"  = "corridorkey_fp16_1536.onnx"
     "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
-    "pytorch/CorridorKey.pth"               = "CorridorKey.pth"
+}
+
+# Upstream-hosted training checkpoints. We never republish these; fetch
+# them direct from nikopueringer/* so the canonical source-of-truth and
+# license terms stay attached. Keys are remote paths under the upstream
+# repo, values are local filenames written under models/.
+$upstreamGreenCheckpointFiles = @{
+    "CorridorKey_v1.0.pth" = "CorridorKey_v1.0.pth"
+}
+$upstreamBlueCheckpointFiles = @{
+    "CorridorKeyBlue_1.0.pth" = "CorridorKeyBlue_1.0.pth"
 }
 
 $windowsCtxFiles = @{
@@ -95,10 +129,6 @@ $appleFiles = @{
     "mlx/corridorkey_mlx_bridge_2048.mlxfn"      = "corridorkey_mlx_bridge_2048.mlxfn"
 }
 
-$pytorchFiles = @{
-    "pytorch/CorridorKey.pth" = "CorridorKey.pth"
-}
-
 $hintTrackerFiles = @{
     "hint/mobilesam_image_encoder_fp16.onnx"  = "mobilesam_image_encoder_fp16.onnx"
     "hint/mobilesam_prompt_decoder_fp16.onnx" = "mobilesam_prompt_decoder_fp16.onnx"
@@ -108,6 +138,10 @@ $hintTrackerFiles = @{
 }
 
 $filesToDownload = @{}
+# Upstream training checkpoints fetched from nikopueringer/* instead of
+# our own repo. Tracked separately because the base URL differs.
+$filesToDownloadGreenUpstream = @{}
+$filesToDownloadBlueUpstream = @{}
 
 switch ($Profile) {
     "windows-rtx" {
@@ -119,8 +153,12 @@ switch ($Profile) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
     }
+    "windows-rtx-blue" {
+        $filesToDownload = $windowsRtxBlueFiles.Clone()
+    }
     "windows-turing-source" {
         $filesToDownload = $windowsTuringSourceFiles.Clone()
+        $filesToDownloadGreenUpstream = $upstreamGreenCheckpointFiles.Clone()
     }
     "windows-all" {
         $filesToDownload = $windowsRtxFiles.Clone()
@@ -133,6 +171,9 @@ switch ($Profile) {
         foreach ($entry in $hintTrackerFiles.GetEnumerator()) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
+        foreach ($entry in $windowsRtxBlueFiles.GetEnumerator()) {
+            $filesToDownload[$entry.Key] = $entry.Value
+        }
     }
     "apple" {
         $filesToDownload = $appleFiles.Clone()
@@ -141,22 +182,34 @@ switch ($Profile) {
         }
     }
     "pytorch" {
-        $filesToDownload = $pytorchFiles.Clone()
+        $filesToDownloadGreenUpstream = $upstreamGreenCheckpointFiles.Clone()
+        $filesToDownloadBlueUpstream = $upstreamBlueCheckpointFiles.Clone()
     }
     "hint-tracker" {
         $filesToDownload = $hintTrackerFiles.Clone()
     }
     "all" {
-        foreach ($table in @($windowsRtxFiles, $windowsCtxFiles, $windowsTorchTensorRtFiles, $appleFiles, $pytorchFiles, $hintTrackerFiles)) {
+        foreach ($table in @($windowsRtxFiles, $windowsCtxFiles, $windowsTorchTensorRtFiles,
+                             $windowsRtxBlueFiles, $appleFiles, $hintTrackerFiles)) {
             foreach ($entry in $table.GetEnumerator()) {
                 $filesToDownload[$entry.Key] = $entry.Value
             }
         }
+        $filesToDownloadGreenUpstream = $upstreamGreenCheckpointFiles.Clone()
+        $filesToDownloadBlueUpstream = $upstreamBlueCheckpointFiles.Clone()
     }
 }
 
-Write-Host "[fetch-models] Profile: $Profile ($($filesToDownload.Count) files)"
+$totalFiles = $filesToDownload.Count + $filesToDownloadGreenUpstream.Count +
+              $filesToDownloadBlueUpstream.Count
+Write-Host "[fetch-models] Profile: $Profile ($totalFiles files)"
 Write-Host "[fetch-models] Source:  $HfRepo@$Revision"
+if ($filesToDownloadGreenUpstream.Count -gt 0) {
+    Write-Host "[fetch-models] Upstream green: $HfUpstreamGreenRepo@$Revision"
+}
+if ($filesToDownloadBlueUpstream.Count -gt 0) {
+    Write-Host "[fetch-models] Upstream blue:  $HfUpstreamBlueRepo@$Revision"
+}
 Write-Host "[fetch-models] Target:  $modelsDir"
 Write-Host ""
 
@@ -164,11 +217,32 @@ $downloaded = 0
 $skipped = 0
 $failed = 0
 
-foreach ($entry in $filesToDownload.GetEnumerator() | Sort-Object Value) {
-    $remotePath = $entry.Key
-    $localName = $entry.Value
+# Iterate runtime variants ($HfRepo) and upstream training checkpoints
+# ($HfUpstreamGreenRepo / $HfUpstreamBlueRepo) with the correct base URL
+# for each. Output names land in models/ with the same filename
+# regardless of which repo they came from.
+$allEntries = @()
+foreach ($entry in $filesToDownload.GetEnumerator()) {
+    $allEntries += [pscustomobject]@{
+        RemotePath = $entry.Key; LocalName = $entry.Value; BaseUrl = $hfBaseUrl
+    }
+}
+foreach ($entry in $filesToDownloadGreenUpstream.GetEnumerator()) {
+    $allEntries += [pscustomobject]@{
+        RemotePath = $entry.Key; LocalName = $entry.Value; BaseUrl = $hfUpstreamGreenBaseUrl
+    }
+}
+foreach ($entry in $filesToDownloadBlueUpstream.GetEnumerator()) {
+    $allEntries += [pscustomobject]@{
+        RemotePath = $entry.Key; LocalName = $entry.Value; BaseUrl = $hfUpstreamBlueBaseUrl
+    }
+}
+
+foreach ($entry in $allEntries | Sort-Object LocalName) {
+    $remotePath = $entry.RemotePath
+    $localName = $entry.LocalName
     $localPath = Join-Path $modelsDir $localName
-    $url = "$hfBaseUrl/$remotePath"
+    $url = "$($entry.BaseUrl)/$remotePath"
 
     if ((Test-Path $localPath) -and -not $Force.IsPresent) {
         Write-Host "  [skip] $localName (already exists, use -Force to re-download)"

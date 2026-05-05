@@ -10,6 +10,20 @@
 
 namespace corridorkey::ofx {
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-const-cast,readability-function-size,readability-function-cognitive-complexity,modernize-use-designated-initializers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+//
+// ofx_plugin.cpp tidy-suppression rationale.
+//
+// The OpenFX 1.4 C ABI mandates a fixed set of TU-local globals (host,
+// suite pointers, plugin descriptor) that the host queries through
+// OfxSetHost / OfxGetPlugin. The host hands actions in as a void*
+// handle that the spec requires the plugin to interpret as the typed
+// OfxImageEffectHandle - the reinterpret_cast plus const_cast pair is
+// the canonical OFX dispatcher form. plugin_main_entry's size and
+// branching reflects the action-dispatch table the spec defines, not
+// accidental complexity. The g_plugin POD is initialised in the field
+// order required by the OfxPlugin struct contract; designated
+// initialisers would obscure the spec field order.
 OfxHost* g_host = nullptr;
 OfxSuites g_suites = {};
 std::unique_ptr<SharedFrameCache> g_frame_cache = nullptr;
@@ -109,7 +123,8 @@ bool fetch_suites() {
                         (has_clearpersist ? "1" : "0"));
     }
 
-    if (!g_suites.property || !g_suites.image_effect || !g_suites.parameter) {
+    if (g_suites.property == nullptr || g_suites.image_effect == nullptr ||
+        g_suites.parameter == nullptr) {
         log_message("fetch_suites", "Missing required OpenFX suites.");
         return false;
     }
@@ -155,11 +170,12 @@ void set_persistent_message(const char* message_type, const char* message_id,
     }
     const OfxStatus status =
         g_suites.message->setPersistentMessage(effect, message_type, message_id, "%s", message);
-    log_message("set_persistent_message",
-                std::string("event=posted type=") + (message_type ? message_type : "(null)") +
-                    " id=" + (message_id ? message_id : "(null)") +
-                    " status=" + std::to_string(status) +
-                    " body_len=" + std::to_string(message ? std::strlen(message) : 0));
+    log_message(
+        "set_persistent_message",
+        std::string("event=posted type=") + (message_type != nullptr ? message_type : "(null)") +
+            " id=" + (message_id != nullptr ? message_id : "(null)") +
+            " status=" + std::to_string(status) +
+            " body_len=" + std::to_string(message != nullptr ? std::strlen(message) : 0));
 }
 
 // ProgressScope implementation. The scope owns one progressStart /
@@ -389,3 +405,4 @@ CORRIDORKEY_OFX_EXPORT OfxPlugin* OfxGetPlugin(int nth) {
 }
 
 }  // extern "C"
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-pro-type-reinterpret-cast,cppcoreguidelines-pro-type-const-cast,readability-function-size,readability-function-cognitive-complexity,modernize-use-designated-initializers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

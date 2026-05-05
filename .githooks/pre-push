@@ -31,6 +31,76 @@ fi
 echo "Building project (${BUILD_PRESET})..."
 bash "$REPO_ROOT/scripts/build.sh" "$BUILD_PRESET"
 
+# 1b. clang-tidy gate on src/ files modified by the commits being pushed.
+# The full .clang-tidy ruleset is tightened (bugprone-*, cert-*,
+# cppcoreguidelines-*, modernize-*, performance-*, readability-* all
+# fail-on-warning); a single regression must not be allowed to land.
+# Skipped if SKIP_TIDY_GATE=1 is set or clang-tidy is not on PATH so the
+# hook stays usable on a workstation that builds the runtime without the
+# LLVM toolchain installed (e.g. a dev who only edits docs / scripts).
+if [ "${SKIP_TIDY_GATE:-0}" != "1" ]; then
+    CLANG_TIDY=""
+    if command -v clang-tidy >/dev/null 2>&1; then
+        CLANG_TIDY="clang-tidy"
+    elif [ -x "/c/Program Files/LLVM/bin/clang-tidy.exe" ]; then
+        CLANG_TIDY="/c/Program Files/LLVM/bin/clang-tidy.exe"
+    elif [ -x "/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/bin/clang-tidy.exe" ]; then
+        CLANG_TIDY="/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/bin/clang-tidy.exe"
+    fi
+    COMPILE_DB="${BUILD_DIR}/compile_commands.json"
+    if [ -n "$CLANG_TIDY" ] && [ -f "$COMPILE_DB" ]; then
+        echo "Running clang-tidy gate..."
+        # Resolve the upstream tracking ref (or origin/main as fallback) so
+        # we only re-lint files this push actually changes.
+        upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "origin/main")
+        base=$(git merge-base HEAD "$upstream" 2>/dev/null || echo "HEAD~1")
+        changed_src=$(git diff --name-only --diff-filter=ACMR "$base..HEAD" -- 'src/*.cpp' 'src/*.hpp' 2>/dev/null | sort -u)
+        if [ -n "$changed_src" ]; then
+            tu_list=""
+            for f in $changed_src; do
+                case "$f" in
+                    *.cpp)
+                        tu_list="$tu_list $f"
+                        ;;
+                    *.hpp)
+                        cpp_guess="${f%.hpp}.cpp"
+                        if [ -f "$cpp_guess" ]; then
+                            tu_list="$tu_list $cpp_guess"
+                        fi
+                        ;;
+                esac
+            done
+            tu_list=$(echo "$tu_list" | tr ' ' '\n' | sed '/^$/d' | sort -u)
+            if [ -n "$tu_list" ]; then
+                tidy_failed=0
+                for tu in $tu_list; do
+                    base_name=$(basename "$tu")
+                    error_count=$("$CLANG_TIDY" --quiet -p "$BUILD_DIR" "$tu" 2>&1 | grep -cE "${base_name}:[0-9]+:[0-9]+: error" || true)
+                    if [ "$error_count" -gt 0 ]; then
+                        echo "  FAIL: $tu - $error_count clang-tidy error(s)"
+                        tidy_failed=1
+                    fi
+                done
+                if [ "$tidy_failed" -ne 0 ]; then
+                    echo ""
+                    echo "clang-tidy gate failed. Re-run a tidy report locally:"
+                    echo "    \"$CLANG_TIDY\" --quiet -p $BUILD_DIR <file>"
+                    echo "Fix the issue inline (preferred) or wrap in a NOLINT block with rationale."
+                    echo "Bypass in an emergency: SKIP_TIDY_GATE=1 git push"
+                    exit 1
+                fi
+                echo "  clang-tidy gate passed for $(echo "$tu_list" | wc -l | tr -d ' ') file(s)."
+            else
+                echo "  No corresponding C++ TUs to lint."
+            fi
+        else
+            echo "  No src/ C++ changes since ${base}; skipping tidy."
+        fi
+    else
+        echo "WARNING: clang-tidy or compile_commands.json missing; skipping tidy gate."
+    fi
+fi
+
 # 2. Run Unit Tests
 echo "Running Unit Tests..."
 "$REPO_ROOT/${BUILD_DIR}/tests/unit/test_unit"
@@ -39,4 +109,4 @@ echo "Running Unit Tests..."
 echo "Running Integration Tests..."
 "$REPO_ROOT/${BUILD_DIR}/tests/integration/test_integration"
 
-echo "✅ All local checks passed. Pushing to remote..."
+echo "All local checks passed. Pushing to remote..."

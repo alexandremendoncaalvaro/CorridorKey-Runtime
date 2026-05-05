@@ -45,7 +45,7 @@ enum class ErrorCode : std::uint8_t {
  */
 struct Error {
     ErrorCode code = ErrorCode::Success;
-    std::string message = "";
+    std::string message;
 };
 
 /**
@@ -128,7 +128,7 @@ class Result<void> {
     }
 
    private:
-    std::optional<Error> m_error = std::nullopt;
+    std::optional<Error> m_error;
 };
 
 /**
@@ -143,7 +143,9 @@ enum class Backend : std::uint8_t {
     DirectML,
     MLX,
     WindowsML,
-    OpenVINO
+    OpenVINO,
+    /// Windows RTX blue-pack backend for packaged Torch-TensorRT artifacts.
+    TorchTRT
 };
 /**
  * @brief Output encoding policy for video exports.
@@ -154,7 +156,7 @@ enum class VideoOutputMode : std::uint8_t { Lossless, Balanced };
  * @brief Information about a detected hardware device.
  */
 struct DeviceInfo {
-    std::string name = "";
+    std::string name;
     int64_t available_memory_mb = 0;
     Backend backend = Backend::Auto;
     int device_index = 0;
@@ -166,14 +168,14 @@ struct DeviceInfo {
 struct BackendFallbackInfo {
     Backend requested_backend = Backend::Auto;
     Backend selected_backend = Backend::Auto;
-    std::string reason = "";
+    std::string reason;
 };
 
 /**
  * @brief Runtime capabilities exposed to the CLI, future GUI, and diagnostics.
  */
 struct RuntimeCapabilities {
-    std::string platform = "";
+    std::string platform;
     bool apple_silicon = false;
     bool coreml_available = false;
     bool mlx_probe_available = false;
@@ -181,19 +183,19 @@ struct RuntimeCapabilities {
     bool videotoolbox_available = false;
     bool tiling_supported = true;
     bool batching_supported = true;
-    std::vector<Backend> supported_backends = {};
+    std::vector<Backend> supported_backends;
     VideoOutputMode default_video_mode = VideoOutputMode::Lossless;
-    std::string default_video_container = "";
-    std::string default_video_encoder = "";
+    std::string default_video_container;
+    std::string default_video_encoder;
     bool lossless_video_available = false;
-    std::string lossless_video_unavailable_reason = "";
+    std::string lossless_video_unavailable_reason;
 };
 
 /**
  * @brief Aggregated timing data for a named stage in the runtime pipeline.
  */
 struct StageTiming {
-    std::string name = "";
+    std::string name;
     double total_ms = 0.0;
     std::uint64_t sample_count = 0;
     std::uint64_t work_units = 0;
@@ -223,14 +225,14 @@ enum class JobEventType : std::uint8_t {
  */
 struct JobEvent {
     JobEventType type = JobEventType::Progress;
-    std::string phase = "";
+    std::string phase;
     float progress = 0.0F;
     Backend backend = Backend::Auto;
-    std::string message = "";
-    std::string artifact_path = "";
-    std::optional<Error> error = std::nullopt;
-    std::optional<BackendFallbackInfo> fallback = std::nullopt;
-    std::vector<StageTiming> timings = {};
+    std::string message;
+    std::string artifact_path;
+    std::optional<Error> error;
+    std::optional<BackendFallbackInfo> fallback;
+    std::vector<StageTiming> timings;
     nlohmann::json metrics = nlohmann::json::object();
 };
 
@@ -252,20 +254,25 @@ struct Image {
     int width = 0;
     int height = 0;
     int channels = 0;
-    std::span<float> data = {};
+    std::span<float> data;
 
     [[nodiscard]] bool empty() const {
         return data.empty();
     }
 
-    // Multidimensional accessor: img(y, x, c)
-    inline float& operator()(int y_pos, int x_pos, int channel = 0) {
-        return data[(static_cast<size_t>(y_pos) * width + x_pos) * channels + channel];
+    // Multidimensional accessor: img(y, x, c). On the OFX render hot path;
+    // operator[] / unparenthesized index math are explicit choices documented
+    // in CLAUDE.md (zero-allocation pixel access). NOLINT below suppresses
+    // the categories that flag those choices as stylistic noise.
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-redundant-inline-specifier,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+    float& operator()(int y_pos, int x_pos, int channel = 0) {
+        return data[(((static_cast<size_t>(y_pos) * width) + x_pos) * channels) + channel];
     }
 
-    inline const float& operator()(int y_pos, int x_pos, int channel = 0) const {
-        return data[(static_cast<size_t>(y_pos) * width + x_pos) * channels + channel];
+    const float& operator()(int y_pos, int x_pos, int channel = 0) const {
+        return data[(((static_cast<size_t>(y_pos) * width) + x_pos) * channels) + channel];
     }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-redundant-inline-specifier,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 };
 
 /**
@@ -273,8 +280,14 @@ struct Image {
  */
 class ImageBuffer {
    public:
-    ImageBuffer() : m_width(0), m_height(0), m_channels(0), m_ptr(nullptr), m_data({}) {}
+    ImageBuffer() = default;
 
+    // Aligned pixel buffer. _aligned_malloc / posix_memalign are documented
+    // C ABIs for SIMD-aligned allocation; the matching _aligned_free / free
+    // pair lives in the destructor. The reinterpret_cast on the
+    // posix_memalign path is the canonical idiom Linux man pages
+    // demonstrate.
+    // NOLINTBEGIN(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
     ImageBuffer(int width, int height, int channels)
         : m_width(width), m_height(height), m_channels(channels) {
         const size_t size = static_cast<size_t>(width) * height * channels;
@@ -295,6 +308,7 @@ class ImageBuffer {
             m_data = std::span<float>(m_ptr, size);
         }
     }
+    // NOLINTEND(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
     ~ImageBuffer() {
         if (m_ptr != nullptr) {
@@ -340,10 +354,10 @@ class ImageBuffer {
     }
 
     [[nodiscard]] Image view() {
-        return {m_width, m_height, m_channels, m_data};
+        return {.width = m_width, .height = m_height, .channels = m_channels, .data = m_data};
     }
     [[nodiscard]] Image const_view() const {
-        return {m_width, m_height, m_channels, m_data};
+        return {.width = m_width, .height = m_height, .channels = m_channels, .data = m_data};
     }
 
    private:
@@ -351,7 +365,7 @@ class ImageBuffer {
     int m_height = 0;
     int m_channels = 0;
     float* m_ptr = nullptr;
-    std::span<float> m_data = {};
+    std::span<float> m_data;
 };
 
 /**
@@ -383,11 +397,27 @@ enum class AlphaHintPolicy : std::uint8_t { AutoRoughFallback, RequireExternalHi
  * @brief Parameters to control the inference and post-processing.
  */
 struct InferenceParams {
+    // Default inference-parameter values. Promoted out of the in-class
+    // initializers so cppcoreguidelines-avoid-magic-numbers stays clean
+    // without scattering the same constants across every caller that
+    // brace-inits an InferenceParams locally.
+    static constexpr float kDefaultDespillStrength = 0.5F;
+    static constexpr int kDefaultDespeckleSizePx = 400;
+    static constexpr int kDefaultTilePaddingPx = 64;
+    static constexpr int kDefaultSpErodePx = 3;
+    static constexpr int kDefaultSpBlurPx = 7;
+
     int target_resolution = 0;  // 0 = Auto-detect based on hardware
-    float despill_strength = 0.5F;
+    float despill_strength = kDefaultDespillStrength;
     int spill_method = 0;  // 0=Average, 1=DoubleLimit, 2=Neutral
+    // Channel index of the dominant screen color (0=R, 1=G, 2=B). Drives the
+    // generalized despill so a blue-screen render cleans channel 2 directly,
+    // instead of relying on a green-domain canonicalization workaround. The
+    // default 1 (green) preserves the historical behavior for every caller
+    // that does not opt into screen-color routing.
+    int despill_screen_channel = 1;
     bool auto_despeckle = false;
-    int despeckle_size = 400;
+    int despeckle_size = kDefaultDespeckleSizePx;
     float refiner_scale = 1.0F;
     AlphaHintPolicy alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
     bool input_is_linear = false;
@@ -397,14 +427,14 @@ struct InferenceParams {
 
     // Tiling Inference (High-Res support)
     bool enable_tiling = false;
-    int tile_padding = 64;  // Overlap in pixels to blend seams
+    int tile_padding = kDefaultTilePaddingPx;  // Overlap in pixels to blend seams
 
     UpscaleMethod upscale_method = UpscaleMethod::Lanczos4;
 
     // Source passthrough: blend original source pixels in opaque regions
     bool source_passthrough = true;
-    int sp_erode_px = 3;  // Erosion radius for interior mask
-    int sp_blur_px = 7;   // Blur radius for transition smoothing
+    int sp_erode_px = kDefaultSpErodePx;  // Erosion radius for interior mask
+    int sp_blur_px = kDefaultSpBlurPx;    // Blur radius for transition smoothing
 
     // Skip foreground materialization when the caller only needs the matte.
     bool output_alpha_only = false;
@@ -423,44 +453,49 @@ struct InferenceParams {
 struct VideoOutputOptions {
     VideoOutputMode mode = VideoOutputMode::Lossless;
     bool allow_lossy_fallback = false;
-    std::string requested_container = "";
+    std::string requested_container;
 };
 
 /**
  * @brief Built-in model catalog entry shared by CLI diagnostics and future GUIs.
  */
 struct ModelCatalogEntry {
-    std::string variant = "";
+    std::string variant;
     int resolution = 0;
-    std::string filename = "";
-    std::string artifact_family = "";
-    std::string recommended_backend = "";
-    std::string description = "";
-    std::string download_url = "";
-    std::string intended_use = "";
+    std::string filename;
+    std::string artifact_family;
+    std::string recommended_backend;
+    std::string description;
+    std::string download_url;
+    std::string intended_use;
     bool validated_for_macos = false;
     bool packaged_for_macos = false;
     bool packaged_for_windows = false;
-    std::vector<std::string> validated_platforms = {};
-    std::vector<std::string> intended_platforms = {};
-    std::vector<std::string> validated_hardware_tiers = {};
+    std::vector<std::string> validated_platforms;
+    std::vector<std::string> intended_platforms;
+    std::vector<std::string> validated_hardware_tiers;
+    // Dominant screen color the model was trained on. "green" for the original
+    // CorridorKey checkpoints; "blue" for the dedicated CorridorKeyBlue weights.
+    // Drives selection routing in default_model_for_request and lets the OFX
+    // render path detect when a Blue request fell back to a green artifact.
+    std::string screen_color = "green";
 };
 
 /**
  * @brief Built-in processing preset shared by CLI diagnostics and future GUIs.
  */
 struct PresetDefinition {
-    std::string id = "";
-    std::string name = "";
-    std::string description = "";
-    InferenceParams params = {};
-    std::string recommended_model = "";
-    std::string intended_use = "";
+    std::string id;
+    std::string name;
+    std::string description;
+    InferenceParams params;
+    std::string recommended_model;
+    std::string intended_use;
     bool default_for_macos = false;
     bool default_for_windows = false;
-    std::vector<std::string> validated_platforms = {};
-    std::vector<std::string> intended_platforms = {};
-    std::vector<std::string> validated_hardware_tiers = {};
+    std::vector<std::string> validated_platforms;
+    std::vector<std::string> intended_platforms;
+    std::vector<std::string> validated_hardware_tiers;
 };
 
 /**

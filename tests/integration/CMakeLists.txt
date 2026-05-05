@@ -7,6 +7,7 @@ add_executable(test_integration
     test_doctor_report.cpp
     test_engine_fallback_policy.cpp
     test_engine_mlx.cpp
+    test_engine_torch_trt.cpp
     test_engine_tiling.cpp
     test_exr_roundtrip.cpp
     test_ofx_runtime_client.cpp
@@ -78,6 +79,25 @@ endif()
 
 add_test(NAME integration_tests COMMAND test_integration)
 set_tests_properties(integration_tests PROPERTIES LABELS "integration")
+
+if(CORRIDORKEY_HAS_TORCHTRT AND TARGET corridorkey-torchtrt-runner)
+    add_test(
+        NAME torchtrt_dynamic_runner_smoke
+        COMMAND
+            ${CMAKE_COMMAND}
+            -DRUNNER_EXE=$<TARGET_FILE:corridorkey-torchtrt-runner>
+            -DTS_PATH=${PROJECT_SOURCE_DIR}/temp/dynamic-rtx/corridorkey_dynamic_blue_fp16.ts
+            -DBIN_DIR=${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}
+            -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DMSVC_TOOLCHAIN=$<BOOL:${MSVC}>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/run_optional_torchtrt_runner.cmake
+    )
+    set_tests_properties(torchtrt_dynamic_runner_smoke PROPERTIES
+        LABELS "integration;torchtrt;dynamic;hardware"
+        SKIP_REGULAR_EXPRESSION "^SKIP:"
+        TIMEOUT 300
+    )
+endif()
 
 add_executable(ofx_benchmark_harness
     ofx_benchmark_harness.cpp

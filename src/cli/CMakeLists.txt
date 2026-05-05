@@ -38,6 +38,19 @@ if(WIN32)
             $<TARGET_FILE_DIR:corridorkey_cli>
         COMMAND_EXPAND_LISTS
     )
+
+    # Strategy C, Sprint 1 PR 1 follow-up landed: corridorkey_torchtrt is
+    # now a SHARED library that the CLI links via /DELAYLOAD. The OS
+    # loader does not pull libtorch when only Backend::TensorRT (green)
+    # paths run, so the green-only user no longer pays the ~5 GB cost.
+    # The TorchTRT runtime DLLs themselves ship inside the blue model
+    # pack at <pack>/torchtrt-runtime/bin/ (production) or in
+    # vendor/torchtrt-windows/bin/ (dev), and arm_torchtrt_runtime in
+    # corridorkey_core resolves them on the first Backend::TorchTRT
+    # session creation.
+    if(CORRIDORKEY_HAS_TORCHTRT)
+        corridorkey_apply_torchtrt_delayload(corridorkey_cli)
+    endif()
 elseif(UNIX AND NOT APPLE)
     # Make the OFX plugin wait on the CLI so the Linux bundle's POST_BUILD
     # stage (in src/plugins/ofx/CMakeLists.txt) can copy corridorkey next to
