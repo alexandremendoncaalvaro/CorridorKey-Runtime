@@ -55,8 +55,12 @@
     `scripts/installer/distribution_manifest.json`.
 
 .PARAMETER InstallerIcon
-    Path to the .ico file used for the installer setup icon.
-    Defaults to the OFX bundle icon when present.
+    Path to the .ico file or source image used for the installer setup
+    icon. Defaults to assets\ck-microchip.png when present.
+
+.PARAMETER InstallerWizardImage
+    Path to the source image used as the installer wizard's full-height
+    side image. Defaults to assets\ck-install-banner.png.
 
 .PARAMETER ISCCPath
     Path to ISCC.exe. Auto-detected from common install paths when
@@ -96,6 +100,8 @@ param(
 
     [string]$InstallerIcon = "",
 
+    [string]$InstallerWizardImage = "",
+
     [string]$ISCCPath = ""
 )
 
@@ -113,9 +119,21 @@ if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     $DisplayVersionLabel = $Version
 }
 if ([string]::IsNullOrWhiteSpace($InstallerIcon)) {
+    $candidate = Join-Path $repoRoot "assets\ck-microchip.png"
+    if (Test-Path $candidate) {
+        $InstallerIcon = $candidate
+    }
+}
+if ([string]::IsNullOrWhiteSpace($InstallerIcon)) {
     $candidate = Join-Path $repoRoot "src\plugins\ofx\resources\corridorkey.ico"
     if (Test-Path $candidate) {
         $InstallerIcon = $candidate
+    }
+}
+if ([string]::IsNullOrWhiteSpace($InstallerWizardImage)) {
+    $candidate = Join-Path $repoRoot "assets\ck-install-banner.png"
+    if (Test-Path $candidate) {
+        $InstallerWizardImage = $candidate
     }
 }
 
@@ -136,6 +154,12 @@ if ($Flavor -eq "offline") {
     if (-not (Test-Path $ModelPayloadDir)) {
         throw "Model payload dir not found: $ModelPayloadDir"
     }
+}
+if ([string]::IsNullOrWhiteSpace($InstallerWizardImage) -or -not (Test-Path $InstallerWizardImage)) {
+    throw "Installer wizard image not found: $InstallerWizardImage"
+}
+if ([string]::IsNullOrWhiteSpace($InstallerIcon) -or -not (Test-Path $InstallerIcon)) {
+    throw "Installer icon source not found: $InstallerIcon"
 }
 
 # ---------------------------------------------------------------------------
@@ -172,6 +196,122 @@ function Resolve-IsccPath {
         return $cmd.Source
     }
     throw "ISCC.exe was not found. Install Inno Setup 6 (https://jrsoftware.org/isdl.php) or pass -ISCCPath."
+}
+
+function New-IconPngFrameBytes {
+    param(
+        [object]$SourceImage,
+        [int]$Size
+    )
+
+    $bitmap = [System.Drawing.Bitmap]::new(
+        $Size,
+        $Size,
+        [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
+        $bitmap.SetResolution(96, 96)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.Clear([System.Drawing.Color]::Transparent)
+            $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+            $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+            $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+
+            $scale = [Math]::Min(
+                [double]$Size / [double]$SourceImage.Width,
+                [double]$Size / [double]$SourceImage.Height)
+            $drawWidth = [int][Math]::Round([double]$SourceImage.Width * $scale)
+            $drawHeight = [int][Math]::Round([double]$SourceImage.Height * $scale)
+            $x = [int][Math]::Round(([double]$Size - [double]$drawWidth) / 2.0)
+            $y = [int][Math]::Round(([double]$Size - [double]$drawHeight) / 2.0)
+
+            $graphics.DrawImage($SourceImage, $x, $y, $drawWidth, $drawHeight)
+        } finally {
+            $graphics.Dispose()
+        }
+
+        $memory = [System.IO.MemoryStream]::new()
+        try {
+            $bitmap.Save($memory, [System.Drawing.Imaging.ImageFormat]::Png)
+            return $memory.ToArray()
+        } finally {
+            $memory.Dispose()
+        }
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
+function New-InstallerSetupIcon {
+    param(
+        [string]$SourcePath,
+        [string]$OutputDir
+    )
+
+    $resolvedSource = (Resolve-Path -LiteralPath $SourcePath).ProviderPath
+    if ([System.IO.Path]::GetExtension($resolvedSource).ToLowerInvariant() -eq ".ico") {
+        return [ordered]@{
+            source = $resolvedSource
+            path = $resolvedSource
+        }
+    }
+
+    Add-Type -AssemblyName System.Drawing
+
+    $sourceImage = [System.Drawing.Image]::FromFile($resolvedSource)
+    try {
+        $iconPath = Join-Path $OutputDir "ck_microchip_setup.ico"
+        $frames = @()
+        foreach ($size in @(16, 32, 48, 64, 256)) {
+            $frames += , [ordered]@{
+                size = $size
+                bytes = New-IconPngFrameBytes -SourceImage $sourceImage -Size $size
+            }
+        }
+
+        $fileStream = [System.IO.File]::Open(
+            $iconPath,
+            [System.IO.FileMode]::Create,
+            [System.IO.FileAccess]::Write)
+        try {
+            $writer = [System.IO.BinaryWriter]::new($fileStream)
+            try {
+                $writer.Write([UInt16]0)
+                $writer.Write([UInt16]1)
+                $writer.Write([UInt16]$frames.Count)
+
+                $offset = 6 + (16 * $frames.Count)
+                foreach ($frame in $frames) {
+                    $dimension = if ($frame.size -eq 256) { 0 } else { $frame.size }
+                    $writer.Write([byte]$dimension)
+                    $writer.Write([byte]$dimension)
+                    $writer.Write([byte]0)
+                    $writer.Write([byte]0)
+                    $writer.Write([UInt16]1)
+                    $writer.Write([UInt16]32)
+                    $writer.Write([UInt32]$frame.bytes.Length)
+                    $writer.Write([UInt32]$offset)
+                    $offset += $frame.bytes.Length
+                }
+
+                foreach ($frame in $frames) {
+                    $writer.Write([byte[]]$frame.bytes)
+                }
+            } finally {
+                $writer.Dispose()
+            }
+        } finally {
+            $fileStream.Dispose()
+        }
+
+        [ordered]@{
+            source = $resolvedSource
+            path = $iconPath
+        }
+    } finally {
+        $sourceImage.Dispose()
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -445,6 +585,11 @@ if ($Flavor -eq "online") {
 $flavorLower = $Flavor.ToLowerInvariant()
 $outputBaseFilename = "CorridorKey_v${DisplayVersionLabel}_Windows_${flavorLower}_Setup"
 
+$tempIssDir = Join-Path $env:TEMP ("corridorkey_iss_" + [System.Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $tempIssDir -Force | Out-Null
+$setupIcon = New-InstallerSetupIcon -SourcePath $InstallerIcon -OutputDir $tempIssDir
+$wizardImagePath = (Resolve-Path -LiteralPath $InstallerWizardImage).ProviderPath
+
 $template = Get-Content -Raw -Path $templatePath
 $rendered = $template `
     -replace '@@DISPLAY_LABEL@@', $DisplayVersionLabel `
@@ -453,7 +598,8 @@ $rendered = $template `
     -replace '@@MODEL_PAYLOAD_DIR@@', (($ModelPayloadDir -replace '/', '\')) `
     -replace '@@OUTPUT_DIR@@', ($OutputDir -replace '/', '\') `
     -replace '@@OUTPUT_BASE_FILENAME@@', $outputBaseFilename `
-    -replace '@@INSTALLER_ICON@@', ($InstallerIcon -replace '/', '\') `
+    -replace '@@INSTALLER_ICON@@', ($setupIcon.path -replace '/', '\') `
+    -replace '@@WIZARD_IMAGE@@', ($wizardImagePath -replace '/', '\') `
     -replace '@@MANIFEST_PATH@@', ($ManifestPath -replace '/', '\') `
     -replace '@@FLAVOR@@', $flavorLower `
     -replace '@@GREEN_COMPONENT_SIZE_LABEL@@', $greenComponentSizeLabel `
@@ -470,14 +616,14 @@ $rendered = $rendered.Replace('@@ONLINE_EXTERNAL_FILES_BLOCK@@', $onlineFilesBlo
 $rendered = $rendered.Replace('@@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@', $downloadQueueProcedure)
 $rendered = $rendered.Replace('@@PACK_CACHE_PREPARE_PROCEDURE@@', $packCachePrepareProcedure)
 
-$tempIssDir = Join-Path $env:TEMP ("corridorkey_iss_" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tempIssDir -Force | Out-Null
 $tempIssPath = Join-Path $tempIssDir "corridorkey_setup.iss"
 Set-Content -Path $tempIssPath -Value $rendered -Encoding UTF8
 
 Write-Host "[installer] Flavor:        $Flavor" -ForegroundColor Cyan
 Write-Host "[installer] Display label: $DisplayVersionLabel" -ForegroundColor Cyan
 Write-Host "[installer] Plugin dir:    $PluginPayloadDir" -ForegroundColor Cyan
+Write-Host "[installer] Setup icon:    $($setupIcon.source)" -ForegroundColor Cyan
+Write-Host "[installer] Wizard image:  $wizardImagePath" -ForegroundColor Cyan
 if ($Flavor -eq "offline") {
     Write-Host "[installer] Model dir:     $ModelPayloadDir" -ForegroundColor Cyan
 }

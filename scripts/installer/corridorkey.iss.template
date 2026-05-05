@@ -37,6 +37,7 @@
 #define OutputDir "@@OUTPUT_DIR@@"
 #define OutputBaseFilename "@@OUTPUT_BASE_FILENAME@@"
 #define InstallerIcon "@@INSTALLER_ICON@@"
+#define InstallerWizardImage "@@WIZARD_IMAGE@@"
 #define ManifestPath "@@MANIFEST_PATH@@"
 ; Flavor MUST be one of: "online" | "offline".
 #define Flavor "@@FLAVOR@@"
@@ -70,6 +71,7 @@ VersionInfoProductTextVersion={#MyDisplayLabel}
 ; line still works for unattended deployments that target a custom
 ; OFX root.
 DefaultDirName={commoncf64}\OFX\Plugins\{#MyAppName}.ofx.bundle
+DisableWelcomePage=no
 DisableDirPage=auto
 DisableProgramGroupPage=yes
 DisableReadyPage=no
@@ -81,6 +83,14 @@ UninstallDisplayIcon={app}\Contents\Win64\corridorkey.exe
 ; https://jrsoftware.org/ishelp/topic_setup_wizardstyle.htm
 WizardStyle=modern dynamic windows11
 WizardSizePercent=110
+; Native wizard artwork. WizardImageFile is the documented full-height
+; side image for the Welcome and Setup Completed pages. The small
+; upper-right image is explicitly disabled so the product artwork is
+; never reduced to a thumbnail.
+WizardImageFile={#InstallerWizardImage}
+WizardImageFileDynamicDark={#InstallerWizardImage}
+WizardSmallImageFile=
+WizardImageBackColor=black
 
 ; Native 64-bit only - we link against TensorRT, libtorch and ONNX
 ; Runtime CUDA builds, none of which ship 32-bit binaries.
