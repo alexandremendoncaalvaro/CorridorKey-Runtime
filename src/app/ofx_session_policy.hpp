@@ -28,7 +28,7 @@ inline std::string canonical_ofx_artifact_name(const std::filesystem::path& mode
 }
 
 inline bool should_destroy_zero_ref_session(Backend backend) {
-    return backend == Backend::TensorRT;
+    return backend == Backend::TensorRT || backend == Backend::TorchTRT;
 }
 
 // --------------------------------------------------------------------------

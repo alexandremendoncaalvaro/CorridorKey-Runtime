@@ -26,11 +26,13 @@ TEST_CASE("OFX session policy canonicalizes artifact names", "[unit][ofx][runtim
           "corridorkey_fp16_512.onnx");
 }
 
-TEST_CASE("OFX session policy destroys zero-ref TensorRT sessions",
+TEST_CASE("OFX session policy destroys zero-ref Windows RTX sessions",
           "[unit][ofx][runtime][regression]") {
     CHECK(app::detail::should_destroy_zero_ref_session(Backend::TensorRT));
+    CHECK(app::detail::should_destroy_zero_ref_session(Backend::TorchTRT));
     CHECK_FALSE(app::detail::should_destroy_zero_ref_session(Backend::CPU));
     CHECK_FALSE(app::detail::should_destroy_zero_ref_session(Backend::CUDA));
+    CHECK_FALSE(app::detail::should_destroy_zero_ref_session(Backend::MLX));
 }
 
 TEST_CASE("Prewarm resident estimate scales quadratically with shape", "[unit][ofx][runtime]") {
