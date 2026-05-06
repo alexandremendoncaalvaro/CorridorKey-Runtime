@@ -2014,6 +2014,96 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             return std::move((*batch_res)[0]);
         }
 
+        auto resize_model_output = [&](FrameResult& raw_result) -> Result<FrameResult> {
+            FrameResult result;
+            result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
+            if (!params.output_alpha_only && !raw_result.foreground.view().empty()) {
+                result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+            }
+            const bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+            auto resize_res = common::measure_stage(
+                on_stage, "frame_extract_outputs_resize",
+                [&]() -> Result<void> {
+                    if (use_lanczos) {
+                        ColorUtils::resize_lanczos_into(raw_result.alpha.view(), result.alpha.view(),
+                                                        m_color_utils_state);
+                        if (!result.foreground.view().empty()) {
+                            ColorUtils::resize_lanczos_into(raw_result.foreground.view(),
+                                                            result.foreground.view(),
+                                                            m_color_utils_state);
+                        }
+                    } else {
+                        ColorUtils::resize_into(raw_result.alpha.view(), result.alpha.view());
+                        if (!result.foreground.view().empty()) {
+                            ColorUtils::resize_into(raw_result.foreground.view(),
+                                                    result.foreground.view());
+                        }
+                    }
+                    return {};
+                },
+                1);
+            if (!resize_res) {
+                return Unexpected(resize_res.error());
+            }
+
+            auto finalize_res = common::measure_stage(
+                on_stage, "frame_extract_outputs_finalize",
+                [&]() -> Result<void> {
+                    ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+                    auto alpha_final_res = finalize_output_image(
+                        m_device, target_res, result.alpha.view(), "alpha_resized_output");
+                    if (!alpha_final_res) {
+                        return Unexpected(alpha_final_res.error());
+                    }
+                    if (!result.foreground.view().empty()) {
+                        auto fg_final_res = finalize_output_image(
+                            m_device, target_res, result.foreground.view(), "fg_resized_output");
+                        if (!fg_final_res) {
+                            return Unexpected(fg_final_res.error());
+                        }
+                    }
+                    return {};
+                },
+                1);
+            if (!finalize_res) {
+                return Unexpected(finalize_res.error());
+            }
+            return result;
+        };
+
+        const auto target_pixels =
+            static_cast<std::size_t>(target_res) * static_cast<std::size_t>(target_res);
+        const auto total_planar_size = 4U * target_pixels;
+        if (m_planar_pool.empty() || m_planar_pool[0].view().data.size() != total_planar_size) {
+            if (m_planar_pool.empty()) {
+                m_planar_pool.emplace_back(static_cast<int>(total_planar_size), 1, 1);
+            } else {
+                m_planar_pool[0] = ImageBuffer(static_cast<int>(total_planar_size), 1, 1);
+            }
+        }
+        float* planar_ptr = m_planar_pool[0].view().data.data();
+
+        if (m_gpu_prep.available()) {
+            auto gpu_prepare_res = common::measure_stage(
+                on_stage, "frame_prepare_inputs",
+                [&]() -> Result<void> {
+                    return m_gpu_prep.prepare_inputs(rgb, alpha_hint, planar_ptr, target_res,
+                                                     target_res, kCorridorKeyRgbMean,
+                                                     kCorridorKeyRgbInvStddev);
+                },
+                1);
+            if (gpu_prepare_res.has_value()) {
+                auto raw_res = m_torch_trt_session->infer_prepared_planar(
+                    planar_ptr, target_res, target_res, params.output_alpha_only, on_stage);
+                if (!raw_res) {
+                    return Unexpected(raw_res.error());
+                }
+                return resize_model_output(*raw_res);
+            }
+            debug_log("GPU TorchScript prep failed, falling back to CPU: " +
+                      gpu_prepare_res.error().message);
+        }
+
         Image prepared_rgb = {};
         Image prepared_hint = {};
         auto ensure_resize_buffer = [&](std::size_t index, int channels) -> Image {
@@ -2048,61 +2138,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         if (!raw_res) {
             return Unexpected(raw_res.error());
         }
-
-        FrameResult result;
-        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        if (!params.output_alpha_only && !raw_res->foreground.view().empty()) {
-            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
-        }
-        const bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
-        auto resize_res = common::measure_stage(
-            on_stage, "frame_extract_outputs_resize",
-            [&]() -> Result<void> {
-                if (use_lanczos) {
-                    ColorUtils::resize_lanczos_into(raw_res->alpha.view(), result.alpha.view(),
-                                                    m_color_utils_state);
-                    if (!result.foreground.view().empty()) {
-                        ColorUtils::resize_lanczos_into(raw_res->foreground.view(),
-                                                        result.foreground.view(),
-                                                        m_color_utils_state);
-                    }
-                } else {
-                    ColorUtils::resize_into(raw_res->alpha.view(), result.alpha.view());
-                    if (!result.foreground.view().empty()) {
-                        ColorUtils::resize_into(raw_res->foreground.view(),
-                                                result.foreground.view());
-                    }
-                }
-                return {};
-            },
-            1);
-        if (!resize_res) {
-            return Unexpected(resize_res.error());
-        }
-
-        auto finalize_res = common::measure_stage(
-            on_stage, "frame_extract_outputs_finalize",
-            [&]() -> Result<void> {
-                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-                auto alpha_final_res = finalize_output_image(
-                    m_device, target_res, result.alpha.view(), "alpha_resized_output");
-                if (!alpha_final_res) {
-                    return Unexpected(alpha_final_res.error());
-                }
-                if (!result.foreground.view().empty()) {
-                    auto fg_final_res = finalize_output_image(
-                        m_device, target_res, result.foreground.view(), "fg_resized_output");
-                    if (!fg_final_res) {
-                        return Unexpected(fg_final_res.error());
-                    }
-                }
-                return {};
-            },
-            1);
-        if (!finalize_res) {
-            return Unexpected(finalize_res.error());
-        }
-        return result;
+        return resize_model_output(*raw_res);
     }
 #endif
     if (m_mlx_session != nullptr) {

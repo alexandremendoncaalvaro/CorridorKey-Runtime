@@ -1,6 +1,9 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
+#include <algorithm>
 #include <filesystem>
+#include <string_view>
+#include <vector>
 
 #include "../test_model_artifact_utils.hpp"
 
@@ -38,6 +41,11 @@ std::filesystem::path sprint0_torchtrt_artifact(int resolution) {
 std::filesystem::path dynamic_torchscript_artifact() {
     return std::filesystem::path(PROJECT_ROOT) / "temp" / "dynamic-rtx" /
            "corridorkey_dynamic_green_fp16.ts";
+}
+
+bool has_stage(const std::vector<StageTiming>& timings, std::string_view name) {
+    return std::any_of(timings.begin(), timings.end(),
+                       [&](const StageTiming& timing) { return timing.name == name; });
 }
 
 }  // namespace
@@ -176,12 +184,21 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
 
         InferenceParams params;
         params.target_resolution = 512;
-        auto result = engine.value()->process_frame(rgb.view(), hint.view(), params);
+        std::vector<StageTiming> timings;
+        auto result = engine.value()->process_frame(
+            rgb.view(), hint.view(), params,
+            [&](const StageTiming& timing) { timings.push_back(timing); });
         REQUIRE(result.has_value());
         REQUIRE(result->alpha.view().width == resolution.width);
         REQUIRE(result->alpha.view().height == resolution.height);
         REQUIRE(result->foreground.view().width == resolution.width);
         REQUIRE(result->foreground.view().height == resolution.height);
+        CHECK(has_stage(timings, "frame_prepare_inputs"));
+        CHECK(has_stage(timings, "torchtrt_prepare_upload"));
+        CHECK(has_stage(timings, "torchtrt_forward"));
+        CHECK(has_stage(timings, "torchtrt_extract_outputs"));
+        CHECK(has_stage(timings, "frame_extract_outputs_resize"));
+        CHECK(has_stage(timings, "frame_extract_outputs_finalize"));
     }
 #endif
 }

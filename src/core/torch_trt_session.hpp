@@ -66,6 +66,12 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
                                             bool output_alpha_only = false,
                                             StageTimingCallback on_stage = nullptr);
 
+    [[nodiscard]] Result<FrameResult> infer_prepared_planar(const float* planar_input,
+                                                            int input_width,
+                                                            int input_height,
+                                                            bool output_alpha_only = false,
+                                                            StageTimingCallback on_stage = nullptr);
+
     [[nodiscard]] int model_resolution() const;
 
    private:

@@ -1110,6 +1110,33 @@ This keeps the DMA fix because it removes upload spikes from the measured hot
 path, but it does not change the conclusion that the primary gap versus the
 green ONNX TensorRT RTX EP path is model execution, not host upload.
 
+#### Dynamic TorchScript GPU Prepare Probe
+
+The LibTorch-backed dynamic path now reuses the established `GpuInputPrep`
+normalization and resize path before the TorchScript call. The session still
+materializes the prepared planar tensor on host before uploading it into
+LibTorch, so this is a measured reuse of the existing GPU prep kernel rather
+than a fully device-resident handoff.
+
+The OFX RPC harness run at `2048 -> 3840x2160`, random input, source
+passthrough, and bilinear output resize reports:
+
+- green dynamic: `1141.7 ms` average roundtrip over six frames; hot
+  `frame_prepare_inputs` is `33.1 ms` to `45.4 ms`; hot `torchtrt_forward`
+  remains `668 ms` to `673 ms`
+- blue dynamic: `1105.4 ms` average roundtrip over six frames; hot
+  `frame_prepare_inputs` is `33.6 ms` to `36.6 ms`; hot `torchtrt_forward`
+  remains `669 ms` to `681 ms`
+
+A shorter `1024 -> 1920x1080` cross-check reports `313.7 ms` average
+roundtrip for green dynamic and `309.2 ms` for blue dynamic over four frames,
+with hot forward calls at about `130 ms`.
+
+The probe is kept because it reduces the measured dynamic path against the
+pinned-upload checkpoint while preserving green and blue parity. The remaining
+gap is the model forward plus the temporary host/device boundary between
+`GpuInputPrep` and LibTorch.
+
 ### `phase_8_gpu_prepare`
 
 - Source state: current `perf/optimization` working tree with CUDA NPP-based
