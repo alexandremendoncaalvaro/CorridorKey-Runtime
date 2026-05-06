@@ -2,8 +2,8 @@ param(
     [string]$Version = "",
     [ValidateSet("rtx", "dml", "all")]
     [string]$Track = "rtx",
-    [ValidateSet("", "online", "offline")]
-    [string]$Flavor = "",
+    [ValidateSet("online", "offline")]
+    [string]$Flavor = "online",
     [string]$DisplayVersionLabel = "",
     [switch]$SkipTests,
     [switch]$CleanOnly,
@@ -16,6 +16,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+
+if ($Track -ne "rtx") {
+    throw "Windows OFX release packaging is RTX-only in this product contract. Use -Track rtx; DirectML/combined OFX installers are not emitted by this branch."
+}
 
 function Write-Step([string]$msg) {
     Write-Host "`n=== [STEP] $msg ===" -ForegroundColor Cyan
@@ -98,14 +102,9 @@ function Publish-CorridorKeyGithubRelease {
         throw "GitHub release '$tagName' already exists in $GithubRepo. Per docs/RELEASE_GUIDELINES.md, a published tag is immutable. Bump the counter and retry."
     }
 
-    $assetGlobs = @()
-    foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
-        if (-not [string]::IsNullOrWhiteSpace($Flavor) -and $variant.Suffix -eq "RTX") {
-            $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_v${tagLabel}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"))
-        } else {
-            $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_OFX_v${tagLabel}_Windows_$($variant.Suffix)_Install.exe"))
-        }
-    }
+    $assetGlobs = @(
+        Join-Path $RepoRoot ("dist\CorridorKey_v${tagLabel}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe")
+    )
     foreach ($asset in $assetGlobs) {
         if (-not (Test-Path $asset)) {
             throw "Expected release asset missing: $asset"
@@ -149,12 +148,8 @@ try {
         throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
     }
 
-    $needsRtxTrack = $Track -in @("rtx", "all")
-    $needsDirectMlTrack = $Track -in @("dml", "all")
-    $buildTrack = if ($Track -eq "dml") { "dml" } else { "rtx" }
     $buildOrtRoot = $null
     $rtxOrtRoot = $null
-    $directMlOrtRoot = $null
 
     Write-Step "Sanitizing Environment"
     $dirsToClean = @("build/release", "dist", "temp")
@@ -173,39 +168,11 @@ try {
 
     if ($CleanOnly) { exit 0 }
 
-    if ($needsRtxTrack) {
-        $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
-        if (-not (Test-Path $rtxOrtRoot)) {
-            throw "Curated RTX runtime not found at $rtxOrtRoot. Stage it with scripts\windows.ps1 -Task prepare-rtx first."
-        }
+    $rtxOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "rtx"
+    if (-not (Test-Path $rtxOrtRoot)) {
+        throw "Curated RTX runtime not found at $rtxOrtRoot. Stage it with scripts\windows.ps1 -Task prepare-rtx first."
     }
-    if ($needsDirectMlTrack) {
-        $directMlOrtRoot = Get-CorridorKeyWindowsOrtRootPath -RepoRoot $repoRoot -Track "dml"
-    }
-
-    if ($buildTrack -eq "rtx") {
-        $buildOrtRoot = $rtxOrtRoot
-    } elseif ($needsDirectMlTrack) {
-        if (-not (Test-Path $directMlOrtRoot)) {
-            throw "Curated DirectML runtime not found at $directMlOrtRoot. Run scripts\\sync_onnxruntime_directml.ps1 first or package the RTX track."
-        }
-        $buildOrtRoot = $directMlOrtRoot
-    }
-
-    if ($needsDirectMlTrack) {
-        if ($null -eq $rtxOrtRoot -or -not (Test-Path $rtxOrtRoot)) {
-            throw "DirectML release packaging requires the curated RTX runtime to infer the aligned ONNX Runtime package version."
-        }
-        $rtxOrtVersion = Get-CorridorKeyWindowsOrtBinaryVersion -RepoRoot $repoRoot -Track "rtx"
-
-        Write-Step "Synchronizing DirectML Runtimes"
-        & powershell.exe -NoProfile -File "scripts/sync_onnxruntime_directml.ps1" -OrtVersion $rtxOrtVersion
-        if ($LASTEXITCODE -ne 0) { throw "DirectML runtime synchronization failed." }
-        Write-Success "DirectML runtimes synchronized."
-        if (-not (Test-Path $directMlOrtRoot)) {
-            throw "DirectML runtime not found at $directMlOrtRoot after synchronization."
-        }
-    }
+    $buildOrtRoot = $rtxOrtRoot
 
     Write-Step "Building Project (Release Mode)"
     $vcvars = Get-ChildItem -Path "C:\Program Files\Microsoft Visual Studio" -Filter vcvars64.bat -Recurse | Select-Object -First 1 -ExpandProperty FullName
@@ -230,12 +197,11 @@ try {
     Write-Step "Quality Gate: Packaging and Backend Validation"
 
     $variants = @()
-    foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $Track) {
-        $variantOrtRoot = if ($variant.Track -eq "dml") { $directMlOrtRoot } else { $rtxOrtRoot }
+    foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
         $variants += @{
             Label = $variant.Label
             Suffix = $variant.Suffix
-            Root = $variantOrtRoot
+            Root = $rtxOrtRoot
             ModelProfile = $variant.ModelProfile
         }
     }
@@ -253,10 +219,7 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
             $packageArgs += @("-DisplayVersionLabel", $DisplayVersionLabel)
         }
-        $isModernInnoInstaller = (-not [string]::IsNullOrWhiteSpace($Flavor)) -and ($v.Suffix -eq "RTX")
-        if ($isModernInnoInstaller) {
-            $packageArgs += @("-SkipNsisInstaller")
-        }
+        $isModernInnoInstaller = $true
         & powershell.exe -NoProfile -File "scripts/package_ofx_installer_windows.ps1" @packageArgs
 
         if ($LASTEXITCODE -ne 0) { throw "Packaging failed for variant: $($v.Suffix)" }
@@ -288,11 +251,8 @@ try {
             }
         }
 
-        $expectedInstaller = if ($isModernInnoInstaller) {
+        $expectedInstaller =
             Join-Path $repoRoot "dist/CorridorKey_v${artifactVersionTag}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"
-        } else {
-            Join-Path $repoRoot "dist/CorridorKey_OFX_v${artifactVersionTag}_Windows_$($v.Suffix)_Install.exe"
-        }
         if (-not (Test-Path $expectedInstaller)) {
             throw "CRITICAL: Pipeline claimed success but installer was NOT found at: $expectedInstaller"
         }

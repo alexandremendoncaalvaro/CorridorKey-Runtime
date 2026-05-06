@@ -308,8 +308,31 @@ function Extract-CollaboratorArchive {
     Expand-Archive -Path $ArchivePath -DestinationPath $DestinationDir -Force
 }
 
-function Test-CollaboratorNsis {
-    return -not [string]::IsNullOrWhiteSpace((Resolve-CorridorKeyMakeNsisPath))
+function Resolve-CollaboratorIsccPath {
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 7\ISCC.exe"),
+        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        "C:\Program Files\Inno Setup 6\ISCC.exe",
+        "C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
+        "C:\Program Files\Inno Setup 7\ISCC.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $command = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $command) {
+        return $command.Source
+    }
+
+    return ""
+}
+
+function Test-CollaboratorInnoSetup {
+    return -not [string]::IsNullOrWhiteSpace((Resolve-CollaboratorIsccPath))
 }
 
 function Ensure-CollaboratorVcpkgRoot {
@@ -348,28 +371,28 @@ function Ensure-CollaboratorVcpkgRoot {
     Write-Host "[collaborator] VCPKG_ROOT set to $($env:VCPKG_ROOT)" -ForegroundColor Green
 }
 
-function Ensure-CollaboratorNsis {
-    if (Test-CollaboratorNsis) {
+function Ensure-CollaboratorInnoSetup {
+    if (Test-CollaboratorInnoSetup) {
         return
     }
 
     $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
     if ($null -eq $winget) {
-        throw "NSIS is missing and winget is unavailable to install it automatically."
+        throw "Inno Setup is missing and winget is unavailable to install it automatically."
     }
 
-    Write-Host "[collaborator] Installing NSIS with winget..." -ForegroundColor Cyan
+    Write-Host "[collaborator] Installing Inno Setup with winget..." -ForegroundColor Cyan
     Invoke-CollaboratorWorkingCommand -FilePath $winget.Source -Arguments @(
         "install",
-        "--id", "NSIS.NSIS",
+        "--id", "JRSoftware.InnoSetup",
         "-e",
         "--accept-package-agreements",
         "--accept-source-agreements",
         "--silent"
     )
 
-    if (-not (Test-CollaboratorNsis)) {
-        throw "NSIS installation did not expose makensis.exe."
+    if (-not (Test-CollaboratorInnoSetup)) {
+        throw "Inno Setup installation did not expose ISCC.exe."
     }
 }
 
@@ -429,7 +452,7 @@ function Ensure-CollaboratorEnvironment {
 
     Ensure-CollaboratorVcpkgRoot
     Ensure-CollaboratorCmake
-    Ensure-CollaboratorNsis
+    Ensure-CollaboratorInnoSetup
 
     if (-not (Test-CorridorKeyWindowsOrtRoot -OrtRoot $rtxOrtRoot)) {
         if (-not (Test-CollaboratorPython312)) {
@@ -459,7 +482,7 @@ function Get-CollaboratorPreflightState {
         uv_path = Resolve-CorridorKeyUvPath
         cmake = $resolvedCmake
         vcpkg_root = $env:VCPKG_ROOT
-        nsis_path = Resolve-CorridorKeyMakeNsisPath
+        iscc_path = Resolve-CollaboratorIsccPath
         checkpoint_path = $resolvedCheckpointPath
         rtx_ort_root = $resolvedRtxOrtRoot
         rtx_ort_ready = (Test-CorridorKeyWindowsOrtRoot -OrtRoot $resolvedRtxOrtRoot)
@@ -496,8 +519,8 @@ function Assert-CollaboratorPrerequisites {
         [void]$missing.Add("VCPKG_ROOT")
     }
 
-    if ([string]::IsNullOrWhiteSpace($state.nsis_path)) {
-        [void]$missing.Add("NSIS (makensis.exe)")
+    if ([string]::IsNullOrWhiteSpace($state.iscc_path)) {
+        [void]$missing.Add("Inno Setup 6 (ISCC.exe)")
     }
 
     if ([string]::IsNullOrWhiteSpace($state.checkpoint_path)) {

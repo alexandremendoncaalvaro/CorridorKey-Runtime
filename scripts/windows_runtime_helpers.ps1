@@ -340,42 +340,6 @@ function Resolve-CorridorKeyUvPath {
     return ""
 }
 
-function Resolve-CorridorKeyMakeNsisPath {
-    $candidatePaths = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($candidate in @(
-            "C:\Program Files (x86)\NSIS\makensis.exe",
-            "C:\Program Files (x86)\NSIS\Bin\makensis.exe",
-            "C:\Program Files\NSIS\makensis.exe",
-            "C:\Program Files\NSIS\Bin\makensis.exe"
-        )) {
-        [void]$candidatePaths.Add($candidate)
-    }
-
-    foreach ($registryPath in @(
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Nullsoft Install System",
-            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Nullsoft Install System",
-            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Nullsoft Install System"
-        )) {
-        $installLocation = Get-CorridorKeyRegistryValue -KeyPath $registryPath -ValueName "InstallLocation"
-        if (-not [string]::IsNullOrWhiteSpace($installLocation)) {
-            [void]$candidatePaths.Add((Join-Path $installLocation "makensis.exe"))
-            [void]$candidatePaths.Add((Join-Path $installLocation "Bin\makensis.exe"))
-        }
-    }
-
-    foreach ($resolvedCommandPath in Get-CorridorKeyResolvedCommandSources -CandidateNames @("makensis.exe")) {
-        [void]$candidatePaths.Add($resolvedCommandPath)
-    }
-
-    $resolved = @(Get-CorridorKeyUniquePathList -Paths $candidatePaths.ToArray() -ExistingOnly)
-    if ($resolved.Count -gt 0) {
-        return $resolved[0]
-    }
-
-    return ""
-}
-
 function Get-CorridorKeyPythonVersion {
     param([string]$ExecutablePath)
 

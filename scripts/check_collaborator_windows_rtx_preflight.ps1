@@ -144,8 +144,27 @@ function Resolve-GitPath {
     return Resolve-CorridorKeyGitPath
 }
 
-function Resolve-MakeNsisPath {
-    return Resolve-CorridorKeyMakeNsisPath
+function Resolve-IsccPath {
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 7\ISCC.exe"),
+        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        "C:\Program Files\Inno Setup 6\ISCC.exe",
+        "C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
+        "C:\Program Files\Inno Setup 7\ISCC.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $command = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $command) {
+        return $command.Source
+    }
+
+    return ""
 }
 
 function Resolve-Python312 {
@@ -223,7 +242,7 @@ $uvPath = Resolve-UvPath
 $resolvedCmake = Resolve-CorridorKeyWindowsCmake -MinimumVersion $rtxBuildContract.minimum_cmake_version
 $cmakePath = $resolvedCmake.path
 $cmakeVersion = $resolvedCmake.version
-$nsisPath = Resolve-MakeNsisPath
+$isccPath = Resolve-IsccPath
 $python312Path = Resolve-Python312
 $vsDevCmd = Resolve-VsDevCmd
 $cudaRoot = Resolve-CudaRoot
@@ -262,7 +281,7 @@ if (-not [string]::IsNullOrWhiteSpace($checkpointPath)) {
 foreach ($commandCheck in @(
         @{ name = "git"; path = $gitPath },
         @{ name = "uv"; path = $uvPath },
-        @{ name = "nsis"; path = $nsisPath }
+        @{ name = "inno_setup"; path = $isccPath }
     )) {
     if (-not [string]::IsNullOrWhiteSpace($commandCheck.path)) {
         Add-CheckResult -Results $results -Name $commandCheck.name -Status "PASS" -Detail $commandCheck.path

@@ -9,14 +9,11 @@ param(
     [ValidateSet("rtx", "dml", "all")]
     [string]$Track = "all",
     [string]$DisplayVersionLabel = "",
-    # Modern installer flavor (Inno Setup 6). When empty, package-ofx
-    # produces the legacy NSIS installer only - kept as fallback during
-    # the migration. When set to "online" or "offline", an Inno Setup
-    # installer is produced ALONGSIDE the legacy NSIS one (same staged
-    # bundle) so the operator can compare or pick. Once Inno is the
-    # default, the NSIS path retires in a follow-up commit.
-    [ValidateSet("", "online", "offline")]
-    [string]$Flavor = "",
+    # Windows RTX installer flavor (Inno Setup 6). Online is the default
+    # local validation and publication artifact; offline is only for
+    # explicit private/no-network validation.
+    [ValidateSet("online", "offline")]
+    [string]$Flavor = "online",
     [string[]]$ForwardArguments = @()
 )
 
@@ -83,8 +80,11 @@ function Invoke-CorridorKeyScript {
 }
 
 $resolvedTrack = $Track
-if ($Task -eq "release" -and -not $PSBoundParameters.ContainsKey("Track")) {
+if ($Task -in @("package-ofx", "release") -and -not $PSBoundParameters.ContainsKey("Track")) {
     $resolvedTrack = "rtx"
+}
+if ($Task -in @("package-ofx", "release") -and $resolvedTrack -ne "rtx") {
+    throw "Windows OFX packaging is RTX-only in this product contract. Use -Track rtx; DirectML/combined OFX installers are not emitted by this branch."
 }
 
 $syncGuiMetadata = $Task -in @("package-runtime", "release", "sync-version")
@@ -145,6 +145,9 @@ if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
 }
 if ($Task -in @("package-ofx", "package-runtime", "release")) {
     Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
+}
+if ($Task -in @("package-ofx", "release")) {
+    Write-Host "[windows] Installer flavor: $Flavor" -ForegroundColor Cyan
 }
 
 switch ($Task) {
@@ -214,21 +217,14 @@ switch ($Task) {
             if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
                 $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
             }
-            if (-not [string]::IsNullOrWhiteSpace($Flavor) -and $variant.Suffix -eq "RTX") {
-                $arguments += @("-SkipNsisInstaller")
-            }
             $arguments += $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_ofx_installer_windows.ps1" -Arguments $arguments
             Assert-CorridorKeyVariantDoctorHealthy -Version $resolvedVersion -ReleaseSuffix $variant.Suffix -DisplayVersionLabel $DisplayVersionLabel
 
-            # Modern installer (Inno Setup 6, scripts/installer/). Only
-            # the RTX variant is wired right now; DirectML is a separate
-            # downstream slice that retains the legacy NSIS path until
-            # we migrate it. The Inno builder reuses the staged OFX
-            # bundle the OFX packager just produced (same Plugin
-            # Payload, same DLLs, same model layout); the only
-            # difference is the surrounding installer shell.
-            if (-not [string]::IsNullOrWhiteSpace($Flavor) -and $variant.Suffix -eq "RTX") {
+            # Windows RTX installers are Inno-only. The OFX packager
+            # above stages and validates the bundle; this builder emits
+            # the user-facing setup executable from that exact payload.
+            if ($variant.Suffix -eq "RTX") {
                 $stagedTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $resolvedVersion } else { $DisplayVersionLabel }
                 $stagedBundle = Join-Path $repoRoot ("dist\CorridorKey_OFX_v${stagedTag}_Windows_$($variant.Suffix)\CorridorKey.ofx.bundle")
                 if (-not (Test-Path $stagedBundle)) {
@@ -280,9 +276,7 @@ switch ($Task) {
         if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
             $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
         }
-        if (-not [string]::IsNullOrWhiteSpace($Flavor)) {
-            $arguments += @("-Flavor", $Flavor)
-        }
+        $arguments += @("-Flavor", $Flavor)
         $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "release_pipeline_windows.ps1" -Arguments $arguments
         break

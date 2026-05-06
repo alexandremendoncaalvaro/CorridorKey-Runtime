@@ -234,11 +234,10 @@ tools/
 
 ### `scripts/installer/`
 
-Modern Windows installer authoring (Inno Setup 6). The legacy NSIS
-inline script in `scripts/package_ofx_installer_windows.ps1` is kept
-as fallback during migration; once the Inno path passes UAT it
-retires. See `docs/RELEASE_GUIDELINES.md` "Modern installer (Inno
-Setup)" for the operator workflow.
+Canonical Windows RTX installer authoring (Inno Setup 6). The wrapper stages
+and validates the OFX bundle, then builds the user-facing setup executable
+from the template in this directory. See `docs/RELEASE_GUIDELINES.md`
+"Modern installer (Inno Setup)" for the operator workflow.
 
 ```text
 scripts/installer/

@@ -66,8 +66,6 @@ function Resolve-CommandPath {
         $wellKnown = Resolve-CorridorKeyUvPath
     } elseif ($CandidateNames -contains "git.exe" -or $CandidateNames -contains "git") {
         $wellKnown = Resolve-CorridorKeyGitPath
-    } elseif ($CandidateNames -contains "makensis.exe" -or $CandidateNames -contains "makensis") {
-        $wellKnown = Resolve-CorridorKeyMakeNsisPath
     }
 
     if (-not [string]::IsNullOrWhiteSpace($wellKnown)) {

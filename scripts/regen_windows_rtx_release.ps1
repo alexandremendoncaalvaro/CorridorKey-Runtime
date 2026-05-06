@@ -36,8 +36,6 @@ function Resolve-CommandPath {
         $wellKnown = Resolve-CorridorKeyUvPath
     } elseif ($CandidateNames -contains "git.exe" -or $CandidateNames -contains "git") {
         $wellKnown = Resolve-CorridorKeyGitPath
-    } elseif ($CandidateNames -contains "makensis.exe" -or $CandidateNames -contains "makensis") {
-        $wellKnown = Resolve-CorridorKeyMakeNsisPath
     }
 
     if (-not [string]::IsNullOrWhiteSpace($wellKnown)) {
@@ -411,22 +409,37 @@ Write-CorridorKeyWindowsRtxArtifactManifest `
     -ModelsDir (Join-Path $repoRoot "models") `
     -ValidationReportPath $validationReportPath | Out-Null
 
+$artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
+
 Write-Host "[9/9] Packaging the RTX OFX release tracks..." -ForegroundColor Cyan
 foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track "rtx") {
+    $packageArguments = @(
+        "-Version", $Version,
+        "-ReleaseSuffix", $variant.Suffix,
+        "-ModelProfile", $variant.ModelProfile,
+        "-OrtRoot", $ortRoot,
+        "-ModelsDir", $promotedModelsDir,
+        "-ArtifactManifestPath", $promotedManifestPath
+    )
+    if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+        $packageArguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+    }
     Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\\package_ofx_installer_windows.ps1") `
-        -Arguments @(
-            "-Version", $Version,
-            "-ReleaseSuffix", $variant.Suffix,
-            "-ModelProfile", $variant.ModelProfile,
-            "-OrtRoot", $ortRoot,
-            "-ModelsDir", $promotedModelsDir,
-            "-ArtifactManifestPath", $promotedManifestPath
-        )
+        -Arguments $packageArguments
 
-    $bundleValidationPath = Join-Path $repoRoot "dist\\CorridorKey_OFX_v${Version}_Windows_$($variant.Suffix)\\bundle_validation.json"
+    $bundleValidationPath = Join-Path $repoRoot "dist\\CorridorKey_OFX_v${artifactVersionTag}_Windows_$($variant.Suffix)\\bundle_validation.json"
     Assert-CorridorKeyBundleValidationHealthy `
         -ValidationReportPath $bundleValidationPath `
         -Label "Packaged track $($variant.Suffix)" | Out-Null
+
+    $stagedBundle = Join-Path $repoRoot "dist\\CorridorKey_OFX_v${artifactVersionTag}_Windows_$($variant.Suffix)\\CorridorKey.ofx.bundle"
+    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\\installer\\build_installer.ps1") `
+        -Arguments @(
+            "-Flavor", "online",
+            "-Version", $Version,
+            "-DisplayVersionLabel", $artifactVersionTag,
+            "-PluginPayloadDir", $stagedBundle
+        )
 }
 
 $summary = [ordered]@{
@@ -440,10 +453,10 @@ $summary = [ordered]@{
     promoted_artifact_manifest = $promotedManifestPath
     validation_report = [System.IO.Path]::GetFullPath($validationReportPath)
     installers = [ordered]@{
-        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_OFX_v${Version}_Windows_RTX_Install.exe"))
+        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_v${artifactVersionTag}_Windows_online_Setup.exe"))
     }
     bundle_validation = [ordered]@{
-        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_OFX_v${Version}_Windows_RTX\\bundle_validation.json"))
+        rtx = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\\CorridorKey_OFX_v${artifactVersionTag}_Windows_RTX\\bundle_validation.json"))
     }
 }
 

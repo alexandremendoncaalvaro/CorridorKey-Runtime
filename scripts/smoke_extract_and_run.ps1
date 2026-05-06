@@ -40,7 +40,7 @@
     scripts\smoke_extract_and_run.ps1 dist\CorridorKey_OFX_v0.8.2_Windows_RTX.zip
 
 .EXAMPLE
-    scripts\smoke_extract_and_run.ps1 dist\CorridorKey_OFX_v0.8.2_Windows_RTX_Install.exe `
+    scripts\smoke_extract_and_run.ps1 dist\CorridorKey_v0.8.2_Windows_online_Setup.exe `
         -ExpectedVersion 0.8.2
 #>
 param(
