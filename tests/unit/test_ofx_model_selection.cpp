@@ -783,7 +783,7 @@ TEST_CASE("Path B placeholder Backend::Auto must not yield int8 quality candidat
     // The v0.8.0 Path B refactor populates the .ofx-side DeviceInfo with
     // Backend::Auto until the runtime server reports the real backend on the
     // first prepare_session response. The dynamic Windows RTX contract
-    // keeps Backend::Auto on the same TorchTRT artifact identity as the
+    // keeps Backend::Auto on the same dynamic RTX artifact identity as the
     // explicit RTX backends, so the placeholder must never enumerate retired
     // INT8 artifacts.
     TempDirGuard temp_dir("corridorkey-ofx-path-b-no-int8-candidates");

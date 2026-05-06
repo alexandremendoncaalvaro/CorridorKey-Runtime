@@ -704,7 +704,7 @@ RuntimeOptimizationProfile windows_rtx_profile() {
         .backend_intent = "torchtrt",
         .fallback_policy = "no_backend_fallback",
         .warmup_policy = "torchscript_load_and_first_run_shape_compile",
-        .certification_tier = "dynamic_torchtrt_green_blue",
+        .certification_tier = "dynamic_torchscript_green_blue",
         .unrestricted_quality_attempt = true,
     };
 }

@@ -35,7 +35,7 @@ void touch_file(const std::filesystem::path& path, const std::string& contents =
 
 }  // namespace
 
-TEST_CASE("windows RTX probes use dynamic TorchTRT artifacts", "[unit][doctor][regression]") {
+TEST_CASE("windows RTX probes use dynamic TorchScript artifacts", "[unit][doctor][regression]") {
     const std::vector<std::string> expected_models{"corridorkey_dynamic_green_fp16.ts",
                                                    "corridorkey_dynamic_blue_fp16.ts"};
 
@@ -229,7 +229,7 @@ TEST_CASE("doctor bundle inspection reports TorchTRT RTX wrapper without ONNX co
         {"backend_intent", "torchtrt"},
         {"fallback_policy", "no_backend_fallback"},
         {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
-        {"certification_tier", "dynamic_torchtrt_green_blue"},
+        {"certification_tier", "dynamic_torchscript_green_blue"},
         {"unrestricted_quality_attempt", true},
         {"expected_models",
          {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
@@ -289,7 +289,7 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
         {"backend_intent", "torchtrt"},
         {"fallback_policy", "no_backend_fallback"},
         {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
-        {"certification_tier", "dynamic_torchtrt_green_blue"},
+        {"certification_tier", "dynamic_torchscript_green_blue"},
         {"unrestricted_quality_attempt", true},
         {"expected_models",
          {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
@@ -355,7 +355,7 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when dynamic pac
         {"backend_intent", "torchtrt"},
         {"fallback_policy", "no_backend_fallback"},
         {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
-        {"certification_tier", "dynamic_torchtrt_green_blue"},
+        {"certification_tier", "dynamic_torchscript_green_blue"},
         {"unrestricted_quality_attempt", true},
         {"expected_models",
          {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
@@ -412,7 +412,7 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
         {"backend_intent", "torchtrt"},
         {"fallback_policy", "no_backend_fallback"},
         {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
-        {"certification_tier", "dynamic_torchtrt_green_blue"},
+        {"certification_tier", "dynamic_torchscript_green_blue"},
         {"unrestricted_quality_attempt", true},
         {"expected_models", nlohmann::json::array({"corridorkey_dynamic_green_fp16.ts",
                                                    "corridorkey_dynamic_blue_fp16.ts"})},
@@ -434,7 +434,7 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
     REQUIRE(diagnostics["model_profile"] == "windows-rtx");
     REQUIRE(diagnostics["bundle_track"] == "rtx");
     REQUIRE(diagnostics["optimization_profile_id"] == "windows-rtx");
-    REQUIRE(diagnostics["certification_tier"] == "dynamic_torchtrt_green_blue");
+    REQUIRE(diagnostics["certification_tier"] == "dynamic_torchscript_green_blue");
     REQUIRE(diagnostics["unrestricted_quality_attempt"].get<bool>());
     REQUIRE(diagnostics["compiled_context_complete"].get<bool>());
     REQUIRE(diagnostics["model_inventory_contract_complete"].get<bool>());

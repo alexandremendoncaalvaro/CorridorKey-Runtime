@@ -459,6 +459,7 @@ if ($Skip2048.IsPresent) {
     $targetModels = @($targetModels | Where-Object { $_ -ne "corridorkey_fp16_2048.onnx" })
 }
 $modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
+$artifactRuntimeKinds = [ordered]@{}
 $compiledContextModels = @()
 $expectedCompiledContextModels = Get-CorridorKeyExpectedCompiledContextModels `
     -PresentModels $modelInventory.present_models `
@@ -482,6 +483,9 @@ if ($strictCertifiedRtxPackaging) {
 
 foreach ($model in $modelInventory.present_models) {
     $sourcePath = Join-Path $ModelsDir $model
+    if ([System.IO.Path]::GetExtension($model) -eq ".ts") {
+        $artifactRuntimeKinds[$model] = Get-CorridorKeyTorchScriptArtifactRuntimeKind -Path $sourcePath
+    }
     Copy-Item $sourcePath $resourcesDir -Force
 
     $compiledContextName = ([System.IO.Path]::GetFileNameWithoutExtension($model)) + "_ctx.onnx"
@@ -546,6 +550,7 @@ $inventoryPayload = [ordered]@{
     expected_models = @($modelInventory.expected_models)
     present_models = @($modelInventory.present_models)
     missing_models = @($modelInventory.missing_models)
+    artifact_runtime_kinds = $artifactRuntimeKinds
     present_count = $modelInventory.present_count
     missing_count = $modelInventory.missing_count
     compiled_context_models = @($compiledContextModels)

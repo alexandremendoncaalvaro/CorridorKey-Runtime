@@ -272,7 +272,7 @@ What the pipeline handles for the operator:
   `X_VCPKG_ASSET_SOURCES=x-script,...` that transparently redirects
   the `libeigen/eigen/<commit>` fetch to the byte-identical
   `eigen-mirror/eigen` GitHub mirror.
-- **Models:** the Windows RTX release expects the dynamic TorchTRT green and
+- **Models:** the Windows RTX release expects the dynamic TorchScript green and
   blue artifacts under `models\`. If all expected files are present the
   pipeline reuses them; if one or more are missing, the release cannot claim a
   complete Windows RTX model set.
@@ -291,9 +291,9 @@ Windows has one canonical release entrypoint for OFX release packaging:
 - `scripts\windows.ps1` - canonical Windows build and release entrypoint
 
 Do not use global ONNX Runtime installations or `vendor\onnxruntime-universal`
-as a fallback path. The Windows RTX release flow packages the dynamic TorchTRT
-runtime contract and fails when asked to emit DirectML or combined OFX
-installers.
+as a fallback path. The Windows RTX release flow packages the dynamic
+LibTorch/TorchScript runtime contract and fails when asked to emit DirectML or
+combined OFX installers.
 
 The canonical Windows release command is:
 
@@ -541,8 +541,8 @@ unavailable.
 Windows RTX now ships as a single installer that replaces the same OFX bundle
 path during installation.
 
-- `Windows RTX` packages the dynamic green TorchTRT artifact, the optional
-  dynamic blue TorchTRT artifact, and the TorchTRT runtime pack. ONNX Runtime
+- `Windows RTX` packages the dynamic green TorchScript artifact, the optional
+  dynamic blue TorchScript artifact, and the LibTorch/TorchTRT runtime pack. ONNX Runtime
   DLLs, INT8 ONNX artifacts, and CPU rendering are not Windows RTX fallback
   paths.
 - `Auto` and manual fixed quality use the same dynamic model artifact and pass

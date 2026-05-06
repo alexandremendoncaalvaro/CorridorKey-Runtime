@@ -27,7 +27,7 @@ function Write-ReleaseReadme {
     )
 
     $modelCoverageText = switch ($ModelProfile) {
-        "windows-rtx" { "This Windows RTX package includes the dynamic TorchTRT runtime contract recorded in CorridorKey.ofx.bundle\\model_inventory.json." }
+        "windows-rtx" { "This Windows RTX package includes the dynamic LibTorch/TorchScript runtime contract recorded in CorridorKey.ofx.bundle\\model_inventory.json." }
         "windows-universal" { "This Windows DirectML package includes the Windows universal GPU and CPU model set." }
         default { "This package includes the packaged model set recorded in CorridorKey.ofx.bundle\\model_inventory.json." }
     }

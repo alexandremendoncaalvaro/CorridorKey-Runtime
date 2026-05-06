@@ -97,7 +97,7 @@ DeviceInfo windows_rtx_effective_device() {
 
 TEST_CASE(
     "REGRESSION v0.8.0 Path B: placeholder Backend::Auto must short-circuit candidate loop on "
-    "first dynamic TorchTRT success and must never expose retired ONNX artifacts",
+    "first dynamic Windows RTX success and must never expose retired ONNX artifacts",
     "[regression][ofx][path-b]") {
     // Invariant 1 — backend_matches_request must accept any effective backend
     // when the requested backend is the Path B placeholder Auto. Without this,
@@ -106,7 +106,7 @@ TEST_CASE(
 
     // Invariant 2 — quality_artifact_candidates must not surface int8 ONNX
     // artifacts when the .ofx asks with the Path B placeholder Auto. The
-    // Windows RTX track now selects the single dynamic TorchTRT artifact before
+    // Windows RTX track now selects the single dynamic TorchScript artifact before
     // engine creation.
     TempDirGuard temp_dir("corridorkey-regression-path-b-quality-loop");
     touch_file(temp_dir.path() / "corridorkey_dynamic_green_fp16.ts");

@@ -70,6 +70,32 @@ function Test-CorridorKeyUsableCheckpointFile {
     return $true
 }
 
+function Get-CorridorKeyTorchScriptArtifactRuntimeKind {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
+        return "missing"
+    }
+
+    $extension = [System.IO.Path]::GetExtension($Path)
+    if ($extension -ne ".ts") {
+        return "not_torchscript"
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $text = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
+    if ($text.Contains("torch_tensorrt") -or
+        $text.Contains("TensorRT") -or
+        $text.Contains("tensorrt")) {
+        return "torch_tensorrt_engine"
+    }
+    if ($text.Contains("__torch__") -or $text.Contains("cuda")) {
+        return "torchscript_cuda"
+    }
+
+    return "torchscript_unknown"
+}
+
 function Get-CorridorKeyRegistryValue {
     param(
         [string]$KeyPath,
@@ -1129,7 +1155,7 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 }
 
 function Get-CorridorKeyPreparedModelList {
-    # Windows RTX is a dynamic TorchTRT track: one green artifact and one
+    # Windows RTX is a dynamic LibTorch/TorchScript track: one green artifact and one
     # blue artifact. The resolution is a runtime parameter, not part of the
     # model identity.
     param(
@@ -1213,7 +1239,7 @@ function Get-CorridorKeyModelProfileContract {
                 backend_intent = "torchtrt"
                 fallback_policy = "no_backend_fallback"
                 warmup_policy = "torchscript_load_and_first_run_shape_compile"
-                certification_tier = "dynamic_torchtrt_green_blue"
+                certification_tier = "dynamic_torchscript_green_blue"
                 unrestricted_quality_attempt = $true
                 expects_compiled_context_models = $false
             }

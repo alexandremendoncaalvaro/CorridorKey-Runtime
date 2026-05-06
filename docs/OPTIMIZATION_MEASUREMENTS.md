@@ -33,7 +33,7 @@ remain the source of truth for methodology and caveats.
 | `phase_7_gpu_resize` | `0.7.4-11` | device-resident tensor flow and GPU-accelerated NPP bilinear resize | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `28%`; `frame_extract_outputs_resize` down to `27ms` | keep; massive win effectively eliminating the strongest remaining CPU hotspot |
 | `phase_8_gpu_prepare` | `0.7.4-12` | GPU-accelerated input preparation via NPP resizing, splitting, and normalization | full-frame `2048 -> 3840x2160` OFX-style harness `frame_prepare_inputs` improved by `~74%` | keep; effectively eliminates the final CPU bottleneck, achieving end-to-end device residence |
 | `phase_9_blue_dedicated_screen_color` | `0.8.3-win.1` (proposed) | dedicated CorridorKeyBlue catalog + screen-color OFX selection / render branching + despill `screen_channel` generalization | green-path bench gate within +1.5% (`avg_latency_ms`) and +4.3% (`ort_run`); blue dedicated baseline pending FP32-I/O wrapper re-export | gate passes; blue 512 measured; 1024 / 1536 / 2048 to be re-recorded after the in-flight re-export |
-| `phase_10_blue_dynamic_hybrid` | `0.8.3-win.1` | dynamic TorchScript candidates for green and blue | dynamic TorchScript loads and produces finite output at `512`, `1024`, and `2048`; dynamic green is `~40%` to `~54%` slower than the optimized green ONNX path in the recorded runner comparison | Windows RTX artifact identity is dynamic green plus dynamic blue; keep `phase_8_gpu_prepare` as the hot-path regression gate until a dynamic TorchTRT baseline is recorded |
+| `phase_10_blue_dynamic_hybrid` | `0.8.3-win.1` | dynamic TorchScript candidates for green and blue | dynamic TorchScript loads and produces finite output at `512`, `1024`, and `2048`; dynamic green is `~40%` to `~54%` slower than the optimized green ONNX path in the recorded runner comparison | Windows RTX artifact identity is dynamic green plus dynamic blue; keep `phase_8_gpu_prepare` as the hot-path regression gate until a true dynamic Torch-TensorRT baseline is recorded |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -45,7 +45,7 @@ Current headline:
 
 - the `prepare_inputs` slice worked
 - the `preview_writeback` slice also worked on the full-frame OFX-style harness
-- Windows RTX dynamic TorchTRT needs its own green and blue baseline before
+- Windows RTX dynamic TorchScript and true dynamic Torch-TensorRT need their own green and blue baseline before
   optimization claims replace the fixed ONNX measurements
 - the attempted lower-rung bound-path expansion and resize-map caching did not
   justify themselves and were discarded instead of being carried forward
@@ -1037,9 +1037,9 @@ package must replace the first one before any user-visible conclusion is kept.
 
 This checkpoint compares the validated green ONNX TensorRT RTX EP path against
 dynamic TorchScript candidates exported from the green and blue checkpoints.
-The product contract uses dynamic TorchTRT artifact identity for both Windows
-RTX screen-color variants. The recorded comparison remains the performance
-guardrail for the first dynamic TorchTRT optimization baseline.
+The product contract uses dynamic RTX artifact identity for both Windows RTX
+screen-color variants. The recorded comparison remains the performance
+guardrail for the first true dynamic Torch-TensorRT optimization baseline.
 
 - Dynamic TorchScript validation:
   - green dynamic artifact: finite output at `512`, `1024`, and `2048`
@@ -1066,13 +1066,49 @@ guardrail for the first dynamic TorchTRT optimization baseline.
     dynamic artifact at `49.8 ms` average latency
 - Decision:
   - use `corridorkey_dynamic_green_fp16.ts` as the single Windows RTX green
-    artifact
+    TorchScript fallback artifact
   - use `corridorkey_dynamic_blue_fp16.ts` as the single Windows RTX blue
-    artifact
+    TorchScript fallback artifact
   - exclude ONNX artifacts from the Windows RTX shipped path and fallback
     policy
   - measure green and blue at `1024` and `2048` through CLI and OFX before
     replacing the `phase_8_gpu_prepare` regression baseline
+
+#### Dynamic Torch-TensorRT Viability Probe
+
+The dynamic TorchScript fallback is not a serialized TensorRT engine. Binary
+inspection finds TorchScript and CUDA metadata in the dynamic green and blue
+artifacts, but not TensorRT engine markers. Fixed diagnostic Torch-TensorRT
+artifacts under `models/` do contain TensorRT markers.
+
+The true dynamic Torch-TensorRT probe used the same patched Hiera dynamic graph
+and explicit `torch.export.Dim` constraints matching the runtime's multiple of
+`32` input padding. Export succeeds for `512` through `1024`, which validates
+the shape contract. Full TensorRT conversion fails on dynamic
+`upsample_bicubic2d` in positional embedding. A partitioned probe that leaves
+dynamic bicubic and bilinear resize operations in PyTorch compiles, but fails
+at runtime on dynamic reshape and resize shape propagation. Do not promote a
+dynamic `.ts` as Torch-TensorRT until it contains TensorRT engine markers,
+loads in C++, runs multiple resolutions, and has a recorded green and blue
+baseline.
+
+#### Dynamic TorchScript Pinned Upload Probe
+
+The LibTorch-backed dynamic path now packs the model input into pinned host
+memory when the allocation succeeds and uploads to CUDA with non-blocking
+transfer semantics. A clean OFX RPC harness run at `2048 -> 3840x2160`,
+random input, source passthrough, and bilinear output resize reports:
+
+- green dynamic: `1186.8 ms` average roundtrip over six frames;
+  `torchtrt_prepare_upload` is `0.12 ms` to `0.18 ms` on hot frames;
+  `torchtrt_forward` remains `673 ms` to `683 ms` on hot frames
+- blue dynamic: `1209.5 ms` average roundtrip over four frames;
+  `torchtrt_prepare_upload` is `0.12 ms` to `0.15 ms` on hot frames;
+  `torchtrt_forward` remains `669 ms` to `675 ms` on hot frames
+
+This keeps the DMA fix because it removes upload spikes from the measured hot
+path, but it does not change the conclusion that the primary gap versus the
+green ONNX TensorRT RTX EP path is model execution, not host upload.
 
 ### `phase_8_gpu_prepare`
 

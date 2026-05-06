@@ -105,7 +105,8 @@ curated execution tracks.
 The official product tracks are:
 
 - Apple Silicon via MLX model pack and bridge exports
-- Windows RTX via dynamic TorchTRT artifacts on NVIDIA RTX 30 series and newer
+- Windows RTX via dynamic LibTorch/TorchScript artifacts on NVIDIA RTX 30
+  series and newer
 
 The experimental product tracks are:
 
@@ -122,10 +123,11 @@ The OFX plugin runs the inference backend in a separate process managed by the
 App-layer OFX runtime service. The plugin is a thin IPC client; it does not
 load ONNX sessions or GPU backends directly.
 
-This design isolates backend failures, TorchTRT load failures, first-run
-shape compilation, and VRAM exhaustion from the host process (DaVinci Resolve
-or Foundry Nuke). The session broker in the service layer pools initialized
-sessions across multiple OFX node instances to avoid redundant GPU warmups.
+This design isolates backend failures, TorchScript or Torch-TensorRT load
+failures, first-run shape compilation, and VRAM exhaustion from the host
+process (DaVinci Resolve or Foundry Nuke). The session broker in the service
+layer pools initialized sessions across multiple OFX node instances to avoid
+redundant GPU warmups.
 
 Frame data moves between plugin and service over shared memory. The IPC
 protocol is versioned to ensure the plugin and service remain compatible
@@ -150,11 +152,11 @@ CorridorKey ships deterministic screen-color execution modes:
 
 - **Green** (`corridorkey_dynamic_green_fp16.ts` on Windows RTX): the
   canonical green-screen variant. On Windows RTX, green is distributed as one
-  dynamic TorchTRT artifact and uses the requested quality resolution at
+  dynamic TorchScript artifact and uses the requested quality resolution at
   execution time.
 - **Blue** (`corridorkey_dynamic_blue_fp16.ts` on Windows RTX): the dedicated
   blue-screen variant. On Windows RTX, blue is distributed as one dynamic
-  TorchTRT artifact and uses the requested quality resolution at execution
+  TorchScript artifact and uses the requested quality resolution at execution
   time.
 - **Blue-Green Channel Swap:** a deterministic fallback that canonicalizes a
   blue-screen plate into the green model domain. It uses the green model
@@ -174,7 +176,7 @@ variant. Packs are hosted on Hugging Face and addressable through the
 
 The installer or first-run flow offers the user a pack selection: green or
 green plus blue. Green is the base Windows RTX pack because it carries the
-primary model and required TorchTRT runtime. Selecting fewer packs reduces
+primary model and required LibTorch/TorchTRT runtime. Selecting fewer packs reduces
 install footprint without disabling runtime features beyond the unselected
 variants. The `corridorkey doctor` command reports which packs are present,
 which are missing, and the canonical Hugging Face source for any missing pack.
@@ -187,7 +189,7 @@ plugin, CLI, or GUI binaries.
 
 Fallback is surface-dependent.
 
-- The Windows RTX track fails explicitly when the selected dynamic TorchTRT
+- The Windows RTX track fails explicitly when the selected dynamic RTX
   artifact or runtime cannot initialize; it does not fall back to ONNX.
 - Non-Windows-RTX experimental workflows may define their own fallback
   behavior when the product track documents it.
@@ -204,8 +206,8 @@ processing begins.
 
 - Native inference execution:
   - MLX for the official Apple Silicon track
-  - TorchTRT for the official Windows RTX track on NVIDIA RTX 30 series and
-    newer
+  - LibTorch/TorchScript for the official Windows RTX track on NVIDIA RTX 30
+    series and newer
   - DirectML for the experimental Windows DirectML track
   - CUDA EP via ONNX Runtime for the experimental Linux RTX track
 - CLI surface (`corridorkey`) with stable JSON and NDJSON output contracts

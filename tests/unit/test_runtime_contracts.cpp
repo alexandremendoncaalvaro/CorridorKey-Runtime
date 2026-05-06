@@ -119,7 +119,7 @@ TEST_CASE("preferred runtime device and optimization profile stay product-aligne
             runtime_optimization_profile_for_device(windows_capabilities, *preferred_windows);
         REQUIRE(profile.id == "windows-rtx");
         REQUIRE(profile.backend_intent == "torchtrt");
-        REQUIRE(profile.certification_tier == "dynamic_torchtrt_green_blue");
+        REQUIRE(profile.certification_tier == "dynamic_torchscript_green_blue");
         REQUIRE(profile.unrestricted_quality_attempt);
     }
     std::filesystem::remove_all(windows_rtx_models_dir.parent_path());

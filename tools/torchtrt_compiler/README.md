@@ -1,19 +1,26 @@
-# TorchScript Exporter
+# Windows RTX Model Exporters
 
-Exports CorridorKey PyTorch checkpoints into dynamic TorchScript artifacts for
-the Windows RTX TorchTRT path.
+This directory owns the Windows RTX PyTorch-family export tools. The tools are
+split by artifact type so the release flow does not confuse dynamic
+TorchScript fallback artifacts with true Torch-TensorRT engines.
 
 ## When To Use
 
-Use the dynamic exporter when a Windows RTX checkpoint or the PyTorch runtime
-stack changes. The Windows RTX model packs consume one dynamic file per screen
-color:
+Use `compile_dynamic_torchscript.py` when a Windows RTX checkpoint or the
+PyTorch runtime stack changes and the selected artifact is the dynamic
+TorchScript fallback. The Windows RTX model packs currently consume one dynamic
+TorchScript file per screen color:
 
 - `corridorkey_dynamic_green_fp16.ts`
 - `corridorkey_dynamic_blue_fp16.ts`
 
-The exported file is loaded by the C++ TorchTRT runtime path. Runtime
-resolution is selected by the caller and is not encoded in the filename.
+The exported file is loaded by the C++ LibTorch-backed RTX runtime path.
+Runtime resolution is selected by the caller and is not encoded in the
+filename.
+
+Use `compile_torchtrt.py` only for fixed-resolution diagnostic
+Torch-TensorRT engines. Those artifacts contain serialized TensorRT engine
+markers and carry a trailing resolution token in the filename.
 
 ## Setup
 
@@ -38,6 +45,11 @@ uv run python compile_dynamic_torchscript.py `
 The exporter writes dynamic `.ts` files into the selected output directory.
 Validation should load the same file from C++ at multiple runtime resolutions
 before it is promoted into the model pack.
+
+The dynamic exporter does not produce a TensorRT engine. A true dynamic
+Torch-TensorRT candidate must be exported through `torch.export` with explicit
+shape constraints, compiled by `torch_tensorrt.dynamo.compile`, loaded in C++,
+and benchmarked before it can replace this fallback.
 
 ## Upload Target
 

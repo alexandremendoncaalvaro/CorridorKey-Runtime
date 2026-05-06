@@ -477,7 +477,7 @@ inline std::string missing_quality_artifact_message(
     if (backend_supports_dynamic_torchtrt(backend)) {
         return missing_artifact_message(
             "Requested quality " + std::string(quality_mode_label(quality_mode)) +
-                " is missing the required dynamic TorchTRT model artifact",
+                " is missing the required dynamic Windows RTX model artifact",
             models_root,
             {artifact_path_for_backend(models_root, backend, requested_resolution, screen_color)});
     }

@@ -2,9 +2,9 @@
 
 This document defines the end-to-end flow for building the Windows RTX
 distribution of CorridorKey Runtime from a clean clone. Windows is the most
-involved target because the release stages CUDA, TorchTRT, the OpenFX SDK,
+involved target because the release stages CUDA, the LibTorch/TorchTRT runtime, the OpenFX SDK,
 model packs, CorridorKey binaries, and installer packaging as one validated
-flow. The supported Windows RTX runtime path is dynamic TorchTRT only. The
+flow. The supported Windows RTX runtime path is dynamic LibTorch/TorchScript only. The
 Windows RTX package does not import or ship ONNX Runtime DLLs, so the installed
 RTX path does not execute or fall back to ONNX.
 
@@ -56,7 +56,7 @@ What `prepare-rtx` does:
 
 1. Validates or auto-stages the TensorRT-RTX SDK into `vendor\TensorRT-RTX-<version>\`.
 2. Resolves the ONNX Runtime source tree at `vendor\onnxruntime-src` (must already be present as a git checkout at `v1.23.0`; clone manually if missing).
-3. Reuses the prepared dynamic TorchTRT model set from `models\` when the green and blue artifacts are present.
+3. Reuses the prepared dynamic Windows RTX model set from `models\` when the green and blue artifacts are present.
 4. Validates the model inventory and reports missing packaged artifacts.
 5. Builds ONNX Runtime from source with `--use_nv_tensorrt_rtx` and stages the result into `vendor\onnxruntime-windows-rtx\`.
 6. Auto-clones the pinned OpenFX SDK tag into `vendor\openfx\`.

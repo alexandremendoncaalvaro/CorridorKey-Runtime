@@ -9,7 +9,7 @@
     direct from the upstream nikopueringer/* repos and never republished
     by us.
 
-    Windows RTX uses dynamic TorchTRT artifacts. ONNX profiles are reference
+    Windows RTX uses dynamic TorchScript artifacts. ONNX profiles are reference
     inputs for non-product comparisons and are not Windows RTX fallback paths.
 
 .PARAMETER Profile
