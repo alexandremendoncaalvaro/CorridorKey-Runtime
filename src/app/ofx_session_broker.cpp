@@ -58,12 +58,13 @@ Error broker_error(ErrorCode code, const std::string& message) {
 std::string normalize_screen_color_mode(std::string_view value) {
     std::string normalized;
     normalized.reserve(value.size());
-    for (const char ch : value) {
-        if (ch == '-' || ch == ' ') {
+    for (const char character : value) {
+        if (character == '-' || character == ' ') {
             normalized.push_back('_');
             continue;
         }
-        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        normalized.push_back(
+            static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
     }
     if (normalized.empty() || normalized == "green") {
         return "green";
@@ -200,9 +201,8 @@ OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options)
     : m_options(options),
       m_ort_process_context(std::make_shared<corridorkey::core::OrtProcessContext>()) {}
 
-Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
+Result<std::string> OfxSessionBroker::validate_screen_color_mode(
     const OfxRuntimePrepareSessionRequest& request) {
-    (void)cleanup_idle_sessions();
     const std::string requested_screen_color_mode =
         normalize_screen_color_mode(request.screen_color_mode);
     if (requested_screen_color_mode.empty()) {
@@ -211,7 +211,11 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
                          "Unknown OFX Screen Color mode: " + request.screen_color_mode +
                              ". Expected Green, Blue, or Blue-Green Channel Swap."));
     }
+    return requested_screen_color_mode;
+}
 
+Result<void> OfxSessionBroker::ensure_screen_color_mode_available(
+    std::string_view requested_screen_color_mode) const {
     for (const auto& session : m_sessions) {
         if (session.second.snapshot.ref_count == 0) {
             continue;
@@ -221,15 +225,32 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         if (active_mode.empty()) {
             active_mode = "green";
         }
-        if (active_mode != requested_screen_color_mode) {
-            return Unexpected<Error>(broker_error(
-                ErrorCode::InvalidParameters,
-                "CorridorKey already has an active " + screen_color_mode_display_name(active_mode) +
-                    " OFX session in this runtime. Use the same Screen Color mode for every "
-                    "active CorridorKey node in the render flow, or release the active node "
-                    "before switching to " +
-                    screen_color_mode_display_name(requested_screen_color_mode) + "."));
+        if (active_mode == requested_screen_color_mode) {
+            continue;
         }
+        return Unexpected<Error>(broker_error(
+            ErrorCode::InvalidParameters,
+            "CorridorKey already has an active " + screen_color_mode_display_name(active_mode) +
+                " OFX session in this runtime. Use the same Screen Color mode for every "
+                "active CorridorKey node in the render flow, or release the active node "
+                "before switching to " +
+                screen_color_mode_display_name(requested_screen_color_mode) + "."));
+    }
+    return {};
+}
+
+Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
+    const OfxRuntimePrepareSessionRequest& request) {
+    (void)cleanup_idle_sessions();
+    auto requested_screen_color_mode = validate_screen_color_mode(request);
+    if (!requested_screen_color_mode) {
+        return Unexpected<Error>(requested_screen_color_mode.error());
+    }
+
+    auto screen_color_mode_available =
+        ensure_screen_color_mode_available(*requested_screen_color_mode);
+    if (!screen_color_mode_available) {
+        return Unexpected<Error>(screen_color_mode_available.error());
     }
 
     auto eviction_result = evict_idle_sessions_if_needed();
@@ -297,7 +318,7 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.snapshot.model_path = request.model_path;
     entry.snapshot.artifact_name = detail::canonical_ofx_artifact_name(request.model_path);
     entry.snapshot.requested_device = request.requested_device;
-    entry.snapshot.screen_color_mode = requested_screen_color_mode;
+    entry.snapshot.screen_color_mode = *requested_screen_color_mode;
     entry.snapshot.requested_quality_mode = request.requested_quality_mode;
     entry.snapshot.requested_resolution = request.requested_resolution;
     entry.snapshot.effective_resolution = request.effective_resolution;

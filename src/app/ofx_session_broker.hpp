@@ -5,6 +5,7 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 #include "../common/ofx_runtime_defaults.hpp"
@@ -71,8 +72,12 @@ class OfxSessionBroker {
 
     static std::string session_key(const OfxRuntimePrepareSessionRequest& request);
     static std::vector<StageTiming> collect_stage_timings(StageTimingCallback& callback);
+    static Result<std::string> validate_screen_color_mode(
+        const OfxRuntimePrepareSessionRequest& request);
 
     Result<void> evict_idle_sessions_if_needed();
+    Result<void> ensure_screen_color_mode_available(
+        std::string_view requested_screen_color_mode) const;
 
     OfxSessionBrokerOptions m_options = {};
     std::unordered_map<std::string, SessionEntry> m_sessions = {};

@@ -851,9 +851,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const ScreenColorMode screen_color_mode = screen_color_mode_from_choice(screen_color);
     const bool dedicated_blue_requested = screen_color_mode == ScreenColorMode::Blue;
     const bool blue_green_requested = screen_color_mode == ScreenColorMode::BlueGreen;
-    const std::string_view screen_color_label = dedicated_blue_requested ? "blue" : "green";
-    const std::string_view screen_color_mode_label =
-        dedicated_blue_requested ? "blue" : (blue_green_requested ? "blue_green" : "green");
+    std::string_view screen_color_label = "green";
+    std::string_view screen_color_mode_label = "green";
+    if (dedicated_blue_requested) {
+        screen_color_label = "blue";
+        screen_color_mode_label = "blue";
+    } else if (blue_green_requested) {
+        screen_color_mode_label = "blue_green";
+    }
 
     if (!ensure_engine_for_quality(
             data, quality_mode, width, height,
