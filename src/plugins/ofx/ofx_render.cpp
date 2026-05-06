@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -642,6 +643,16 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (!ensure_runtime_client(data, instance)) {
         log_message("render", "Runtime client could not be initialized.");
         return kOfxStatFailed;
+    }
+
+    const auto serial_wait_start = std::chrono::steady_clock::now();
+    std::unique_lock<std::mutex> render_lock(data->render_mutex);
+    const double serial_wait_ms = std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - serial_wait_start)
+                                      .count();
+    if (serial_wait_ms > 1.0) {
+        log_message("render",
+                    "event=render_serial_wait total_ms=" + std::to_string(serial_wait_ms));
     }
 
     RenderScope render_scope(data);

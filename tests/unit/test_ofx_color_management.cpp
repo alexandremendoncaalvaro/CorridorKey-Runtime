@@ -483,6 +483,18 @@ TEST_CASE("ofx descriptor advertises core colour management support", "[unit][of
               .front() == kOfxConfigIdentifier);
 }
 
+TEST_CASE("ofx descriptor serializes host render calls for sidecar runtime",
+          "[unit][ofx][regression]") {
+    SuiteScope suites;
+    FakeEffect descriptor;
+
+    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor)) == kOfxStatOK);
+
+    CHECK(prop_strings(descriptor.props, kOfxImageEffectPluginRenderThreadSafety).front() ==
+          kOfxImageEffectRenderUnsafe);
+    CHECK(prop_ints(descriptor.props, kOfxImageEffectPluginPropHostFrameThreading).front() == 0);
+}
+
 TEST_CASE("describe_in_context places recover original details in interior detail",
           "[unit][ofx][regression]") {
     SuiteScope suites;

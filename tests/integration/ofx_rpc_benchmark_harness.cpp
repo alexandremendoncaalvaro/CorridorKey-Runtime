@@ -97,7 +97,37 @@ struct HarnessOptions {
     std::string input_mode = "constant";
     // Optional PRNG seed for --input-mode=random so runs are reproducible.
     std::uint32_t input_random_seed = 0xC0B7A1C0u;
+    bool source_passthrough = true;
+    int sp_erode_px = InferenceParams::kDefaultSpErodePx;
+    int sp_blur_px = InferenceParams::kDefaultSpBlurPx;
+    UpscaleMethod upscale_method = UpscaleMethod::Lanczos4;
 };
+
+Result<bool> parse_bool_option(const std::string& value, const char* option_name) {
+    if (value == "1" || value == "true" || value == "on") {
+        return true;
+    }
+    if (value == "0" || value == "false" || value == "off") {
+        return false;
+    }
+    return Unexpected<Error>(Error{ErrorCode::InvalidParameters,
+                                   std::string("invalid value for ") + option_name + ": " + value});
+}
+
+Result<UpscaleMethod> parse_upscale_method(const std::string& value) {
+    if (value == "lanczos4" || value == "lanczos") {
+        return UpscaleMethod::Lanczos4;
+    }
+    if (value == "bilinear") {
+        return UpscaleMethod::Bilinear;
+    }
+    return Unexpected<Error>(
+        Error{ErrorCode::InvalidParameters, "invalid value for --upscale: " + value});
+}
+
+const char* upscale_method_label(UpscaleMethod method) {
+    return method == UpscaleMethod::Bilinear ? "bilinear" : "lanczos4";
+}
 
 Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
     HarnessOptions options;
@@ -165,6 +195,26 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
             if (!value) return Unexpected(value.error());
             options.input_random_seed =
                 static_cast<std::uint32_t>(std::strtoul(value->c_str(), nullptr, 10));
+        } else if (argument == "--source-passthrough") {
+            auto value = need("--source-passthrough");
+            if (!value) return Unexpected(value.error());
+            auto parsed = parse_bool_option(*value, "--source-passthrough");
+            if (!parsed) return Unexpected(parsed.error());
+            options.source_passthrough = *parsed;
+        } else if (argument == "--sp-erode") {
+            auto value = need("--sp-erode");
+            if (!value) return Unexpected(value.error());
+            options.sp_erode_px = std::atoi(value->c_str());
+        } else if (argument == "--sp-blur") {
+            auto value = need("--sp-blur");
+            if (!value) return Unexpected(value.error());
+            options.sp_blur_px = std::atoi(value->c_str());
+        } else if (argument == "--upscale") {
+            auto value = need("--upscale");
+            if (!value) return Unexpected(value.error());
+            auto parsed = parse_upscale_method(*value);
+            if (!parsed) return Unexpected(parsed.error());
+            options.upscale_method = *parsed;
         } else {
             return Unexpected<Error>(
                 Error{ErrorCode::InvalidParameters, "Unknown argument: " + argument});
@@ -340,6 +390,10 @@ int main(int argc, char* argv[]) {
     params.target_resolution = options.resolution;
     params.batch_size = 1;
     params.output_alpha_only = false;
+    params.source_passthrough = options.source_passthrough;
+    params.sp_erode_px = options.sp_erode_px;
+    params.sp_blur_px = options.sp_blur_px;
+    params.upscale_method = options.upscale_method;
 
     std::vector<nlohmann::json> per_frame;
     per_frame.reserve(static_cast<std::size_t>(options.iterations));
@@ -404,6 +458,10 @@ int main(int argc, char* argv[]) {
     report["endpoint_port"] = options.endpoint_port;
     report["parent_qos_class"] = options.parent_qos_class;
     report["input_mode"] = options.input_mode;
+    report["source_passthrough"] = options.source_passthrough;
+    report["sp_erode_px"] = options.sp_erode_px;
+    report["sp_blur_px"] = options.sp_blur_px;
+    report["upscale_method"] = upscale_method_label(options.upscale_method);
     if (options.input_mode == "random") {
         report["input_random_seed"] = options.input_random_seed;
     }

@@ -283,7 +283,7 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
     const char* depths[] = {kOfxBitDepthFloat, kOfxBitDepthByte};
     g_suites.property->propSetStringN(props, kOfxImageEffectPropSupportedPixelDepths, 2, depths);
     g_suites.property->propSetString(props, kOfxImageEffectPluginRenderThreadSafety, 0,
-                                     kOfxImageEffectRenderInstanceSafe);
+                                     kOfxImageEffectRenderUnsafe);
     g_suites.property->propSetInt(props, kOfxImageEffectPluginPropHostFrameThreading, 0, 0);
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsTiles, 0, 0);
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsMultiResolution, 0, 1);

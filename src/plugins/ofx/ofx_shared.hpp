@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -280,6 +281,9 @@ struct InstanceData {
     // instance instead of per frame. Reset implicitly on plugin reload because
     // InstanceData is recreated.
     bool blue_green_path_warning_logged = false;
+    // Serialize render actions for this instance when a host still overlaps
+    // render calls despite the descriptor-level runtime safety contract.
+    std::mutex render_mutex;
 };
 
 class SharedFrameCache;
