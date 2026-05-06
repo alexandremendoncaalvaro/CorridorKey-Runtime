@@ -438,8 +438,7 @@ TEST_CASE("Foundry Nuke defers paramSetValue inside the BeginSequenceRender wind
 // DaVinci Resolve has historically tolerated render-thread paramSetValue
 // through internal locking. The live runtime panel is the validated Resolve
 // feedback path for per-frame timings; strict hosts still defer above.
-TEST_CASE("DaVinci Resolve flushes paramSetValue live during render",
-          "[unit][ofx][regression]") {
+TEST_CASE("DaVinci Resolve flushes paramSetValue live during render", "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     data.in_render = true;

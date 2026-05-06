@@ -167,8 +167,8 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
         int height;
     };
 
-    for (const auto resolution : {ResolutionCase{512, 512}, ResolutionCase{1024, 1024},
-                                  ResolutionCase{640, 360}}) {
+    for (const auto resolution :
+         {ResolutionCase{512, 512}, ResolutionCase{1024, 1024}, ResolutionCase{640, 360}}) {
         ImageBuffer rgb(resolution.width, resolution.height, 3);
         ImageBuffer hint(resolution.width, resolution.height, 1);
         std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.5F);

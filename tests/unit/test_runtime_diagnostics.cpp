@@ -272,9 +272,8 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
         touch_file(models_dir / filename);
     }
 
-    for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
-          "cudart64_12.dll"}) {
+    for (const auto& filename : {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe",
+                                 "CorridorKey.ofx", "cudart64_12.dll"}) {
         touch_file(win64_dir / filename);
     }
     touch_file(bundle_dir / "Contents" / "Resources" / "torchtrt-runtime" / "bin" /
@@ -339,9 +338,8 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when dynamic pac
         touch_file(models_dir / filename);
     }
 
-    for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
-          "cudart64_12.dll"}) {
+    for (const auto& filename : {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe",
+                                 "CorridorKey.ofx", "cudart64_12.dll"}) {
         touch_file(win64_dir / filename);
     }
     touch_file(bundle_dir / "Contents" / "Resources" / "torchtrt-runtime" / "bin" /
@@ -416,12 +414,10 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
         {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
         {"certification_tier", "dynamic_torchtrt_green_blue"},
         {"unrestricted_quality_attempt", true},
-        {"expected_models",
-         nlohmann::json::array(
-             {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"})},
-        {"present_models",
-         nlohmann::json::array(
-             {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"})},
+        {"expected_models", nlohmann::json::array({"corridorkey_dynamic_green_fp16.ts",
+                                                   "corridorkey_dynamic_blue_fp16.ts"})},
+        {"present_models", nlohmann::json::array({"corridorkey_dynamic_green_fp16.ts",
+                                                  "corridorkey_dynamic_blue_fp16.ts"})},
         {"missing_models", nlohmann::json::array()},
         {"compiled_context_models", nlohmann::json::array()},
         {"expected_compiled_context_models", nlohmann::json::array()},

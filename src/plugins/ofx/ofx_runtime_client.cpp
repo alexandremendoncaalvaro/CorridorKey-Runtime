@@ -306,8 +306,8 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
         }
         if (requires_family_restart) {
             const std::string reason = std::string("runtime_family_switch from=") +
-                                       ofx_runtime_family_label(current_family) + " to=" +
-                                       ofx_runtime_family_label(next_family);
+                                       ofx_runtime_family_label(current_family) +
+                                       " to=" + ofx_runtime_family_label(next_family);
             log_message("ofx_runtime_client", "event=runtime_family_switch_restart " + reason);
             auto restart_result = restart_server(reason);
             if (!restart_result) {
@@ -530,9 +530,9 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
             // process object first turns the dead-sidecar case into a
             // sub-millisecond return.
             if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
-                const std::string reason = "OFX runtime server process (pid=" +
-                                           std::to_string(m_server_pid) +
-                                           ") exited during startup";
+                const std::string reason =
+                    "OFX runtime server process (pid=" + std::to_string(m_server_pid) +
+                    ") exited during startup";
                 log_message("ofx_runtime_client", "event=server_exited_during_startup pid=" +
                                                       std::to_string(m_server_pid));
                 return Unexpected<Error>(Error{
@@ -697,11 +697,11 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
         // connect-refused TCP retry cost on every iteration after the
         // restarted sidecar has already exited.
         if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
-            const std::string exit_reason = "Restarted OFX runtime server process (pid=" +
-                                            std::to_string(m_server_pid) +
-                                            ") exited during startup";
-            log_message("ofx_runtime_client", "event=restart_server_exited pid=" +
-                                                  std::to_string(m_server_pid));
+            const std::string exit_reason =
+                "Restarted OFX runtime server process (pid=" + std::to_string(m_server_pid) +
+                ") exited during startup";
+            log_message("ofx_runtime_client",
+                        "event=restart_server_exited pid=" + std::to_string(m_server_pid));
             return Unexpected<Error>(Error{
                 ErrorCode::IoError,
                 compose_launch_failure_message(exit_reason, m_options.endpoint,

@@ -704,8 +704,7 @@ int main(int argc, char* argv[]) {
                                                  {"base_version", CORRIDORKEY_VERSION_STRING}}))
                           << "\n";
             } else {
-                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING
-                          << "\n";
+                std::cout << "CorridorKey Runtime v" << CORRIDORKEY_DISPLAY_VERSION_STRING << "\n";
             }
             return 0;
         }
@@ -753,8 +752,7 @@ int main(int argc, char* argv[]) {
 
         if (cmd == "info") {
             if (use_json) {
-                std::cout << common::safe_json_dump(JobOrchestrator::get_system_info(), 4)
-                          << "\n";
+                std::cout << common::safe_json_dump(JobOrchestrator::get_system_info(), 4) << "\n";
             } else {
                 print_info();
             }
@@ -956,8 +954,7 @@ int main(int argc, char* argv[]) {
                 if (use_json) {
                     std::cout << common::safe_json_dump(report, 4) << "\n";
                 } else {
-                    std::cerr << "Benchmark error: " << report["error"].get<std::string>()
-                              << "\n";
+                    std::cerr << "Benchmark error: " << report["error"].get<std::string>() << "\n";
                 }
                 return 1;
             }

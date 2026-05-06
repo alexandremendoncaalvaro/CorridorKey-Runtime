@@ -404,7 +404,8 @@ std::string format_duration_ms(double duration_ms) {
     }
     std::ostringstream oss;
     if (duration_ms >= kMillisecondsPerSecondD) {
-        oss << std::fixed << std::setprecision(1) << (duration_ms / kMillisecondsPerSecondD) << " s";
+        oss << std::fixed << std::setprecision(1) << (duration_ms / kMillisecondsPerSecondD)
+            << " s";
     } else {
         oss << std::fixed << std::setprecision(1) << duration_ms << " ms";
     }
@@ -590,9 +591,9 @@ std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
             break;
     }
     if (hottest_stage != nullptr && hottest_stage->total_ms > 0.0 && !hottest_stage->name.empty()) {
-        label += " | Hotspot: " +
-                 truncate_status_message(hottest_stage->name, kHotspotLabelMaxLength) + " " +
-                 format_duration_ms(hottest_stage->total_ms);
+        label +=
+            " | Hotspot: " + truncate_status_message(hottest_stage->name, kHotspotLabelMaxLength) +
+            " " + format_duration_ms(hottest_stage->total_ms);
     }
     return label;
 }
@@ -647,8 +648,7 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
         return summary;
     }
 
-    const bool has_session =
-        data.runtime_client != nullptr && data.runtime_client->has_session();
+    const bool has_session = data.runtime_client != nullptr && data.runtime_client->has_session();
     const bool has_recorded_frame_timing =
         data.last_frame_ms > 0.0 || !data.last_render_stage_timings.empty();
     if (!has_session && !has_recorded_frame_timing) {
@@ -671,8 +671,8 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
     }
     if (const StageTiming* hot = hottest_actionable_stage(data.last_render_stage_timings);
         hot != nullptr && hot->total_ms > 0.0 && !hot->name.empty()) {
-        body += " · Hot: " + truncate_status_message(hot->name, kNodeSummaryHotStageMaxLen) +
-                " " + format_duration_ms(hot->total_ms);
+        body += " · Hot: " + truncate_status_message(hot->name, kNodeSummaryHotStageMaxLen) + " " +
+                format_duration_ms(hot->total_ms);
     }
     switch (data.last_render_work_origin) {
         case LastRenderWorkOrigin::SharedCache:
@@ -688,8 +688,7 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
     }
 
     if (!data.last_warning.empty()) {
-        body += " · Note: " +
-                truncate_status_message(data.last_warning, kNodeSummaryWarningMaxLen);
+        body += " · Note: " + truncate_status_message(data.last_warning, kNodeSummaryWarningMaxLen);
         summary.severity = kOfxMessageWarning;
     } else {
         summary.severity = kOfxMessageMessage;
@@ -1639,9 +1638,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         // (TensorRT engine compile dominates first-launch wall time per
         // help/TROUBLESHOOTING.md "First-Run Warmup").
         const std::string progress_label =
-            std::string("CorridorKey: preparing ") +
-            quality_mode_label(requested_quality_mode) + " engine (" +
-            std::to_string(selection.effective_resolution) + "px) — first launch may take 10-30s";
+            std::string("CorridorKey: preparing ") + quality_mode_label(requested_quality_mode) +
+            " engine (" + std::to_string(selection.effective_resolution) +
+            "px) — first launch may take 10-30s";
         // Progress-bar tick fractions for the OFX progress suite. The 5%
         // initial tick gives the host a non-empty first frame, the 50% tick
         // surfaces mid-compile activity, and the 100% tick closes the modal.
@@ -1704,22 +1703,21 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         }
         effective_device = prepare_result->session.effective_device;
         fallback = prepare_result->session.backend_fallback;
-        log_message(
-            "ensure_engine_for_quality",
-            "Runtime session prepared. reused_existing_session=" +
-                std::string(prepare_result->session.reused_existing_session ? "1" : "0") +
-                " ref_count=" + std::to_string(prepare_result->session.ref_count));
+        log_message("ensure_engine_for_quality",
+                    "Runtime session prepared. reused_existing_session=" +
+                        std::string(prepare_result->session.reused_existing_session ? "1" : "0") +
+                        " ref_count=" + std::to_string(prepare_result->session.ref_count));
 
         log_engine_event("ensure_engine_for_quality", "engine_create_result", kQualitySwitchPhase,
                          candidate_requested_device, effective_device,
                          selection.executable_model_path, requested_resolution,
                          selection.effective_resolution, fallback);
         if (!backend_matches_request(effective_device, candidate_requested_device)) {
-            data->last_error =
-                "Quality switch requested backend " +
-                backend_label(candidate_requested_device.backend) + " for " +
-                selection.executable_model_path.filename().string() +
-                " but the runtime is using " + backend_label(effective_device.backend) + ".";
+            data->last_error = "Quality switch requested backend " +
+                               backend_label(candidate_requested_device.backend) + " for " +
+                               selection.executable_model_path.filename().string() +
+                               " but the runtime is using " +
+                               backend_label(effective_device.backend) + ".";
             if (fallback.has_value() && !fallback->reason.empty()) {
                 data->last_error += " Reason: " + fallback->reason;
             }
@@ -1838,8 +1836,8 @@ void update_runtime_node_indicator(InstanceData* data) {
         summary.body == data->last_persistent_body) {
         return;
     }
-    set_persistent_message(summary.severity, "corridorkey_runtime_status",
-                           summary.body.c_str(), data->effect);
+    set_persistent_message(summary.severity, "corridorkey_runtime_status", summary.body.c_str(),
+                           data->effect);
     data->last_persistent_severity = severity_str;
     data->last_persistent_body = summary.body;
 }
@@ -2023,9 +2021,9 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 std::error_code error;
                 std::filesystem::create_directories(log_dir, error);
                 if (!open_external_url(log_dir.string())) {
-                    post_message(
-                        kOfxMessageError,
-                        ("Failed to open log folder: " + log_dir.string()).c_str(), instance);
+                    post_message(kOfxMessageError,
+                                 ("Failed to open log folder: " + log_dir.string()).c_str(),
+                                 instance);
                 }
                 return kOfxStatOK;
             }

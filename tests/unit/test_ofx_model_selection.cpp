@@ -377,8 +377,8 @@ TEST_CASE("fixed TorchTRT abort predicate only trips on the exact requested arti
         Backend::TorchTRT, kQualityMaximum, false, fallback_selection));
     REQUIRE_FALSE(should_abort_quality_fallback_after_compile_failure(
         Backend::TorchTRT, kQualityAuto, false, exact_selection));
-    REQUIRE(should_abort_quality_fallback_after_compile_failure(
-        Backend::TorchTRT, kQualityMaximum, false, dynamic_blue_selection));
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(Backend::TorchTRT, kQualityMaximum,
+                                                                false, dynamic_blue_selection));
 }
 
 TEST_CASE("auto TorchTRT quality skips cached compile failures and keeps working fallback",
@@ -424,8 +424,8 @@ TEST_CASE("dynamic blue compile failure cache blocks implicit green fallback",
     QualityCompileFailureCache cache;
     record_quality_compile_failure(cache, context, candidates.front(), "blue init failed");
 
-    REQUIRE(should_abort_quality_fallback_after_compile_failure(
-        Backend::TorchTRT, kQualityHigh, false, candidates.front()));
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(Backend::TorchTRT, kQualityHigh,
+                                                                false, candidates.front()));
     auto filtered = filter_quality_artifacts_with_compile_cache(candidates, cache, context);
     REQUIRE(filtered.empty());
 }
@@ -766,16 +766,14 @@ TEST_CASE("quality artifact runtime backend follows the selected file format",
     }
 
     SECTION("ONNX extension does not override a TorchTRT request") {
-        REQUIRE(runtime_backend_for_quality_artifact(Backend::TorchTRT,
-                                                    std::filesystem::path{
-                                                        "corridorkey_fp16_1024.onnx"}) ==
+        REQUIRE(runtime_backend_for_quality_artifact(
+                    Backend::TorchTRT, std::filesystem::path{"corridorkey_fp16_1024.onnx"}) ==
                 Backend::TorchTRT);
     }
 
     SECTION("legacy ONNX selections keep the requested backend") {
-        REQUIRE(runtime_backend_for_quality_artifact(Backend::TorchTRT,
-                                                    std::filesystem::path{
-                                                        "corridorkey_fp16_1024.onnx"}) ==
+        REQUIRE(runtime_backend_for_quality_artifact(
+                    Backend::TorchTRT, std::filesystem::path{"corridorkey_fp16_1024.onnx"}) ==
                 Backend::TorchTRT);
     }
 }

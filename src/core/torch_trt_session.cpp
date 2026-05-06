@@ -155,8 +155,7 @@ ImageBuffer materialize_rgb(const torch::Tensor& fg_cuda, int output_width, int 
         for (int x = 0; x < output_width; ++x) {
             const auto src_index =
                 (static_cast<std::ptrdiff_t>(y + pad_top) * tensor_width) + x + pad_left;
-            const auto dst_index =
-                ((static_cast<std::ptrdiff_t>(y) * output_width) + x) * 3;
+            const auto dst_index = ((static_cast<std::ptrdiff_t>(y) * output_width) + x) * 3;
             dst[dst_index + 0] = src[src_index];
             dst[dst_index + 1] = src[plane + src_index];
             dst[dst_index + 2] = src[(2 * plane) + src_index];
@@ -198,7 +197,8 @@ TorchTrtSession& TorchTrtSession::operator=(TorchTrtSession&&) noexcept = defaul
 
 Result<std::unique_ptr<TorchTrtSession>> TorchTrtSession::create(
     const std::filesystem::path& ts_path, const DeviceInfo& device,
-    StageTimingCallback on_stage) {  // NOLINT(performance-unnecessary-value-param) — matches MlxSession signature.
+    StageTimingCallback
+        on_stage) {  // NOLINT(performance-unnecessary-value-param) — matches MlxSession signature.
     if (!std::filesystem::exists(ts_path)) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::ModelLoadFailed,
@@ -266,22 +266,21 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
             .code = ErrorCode::InvalidParameters,
             .message = "TorchScript RTX session expects RGB input with positive width/height and "
                        "3 channels; got " +
-                       std::to_string(rgb.width) + "x" +
-                       std::to_string(rgb.height) + "x" + std::to_string(rgb.channels)}};
+                       std::to_string(rgb.width) + "x" + std::to_string(rgb.height) + "x" +
+                       std::to_string(rgb.channels)}};
     }
     if (!dynamic_resolution && (width != fixed_resolution || height != fixed_resolution)) {
-        return Unexpected<Error>{
-            Error{.code = ErrorCode::InvalidParameters,
-                  .message = "TorchTRT session expects input at " +
-                             std::to_string(fixed_resolution) + "x" +
-                             std::to_string(fixed_resolution) + "; got " +
-                             std::to_string(width) + "x" + std::to_string(height)}};
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InvalidParameters,
+            .message = "TorchTRT session expects input at " + std::to_string(fixed_resolution) +
+                       "x" + std::to_string(fixed_resolution) + "; got " + std::to_string(width) +
+                       "x" + std::to_string(height)}};
     }
     if (alpha_hint.width != width || alpha_hint.height != height || alpha_hint.channels != 1) {
-        return Unexpected<Error>{
-            Error{.code = ErrorCode::InvalidParameters,
-                  .message = "TorchScript RTX session expects alpha_hint at " +
-                             std::to_string(width) + "x" + std::to_string(height) + "x1"}};
+        return Unexpected<Error>{Error{.code = ErrorCode::InvalidParameters,
+                                       .message = "TorchScript RTX session expects alpha_hint at " +
+                                                  std::to_string(width) + "x" +
+                                                  std::to_string(height) + "x1"}};
     }
 
     try {

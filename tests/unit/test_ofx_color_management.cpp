@@ -556,9 +556,8 @@ TEST_CASE("describe_in_context makes deterministic screen paths explicit in OFX 
               .find("deterministic screen path") != std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint).front().find("CorridorKeyBlue") !=
           std::string::npos);
-    CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
-              .front()
-              .find("Blue-Green") != std::string::npos);
+    CHECK(prop_strings(screen_color_props, kOfxParamPropHint).front().find("Blue-Green") !=
+          std::string::npos);
     CHECK(prop_strings(despill_props, kOfxParamPropHint).front().find("selected screen color") !=
           std::string::npos);
     CHECK(prop_strings(spill_method_props, kOfxParamPropHint)

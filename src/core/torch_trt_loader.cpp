@@ -104,8 +104,8 @@ bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out
     HMODULE torchtrt_handle =
         LoadLibraryExW(torchtrt_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (torchtrt_handle == nullptr) {
-        out_error = "LoadLibrary torchtrt.dll failed (GetLastError=" +
-                    std::to_string(GetLastError()) + ")";
+        out_error =
+            "LoadLibrary torchtrt.dll failed (GetLastError=" + std::to_string(GetLastError()) + ")";
         return false;
     }
 
@@ -122,12 +122,12 @@ bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out
     // the blue pack (`<pack>/torchtrt-runtime/bin/`).
     const auto wrapper_path = absolute / L"corridorkey_torchtrt.dll";
     if (!std::filesystem::exists(wrapper_path)) {
-        out_error = "corridorkey_torchtrt.dll not found next to torchtrt.dll in " +
-                    absolute.string();
+        out_error =
+            "corridorkey_torchtrt.dll not found next to torchtrt.dll in " + absolute.string();
         return false;
     }
-    HMODULE wrapper_handle = LoadLibraryExW(wrapper_path.wstring().c_str(), nullptr,
-                                            LOAD_WITH_ALTERED_SEARCH_PATH);
+    HMODULE wrapper_handle =
+        LoadLibraryExW(wrapper_path.wstring().c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (wrapper_handle == nullptr) {
         out_error = "LoadLibrary corridorkey_torchtrt.dll failed (GetLastError=" +
                     std::to_string(GetLastError()) + ")";

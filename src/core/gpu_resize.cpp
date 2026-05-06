@@ -214,10 +214,10 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
     NppiRect dst_roi = {0, 0, dst_alpha.width, dst_alpha.height};
 
     const NppStreamContext npp_context = m_state->npp_context;
-    NppStatus status = nppiResize_32f_C1R_Ctx(
-        m_state->src_alpha_dev, src_width * sizeof(float), src_size, src_roi,
-        m_state->dst_alpha_dev, dst_alpha.width * sizeof(float), dst_size, dst_roi,
-        NPPI_INTER_LINEAR, npp_context);
+    NppStatus status =
+        nppiResize_32f_C1R_Ctx(m_state->src_alpha_dev, src_width * sizeof(float), src_size, src_roi,
+                               m_state->dst_alpha_dev, dst_alpha.width * sizeof(float), dst_size,
+                               dst_roi, NPPI_INTER_LINEAR, npp_context);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -256,10 +256,9 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
         const int plane_step = dst_alpha.width * static_cast<int>(sizeof(float));
 
         for (int channel = 0; channel < 3; ++channel) {
-            status = nppiResize_32f_C1R_Ctx(
-                src_fg_planes[channel], src_width * sizeof(float), src_size, src_roi,
-                dst_fg_planes[channel], plane_step, dst_size, dst_roi, NPPI_INTER_LINEAR,
-                npp_context);
+            status = nppiResize_32f_C1R_Ctx(src_fg_planes[channel], src_width * sizeof(float),
+                                            src_size, src_roi, dst_fg_planes[channel], plane_step,
+                                            dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
 
             if (status != NPP_SUCCESS) {
                 return Unexpected(Error{ErrorCode::InferenceFailed,

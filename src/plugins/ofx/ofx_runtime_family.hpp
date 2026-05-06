@@ -46,8 +46,8 @@ inline bool should_restart_for_ofx_runtime_family_switch(OfxRuntimeFamily curren
     }
     const bool current_is_windows_rtx = current_family == OfxRuntimeFamily::OrtTensorRt ||
                                         current_family == OfxRuntimeFamily::TorchTrt;
-    const bool next_is_windows_rtx = next_family == OfxRuntimeFamily::OrtTensorRt ||
-                                     next_family == OfxRuntimeFamily::TorchTrt;
+    const bool next_is_windows_rtx =
+        next_family == OfxRuntimeFamily::OrtTensorRt || next_family == OfxRuntimeFamily::TorchTrt;
     return current_is_windows_rtx && next_is_windows_rtx;
 }
 

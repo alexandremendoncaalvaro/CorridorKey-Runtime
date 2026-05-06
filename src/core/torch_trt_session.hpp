@@ -17,13 +17,13 @@
 // tests). Without the explicit attribute MSVC skips the import-table
 // entries and /DELAYLOAD becomes a no-op (LNK4199).
 #if defined(_WIN32)
-#  if defined(CORRIDORKEY_TORCHTRT_BUILDING)
-#    define CORRIDORKEY_TORCHTRT_API __declspec(dllexport)
-#  else
-#    define CORRIDORKEY_TORCHTRT_API __declspec(dllimport)
-#  endif
+#if defined(CORRIDORKEY_TORCHTRT_BUILDING)
+#define CORRIDORKEY_TORCHTRT_API __declspec(dllexport)
 #else
-#  define CORRIDORKEY_TORCHTRT_API
+#define CORRIDORKEY_TORCHTRT_API __declspec(dllimport)
+#endif
+#else
+#define CORRIDORKEY_TORCHTRT_API
 #endif
 
 namespace corridorkey::core {
@@ -46,8 +46,8 @@ namespace corridorkey::core {
 // and thunk through to Impl internally. Same suppression pattern Apple
 // and PyTorch ship in their own libtorch headers.
 #if defined(_WIN32) && defined(_MSC_VER)
-#  pragma warning(push)
-#  pragma warning(disable : 4251)
+#pragma warning(push)
+#pragma warning(disable : 4251)
 #endif
 class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
    public:
@@ -75,7 +75,7 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
     std::unique_ptr<Impl> m_impl;
 };
 #if defined(_WIN32) && defined(_MSC_VER)
-#  pragma warning(pop)
+#pragma warning(pop)
 #endif
 
 }  // namespace corridorkey::core

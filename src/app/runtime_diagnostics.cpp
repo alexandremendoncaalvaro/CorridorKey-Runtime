@@ -970,14 +970,14 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         find_libraries_with_prefixes(executable_dir, {"tensorrt_onnxparser_rtx", "nvonnxparser"});
     auto cuda_runtime_libraries =
         find_libraries_with_prefixes(executable_dir, {"cudart64_", "cudart"});
-    auto torchtrt_wrapper_library = layout.root / "Contents" / "Resources" /
-                                    "torchtrt-runtime" / "bin" / "corridorkey_torchtrt.dll";
+    auto torchtrt_wrapper_library = layout.root / "Contents" / "Resources" / "torchtrt-runtime" /
+                                    "bin" / "corridorkey_torchtrt.dll";
     auto compiled_context_models = nlohmann::json::array();
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
-    const bool inventory_torchtrt_rtx_bundle =
-        packaged_inventory.has_value() && packaged_inventory->bundle_track == "rtx" &&
-        packaged_inventory->backend_intent == "torchtrt";
+    const bool inventory_torchtrt_rtx_bundle = packaged_inventory.has_value() &&
+                                               packaged_inventory->bundle_track == "rtx" &&
+                                               packaged_inventory->backend_intent == "torchtrt";
     const auto expected_packaged_models = expected_packaged_models_for_platform(
         models_dir, layout.kind == "windows_ofx" || layout.kind == "linux_ofx");
 

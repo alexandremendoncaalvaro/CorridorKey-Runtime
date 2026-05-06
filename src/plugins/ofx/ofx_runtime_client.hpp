@@ -57,8 +57,9 @@ class OfxRuntimeClient {
                                         const nlohmann::json& payload);
     [[nodiscard]] Result<nlohmann::json> send_command_without_launch(
         app::OfxRuntimeCommand command, const nlohmann::json& payload) const;
-    [[nodiscard]] Result<nlohmann::json> send_command_without_launch(
-        app::OfxRuntimeCommand command, const nlohmann::json& payload, int timeout_ms) const;
+    [[nodiscard]] Result<nlohmann::json> send_command_without_launch(app::OfxRuntimeCommand command,
+                                                                     const nlohmann::json& payload,
+                                                                     int timeout_ms) const;
     Result<void> launch_server();
     Result<void> recover_runtime_session(StageTimingCallback on_stage);
     Result<void> restart_server(const std::string& reason);

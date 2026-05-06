@@ -471,11 +471,11 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
     CHECK(prepare_count.load() == 2);
     CHECK(render_count.load() == 1);
 
-    auto shutdown_response = send_json_request(
-        endpoint,
-        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
-                                          .payload = nlohmann::json::object()}),
-        500);
+    auto shutdown_response =
+        send_json_request(endpoint,
+                          to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
+                                                            .payload = nlohmann::json::object()}),
+                          500);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
     server_thread.join();

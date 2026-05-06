@@ -90,8 +90,7 @@ TEST_CASE("OFX runtime family follows the prepare request executable artifact",
     blue_request.requested_device.backend = Backend::TorchTRT;
     blue_request.model_path = "models/corridorkey_dynamic_blue_fp16.ts";
 
-    REQUIRE(ofx_runtime_family_for_prepare_request(green_request) ==
-            OfxRuntimeFamily::OrtTensorRt);
+    REQUIRE(ofx_runtime_family_for_prepare_request(green_request) == OfxRuntimeFamily::OrtTensorRt);
     REQUIRE(ofx_runtime_family_for_prepare_request(blue_request) == OfxRuntimeFamily::TorchTrt);
     REQUIRE(should_restart_for_ofx_runtime_family_switch(
         ofx_runtime_family_for_prepare_request(green_request),

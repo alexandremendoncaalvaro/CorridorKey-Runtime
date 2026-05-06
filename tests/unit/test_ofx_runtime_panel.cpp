@@ -374,8 +374,7 @@ TEST_CASE("alpha hint policy prefers external hints and falls back to rough guid
 // fields. The unit tests below pin the formatting + severity contract
 // so a future refactor cannot silently drop fields that the user docs
 // reference.
-TEST_CASE("compose_runtime_node_summary surfaces idle state",
-          "[unit][ofx][runtime][panel]") {
+TEST_CASE("compose_runtime_node_summary surfaces idle state", "[unit][ofx][runtime][panel]") {
     InstanceData data{};
     data.last_render_work_origin = LastRenderWorkOrigin::None;
 
@@ -384,8 +383,9 @@ TEST_CASE("compose_runtime_node_summary surfaces idle state",
     CHECK(std::string(summary.severity) == kOfxMessageMessage);
 }
 
-TEST_CASE("compose_runtime_node_summary reports backend, device and effective quality on ready state",
-          "[unit][ofx][runtime][panel]") {
+TEST_CASE(
+    "compose_runtime_node_summary reports backend, device and effective quality on ready state",
+    "[unit][ofx][runtime][panel]") {
     InstanceData data{};
     data.device.backend = corridorkey::Backend::TensorRT;
     data.device.name = "NVIDIA GeForce RTX 3080";
@@ -428,8 +428,9 @@ TEST_CASE("compose_runtime_node_summary escalates severity on warning",
     CHECK(std::string(summary.severity) == kOfxMessageWarning);
 }
 
-TEST_CASE("compose_runtime_node_summary escalates severity to error and short-circuits other fields",
-          "[unit][ofx][runtime][panel]") {
+TEST_CASE(
+    "compose_runtime_node_summary escalates severity to error and short-circuits other fields",
+    "[unit][ofx][runtime][panel]") {
     InstanceData data{};
     data.device.backend = corridorkey::Backend::TensorRT;
     data.device.name = "NVIDIA GeForce RTX 3080";

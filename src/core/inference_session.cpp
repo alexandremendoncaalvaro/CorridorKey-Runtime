@@ -2040,9 +2040,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             return Unexpected(prepare_res.error());
         }
 
-        auto raw_res =
-            m_torch_trt_session->infer(prepared_rgb, prepared_hint, params.output_alpha_only,
-                                       on_stage);
+        auto raw_res = m_torch_trt_session->infer(prepared_rgb, prepared_hint,
+                                                  params.output_alpha_only, on_stage);
         if (!raw_res) {
             return Unexpected(raw_res.error());
         }
@@ -2082,16 +2081,14 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             on_stage, "frame_extract_outputs_finalize",
             [&]() -> Result<void> {
                 ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-                auto alpha_final_res =
-                    finalize_output_image(m_device, target_res, result.alpha.view(),
-                                          "alpha_resized_output");
+                auto alpha_final_res = finalize_output_image(
+                    m_device, target_res, result.alpha.view(), "alpha_resized_output");
                 if (!alpha_final_res) {
                     return Unexpected(alpha_final_res.error());
                 }
                 if (!result.foreground.view().empty()) {
-                    auto fg_final_res =
-                        finalize_output_image(m_device, target_res, result.foreground.view(),
-                                              "fg_resized_output");
+                    auto fg_final_res = finalize_output_image(
+                        m_device, target_res, result.foreground.view(), "fg_resized_output");
                     if (!fg_final_res) {
                         return Unexpected(fg_final_res.error());
                     }

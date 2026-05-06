@@ -222,9 +222,9 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
     const int dst_rgb_step = model_width * 3 * static_cast<int>(sizeof(float));
 
     const NppStreamContext npp_context = m_state->npp_context;
-    NppStatus status = nppiResize_32f_C3R_Ctx(
-        m_state->src_rgb_dev, src_rgb_step, src_rgb_size, src_rgb_roi, m_state->resized_rgb_dev,
-        dst_rgb_step, dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
+    NppStatus status = nppiResize_32f_C3R_Ctx(m_state->src_rgb_dev, src_rgb_step, src_rgb_size,
+                                              src_rgb_roi, m_state->resized_rgb_dev, dst_rgb_step,
+                                              dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
