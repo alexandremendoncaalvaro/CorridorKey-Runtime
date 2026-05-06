@@ -52,6 +52,9 @@ CORRIDORKEY_API ArtifactRuntimeState artifact_runtime_state_for_device(
     const DeviceInfo& device, bool usable);
 CORRIDORKEY_API std::optional<ModelCatalogEntry> find_model_by_filename(
     const std::string& filename);
+CORRIDORKEY_API std::optional<std::string> dynamic_torchtrt_model_filename_for_screen_color(
+    std::string_view screen_color);
+CORRIDORKEY_API bool is_dynamic_torchtrt_model_filename(std::string_view filename);
 CORRIDORKEY_API std::optional<PresetDefinition> find_preset_by_selector(
     const std::string& selector);
 CORRIDORKEY_API std::optional<PresetDefinition> default_preset_for_capabilities(

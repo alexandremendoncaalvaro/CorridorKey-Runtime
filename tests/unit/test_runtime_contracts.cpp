@@ -101,16 +101,16 @@ TEST_CASE("preferred runtime device and optimization profile stay product-aligne
           "[unit][runtime][regression]") {
     RuntimeCapabilities windows_capabilities;
     windows_capabilities.platform = "windows";
-    windows_capabilities.supported_backends = {Backend::CPU, Backend::TensorRT};
+    windows_capabilities.supported_backends = {Backend::CPU, Backend::TorchTRT};
 
     std::vector<DeviceInfo> windows_devices = {
         DeviceInfo{"Generic CPU", 0, Backend::CPU},
-        DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
+        DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT},
     };
 
     auto preferred_windows = preferred_runtime_device(windows_capabilities, windows_devices);
     REQUIRE(preferred_windows.has_value());
-    REQUIRE(preferred_windows->backend == Backend::TensorRT);
+    REQUIRE(preferred_windows->backend == Backend::TorchTRT);
 
     const auto windows_rtx_models_dir = write_models_inventory_fixture("windows-rtx");
     {
@@ -118,7 +118,8 @@ TEST_CASE("preferred runtime device and optimization profile stay product-aligne
         auto profile =
             runtime_optimization_profile_for_device(windows_capabilities, *preferred_windows);
         REQUIRE(profile.id == "windows-rtx");
-        REQUIRE(profile.certification_tier == "packaged_fp16_ladder_through_2048");
+        REQUIRE(profile.backend_intent == "torchtrt");
+        REQUIRE(profile.certification_tier == "dynamic_torchtrt_green_blue");
         REQUIRE(profile.unrestricted_quality_attempt);
     }
     std::filesystem::remove_all(windows_rtx_models_dir.parent_path());
@@ -170,18 +171,33 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
 
     auto fp16_1024 = find_model("corridorkey_fp16_1024.onnx");
     REQUIRE(fp16_1024 != models.end());
-    REQUIRE(fp16_1024->packaged_for_windows);
+    REQUIRE_FALSE(fp16_1024->packaged_for_windows);
     REQUIRE(fp16_1024->recommended_backend == "tensorrt");
-    REQUIRE(fp16_1024->intended_use == "windows_rtx_primary");
+    REQUIRE(fp16_1024->intended_use == "reference_validation");
+    REQUIRE(fp16_1024->intended_platforms.empty());
 
     auto fp16_512 = find_model("corridorkey_fp16_512.onnx");
     REQUIRE(fp16_512 != models.end());
-    REQUIRE(fp16_512->packaged_for_windows);
+    REQUIRE_FALSE(fp16_512->packaged_for_windows);
+    REQUIRE(fp16_512->intended_platforms.empty());
+
+    auto dynamic_green = find_model("corridorkey_dynamic_green_fp16.ts");
+    REQUIRE(dynamic_green != models.end());
+    REQUIRE(dynamic_green->packaged_for_windows);
+    REQUIRE(dynamic_green->recommended_backend == "torchtrt");
+    REQUIRE(dynamic_green->intended_use == "windows_rtx_primary");
+    REQUIRE(dynamic_green->resolution == 0);
 
     auto fp16_768 = find_model("corridorkey_fp16_768.onnx");
     REQUIRE(fp16_768 != models.end());
     REQUIRE_FALSE(fp16_768->packaged_for_windows);
     REQUIRE(fp16_768->intended_use == "reference_validation");
+    for (const auto& model : models) {
+        if (model.artifact_family == "onnx") {
+            REQUIRE(std::find(model.intended_platforms.begin(), model.intended_platforms.end(),
+                              "windows_rtx_30_plus") == model.intended_platforms.end());
+        }
+    }
 }
 
 TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
@@ -240,7 +256,7 @@ TEST_CASE("preset lookup accepts product-facing aliases", "[unit][runtime]") {
     bool windows_rtx_defaults =
         capabilities.platform == "windows" &&
         std::find(capabilities.supported_backends.begin(), capabilities.supported_backends.end(),
-                  Backend::TensorRT) != capabilities.supported_backends.end();
+                  Backend::TorchTRT) != capabilities.supported_backends.end();
 
     // The "preview" alias was retired alongside the int8/CPU presets
     // (mac-preview, win-cpu-safe). Callers that previously asked for preview
@@ -291,7 +307,7 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
 
     RuntimeCapabilities windows_capabilities;
     windows_capabilities.platform = "windows";
-    windows_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
+    windows_capabilities.supported_backends = {Backend::TorchTRT, Backend::CPU};
 
     auto windows_default = default_preset_for_capabilities(windows_capabilities);
     REQUIRE(windows_default.has_value());
@@ -301,7 +317,7 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
         windows_capabilities, DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
         windows_default);
     REQUIRE(windows_rtx_model.has_value());
-    REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_1024.onnx");
+    REQUIRE(windows_rtx_model->filename == "corridorkey_dynamic_green_fp16.ts");
 
     // Windows CPU rendering retired with INT8: Backend::CPU yields no
     // catalog match. Callers must surface "no supported render backend"
@@ -328,7 +344,7 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
           "[unit][runtime][screen-color]") {
     RuntimeCapabilities windows_capabilities;
     windows_capabilities.platform = "windows";
-    windows_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
+    windows_capabilities.supported_backends = {Backend::TorchTRT, Backend::CPU};
 
     auto windows_default = default_preset_for_capabilities(windows_capabilities);
 
@@ -337,7 +353,10 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
                                                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
                                                windows_default, "green");
         REQUIRE(entry.has_value());
-        REQUIRE(entry->filename == "corridorkey_fp16_1024.onnx");
+        REQUIRE(entry->filename == "corridorkey_dynamic_green_fp16.ts");
+        REQUIRE(entry->artifact_family == "torchscript");
+        REQUIRE(entry->recommended_backend == "torchtrt");
+        REQUIRE(entry->resolution == 0);
         REQUIRE(entry->screen_color == "green");
     }
 
@@ -369,7 +388,7 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
                                                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
                                                windows_default);
         REQUIRE(entry.has_value());
-        REQUIRE(entry->filename == "corridorkey_fp16_1024.onnx");
+        REQUIRE(entry->filename == "corridorkey_dynamic_green_fp16.ts");
         REQUIRE(entry->screen_color == "green");
     }
 
@@ -388,7 +407,7 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
         REQUIRE(blue_json.contains("screen_color"));
         REQUIRE(blue_json["screen_color"] == "blue");
 
-        auto green_entry = find_model_by_filename("corridorkey_fp16_1024.onnx");
+        auto green_entry = find_model_by_filename("corridorkey_dynamic_green_fp16.ts");
         REQUIRE(green_entry.has_value());
         const auto green_json = to_json(*green_entry);
         REQUIRE(green_json["screen_color"] == "green");
@@ -472,24 +491,24 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-runtime-artifact-select";
     std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir);
-    std::ofstream(temp_dir / "corridorkey_fp16_768.onnx") << "stub";
-    std::ofstream(temp_dir / "corridorkey_fp16_512.onnx") << "stub";
+    std::ofstream(temp_dir / "corridorkey_dynamic_green_fp16.ts") << "stub";
 
     auto selections = quality_artifact_candidates_for_request(
         temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
         QualityFallbackMode::Auto);
     REQUIRE(selections.has_value());
     REQUIRE_FALSE(selections->empty());
-    CHECK(selections->front().effective_resolution == 512);
-    CHECK(selections->front().coarse_to_fine);
+    CHECK(selections->front().executable_model_path.filename() ==
+          "corridorkey_dynamic_green_fp16.ts");
+    CHECK(selections->front().effective_resolution == 2048);
+    CHECK_FALSE(selections->front().coarse_to_fine);
 
     auto expected = expected_artifact_paths_for_request(
         temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
         QualityFallbackMode::Auto);
     REQUIRE(expected.has_value());
-    REQUIRE(expected->size() == 2);
-    CHECK(expected->front().filename() == "corridorkey_fp16_1024.onnx");
-    CHECK((*expected)[1].filename() == "corridorkey_fp16_512.onnx");
+    REQUIRE(expected->size() == 1);
+    CHECK(expected->front().filename() == "corridorkey_dynamic_green_fp16.ts");
 
     std::filesystem::remove_all(temp_dir);
 }
@@ -497,23 +516,25 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
 TEST_CASE("packaged model resolution uses catalog entries for non-onnx artifacts",
           "[unit][runtime][regression]") {
     REQUIRE(packaged_model_resolution("corridorkey_mlx.safetensors") == 2048);
+    REQUIRE(packaged_model_resolution("corridorkey_dynamic_green_fp16.ts") == 0);
     REQUIRE(is_packaged_corridorkey_model("corridorkey_mlx.safetensors"));
+    REQUIRE(is_packaged_corridorkey_model("corridorkey_dynamic_green_fp16.ts"));
 }
 
 TEST_CASE("artifact runtime state separates packaged, certified, and recommended",
           "[unit][runtime][regression]") {
     RuntimeCapabilities windows_capabilities;
     windows_capabilities.platform = "windows";
-    windows_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
-    DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TensorRT};
+    windows_capabilities.supported_backends = {Backend::TorchTRT, Backend::CPU};
+    DeviceInfo rtx_3080{"RTX 3080", 10240, Backend::TorchTRT};
 
     const auto windows_rtx_models_dir = write_models_inventory_fixture("windows-rtx");
     ScopedModelsDirOverride windows_rtx_override(windows_rtx_models_dir);
 
-    auto fp16_1024 = find_model_by_filename("corridorkey_fp16_1024.onnx");
-    REQUIRE(fp16_1024.has_value());
+    auto dynamic_green = find_model_by_filename("corridorkey_dynamic_green_fp16.ts");
+    REQUIRE(dynamic_green.has_value());
     auto recommended_state =
-        artifact_runtime_state_for_device(*fp16_1024, windows_capabilities, rtx_3080, true);
+        artifact_runtime_state_for_device(*dynamic_green, windows_capabilities, rtx_3080, true);
     REQUIRE(recommended_state.packaged_for_active_track);
     REQUIRE(recommended_state.present);
     REQUIRE(recommended_state.certified_for_active_track);
@@ -521,16 +542,16 @@ TEST_CASE("artifact runtime state separates packaged, certified, and recommended
     REQUIRE(recommended_state.recommended_for_active_device);
     REQUIRE(recommended_state.state == "recommended");
 
-    auto fp16_1536 = find_model_by_filename("corridorkey_fp16_1536.onnx");
-    REQUIRE(fp16_1536.has_value());
+    auto dynamic_blue = find_model_by_filename("corridorkey_dynamic_blue_fp16.ts");
+    REQUIRE(dynamic_blue.has_value());
     auto certified_state =
-        artifact_runtime_state_for_device(*fp16_1536, windows_capabilities, rtx_3080, true);
+        artifact_runtime_state_for_device(*dynamic_blue, windows_capabilities, rtx_3080, true);
     REQUIRE(certified_state.packaged_for_active_track);
     REQUIRE(certified_state.present);
     REQUIRE(certified_state.certified_for_active_track);
-    REQUIRE_FALSE(certified_state.certified_for_active_device);
+    REQUIRE(certified_state.certified_for_active_device);
     REQUIRE_FALSE(certified_state.recommended_for_active_device);
-    REQUIRE(certified_state.state == "packaged");
+    REQUIRE(certified_state.state == "certified");
 
     // The packaged-but-not-certified state historically used corridorkey_int8_1024.onnx
     // (packaged_for_windows=true, validated_platforms={}, validated_hardware_tiers={}).
@@ -549,7 +570,7 @@ TEST_CASE("artifact runtime state separates packaged, certified, and recommended
     REQUIRE(reference_only_state.state == "reference_only");
 
     auto missing_state =
-        artifact_runtime_state_for_device(*fp16_1536, windows_capabilities, rtx_3080, false);
+        artifact_runtime_state_for_device(*dynamic_blue, windows_capabilities, rtx_3080, false);
     REQUIRE(missing_state.packaged_for_active_track);
     REQUIRE_FALSE(missing_state.present);
     REQUIRE(missing_state.state == "missing");

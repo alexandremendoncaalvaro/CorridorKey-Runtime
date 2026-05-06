@@ -217,6 +217,17 @@ bool is_mlx_artifact(const std::filesystem::path& model_path) {
 }
 #endif
 
+bool has_model_extension(const std::filesystem::path& model_path, std::string_view expected) {
+    auto extension = model_path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return extension == expected;
+}
+
+bool is_torchscript_artifact(const std::filesystem::path& model_path) {
+    return has_model_extension(model_path, ".ts");
+}
+
 DeviceInfo resolve_auto_device_for_model(const std::filesystem::path& model_path) {
 #ifdef __APPLE__
     DeviceInfo detected = auto_detect();
@@ -233,10 +244,37 @@ DeviceInfo resolve_auto_device_for_model(const std::filesystem::path& model_path
     }
 
     return detected;
+#elif defined(_WIN32)
+    DeviceInfo detected = auto_detect();
+    if (is_torchscript_artifact(model_path)) {
+        if (detected.name.empty()) {
+            detected.name = "TorchTRT";
+        }
+        detected.backend = Backend::TorchTRT;
+        return detected;
+    }
+    return detected;
 #else
     (void)model_path;
     return auto_detect();
 #endif
+}
+
+DeviceInfo normalize_device_for_model_artifact(const std::filesystem::path& model_path,
+                                               DeviceInfo device) {
+#ifdef _WIN32
+    if (is_torchscript_artifact(model_path) &&
+        (device.backend == Backend::Auto || device.backend == Backend::TensorRT ||
+         device.backend == Backend::CUDA)) {
+        device.backend = Backend::TorchTRT;
+        if (device.name.empty() || device.name == "Auto") {
+            device.name = "TorchTRT";
+        }
+    }
+#else
+    (void)model_path;
+#endif
+    return device;
 }
 
 std::optional<DeviceInfo> build_cpu_fallback_device(const DeviceInfo& device) {
@@ -284,6 +322,7 @@ Result<std::unique_ptr<Engine>> core::EngineFactory::create_with_ort_process_con
 
     DeviceInfo requested_device =
         device.backend == Backend::Auto ? resolve_auto_device_for_model(model_path) : device;
+    requested_device = normalize_device_for_model_artifact(model_path, requested_device);
     if (options.allow_cpu_fallback) {
         engine->m_impl->cpu_fallback_device = build_cpu_fallback_device(requested_device);
     }

@@ -127,15 +127,11 @@ set_target_properties(corridorkey_ofx PROPERTIES
 )
 
 if(WIN32)
-    # The .ofx no longer references ONNX Runtime symbols directly: every
+    # The .ofx does not reference ONNX Runtime symbols directly: every
     # inference call goes through corridorkey_ofx_runtime_server.exe over
-    # IPC, so the plugin DLL is intentionally ORT-import-free. Drop the
-    # delay-load infrastructure (delayimp.lib + /DELAYLOAD:onnxruntime.dll)
-    # along with the win_delayload_hook source. The bundle still ships
-    # onnxruntime.dll for the server process, but the host's loader
-    # (Foundry Nuke ships cudart64_12.dll 12.8 next to its executable)
-    # cannot drag the plugin into a CUDA-version conflict because the
-    # plugin import table no longer mentions onnxruntime.dll at all.
+    # IPC, so the plugin DLL is intentionally ORT-import-free. Windows RTX
+    # packages also keep the sidecar ORT-import-free and load ONNX only through
+    # the dynamic legacy path outside the RTX product contract.
     # Validate via `dumpbin -imports CorridorKey.ofx` before each release.
     corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx)
 endif()

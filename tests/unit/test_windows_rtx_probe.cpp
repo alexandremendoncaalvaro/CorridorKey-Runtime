@@ -124,9 +124,9 @@ TEST_CASE("OFX unrestricted quality attempts use cached runtime capabilities",
           "[unit][ofx][regression]") {
     corridorkey::ofx::InstanceData data;
     data.runtime_capabilities.platform = "windows";
-    data.runtime_capabilities.supported_backends = {Backend::TensorRT, Backend::CPU};
+    data.runtime_capabilities.supported_backends = {Backend::TorchTRT, Backend::CPU};
 
-    const DeviceInfo tensor_rt{"RTX 3080", 10240, Backend::TensorRT};
+    const DeviceInfo tensor_rt{"RTX 3080", 10240, Backend::TorchTRT};
     const DeviceInfo cpu{"Generic CPU", 0, Backend::CPU};
 
     CHECK(corridorkey::ofx::allow_unrestricted_quality_attempt_for_request(

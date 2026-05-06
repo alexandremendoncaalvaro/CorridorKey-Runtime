@@ -306,7 +306,7 @@ void append_benchmark_artifact_metadata(nlohmann::json& results, const JobReques
         if (execution_device.backend == Backend::TensorRT ||
             execution_device.backend == Backend::CUDA) {
             precision_fallback["reason"] =
-                "Windows RTX currently ships FP16 as the official TensorRT path.";
+                "Windows RTX currently ships FP16 as the official TorchTRT path.";
         } else {
             precision_fallback["reason"] =
                 "The requested precision was unavailable for the selected artifact path.";

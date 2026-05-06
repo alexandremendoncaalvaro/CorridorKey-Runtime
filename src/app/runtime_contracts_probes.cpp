@@ -68,19 +68,19 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
     if (selector == "balanced" || selector == "default") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TorchTRT)) {
             return "win-rtx-balanced";
         }
         return "mac-balanced";
     }
     if (selector == "max" || selector == "max-quality") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TorchTRT)) {
             return "win-rtx-max-quality";
         }
         return "mac-max-quality";
     }
     if (selector == "ultra" || selector == "maximum") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TorchTRT)) {
             return "win-rtx-ultra-quality";
         }
         return "mac-ultra-quality";

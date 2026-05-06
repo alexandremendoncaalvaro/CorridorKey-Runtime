@@ -300,6 +300,21 @@ Result<int> parse_coarse_resolution_override(const std::string& value) {
     }};
 }
 
+Result<std::string> parse_screen_color(const std::string& value) {
+    const std::string normalized = normalized_lower(value);
+    if (normalized == "green" || normalized == "blue") {
+        return normalized;
+    }
+    return Unexpected<Error>{Error{
+        ErrorCode::InvalidParameters,
+        "Invalid --screen-color value. Use green or blue.",
+    }};
+}
+
+void apply_screen_color_params(InferenceParams& params, std::string_view screen_color) {
+    params.despill_screen_channel = screen_color == "blue" ? 2 : 1;
+}
+
 InferenceParams build_inference_params(const cxxopts::ParseResult& result,
                                        const std::optional<InferenceParams>& base_params, int argc,
                                        char* argv[]) {
@@ -399,6 +414,7 @@ struct ResolvedExecution {
     std::filesystem::path model_path = {};
     std::optional<PresetDefinition> preset = std::nullopt;
     InferenceParams params = {};
+    std::string screen_color = "green";
     bool default_model_selected = false;
     bool default_output_selected = false;
 };
@@ -408,6 +424,11 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
                                                      bool requires_output) {
     ResolvedExecution resolved;
     resolved.models_dir = default_models_dir();
+    auto screen_color = parse_screen_color(result["screen-color"].as<std::string>());
+    if (!screen_color) {
+        return Unexpected<Error>(screen_color.error());
+    }
+    resolved.screen_color = *screen_color;
     if (result.count("model")) {
         resolved.model_path = result["model"].as<std::string>();
         auto parent = resolved.model_path.parent_path();
@@ -429,6 +450,7 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
 
     if (result.count("model")) {
         resolved.params = build_inference_params(result, std::nullopt, argc, argv);
+        apply_screen_color_params(resolved.params, resolved.screen_color);
         if (resolved.params.requested_quality_resolution <= 0) {
             resolved.params.requested_quality_resolution =
                 app::packaged_model_resolution(result["model"].as<std::string>())
@@ -446,8 +468,10 @@ Result<ResolvedExecution> resolve_execution_defaults(const cxxopts::ParseResult&
             resolved.preset.has_value() ? std::optional<InferenceParams>{resolved.preset->params}
                                         : std::nullopt,
             argc, argv);
+        apply_screen_color_params(resolved.params, resolved.screen_color);
 
-        auto selected_model = default_model_for_request(capabilities, device, resolved.preset);
+        auto selected_model =
+            default_model_for_request(capabilities, device, resolved.preset, resolved.screen_color);
         if (!selected_model.has_value()) {
             return Unexpected<Error>{Error{ErrorCode::ModelLoadFailed,
                                            "Could not resolve a default model for this device."}};
@@ -608,6 +632,8 @@ int main(int argc, char* argv[]) {
         cxxopts::value<std::string>()->default_value("auto"))(
         "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
         cxxopts::value<std::string>()->default_value("0"))(
+        "screen-color", "Screen color model variant for default selection (green, blue)",
+        cxxopts::value<std::string>()->default_value("green"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "endpoint-port", "Local OFX runtime server control port", cxxopts::value<int>())(
@@ -640,9 +666,9 @@ int main(int argc, char* argv[]) {
                   << "3. Use a simpler or stronger preset when needed:\n"
                   << "   corridorkey process input.mp4 output.mp4 --preset preview\n"
                   << "   corridorkey process input.mp4 output.mp4 --preset max\n\n"
-                  << "4. Prepare TensorRT RTX context models for a Windows bundle (maintainers):\n"
-                  << "   corridorkey compile-context --model models/corridorkey_fp16_1024.onnx "
-                     "--device tensorrt\n\n"
+                  << "4. Benchmark deterministic Windows RTX screen paths:\n"
+                  << "   corridorkey benchmark --screen-color green --resolution 1024\n"
+                  << "   corridorkey benchmark --screen-color blue --resolution 1024\n\n"
                   << "5. Inspect validated models and presets:\n"
                   << "   corridorkey models\n"
                   << "   corridorkey presets\n\n"
@@ -949,6 +975,7 @@ int main(int argc, char* argv[]) {
                           << "\n";
                 std::cout << "Requested device: " << report["requested_device"].get<std::string>()
                           << "\n"
+                          << "Screen color: " << resolved->screen_color << "\n"
                           << "Backend: " << report["backend"].get<std::string>() << "\n";
                 std::cout << "Mode: " << report["mode"].get<std::string>() << "\n"
                           << "Device: "

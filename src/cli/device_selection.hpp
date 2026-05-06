@@ -61,7 +61,7 @@ inline DeviceInfo select_device(const std::vector<DeviceInfo>& devices, std::str
         return static_cast<char>(std::tolower(character));
     });
     if (device_str == "rtx" || device_str == "trt") {
-        device_str = "tensorrt";
+        device_str = "torchtrt";
     }
     if (device_str == "torch_trt" || device_str == "torch-trt" || device_str == "ttrt") {
         device_str = "torchtrt";

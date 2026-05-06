@@ -6,7 +6,7 @@
         {
             "name": "onnxruntime",
             "platform": "!osx",
-            "$comment": "Primary ML inference engine for CPU fallback and lab builds. Windows RTX shipping uses a curated ONNX Runtime with TensorRT RTX support."
+            "$comment": "ONNX headers and legacy runtime support for non-Windows-RTX paths. Windows RTX shipping uses dynamic TorchTRT and does not import or ship ONNX Runtime."
         },
         {
             "name": "openexr",

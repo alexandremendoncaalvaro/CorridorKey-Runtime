@@ -194,6 +194,9 @@ Backend diagnostic_backend_from_string(const std::string& value) {
     if (value == "tensorrt") {
         return Backend::TensorRT;
     }
+    if (value == "torchtrt") {
+        return Backend::TorchTRT;
+    }
     if (value == "coreml") {
         return Backend::CoreML;
     }
@@ -242,23 +245,9 @@ std::vector<std::string> windows_probe_models_for_backend(Backend backend,
                                                           const DeviceInfo& device) {
     std::vector<std::string> models;
 
-    if (backend == Backend::TensorRT) {
-        const int max_resolution = max_supported_resolution_for_device(device).value_or(512);
-        for (const auto* model : {"corridorkey_fp16_2048.onnx", "corridorkey_fp16_1536.onnx",
-                                  "corridorkey_fp16_1024.onnx", "corridorkey_fp16_512.onnx"}) {
-            const auto separator = std::string_view(model).find_last_of('_');
-            const auto extension = std::string_view(model).find('.');
-            if (separator == std::string_view::npos || extension == std::string_view::npos ||
-                separator + 1 >= extension) {
-                continue;
-            }
-            const int resolution = std::stoi(std::string(
-                std::string_view(model).substr(separator + 1, extension - separator - 1)));
-            if (resolution > max_resolution) {
-                continue;
-            }
-            append_unique_model(models, model);
-        }
+    if (backend == Backend::TorchTRT || backend == Backend::TensorRT) {
+        append_unique_model(models, "corridorkey_dynamic_green_fp16.ts");
+        append_unique_model(models, "corridorkey_dynamic_blue_fp16.ts");
         return models;
     }
 
@@ -280,6 +269,8 @@ std::string windows_backend_device_name(const core::WindowsGpuInfo& gpu, Backend
             return gpu.adapter_name + " (Windows AI)";
         case Backend::OpenVINO:
             return gpu.adapter_name + " (OpenVINO)";
+        case Backend::TorchTRT:
+            return gpu.adapter_name + " (TorchTRT)";
         default:
             return gpu.adapter_name;
     }
@@ -287,16 +278,18 @@ std::string windows_backend_device_name(const core::WindowsGpuInfo& gpu, Backend
 
 int windows_backend_probe_priority(Backend backend) {
     switch (backend) {
-        case Backend::TensorRT:
+        case Backend::TorchTRT:
             return 0;
-        case Backend::WindowsML:
+        case Backend::TensorRT:
             return 1;
-        case Backend::DirectML:
+        case Backend::WindowsML:
             return 2;
-        case Backend::OpenVINO:
+        case Backend::DirectML:
             return 3;
-        default:
+        case Backend::OpenVINO:
             return 4;
+        default:
+            return 5;
     }
 }
 
@@ -666,7 +659,7 @@ bool packaged_inventory_contract_complete(const PackagedModelInventory& inventor
 }
 
 bool packaged_inventory_requires_compiled_contexts(const PackagedModelInventory& inventory) {
-    return inventory.bundle_track == "rtx";
+    return inventory.bundle_track == "rtx" && inventory.backend_intent == "tensorrt";
 }
 
 bool packaged_inventory_compiled_contexts_ready(
@@ -977,12 +970,14 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         find_libraries_with_prefixes(executable_dir, {"tensorrt_onnxparser_rtx", "nvonnxparser"});
     auto cuda_runtime_libraries =
         find_libraries_with_prefixes(executable_dir, {"cudart64_", "cudart"});
+    auto torchtrt_wrapper_library = layout.root / "Contents" / "Resources" /
+                                    "torchtrt-runtime" / "bin" / "corridorkey_torchtrt.dll";
     auto compiled_context_models = nlohmann::json::array();
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
-    // Linux RTX ships the same ORT/.onnx model set as Windows RTX, so the
-    // packaged-models expectation uses the windows_platform catalog entries
-    // for both layouts.
+    const bool inventory_torchtrt_rtx_bundle =
+        packaged_inventory.has_value() && packaged_inventory->bundle_track == "rtx" &&
+        packaged_inventory->backend_intent == "torchtrt";
     const auto expected_packaged_models = expected_packaged_models_for_platform(
         models_dir, layout.kind == "windows_ofx" || layout.kind == "linux_ofx");
 
@@ -1033,13 +1028,18 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     const bool windows_ofx_layout = layout.kind == "windows_ofx";
     const bool linux_ofx_layout = layout.kind == "linux_ofx";
     const bool packaged_layout_detected = layout.packaged_layout_detected;
-    const bool windows_rtx_bundle =
+    const bool torchtrt_wrapper_found = std::filesystem::exists(torchtrt_wrapper_library);
+    const bool torchtrt_rtx_bundle = inventory_torchtrt_rtx_bundle || torchtrt_wrapper_found;
+    const bool legacy_tensorrt_rtx_bundle =
         !tensorrt_provider_libraries.empty() || !tensorrt_rtx_core_libraries.empty() ||
         !tensorrt_rtx_parser_libraries.empty() || !cuda_runtime_libraries.empty();
+    const bool windows_rtx_bundle = torchtrt_rtx_bundle || legacy_tensorrt_rtx_bundle;
     const bool windows_directml_bundle = directml_library.has_value() && !windows_rtx_bundle;
     bool runtime_backend_bundle_ready = runtime_library.has_value();
     if (windows_ofx_layout) {
-        if (windows_rtx_bundle) {
+        if (torchtrt_rtx_bundle) {
+            runtime_backend_bundle_ready = torchtrt_wrapper_found;
+        } else if (legacy_tensorrt_rtx_bundle) {
             runtime_backend_bundle_ready =
                 !tensorrt_provider_libraries.empty() && !tensorrt_rtx_core_libraries.empty() &&
                 !tensorrt_rtx_parser_libraries.empty() && !cuda_runtime_libraries.empty();
@@ -1068,6 +1068,9 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["runtime_library_found"] = runtime_library.has_value();
     json["runtime_library_path"] = runtime_library.has_value() ? runtime_library->string() : "";
     json["runtime_library_referenced"] = runtime_reference_found;
+    json["torchtrt_wrapper_found"] = torchtrt_wrapper_found;
+    json["torchtrt_wrapper_path"] =
+        torchtrt_wrapper_found ? torchtrt_wrapper_library.string() : std::string();
     json["core_library_found"] = core_library.has_value();
     json["core_library_path"] = core_library.has_value() ? core_library->string() : "";
     json["core_library_referenced"] = core_reference_found;
@@ -1478,7 +1481,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     json["gpus"] = nlohmann::json::array();
 
     bool any_provider_available = false;
-    bool preferred_tensorrt_gpu_selected = false;
+    bool preferred_rtx_gpu_selected = false;
     nlohmann::json probes = nlohmann::json::array();
     for (size_t index = 0; index < gpus.size(); ++index) {
         const auto& gpu = gpus[index];
@@ -1487,14 +1490,15 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         gpu_json["memory_mb"] = gpu.dedicated_memory_mb;
         gpu_json["is_rtx"] = gpu.is_rtx;
         gpu_json["tensorrt_available"] = gpu.tensorrt_rtx_available;
+        gpu_json["torchtrt_available"] = gpu.cuda_available && gpu.compute_capability_major >= 8;
         gpu_json["cuda_available"] = gpu.cuda_available;
         gpu_json["directml_available"] = gpu.directml_available;
         gpu_json["driver_query_available"] = gpu.driver_query_available;
         gpu_json["driver_version"] = gpu.driver_version;
         json["gpus"].push_back(gpu_json);
 
-        const bool has_windows_provider = gpu.tensorrt_rtx_available || gpu.directml_available ||
-                                          gpu.winml_available || gpu.openvino_available;
+        const bool torchtrt_available = gpu.cuda_available && gpu.compute_capability_major >= 8;
+        const bool has_windows_provider = torchtrt_available;
         any_provider_available = any_provider_available || has_windows_provider;
         if (has_windows_provider && json["gpu_name"] == "") {
             json["gpu_name"] = gpu.adapter_name;
@@ -1503,13 +1507,13 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
             json["driver_version"] = gpu.driver_version;
         }
 
-        if (gpu.tensorrt_rtx_available && !preferred_tensorrt_gpu_selected) {
+        if (torchtrt_available && !preferred_rtx_gpu_selected) {
             json["gpu_name"] = gpu.adapter_name;
             json["gpu_memory_mb"] = gpu.dedicated_memory_mb;
-            json["ampere_or_newer"] = gpu.is_rtx;
+            json["ampere_or_newer"] = gpu.compute_capability_major >= 8;
             json["driver_query_available"] = gpu.driver_query_available;
             json["driver_version"] = gpu.driver_version;
-            preferred_tensorrt_gpu_selected = true;
+            preferred_rtx_gpu_selected = true;
         }
 
         const auto queue_backend_probes = [&](Backend backend, bool available,
@@ -1526,15 +1530,8 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
             }
         };
 
-        queue_backend_probes(Backend::TensorRT, gpu.tensorrt_rtx_available,
-                             "Primary Windows RTX path with strict FP16 engine compilation.");
-        queue_backend_probes(Backend::WindowsML, gpu.winml_available,
-                             "Recommended by ONNX Runtime for new Windows deployments.");
-        queue_backend_probes(
-            Backend::DirectML, gpu.directml_available,
-            "Supported by ONNX Runtime, but DirectML is in sustained engineering.");
-        queue_backend_probes(Backend::OpenVINO, gpu.openvino_available,
-                             "Intel-managed Windows acceleration path.");
+        queue_backend_probes(Backend::TorchTRT, torchtrt_available,
+                             "Primary Windows RTX path with dynamic TorchScript artifacts.");
     }
 
     json["provider_available"] = any_provider_available;
@@ -1616,23 +1613,19 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
         json["backend_integrated"] = true;
         json["recommended_backend"] = preferred_probe->value("backend", "cpu");
         json["recommended_model"] = preferred_probe->value("model", "");
-        if (preferred_probe->value("backend", "") == "tensorrt") {
+        if (preferred_probe->value("backend", "") == "torchtrt") {
             json["recommended_backend_reason"] =
-                "TensorRT RTX completed a strict execution probe on the packaged FP16 model and "
-                "remains the preferred Windows RTX backend when it executes successfully.";
-        } else if (preferred_probe->value("backend", "") == "winml") {
-            json["recommended_backend_reason"] =
-                "WinML completed a strict execution probe and ONNX Runtime recommends WinML for "
-                "new Windows deployments.";
+                "TorchTRT completed a strict execution probe on the packaged dynamic model and "
+                "is the primary Windows RTX backend.";
         } else {
             json["recommended_backend_reason"] =
                 "This backend completed a strict execution probe on the packaged model while "
-                "higher-priority Windows universal backends did not.";
+                "the primary Windows RTX backend did not.";
         }
     } else if (any_provider_available) {
         json["recommended_backend_reason"] =
-            "TensorRT RTX or Windows universal GPU providers were detected, but none completed a "
-            "strict execution probe on the packaged models.";
+            "TorchTRT was detected, but it did not complete a strict execution probe on the "
+            "packaged dynamic models.";
     } else {
         json["recommended_backend_reason"] =
             "No Windows GPU execution provider is available in this runtime package.";

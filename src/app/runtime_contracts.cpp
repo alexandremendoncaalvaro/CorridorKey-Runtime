@@ -56,6 +56,7 @@ constexpr int kDefaultTilePadding = 64;
 // active artifact's recommended resolution". Used by the macOS presets
 // where the MLX bridge is fixed at its compile resolution.
 constexpr int kTargetResolutionAuto = 0;
+constexpr std::string_view kDynamicGreenModelFilename = "corridorkey_dynamic_green_fp16.ts";
 constexpr std::string_view kDynamicBlueModelFilename = "corridorkey_dynamic_blue_fp16.ts";
 
 bool has_backend(const RuntimeCapabilities& capabilities, Backend backend) {
@@ -162,7 +163,7 @@ std::vector<std::string> apple_silicon_validation_tiers(std::int64_t available_m
 
 bool is_windows_rtx_device(const DeviceInfo& device, const RuntimeCapabilities& capabilities) {
     return capabilities.platform == "windows" &&
-           (device.backend == Backend::TensorRT || device.backend == Backend::CUDA);
+           (device.backend == Backend::TensorRT || device.backend == Backend::TorchTRT);
 }
 
 bool is_apple_silicon_device(const DeviceInfo& device, const RuntimeCapabilities& capabilities) {
@@ -204,6 +205,11 @@ bool windows_tensorrt_packaged_resolution_supported(int resolution) {
     }
 }
 
+bool backend_uses_dynamic_torchtrt_artifacts(Backend backend) {
+    return backend == Backend::Auto || backend == Backend::TensorRT ||
+           backend == Backend::TorchTRT;
+}
+
 std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_memory_mb) {
     if (available_memory_mb <= 0) {
         return std::nullopt;
@@ -233,19 +239,19 @@ std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_m
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
     if (selector == "balanced" || selector == "default") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TorchTRT)) {
             return "win-rtx-balanced";
         }
         return "mac-balanced";
     }
     if (selector == "max" || selector == "max-quality") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TorchTRT)) {
             return "win-rtx-max-quality";
         }
         return "mac-max-quality";
     }
     if (selector == "ultra" || selector == "maximum") {
-        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TorchTRT)) {
             return "win-rtx-ultra-quality";
         }
         return "mac-ultra-quality";
@@ -262,6 +268,11 @@ std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
     const std::filesystem::path& models_root, Backend backend, int resolution) {
     if (backend == Backend::MLX) {
         return {models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn")};
+    }
+
+    if (backend_uses_dynamic_torchtrt_artifacts(backend)) {
+        (void)resolution;
+        return {models_root / kDynamicGreenModelFilename};
     }
 
     if ((backend == Backend::TensorRT || backend == Backend::CUDA) &&
@@ -361,7 +372,7 @@ std::optional<ModelCatalogEntry> find_model_by_filename(const std::string& filen
 
 std::optional<PresetDefinition> default_preset_for_capabilities(
     const RuntimeCapabilities& capabilities) {
-    if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+    if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TorchTRT)) {
         for (const auto& preset : preset_catalog()) {
             if (preset.default_for_windows) {
                 return preset;
@@ -382,55 +393,26 @@ std::optional<PresetDefinition> default_preset_for_capabilities(
 
 namespace {
 
-// Picks the blue artifact when requested and packaged, otherwise falls back
-// to the green rung. Encapsulates the "blue requested but not packaged ->
-// green canonicalization fallback" rule the OFX render path detects via
-// the returned entry's screen_color.
-std::optional<ModelCatalogEntry> pick_blue_or_green(std::string_view screen_color,
-                                                    const char* green_filename) {
-    if (screen_color == "blue") {
-        if (auto blue = app::find_model_by_filename(std::string(kDynamicBlueModelFilename));
-            blue.has_value() && blue->packaged_for_windows) {
-            return blue;
-        }
-        // Fall through to green rung; OFX render path canonicalises blue input.
+std::optional<ModelCatalogEntry> dynamic_torchtrt_catalog_entry_for_screen_color(
+    std::string_view screen_color) {
+    auto filename = app::dynamic_torchtrt_model_filename_for_screen_color(screen_color);
+    if (!filename.has_value()) {
+        return std::nullopt;
     }
-    return app::find_model_by_filename(green_filename);
+    return app::find_model_by_filename(*filename);
 }
 
-// Resolves the Windows RTX (TensorRT or CUDA) catalog entry for the given
-// memory tier. Green stays on the optimized ONNX -> TensorRT RTX EP ladder.
-// Blue uses the single dynamic TorchScript artifact validated by the
-// TorchTRT runner and falls back to green-domain canonicalization when the
-// blue pack is not staged.
 std::optional<ModelCatalogEntry> windows_rtx_catalog_entry_for_tier(
     std::int64_t available_memory_mb, std::string_view screen_color) {
-    if (available_memory_mb >= kVram24GbMiB) {
-        return pick_blue_or_green(screen_color, "corridorkey_fp16_2048.onnx");
-    }
-    if (available_memory_mb >= kVram16GbMiB) {
-        return pick_blue_or_green(screen_color, "corridorkey_fp16_1536.onnx");
-    }
-    if (available_memory_mb >= kVram10GbMiB) {
-        return pick_blue_or_green(screen_color, "corridorkey_fp16_1024.onnx");
-    }
-    return pick_blue_or_green(screen_color, "corridorkey_fp16_512.onnx");
+    (void)available_memory_mb;
+    return dynamic_torchtrt_catalog_entry_for_screen_color(screen_color);
 }
 
-// Picks a Windows RTX entry, prioritising the preset's recommended model when
-// it is validated for the device and the request is not blue (preset models
-// are green-track; blue requests bypass preset and use the dedicated table).
 std::optional<ModelCatalogEntry> windows_rtx_model_for_request(
     const RuntimeCapabilities& capabilities, const DeviceInfo& requested_device,
     const std::optional<PresetDefinition>& preset, std::string_view screen_color) {
-    const bool prefer_blue = (screen_color == "blue");
-    if (preset.has_value() && !prefer_blue) {
-        auto preset_model = app::find_model_by_filename(preset->recommended_model);
-        if (preset_model.has_value() &&
-            has_validated_tier_for_device(*preset_model, requested_device, capabilities)) {
-            return preset_model;
-        }
-    }
+    (void)capabilities;
+    (void)preset;
     return windows_rtx_catalog_entry_for_tier(requested_device.available_memory_mb, screen_color);
 }
 
@@ -465,10 +447,10 @@ bool is_windows_rtx_request(const DeviceInfo& requested_device,
     if (capabilities.platform != "windows") return false;
     if (requested_device.backend == Backend::Auto ||
         requested_device.backend == Backend::TensorRT) {
-        return has_backend(capabilities, Backend::TensorRT);
+        return has_backend(capabilities, Backend::TorchTRT);
     }
-    if (requested_device.backend == Backend::CUDA) {
-        return has_backend(capabilities, Backend::CUDA);
+    if (requested_device.backend == Backend::TorchTRT) {
+        return true;
     }
     return false;
 }
@@ -512,48 +494,50 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "apple_acceleration_primary", true, true, false, {"macos_apple_silicon"},
                          {"macos_apple_silicon"}, {"apple_silicon_16gb"}),
         make_model_entry("fp16", kRes512, "corridorkey_fp16_512.onnx", "onnx", "tensorrt",
-                         "Lower-memory Windows RTX reference variant for lab bring-up.",
-                         "windows_rtx_reference", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_8gb"}),
+                         "Reference validation artifact for non-product comparisons.",
+                         "reference_validation", false, false, false, {}, {}, {}),
         make_model_entry("fp16", kRes768, "corridorkey_fp16_768.onnx", "onnx", "tensorrt",
                          "Reference-only Windows RTX artifact retained for 768px investigation.",
-                         "reference_validation", false, false, false, {}, {"windows_rtx_30_plus"},
+                         "reference_validation", false, false, false, {}, {},
                          {}),
         make_model_entry("fp16", kRes1024, "corridorkey_fp16_1024.onnx", "onnx", "tensorrt",
-                         "Maximum quality Windows RTX pack for 10 GB and higher tiers.",
-                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_10gb_plus"}),
+                         "Reference validation artifact for non-product comparisons.",
+                         "reference_validation", false, false, false, {}, {}, {}),
         make_model_entry("fp16", kRes1536, "corridorkey_fp16_1536.onnx", "onnx", "tensorrt",
-                         "High-fidelity Windows RTX pack for 16 GB VRAM systems.",
-                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_16gb_plus"}),
+                         "Reference validation artifact for non-product comparisons.",
+                         "reference_validation", false, false, false, {}, {}, {}),
         make_model_entry("fp16", kRes2048, "corridorkey_fp16_2048.onnx", "onnx", "tensorrt",
-                         "Extreme quality Windows RTX pack for 24 GB VRAM systems.",
-                         "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
-                         {"rtx_24gb"}),
+                         "Reference validation artifact for non-product comparisons.",
+                         "reference_validation", false, false, false, {}, {}, {}),
+        make_model_entry(
+            "dynamic-green", kTargetResolutionAuto, std::string(kDynamicGreenModelFilename),
+            "torchscript", "torchtrt",
+            "Windows RTX green-screen pack with dynamic runtime resolution.",
+            "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
+            {"rtx_8gb", "rtx_10gb_plus", "rtx_16gb_plus", "rtx_24gb"}, "green"),
         make_model_entry(
             "dynamic-blue", kTargetResolutionAuto, std::string(kDynamicBlueModelFilename),
             "torchscript", "torchtrt",
             "Windows RTX blue-screen pack with dynamic runtime resolution.",
-            "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+            "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
             {"rtx_8gb", "rtx_10gb_plus", "rtx_16gb_plus", "rtx_24gb"}, "blue"),
         make_model_entry("fp32", kRes512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
-                         false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
+                         false, {}, {"macos_apple_silicon"}, {}),
         make_model_entry("fp32", kRes768, "corridorkey_fp32_768.onnx", "onnx", "cpu",
                          "Higher resolution reference validation variant.", "reference_validation",
-                         false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
+                         false, false, false, {}, {"macos_apple_silicon"}, {}),
         make_model_entry("fp32", kRes1024, "corridorkey_fp32_1024.onnx", "onnx", "cpu",
                          "High resolution reference validation variant.", "reference_validation",
-                         false, false, false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
+                         false, false, false, {}, {"macos_apple_silicon"}, {}),
         make_model_entry("fp32", kRes1536, "corridorkey_fp32_1536.onnx", "onnx", "cpu",
                          "Ultra resolution variant for near-native 1080p inference.",
                          "reference_validation", false, false, false, {},
-                         {"macos_apple_silicon", "windows_rtx"}, {}),
+                         {"macos_apple_silicon"}, {}),
         make_model_entry("fp32", kRes2048, "corridorkey_fp32_2048.onnx", "onnx", "cpu",
                          "Maximum resolution variant matching Python reference pipeline.",
                          "reference_validation", false, false, false, {},
-                         {"macos_apple_silicon", "windows_rtx"}, {}),
+                         {"macos_apple_silicon"}, {}),
     };
 }
 
@@ -595,7 +579,7 @@ std::vector<PresetDefinition> preset_catalog() {
             .description = "Default Windows RTX preset with FP16 inference, runtime cache enabled, "
                            "and tiling ready for portable bundles.",
             .params = make_preset_inference_params(kRes1024, false, true, kDefaultTilePadding),
-            .recommended_model = "corridorkey_fp16_1024.onnx",
+            .recommended_model = std::string(kDynamicGreenModelFilename),
             .intended_use = "windows_rtx_primary",
             .default_for_macos = false,
             .default_for_windows = true,
@@ -609,7 +593,7 @@ std::vector<PresetDefinition> preset_catalog() {
             .description =
                 "Higher-quality Windows RTX preset with cleanup enabled for the 10 GB and up tier.",
             .params = make_preset_inference_params(kRes1024, true, true, kDefaultTilePadding),
-            .recommended_model = "corridorkey_fp16_1024.onnx",
+            .recommended_model = std::string(kDynamicGreenModelFilename),
             .intended_use = "windows_rtx_primary",
             .default_for_macos = false,
             .default_for_windows = false,
@@ -623,7 +607,7 @@ std::vector<PresetDefinition> preset_catalog() {
             .description =
                 "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
             .params = make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
-            .recommended_model = "corridorkey_fp16_2048.onnx",
+            .recommended_model = std::string(kDynamicGreenModelFilename),
             .intended_use = "windows_rtx_primary",
             .default_for_macos = false,
             .default_for_windows = false,
@@ -656,6 +640,21 @@ std::optional<std::string> active_packaged_model_profile() {
     return detect_active_packaged_model_profile();
 }
 
+std::optional<std::string> dynamic_torchtrt_model_filename_for_screen_color(
+    std::string_view screen_color) {
+    if (screen_color == "blue") {
+        return std::string(kDynamicBlueModelFilename);
+    }
+    if (screen_color == "green") {
+        return std::string(kDynamicGreenModelFilename);
+    }
+    return std::nullopt;
+}
+
+bool is_dynamic_torchtrt_model_filename(std::string_view filename) {
+    return filename == kDynamicGreenModelFilename || filename == kDynamicBlueModelFilename;
+}
+
 std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& capabilities,
                                                    const std::vector<DeviceInfo>& devices) {
     if (devices.empty()) {
@@ -672,7 +671,7 @@ std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& ca
     };
 
     if (capabilities.platform == "windows") {
-        if (auto preferred = prefer_backend(Backend::TensorRT); preferred.has_value()) {
+        if (auto preferred = prefer_backend(Backend::TorchTRT); preferred.has_value()) {
             return preferred;
         }
         if (auto preferred = prefer_backend(Backend::DirectML); preferred.has_value()) {
@@ -710,10 +709,10 @@ RuntimeOptimizationProfile windows_rtx_profile() {
         .id = "windows-rtx",
         .label = "Windows RTX",
         .intended_track = "windows_rtx",
-        .backend_intent = "tensorrt",
-        .fallback_policy = "safe_auto_quality_with_manual_override",
-        .warmup_policy = "precompiled_context_or_first_run_compile",
-        .certification_tier = "packaged_fp16_ladder_through_2048",
+        .backend_intent = "torchtrt",
+        .fallback_policy = "no_backend_fallback",
+        .warmup_policy = "torchscript_load_and_first_run_shape_compile",
+        .certification_tier = "dynamic_torchtrt_green_blue",
         .unrestricted_quality_attempt = true,
     };
 }
@@ -944,6 +943,7 @@ std::optional<int> max_supported_resolution_for_device(const DeviceInfo& request
         case Backend::CPU:
             return kRes512;
         case Backend::TensorRT:
+        case Backend::TorchTRT:
         case Backend::CUDA:
             return windows_tensorrt_resolution_ceiling(requested_device.available_memory_mb);
         case Backend::DirectML:
@@ -958,6 +958,7 @@ std::optional<int> max_supported_resolution_for_device(const DeviceInfo& request
 std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, int resolution) {
     switch (backend) {
         case Backend::TensorRT:
+        case Backend::TorchTRT:
         case Backend::CUDA:
             if (resolution >= kRes2048) {
                 return static_cast<int>(kVram24GbMiB);
@@ -1116,6 +1117,14 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
         }};
     }
 
+    if (backend_uses_dynamic_torchtrt_artifacts(requested_device.backend)) {
+        (void)allow_lower_resolution_fallback;
+        (void)fallback_mode;
+        (void)coarse_resolution_override;
+        (void)allow_unrestricted_quality_attempt;
+        return std::vector<std::filesystem::path>{models_root / kDynamicGreenModelFilename};
+    }
+
     auto resolution_search = search_resolution_for_request(
         requested_device, requested_resolution, fallback_mode, coarse_resolution_override,
         allow_unrestricted_quality_attempt);
@@ -1204,6 +1213,33 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     int requested_resolution, bool allow_lower_resolution_fallback,
     QualityFallbackMode fallback_mode, int coarse_resolution_override,
     bool allow_unrestricted_quality_attempt) {
+    if (requested_resolution <= 0) {
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InvalidParameters,
+            .message = "Requested quality resolution must be greater than zero.",
+        }};
+    }
+
+    if (backend_uses_dynamic_torchtrt_artifacts(requested_device.backend)) {
+        (void)allow_lower_resolution_fallback;
+        (void)fallback_mode;
+        (void)coarse_resolution_override;
+        (void)allow_unrestricted_quality_attempt;
+
+        const auto artifact_path = models_root / kDynamicGreenModelFilename;
+        if (!std::filesystem::exists(artifact_path)) {
+            return std::vector<ArtifactSelection>{};
+        }
+
+        return std::vector<ArtifactSelection>{ArtifactSelection{
+            .executable_model_path = artifact_path,
+            .requested_resolution = requested_resolution,
+            .effective_resolution = requested_resolution,
+            .used_fallback = false,
+            .coarse_to_fine = false,
+        }};
+    }
+
     auto expected_paths = expected_artifact_paths_for_request(
         models_root, requested_device, requested_resolution, allow_lower_resolution_fallback,
         fallback_mode, coarse_resolution_override, allow_unrestricted_quality_attempt);

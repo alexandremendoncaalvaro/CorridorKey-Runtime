@@ -45,6 +45,7 @@ constexpr int kAutoThreshold2048 = 3000;
 constexpr int kBytesPerMib = 1024;
 constexpr int kCeilToMib = kBytesPerMib - 1;
 
+constexpr std::string_view kDynamicGreenModelFilename = "corridorkey_dynamic_green_fp16.ts";
 constexpr std::string_view kDynamicBlueModelFilename = "corridorkey_dynamic_blue_fp16.ts";
 
 // build_bootstrap_candidates extraction limit on per-candidate-builder nesting.
@@ -61,6 +62,11 @@ struct BootstrapEngineCandidate {
 };
 
 using QualityArtifactSelection = app::ArtifactSelection;
+
+inline bool is_dynamic_torchtrt_artifact_filename(std::string_view filename) {
+    return filename == selection_detail::kDynamicGreenModelFilename ||
+           filename == selection_detail::kDynamicBlueModelFilename;
+}
 
 inline bool is_dynamic_blue_artifact_filename(std::string_view filename) {
     return filename == selection_detail::kDynamicBlueModelFilename;
@@ -79,9 +85,17 @@ inline bool is_dynamic_blue_artifact_path(const std::filesystem::path& path) {
     return is_dynamic_blue_artifact_filename(path.filename().string());
 }
 
-inline bool backend_supports_dynamic_blue(Backend backend) {
-    return backend == Backend::Auto || backend == Backend::TensorRT || backend == Backend::CUDA ||
+inline bool is_dynamic_torchtrt_artifact_path(const std::filesystem::path& path) {
+    return is_dynamic_torchtrt_artifact_filename(path.filename().string());
+}
+
+inline bool backend_supports_dynamic_torchtrt(Backend backend) {
+    return backend == Backend::Auto || backend == Backend::TensorRT ||
            backend == Backend::TorchTRT;
+}
+
+inline bool backend_supports_dynamic_blue(Backend backend) {
+    return backend_supports_dynamic_torchtrt(backend);
 }
 
 inline Backend runtime_backend_for_quality_artifact(Backend requested_backend,
@@ -89,9 +103,6 @@ inline Backend runtime_backend_for_quality_artifact(Backend requested_backend,
     const auto extension = artifact_path.extension().string();
     if (extension == ".ts") {
         return Backend::TorchTRT;
-    }
-    if (requested_backend == Backend::TorchTRT && extension == ".onnx") {
-        return Backend::TensorRT;
     }
     return requested_backend;
 }
@@ -180,9 +191,9 @@ inline std::optional<std::string> unsupported_quality_message(
         return std::nullopt;
     }
 
-    if ((device.backend == Backend::TensorRT || device.backend == Backend::CUDA ||
-         device.backend == Backend::DirectML || device.backend == Backend::WindowsML ||
-         device.backend == Backend::OpenVINO) &&
+    if ((device.backend == Backend::TensorRT || device.backend == Backend::TorchTRT ||
+         device.backend == Backend::CUDA || device.backend == Backend::DirectML ||
+         device.backend == Backend::WindowsML || device.backend == Backend::OpenVINO) &&
         requested_resolution == selection_detail::kRes768) {
         return "768px is not part of CorridorKey's current public Windows quality ladder. "
                "Please use Draft (512) or High (1024).";
@@ -206,8 +217,9 @@ inline std::optional<std::string> unsupported_quality_message(
     return std::string(quality_mode_label(quality_mode)) + " requires at least " +
            std::to_string(rounded_gb_from_mb(*minimum_memory_mb)) +
            " GB of VRAM for CorridorKey's current safe quality ceiling on " +
-           (device.backend == Backend::TensorRT ? std::string("the Windows RTX path")
-                                                : std::string("the selected backend")) +
+           ((device.backend == Backend::TensorRT || device.backend == Backend::TorchTRT)
+                ? std::string("the Windows RTX path")
+                : std::string("the selected backend")) +
            ". This GPU reports " + std::to_string(rounded_gb_from_mb(device.available_memory_mb)) +
            " GB, so the safe quality ceiling is " +
            quality_mode_label(quality_mode_for_resolution(*max_supported_resolution)) + ".";
@@ -232,7 +244,7 @@ inline std::string quality_fallback_warning(int quality_mode,
 }
 
 inline bool use_quality_compile_failure_cache(Backend backend) {
-    return backend == Backend::TensorRT;
+    return backend == Backend::TensorRT || backend == Backend::TorchTRT;
 }
 
 inline bool quality_compile_failure_cache_matches(
@@ -373,9 +385,12 @@ inline std::filesystem::path artifact_path_for_backend(const std::filesystem::pa
     if (backend == Backend::MLX) {
         return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
     }
-    if (screen_color == "blue") {
+    if (backend_supports_dynamic_torchtrt(backend)) {
         (void)resolution;
-        return models_root / selection_detail::kDynamicBlueModelFilename;
+        if (screen_color == "blue") {
+            return models_root / selection_detail::kDynamicBlueModelFilename;
+        }
+        return models_root / selection_detail::kDynamicGreenModelFilename;
     }
     return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
 }
@@ -412,8 +427,8 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     std::string_view screen_color = "green") {
     const int requested_resolution =
         resolve_target_resolution(quality_mode, input_width, input_height);
-    if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
-        return {artifact_path_for_backend(models_root, backend, requested_resolution, "blue")};
+    if (backend_supports_dynamic_torchtrt(backend)) {
+        return {artifact_path_for_backend(models_root, backend, requested_resolution, screen_color)};
     }
 
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -458,12 +473,12 @@ inline std::string missing_quality_artifact_message(
     std::string_view screen_color = "green") {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
-    if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
+    if (backend_supports_dynamic_torchtrt(backend)) {
         return missing_artifact_message(
             "Requested quality " + std::string(quality_mode_label(quality_mode)) +
-                " is missing the required dedicated blue model artifact",
+                " is missing the required dynamic TorchTRT model artifact",
             models_root,
-            {artifact_path_for_backend(models_root, backend, requested_resolution, "blue")});
+            {artifact_path_for_backend(models_root, backend, requested_resolution, screen_color)});
     }
 
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -567,20 +582,18 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
 
     std::vector<QualityArtifactSelection> selections;
 
-    // Blue is deterministic: use the dedicated dynamic artifact only. The
-    // explicit Blue-Green UI mode is the green-model fallback path.
-    if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
-        const auto blue_path =
-            artifact_path_for_backend(models_root, backend, requested_resolution, "blue");
-        std::error_code blue_ec;
-        if (std::filesystem::exists(blue_path, blue_ec)) {
-            QualityArtifactSelection blue_selection{};
-            blue_selection.executable_model_path = blue_path;
-            blue_selection.requested_resolution = requested_resolution;
-            blue_selection.effective_resolution = requested_resolution;
-            blue_selection.used_fallback = false;
-            blue_selection.coarse_to_fine = false;
-            selections.push_back(std::move(blue_selection));
+    if (backend_supports_dynamic_torchtrt(backend)) {
+        const auto artifact_path =
+            artifact_path_for_backend(models_root, backend, requested_resolution, screen_color);
+        std::error_code artifact_ec;
+        if (std::filesystem::exists(artifact_path, artifact_ec)) {
+            QualityArtifactSelection selection{};
+            selection.executable_model_path = artifact_path;
+            selection.requested_resolution = requested_resolution;
+            selection.effective_resolution = requested_resolution;
+            selection.used_fallback = false;
+            selection.coarse_to_fine = false;
+            selections.push_back(std::move(selection));
         }
         return selections;
     }
@@ -657,10 +670,14 @@ inline std::optional<BootstrapEngineCandidate> resolve_default_candidate(
         }
     }
 
-    const int effective_resolution =
+    const auto effective_catalog_resolution =
         app::packaged_model_resolution(executable_model_path).value_or(kRes512);
-    const int requested_resolution =
+    const int effective_resolution =
+        effective_catalog_resolution > 0 ? effective_catalog_resolution : kRes512;
+    const auto requested_catalog_resolution =
         app::packaged_model_resolution(requested_model_path).value_or(effective_resolution);
+    const int requested_resolution =
+        requested_catalog_resolution > 0 ? requested_catalog_resolution : effective_resolution;
     return BootstrapEngineCandidate{
         .device = device,
         .requested_model_path = requested_model_path,

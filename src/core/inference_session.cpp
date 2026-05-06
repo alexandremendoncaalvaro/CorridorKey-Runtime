@@ -812,6 +812,14 @@ InferenceSession::~InferenceSession() = default;
 InferenceSession::InferenceSession(InferenceSession&&) noexcept = default;
 InferenceSession& InferenceSession::operator=(InferenceSession&&) noexcept = default;
 
+Ort::Session& InferenceSession::session() {
+    return *m_session;
+}
+
+Ort::SessionOptions& InferenceSession::session_options() {
+    return *m_session_options;
+}
+
 Result<Ort::Value> InferenceSession::create_input_tensor(float* planar_data,
                                                          std::size_t element_count,
                                                          const std::vector<int64_t>& shape) {
@@ -868,7 +876,7 @@ Result<InferenceSession::BoundIoState*> InferenceSession::ensure_bound_io_state(
                                     std::to_string(m_output_element_types[1])});
     }
 
-    auto state = std::make_unique<BoundIoState>(m_session);
+    auto state = std::make_unique<BoundIoState>(session());
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
     const auto batch_size = input_shape[0];
@@ -910,8 +918,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     debug_log("Configuring shared ORT thread pools and env allocators");
     // Shared thread pools require per-session thread pools to be disabled. Pair that with
     // `session.use_env_allocators=1` so every ORT session in the process reuses the env allocator.
-    m_session_options.DisablePerSessionThreads();
-    m_session_options.AddConfigEntry(kUseEnvAllocatorsConfig, "1");
+    session_options().DisablePerSessionThreads();
+    session_options().AddConfigEntry(kUseEnvAllocatorsConfig, "1");
 
     // Optional per-op profiling gated on `CORRIDORKEY_ORT_PROFILE=1`. When
     // enabled, ORT writes a Chrome-tracing-compatible JSON next to the
@@ -932,9 +940,9 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 #ifdef _WIN32
             // ORT on Windows expects a wide-char path prefix; std::filesystem::path
             // already stores as wchar_t, so use native() directly.
-            m_session_options.EnableProfiling(prefix_path.native().c_str());
+            session_options().EnableProfiling(prefix_path.native().c_str());
 #else
-            m_session_options.EnableProfiling(prefix_path.native().c_str());
+            session_options().EnableProfiling(prefix_path.native().c_str());
 #endif
             debug_log("ORT per-op profiling enabled; output prefix: " + prefix_path.string());
         }
@@ -942,30 +950,30 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 
     debug_log("Setting graph optimization level");
     if (use_optimized_model_cache) {
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
+        session_options().SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
     } else if (m_device.backend == Backend::DirectML) {
         // Microsoft strongly recommends avoiding ORT_ENABLE_ALL (level 3) for DirectML
         // because it enables CPU-specific memory layout optimizations that crash DML execution.
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+        session_options().SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
     } else {
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        session_options().SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     }
 
     debug_log("Setting log severity level");
-    m_session_options.SetLogSeverityLevel(options.log_severity);
+    session_options().SetLogSeverityLevel(options.log_severity);
 
 #ifdef _WIN32
-    override_windows_universal_free_dimensions(m_session_options, m_device.backend);
+    override_windows_universal_free_dimensions(session_options(), m_device.backend);
 #endif
 
     if (m_device.backend != Backend::CPU) {
         if (options.disable_cpu_ep_fallback) {
             debug_log("Disabling CPU EP fallback");
-            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
+            session_options().AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
         } else {
             // Explicitly enable CPU EP fallback to avoid issues in some DirectML environments
             // where ORT might default to disabling it when an EP is added.
-            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "0");
+            session_options().AddConfigEntry(kDisableCpuEpFallbackConfig, "0");
         }
     }
 
@@ -976,7 +984,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         case Backend::CoreML: {
 #ifdef __APPLE__
             debug_log("Adding CoreML execution provider");
-            append_coreml_execution_provider(m_session_options);
+            append_coreml_execution_provider(session_options());
 #endif
             break;
         }
@@ -984,39 +992,39 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             debug_log("Adding CUDA execution provider");
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = 0;
-            m_session_options.AppendExecutionProvider_CUDA(cuda_options);
+            session_options().AppendExecutionProvider_CUDA(cuda_options);
             break;
         }
         case Backend::TensorRT: {
 #ifdef _WIN32
             debug_log("Adding TensorRT RTX execution provider");
-            append_tensorrt_rtx_execution_provider(m_session_options, model_path);
+            append_tensorrt_rtx_execution_provider(session_options(), model_path);
             debug_log("TensorRT RTX execution provider added");
 #else
             debug_log("Adding TensorRT execution provider");
             OrtTensorRTProviderOptions trt_options;
             trt_options.device_id = 0;
-            m_session_options.AppendExecutionProvider_TensorRT(trt_options);
+            session_options().AppendExecutionProvider_TensorRT(trt_options);
 #endif
             break;
         }
 #ifdef _WIN32
         case Backend::DirectML: {
-            append_directml_execution_provider(m_session_options, m_device.device_index);
+            append_directml_execution_provider(session_options(), m_device.device_index);
             break;
         }
         case Backend::WindowsML: {
             debug_log("Adding WindowsML execution provider");
             // In March 2026, WindowsML EP or adapter handles NPU/GPU auto-selection
             std::unordered_map<std::string, std::string> winml_options = {};
-            m_session_options.AppendExecutionProvider("WinML", winml_options);
+            session_options().AppendExecutionProvider("WinML", winml_options);
             break;
         }
         case Backend::OpenVINO: {
             debug_log("Adding OpenVINO execution provider");
             // Intel specific acceleration
             std::unordered_map<std::string, std::string> ov_options = {{"device_type", "AUTO"}};
-            m_session_options.AppendExecutionProvider("OpenVINO", ov_options);
+            session_options().AppendExecutionProvider("OpenVINO", ov_options);
             break;
         }
 #endif
@@ -1031,14 +1039,14 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     debug_log("Extracting model metadata");
     Ort::AllocatorWithDefaultOptions allocator;
 
-    size_t num_input_nodes = m_session.GetInputCount();
+    size_t num_input_nodes = session().GetInputCount();
     debug_log("Model has " + std::to_string(num_input_nodes) + " inputs");
 
     for (size_t i = 0; i < num_input_nodes; i++) {
-        auto input_name_ptr = m_session.GetInputNameAllocated(i, allocator);
+        auto input_name_ptr = session().GetInputNameAllocated(i, allocator);
         m_input_node_names.push_back(input_name_ptr.get());
 
-        auto type_info = m_session.GetInputTypeInfo(i);
+        auto type_info = session().GetInputTypeInfo(i);
         auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
         m_input_node_dims.push_back(tensor_info.GetShape());
 
@@ -1068,7 +1076,7 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
         model_path, m_device.backend,
         m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
-    size_t num_output_nodes = m_session.GetOutputCount();
+    size_t num_output_nodes = session().GetOutputCount();
     std::vector<std::string> discovered_output_names;
     std::vector<std::vector<int64_t>> discovered_output_dims;
     std::vector<ONNXTensorElementDataType> discovered_output_element_types;
@@ -1076,8 +1084,8 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     discovered_output_dims.reserve(num_output_nodes);
     discovered_output_element_types.reserve(num_output_nodes);
     for (size_t i = 0; i < num_output_nodes; ++i) {
-        auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
-        auto output_type_info = m_session.GetOutputTypeInfo(i);
+        auto output_name_ptr = session().GetOutputNameAllocated(i, allocator);
+        auto output_type_info = session().GetOutputTypeInfo(i);
         auto output_tensor_info = output_type_info.GetTensorTypeAndShapeInfo();
         discovered_output_names.push_back(output_name_ptr.get());
         discovered_output_dims.push_back(output_tensor_info.GetShape());
@@ -1151,7 +1159,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             // by calling any of its symbols. arm_torchtrt_runtime sits in
             // a torch-free TU compiled into corridorkey_core, so the
             // base exe / OFX bundle can run AddDllDirectory and
-            // pre-load the torch / torchtrt DLLs from the blue pack
+            // pre-load the torch / torchtrt DLLs from the TorchTRT pack
             // (or vendor/torchtrt-windows in dev) without ever
             // touching torch headers from this layer. Once the cache
             // is populated, the next implicit resolve from the
@@ -1161,7 +1169,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 return Unexpected(Error{
                     ErrorCode::HardwareNotSupported,
                     "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
-                    "stage the blue model pack runtime alongside the .ts."});
+                    "stage the TorchTRT runtime pack alongside the .ts."});
             }
             std::string arm_error;
             if (!core::arm_torchtrt_runtime(runtime_bin, arm_error)) {
@@ -1227,13 +1235,14 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 bool use_cached_model,
                 const std::optional<std::filesystem::path>& optimized_output_path) {
                 common::measure_stage(on_stage, "ort_session_options", [&]() {
+                    session.m_session_options.emplace();
                     session.configure_session_options(use_cached_model, options, model_path);
                     if (!use_cached_model && optimized_output_path.has_value()) {
 #ifdef _WIN32
-                        session.m_session_options.SetOptimizedModelFilePath(
+                        session.session_options().SetOptimizedModelFilePath(
                             optimized_output_path->wstring().c_str());
 #else
-                            session.m_session_options.SetOptimizedModelFilePath(
+                            session.session_options().SetOptimizedModelFilePath(
                                 optimized_output_path->c_str());
 #endif
                     }
@@ -1241,11 +1250,11 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 
                 common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                    session.m_session = Ort::Session(*env, runtime_model_path.wstring().c_str(),
-                                                     session.m_session_options);
+                    session.m_session.emplace(*env, runtime_model_path.wstring().c_str(),
+                                              session.session_options());
 #else
-                    session.m_session =
-                        Ort::Session(*env, runtime_model_path.c_str(), session.m_session_options);
+                    session.m_session.emplace(*env, runtime_model_path.c_str(),
+                                              session.session_options());
 #endif
                 });
 
@@ -1273,22 +1282,23 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                             options.log_severity);
                     });
                     common::measure_stage(on_stage, "ort_session_options", [&]() {
+                        session_ptr->m_session_options.emplace();
                         session_ptr->configure_session_options(false, options, model_path);
 #ifdef _WIN32
-                        session_ptr->m_session_options.SetOptimizedModelFilePath(
+                        session_ptr->session_options().SetOptimizedModelFilePath(
                             optimized_model_path->wstring().c_str());
 #else
-                            session_ptr->m_session_options.SetOptimizedModelFilePath(
+                            session_ptr->session_options().SetOptimizedModelFilePath(
                                 optimized_model_path->c_str());
 #endif
                     });
                     common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                        session_ptr->m_session = Ort::Session(*env, model_path.wstring().c_str(),
-                                                              session_ptr->m_session_options);
+                        session_ptr->m_session.emplace(*env, model_path.wstring().c_str(),
+                                                       session_ptr->session_options());
 #else
-                        session_ptr->m_session =
-                            Ort::Session(*env, model_path.c_str(), session_ptr->m_session_options);
+                        session_ptr->m_session.emplace(*env, model_path.c_str(),
+                                                       session_ptr->session_options());
 #endif
                     });
                     common::measure_stage(on_stage, "ort_metadata_extract",
@@ -1838,7 +1848,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                             bound_io_state->binding.SynchronizeInputs();
                         },
                         batch_size);
-                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    session().Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
                     bound_io_state->binding.SynchronizeOutputs();
                 },
                 batch_size);
@@ -1846,7 +1856,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             output_tensors = common::measure_stage(
                 on_stage, "ort_run",
                 [&]() {
-                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                    return session().Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
                                          &input_tensor, 1, m_output_node_names_ptr.data(),
                                          m_output_node_names_ptr.size());
                 },
@@ -2203,7 +2213,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                             bound_io_state->binding.SynchronizeInputs();
                         },
                         1);
-                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    session().Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
                     bound_io_state->binding.SynchronizeOutputs();
                 },
                 1);
@@ -2211,7 +2221,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             output_tensors = common::measure_stage(
                 on_stage, "ort_run",
                 [&]() {
-                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                    return session().Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
                                          &input_tensor, 1, m_output_node_names_ptr.data(),
                                          m_output_node_names_ptr.size());
                 },

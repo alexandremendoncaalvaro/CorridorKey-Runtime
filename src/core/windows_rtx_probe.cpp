@@ -1,21 +1,12 @@
 #include "windows_rtx_probe.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <corridorkey/detail/constants.hpp>
 #include <corridorkey/engine.hpp>
 #include <optional>
-#include <string_view>
 
 #include "windows_rtx_probe_internal.hpp"
-
-#if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
-#include <onnxruntime/core/session/onnxruntime_cxx_api.h>
-#elif __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
-#include <onnxruntime/onnxruntime_cxx_api.h>
-#else
-#error "ONNX Runtime C++ headers not found"
-#endif
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -232,73 +223,28 @@ std::vector<detail::CudaDeviceIdentity> enumerate_cuda_devices() {
     return devices;
 }
 
-bool provider_available(const std::string& provider_name) {
-    try {
-        Ort::Env dummy_env{ORT_LOGGING_LEVEL_WARNING, "probe"};
-        auto providers = Ort::GetAvailableProviders();
-        return std::ranges::find(providers, provider_name) != providers.end();
-    } catch (...) {
-        return false;
-    }
-}
-
-bool onnxruntime_export_available(const char* export_name) {
-    HMODULE runtime_module = GetModuleHandleW(L"onnxruntime.dll");
-    if (runtime_module == nullptr) {
-        runtime_module = LoadLibraryW(L"onnxruntime.dll");
-    }
-    if (runtime_module == nullptr) {
-        return false;
-    }
-    return GetProcAddress(runtime_module, export_name) != nullptr;
-}
-
 #endif
 
 }  // namespace
 
 bool tensorrt_rtx_provider_available() {
-#ifdef _WIN32
-    return provider_available(std::string(corridorkey::detail::providers::TENSORRT));
-#else
     return false;
-#endif
 }
 
 bool cuda_provider_available() {
-#ifdef _WIN32
-    return provider_available(std::string(corridorkey::detail::providers::CUDA));
-#else
     return false;
-#endif
 }
 
 bool directml_provider_available() {
-#ifdef _WIN32
-    return onnxruntime_export_available("OrtSessionOptionsAppendExecutionProvider_DML") ||
-           provider_available("DML") || provider_available("DirectML") ||
-           provider_available(std::string(corridorkey::detail::providers::DIRECTML));
-#else
     return false;
-#endif
 }
 
 bool winml_provider_available() {
-#ifdef _WIN32
-    return provider_available("WinML") ||
-           provider_available(std::string(corridorkey::detail::providers::WINML));
-#else
     return false;
-#endif
 }
 
 bool openvino_provider_available() {
-#ifdef _WIN32
-    return provider_available("OpenVINO") ||
-           provider_available(std::string(corridorkey::detail::providers::OPENVINO));
-#else
     return false;
-#endif
 }
 
 std::vector<WindowsGpuInfo> list_windows_gpus() {
@@ -309,11 +255,6 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
         return gpus;
     }
 
-    const bool trt_available = tensorrt_rtx_provider_available();
-    const bool cuda_available = cuda_provider_available();
-    const bool dml_available = directml_provider_available();
-    const bool winml_available = winml_provider_available();
-    const bool openvino_available = openvino_provider_available();
     const auto cuda_devices = enumerate_cuda_devices();
 
     for (UINT adapter_index = 0;; ++adapter_index) {
@@ -336,26 +277,22 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
             static_cast<int64_t>(description.DedicatedVideoMemory / (1024ULL * 1024ULL));
         info.vendor_id = description.VendorId;
         info.is_rtx = has_rtx_branding(info.adapter_name);
-        info.directml_available = dml_available;
-        info.winml_available = winml_available;
-        info.openvino_available = openvino_available;
+        info.directml_available = false;
+        info.winml_available = false;
+        info.openvino_available = false;
 
         if (info.vendor_id == kNvidiaVendorId) {
-            info.cuda_available = cuda_available;
-
             auto cuda_device =
                 detail::find_cuda_device_for_adapter(description.AdapterLuid, cuda_devices);
             if (cuda_device.has_value()) {
+                info.cuda_available = true;
                 info.driver_query_available = true;
                 info.compute_capability_major = cuda_device->compute_capability_major;
                 info.compute_capability_minor = cuda_device->compute_capability_minor;
-                info.tensorrt_rtx_available =
-                    info.is_rtx && trt_available &&
-                    detail::compute_capability_supports_tensorrt_rtx(info.compute_capability_major,
-                                                                     info.compute_capability_minor);
+                info.tensorrt_rtx_available = false;
             }
         } else if (info.vendor_id == kIntelVendorId) {
-            info.openvino_available = openvino_available;
+            info.openvino_available = false;
         }
 
         gpus.push_back(std::move(info));

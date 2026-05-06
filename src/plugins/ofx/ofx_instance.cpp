@@ -1036,9 +1036,9 @@ DeviceInfo requested_device_for_quality_selection(const DeviceInfo& requested_de
     candidate_device.backend = runtime_backend_for_quality_artifact(
         requested_device.backend, selection.executable_model_path);
     if (candidate_device.backend == Backend::TorchTRT &&
-        is_dynamic_blue_artifact_path(selection.executable_model_path)) {
+        is_dynamic_torchtrt_artifact_path(selection.executable_model_path)) {
         if (candidate_device.name.empty()) {
-            candidate_device.name = "Torch-TensorRT dynamic blue";
+            candidate_device.name = "Torch-TensorRT dynamic";
         }
     }
     return candidate_device;

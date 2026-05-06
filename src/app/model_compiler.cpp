@@ -1,5 +1,9 @@
 #include "model_compiler.hpp"
 
+#ifndef ORT_API_MANUAL_INIT
+#define ORT_API_MANUAL_INIT
+#endif
+
 #if __has_include(<onnxruntime/core/session/onnxruntime_cxx_api.h>)
 #include <onnxruntime/core/session/onnxruntime_cxx_api.h>
 #elif __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
@@ -16,6 +20,7 @@
 #include <system_error>
 #include <unordered_map>
 
+#include "../core/ort_process_context.hpp"
 #include "../core/windows_rtx_probe.hpp"
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,bugprone-easily-swappable-parameters,cppcoreguidelines-macro-usage,readability-use-concise-preprocessor-directives,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
@@ -97,6 +102,7 @@ void append_tensorrt_rtx_provider(Ort::SessionOptions& session_options,
 Result<std::filesystem::path> compile_with_compile_api(
     const std::filesystem::path& input_model_path, const std::filesystem::path& output_model_path) {
     try {
+        core::ensure_ort_api_initialized();
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "CorridorKeyModelCompiler");
         Ort::SessionOptions session_options;
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
@@ -134,6 +140,7 @@ Result<std::filesystem::path> compile_with_compile_api(
 Result<std::filesystem::path> compile_with_ep_context_dump(
     const std::filesystem::path& input_model_path, const std::filesystem::path& output_model_path) {
     try {
+        core::ensure_ort_api_initialized();
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "CorridorKeyModelCompiler");
         Ort::SessionOptions session_options;
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);

@@ -35,30 +35,19 @@ void touch_file(const std::filesystem::path& path, const std::string& contents =
 
 }  // namespace
 
-TEST_CASE("windows TensorRT probes respect supported VRAM tiers", "[unit][doctor][regression]") {
-    SECTION("10 GB probes include 1024 and below") {
+TEST_CASE("windows RTX probes use dynamic TorchTRT artifacts", "[unit][doctor][regression]") {
+    const std::vector<std::string> expected_models{"corridorkey_dynamic_green_fp16.ts",
+                                                   "corridorkey_dynamic_blue_fp16.ts"};
+
+    SECTION("TorchTRT probes green and blue dynamic artifacts") {
+        DeviceInfo device{"RTX 3080", 10240, Backend::TorchTRT, 0};
+        auto models = windows_probe_models_for_backend(Backend::TorchTRT, device);
+        REQUIRE(models == expected_models);
+    }
+
+    SECTION("legacy TensorRT requests are normalized to the same dynamic artifacts") {
         DeviceInfo device{"RTX 3080", 10240, Backend::TensorRT, 0};
         auto models = windows_probe_models_for_backend(Backend::TensorRT, device);
-        const std::vector<std::string> expected_models{"corridorkey_fp16_1024.onnx",
-                                                       "corridorkey_fp16_512.onnx"};
-        REQUIRE(models == expected_models);
-    }
-
-    SECTION("16 GB caps probes at 1536 and below") {
-        DeviceInfo device{"RTX 4080", 16384, Backend::TensorRT, 0};
-        auto models = windows_probe_models_for_backend(Backend::TensorRT, device);
-        const std::vector<std::string> expected_models{"corridorkey_fp16_1536.onnx",
-                                                       "corridorkey_fp16_1024.onnx",
-                                                       "corridorkey_fp16_512.onnx"};
-        REQUIRE(models == expected_models);
-    }
-
-    SECTION("24 GB keeps the full packaged FP16 probe ladder") {
-        DeviceInfo device{"RTX 4090", 24576, Backend::TensorRT, 0};
-        auto models = windows_probe_models_for_backend(Backend::TensorRT, device);
-        const std::vector<std::string> expected_models{
-            "corridorkey_fp16_2048.onnx", "corridorkey_fp16_1536.onnx",
-            "corridorkey_fp16_1024.onnx", "corridorkey_fp16_512.onnx"};
         REQUIRE(models == expected_models);
     }
 
@@ -78,7 +67,7 @@ TEST_CASE("windows TensorRT probes respect supported VRAM tiers", "[unit][doctor
     }
 }
 
-TEST_CASE("preferred Windows probe prioritizes strict TensorRT success",
+TEST_CASE("preferred Windows probe prioritizes strict TorchTRT success",
           "[unit][doctor][regression]") {
     nlohmann::json probes = nlohmann::json::array({{{"backend", "winml"},
                                                     {"model", "corridorkey_fp16_1024.onnx"},
@@ -86,9 +75,9 @@ TEST_CASE("preferred Windows probe prioritizes strict TensorRT success",
                                                     {"session_create_ok", true},
                                                     {"frame_execute_ok", true},
                                                     {"fallback_used", false}},
-                                                   {{"backend", "tensorrt"},
-                                                    {"model", "corridorkey_fp16_1536.onnx"},
-                                                    {"requested_resolution", 1536},
+                                                   {{"backend", "torchtrt"},
+                                                    {"model", "corridorkey_dynamic_green_fp16.ts"},
+                                                    {"requested_resolution", 512},
                                                     {"session_create_ok", true},
                                                     {"frame_execute_ok", true},
                                                     {"fallback_used", false}}});
@@ -96,8 +85,8 @@ TEST_CASE("preferred Windows probe prioritizes strict TensorRT success",
     auto preferred = preferred_windows_probe(probes);
 
     REQUIRE(preferred.has_value());
-    REQUIRE(preferred->at("backend") == "tensorrt");
-    REQUIRE(preferred->at("model") == "corridorkey_fp16_1536.onnx");
+    REQUIRE(preferred->at("backend") == "torchtrt");
+    REQUIRE(preferred->at("model") == "corridorkey_dynamic_green_fp16.ts");
 }
 
 TEST_CASE("preferred Windows probe ignores probes that used fallback",
@@ -209,39 +198,62 @@ TEST_CASE("doctor bundle inspection requires the dedicated OFX runtime server on
     std::filesystem::remove_all(temp_dir);
 }
 
-TEST_CASE("doctor bundle inspection reports packaged TensorRT context models",
+TEST_CASE("doctor bundle inspection reports TorchTRT RTX wrapper without ONNX contexts",
           "[unit][doctor][regression]") {
-    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-rtx-context";
+    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-rtx-torchtrt";
     std::filesystem::remove_all(temp_dir);
 
-    const auto win64_dir = temp_dir / "Contents" / "Win64";
-    const auto models_dir = temp_dir / "Contents" / "Resources" / "models";
+    const auto bundle_dir = temp_dir / "CorridorKey.ofx.bundle";
+    const auto win64_dir = bundle_dir / "Contents" / "Win64";
+    const auto models_dir = bundle_dir / "Contents" / "Resources" / "models";
+    const auto torchtrt_dir = bundle_dir / "Contents" / "Resources" / "torchtrt-runtime" / "bin";
 
     for (const auto& filename :
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_768.onnx",
-          "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1024_ctx.onnx",
-          "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}) {
+         {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}) {
         touch_file(models_dir / filename);
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
-          "onnxruntime.dll", "onnxruntime_providers_shared.dll",
-          "onnxruntime_providers_nv_tensorrt_rtx.dll"}) {
+         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx"}) {
         touch_file(win64_dir / filename);
     }
+    touch_file(torchtrt_dir / "corridorkey_torchtrt.dll");
+
+    const nlohmann::json inventory = {
+        {"package_type", "ofx_bundle"},
+        {"model_profile", "windows-rtx"},
+        {"bundle_track", "rtx"},
+        {"release_label", "Windows RTX"},
+        {"optimization_profile_id", "windows-rtx"},
+        {"optimization_profile_label", "Windows RTX"},
+        {"backend_intent", "torchtrt"},
+        {"fallback_policy", "no_backend_fallback"},
+        {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
+        {"certification_tier", "dynamic_torchtrt_green_blue"},
+        {"unrestricted_quality_attempt", true},
+        {"expected_models",
+         {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
+        {"present_models",
+         {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
+        {"missing_models", nlohmann::json::array()},
+        {"compiled_context_models", nlohmann::json::array()},
+        {"expected_compiled_context_models", nlohmann::json::array()},
+        {"missing_compiled_context_models", nlohmann::json::array()},
+        {"compiled_context_complete", true},
+    };
+    std::filesystem::create_directories(bundle_dir);
+    std::ofstream(bundle_dir / "model_inventory.json") << inventory.dump(2);
 
     const auto report = inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
     const auto compiled_context_models =
         report["compiled_context_models"].get<std::vector<std::string>>();
 
     REQUIRE(report["bundle_track"] == "rtx");
+    REQUIRE(report["torchtrt_wrapper_found"].get<bool>());
+    REQUIRE(report["runtime_backend_bundle_ready"].get<bool>());
     REQUIRE(report["compiled_context_models"].is_array());
-    REQUIRE(compiled_context_models.size() == 2);
-    REQUIRE(std::find(compiled_context_models.begin(), compiled_context_models.end(),
-                      "corridorkey_fp16_512_ctx.onnx") != compiled_context_models.end());
-    REQUIRE(std::find(compiled_context_models.begin(), compiled_context_models.end(),
-                      "corridorkey_fp16_1024_ctx.onnx") != compiled_context_models.end());
+    REQUIRE(compiled_context_models.empty());
+    REQUIRE(report["healthy"].get<bool>());
 
     std::filesystem::remove_all(temp_dir);
 }
@@ -255,20 +267,18 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     const auto win64_dir = bundle_dir / "Contents" / "Win64";
     const auto models_dir = bundle_dir / "Contents" / "Resources" / "models";
 
-    for (const auto& filename : {"corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx",
-                                 "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1024_ctx.onnx",
-                                 "corridorkey_fp16_1536.onnx", "corridorkey_fp16_1536_ctx.onnx",
-                                 "corridorkey_fp16_2048.onnx", "corridorkey_fp16_2048_ctx.onnx"}) {
+    for (const auto& filename :
+         {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}) {
         touch_file(models_dir / filename);
     }
 
     for (const auto& filename :
          {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
-          "onnxruntime.dll", "onnxruntime_providers_shared.dll",
-          "onnxruntime_providers_nv_tensorrt_rtx.dll", "cudart64_12.dll", "tensorrt_rtx_1_2.dll",
-          "tensorrt_onnxparser_rtx_1_2.dll"}) {
+          "cudart64_12.dll"}) {
         touch_file(win64_dir / filename);
     }
+    touch_file(bundle_dir / "Contents" / "Resources" / "torchtrt-runtime" / "bin" /
+               "corridorkey_torchtrt.dll");
 
     const nlohmann::json inventory = {
         {"package_type", "ofx_bundle"},
@@ -277,26 +287,18 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
         {"release_label", "Windows RTX"},
         {"optimization_profile_id", "windows-rtx"},
         {"optimization_profile_label", "Windows RTX"},
-        {"backend_intent", "tensorrt"},
-        {"fallback_policy", "safe_auto_quality_with_manual_override"},
-        {"warmup_policy", "precompiled_context_or_first_run_compile"},
-        {"certification_tier", "packaged_fp16_ladder_through_2048"},
+        {"backend_intent", "torchtrt"},
+        {"fallback_policy", "no_backend_fallback"},
+        {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
+        {"certification_tier", "dynamic_torchtrt_green_blue"},
         {"unrestricted_quality_attempt", true},
         {"expected_models",
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx"}},
+         {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
         {"present_models",
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx"}},
+         {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
         {"missing_models", nlohmann::json::array()},
-        {"compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
-                                "corridorkey_fp16_1536_ctx.onnx",
-                                "corridorkey_fp16_2048_ctx.onnx"})},
-        {"expected_compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
-                                "corridorkey_fp16_1536_ctx.onnx",
-                                "corridorkey_fp16_2048_ctx.onnx"})},
+        {"compiled_context_models", nlohmann::json::array()},
+        {"expected_compiled_context_models", nlohmann::json::array()},
         {"missing_compiled_context_models", nlohmann::json::array()},
         {"compiled_context_complete", true},
     };
@@ -311,11 +313,12 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     REQUIRE(report["ofx_runtime_server_found"].get<bool>());
     REQUIRE(report["model_inventory_contract_complete"].get<bool>());
     REQUIRE(report["optimization_profile_id"] == "windows-rtx");
+    REQUIRE(report["torchtrt_wrapper_found"].get<bool>());
     REQUIRE(report["healthy"].get<bool>());
 
     const auto packaged_models = report["packaged_models"];
     REQUIRE(packaged_models.is_array());
-    REQUIRE(packaged_models.size() == 4);
+    REQUIRE(packaged_models.size() == 2);
     for (const auto& entry : packaged_models) {
         REQUIRE(entry["found"].get<bool>());
     }
@@ -323,27 +326,26 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     std::filesystem::remove_all(temp_dir);
 }
 
-TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled contexts are missing",
+TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when dynamic packs are missing",
           "[unit][doctor][regression]") {
-    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-rtx-missing-ctx";
+    auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-rtx-missing-pack";
     std::filesystem::remove_all(temp_dir);
 
     const auto bundle_dir = temp_dir / "CorridorKey.ofx.bundle";
     const auto win64_dir = bundle_dir / "Contents" / "Win64";
     const auto models_dir = bundle_dir / "Contents" / "Resources" / "models";
 
-    for (const auto& filename : {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx",
-                                 "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx"}) {
+    for (const auto& filename : {"corridorkey_dynamic_green_fp16.ts"}) {
         touch_file(models_dir / filename);
     }
 
     for (const auto& filename :
          {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
-          "onnxruntime.dll", "onnxruntime_providers_shared.dll",
-          "onnxruntime_providers_nv_tensorrt_rtx.dll", "cudart64_12.dll", "tensorrt_rtx_1_2.dll",
-          "tensorrt_onnxparser_rtx_1_2.dll"}) {
+          "cudart64_12.dll"}) {
         touch_file(win64_dir / filename);
     }
+    touch_file(bundle_dir / "Contents" / "Resources" / "torchtrt-runtime" / "bin" /
+               "corridorkey_torchtrt.dll");
 
     const nlohmann::json inventory = {
         {"package_type", "ofx_bundle"},
@@ -352,28 +354,19 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
         {"release_label", "Windows RTX"},
         {"optimization_profile_id", "windows-rtx"},
         {"optimization_profile_label", "Windows RTX"},
-        {"backend_intent", "tensorrt"},
-        {"fallback_policy", "safe_auto_quality_with_manual_override"},
-        {"warmup_policy", "precompiled_context_or_first_run_compile"},
-        {"certification_tier", "packaged_fp16_ladder_through_2048"},
+        {"backend_intent", "torchtrt"},
+        {"fallback_policy", "no_backend_fallback"},
+        {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
+        {"certification_tier", "dynamic_torchtrt_green_blue"},
         {"unrestricted_quality_attempt", true},
         {"expected_models",
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx"}},
-        {"present_models",
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx", "corridorkey_fp16_1536.onnx",
-          "corridorkey_fp16_2048.onnx"}},
-        {"missing_models", nlohmann::json::array()},
+         {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"}},
+        {"present_models", {"corridorkey_dynamic_green_fp16.ts"}},
+        {"missing_models", {"corridorkey_dynamic_blue_fp16.ts"}},
         {"compiled_context_models", nlohmann::json::array()},
-        {"expected_compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
-                                "corridorkey_fp16_1536_ctx.onnx",
-                                "corridorkey_fp16_2048_ctx.onnx"})},
-        {"missing_compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
-                                "corridorkey_fp16_1536_ctx.onnx",
-                                "corridorkey_fp16_2048_ctx.onnx"})},
-        {"compiled_context_complete", false},
+        {"expected_compiled_context_models", nlohmann::json::array()},
+        {"missing_compiled_context_models", nlohmann::json::array()},
+        {"compiled_context_complete", true},
     };
     std::filesystem::create_directories(bundle_dir);
     std::ofstream(bundle_dir / "model_inventory.json") << inventory.dump(2);
@@ -381,7 +374,8 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
     const auto report = inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
 
     REQUIRE(report["bundle_track"] == "rtx");
-    REQUIRE(report["compiled_context_complete"] == false);
+    REQUIRE(report["packaged_models"][1]["filename"] == "corridorkey_dynamic_blue_fp16.ts");
+    REQUIRE(report["packaged_models"][1]["found"] == false);
     REQUIRE(report["healthy"] == false);
 
     std::filesystem::remove_all(temp_dir);
@@ -403,15 +397,12 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
     touch_file(win64_dir / "corridorkey.exe");
     touch_file(win64_dir / "corridorkey_ofx_runtime_server.exe");
     touch_file(win64_dir / "CorridorKey.ofx");
-    touch_file(win64_dir / "onnxruntime.dll");
-    touch_file(win64_dir / "onnxruntime_providers_shared.dll");
-    touch_file(win64_dir / "onnxruntime_providers_nv_tensorrt_rtx.dll");
-    touch_file(win64_dir / "tensorrt_rtx_1.dll");
-    touch_file(win64_dir / "tensorrt_onnxparser_rtx_1.dll");
     touch_file(win64_dir / "cudart64_12.dll");
+    touch_file(bundle_root / "Contents" / "Resources" / "torchtrt-runtime" / "bin" /
+               "corridorkey_torchtrt.dll");
 
-    touch_file(models_dir / "corridorkey_fp16_512.onnx");
-    touch_file(models_dir / "corridorkey_fp16_512_ctx.onnx");
+    touch_file(models_dir / "corridorkey_dynamic_green_fp16.ts");
+    touch_file(models_dir / "corridorkey_dynamic_blue_fp16.ts");
 
     const nlohmann::json inventory = {
         {"package_type", "ofx_bundle"},
@@ -420,17 +411,20 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
         {"release_label", "Windows RTX"},
         {"optimization_profile_id", "windows-rtx"},
         {"optimization_profile_label", "Windows RTX"},
-        {"backend_intent", "tensorrt"},
-        {"fallback_policy", "safe_auto_quality_with_manual_override"},
-        {"warmup_policy", "precompiled_context_or_first_run_compile"},
-        {"certification_tier", "packaged_fp16_ladder_through_2048"},
+        {"backend_intent", "torchtrt"},
+        {"fallback_policy", "no_backend_fallback"},
+        {"warmup_policy", "torchscript_load_and_first_run_shape_compile"},
+        {"certification_tier", "dynamic_torchtrt_green_blue"},
         {"unrestricted_quality_attempt", true},
-        {"expected_models", nlohmann::json::array({"corridorkey_fp16_512.onnx"})},
-        {"present_models", nlohmann::json::array({"corridorkey_fp16_512.onnx"})},
+        {"expected_models",
+         nlohmann::json::array(
+             {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"})},
+        {"present_models",
+         nlohmann::json::array(
+             {"corridorkey_dynamic_green_fp16.ts", "corridorkey_dynamic_blue_fp16.ts"})},
         {"missing_models", nlohmann::json::array()},
-        {"compiled_context_models", nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx"})},
-        {"expected_compiled_context_models",
-         nlohmann::json::array({"corridorkey_fp16_512_ctx.onnx"})},
+        {"compiled_context_models", nlohmann::json::array()},
+        {"expected_compiled_context_models", nlohmann::json::array()},
         {"missing_compiled_context_models", nlohmann::json::array()},
         {"compiled_context_complete", true},
     };
@@ -444,12 +438,13 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
     REQUIRE(diagnostics["model_profile"] == "windows-rtx");
     REQUIRE(diagnostics["bundle_track"] == "rtx");
     REQUIRE(diagnostics["optimization_profile_id"] == "windows-rtx");
-    REQUIRE(diagnostics["certification_tier"] == "packaged_fp16_ladder_through_2048");
+    REQUIRE(diagnostics["certification_tier"] == "dynamic_torchtrt_green_blue");
     REQUIRE(diagnostics["unrestricted_quality_attempt"].get<bool>());
     REQUIRE(diagnostics["compiled_context_complete"].get<bool>());
     REQUIRE(diagnostics["model_inventory_contract_complete"].get<bool>());
     REQUIRE(diagnostics["model_inventory"]["contract_complete"].get<bool>());
-    REQUIRE(diagnostics["model_inventory"]["expected_compiled_context_models"].size() == 1);
+    REQUIRE(diagnostics["model_inventory"]["expected_compiled_context_models"].empty());
+    REQUIRE(diagnostics["torchtrt_wrapper_found"].get<bool>());
 
     std::filesystem::remove_all(temp_root);
 #endif

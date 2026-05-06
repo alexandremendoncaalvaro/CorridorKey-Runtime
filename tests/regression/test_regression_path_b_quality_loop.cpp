@@ -8,14 +8,14 @@
 // surfaced after the user installed v0.8.0 and Resolve hung for 98 seconds
 // before reporting "models not loading" (ofx.log, 2026-04-29 09:51-09:53):
 //
-//   1. backend_matches_request(effective={TensorRT}, requested={Auto}) returned
+//   1. backend_matches_request(effective={TorchTRT}, requested={Auto}) returned
 //      false, so the loop treated every server response as a backend mismatch
-//      and continued past the first fp16 success.
-//   2. quality_artifact_candidates(backend=Auto, ...) emitted both fp16 and
-//      int8 ONNX paths. With #1 forcing iteration, the loop reached int8
-//      artifacts that TensorRT-RTX 1.2.0.54 cannot load.
-//   3. The runtime server crashed mid-prepare on int8 artifacts ("Socket
-//      closed before JSON message completed"), exhausting all candidates.
+//      and continued past the first dynamic-model success.
+//   2. quality_artifact_candidates(backend=Auto, ...) emitted retired ONNX
+//      paths. With #1 forcing iteration, the loop reached artifacts that the
+//      Windows RTX product path must no longer load.
+//   3. The runtime server crashed mid-prepare on unsupported artifacts,
+//      exhausting all candidates.
 //
 // This regression test pins both invariants so the candidate list returned
 // to the .ofx loop is safe under the Path B placeholder DeviceInfo.
@@ -87,7 +87,7 @@ DeviceInfo path_b_placeholder_device() {
 
 DeviceInfo windows_rtx_effective_device() {
     DeviceInfo device;
-    device.backend = Backend::TensorRT;
+    device.backend = Backend::TorchTRT;
     device.name = "NVIDIA GeForce RTX 3080";
     device.available_memory_mb = 10240;
     return device;
@@ -97,7 +97,7 @@ DeviceInfo windows_rtx_effective_device() {
 
 TEST_CASE(
     "REGRESSION v0.8.0 Path B: placeholder Backend::Auto must short-circuit candidate loop on "
-    "first fp16 success and must never expose int8 artifacts that crash the runtime server",
+    "first dynamic TorchTRT success and must never expose retired ONNX artifacts",
     "[regression][ofx][path-b]") {
     // Invariant 1 — backend_matches_request must accept any effective backend
     // when the requested backend is the Path B placeholder Auto. Without this,
@@ -106,11 +106,10 @@ TEST_CASE(
 
     // Invariant 2 — quality_artifact_candidates must not surface int8 ONNX
     // artifacts when the .ofx asks with the Path B placeholder Auto. The
-    // runtime server crashes on int8 in the Windows RTX track, so even a
-    // single int8 entry in the candidate list is unsafe in production.
+    // Windows RTX track now selects the single dynamic TorchTRT artifact before
+    // engine creation.
     TempDirGuard temp_dir("corridorkey-regression-path-b-quality-loop");
-    touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
-    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
+    touch_file(temp_dir.path() / "corridorkey_dynamic_green_fp16.ts");
     touch_file(temp_dir.path() / "corridorkey_int8_512.onnx");
     touch_file(temp_dir.path() / "corridorkey_int8_1024.onnx");
 
@@ -121,7 +120,7 @@ TEST_CASE(
     for (const auto& candidate : candidates) {
         const auto filename = candidate.executable_model_path.filename().string();
         INFO("candidate filename: " << filename);
-        REQUIRE(filename.find("int8") == std::string::npos);
+        REQUIRE(filename == "corridorkey_dynamic_green_fp16.ts");
     }
 }
 

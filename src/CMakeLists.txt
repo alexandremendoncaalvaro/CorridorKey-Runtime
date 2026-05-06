@@ -69,16 +69,22 @@ else()
     endif()
 endif()
 
+set(_corridorkey_core_private_libraries
+    OpenEXR::OpenEXR
+    PNG::PNG
+    ${FFMPEG_LIBRARIES}
+)
+if(NOT WIN32)
+    list(APPEND _corridorkey_core_private_libraries onnxruntime::onnxruntime)
+endif()
+
 # Link against public headers and external libraries
 target_link_libraries(corridorkey_core
     PUBLIC
         corridorkey_headers
         nlohmann_json::nlohmann_json
     PRIVATE
-        onnxruntime::onnxruntime
-        OpenEXR::OpenEXR
-        PNG::PNG
-        ${FFMPEG_LIBRARIES}
+        ${_corridorkey_core_private_libraries}
 )
 
 if(APPLE)
@@ -203,12 +209,18 @@ if(BUILD_TESTING)
         )
     endif()
 
+    set(_corridorkey_core_static_public_libraries
+        corridorkey_headers
+        nlohmann_json::nlohmann_json
+        cpr::cpr
+    )
+    if(NOT WIN32)
+        list(APPEND _corridorkey_core_static_public_libraries onnxruntime::onnxruntime)
+    endif()
+
     target_link_libraries(corridorkey_core_static
         PUBLIC
-            corridorkey_headers
-            onnxruntime::onnxruntime
-            nlohmann_json::nlohmann_json
-            cpr::cpr
+            ${_corridorkey_core_static_public_libraries}
         PRIVATE
             OpenEXR::OpenEXR
             PNG::PNG

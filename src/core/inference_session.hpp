@@ -3,8 +3,13 @@
 #include <corridorkey/types.hpp>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+#ifndef ORT_API_MANUAL_INIT
+#define ORT_API_MANUAL_INIT
+#endif
 
 // Keep the C++ wrapper aligned with the provider header layout for each platform.
 // The curated Windows RTX package only ships the core/session layout; falling back
@@ -169,8 +174,10 @@ class InferenceSession {
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 
-    Ort::Session m_session{nullptr};
-    Ort::SessionOptions m_session_options;
+    std::optional<Ort::Session> m_session = std::nullopt;
+    std::optional<Ort::SessionOptions> m_session_options = std::nullopt;
+    [[nodiscard]] Ort::Session& session();
+    [[nodiscard]] Ort::SessionOptions& session_options();
 
     // Input/Output metadata
     std::vector<std::string> m_input_node_names = {};
