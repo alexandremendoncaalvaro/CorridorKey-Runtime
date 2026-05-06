@@ -161,16 +161,15 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 void set_persistent_message(const char* message_type, const char* message_id, const char* message,
                             OfxImageEffectHandle effect) {
     if (!has_persistent_message_suite(g_suites) || effect == nullptr || message == nullptr) {
-        log_message(
-            "set_persistent_message",
-            std::string("skip reason=missing suite_v2_null=") +
-                (g_suites.message_v2 == nullptr ? "1" : "0") + " set_fn_null=" +
-                ((g_suites.message_v2 != nullptr &&
-                  g_suites.message_v2->setPersistentMessage == nullptr)
-                     ? "1"
-                     : "0") +
-                " effect_null=" + (effect == nullptr ? "1" : "0") +
-                " message_null=" + (message == nullptr ? "1" : "0"));
+        log_message("set_persistent_message",
+                    std::string("skip reason=missing suite_v2_null=") +
+                        (g_suites.message_v2 == nullptr ? "1" : "0") + " set_fn_null=" +
+                        ((g_suites.message_v2 != nullptr &&
+                          g_suites.message_v2->setPersistentMessage == nullptr)
+                             ? "1"
+                             : "0") +
+                        " effect_null=" + (effect == nullptr ? "1" : "0") +
+                        " message_null=" + (message == nullptr ? "1" : "0"));
         return;
     }
     const OfxStatus status =

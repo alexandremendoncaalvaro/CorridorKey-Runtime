@@ -1420,8 +1420,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height, QualityFallbackMode fallback_mode,
                                int coarse_resolution_override, RefinementMode refinement_mode,
-                               std::string_view screen_color,
-                               std::string_view screen_color_mode) {
+                               std::string_view screen_color, std::string_view screen_color_mode) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +

@@ -1,8 +1,8 @@
 #include "ofx_session_broker.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <future>
 #include <memory>
@@ -63,8 +63,7 @@ std::string normalize_screen_color_mode(std::string_view value) {
             normalized.push_back('_');
             continue;
         }
-        normalized.push_back(
-            static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
     }
     if (normalized.empty() || normalized == "green") {
         return "green";
@@ -207,10 +206,10 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     const std::string requested_screen_color_mode =
         normalize_screen_color_mode(request.screen_color_mode);
     if (requested_screen_color_mode.empty()) {
-        return Unexpected<Error>(broker_error(
-            ErrorCode::InvalidParameters,
-            "Unknown OFX Screen Color mode: " + request.screen_color_mode +
-                ". Expected Green, Blue, or Blue-Green Channel Swap."));
+        return Unexpected<Error>(
+            broker_error(ErrorCode::InvalidParameters,
+                         "Unknown OFX Screen Color mode: " + request.screen_color_mode +
+                             ". Expected Green, Blue, or Blue-Green Channel Swap."));
     }
 
     for (const auto& session : m_sessions) {
@@ -225,8 +224,7 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         if (active_mode != requested_screen_color_mode) {
             return Unexpected<Error>(broker_error(
                 ErrorCode::InvalidParameters,
-                "CorridorKey already has an active " +
-                    screen_color_mode_display_name(active_mode) +
+                "CorridorKey already has an active " + screen_color_mode_display_name(active_mode) +
                     " OFX session in this runtime. Use the same Screen Color mode for every "
                     "active CorridorKey node in the render flow, or release the active node "
                     "before switching to " +
