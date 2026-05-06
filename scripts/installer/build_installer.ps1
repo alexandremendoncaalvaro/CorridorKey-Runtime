@@ -446,8 +446,8 @@ function Build-OnlineExternalFilesBlock {
             $line = "Source: `"{tmp}\$($file.filename)`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; ExternalSize: $($file.size_bytes); Flags: external ignoreversion"
             if ($isExtractArchive) {
                 $line += " extractarchive recursesubdirs"
-                if ($pack.Name -eq "blue-runtime") {
-                    $line += "; Check: not CorridorKeyBlueRuntimeCacheValid"
+                if ($pack.Name -eq "torchtrt-runtime") {
+                    $line += "; Check: not CorridorKeyTorchTrtRuntimeCacheValid"
                 }
             } else {
                 $line += "; Check: $(Get-ResourceCacheCheck -DestSubdir $destSubdir -Filename $file.filename -Sha256 $file.sha256)"
@@ -488,8 +488,8 @@ function Build-OfflineFilesBlock {
             }
             $sourceForIss = ((Join-Path $packDir '*') -replace '/', '\') -replace '\\\\', '\'
             $line = "Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion recursesubdirs createallsubdirs"
-            if ($pack.Name -eq "blue-runtime") {
-                $line += "; Check: not CorridorKeyBlueRuntimeCacheValid"
+            if ($pack.Name -eq "torchtrt-runtime") {
+                $line += "; Check: not CorridorKeyTorchTrtRuntimeCacheValid"
             }
             [void]$sb.AppendLine($line)
             continue
@@ -520,9 +520,9 @@ function Build-PackCachePrepareProcedure {
             $packMeta = $pack.Value
             $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
             if (Test-PackExtractsArchive -PackMeta $packMeta) {
-                if ($pack.Name -eq "blue-runtime") {
-                    [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
-                    [void]$sb.AppendLine('      DelTree(CorridorKeyBlueRuntimeBinPath, True, True, True);')
+                if ($pack.Name -eq "torchtrt-runtime") {
+                    [void]$sb.AppendLine('    if not CorridorKeyTorchTrtRuntimeCacheValid then begin')
+                    [void]$sb.AppendLine('      DelTree(CorridorKeyTorchTrtRuntimeBinPath, True, True, True);')
                     [void]$sb.AppendLine('    end;')
                 }
                 continue
@@ -539,7 +539,7 @@ function Build-PackCachePrepareProcedure {
             $packMeta = $pack.Value
             $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
             if (Test-PackExtractsArchive -PackMeta $packMeta) {
-                if ($pack.Name -eq "blue-runtime") {
+                if ($pack.Name -eq "torchtrt-runtime") {
                     [void]$sb.AppendLine("    DelTree(ExpandConstant('{app}\Contents\Resources\torchtrt-runtime'), True, True, True);")
                 }
                 continue
@@ -571,8 +571,8 @@ function Build-OnlineDownloadQueueProcedure {
             $url = ConvertTo-IssEscapedString -Value $file.url
             $name = ConvertTo-IssEscapedString -Value $file.filename
             $hash = $file.sha256
-            if ($pack.Name -eq "blue-runtime") {
-                [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
+            if ($pack.Name -eq "torchtrt-runtime") {
+                [void]$sb.AppendLine('    if not CorridorKeyTorchTrtRuntimeCacheValid then begin')
                 [void]$sb.AppendLine("      DownloadPage.Add('$url', '$name', '$hash');")
                 [void]$sb.AppendLine("      CorridorKeyTrackPlannedDownload($($file.size_bytes));")
                 [void]$sb.AppendLine('    end;')
@@ -598,11 +598,11 @@ $manifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
 $iscc = Resolve-IsccPath -Override $ISCCPath
 $greenComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "green"
 $blueComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "blue"
-$blueRuntimePack = Get-PackByName -Manifest $manifest -PackName "blue-runtime"
-$blueRuntimeFile = @($blueRuntimePack.files | Where-Object { $_.status -eq 'ready' })[0]
-$blueRuntimeSha256 = $blueRuntimeFile.sha256
-$blueRuntimeInstalledSizeBytes = [Int64]$blueRuntimePack.installed_size_bytes
-$blueRuntimeInstalledFileCount = [Int64]$blueRuntimePack.installed_file_count
+$torchTrtRuntimePack = Get-PackByName -Manifest $manifest -PackName "torchtrt-runtime"
+$torchTrtRuntimeFile = @($torchTrtRuntimePack.files | Where-Object { $_.status -eq 'ready' })[0]
+$torchTrtRuntimeSha256 = $torchTrtRuntimeFile.sha256
+$torchTrtRuntimeInstalledSizeBytes = [Int64]$torchTrtRuntimePack.installed_size_bytes
+$torchTrtRuntimeInstalledFileCount = [Int64]$torchTrtRuntimePack.installed_file_count
 
 $onlineFilesBlock = ""
 $offlineFilesBlock = ""
@@ -637,9 +637,9 @@ $rendered = $template `
     -replace '@@FLAVOR@@', $flavorLower `
     -replace '@@GREEN_COMPONENT_SIZE_LABEL@@', $greenComponentSizeLabel `
     -replace '@@BLUE_COMPONENT_SIZE_LABEL@@', $blueComponentSizeLabel `
-    -replace '@@BLUE_RUNTIME_SHA256@@', $blueRuntimeSha256 `
-    -replace '@@BLUE_RUNTIME_INSTALLED_SIZE_BYTES@@', $blueRuntimeInstalledSizeBytes `
-    -replace '@@BLUE_RUNTIME_INSTALLED_FILE_COUNT@@', $blueRuntimeInstalledFileCount
+    -replace '@@TORCHTRT_RUNTIME_SHA256@@', $torchTrtRuntimeSha256 `
+    -replace '@@TORCHTRT_RUNTIME_INSTALLED_SIZE_BYTES@@', $torchTrtRuntimeInstalledSizeBytes `
+    -replace '@@TORCHTRT_RUNTIME_INSTALLED_FILE_COUNT@@', $torchTrtRuntimeInstalledFileCount
 
 # Inject generated Pascal/.iss blocks AFTER simple token replacement.
 # These blocks may contain regex metacharacters (`$`, `{`), so use

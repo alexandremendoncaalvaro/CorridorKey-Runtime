@@ -140,12 +140,17 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
 $preferredTrack = Get-CorridorKeyWindowsTrackFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix -DefaultTrack "rtx"
-$OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack $preferredTrack
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
 if ([string]::IsNullOrWhiteSpace($ModelProfile)) {
     $ModelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix $ReleaseSuffix
+}
+$profileContract = Get-CorridorKeyModelProfileContract -ModelProfile $ModelProfile
+if ($profileContract.bundle_track -eq "rtx" -and $profileContract.backend_intent -eq "torchtrt") {
+    $OrtRoot = ""
+} else {
+    $OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack $preferredTrack
 }
 $releaseLabel = Get-CorridorKeyWindowsReleaseLabelFromSuffix -ReleaseSuffix $ReleaseSuffix
 
@@ -194,7 +199,8 @@ if ($Skip2048.IsPresent) {
 
 Write-Host "[2/5] Packaging the OFX bundle..." -ForegroundColor Cyan
 & (Join-Path $repoRoot "scripts\package_ofx.ps1") @bundleArgs
-if ($LASTEXITCODE -ne 0) {
+$bundlePackaged = $?
+if (-not $bundlePackaged) {
     throw "Windows OFX bundle packaging failed."
 }
 
@@ -208,7 +214,8 @@ if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
         -BundlePath $bundlePath `
         -ExpectedDisplayVersionLabel $DisplayVersionLabel
 }
-if ($LASTEXITCODE -ne 0) {
+$bundleValidated = $?
+if (-not $bundleValidated) {
     throw "Windows OFX bundle validation failed."
 }
 

@@ -1165,20 +1165,16 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 }
 
 function Get-CorridorKeyPreparedModelList {
-    # Defaults to "green" so the prepare-rtx flow keeps regenerating only the
-    # optimized green ONNX ladder from CorridorKey_v1.0.pth. Pass -Variant
-    # blue to report the dynamic CorridorKeyBlue TorchScript pack; pass
-    # -Variant all to ask for both.
+    # Windows RTX is a dynamic TorchTRT track: one green artifact and one
+    # blue artifact. The resolution is a runtime parameter, not part of the
+    # model identity.
     param(
         [ValidateSet("green", "blue", "all")]
         [string]$Variant = "green"
     )
 
     $green = @(
-        "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_1024.onnx",
-        "corridorkey_fp16_1536.onnx",
-        "corridorkey_fp16_2048.onnx"
+        "corridorkey_dynamic_green_fp16.ts"
     )
     $blue = @(
         "corridorkey_dynamic_blue_fp16.ts"
@@ -1192,16 +1188,9 @@ function Get-CorridorKeyPreparedModelList {
 }
 
 function Get-CorridorKeyWindowsRtxPromotedModelList {
-    # Bundle-facing list. Defaults to "green" so the existing package-ofx +
-    # certify-rtx-artifacts flow stays bit-for-bit compatible while blue is
-    # not yet promoted through the canonical pipeline. Pass -Variant blue or
-    # -Variant all explicitly to advertise blue in the OFX bundle inventory
-    # (the runtime catalog already declares blue intent via packaged_for_windows
-    # = true; missing blue files surface as missing in bundle_validation.json
-    # per the documented Windows Model Availability Policy).
     param(
         [ValidateSet("green", "blue", "all")]
-        [string]$Variant = "green"
+        [string]$Variant = "all"
     )
 
     return @(Get-CorridorKeyPreparedModelList -Variant $Variant)
@@ -1257,12 +1246,12 @@ function Get-CorridorKeyModelProfileContract {
                 release_label = "Windows RTX"
                 optimization_profile_id = "windows-rtx"
                 optimization_profile_label = "Windows RTX"
-                backend_intent = "tensorrt"
-                fallback_policy = "safe_auto_quality_with_manual_override"
-                warmup_policy = "precompiled_context_or_first_run_compile"
-                certification_tier = "packaged_fp16_ladder_through_2048"
+                backend_intent = "torchtrt"
+                fallback_policy = "no_backend_fallback"
+                warmup_policy = "torchscript_load_and_first_run_shape_compile"
+                certification_tier = "dynamic_torchtrt_green_blue"
                 unrestricted_quality_attempt = $true
-                expects_compiled_context_models = $true
+                expects_compiled_context_models = $false
             }
         }
         "windows-universal" {
@@ -1459,6 +1448,75 @@ function Test-CorridorKeyDoctorMissingModelProbeFailuresOnly {
     return $true
 }
 
+function Test-CorridorKeyDoctorMissingBundleModelsOnly {
+    param(
+        [object]$Doctor,
+        [string[]]$MissingModels
+    )
+
+    if ($null -eq $Doctor -or @($MissingModels).Count -eq 0) {
+        return $false
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Doctor -Name "bundle")) {
+        return $false
+    }
+
+    $bundle = $Doctor.bundle
+    if ($null -eq $bundle -or -not (Test-CorridorKeyPsProperty -Object $bundle -Name "packaged_models")) {
+        return $false
+    }
+
+    if ((-not (Test-CorridorKeyPsProperty -Object $bundle -Name "model_inventory_contract_complete")) -or
+        (-not [bool]$bundle.model_inventory_contract_complete)) {
+        return $false
+    }
+
+    $failedModels = @(
+        @($bundle.packaged_models) |
+            Where-Object {
+                (-not [bool]$_.found) -or (-not [bool]$_.usable)
+            }
+    )
+    if ($failedModels.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($model in $failedModels) {
+        if ($null -eq $model -or -not (Test-CorridorKeyPsProperty -Object $model -Name "filename")) {
+            return $false
+        }
+
+        $filename = [string]$model.filename
+        if ([string]::IsNullOrWhiteSpace($filename) -or @($MissingModels) -notcontains $filename) {
+            return $false
+        }
+
+        if ((Test-CorridorKeyPsProperty -Object $model -Name "found") -and [bool]$model.found) {
+            return $false
+        }
+
+        $artifactStatus = ""
+        if (Test-CorridorKeyPsProperty -Object $model -Name "artifact_status") {
+            $artifactStatus = [string]$model.artifact_status
+        }
+        if ($artifactStatus -ne "" -and $artifactStatus -ne "missing") {
+            return $false
+        }
+
+        $error = ""
+        if (Test-CorridorKeyPsProperty -Object $model -Name "error") {
+            $error = [string]$model.error
+        }
+        if (-not [string]::IsNullOrWhiteSpace($error) -and
+            -not $error.Contains("Artifact not found")) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Read-CorridorKeyBundleValidationReport {
     param([string]$ValidationReportPath)
 
@@ -1520,7 +1578,9 @@ function Get-CorridorKeyBundleValidationIssues {
         $expectsCompiledContexts = $false
         if ($null -ne $expectedContract -and
             (Test-CorridorKeyPsProperty -Object $expectedContract -Name "bundle_track") -and
-            [string]$expectedContract.bundle_track -eq "rtx") {
+            [string]$expectedContract.bundle_track -eq "rtx" -and
+            (Test-CorridorKeyPsProperty -Object $expectedContract -Name "backend_intent") -and
+            [string]$expectedContract.backend_intent -eq "tensorrt") {
             $expectsCompiledContexts = $true
         }
 

@@ -299,6 +299,7 @@ $bundleValidationPath = Join-Path $bundleRoot "bundle_validation.json"
 $defaultModelProfile = Get-CorridorKeyOfxModelProfileFromReleaseSuffix -ReleaseSuffix (Split-Path $bundleRoot -Leaf)
 $expectsUniversalGpuPath = $bundleDescriptor -match 'Universal'
 $expectsDirectMlPath = $bundleDescriptor -match 'DirectML'
+$expectsTorchTrtRtxPath = $defaultModelProfile -eq "windows-rtx"
 
 # Check bundle structure
 if (-not (Test-Path $BundlePath)) {
@@ -315,27 +316,33 @@ if (-not (Test-Path $resourcesDir)) {
 
 Write-Host "[PASS] Bundle directory structure exists" -ForegroundColor Green
 
-if ($defaultModelProfile -eq "windows-rtx") {
+if ($expectsTorchTrtRtxPath) {
     if (-not (Test-Path $torchTrtWrapperPath)) {
         throw "Missing TorchTRT wrapper DLL at $torchTrtWrapperPath"
     }
-    Write-Host "[PASS] Found corridorkey_torchtrt.dll for blue TorchTRT runtime" -ForegroundColor Green
+    Write-Host "[PASS] Found corridorkey_torchtrt.dll for TorchTRT runtime" -ForegroundColor Green
 }
 
-# CRITICAL: Check for correct ONNX Runtime DLL name
-$onnxDll = Join-Path $win64Dir "onnxruntime.dll"
-if (-not (Test-Path $onnxDll)) {
-    Write-Host "[FAIL] onnxruntime.dll not found!" -ForegroundColor Red
-    throw "ERROR: onnxruntime.dll not found in Win64 directory"
+if ($expectsTorchTrtRtxPath) {
+    Write-Host "[PASS] Windows RTX package intentionally omits ONNX Runtime DLLs" -ForegroundColor Green
+} else {
+    $onnxDll = Join-Path $win64Dir "onnxruntime.dll"
+    if (-not (Test-Path $onnxDll)) {
+        Write-Host "[FAIL] onnxruntime.dll not found!" -ForegroundColor Red
+        throw "ERROR: onnxruntime.dll not found in Win64 directory"
+    }
+
+    Write-Host "[PASS] onnxruntime.dll exists" -ForegroundColor Green
 }
 
-Write-Host "[PASS] onnxruntime.dll exists" -ForegroundColor Green
-
-# Check all required DLLs
-$requiredDlls = @(
-    "onnxruntime.dll",
-    "onnxruntime_providers_shared.dll"
-)
+$requiredDlls = if ($expectsTorchTrtRtxPath) {
+    @()
+} else {
+    @(
+        "onnxruntime.dll",
+        "onnxruntime_providers_shared.dll"
+    )
+}
 
 foreach ($dll in $requiredDlls) {
     $path = Join-Path $win64Dir $dll
@@ -494,7 +501,12 @@ if ($cudartFiles.Count -eq 0) {
 
 # Check TensorRT provider (optional)
 $tensorrtProvider = @(Get-ChildItem -Path $win64Dir -Filter "onnxruntime_providers_*tensorrt*.dll" -File -ErrorAction SilentlyContinue)
-if ($tensorrtProvider.Count -eq 0) {
+if ($expectsTorchTrtRtxPath) {
+    if ($tensorrtProvider.Count -gt 0) {
+        throw "TorchTRT-only Windows RTX bundle must not ship ONNX TensorRT provider DLLs."
+    }
+    Write-Host "[PASS] No ONNX TensorRT provider DLLs shipped in TorchTRT-only RTX bundle" -ForegroundColor Green
+} elseif ($tensorrtProvider.Count -eq 0) {
     Write-Host "[INFO] No TensorRT provider found (DirectML will be used)" -ForegroundColor Cyan
 } else {
     foreach ($provider in $tensorrtProvider) {
@@ -516,7 +528,13 @@ foreach ($provider in $universalProviderDlls) {
         Write-Host "[PASS] Found $provider" -ForegroundColor Green
     }
 }
-if ($foundUniversalProviders.Count -eq 0) {
+if ($expectsTorchTrtRtxPath -and $foundUniversalProviders.Count -gt 0) {
+    throw "TorchTRT-only Windows RTX bundle must not ship Windows universal ONNX provider DLLs."
+}
+
+if ($expectsTorchTrtRtxPath -and $foundUniversalProviders.Count -eq 0) {
+    Write-Host "[PASS] Windows RTX package intentionally omits Windows universal ONNX provider DLLs" -ForegroundColor Green
+} elseif ($foundUniversalProviders.Count -eq 0) {
     $message = "No Windows universal GPU provider DLL found; AMD/Intel systems will fall back to CPU."
     $hasUniversalGpuBackend = $supportedBackends -contains "dml" -or
         $supportedBackends -contains "winml" -or
@@ -740,6 +758,19 @@ if ($doctorSucceeded -and $doctorModelContractsAvailable -and -not $doctorModelC
         Write-Host "[INFO] Packaged runtime doctor reported unhealthy model contracts only because model(s) are absent from this bundle." -ForegroundColor Cyan
     } else {
         throw "Packaged runtime doctor reported unhealthy model contracts. See $doctorReportPath."
+    }
+}
+
+if ($doctorSucceeded -and -not $doctorHealthy -and -not $doctorFailureTolerated) {
+    $missingBundleModelsOnly = Test-CorridorKeyDoctorMissingBundleModelsOnly `
+        -Doctor $doctor `
+        -MissingModels $missingModels
+    if ($missingBundleModelsOnly) {
+        $doctorFailureTolerated = $true
+        if ([string]::IsNullOrWhiteSpace($doctorFailureReason)) {
+            $doctorFailureReason = "Packaged runtime doctor reported unhealthy bundle status only because model(s) are absent from this online bundle before installer download."
+        }
+        Write-Host "[INFO] Packaged runtime doctor reported unhealthy bundle status only because model(s) are absent from this online bundle before installer download." -ForegroundColor Cyan
     }
 }
 

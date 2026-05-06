@@ -40,21 +40,14 @@ REVISION = "main"
 # `[Components]` section. The dest_subdir is rooted at the OFX bundle's
 # `Contents/Resources/` so the runtime walk in
 # `src/core/torch_trt_loader.cpp` resolve_torchtrt_runtime_bin keeps
-# working when the blue pack lands in `Resources/torchtrt-runtime/bin/`.
+# working when the dynamic pack lands in `Resources/torchtrt-runtime/bin/`.
 PACKS = {
     "green-models": {
-        "label": "Green pack (ONNX models)",
+        "label": "Green pack - dynamic TorchScript model",
         "component": "green",
         "dest_subdir": "models",
         "files": [
-            "onnx/fp16/corridorkey_fp16_512.onnx",
-            "onnx/fp16/corridorkey_fp16_1024.onnx",
-            "onnx/fp16/corridorkey_fp16_1536.onnx",
-            "onnx/fp16/corridorkey_fp16_2048.onnx",
-            "onnx/fp16_ctx/corridorkey_fp16_512_ctx.onnx",
-            "onnx/fp16_ctx/corridorkey_fp16_1024_ctx.onnx",
-            "onnx/fp16_ctx/corridorkey_fp16_1536_ctx.onnx",
-            "onnx/fp16_ctx/corridorkey_fp16_2048_ctx.onnx",
+            "torchtrt/dynamic-green/corridorkey_dynamic_green_fp16.ts",
         ],
     },
     "blue-models": {
@@ -65,9 +58,9 @@ PACKS = {
             "torchtrt/dynamic-blue/corridorkey_dynamic_blue_fp16.ts",
         ],
     },
-    "blue-runtime": {
-        "label": "Blue pack - runtime DLLs (LibTorch + CUDA + TensorRT)",
-        "component": "blue",
+    "torchtrt-runtime": {
+        "label": "TorchTRT runtime DLLs (LibTorch + CUDA + TensorRT)",
+        "component": "green",
         "dest_subdir": "torchtrt-runtime/bin",
         "is_archive": True,
         "extract": True,

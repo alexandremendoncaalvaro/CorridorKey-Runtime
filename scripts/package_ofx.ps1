@@ -19,7 +19,16 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $repoRoot "build\release"
 }
-$OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack "rtx"
+$profileContract = Get-CorridorKeyModelProfileContract -ModelProfile $ModelProfile
+$torchTrtOnlyRtx = (
+    $profileContract.bundle_track -eq "rtx" -and
+    $profileContract.backend_intent -eq "torchtrt"
+)
+if (-not $torchTrtOnlyRtx) {
+    $OrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -ExplicitRoot $OrtRoot -PreferredTrack "rtx"
+} else {
+    $OrtRoot = ""
+}
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $repoRoot "models"
 }
@@ -233,6 +242,47 @@ function Ensure-TensorRtCompiledContext {
     }
 }
 
+function Resolve-CudaToolkitBinDir {
+    $cudaContract = Get-CorridorKeyWindowsRtxBuildContract
+    $cudaVersion = $cudaContract.required_cuda_version
+    $cudaVersionTag = "v$cudaVersion"
+    $cudaVersionEnvVar = "CUDA_PATH_V" + ($cudaVersion -replace '\.', '_')
+    $cudaRoot = $env:CUDA_PATH
+    if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
+        $cudaRoot = [System.Environment]::GetEnvironmentVariable($cudaVersionEnvVar)
+    }
+    if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
+        $cudaRoot = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\$cudaVersionTag"
+    }
+    return Join-Path $cudaRoot "bin"
+}
+
+function Copy-CudaToolkitRuntimeDlls {
+    param(
+        [string]$DestinationDir,
+        [switch]$IncludeCudaRuntime
+    )
+
+    $cudaBin = Resolve-CudaToolkitBinDir
+    $cudaDllNames = @()
+    if ($IncludeCudaRuntime.IsPresent) {
+        $cudaDllNames += "cudart64_12.dll"
+    }
+    $cudaDllNames += @("nppc64_12.dll", "nppial64_12.dll", "nppidei64_12.dll", "nppig64_12.dll")
+
+    foreach ($dllName in $cudaDllNames) {
+        $dllPath = Join-Path $cudaBin $dllName
+        if (-not (Test-Path $dllPath)) {
+            $cudaContract = Get-CorridorKeyWindowsRtxBuildContract
+            $cudaVersion = $cudaContract.required_cuda_version
+            $cudaVersionEnvVar = "CUDA_PATH_V" + ($cudaVersion -replace '\.', '_')
+            throw "Required CUDA DLL not found: $dllPath (set CUDA_PATH or $cudaVersionEnvVar to the CUDA $cudaVersion install root, per the build contract)."
+        }
+        Copy-Item $dllPath $DestinationDir -Force
+    }
+    Write-Host "Copied CUDA Toolkit DLLs: $($cudaDllNames -join ', ')"
+}
+
 if (Test-Path $OutputDir) {
     Remove-Item $OutputDir -Recurse -Force
 }
@@ -248,129 +298,87 @@ Copy-Item $pluginBinary $win64Dir -Force
 Copy-Item $cliBinary $win64Dir -Force
 Copy-Item $runtimeServerBinary $win64Dir -Force
 
-Write-Host "Staging ONNX Runtime core DLLs from $OrtRoot" -ForegroundColor Cyan
-Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
-Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
-Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir | Out-Null
+$tensorrtProvider = $null
+$cudaProvider = $null
+if ($torchTrtOnlyRtx) {
+    Write-Host "Skipping ONNX Runtime staging for TorchTRT-only Windows RTX package." -ForegroundColor Cyan
+} else {
+    Write-Host "Staging ONNX Runtime core DLLs from $OrtRoot" -ForegroundColor Cyan
+    Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $win64Dir
+    Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $win64Dir
+    Copy-OrtDllIfPresent -Root $OrtRoot -Name "DirectML.dll" -DestinationDir $win64Dir | Out-Null
 
-$isRtxRuntime = $OrtRoot -match "rtx"
+    $isRtxRuntime = $OrtRoot -match "rtx"
 
-$copiedOptionalGpuProvider = $false
-foreach ($provider in @(
-        "onnxruntime_providers_winml.dll",
-        "onnxruntime_providers_openvino.dll"
-    )) {
-    if (Copy-OrtDllIfPresent -Root $OrtRoot -Name $provider -DestinationDir $win64Dir) {
-        Write-Host "Copied optional runtime DLL: $provider"
-        $copiedOptionalGpuProvider = $true
-    }
-}
-if (-not $copiedOptionalGpuProvider) {
-    # Check if DirectML is available even if no separate provider DLL exists
-    # (since it can be built into onnxruntime.dll in some packages)
-    $supportedBackends = Get-RuntimeSupportedBackends -RuntimeDir $win64Dir
-    $hasOptionalGpuRuntime = $supportedBackends -contains "dml" -or
-        $supportedBackends -contains "winml" -or
-        $supportedBackends -contains "openvino"
-    if (-not $hasOptionalGpuRuntime) {
-        if (Test-Path (Join-Path $win64Dir "DirectML.dll")) {
-             Write-Host "DirectML.dll is present, assuming DirectML support is built into onnxruntime.dll"
-             $hasOptionalGpuRuntime = $true
+    $copiedOptionalGpuProvider = $false
+    foreach ($provider in @(
+            "onnxruntime_providers_winml.dll",
+            "onnxruntime_providers_openvino.dll"
+        )) {
+        if (Copy-OrtDllIfPresent -Root $OrtRoot -Name $provider -DestinationDir $win64Dir) {
+            Write-Host "Copied optional runtime DLL: $provider"
+            $copiedOptionalGpuProvider = $true
         }
     }
+    if (-not $copiedOptionalGpuProvider) {
+        $supportedBackends = Get-RuntimeSupportedBackends -RuntimeDir $win64Dir
+        $hasOptionalGpuRuntime = $supportedBackends -contains "dml" -or
+            $supportedBackends -contains "winml" -or
+            $supportedBackends -contains "openvino"
+        if (-not $hasOptionalGpuRuntime) {
+            if (Test-Path (Join-Path $win64Dir "DirectML.dll")) {
+                 Write-Host "DirectML.dll is present, assuming DirectML support is built into onnxruntime.dll"
+                 $hasOptionalGpuRuntime = $true
+            }
+        }
 
-    if (-not $hasOptionalGpuRuntime) {
-        if ($isRtxRuntime) {
-            Write-Host "RTX runtime intentionally omits DirectML/WinML/OpenVINO provider support." -ForegroundColor Cyan
+        if (-not $hasOptionalGpuRuntime) {
+            if ($isRtxRuntime) {
+                Write-Host "RTX runtime intentionally omits DirectML/WinML/OpenVINO provider support." -ForegroundColor Cyan
+            } else {
+                Write-Host "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot." -ForegroundColor Cyan
+            }
         } else {
-            Write-Host "No DirectML/WinML/OpenVINO runtime path was detected after staging $OrtRoot." -ForegroundColor Cyan
-        }
-    } else {
-        Write-Host "Detected packaged optional GPU backend(s): $($supportedBackends -join ', ')"
+            Write-Host "Detected packaged optional GPU backend(s): $($supportedBackends -join ', ')"
+            Write-Host "Validating packaged backends loadability..." -ForegroundColor Cyan
+            $cliPath = Join-Path $win64Dir "corridorkey.exe"
+            if (Test-Path $cliPath) {
+                $envPathOld = $env:PATH
+                try {
+                    $env:PATH = "$win64Dir;$envPathOld"
+                    $requiredBackend = if ($isRtxRuntime) { "tensorrt" } else { "dml" }
 
-        # Validate the staged bundle with the staged DLL set, not the developer machine.
-        Write-Host "Validating packaged backends loadability..." -ForegroundColor Cyan
-        $cliPath = Join-Path $win64Dir "corridorkey.exe"
-        if (Test-Path $cliPath) {
-            $envPathOld = $env:PATH
-            try {
-                # Temporarily add staging dir to PATH so it finds the DLLs
-                $env:PATH = "$win64Dir;$envPathOld"
-                $requiredBackend = if ($isRtxRuntime) { "tensorrt" } else { "dml" }
-
-                if (Test-RuntimeBackendSupport -RuntimeDir $win64Dir -RequiredBackend $requiredBackend) {
-                    Write-Host "[VERIFIED] $requiredBackend backend is functional in the package." -ForegroundColor Green
-                } else {
-                    throw "CRITICAL: Backend validation failed! 'corridorkey info --json' does not report $requiredBackend as supported."
+                    if (Test-RuntimeBackendSupport -RuntimeDir $win64Dir -RequiredBackend $requiredBackend) {
+                        Write-Host "[VERIFIED] $requiredBackend backend is functional in the package." -ForegroundColor Green
+                    } else {
+                        throw "CRITICAL: Backend validation failed! 'corridorkey info --json' does not report $requiredBackend as supported."
+                    }
+                } finally {
+                    $env:PATH = $envPathOld
                 }
-            } finally {
-                $env:PATH = $envPathOld
             }
         }
     }
+
+    $tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nv_tensorrt_rtx.dll"
+    if (-not $tensorrtProvider) {
+        $tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nvtensorrtrtx.dll"
+    }
+    $cudaProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_cuda.dll"
+    if ($tensorrtProvider) {
+        Copy-Item $tensorrtProvider $win64Dir -Force
+        $onnxParserDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_onnxparser_rtx_*.dll" -DestinationDir $win64Dir
+        $runtimeDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_rtx_*.dll" -DestinationDir $win64Dir
+        Write-Host "Copied TensorRT-RTX support DLLs: $onnxParserDll, $runtimeDll"
+    }
+    if ($cudaProvider) {
+        Copy-Item $cudaProvider $win64Dir -Force
+    }
 }
 
-$tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nv_tensorrt_rtx.dll"
-if (-not $tensorrtProvider) {
-    $tensorrtProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_nvtensorrtrtx.dll"
-}
-$cudaProvider = Resolve-OrtDllPath -Root $OrtRoot -Name "onnxruntime_providers_cuda.dll"
-if ($tensorrtProvider) {
-    Copy-Item $tensorrtProvider $win64Dir -Force
-    $onnxParserDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_onnxparser_rtx_*.dll" -DestinationDir $win64Dir
-    $runtimeDll = Copy-OrtDllByPattern -Root $OrtRoot -Pattern "tensorrt_rtx_*.dll" -DestinationDir $win64Dir
-    Write-Host "Copied TensorRT-RTX support DLLs: $onnxParserDll, $runtimeDll"
-}
-if ($cudaProvider) {
-    Copy-Item $cudaProvider $win64Dir -Force
-}
-
-$requiresCudaRuntime = ($null -ne $tensorrtProvider) -or ($null -ne $cudaProvider)
+$requiresCudaRuntime = $torchTrtOnlyRtx -or ($null -ne $tensorrtProvider) -or ($null -ne $cudaProvider)
 if ($requiresCudaRuntime) {
-    $cudartCandidates = @()
-    $rootBin = Join-Path $OrtRoot "bin"
-    $rootLib = Join-Path $OrtRoot "lib"
-    foreach ($candidateDir in @($OrtRoot, $rootBin, $rootLib)) {
-        if (Test-Path $candidateDir) {
-            $cudartCandidates += Get-ChildItem -Path $candidateDir -Filter "cudart64_*.dll" -File -ErrorAction SilentlyContinue
-        }
-    }
-    if ($cudartCandidates.Count -eq 0) {
-        throw "Required CUDA runtime DLL not found (cudart64_*.dll)."
-    }
-    foreach ($candidate in $cudartCandidates) {
-        Copy-Item $candidate.FullName $win64Dir -Force
-    }
-
-    # The RTX pipeline links CUDA NPP (gpu_resize). NPP ships only as DLLs
-    # on Windows (no static libs), so we must bundle them or Resolve will
-    # silently fail to load the plugin on machines without a system CUDA
-    # install. The required CUDA Toolkit version is sourced from the build
-    # contract (Get-CorridorKeyWindowsRtxBuildContract.required_cuda_version)
-    # so a contract bump is the single source of truth and this script never
-    # drifts behind. The NPP DLL filename suffix _64_12 is the CUDA 12.x ABI
-    # tag, stable across all 12.x minor versions, so the names are constant.
-    $cudaContract = Get-CorridorKeyWindowsRtxBuildContract
-    $cudaVersion = $cudaContract.required_cuda_version
-    $cudaVersionTag = "v$cudaVersion"
-    $cudaVersionEnvVar = "CUDA_PATH_V" + ($cudaVersion -replace '\.', '_')
-    $cudaRoot = $env:CUDA_PATH
-    if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
-        $cudaRoot = [System.Environment]::GetEnvironmentVariable($cudaVersionEnvVar)
-    }
-    if ([string]::IsNullOrWhiteSpace($cudaRoot)) {
-        $cudaRoot = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\$cudaVersionTag"
-    }
-    $cudaBin = Join-Path $cudaRoot "bin"
-    $nppDllNames = @("nppc64_12.dll", "nppial64_12.dll", "nppidei64_12.dll", "nppig64_12.dll")
-    foreach ($nppName in $nppDllNames) {
-        $nppPath = Join-Path $cudaBin $nppName
-        if (-not (Test-Path $nppPath)) {
-            throw "Required CUDA NPP DLL not found: $nppPath (set CUDA_PATH or $cudaVersionEnvVar to the CUDA $cudaVersion install root, per the build contract)."
-        }
-        Copy-Item $nppPath $win64Dir -Force
-    }
-    Write-Host "Copied CUDA NPP DLLs: $($nppDllNames -join ', ')"
+    Copy-CudaToolkitRuntimeDlls -DestinationDir $win64Dir -IncludeCudaRuntime
 } else {
     Write-Host "Skipping CUDA runtime staging because no CUDA/TensorRT provider was found."
 }
@@ -431,7 +439,7 @@ if (-not (Test-Path $cmakeTorchTrtWrapper)) {
 Copy-Item $cmakeTorchTrtWrapper $torchTrtRuntimeDir -Force
 Write-Host "Copied TorchTRT wrapper DLL: corridorkey_torchtrt.dll"
 
-if ($null -ne $tensorrtProvider) {
+if (-not $torchTrtOnlyRtx -and $null -ne $tensorrtProvider) {
     Write-Host "Validating packaged TensorRT backend loadability..." -ForegroundColor Cyan
     $envPathOld = $env:PATH
     try {
@@ -450,7 +458,6 @@ $targetModels = Get-CorridorKeyOfxBundleTargetModels -ModelProfile $ModelProfile
 if ($Skip2048.IsPresent) {
     $targetModels = @($targetModels | Where-Object { $_ -ne "corridorkey_fp16_2048.onnx" })
 }
-$profileContract = Get-CorridorKeyModelProfileContract -ModelProfile $ModelProfile
 $modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
 $compiledContextModels = @()
 $expectedCompiledContextModels = Get-CorridorKeyExpectedCompiledContextModels `

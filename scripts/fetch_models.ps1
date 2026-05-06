@@ -3,21 +3,21 @@
     Downloads CorridorKey model files from Hugging Face Hub into the local models/ directory.
 
 .DESCRIPTION
-    Fetches the runtime model variants (ONNX, Torch-TensorRT TorchScript,
-    MLX, hint-tracker fixtures) from alexandrealvaro/CorridorKey into the
+    Fetches the runtime model variants (TorchScript, ONNX, MLX,
+    hint-tracker fixtures) from alexandrealvaro/CorridorKey into the
     local models/ directory. Training checkpoints (.pth) are pulled
     direct from the upstream nikopueringer/* repos and never republished
     by us.
 
-    INT8 ONNX models stay shipped for the browser experiment; the
-    OFX render path uses FP16 + TensorRT-RTX EP exclusively.
+    Windows RTX uses dynamic TorchTRT artifacts. ONNX profiles are reference
+    inputs for non-product comparisons and are not Windows RTX fallback paths.
 
 .PARAMETER Profile
     Model set to download:
-      windows-rtx           : FP16 ONNX models + Torch-TensorRT TorchScript engines (default)
+      windows-rtx           : Dynamic green and blue TorchScript models (default)
       windows-rtx-blue      : Dedicated CorridorKeyBlue dynamic TorchScript (.ts) model for blue-screen plates
       windows-turing-source : Reference FP16 ONNX ladder + upstream green training checkpoint
-      windows-all           : FP16 + FP16 context ONNX models + Torch-TensorRT (green and blue)
+      windows-all           : Dynamic TorchScript models + green ONNX reference artifacts
       apple                 : MLX safetensors + bridge files
       pytorch               : Upstream green and blue training checkpoints (from nikopueringer/*)
       hint-tracker          : MobileSAM + Cutie auxiliary fixtures for alpha-hint generation
@@ -74,14 +74,11 @@ $hfBaseUrl = "https://huggingface.co/$HfRepo/resolve/$Revision"
 $hfUpstreamGreenBaseUrl = "https://huggingface.co/$HfUpstreamGreenRepo/resolve/$Revision"
 $hfUpstreamBlueBaseUrl = "https://huggingface.co/$HfUpstreamBlueRepo/resolve/$Revision"
 
-$windowsRtxFiles = @{
-    "onnx/fp16/corridorkey_fp16_512.onnx"   = "corridorkey_fp16_512.onnx"
-    "onnx/fp16/corridorkey_fp16_1024.onnx"  = "corridorkey_fp16_1024.onnx"
-    "onnx/fp16/corridorkey_fp16_1536.onnx"  = "corridorkey_fp16_1536.onnx"
-    "onnx/fp16/corridorkey_fp16_2048.onnx"  = "corridorkey_fp16_2048.onnx"
+$windowsRtxGreenFiles = @{
+    "torchtrt/dynamic-green/corridorkey_dynamic_green_fp16.ts" = "corridorkey_dynamic_green_fp16.ts"
 }
 
-# The blue Windows RTX pack is a single dynamic TorchScript artifact.
+# The Windows RTX packs are single dynamic TorchScript artifacts.
 # Keep this filename aligned with src/app/runtime_contracts.cpp and
 # src/plugins/ofx/ofx_model_selection.hpp.
 $windowsRtxBlueFiles = @{
@@ -145,11 +142,8 @@ $filesToDownloadBlueUpstream = @{}
 
 switch ($Profile) {
     "windows-rtx" {
-        $filesToDownload = $windowsRtxFiles.Clone()
-        foreach ($entry in $windowsTorchTensorRtFiles.GetEnumerator()) {
-            $filesToDownload[$entry.Key] = $entry.Value
-        }
-        foreach ($entry in $hintTrackerFiles.GetEnumerator()) {
+        $filesToDownload = $windowsRtxGreenFiles.Clone()
+        foreach ($entry in $windowsRtxBlueFiles.GetEnumerator()) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
     }
@@ -161,17 +155,17 @@ switch ($Profile) {
         $filesToDownloadGreenUpstream = $upstreamGreenCheckpointFiles.Clone()
     }
     "windows-all" {
-        $filesToDownload = $windowsRtxFiles.Clone()
+        $filesToDownload = $windowsRtxGreenFiles.Clone()
+        foreach ($entry in $windowsRtxBlueFiles.GetEnumerator()) {
+            $filesToDownload[$entry.Key] = $entry.Value
+        }
+        foreach ($entry in $windowsTuringSourceFiles.GetEnumerator()) {
+            $filesToDownload[$entry.Key] = $entry.Value
+        }
         foreach ($entry in $windowsCtxFiles.GetEnumerator()) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
         foreach ($entry in $windowsTorchTensorRtFiles.GetEnumerator()) {
-            $filesToDownload[$entry.Key] = $entry.Value
-        }
-        foreach ($entry in $hintTrackerFiles.GetEnumerator()) {
-            $filesToDownload[$entry.Key] = $entry.Value
-        }
-        foreach ($entry in $windowsRtxBlueFiles.GetEnumerator()) {
             $filesToDownload[$entry.Key] = $entry.Value
         }
     }
@@ -189,7 +183,7 @@ switch ($Profile) {
         $filesToDownload = $hintTrackerFiles.Clone()
     }
     "all" {
-        foreach ($table in @($windowsRtxFiles, $windowsCtxFiles, $windowsTorchTensorRtFiles,
+        foreach ($table in @($windowsRtxGreenFiles, $windowsTuringSourceFiles, $windowsCtxFiles, $windowsTorchTensorRtFiles,
                              $windowsRtxBlueFiles, $appleFiles, $hintTrackerFiles)) {
             foreach ($entry in $table.GetEnumerator()) {
                 $filesToDownload[$entry.Key] = $entry.Value

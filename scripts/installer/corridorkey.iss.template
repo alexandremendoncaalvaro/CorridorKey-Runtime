@@ -18,9 +18,9 @@
 ;             bundled and installed; no network access during install.
 ;
 ; ONLINE keeps component selection so a green-only operator can avoid
-; the blue runtime download. OFFLINE is complete by construction: all
-; available packs are fixed and installed. arm_torchtrt_runtime in
-; src/core/torch_trt_loader.cpp walks for blue runtime DLLs at
+; the optional blue model download. OFFLINE is complete by construction:
+; all available packs are fixed and installed. arm_torchtrt_runtime in
+; src/core/torch_trt_loader.cpp walks for TorchTRT runtime DLLs at
 ; <install>/Contents/Resources/torchtrt-runtime/bin/ regardless of
 ; how the bytes got there.
 ;
@@ -105,7 +105,7 @@ Compression=lzma2/ultra
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
 
-; The blue-runtime pack ships as a 7z archive that the installer
+; The TorchTRT runtime pack ships as a 7z archive that the installer
 ; extracts on disk via the `extractarchive` flag in [Files]. The
 ; default ArchiveExtraction value ("basic") only handles ZIP, so 7z
 ; payload extraction requires the "full" extractor (which Inno Setup
@@ -134,25 +134,25 @@ Name: "custom"; Description: "Custom"; Flags: iscustom
 
 [Components]
 ; Plugin base is always installed - it is the OFX bundle the host
-; loads, plus the green-track ONNX Runtime DLLs that ship in every
-; flavor. The fixed flag prevents the user from unchecking it.
+; loads, plus the runtime server binaries that ship in every flavor.
+; The fixed flag prevents the user from unchecking it.
 #if Flavor == "offline"
-Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
+Name: "pluginbase"; Description: "Base OFX plugin (CLI + runtime server)"; \
     Types: complete; Flags: fixed
 
-Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+Name: "green"; Description: "Green pack - dynamic model and TorchTRT runtime (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
     Types: complete; Flags: fixed
 
-Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+Name: "blue"; Description: "Blue pack - dynamic model (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
     Types: complete; Flags: fixed
 #else
-Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
+Name: "pluginbase"; Description: "Base OFX plugin (CLI + runtime server)"; \
     Types: minimum recommended custom; Flags: fixed
 
-Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
-    Types: minimum recommended custom
+Name: "green"; Description: "Green pack - dynamic model and TorchTRT runtime (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+    Types: minimum recommended custom; Flags: fixed
 
-Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+Name: "blue"; Description: "Blue pack - dynamic model (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
     Types: recommended custom
 #endif
 
@@ -167,12 +167,12 @@ Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Per-build wrapper DLL (corridorkey_torchtrt.dll) ships next to the
-; rest of the runtime DLLs of the blue pack. It is built from this
+; rest of the runtime DLLs of the TorchTRT pack. It is built from this
 ; repo and changes per commit, so it ships from the plugin payload
 ; instead of the upstream HF runtime archive.
 Source: "{#PluginPayloadDir}\Contents\Resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll"; \
     DestDir: "{app}\Contents\Resources\torchtrt-runtime\bin"; \
-    Components: blue; \
+    Components: green; \
     Flags: ignoreversion
 
 #if Flavor == "offline"
@@ -230,7 +230,7 @@ Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
 //     the sha256 baked into the page's Add() call so Inno Setup verifies
 //     integrity before the file leaves the temp dir.
 //   - Aborts the install on download or hash failure (no silent
-//     fallback - a partial install of the blue pack would surface
+//     fallback - a partial install of the TorchTRT pack would surface
 //     as opaque DLL load failures at runtime).
 //
 // Offline flavor:
@@ -243,9 +243,9 @@ Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
 // https://raw.githubusercontent.com/jrsoftware/issrc/main/Examples/CodeDownloadFiles.iss
 
 const
-  BLUE_RUNTIME_SHA256 = '@@BLUE_RUNTIME_SHA256@@';
-  BLUE_RUNTIME_INSTALLED_SIZE_BYTES = @@BLUE_RUNTIME_INSTALLED_SIZE_BYTES@@;
-  BLUE_RUNTIME_INSTALLED_FILE_COUNT = @@BLUE_RUNTIME_INSTALLED_FILE_COUNT@@;
+  TORCHTRT_RUNTIME_SHA256 = '@@TORCHTRT_RUNTIME_SHA256@@';
+  TORCHTRT_RUNTIME_INSTALLED_SIZE_BYTES = @@TORCHTRT_RUNTIME_INSTALLED_SIZE_BYTES@@;
+  TORCHTRT_RUNTIME_INSTALLED_FILE_COUNT = @@TORCHTRT_RUNTIME_INSTALLED_FILE_COUNT@@;
 
 procedure StopProcessByImageName(const ImageName: String);
 var
@@ -307,32 +307,32 @@ begin
   end;
 end;
 
-function CorridorKeyBlueRuntimeBinPath: String;
+function CorridorKeyTorchTrtRuntimeBinPath: String;
 begin
   Result := ExpandConstant('{app}\Contents\Resources\torchtrt-runtime\bin');
 end;
 
-function CorridorKeyBlueRuntimeMarkerPath: String;
+function CorridorKeyTorchTrtRuntimeMarkerPath: String;
 begin
-  Result := CorridorKeyBlueRuntimeBinPath + '\corridorkey_blue_runtime.sha256';
+  Result := CorridorKeyTorchTrtRuntimeBinPath + '\corridorkey_torchtrt_runtime.sha256';
 end;
 
-function CorridorKeyBlueRuntimeMarkerMatches: Boolean;
+function CorridorKeyTorchTrtRuntimeMarkerMatches: Boolean;
 var
   MarkerValue: AnsiString;
 begin
-  Result := LoadStringFromFile(CorridorKeyBlueRuntimeMarkerPath, MarkerValue) and
-    (CompareText(Trim(String(MarkerValue)), BLUE_RUNTIME_SHA256) = 0);
+  Result := LoadStringFromFile(CorridorKeyTorchTrtRuntimeMarkerPath, MarkerValue) and
+    (CompareText(Trim(String(MarkerValue)), TORCHTRT_RUNTIME_SHA256) = 0);
 end;
 
-function CorridorKeyBlueRuntimeFilesMatch: Boolean;
+function CorridorKeyTorchTrtRuntimeFilesMatch: Boolean;
 var
   FindRec: TFindRec;
   FileCount: Integer;
   TotalBytes: Int64;
   RuntimeBinPath: String;
 begin
-  RuntimeBinPath := CorridorKeyBlueRuntimeBinPath;
+  RuntimeBinPath := CorridorKeyTorchTrtRuntimeBinPath;
   FileCount := 0;
   TotalBytes := 0;
 
@@ -353,19 +353,19 @@ begin
     FileExists(RuntimeBinPath + '\torch_cuda.dll') and
     FileExists(RuntimeBinPath + '\torchtrt.dll') and
     FileExists(RuntimeBinPath + '\nvinfer_10.dll') and
-    (FileCount = BLUE_RUNTIME_INSTALLED_FILE_COUNT) and
-    (TotalBytes = BLUE_RUNTIME_INSTALLED_SIZE_BYTES);
+    (FileCount = TORCHTRT_RUNTIME_INSTALLED_FILE_COUNT) and
+    (TotalBytes = TORCHTRT_RUNTIME_INSTALLED_SIZE_BYTES);
 end;
 
-function CorridorKeyBlueRuntimeCacheValid: Boolean;
+function CorridorKeyTorchTrtRuntimeCacheValid: Boolean;
 begin
-  Result := CorridorKeyBlueRuntimeMarkerMatches or CorridorKeyBlueRuntimeFilesMatch;
+  Result := CorridorKeyTorchTrtRuntimeMarkerMatches or CorridorKeyTorchTrtRuntimeFilesMatch;
 end;
 
-procedure CorridorKeyWriteBlueRuntimeCacheMarker;
+procedure CorridorKeyWriteTorchTrtRuntimeCacheMarker;
 begin
-  if CorridorKeyBlueRuntimeFilesMatch then begin
-    SaveStringToFile(CorridorKeyBlueRuntimeMarkerPath, BLUE_RUNTIME_SHA256, False);
+  if CorridorKeyTorchTrtRuntimeFilesMatch then begin
+    SaveStringToFile(CorridorKeyTorchTrtRuntimeMarkerPath, TORCHTRT_RUNTIME_SHA256, False);
   end;
 end;
 
@@ -415,7 +415,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
     UpdateCorridorKeyPath('Install');
-    CorridorKeyWriteBlueRuntimeCacheMarker;
+    CorridorKeyWriteTorchTrtRuntimeCacheMarker;
     ClearHostOfxCaches;
   end;
 end;
