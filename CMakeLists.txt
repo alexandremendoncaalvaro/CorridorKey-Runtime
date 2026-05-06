@@ -13,7 +13,7 @@ if(WIN32)
 endif()
 
 project(CorridorKey-Runtime
-    VERSION 0.8.4
+    VERSION 0.8.5
     DESCRIPTION "High-performance C++ inference runtime for CorridorKey"
     LANGUAGES CXX
 )
@@ -65,6 +65,7 @@ if(WIN32 AND MSVC)
             "${CORRIDORKEY_WINDOWS_UM_LIB_DIR}"
         )
     endfunction()
+
 endif()
 
 function(corridorkey_apply_windows_common_compile_defs target_name)
@@ -337,10 +338,11 @@ if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime-windows-rtx"
     endif()
 endif()
 
-# Optional Windows TorchTRT runtime payload (blue-pack backend, Sprint 1).
+# Optional Windows TorchTRT runtime payload.
 # Staged by `scripts/windows.ps1 -Task prepare-torchtrt`. Absence is fine —
 # blocks below in src/core only enable the TorchTrtSession when the imported
-# targets are defined, so green continues to build with ONNX→TRT-RTX EP only.
+# targets are defined, so non-TorchTRT provider hooks continue to build without
+# loading LibTorch.
 if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/torchtrt-windows")
     set(_corridorkey_torchtrt_root "${CMAKE_CURRENT_SOURCE_DIR}/vendor/torchtrt-windows")
     set(_corridorkey_torchtrt_bin "${_corridorkey_torchtrt_root}/bin")
