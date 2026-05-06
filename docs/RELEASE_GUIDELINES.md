@@ -348,7 +348,7 @@ preprocessor define:
 
 | Flavor    | Size  | Network at install time | When to use |
 |-----------|-------|-------------------------|-------------|
-| `online`  | ~85 MB | Required | Default. Stub installer downloads selected packs from Hugging Face with SHA256 verification. Recommended setup selects every available pack by default; custom setup can opt down to Green only. |
+| `online`  | ~85 MB | Required | Default. Stub installer downloads selected packs from Hugging Face with SHA256 verification. Recommended setup selects every available pack by default; custom setup can opt down to Green only or Blue only, but cannot proceed without a model pack. |
 | `offline` | ~7 GB  | None     | Air-gapped or low-bandwidth installs. Every available pack is pre-bundled inside the .exe and installed; the component page is skipped. |
 
 Local release validation builds use the `online` flavor. The wrapper defaults
@@ -359,11 +359,13 @@ publish the online flavor only; the release pipeline rejects `-PublishGithub`
 unless `online` is selected.
 
 Component selection differs by transport. The online flavor keeps component
-selection so a green-only operator can avoid the optional blue model download,
-while the recommended setup downloads every currently available pack. The
-offline flavor is complete by construction: every available pack is bundled
-and fixed for install. The Tauri GUI is a separate desktop installer surface
-and is not an OFX installer component.
+selection so an operator can install Green only, Blue only, or both model
+packs. The shared TorchTRT runtime pack is fixed, screen-color neutral, and
+installed whenever at least one model pack is selected. The online component
+page cannot advance with zero model packs selected. The offline flavor is
+complete by construction: every available pack is bundled and fixed for
+install. The Tauri GUI is a separate desktop installer surface and is not an
+OFX installer component.
 
 The modern installer treats selected model packs and the TorchTRT runtime pack
 as immutable caches keyed by the manifest SHA256. When a selected pack file
@@ -417,7 +419,7 @@ packaging flow requires:
 
 - the packaged `corridorkey_dynamic_green_fp16.ts` and
   `corridorkey_dynamic_blue_fp16.ts` files
-- the packaged TorchTRT runtime bundle
+- the packaged screen-color-neutral TorchTRT runtime bundle
 - a matching `artifact_manifest.json` written from the certification report
 
 If that manifest is absent or does not match the packaged RTX artifacts,

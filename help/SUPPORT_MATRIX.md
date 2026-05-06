@@ -111,10 +111,10 @@ product support tracks unless they are explicitly packaged and validated.
 
 **Windows RTX installer policy:**
 - `Windows RTX` is the official Windows installer for NVIDIA RTX 30 series and
-  newer. It packages one dynamic green TorchTRT model, one dynamic blue
-  TorchTRT model when the blue pack is selected, and the TorchTRT runtime.
-  ONNX Runtime DLLs, INT8 ONNX artifacts, and CPU rendering are not shipped as
-  Windows RTX fallback paths.
+  newer. It installs the fixed TorchTRT runtime plus the selected dynamic
+  green model pack, dynamic blue model pack, or both. ONNX Runtime DLLs, INT8
+  ONNX artifacts, and CPU rendering are not shipped as Windows RTX fallback
+  paths.
 - In `Auto`, `Windows RTX` resolves to the same dynamic model artifact and
   passes the selected quality as a runtime resolution.
 - In fixed modes, `Windows RTX` uses the selected quality as the runtime
@@ -246,8 +246,8 @@ The canonical CorridorKey model, trained on green screen plates.
 | 1536px | Dynamic artifact | Validated | Officially supported |
 | 2048px | Dynamic artifact | Validated | Officially supported |
 
-Green packs are part of every official Windows RTX and macOS Apple Silicon
-installer.
+Green packs are selected by default in the Windows RTX online installer and
+remain part of every macOS Apple Silicon installer.
 
 ### Blue model variant
 
@@ -287,9 +287,9 @@ the requested quality path; it does not substitute a lower blue resolution.
 
 ### Pack distribution
 
-Model packs are selectable. The installer or first-run flow lets the user
-choose green only or green plus blue. Green is the base Windows RTX pack
-because it carries the primary model and TorchTRT runtime. Packs not selected
-at install time can be added later through the same flow. Missing packs
-surface as missing artifacts in `corridorkey doctor`, with the canonical
-Hugging Face download location attached.
+Model packs are selectable. The Windows RTX online installer lets the user
+choose green only, blue only, or both, and refuses an install with zero model
+packs. The TorchTRT runtime is a fixed shared pack and is not tied to a screen
+color. Packs not selected at install time can be added later through the same
+flow. Missing packs surface as missing artifacts in `corridorkey doctor`, with
+the canonical Hugging Face download location attached.

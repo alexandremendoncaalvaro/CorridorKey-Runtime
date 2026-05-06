@@ -64,18 +64,23 @@ PACKS = {
         "dest_subdir": "torchtrt-runtime/bin",
         "is_archive": True,
         "extract": True,
-        "files": [
-            # Single 7z bundle containing the curated TorchTRT runtime
-            # DLLs. Built from
-            # vendor/torchtrt-windows/bin/ excluding our per-build
-            # wrapper corridorkey_torchtrt.dll (which ships inside the
-            # installer Win64 dir directly because it changes per build).
-            "torchtrt/runtime/corridorkey_blue_torchtrt_runtime.7z",
-        ],
+        "files": ["torchtrt/runtime/corridorkey_torchtrt_runtime.7z"],
         "installed_size_bytes": 5011471040,
         "installed_file_count": 41,
     },
 }
+
+
+def pack_file_remote_path(file_spec: str | dict[str, str]) -> str:
+    if isinstance(file_spec, dict):
+        return file_spec["remote_path"]
+    return file_spec
+
+
+def pack_file_filename(file_spec: str | dict[str, str]) -> str:
+    if isinstance(file_spec, dict):
+        return file_spec.get("filename") or pack_file_remote_path(file_spec).rsplit("/", 1)[-1]
+    return file_spec.rsplit("/", 1)[-1]
 
 
 def main() -> int:
@@ -89,17 +94,19 @@ def main() -> int:
     }
 
     for pack_name, pack_meta in PACKS.items():
-        paths = pack_meta["files"]
+        paths = [pack_file_remote_path(file_spec) for file_spec in pack_meta["files"]]
         print(f"[{pack_name}] querying {len(paths)} files ...", flush=True)
         info_list = api.get_paths_info(REPO, paths, revision=REVISION)
         found = {info.path: info for info in info_list}
         entries = []
-        for path in paths:
+        for file_spec in pack_meta["files"]:
+            path = pack_file_remote_path(file_spec)
+            filename = pack_file_filename(file_spec)
             info = found.get(path)
             if info is None or info.lfs is None:
                 entries.append({
                     "remote_path": path,
-                    "filename": path.rsplit("/", 1)[-1],
+                    "filename": filename,
                     "url": None,
                     "sha256": None,
                     "size_bytes": None,
@@ -109,7 +116,7 @@ def main() -> int:
                 continue
             entries.append({
                 "remote_path": path,
-                "filename": path.rsplit("/", 1)[-1],
+                "filename": filename,
                 "url": hf_hub_url(REPO, path, revision=REVISION),
                 "sha256": info.lfs.sha256,
                 "size_bytes": info.size,

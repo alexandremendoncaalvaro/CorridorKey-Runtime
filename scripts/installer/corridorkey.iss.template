@@ -514,6 +514,16 @@ function NextButtonClick(CurPageID: Integer): Boolean;
 var
   ErrorMessage: String;
 begin
+  if CurPageID = wpSelectComponents then begin
+    if not WizardIsComponentSelected('green') and not WizardIsComponentSelected('blue') then begin
+      SuppressibleMsgBox(
+        'Select at least one model pack: Green, Blue, or both.',
+        mbError, MB_OK, IDOK);
+      Result := False;
+      Exit;
+    end;
+  end;
+
   if CurPageID = wpReady then begin
     DownloadPage.Clear;
     CorridorKeyResetDownloadPlan;
