@@ -287,30 +287,37 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         const DynamicPadding padding = dynamic_padding_for_input(width, height, dynamic_resolution);
         const int inference_width = padding.width;
         const int inference_height = padding.height;
-        // Pack RGB + hint into (1, 4, H, W) channel-first before CUDA upload.
-        // RGB is interleaved (R,G,B,R,G,B,...) on host; we convert to planar.
-        auto host_input = torch::empty({1, 4, inference_height, inference_width}, torch::kFloat32);
-        const float* rgb_data = rgb.data.data();
-        const float* hint_data = alpha_hint.data.data();
-        auto* dst = host_input.data_ptr<float>();
-        const auto inference_plane =
-            static_cast<std::ptrdiff_t>(inference_width) * inference_height;
-        for (int y = 0; y < inference_height; ++y) {
-            const int src_y = reflect_index(y - padding.top, height);
-            for (int x = 0; x < inference_width; ++x) {
-                const int src_x = reflect_index(x - padding.left, width);
-                const auto dst_index = (static_cast<std::ptrdiff_t>(y) * inference_width) + x;
-                const auto reflected_index = (static_cast<std::ptrdiff_t>(src_y) * width) + src_x;
-                dst[(0 * inference_plane) + dst_index] = normalize_corridorkey_rgb(
-                    rgb_data[(reflected_index * 3) + 0], ModelRgbChannel::Red);
-                dst[(1 * inference_plane) + dst_index] = normalize_corridorkey_rgb(
-                    rgb_data[(reflected_index * 3) + 1], ModelRgbChannel::Green);
-                dst[(2 * inference_plane) + dst_index] = normalize_corridorkey_rgb(
-                    rgb_data[(reflected_index * 3) + 2], ModelRgbChannel::Blue);
-                dst[(3 * inference_plane) + dst_index] = hint_data[reflected_index];
+        torch::Tensor host_input;
+        common::measure_stage(on_stage, "torchtrt_prepare_pack", [&]() {
+            host_input =
+                torch::empty({1, 4, inference_height, inference_width}, torch::kFloat32);
+            const float* rgb_data = rgb.data.data();
+            const float* hint_data = alpha_hint.data.data();
+            auto* dst = host_input.data_ptr<float>();
+            const auto inference_plane =
+                static_cast<std::ptrdiff_t>(inference_width) * inference_height;
+            for (int y = 0; y < inference_height; ++y) {
+                const int src_y = reflect_index(y - padding.top, height);
+                for (int x = 0; x < inference_width; ++x) {
+                    const int src_x = reflect_index(x - padding.left, width);
+                    const auto dst_index =
+                        (static_cast<std::ptrdiff_t>(y) * inference_width) + x;
+                    const auto reflected_index =
+                        (static_cast<std::ptrdiff_t>(src_y) * width) + src_x;
+                    dst[(0 * inference_plane) + dst_index] = normalize_corridorkey_rgb(
+                        rgb_data[(reflected_index * 3) + 0], ModelRgbChannel::Red);
+                    dst[(1 * inference_plane) + dst_index] = normalize_corridorkey_rgb(
+                        rgb_data[(reflected_index * 3) + 1], ModelRgbChannel::Green);
+                    dst[(2 * inference_plane) + dst_index] = normalize_corridorkey_rgb(
+                        rgb_data[(reflected_index * 3) + 2], ModelRgbChannel::Blue);
+                    dst[(3 * inference_plane) + dst_index] = hint_data[reflected_index];
+                }
             }
-        }
-        auto cuda_input = host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype);
+        });
+        torch::Tensor cuda_input;
+        common::measure_stage(on_stage, "torchtrt_prepare_upload", [&]() {
+            cuda_input = host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype);
+        });
 
         torch::IValue raw_out;
         common::measure_stage(on_stage, "torchtrt_forward", [&]() {
