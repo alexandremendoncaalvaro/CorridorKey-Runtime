@@ -64,6 +64,7 @@ bool same_prepare_request(const app::OfxRuntimePrepareSessionRequest& lhs,
            lhs.artifact_name == rhs.artifact_name &&
            same_device_info(lhs.requested_device, rhs.requested_device) &&
            same_engine_options(lhs.engine_options, rhs.engine_options) &&
+           lhs.screen_color_mode == rhs.screen_color_mode &&
            lhs.requested_quality_mode == rhs.requested_quality_mode &&
            lhs.requested_resolution == rhs.requested_resolution &&
            lhs.effective_resolution == rhs.effective_resolution;
@@ -74,6 +75,7 @@ app::OfxRuntimeSessionSnapshot with_prepare_request_metadata(
     snapshot.model_path = request.model_path;
     snapshot.artifact_name = request.artifact_name;
     snapshot.requested_device = request.requested_device;
+    snapshot.screen_color_mode = request.screen_color_mode;
     snapshot.requested_quality_mode = request.requested_quality_mode;
     snapshot.requested_resolution = request.requested_resolution;
     snapshot.effective_resolution = request.effective_resolution;

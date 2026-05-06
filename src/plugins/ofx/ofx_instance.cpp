@@ -1016,13 +1016,14 @@ std::filesystem::path resolve_models_root() {
 
 app::OfxRuntimePrepareSessionRequest build_prepare_request(
     const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
-    int requested_quality_mode) {
+    int requested_quality_mode, std::string_view screen_color_mode) {
     app::OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = "quality_switch";
     request.model_path = selection.executable_model_path;
     request.artifact_name = selection.executable_model_path.filename().string();
     request.requested_device = requested_device;
     request.engine_options = ofx_engine_options(requested_device);
+    request.screen_color_mode = std::string(screen_color_mode);
     request.requested_quality_mode = requested_quality_mode;
     request.requested_resolution = selection.requested_resolution;
     request.effective_resolution = selection.effective_resolution;
@@ -1419,7 +1420,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height, QualityFallbackMode fallback_mode,
                                int coarse_resolution_override, RefinementMode refinement_mode,
-                               std::string_view screen_color) {
+                               std::string_view screen_color,
+                               std::string_view screen_color_mode) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +
@@ -1653,7 +1655,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                      "corridorkey_prepare_session");
         (void)progress_scope.update(kProgressInitialTick);
         auto prepare_result = data->runtime_client->prepare_session(
-            build_prepare_request(candidate_requested_device, selection, requested_quality_mode),
+            build_prepare_request(candidate_requested_device, selection, requested_quality_mode,
+                                  screen_color_mode),
             [&](const StageTiming& timing) {
                 log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
                                  candidate_requested_device, selection.executable_model_path,

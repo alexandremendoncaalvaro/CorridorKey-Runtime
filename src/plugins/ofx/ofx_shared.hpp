@@ -398,7 +398,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
                                int coarse_resolution_override = 0,
                                RefinementMode refinement_mode = RefinementMode::Auto,
-                               std::string_view screen_color = "green");
+                               std::string_view screen_color = "green",
+                               std::string_view screen_color_mode = "green");
 bool allow_unrestricted_quality_attempt_for_request(const InstanceData& data, int quality_mode,
                                                     const DeviceInfo& requested_device);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,

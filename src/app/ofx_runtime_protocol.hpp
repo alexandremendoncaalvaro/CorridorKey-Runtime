@@ -39,6 +39,7 @@ struct OfxRuntimePrepareSessionRequest {
     std::string artifact_name;
     DeviceInfo requested_device = {};
     EngineCreateOptions engine_options = {};
+    std::string screen_color_mode = "green";
     int requested_quality_mode = 0;
     int requested_resolution = 0;
     int effective_resolution = 0;
@@ -56,6 +57,7 @@ struct OfxRuntimeSessionSnapshot {
     DeviceInfo requested_device = {};
     DeviceInfo effective_device = {};
     std::optional<BackendFallbackInfo> backend_fallback;
+    std::string screen_color_mode = "green";
     int requested_quality_mode = 0;
     int requested_resolution = 0;
     int effective_resolution = 0;

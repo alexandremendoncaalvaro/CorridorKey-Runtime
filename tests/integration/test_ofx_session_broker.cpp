@@ -97,6 +97,54 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     CHECK(broker.active_session_count() == 0);
 }
 
+TEST_CASE("OFX session broker rejects mixed active screen color modes",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    OfxSessionBroker broker;
+
+    OfxRuntimePrepareSessionRequest green_request;
+    green_request.client_instance_id = "green_node";
+    green_request.model_path = model_path;
+    green_request.artifact_name = model_path.filename().string();
+    green_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    green_request.screen_color_mode = "green";
+    green_request.requested_quality_mode = 1;
+    green_request.requested_resolution = 512;
+    green_request.effective_resolution = 512;
+    green_request.engine_options.allow_cpu_fallback = false;
+    green_request.engine_options.disable_cpu_ep_fallback = true;
+
+    auto green_prepare = broker.prepare_session(green_request);
+    REQUIRE(green_prepare.has_value());
+    CHECK(green_prepare->session.screen_color_mode == "green");
+    CHECK(broker.active_session_count() == 1);
+
+    auto blue_request = green_request;
+    blue_request.client_instance_id = "blue_node";
+    blue_request.screen_color_mode = "blue";
+
+    auto mixed_prepare = broker.prepare_session(blue_request);
+    REQUIRE_FALSE(mixed_prepare.has_value());
+    CHECK(mixed_prepare.error().code == ErrorCode::InvalidParameters);
+    CHECK(mixed_prepare.error().message.find("active Green OFX session") != std::string::npos);
+    CHECK(mixed_prepare.error().message.find("Blue") != std::string::npos);
+    CHECK(broker.active_session_count() == 1);
+
+    auto release_res =
+        broker.release_session(OfxRuntimeReleaseSessionRequest{green_prepare->session.session_id});
+    REQUIRE(release_res.has_value());
+    CHECK(broker.active_session_count() == 0);
+
+    auto blue_prepare = broker.prepare_session(blue_request);
+    REQUIRE(blue_prepare.has_value());
+    CHECK(blue_prepare->session.screen_color_mode == "blue");
+}
+
 TEST_CASE("OFX session broker records broker writeback timing on render",
           "[integration][ofx][runtime][regression]") {
     const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";

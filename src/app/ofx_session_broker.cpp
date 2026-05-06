@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <filesystem>
 #include <future>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "../common/parallel_for.hpp"
@@ -51,6 +53,39 @@ std::chrono::steady_clock::time_point now() {
 
 Error broker_error(ErrorCode code, const std::string& message) {
     return Error{code, message};
+}
+
+std::string normalize_screen_color_mode(std::string_view value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const char ch : value) {
+        if (ch == '-' || ch == ' ') {
+            normalized.push_back('_');
+            continue;
+        }
+        normalized.push_back(
+            static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    if (normalized.empty() || normalized == "green") {
+        return "green";
+    }
+    if (normalized == "blue") {
+        return "blue";
+    }
+    if (normalized == "blue_green" || normalized == "blue_green_channel_swap") {
+        return "blue_green";
+    }
+    return {};
+}
+
+std::string screen_color_mode_display_name(std::string_view mode) {
+    if (mode == "blue") {
+        return "Blue";
+    }
+    if (mode == "blue_green") {
+        return "Blue-Green Channel Swap";
+    }
+    return "Green";
 }
 
 void append_timing(std::vector<StageTiming>& timings, const StageTiming& timing) {
@@ -169,6 +204,36 @@ OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options)
 Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     const OfxRuntimePrepareSessionRequest& request) {
     (void)cleanup_idle_sessions();
+    const std::string requested_screen_color_mode =
+        normalize_screen_color_mode(request.screen_color_mode);
+    if (requested_screen_color_mode.empty()) {
+        return Unexpected<Error>(broker_error(
+            ErrorCode::InvalidParameters,
+            "Unknown OFX Screen Color mode: " + request.screen_color_mode +
+                ". Expected Green, Blue, or Blue-Green Channel Swap."));
+    }
+
+    for (const auto& session : m_sessions) {
+        if (session.second.snapshot.ref_count == 0) {
+            continue;
+        }
+        std::string active_mode =
+            normalize_screen_color_mode(session.second.snapshot.screen_color_mode);
+        if (active_mode.empty()) {
+            active_mode = "green";
+        }
+        if (active_mode != requested_screen_color_mode) {
+            return Unexpected<Error>(broker_error(
+                ErrorCode::InvalidParameters,
+                "CorridorKey already has an active " +
+                    screen_color_mode_display_name(active_mode) +
+                    " OFX session in this runtime. Use the same Screen Color mode for every "
+                    "active CorridorKey node in the render flow, or release the active node "
+                    "before switching to " +
+                    screen_color_mode_display_name(requested_screen_color_mode) + "."));
+        }
+    }
+
     auto eviction_result = evict_idle_sessions_if_needed();
     if (!eviction_result) {
         return Unexpected<Error>(eviction_result.error());
@@ -234,6 +299,7 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.snapshot.model_path = request.model_path;
     entry.snapshot.artifact_name = detail::canonical_ofx_artifact_name(request.model_path);
     entry.snapshot.requested_device = request.requested_device;
+    entry.snapshot.screen_color_mode = requested_screen_color_mode;
     entry.snapshot.requested_quality_mode = request.requested_quality_mode;
     entry.snapshot.requested_resolution = request.requested_resolution;
     entry.snapshot.effective_resolution = request.effective_resolution;
@@ -387,7 +453,8 @@ std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest&
         canonical_model_path.string() + "|" +
         std::to_string(static_cast<int>(request.requested_device.backend)) + "|" +
         std::to_string(static_cast<int>(request.engine_options.allow_cpu_fallback)) + "|" +
-        std::to_string(static_cast<int>(request.engine_options.disable_cpu_ep_fallback))));
+        std::to_string(static_cast<int>(request.engine_options.disable_cpu_ep_fallback)) + "|" +
+        normalize_screen_color_mode(request.screen_color_mode)));
 }
 
 std::vector<StageTiming> OfxSessionBroker::collect_stage_timings(StageTimingCallback& callback) {

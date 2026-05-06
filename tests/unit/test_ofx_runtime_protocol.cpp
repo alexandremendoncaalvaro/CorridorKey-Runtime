@@ -29,6 +29,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     prepare_request.requested_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
     prepare_request.engine_options.allow_cpu_fallback = false;
     prepare_request.engine_options.disable_cpu_ep_fallback = true;
+    prepare_request.screen_color_mode = "blue_green";
     prepare_request.requested_quality_mode = 2;
     prepare_request.requested_resolution = 1024;
     prepare_request.effective_resolution = 1024;
@@ -42,6 +43,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     CHECK(parsed_prepare->requested_device.backend == Backend::TensorRT);
     CHECK_FALSE(parsed_prepare->engine_options.allow_cpu_fallback);
     CHECK(parsed_prepare->engine_options.disable_cpu_ep_fallback);
+    CHECK(parsed_prepare->screen_color_mode == "blue_green");
     CHECK(parsed_prepare->prepare_timeout_ms == 45000);
 
     OfxRuntimeSessionSnapshot snapshot;
@@ -50,6 +52,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     snapshot.artifact_name = prepare_request.artifact_name;
     snapshot.requested_device = prepare_request.requested_device;
     snapshot.effective_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
+    snapshot.screen_color_mode = prepare_request.screen_color_mode;
     snapshot.backend_fallback =
         BackendFallbackInfo{Backend::TensorRT, Backend::CPU, "GPU residency was not maintained"};
     snapshot.requested_quality_mode = prepare_request.requested_quality_mode;
@@ -63,6 +66,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     auto parsed_snapshot = session_snapshot_from_json(snapshot_json);
     REQUIRE(parsed_snapshot.has_value());
     CHECK(parsed_snapshot->session_id == snapshot.session_id);
+    CHECK(parsed_snapshot->screen_color_mode == "blue_green");
     REQUIRE(parsed_snapshot->backend_fallback.has_value());
     CHECK(parsed_snapshot->backend_fallback->requested_backend == Backend::TensorRT);
     CHECK(parsed_snapshot->backend_fallback->selected_backend == Backend::CPU);

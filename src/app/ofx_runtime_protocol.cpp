@@ -493,6 +493,7 @@ nlohmann::json to_json(const OfxRuntimePrepareSessionRequest& request) {
                 {"artifact_name", request.artifact_name},
                 {"requested_device", to_json(request.requested_device)},
                 {"engine_options", to_json(request.engine_options)},
+                {"screen_color_mode", request.screen_color_mode},
                 {"requested_quality_mode", request.requested_quality_mode},
                 {"requested_resolution", request.requested_resolution},
                 {"effective_resolution", request.effective_resolution},
@@ -515,6 +516,10 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
     if (!engine_options_json) return Unexpected<Error>(engine_options_json.error());
     auto engine_options = engine_create_options_from_json(*engine_options_json);
     if (!engine_options) return Unexpected<Error>(engine_options.error());
+    std::string screen_color_mode = "green";
+    if (json.contains("screen_color_mode") && json.at("screen_color_mode").is_string()) {
+        screen_color_mode = json.at("screen_color_mode").get<std::string>();
+    }
     auto requested_quality_mode = required_int(json, "requested_quality_mode");
     if (!requested_quality_mode) return Unexpected<Error>(requested_quality_mode.error());
     auto requested_resolution = required_int(json, "requested_resolution");
@@ -534,6 +539,7 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
     request.artifact_name = *artifact_name;
     request.requested_device = *requested_device;
     request.engine_options = *engine_options;
+    request.screen_color_mode = screen_color_mode;
     request.requested_quality_mode = *requested_quality_mode;
     request.requested_resolution = *requested_resolution;
     request.effective_resolution = *effective_resolution;
@@ -547,6 +553,7 @@ nlohmann::json to_json(const OfxRuntimeSessionSnapshot& snapshot) {
               {"artifact_name", snapshot.artifact_name},
               {"requested_device", to_json(snapshot.requested_device)},
               {"effective_device", to_json(snapshot.effective_device)},
+              {"screen_color_mode", snapshot.screen_color_mode},
               {"requested_quality_mode", snapshot.requested_quality_mode},
               {"requested_resolution", snapshot.requested_resolution},
               {"effective_resolution", snapshot.effective_resolution},
@@ -574,6 +581,10 @@ Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::jso
     if (!effective_device_json) return Unexpected<Error>(effective_device_json.error());
     auto effective_device = device_from_json(*effective_device_json);
     if (!effective_device) return Unexpected<Error>(effective_device.error());
+    std::string screen_color_mode = "green";
+    if (json.contains("screen_color_mode") && json.at("screen_color_mode").is_string()) {
+        screen_color_mode = json.at("screen_color_mode").get<std::string>();
+    }
     auto requested_quality_mode = required_int(json, "requested_quality_mode");
     if (!requested_quality_mode) return Unexpected<Error>(requested_quality_mode.error());
     auto requested_resolution = required_int(json, "requested_resolution");
@@ -604,6 +615,7 @@ Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::jso
     snapshot.requested_device = *requested_device;
     snapshot.effective_device = *effective_device;
     snapshot.backend_fallback = backend_fallback;
+    snapshot.screen_color_mode = screen_color_mode;
     snapshot.requested_quality_mode = *requested_quality_mode;
     snapshot.requested_resolution = *requested_resolution;
     snapshot.effective_resolution = *effective_resolution;

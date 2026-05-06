@@ -859,7 +859,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             data, quality_mode, width, height,
             quality_fallback_mode_from_choice(quality_fallback_mode),
             coarse_resolution_override_from_choice(coarse_resolution_override),
-            refinement_mode_from_choice(refinement_mode), screen_color_label)) {
+            refinement_mode_from_choice(refinement_mode), screen_color_label,
+            screen_color_mode_label)) {
         const std::string quality_error =
             data->last_error.empty() ? "Failed to switch quality mode." : data->last_error;
         if (is_fixed_quality_mode(quality_mode)) {
