@@ -8,6 +8,12 @@ namespace corridorkey::core {
 
 struct GpuPrepState;
 
+struct GpuPreparedInput {
+    void* planar_device = nullptr;
+    int width = 0;
+    int height = 0;
+};
+
 class GpuInputPrep {
    public:
     GpuInputPrep();
@@ -24,6 +30,10 @@ class GpuInputPrep {
                                               int model_width, int model_height,
                                               const std::array<float, 3>& mean,
                                               const std::array<float, 3>& inv_stddev);
+
+    [[nodiscard]] Result<GpuPreparedInput> prepare_inputs_device(
+        Image rgb, Image hint, int model_width, int model_height, const std::array<float, 3>& mean,
+        const std::array<float, 3>& inv_stddev);
 
    private:
     std::unique_ptr<GpuPrepState> m_state;

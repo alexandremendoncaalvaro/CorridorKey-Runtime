@@ -1137,6 +1137,34 @@ pinned-upload checkpoint while preserving green and blue parity. The remaining
 gap is the model forward plus the temporary host/device boundary between
 `GpuInputPrep` and LibTorch.
 
+#### Dynamic TorchScript Device Input Probe
+
+The dynamic path now can hand the `GpuInputPrep` planar CUDA buffer directly to
+LibTorch as a CUDA tensor. This uses LibTorch's non-owning external-memory
+tensor contract, with `GpuInputPrep` retaining ownership of the backing buffer
+for the duration of the synchronized forward. The path removes the temporary
+device-to-host download plus pinned host re-copy before inference.
+
+A back-to-back `2048 -> 3840x2160` OFX RPC harness comparison on the same
+machine state, random input, source passthrough, and bilinear output resize
+reports:
+
+- previous GPU-prep plus pinned upload path: `1375.2 ms` average roundtrip over
+  six frames; `torchtrt_prepare_planar_copy` averages `6.9 ms`
+- device input path: `1294.5 ms` average roundtrip over six frames;
+  `torchtrt_prepare_device_wrap` and `torchtrt_prepare_device_cast` together
+  stay below `0.1 ms` on hot frames
+
+A green and blue cross-check with the same `2048 -> 3840x2160` harness settings
+reports `1366.6 ms` average roundtrip for green dynamic and `1279.6 ms` for blue
+dynamic over six frames. Both traces use the device input handoff on rendered
+frames; the remaining `torchtrt_prepare_upload` sample belongs to warmup.
+
+The device input probe is kept because it removes an avoidable host/device
+boundary and improves the dynamic path under direct comparison. The dominant
+remaining costs are still model forward, output materialization, and CPU-side
+full-frame post-processing.
+
 ### `phase_8_gpu_prepare`
 
 - Source state: current `perf/optimization` working tree with CUDA NPP-based

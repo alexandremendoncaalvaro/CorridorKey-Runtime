@@ -2025,8 +2025,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 on_stage, "frame_extract_outputs_resize",
                 [&]() -> Result<void> {
                     if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(raw_result.alpha.view(), result.alpha.view(),
-                                                        m_color_utils_state);
+                        ColorUtils::resize_lanczos_into(raw_result.alpha.view(),
+                                                        result.alpha.view(), m_color_utils_state);
                         if (!result.foreground.view().empty()) {
                             ColorUtils::resize_lanczos_into(raw_result.foreground.view(),
                                                             result.foreground.view(),
@@ -2071,30 +2071,19 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             return result;
         };
 
-        const auto target_pixels =
-            static_cast<std::size_t>(target_res) * static_cast<std::size_t>(target_res);
-        const auto total_planar_size = 4U * target_pixels;
-        if (m_planar_pool.empty() || m_planar_pool[0].view().data.size() != total_planar_size) {
-            if (m_planar_pool.empty()) {
-                m_planar_pool.emplace_back(static_cast<int>(total_planar_size), 1, 1);
-            } else {
-                m_planar_pool[0] = ImageBuffer(static_cast<int>(total_planar_size), 1, 1);
-            }
-        }
-        float* planar_ptr = m_planar_pool[0].view().data.data();
-
         if (m_gpu_prep.available()) {
             auto gpu_prepare_res = common::measure_stage(
                 on_stage, "frame_prepare_inputs",
-                [&]() -> Result<void> {
-                    return m_gpu_prep.prepare_inputs(rgb, alpha_hint, planar_ptr, target_res,
-                                                     target_res, kCorridorKeyRgbMean,
-                                                     kCorridorKeyRgbInvStddev);
+                [&]() -> Result<core::GpuPreparedInput> {
+                    return m_gpu_prep.prepare_inputs_device(rgb, alpha_hint, target_res, target_res,
+                                                            kCorridorKeyRgbMean,
+                                                            kCorridorKeyRgbInvStddev);
                 },
                 1);
             if (gpu_prepare_res.has_value()) {
-                auto raw_res = m_torch_trt_session->infer_prepared_planar(
-                    planar_ptr, target_res, target_res, params.output_alpha_only, on_stage);
+                auto raw_res = m_torch_trt_session->infer_prepared_cuda_planar(
+                    gpu_prepare_res->planar_device, gpu_prepare_res->width, gpu_prepare_res->height,
+                    params.output_alpha_only, on_stage);
                 if (!raw_res) {
                     return Unexpected(raw_res.error());
                 }

@@ -1,6 +1,6 @@
+#include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
-#include <algorithm>
 #include <filesystem>
 #include <string_view>
 #include <vector>
@@ -194,7 +194,12 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
         REQUIRE(result->foreground.view().width == resolution.width);
         REQUIRE(result->foreground.view().height == resolution.height);
         CHECK(has_stage(timings, "frame_prepare_inputs"));
-        CHECK(has_stage(timings, "torchtrt_prepare_upload"));
+        const bool used_host_upload = has_stage(timings, "torchtrt_prepare_upload");
+        const bool used_device_wrap = has_stage(timings, "torchtrt_prepare_device_wrap");
+        CHECK((used_host_upload || used_device_wrap));
+        if (used_device_wrap) {
+            CHECK_FALSE(has_stage(timings, "torchtrt_prepare_planar_copy"));
+        }
         CHECK(has_stage(timings, "torchtrt_forward"));
         CHECK(has_stage(timings, "torchtrt_extract_outputs"));
         CHECK(has_stage(timings, "frame_extract_outputs_resize"));

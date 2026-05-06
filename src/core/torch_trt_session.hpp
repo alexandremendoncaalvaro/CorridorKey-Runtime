@@ -16,8 +16,8 @@
 // and dllimport (when consumed by corridorkey_core / cli / ofx /
 // tests). Without the explicit attribute MSVC skips the import-table
 // entries and /DELAYLOAD becomes a no-op (LNK4199).
-#if defined(_WIN32)
-#if defined(CORRIDORKEY_TORCHTRT_BUILDING)
+#ifdef _WIN32
+#ifdef CORRIDORKEY_TORCHTRT_BUILDING
 #define CORRIDORKEY_TORCHTRT_API __declspec(dllexport)
 #else
 #define CORRIDORKEY_TORCHTRT_API __declspec(dllimport)
@@ -67,10 +67,13 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
                                             StageTimingCallback on_stage = nullptr);
 
     [[nodiscard]] Result<FrameResult> infer_prepared_planar(const float* planar_input,
-                                                            int input_width,
-                                                            int input_height,
+                                                            int input_width, int input_height,
                                                             bool output_alpha_only = false,
                                                             StageTimingCallback on_stage = nullptr);
+
+    [[nodiscard]] Result<FrameResult> infer_prepared_cuda_planar(
+        void* planar_device_input, int input_width, int input_height,
+        bool output_alpha_only = false, StageTimingCallback on_stage = nullptr);
 
     [[nodiscard]] int model_resolution() const;
 

@@ -126,6 +126,7 @@ torch::Tensor allocate_host_input_tensor(int height, int width) {
     return allocate_host_tensor({1, 4, height, width});
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) - index and size match the reflection formula.
 int reflect_index(int index, int size) {
     if (size <= 1) {
         return 0;
@@ -140,6 +141,7 @@ int reflect_index(int index, int size) {
     }
     return reflected;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 torch::Tensor flatten_cropped_hwc(const torch::Tensor& tensor_cuda, int output_width,
                                   int output_height, int pad_top, int pad_left) {
@@ -156,16 +158,14 @@ struct MaterializedOutputTensors {
 };
 
 MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
-                                              const torch::Tensor& fg_cuda,
-                                              int output_width, int output_height,
-                                              int pad_top, int pad_left,
+                                              const torch::Tensor& fg_cuda, int output_width,
+                                              int output_height, int pad_top, int pad_left,
                                               bool include_foreground) {
     auto alpha_flat =
         flatten_cropped_hwc(alpha_cuda, output_width, output_height, pad_top, pad_left);
     torch::Tensor bulk_cuda;
     if (include_foreground) {
-        auto fg_flat =
-            flatten_cropped_hwc(fg_cuda, output_width, output_height, pad_top, pad_left);
+        auto fg_flat = flatten_cropped_hwc(fg_cuda, output_width, output_height, pad_top, pad_left);
         bulk_cuda = torch::cat({alpha_flat, fg_flat}, 0).contiguous();
     } else {
         bulk_cuda = alpha_flat.contiguous();
@@ -176,8 +176,8 @@ MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
     torch::cuda::synchronize();
 
     MaterializedOutputTensors result;
-    const auto alpha_count = static_cast<std::size_t>(output_width) *
-                             static_cast<std::size_t>(output_height);
+    const auto alpha_count =
+        static_cast<std::size_t>(output_width) * static_cast<std::size_t>(output_height);
     const auto* src = host_bulk.data_ptr<float>();
     result.alpha = ImageBuffer(output_width, output_height, 1);
     std::memcpy(result.alpha.view().data.data(), src, alpha_count * sizeof(float));
@@ -191,13 +191,13 @@ MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
     return result;
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters) - these dimensions mirror tensor shape order.
 Result<FrameResult> forward_and_materialize(torch::jit::script::Module& module,
-                                            const torch::Tensor& cuda_input,
-                                            int output_width, int output_height,
-                                            int inference_width, int inference_height,
-                                            int pad_top, int pad_left,
+                                            const torch::Tensor& cuda_input, int output_width,
+                                            int output_height, int inference_width,
+                                            int inference_height, int pad_top, int pad_left,
                                             bool output_alpha_only,
-                                            StageTimingCallback on_stage) {
+                                            const StageTimingCallback& on_stage) {
     torch::IValue raw_out;
     common::measure_stage(on_stage, "torchtrt_forward", [&]() {
         const torch::NoGradGuard no_grad;
@@ -212,19 +212,17 @@ Result<FrameResult> forward_and_materialize(torch::jit::script::Module& module,
                   .message = "TorchTRT forward returned no usable alpha tensor"}};
     }
     if (!tensor_has_shape(split->alpha, 1, inference_width, inference_height)) {
-        return Unexpected<Error>{
-            Error{.code = ErrorCode::InferenceFailed,
-                  .message = "TorchScript RTX alpha output shape did not match input " +
-                             std::to_string(inference_width) + "x" +
-                             std::to_string(inference_height)}};
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InferenceFailed,
+            .message = "TorchScript RTX alpha output shape did not match input " +
+                       std::to_string(inference_width) + "x" + std::to_string(inference_height)}};
     }
     if (!output_alpha_only && split->foreground.defined() &&
         !tensor_has_shape(split->foreground, 3, inference_width, inference_height)) {
-        return Unexpected<Error>{
-            Error{.code = ErrorCode::InferenceFailed,
-                  .message = "TorchScript RTX foreground output shape did not match input " +
-                             std::to_string(inference_width) + "x" +
-                             std::to_string(inference_height)}};
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InferenceFailed,
+            .message = "TorchScript RTX foreground output shape did not match input " +
+                       std::to_string(inference_width) + "x" + std::to_string(inference_height)}};
     }
 
     FrameResult result;
@@ -238,6 +236,7 @@ Result<FrameResult> forward_and_materialize(torch::jit::script::Module& module,
     });
     return result;
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 }  // namespace
 
@@ -370,12 +369,12 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
             auto* dst = host_input.data_ptr<float>();
             const auto inference_plane =
                 static_cast<std::ptrdiff_t>(inference_width) * inference_height;
-            for (int y = 0; y < inference_height; ++y) {
-                const int src_y = reflect_index(y - padding.top, height);
-                for (int x = 0; x < inference_width; ++x) {
-                    const int src_x = reflect_index(x - padding.left, width);
+            for (int row = 0; row < inference_height; ++row) {
+                const int src_y = reflect_index(row - padding.top, height);
+                for (int column = 0; column < inference_width; ++column) {
+                    const int src_x = reflect_index(column - padding.left, width);
                     const auto dst_index =
-                        (static_cast<std::ptrdiff_t>(y) * inference_width) + x;
+                        (static_cast<std::ptrdiff_t>(row) * inference_width) + column;
                     const auto reflected_index =
                         (static_cast<std::ptrdiff_t>(src_y) * width) + src_x;
                     dst[(0 * inference_plane) + dst_index] = normalize_corridorkey_rgb(
@@ -409,10 +408,10 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
     }
 }
 
-Result<FrameResult> TorchTrtSession::infer_prepared_planar(const float* planar_input,
-                                                           int input_width, int input_height,
-                                                           bool output_alpha_only,
-                                                           StageTimingCallback on_stage) {
+Result<FrameResult> TorchTrtSession::infer_prepared_planar(
+    const float* planar_input, int input_width, int input_height, bool output_alpha_only,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    StageTimingCallback on_stage) {
     if (m_impl == nullptr) {
         return Unexpected<Error>{Error{.code = ErrorCode::InferenceFailed,
                                        .message = "TorchTrtSession in moved-from state"}};
@@ -450,8 +449,48 @@ Result<FrameResult> TorchTrtSession::infer_prepared_planar(const float* planar_i
     } catch (const std::exception& e) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InferenceFailed,
-                  .message = std::string("TorchTRT prepared forward std::exception: ") +
-                             e.what()}};
+                  .message = std::string("TorchTRT prepared forward std::exception: ") + e.what()}};
+    }
+}
+
+Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar(
+    void* planar_device_input, int input_width, int input_height, bool output_alpha_only,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    StageTimingCallback on_stage) {
+    if (m_impl == nullptr) {
+        return Unexpected<Error>{Error{.code = ErrorCode::InferenceFailed,
+                                       .message = "TorchTrtSession in moved-from state"}};
+    }
+    if (planar_device_input == nullptr || input_width <= 0 || input_height <= 0) {
+        return Unexpected<Error>{
+            Error{.code = ErrorCode::InvalidParameters,
+                  .message = "Prepared CUDA TorchTRT input must be a non-empty planar tensor"}};
+    }
+
+    try {
+        torch::Tensor cuda_input;
+        common::measure_stage(on_stage, "torchtrt_prepare_device_wrap", [&]() {
+            auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
+            cuda_input =
+                torch::from_blob(planar_device_input, {1, 4, input_height, input_width}, options);
+        });
+
+        if (m_impl->input_dtype != torch::kFloat32) {
+            common::measure_stage(on_stage, "torchtrt_prepare_device_cast",
+                                  [&]() { cuda_input = cuda_input.to(m_impl->input_dtype); });
+        }
+
+        return forward_and_materialize(m_impl->module, cuda_input, input_width, input_height,
+                                       input_width, input_height, 0, 0, output_alpha_only,
+                                       on_stage);
+    } catch (const c10::Error& e) {
+        return Unexpected<Error>{
+            Error{.code = ErrorCode::InferenceFailed,
+                  .message = std::string("TorchTRT prepared CUDA forward c10 error: ") + e.what()}};
+    } catch (const std::exception& e) {
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InferenceFailed,
+            .message = std::string("TorchTRT prepared CUDA forward std::exception: ") + e.what()}};
     }
 }
 
