@@ -60,7 +60,7 @@ PACKS = {
     },
     "torchtrt-runtime": {
         "label": "TorchTRT runtime DLLs (LibTorch + CUDA + TensorRT)",
-        "component": "green",
+        "component": "runtime",
         "dest_subdir": "torchtrt-runtime/bin",
         "is_archive": True,
         "extract": True,

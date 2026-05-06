@@ -17,8 +17,9 @@
 ;   OFFLINE - large self-contained installer (~7 GB). All packs
 ;             bundled and installed; no network access during install.
 ;
-; ONLINE keeps component selection so a green-only operator can avoid
-; the optional blue model download. OFFLINE is complete by construction:
+; ONLINE keeps component selection so an operator can install green only,
+; blue only, or both models. The shared TorchTRT runtime remains a fixed
+; component because either model needs it. OFFLINE is complete by construction:
 ; all available packs are fixed and installed. arm_torchtrt_runtime in
 ; src/core/torch_trt_loader.cpp walks for TorchTRT runtime DLLs at
 ; <install>/Contents/Resources/torchtrt-runtime/bin/ regardless of
@@ -128,7 +129,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "complete"; Description: "Complete (Green + Blue)"
 #else
 Name: "recommended"; Description: "Recommended (Green + Blue)"
-Name: "minimum"; Description: "Minimum (Green only)"
+Name: "greenonly"; Description: "Green only"
+Name: "blueonly"; Description: "Blue only"
 Name: "custom"; Description: "Custom"; Flags: iscustom
 #endif
 
@@ -140,20 +142,26 @@ Name: "custom"; Description: "Custom"; Flags: iscustom
 Name: "pluginbase"; Description: "Base OFX plugin (CLI + runtime server)"; \
     Types: complete; Flags: fixed
 
-Name: "green"; Description: "Green pack - dynamic model and TorchTRT runtime (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+Name: "runtime"; Description: "TorchTRT runtime (@@RUNTIME_COMPONENT_SIZE_LABEL@@)"; \
+    Types: complete; Flags: fixed
+
+Name: "green"; Description: "Green pack - dynamic model (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
     Types: complete; Flags: fixed
 
 Name: "blue"; Description: "Blue pack - dynamic model (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
     Types: complete; Flags: fixed
 #else
 Name: "pluginbase"; Description: "Base OFX plugin (CLI + runtime server)"; \
-    Types: minimum recommended custom; Flags: fixed
+    Types: greenonly blueonly recommended custom; Flags: fixed
 
-Name: "green"; Description: "Green pack - dynamic model and TorchTRT runtime (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
-    Types: minimum recommended custom; Flags: fixed
+Name: "runtime"; Description: "TorchTRT runtime (@@RUNTIME_COMPONENT_SIZE_LABEL@@)"; \
+    Types: greenonly blueonly recommended custom; Flags: fixed
+
+Name: "green"; Description: "Green pack - dynamic model (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+    Types: greenonly recommended custom
 
 Name: "blue"; Description: "Blue pack - dynamic model (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
-    Types: recommended custom
+    Types: blueonly recommended custom
 #endif
 
 [Files]
@@ -172,7 +180,7 @@ Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
 ; instead of the upstream HF runtime archive.
 Source: "{#PluginPayloadDir}\Contents\Resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll"; \
     DestDir: "{app}\Contents\Resources\torchtrt-runtime\bin"; \
-    Components: green; \
+    Components: runtime; \
     Flags: ignoreversion
 
 #if Flavor == "offline"

@@ -11,7 +11,9 @@
 
     Online flavor produces a small stub installer (~50 MB) that
     downloads every selected pack from Hugging Face during install,
-    with Green + Blue selected by default. Offline flavor produces a
+    with Green + Blue selected by default. The shared TorchTRT runtime
+    is always selected; Green and Blue can be installed independently.
+    Offline flavor produces a
     self-contained installer (~7 GB) with every manifest pack
     pre-bundled and fixed for install.
 
@@ -512,7 +514,7 @@ function Build-PackCachePrepareProcedure {
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('procedure CorridorKeyPrepareSelectedPackCaches;')
     [void]$sb.AppendLine('begin')
-    foreach ($component in @('green', 'blue')) {
+    foreach ($component in @('runtime', 'green', 'blue')) {
         $componentPacks = @($Manifest.packs.PSObject.Properties | Where-Object { $_.Value.component -eq $component })
         if ($componentPacks.Count -eq 0) { continue }
         [void]$sb.AppendLine("  if WizardIsComponentSelected('$component') then begin")
@@ -596,6 +598,7 @@ function Build-OnlineDownloadQueueProcedure {
 
 $manifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
 $iscc = Resolve-IsccPath -Override $ISCCPath
+$runtimeComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "runtime"
 $greenComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "green"
 $blueComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "blue"
 $torchTrtRuntimePack = Get-PackByName -Manifest $manifest -PackName "torchtrt-runtime"
@@ -635,6 +638,7 @@ $rendered = $template `
     -replace '@@WIZARD_IMAGE@@', ($wizardImagePath -replace '/', '\') `
     -replace '@@MANIFEST_PATH@@', ($ManifestPath -replace '/', '\') `
     -replace '@@FLAVOR@@', $flavorLower `
+    -replace '@@RUNTIME_COMPONENT_SIZE_LABEL@@', $runtimeComponentSizeLabel `
     -replace '@@GREEN_COMPONENT_SIZE_LABEL@@', $greenComponentSizeLabel `
     -replace '@@BLUE_COMPONENT_SIZE_LABEL@@', $blueComponentSizeLabel `
     -replace '@@TORCHTRT_RUNTIME_SHA256@@', $torchTrtRuntimeSha256 `
