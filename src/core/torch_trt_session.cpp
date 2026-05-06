@@ -8,6 +8,7 @@
 #include <regex>
 #include <string>
 #include <utility>
+#include <vector>
 
 // Pulling individual c10/torch headers piecemeal triggers CUDA include
 // resolution that the vendored torchtrt-windows tree intentionally
@@ -110,6 +111,16 @@ DynamicPadding dynamic_padding_for_input(int width, int height, bool dynamic_res
         .height = padded_height,
         .width = padded_width,
     };
+}
+
+torch::Tensor allocate_host_input_tensor(int height, int width) {
+    const auto shape = std::vector<int64_t>{1, 4, height, width};
+    const auto base_options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+    try {
+        return torch::empty(shape, base_options.pinned_memory(true));
+    } catch (const c10::Error&) {
+        return torch::empty(shape, base_options);
+    }
 }
 
 int reflect_index(int index, int size) {
@@ -289,8 +300,7 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         const int inference_height = padding.height;
         torch::Tensor host_input;
         common::measure_stage(on_stage, "torchtrt_prepare_pack", [&]() {
-            host_input =
-                torch::empty({1, 4, inference_height, inference_width}, torch::kFloat32);
+            host_input = allocate_host_input_tensor(inference_height, inference_width);
             const float* rgb_data = rgb.data.data();
             const float* hint_data = alpha_hint.data.data();
             auto* dst = host_input.data_ptr<float>();
@@ -316,7 +326,9 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
         });
         torch::Tensor cuda_input;
         common::measure_stage(on_stage, "torchtrt_prepare_upload", [&]() {
-            cuda_input = host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype);
+            constexpr bool kNonBlockingCopy = true;
+            cuda_input =
+                host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype, kNonBlockingCopy);
         });
 
         torch::IValue raw_out;
