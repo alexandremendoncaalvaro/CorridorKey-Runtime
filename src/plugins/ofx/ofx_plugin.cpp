@@ -83,12 +83,14 @@ bool fetch_suites() {
     g_suites.parameter = static_cast<const OfxParameterSuiteV1*>(
         g_host->fetchSuite(g_host->host, kOfxParameterSuite, 1));
 
-    const void* message_suite = g_host->fetchSuite(g_host->host, kOfxMessageSuite, 2);
-    bool fetched_v2 = (message_suite != nullptr);
-    if (message_suite == nullptr) {
-        message_suite = g_host->fetchSuite(g_host->host, kOfxMessageSuite, 1);
+    g_suites.message_v2 = static_cast<const OfxMessageSuiteV2*>(
+        g_host->fetchSuite(g_host->host, kOfxMessageSuite, 2));
+    if (g_suites.message_v2 == nullptr) {
+        g_suites.message_v1 = static_cast<const OfxMessageSuiteV1*>(
+            g_host->fetchSuite(g_host->host, kOfxMessageSuite, 1));
+    } else {
+        g_suites.message_v1 = nullptr;
     }
-    g_suites.message = static_cast<const OfxMessageSuiteV2*>(message_suite);
 
     // OFX 1.4 progress suite. Both Nuke 10+ and Resolve 12.5+ advertise
     // OfxProgressSuite (openfx-misc README-hosts.txt). Try V2 first because
@@ -108,14 +110,16 @@ bool fetch_suites() {
     // clearPersistentMessage pointers; capturing this once at suite
     // fetch lets us correlate the absence of node alerts with the
     // host's actual capability vector.
-    if (g_suites.message == nullptr) {
+    if (!has_transient_message_suite(g_suites)) {
         log_message("fetch_suites", "event=ofx_message_suite v2_fetched=0 v1_fetched=0 (none)");
     } else {
-        const bool has_message = g_suites.message->message != nullptr;
-        const bool has_setpersist = g_suites.message->setPersistentMessage != nullptr;
-        const bool has_clearpersist = g_suites.message->clearPersistentMessage != nullptr;
+        const bool fetched_v2 = g_suites.message_v2 != nullptr;
+        const bool has_message = has_transient_message_suite(g_suites);
+        const bool has_setpersist = has_persistent_message_suite(g_suites);
+        const bool has_clearpersist = has_clear_persistent_message_suite(g_suites);
         log_message("fetch_suites",
                     std::string("event=ofx_message_suite v2_fetched=") + (fetched_v2 ? "1" : "0") +
+                        " v1_fetched=" + (g_suites.message_v1 != nullptr ? "1" : "0") +
                         " has_message=" + (has_message ? "1" : "0") +
                         " has_setPersistentMessage=" + (has_setpersist ? "1" : "0") +
                         " has_clearPersistentMessage=" + (has_clearpersist ? "1" : "0"));
@@ -130,11 +134,14 @@ bool fetch_suites() {
 }
 
 void post_message(const char* message_type, const char* message, OfxImageEffectHandle effect) {
-    if (g_suites.message == nullptr || g_suites.message->message == nullptr) {
+    if (!has_transient_message_suite(g_suites)) {
         return;
     }
-
-    g_suites.message->message(effect, message_type, "", "%s", message);
+    if (g_suites.message_v2 != nullptr && g_suites.message_v2->message != nullptr) {
+        g_suites.message_v2->message(effect, message_type, "", "%s", message);
+        return;
+    }
+    g_suites.message_v1->message(effect, message_type, "", "%s", message);
 }
 
 // OFX 1.5 setPersistentMessage / clearPersistentMessage: allowed from any
@@ -153,13 +160,13 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 // only telemetry surface (which is the historical behavior).
 void set_persistent_message(const char* message_type, const char* message_id, const char* message,
                             OfxImageEffectHandle effect) {
-    if (g_suites.message == nullptr || g_suites.message->setPersistentMessage == nullptr ||
-        effect == nullptr || message == nullptr) {
+    if (!has_persistent_message_suite(g_suites) || effect == nullptr || message == nullptr) {
         log_message(
             "set_persistent_message",
-            std::string("skip reason=missing suite_null=") +
-                (g_suites.message == nullptr ? "1" : "0") + " set_fn_null=" +
-                ((g_suites.message != nullptr && g_suites.message->setPersistentMessage == nullptr)
+            std::string("skip reason=missing suite_v2_null=") +
+                (g_suites.message_v2 == nullptr ? "1" : "0") + " set_fn_null=" +
+                ((g_suites.message_v2 != nullptr &&
+                  g_suites.message_v2->setPersistentMessage == nullptr)
                      ? "1"
                      : "0") +
                 " effect_null=" + (effect == nullptr ? "1" : "0") +
@@ -167,7 +174,7 @@ void set_persistent_message(const char* message_type, const char* message_id, co
         return;
     }
     const OfxStatus status =
-        g_suites.message->setPersistentMessage(effect, message_type, message_id, "%s", message);
+        g_suites.message_v2->setPersistentMessage(effect, message_type, message_id, "%s", message);
     log_message("set_persistent_message",
                 std::string("event=posted type=") +
                     (message_type != nullptr ? message_type : "(null)") +
@@ -238,11 +245,10 @@ bool ProgressScope::update(double progress) {
 }
 
 void clear_persistent_message(OfxImageEffectHandle effect) {
-    if (g_suites.message == nullptr || g_suites.message->clearPersistentMessage == nullptr ||
-        effect == nullptr) {
+    if (!has_clear_persistent_message_suite(g_suites) || effect == nullptr) {
         return;
     }
-    const OfxStatus status = g_suites.message->clearPersistentMessage(effect);
+    const OfxStatus status = g_suites.message_v2->clearPersistentMessage(effect);
     log_message("clear_persistent_message",
                 std::string("event=cleared status=") + std::to_string(status));
 }

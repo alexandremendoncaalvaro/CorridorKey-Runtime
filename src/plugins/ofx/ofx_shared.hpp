@@ -110,7 +110,8 @@ struct OfxSuites {
     const OfxPropertySuiteV1* property = nullptr;
     const OfxImageEffectSuiteV1* image_effect = nullptr;
     const OfxParameterSuiteV1* parameter = nullptr;
-    const OfxMessageSuiteV2* message = nullptr;
+    const OfxMessageSuiteV1* message_v1 = nullptr;
+    const OfxMessageSuiteV2* message_v2 = nullptr;
     // Both V1 and V2 of the OFX progress suite are kept side-by-side so the
     // plugin can call the richest API the host advertises. README-hosts.txt
     // confirms Resolve and Nuke both expose at least V1 in their suite list.
@@ -119,6 +120,19 @@ struct OfxSuites {
     const OfxProgressSuiteV1* progress_v1 = nullptr;
     const OfxProgressSuiteV2* progress_v2 = nullptr;
 };
+
+inline bool has_transient_message_suite(const OfxSuites& suites) {
+    return (suites.message_v2 != nullptr && suites.message_v2->message != nullptr) ||
+           (suites.message_v1 != nullptr && suites.message_v1->message != nullptr);
+}
+
+inline bool has_persistent_message_suite(const OfxSuites& suites) {
+    return suites.message_v2 != nullptr && suites.message_v2->setPersistentMessage != nullptr;
+}
+
+inline bool has_clear_persistent_message_suite(const OfxSuites& suites) {
+    return suites.message_v2 != nullptr && suites.message_v2->clearPersistentMessage != nullptr;
+}
 
 struct RuntimePanelState {
     int requested_quality_mode = kQualityPreview;
