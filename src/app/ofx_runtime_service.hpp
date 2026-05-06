@@ -14,7 +14,7 @@ namespace corridorkey::app {
 struct OfxRuntimeServiceOptions {
     common::LocalJsonEndpoint endpoint = {};
     std::chrono::milliseconds idle_timeout = common::kDefaultOfxIdleTimeout;
-    std::filesystem::path log_path = {};
+    std::filesystem::path log_path;
     OfxSessionBrokerOptions broker = {};
 };
 

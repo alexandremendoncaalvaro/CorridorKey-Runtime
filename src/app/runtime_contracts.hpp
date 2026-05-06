@@ -12,7 +12,7 @@
 namespace corridorkey::app {
 
 struct ArtifactSelection {
-    std::filesystem::path executable_model_path = {};
+    std::filesystem::path executable_model_path;
     int requested_resolution = 0;
     int effective_resolution = 0;
     bool used_fallback = false;

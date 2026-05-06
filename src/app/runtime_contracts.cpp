@@ -1198,6 +1198,22 @@ bool should_skip_resolution(int resolution, const CandidateSelectionContext& con
            !exact_artifact_available;
 }
 
+std::vector<ArtifactSelection> dynamic_torchtrt_artifact_candidates_for_request(
+    const std::filesystem::path& models_root, int requested_resolution) {
+    const auto artifact_path = models_root / kDynamicGreenModelFilename;
+    if (!std::filesystem::exists(artifact_path)) {
+        return {};
+    }
+
+    return {ArtifactSelection{
+        .executable_model_path = artifact_path,
+        .requested_resolution = requested_resolution,
+        .effective_resolution = requested_resolution,
+        .used_fallback = false,
+        .coarse_to_fine = false,
+    }};
+}
+
 }  // namespace
 
 Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
@@ -1213,23 +1229,7 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     }
 
     if (backend_uses_dynamic_torchtrt_artifacts(requested_device.backend)) {
-        (void)allow_lower_resolution_fallback;
-        (void)fallback_mode;
-        (void)coarse_resolution_override;
-        (void)allow_unrestricted_quality_attempt;
-
-        const auto artifact_path = models_root / kDynamicGreenModelFilename;
-        if (!std::filesystem::exists(artifact_path)) {
-            return std::vector<ArtifactSelection>{};
-        }
-
-        return std::vector<ArtifactSelection>{ArtifactSelection{
-            .executable_model_path = artifact_path,
-            .requested_resolution = requested_resolution,
-            .effective_resolution = requested_resolution,
-            .used_fallback = false,
-            .coarse_to_fine = false,
-        }};
+        return dynamic_torchtrt_artifact_candidates_for_request(models_root, requested_resolution);
     }
 
     auto expected_paths = expected_artifact_paths_for_request(

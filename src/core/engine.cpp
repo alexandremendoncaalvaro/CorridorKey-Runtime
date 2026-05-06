@@ -219,8 +219,8 @@ bool is_mlx_artifact(const std::filesystem::path& model_path) {
 
 bool has_model_extension(const std::filesystem::path& model_path, std::string_view expected) {
     auto extension = model_path.extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    std::ranges::transform(extension, extension.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return extension == expected;
 }
 

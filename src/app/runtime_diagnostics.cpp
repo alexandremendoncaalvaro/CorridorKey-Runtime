@@ -592,10 +592,10 @@ bool paths_equivalent(const std::filesystem::path& left, const std::filesystem::
 }
 
 struct BundleLayoutInfo {
-    std::filesystem::path root = {};
-    std::filesystem::path expected_models_dir = {};
-    std::filesystem::path readme_path = {};
-    std::filesystem::path smoke_test_path = {};
+    std::filesystem::path root;
+    std::filesystem::path expected_models_dir;
+    std::filesystem::path readme_path;
+    std::filesystem::path smoke_test_path;
     std::string kind = "development";
     bool packaged_layout_detected = false;
 };

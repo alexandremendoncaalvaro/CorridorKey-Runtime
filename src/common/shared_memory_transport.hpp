@@ -79,7 +79,7 @@ class CORRIDORKEY_API SharedFrameTransport {
 
     [[nodiscard]] float* float_data_at(std::uint64_t byte_offset) const;
 
-    std::filesystem::path m_path = {};
+    std::filesystem::path m_path;
     std::byte* m_mapping = nullptr;
     std::size_t m_mapping_size = 0;
     SharedFrameTransportHeader* m_header = nullptr;

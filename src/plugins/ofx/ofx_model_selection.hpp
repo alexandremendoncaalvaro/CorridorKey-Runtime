@@ -73,7 +73,7 @@ inline bool is_dynamic_blue_artifact_filename(std::string_view filename) {
 }
 
 inline bool is_legacy_blue_artifact_filename(std::string_view filename) {
-    return filename.rfind("corridorkey_blue_", 0) == 0;
+    return filename.starts_with("corridorkey_blue_");
 }
 
 inline bool is_dedicated_blue_artifact_filename(std::string_view filename) {

@@ -410,8 +410,8 @@ Result<std::filesystem::path> default_output_path_for_input(
 }
 
 struct ResolvedExecution {
-    std::filesystem::path models_dir = {};
-    std::filesystem::path model_path = {};
+    std::filesystem::path models_dir;
+    std::filesystem::path model_path;
     std::optional<PresetDefinition> preset = std::nullopt;
     InferenceParams params = {};
     std::string screen_color = "green";
@@ -963,8 +963,9 @@ int main(int argc, char* argv[]) {
             } else {
                 std::cout << "--- Benchmark Results ---\n"
                           << "Model: " << benchmark_request.model_path.filename().string() << "\n";
-                if (resolved->preset.has_value()) {
-                    std::cout << "Preset: " << resolved->preset->name << "\n";
+                const auto& preset = resolved->preset;
+                if (preset.has_value()) {
+                    std::cout << "Preset: " << preset->name << "\n";
                 }
                 std::cout << "Requested precision: "
                           << precision_preference_to_string(
@@ -1146,8 +1147,9 @@ int main(int argc, char* argv[]) {
                                                                                      : "balanced")
                               << "\n";
                 }
-                if (resolved->preset.has_value()) {
-                    std::cout << " - Preset: " << resolved->preset->name << "\n";
+                const auto& preset = resolved->preset;
+                if (preset.has_value()) {
+                    std::cout << " - Preset: " << preset->name << "\n";
                 }
                 std::cout << " - Precision: "
                           << precision_preference_to_string(req.params.precision_preference)

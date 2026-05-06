@@ -35,7 +35,7 @@ struct OfxRuntimeResponseEnvelope {
 
 struct OfxRuntimePrepareSessionRequest {
     std::string client_instance_id;
-    std::filesystem::path model_path = {};
+    std::filesystem::path model_path;
     std::string artifact_name;
     DeviceInfo requested_device = {};
     EngineCreateOptions engine_options = {};
@@ -51,7 +51,7 @@ struct OfxRuntimePrepareSessionRequest {
 
 struct OfxRuntimeSessionSnapshot {
     std::string session_id;
-    std::filesystem::path model_path = {};
+    std::filesystem::path model_path;
     std::string artifact_name;
     DeviceInfo requested_device = {};
     DeviceInfo effective_device = {};
@@ -71,7 +71,7 @@ struct OfxRuntimePrepareSessionResponse {
 
 struct OfxRuntimeRenderFrameRequest {
     std::string session_id;
-    std::filesystem::path shared_frame_path = {};
+    std::filesystem::path shared_frame_path;
     int width = 0;
     int height = 0;
     InferenceParams params = {};

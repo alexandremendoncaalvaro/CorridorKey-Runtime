@@ -899,9 +899,9 @@ Result<InferenceSession::BoundIoState*> InferenceSession::ensure_bound_io_state(
             return Unexpected(fg_shape_res.error());
         }
 
-        state->fg_output.emplace();
-        state->fg_output->reset(memory_info, m_output_element_types[1], *fg_shape_res);
-        state->binding.BindOutput(m_output_node_names_ptr[1], state->fg_output->tensor);
+        auto& foreground_output = state->fg_output.emplace();
+        foreground_output.reset(memory_info, m_output_element_types[1], *fg_shape_res);
+        state->binding.BindOutput(m_output_node_names_ptr[1], foreground_output.tensor);
     }
 
     state->input_shape = input_shape;
@@ -1586,7 +1586,10 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
         on_stage, "post_despill",
         [&]() {
             despill(result.foreground.view(), params.despill_strength,
-                    effective_despill_method(params.spill_method, params.despill_screen_channel),
+                    effective_despill_method(DespillMethodRequest{
+                        .requested_method = params.spill_method,
+                        .screen_channel = params.despill_screen_channel,
+                    }),
                     params.despill_screen_channel);
         },
         1);

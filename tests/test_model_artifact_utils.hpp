@@ -10,7 +10,7 @@
 namespace corridorkey::tests {
 
 struct RequiredArtifact {
-    std::filesystem::path path = {};
+    std::filesystem::path path;
     std::string label = "";
 };
 

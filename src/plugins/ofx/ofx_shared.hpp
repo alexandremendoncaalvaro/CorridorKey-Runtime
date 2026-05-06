@@ -125,7 +125,7 @@ struct RuntimePanelState {
     int effective_resolution = 0;
     int safe_quality_ceiling_resolution = 0;
     bool cpu_quality_guardrail_active = false;
-    std::filesystem::path artifact_path = {};
+    std::filesystem::path artifact_path;
     bool session_prepared = false;
     std::uint64_t session_ref_count = 0;
 };
@@ -201,9 +201,9 @@ struct InstanceData {
     // in TUs that don't include its full definition. unique_ptr default-
     // constructs to nullptr already.
     std::unique_ptr<OfxRuntimeClient> runtime_client;
-    std::filesystem::path models_root = {};
-    std::filesystem::path model_path = {};
-    std::filesystem::path runtime_server_path = {};
+    std::filesystem::path models_root;
+    std::filesystem::path model_path;
+    std::filesystem::path runtime_server_path;
     DeviceInfo device = {};
     DeviceInfo preferred_device = {};
     RuntimeCapabilities runtime_capabilities = {};
@@ -257,7 +257,7 @@ struct InstanceData {
     std::uint64_t cached_signature = 0;
     bool cached_signature_valid = false;
     InferenceParams cached_params = {};
-    std::filesystem::path cached_model_path = {};
+    std::filesystem::path cached_model_path;
     std::vector<StageTiming> cached_render_stage_timings;
     int cached_screen_color = kDefaultScreenColor;
     double cached_alpha_black_point = 0.0;
