@@ -80,9 +80,9 @@ Vague claims such as "works on most hardware" or "compatible with" are not
 used. Every hardware path and host version has an explicit designation.
 
 Support is defined by packaged and validated product tracks. A backend present
-in the core runtime for probing, diagnostics, or future integration does not
-become a support claim unless it is distributed and validated as a product
-track.
+in the core runtime for non-RTX tracks, diagnostics, or future integration
+does not become a support claim unless it is distributed and validated as a
+product track.
 
 The complete support table is in [Support Matrix](../help/SUPPORT_MATRIX.md).
 
@@ -102,20 +102,19 @@ The complete support table is in [Support Matrix](../help/SUPPORT_MATRIX.md).
 The runtime contains multiple backend hooks, but product support is defined by
 curated execution tracks.
 
-The current official product tracks are:
+The official product tracks are:
 
 - Apple Silicon via MLX model pack and bridge exports
-- Windows RTX via ONNX Runtime TensorRT RTX EP for the green model and a
-  dynamic TorchScript path for the blue model on NVIDIA RTX 30 series and
-  newer
+- Windows RTX via dynamic TorchTRT artifacts on NVIDIA RTX 30 series and newer
 
-The current experimental product tracks are:
+The experimental product tracks are:
 
 - Windows DirectML
 - Linux RTX via ONNX Runtime CUDA EP on NVIDIA RTX 30 series and newer
 
-Additional provider hooks may exist in the core runtime for diagnostics,
-bring-up, or future tracks. Those hooks are not support claims by themselves.
+Additional provider hooks may exist for non-Windows-RTX tracks, diagnostics,
+bring-up, or future tracks. Those hooks are not support claims by themselves
+and are not fallback backends for the Windows RTX product track.
 
 ### 3.3 OFX Out-of-Process Runtime
 
@@ -123,10 +122,10 @@ The OFX plugin runs the inference backend in a separate process managed by the
 App-layer OFX runtime service. The plugin is a thin IPC client; it does not
 load ONNX sessions or GPU backends directly.
 
-This design isolates backend failures, TensorRT RTX compilation errors, and
-VRAM exhaustion from the host process (DaVinci Resolve or Foundry Nuke). The
-session broker in the service layer pools initialized sessions across multiple
-OFX node instances to avoid redundant GPU warmups.
+This design isolates backend failures, TorchTRT load failures, first-run
+shape compilation, and VRAM exhaustion from the host process (DaVinci Resolve
+or Foundry Nuke). The session broker in the service layer pools initialized
+sessions across multiple OFX node instances to avoid redundant GPU warmups.
 
 Frame data moves between plugin and service over shared memory. The IPC
 protocol is versioned to ensure the plugin and service remain compatible
@@ -138,28 +137,33 @@ Each product track ships curated model artifacts optimized for that track. The
 runtime contract - API, parameter schema, and output format - is identical
 across tracks. The artifact format and execution provider may differ.
 
-Quality policy is product-defined, not a vendor support claim. The runtime
-uses conservative **safe quality ceilings** by backend and available memory to
-pick a direct artifact, downgrade automatically, or force an explicit error
-when the requested quality is outside the current validated tier.
+Quality policy is product-defined, not a vendor support claim. Dynamic
+Windows RTX artifacts use the requested quality as a runtime input. Backends
+that still rely on fixed-resolution artifacts use conservative **safe quality
+ceilings** by backend and available memory to pick a direct artifact,
+downgrade automatically, or force an explicit error when the requested quality
+is outside the validated tier.
 
 ### 3.4.1 Screen Color Model Variants
 
-CorridorKey ships two model variants distinguished by training plate color:
+CorridorKey ships deterministic screen-color execution modes:
 
-- **Green** (`corridorkey_fp16_<res>.onnx`): the canonical variant. Officially
-  packaged across the full validated resolution ladder for every official
-  product track. Served via the canonical ONNX backend on every host.
-- **Blue** (`corridorkey_dynamic_blue_fp16.ts`): the dedicated Windows RTX
-  variant for blue screen plates. Blue is distributed as one dynamic
-  TorchScript artifact instead of a per-resolution ladder. The runtime uses
-  the requested quality resolution at execution time and keeps the green ONNX
-  ladder unchanged.
+- **Green** (`corridorkey_dynamic_green_fp16.ts` on Windows RTX): the
+  canonical green-screen variant. On Windows RTX, green is distributed as one
+  dynamic TorchTRT artifact and uses the requested quality resolution at
+  execution time.
+- **Blue** (`corridorkey_dynamic_blue_fp16.ts` on Windows RTX): the dedicated
+  blue-screen variant. On Windows RTX, blue is distributed as one dynamic
+  TorchTRT artifact and uses the requested quality resolution at execution
+  time.
+- **Blue-Green Channel Swap:** a deterministic fallback that canonicalizes a
+  blue-screen plate into the green model domain. It uses the green model
+  artifact and is not a third model pack.
 
 The runtime selects the variant by the user-provided screen color parameter.
 When the blue pack is not installed or cannot initialize, the runtime applies
 the documented green-domain canonicalization fallback rather than substituting
-another blue resolution.
+another blue artifact.
 
 ### 3.4.2 Model Pack Distribution
 
@@ -168,11 +172,12 @@ mandatory bundle. Each pack is identified by product track and screen color
 variant. Packs are hosted on Hugging Face and addressable through the
 `download_url` field on every catalog entry.
 
-The installer or first-run flow offers the user a pack selection: green only,
-blue only, or both. Selecting fewer packs reduces install footprint without
-disabling runtime features beyond the unselected variants. The
-`corridorkey doctor` command reports which packs are present, which are
-missing, and the canonical Hugging Face source for any missing pack.
+The installer or first-run flow offers the user a pack selection: green or
+green plus blue. Green is the base Windows RTX pack because it carries the
+primary model and required TorchTRT runtime. Selecting fewer packs reduces
+install footprint without disabling runtime features beyond the unselected
+variants. The `corridorkey doctor` command reports which packs are present,
+which are missing, and the canonical Hugging Face source for any missing pack.
 
 Models are data, not executable code. Pack downloads after install do not
 invalidate macOS notarization or Windows Authenticode signatures of the
@@ -182,9 +187,10 @@ plugin, CLI, or GUI binaries.
 
 Fallback is surface-dependent.
 
-- CLI and tolerant automation workflows may fall back to ONNX CPU execution.
-- The OFX plugin favors explicit failure over silent CPU fallback on
-  unsupported interactive GPU requests.
+- The Windows RTX track fails explicitly when the selected dynamic TorchTRT
+  artifact or runtime cannot initialize; it does not fall back to ONNX.
+- Non-Windows-RTX experimental workflows may define their own fallback
+  behavior when the product track documents it.
 
 Fallback or failure is logged explicitly. The `corridorkey doctor` command
 reports the active execution path and any fallback conditions before
@@ -198,12 +204,13 @@ processing begins.
 
 - Native inference execution:
   - MLX for the official Apple Silicon track
-  - TensorRT RTX EP for the official Windows RTX track on NVIDIA RTX 30 series
-    and newer
+  - TorchTRT for the official Windows RTX track on NVIDIA RTX 30 series and
+    newer
   - DirectML for the experimental Windows DirectML track
   - CUDA EP via ONNX Runtime for the experimental Linux RTX track
-  - ONNX CPU fallback for tolerant workflows
 - CLI surface (`corridorkey`) with stable JSON and NDJSON output contracts
+- CLI `process` and `benchmark` select deterministic green or blue model
+  variants through the screen color parameter
 - OFX plugin for DaVinci Resolve 20 and Foundry Nuke 17 on Apple Silicon,
   Windows, and Linux
 - Tauri desktop GUI distributed as an independent installer that embeds the
@@ -271,5 +278,5 @@ correspond to specific failure categories documented in the `--help` output.
 - No heap allocation in per-frame or per-pixel loops
 - All image buffers are 64-byte aligned for SIMD compatibility
 - Zero-copy frame passing via `std::span` between processing stages
-- TensorRT RTX first-run compilation is expected and takes 10-30 seconds for a
-  new GPU and model combination
+- TorchTRT first-run shape compilation is expected for a new GPU, model, or
+  runtime resolution combination

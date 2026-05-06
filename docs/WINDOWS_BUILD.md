@@ -2,12 +2,11 @@
 
 This document defines the end-to-end flow for building the Windows RTX
 distribution of CorridorKey Runtime from a clean clone. Windows is the most
-involved target because the release requires a custom ONNX Runtime build with
-the TensorRT RTX execution provider, which is not published as a pre-built
-binary by Microsoft, NVIDIA, or any other distributor as of ORT 1.23.x
-([reference](https://onnxruntime.ai/docs/execution-providers/TensorRTRTX-ExecutionProvider.html)).
-The canonical pipeline owns the full chain: source fetch, ORT build, model
-staging, CorridorKey compile, and installer packaging.
+involved target because the release stages CUDA, TorchTRT, the OpenFX SDK,
+model packs, CorridorKey binaries, and installer packaging as one validated
+flow. The supported Windows RTX runtime path is dynamic TorchTRT only. The
+Windows RTX package does not import or ship ONNX Runtime DLLs, so the installed
+RTX path does not execute or fall back to ONNX.
 
 **See also:**
 [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup across platforms |
@@ -27,7 +26,7 @@ clones one (the OpenFX SDK). Everything else must be installed by the operator.
 | uv | latest | Python dependency manager used by the model exporter. Install with `irm https://astral.sh/uv/install.ps1 \| iex`. The installer drops `uv.exe` under `%USERPROFILE%\.local\bin\` — the pipeline looks there even when it is not on `PATH`. |
 | CUDA Toolkit | `12.9` (mandatory) | Required for CUDA headers, `nvcc`, and the NPP DLLs the OFX bundle ships. The contract pins `required_cuda_version = 12.9` because TensorRT-RTX 1.2.0.54 only ships against CUDA 12.9 and 13.x ([NVIDIA prerequisites](https://docs.nvidia.com/deeplearning/tensorrt-rtx/latest/installing-tensorrt-rtx/prerequisites.html)) and CUDA Minor Version Compatibility is forward-only ([NVIDIA compatibility guide](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)) — building against 12.8 produces `ERROR_DLL_INIT_FAILED` (1114) inside `onnxruntime_providers_nv_tensorrt_rtx.dll` at host load time. Install to the default path `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\`. Coexists with an existing 12.8 install. |
 | vcpkg | manifest mode | Clone `microsoft/vcpkg`, run `bootstrap-vcpkg.bat`, then export `VCPKG_ROOT=<path>`. Prefer a short path such as `C:\tools\vcpkg` to avoid Windows long-path issues in vcpkg build output. |
-| NSIS | `3.x` | Required to build the installer. Default install location (`C:\Program Files (x86)\NSIS\`) is auto-discovered. |
+| Inno Setup | `6.4+` | Required to build the installer. Default install location (`C:\Program Files (x86)\Inno Setup 6\`) is auto-discovered. |
 | Git for Windows | latest | Needed by the OpenFX SDK shallow-clone step and the ORT source checkout. |
 
 All of these are available on a stock Windows 11 developer box once the
@@ -57,8 +56,8 @@ What `prepare-rtx` does:
 
 1. Validates or auto-stages the TensorRT-RTX SDK into `vendor\TensorRT-RTX-<version>\`.
 2. Resolves the ONNX Runtime source tree at `vendor\onnxruntime-src` (must already be present as a git checkout at `v1.23.0`; clone manually if missing).
-3. Reuses the prepared model set from `models\` if all seven expected artifacts are present (otherwise regenerates via `uv run` on the model exporter).
-4. Validates the models load cleanly on the onnxruntime CPU EP (`validate_model_pack.py`).
+3. Reuses the prepared dynamic TorchTRT model set from `models\` when the green and blue artifacts are present.
+4. Validates the model inventory and reports missing packaged artifacts.
 5. Builds ONNX Runtime from source with `--use_nv_tensorrt_rtx` and stages the result into `vendor\onnxruntime-windows-rtx\`.
 6. Auto-clones the pinned OpenFX SDK tag into `vendor\openfx\`.
 7. Activates the MSVC environment and builds the CorridorKey C++ tree (library, CLI, OFX plugin, tests).
@@ -71,8 +70,8 @@ Expected completion time on a fresh clone: **45 min – 2 h**, dominated by the 
 ```powershell
 $env:VCPKG_ROOT = "C:\tools\vcpkg"
 
-# Public release. Produces CorridorKey_OFX_v0.8.2_Windows_RTX_Install.exe
-# plus the matching bundle_validation.json.
+# Public release. Produces the Windows online installer plus the matching
+# bundle_validation.json.
 .\scripts\windows.ps1 -Task release -Version 0.8.2
 ```
 
@@ -188,7 +187,7 @@ step. The helper lives in `windows_runtime_helpers.ps1` and runs
 which is not added to user `PATH` by the installer.
 
 **Fix in-tree.** `Resolve-CommandPath` now falls back to the
-documented well-known install paths for `uv`, `git`, and `makensis`
+documented well-known install paths for `uv`, `git`, and Inno Setup
 via the shared `Resolve-CorridorKey*Path` helpers in
 `windows_runtime_helpers.ps1`. No operator action needed.
 
@@ -202,7 +201,7 @@ version over an existing install) fails when replacing
 `corridorkey.exe`) keep running in the background even after
 DaVinci Resolve closes, holding the bundle DLLs mapped.
 
-**Fix in-tree.** The NSIS install section now taskkills
+**Fix in-tree.** The installer install section taskkills
 `corridorkey_ofx_runtime_server.exe` and `corridorkey.exe` in
 addition to `Resolve.exe` before replacing bundle files. The
 uninstall section does the same. Log output from `taskkill` exit
@@ -304,7 +303,7 @@ and short warm-up measurements:
 
 ```powershell
 .\build\release\tests\integration\ofx_benchmark_harness.exe `
-    --model models\corridorkey_fp16_2048.onnx `
+    --model models\corridorkey_dynamic_green_fp16.ts `
     --resolution 2048 --frame-width 3840 --frame-height 2160 `
     --iterations 20 --device rtx --io-binding on
 ```
@@ -319,7 +318,7 @@ independently on EOF so `--iterations` can exceed the source length.
 
 ```powershell
 .\build\release\tests\integration\ofx_benchmark_harness.exe `
-    --model models\corridorkey_fp16_2048.onnx `
+    --model models\corridorkey_dynamic_green_fp16.ts `
     --resolution 2048 --iterations 60 --device rtx --io-binding on `
     --input-video assets\video_samples\Jordan4k.mp4 `
     --hint-video  assets\video_samples\Jordan4k_alphahint.mp4

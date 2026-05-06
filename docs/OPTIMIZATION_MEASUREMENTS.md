@@ -33,7 +33,7 @@ remain the source of truth for methodology and caveats.
 | `phase_7_gpu_resize` | `0.7.4-11` | device-resident tensor flow and GPU-accelerated NPP bilinear resize | full-frame `2048 -> 3840x2160` OFX-style harness average latency improved about `28%`; `frame_extract_outputs_resize` down to `27ms` | keep; massive win effectively eliminating the strongest remaining CPU hotspot |
 | `phase_8_gpu_prepare` | `0.7.4-12` | GPU-accelerated input preparation via NPP resizing, splitting, and normalization | full-frame `2048 -> 3840x2160` OFX-style harness `frame_prepare_inputs` improved by `~74%` | keep; effectively eliminates the final CPU bottleneck, achieving end-to-end device residence |
 | `phase_9_blue_dedicated_screen_color` | `0.8.3-win.1` (proposed) | dedicated CorridorKeyBlue catalog + screen-color OFX selection / render branching + despill `screen_channel` generalization | green-path bench gate within +1.5% (`avg_latency_ms`) and +4.3% (`ort_run`); blue dedicated baseline pending FP32-I/O wrapper re-export | gate passes; blue 512 measured; 1024 / 1536 / 2048 to be re-recorded after the in-flight re-export |
-| `phase_10_blue_dynamic_hybrid` | `0.8.3-win.1` | single dynamic blue TorchScript artifact with green kept on the optimized ONNX TensorRT RTX EP ladder | dynamic TorchScript loads and produces finite output at `512`, `1024`, and `2048`; dynamic green is `~40%` to `~54%` slower than the optimized green ONNX path | keep green on ONNX; use the dynamic artifact for blue |
+| `phase_10_blue_dynamic_hybrid` | `0.8.3-win.1` | dynamic TorchScript candidates for green and blue | dynamic TorchScript loads and produces finite output at `512`, `1024`, and `2048`; dynamic green is `~40%` to `~54%` slower than the optimized green ONNX path in the recorded runner comparison | Windows RTX artifact identity is dynamic green plus dynamic blue; keep `phase_8_gpu_prepare` as the hot-path regression gate until a dynamic TorchTRT baseline is recorded |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -45,7 +45,8 @@ Current headline:
 
 - the `prepare_inputs` slice worked
 - the `preview_writeback` slice also worked on the full-frame OFX-style harness
-- the next real hotspot is back to `ort_run` plus the resize-heavy extract path
+- Windows RTX dynamic TorchTRT needs its own green and blue baseline before
+  optimization claims replace the fixed ONNX measurements
 - the attempted lower-rung bound-path expansion and resize-map caching did not
   justify themselves and were discarded instead of being carried forward
 
@@ -1036,8 +1037,9 @@ package must replace the first one before any user-visible conclusion is kept.
 
 This checkpoint compares the validated green ONNX TensorRT RTX EP path against
 dynamic TorchScript candidates exported from the green and blue checkpoints.
-The purpose is to decide whether Windows RTX should become fully dynamic or
-stay hybrid.
+The product contract uses dynamic TorchTRT artifact identity for both Windows
+RTX screen-color variants. The recorded comparison remains the performance
+guardrail for the first dynamic TorchTRT optimization baseline.
 
 - Dynamic TorchScript validation:
   - green dynamic artifact: finite output at `512`, `1024`, and `2048`
@@ -1052,11 +1054,25 @@ stay hybrid.
   - `512`: `44.5 ms`
   - `1024`: `156.9 ms`
   - `2048`: `753.4 ms`
+- Product-path smoke validation:
+  - green dynamic artifact exported from `CorridorKey.pth` validates against
+    eager PyTorch at `512`, `1024`, and `2048`
+  - blue dynamic artifact SHA256 matches the Hugging Face manifest
+  - C++ TorchTRT runner loads green and blue dynamic artifacts and produces
+    finite output at `512`
+  - CLI synthetic benchmark at `512` reports TorchTRT backend with green
+    dynamic artifact at `61.7 ms` average latency
+  - CLI synthetic benchmark at `512` reports TorchTRT backend with blue
+    dynamic artifact at `49.8 ms` average latency
 - Decision:
-  - keep green on the current optimized ONNX TensorRT RTX EP ladder
+  - use `corridorkey_dynamic_green_fp16.ts` as the single Windows RTX green
+    artifact
   - use `corridorkey_dynamic_blue_fp16.ts` as the single Windows RTX blue
     artifact
-  - keep the blue runtime path isolated from the green fast path
+  - exclude ONNX artifacts from the Windows RTX shipped path and fallback
+    policy
+  - measure green and blue at `1024` and `2048` through CLI and OFX before
+    replacing the `phase_8_gpu_prepare` regression baseline
 
 ### `phase_8_gpu_prepare`
 

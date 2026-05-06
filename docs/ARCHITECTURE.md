@@ -30,15 +30,32 @@ plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
 3. **Predictable Operations.** Diagnostics, fallback behavior, and error
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
-   through MLX and Windows RTX through ONNX Runtime TensorRT RTX EP for green
-   and the dynamic TorchScript path for blue on NVIDIA RTX 30 series and
-   newer. Windows DirectML and Linux RTX (CUDA EP via ONNX Runtime) are
+   through MLX and Windows RTX through dynamic TorchTRT artifacts on NVIDIA
+   RTX 30 series and newer. Windows DirectML and Linux RTX (CUDA EP via ONNX
+   Runtime) are
    explicit experimental product tracks. Other provider hooks present in the
    core runtime do not become support claims unless they are packaged and
    validated. See [Support Matrix](../help/SUPPORT_MATRIX.md).
 5. **Shared Runtime, Curated Artifacts.** The runtime contract is stable
    across product tracks. Model artifacts and backend adapters may differ by
    platform when required for predictable performance.
+
+## 1.1 Track Selection Contract
+
+The runtime keeps host, backend, and model selection separate so new product
+tracks can be added without cross-wiring unrelated paths.
+
+- Host surfaces (CLI, OFX, GUI) collect user intent and call the App layer.
+- The App layer resolves product track, screen color, model pack, and
+  diagnostics.
+- The Core layer owns backend-specific sessions and converts artifact type
+  into a concrete inference adapter.
+- The Windows RTX track resolves `green` and `blue` to one dynamic TorchTRT
+  artifact each. `Blue-Green Channel Swap` resolves to the green artifact with
+  blue-plate canonicalization.
+- ONNX provider hooks belong to non-Windows-RTX tracks and reference
+  workflows. They are not shipped, probed, or selected by the Windows RTX
+  product path.
 
 ---
 
@@ -48,10 +65,10 @@ plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
 
 The engine, math, and I/O capabilities.
 
-- **Inference:** Backend adapters and session management for the official MLX,
-  TensorRT RTX EP, and dynamic TorchScript product paths, the experimental
-  DirectML and Linux CUDA EP tracks, and other internal provider hooks used for
-  diagnostics, bring-up, or future packaging work.
+- **Inference:** Backend adapters and session management for the official MLX
+  and TorchTRT product paths, the experimental DirectML and Linux CUDA EP
+  tracks, and other internal provider hooks used for diagnostics, bring-up, or
+  future packaging work.
 - **Hardware:** Device detection and provider selection.
 - **Video Pipeline:** FFmpeg integration for direct memory processing.
 - **Math:** Color space conversion, despill, despeckle algorithms.
@@ -162,7 +179,7 @@ src/
 |   |-- device_detection.cpp
 |   |-- mlx_probe.cpp           macOS MLX backend probe
 |   |-- mlx_session.cpp         MLX inference session
-|   |-- windows_rtx_probe.cpp   Windows TensorRT RTX backend probe
+|   |-- windows_rtx_probe.cpp   Windows RTX backend probe
 |   |-- session_cache_policy.hpp
 |   |-- session_policy.hpp
 |   `-- tile_blend.hpp
@@ -210,7 +227,7 @@ Standalone auxiliary tools. Must not leak dependencies into the main build.
 ```text
 tools/
 |-- model_exporter/     Python scripts to export PyTorch models to ONNX
-|-- torchtrt_compiler/  Python scripts to export dynamic blue TorchScript artifacts
+|-- torchtrt_compiler/  Python scripts to export dynamic TorchScript artifacts
 |-- torchtrt_runner/    C++ smoke test that loads a .ts engine standalone
 `-- coreml_student/     Apple Neural Engine distillation toolkit
 ```
@@ -240,8 +257,8 @@ The OFX plugin uses an out-of-process architecture to protect the host
 application (DaVinci Resolve) from backend and VRAM failures.
 
 **Crash Containment.** The runtime service (`ofx_runtime_service`) runs in a
-separate process. ONNX session failures, VRAM exhaustion, and TensorRT RTX
-compilation errors are isolated from the host.
+separate process. ONNX session failures, TorchTRT load failures, first-run
+shape compilation, and VRAM exhaustion are isolated from the host.
 
 **Session Residency.** The session broker (`ofx_session_broker`) pools
 initialized sessions by backend and model. Multiple OFX node instances share

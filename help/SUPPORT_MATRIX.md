@@ -86,19 +86,18 @@ whole does not have a single designation.
 
 | Hardware | Backend | Support |
 |----------|---------|---------|
-| NVIDIA Ampere (RTX 30 series) | TensorRT RTX EP | Officially supported |
-| NVIDIA Ada Lovelace (RTX 40 series) | TensorRT RTX EP | Officially supported |
-| NVIDIA Blackwell (RTX 50 series) | TensorRT RTX EP | Officially supported |
-| NVIDIA RTX 20 series (Turing) | TensorRT RTX EP | Experimental - implemented but not validated as an official product path |
-| NVIDIA GTX 10xx / 16xx | CUDA via ONNX Runtime | Unsupported - a core CUDA path exists, but no packaged Windows CUDA product track is distributed |
+| NVIDIA Ampere (RTX 30 series) | TorchTRT | Officially supported |
+| NVIDIA Ada Lovelace (RTX 40 series) | TorchTRT | Officially supported |
+| NVIDIA Blackwell (RTX 50 series) | TorchTRT | Officially supported |
+| NVIDIA RTX 20 series (Turing) | None | Unsupported - the Windows RTX product track requires TorchTRT on RTX 30 series or newer |
+| NVIDIA GTX 10xx / 16xx | None | Unsupported - no packaged Windows CUDA product track is distributed |
 | Intel integrated GPU (DirectX 12) | DirectML | Experimental - implemented and distributed, but not validated as an official product path |
 | Intel Arc discrete GPU | DirectML | Experimental - implemented and distributed, but not validated as an official product path |
 | AMD GPU | DirectML | Experimental - known errors in practice |
-| CPU (AVX2+) | ONNX CPU | Best-effort fallback path for CLI and tolerant workflows |
+| CPU (AVX2+) | None | Unsupported for the Windows RTX product track |
 
-**RTX 20 series (Turing):** A TensorRT RTX EP path exists in code and may be
-usable on some systems, but it is not a validated official Windows support
-track. Do not rely on it for production use.
+**RTX 20 series (Turing):** The Windows RTX product track requires RTX 30
+series or newer because it is a TorchTRT dynamic-artifact path.
 
 **AMD:** DirectML integration exists but known errors occur in practice.
 AMD GPUs are not officially supported. Do not rely on them for production use.
@@ -106,20 +105,21 @@ AMD GPUs are not officially supported. Do not rely on them for production use.
 **Windows product tracks:** The canonical public Windows release emits the
 official `Windows RTX` installer by default. The `DirectML` installer is
 experimental and should only be published intentionally. Other
-execution-provider hooks present in the core runtime, such as CUDA, WinML, and
-OpenVINO, are not current product support tracks unless they are explicitly
-packaged and validated.
+execution-provider hooks present in the core runtime, such as CUDA, WinML,
+OpenVINO, and ONNX Runtime TensorRT RTX EP, are not current Windows RTX
+product support tracks unless they are explicitly packaged and validated.
 
 **Windows RTX installer policy:**
 - `Windows RTX` is the official Windows installer for NVIDIA RTX 30 series and
-  newer. It packages the complete green FP16 ONNX ladder through `2048px` and
-  the optional dynamic blue TorchScript pack. INT8 ONNX and CPU rendering have
-  been retired from the official Windows RTX installer.
-- In `Auto`, `Windows RTX` respects the current safe quality ceiling for the
-  detected VRAM tier.
-- In fixed modes, `Windows RTX` can attempt a packaged quality above the safe
-  ceiling and then follows the established runtime failure or fallback path if
-  that quality cannot execute.
+  newer. It packages one dynamic green TorchTRT model, one dynamic blue
+  TorchTRT model when the blue pack is selected, and the TorchTRT runtime.
+  ONNX Runtime DLLs, INT8 ONNX artifacts, and CPU rendering are not shipped as
+  Windows RTX fallback paths.
+- In `Auto`, `Windows RTX` resolves to the same dynamic model artifact and
+  passes the selected quality as a runtime resolution.
+- In fixed modes, `Windows RTX` uses the selected quality as the runtime
+  resolution for the same dynamic model artifact and then follows the
+  established runtime failure or fallback path if that quality cannot execute.
 - `Windows RTX` installs to a single OFX bundle location. Reinstalling the
   same track replaces the previous Windows RTX package in place.
 - The current public Windows RTX quality ladder in the OFX plugin is
@@ -134,11 +134,11 @@ conditions on your specific hardware before processing begins.
 
 ## Linux - Platform and Hardware Support
 
-Linux support is an experimental product track. It packages the same FP16
-model ladder shipped by the Windows RTX track, but switches the inference
-backend to the ONNX Runtime CUDA Execution Provider via a curated Microsoft
-prebuilt (`onnxruntime-linux-x64-gpu`). The TensorRT RTX Execution Provider is
-not yet built for Linux and is tracked for a future release.
+Linux support is an experimental product track. It packages the validated FP16
+ONNX model ladder and switches the inference backend to the ONNX Runtime CUDA
+Execution Provider via a curated Microsoft prebuilt
+(`onnxruntime-linux-x64-gpu`). The TensorRT RTX Execution Provider is not a
+Linux product track.
 
 | Hardware | Backend | Support |
 |----------|---------|---------|
@@ -231,21 +231,20 @@ their own SDK integrations that have not been built.
 
 ## Screen Color Model Variants
 
-The runtime ships two model variants distinguished by the screen color the
-model was trained on. Green is distributed as a per-resolution ladder. Blue on
-Windows RTX is distributed as one dynamic artifact that accepts the runtime
-quality resolution.
+The runtime ships deterministic screen-color execution modes. On Windows RTX,
+green and blue are distributed as one dynamic TorchTRT artifact each. Runtime
+quality is an input to the model session, not part of the artifact identity.
 
 ### Green model variant
 
 The canonical CorridorKey model, trained on green screen plates.
 
-| Resolution | TensorRT RTX EP | MLX (Apple Silicon) | Status |
-|------------|-----------------|---------------------|--------|
-| 512px | Validated | Validated | Officially supported |
-| 1024px | Validated | Validated | Officially supported |
-| 1536px | Validated | Validated | Officially supported |
-| 2048px | Validated | Validated | Officially supported |
+| Resolution | Windows RTX TorchTRT | MLX (Apple Silicon) | Status |
+|------------|----------------------|---------------------|--------|
+| 512px | Dynamic artifact | Validated | Officially supported |
+| 1024px | Dynamic artifact | Validated | Officially supported |
+| 1536px | Dynamic artifact | Validated | Officially supported |
+| 2048px | Dynamic artifact | Validated | Officially supported |
 
 Green packs are part of every official Windows RTX and macOS Apple Silicon
 installer.
@@ -253,18 +252,17 @@ installer.
 ### Blue model variant
 
 A dedicated CorridorKey variant trained on blue screen plates. On Windows RTX,
-blue uses a dynamic TorchScript artifact instead of the green ONNX TensorRT RTX
-EP ladder. This keeps blue independent from per-resolution engine files while
-preserving the existing green optimized path.
+blue uses a dynamic TorchTRT artifact and remains independent from
+per-resolution engine files.
 
 #### Windows RTX coverage
 
 | Resolution | Backend | Status |
 |------------|---------|--------|
-| 512px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
-| 1024px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
-| 1536px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
-| 2048px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 512px | Dynamic TorchTRT | Officially supported through the blue dynamic pack |
+| 1024px | Dynamic TorchTRT | Officially supported through the blue dynamic pack |
+| 1536px | Dynamic TorchTRT | Officially supported through the blue dynamic pack |
+| 2048px | Dynamic TorchTRT | Officially supported through the blue dynamic pack |
 
 #### macOS Apple Silicon coverage
 
@@ -275,10 +273,10 @@ preserving the existing green optimized path.
 | 1536px | MLX (canonicalization through green) | Officially supported |
 | 2048px | MLX (canonicalization through green) | Officially supported |
 
-There is no dedicated blue MLX artifact today. On Apple Silicon, blue plates
-are handled by canonicalizing the input into the green domain, running the
-green MLX model, and restoring the result. This is automatic and reported in
-`corridorkey doctor`.
+There is no dedicated blue MLX artifact in the support matrix. On Apple
+Silicon, blue plates are handled by canonicalizing the input into the green
+domain, running the green MLX model, and restoring the result. This is
+reported in diagnostics.
 
 #### Missing artifact UX
 
@@ -290,7 +288,8 @@ the requested quality path; it does not substitute a lower blue resolution.
 ### Pack distribution
 
 Model packs are selectable. The installer or first-run flow lets the user
-choose green only, blue only, or both. Packs not selected at install time can
-be added later through the same flow. Missing packs surface as missing
-artifacts in `corridorkey doctor`, with the canonical Hugging Face download
-location attached.
+choose green only or green plus blue. Green is the base Windows RTX pack
+because it carries the primary model and TorchTRT runtime. Packs not selected
+at install time can be added later through the same flow. Missing packs
+surface as missing artifacts in `corridorkey doctor`, with the canonical
+Hugging Face download location attached.
