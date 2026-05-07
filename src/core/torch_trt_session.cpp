@@ -1,6 +1,7 @@
 #include "torch_trt_session.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -16,14 +17,16 @@
 // resolution that the vendored torchtrt-windows tree intentionally
 // stubs out (the .ts is loaded by name and TensorRT plugins register
 // themselves at LoadLibrary time, so the application never directly
-// touches cuda_runtime_api.h). Stick to torch/script.h + torch/cuda.h:
-// the umbrella headers provide every torch:: + c10:: + at:: symbol we
-// reference (jit::load, jit::script::Module, IValue, NoGradGuard,
-// Tensor, Device, kCUDA, kFloat16/32, cuda::is_available,
-// cuda::synchronize, c10::Error) and pull only the slice of CUDA
-// declarations libtorch already proxies internally.
+// touches cuda_runtime_api.h) unless the API is surfaced through libtorch
+// itself. Keep this TU on the libtorch CUDA abstractions: stream guards and
+// events give us the same pinned-copy/copy-stream shape used by the Python
+// engine without linking application code directly against hand-written CUDA
+// kernels.
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/ops/upsample_bicubic2d.h>
 #include <ATen/ops/upsample_bilinear2d.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <torch/cuda.h>
 #include <torch/script.h>
 
@@ -93,6 +96,7 @@ bool tensor_has_shape(const torch::Tensor& tensor, int channels, int width, int 
 }
 
 constexpr int kDynamicInputAlignment = 32;
+constexpr std::size_t kPinnedHostRingSize = 3;
 constexpr std::string_view kExternalPosMetaName = "corridorkey.external_pos.v1.json";
 constexpr std::string_view kExternalPosDataName = "corridorkey.external_pos.v1.fp32";
 
@@ -133,6 +137,25 @@ torch::Tensor allocate_host_tensor(const std::vector<int64_t>& shape) {
 torch::Tensor allocate_host_input_tensor(int height, int width) {
     return allocate_host_tensor({1, 4, height, width});
 }
+
+class PinnedHostTensorRing {
+   public:
+    torch::Tensor acquire(int64_t element_count) {
+        auto& slot = m_buffers[m_cursor];
+        m_cursor = (m_cursor + 1U) % m_buffers.size();
+        if (!slot.defined() || slot.numel() < element_count) {
+            slot = allocate_host_tensor({element_count});
+        }
+        if (slot.numel() == element_count) {
+            return slot;
+        }
+        return slot.narrow(0, 0, element_count);
+    }
+
+   private:
+    std::array<torch::Tensor, kPinnedHostRingSize> m_buffers{};
+    std::size_t m_cursor = 0;
+};
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) - index and size match the reflection formula.
 int reflect_index(int index, int size) {
@@ -302,7 +325,6 @@ Result<torch::Tensor> external_pos_grid_for(ExternalPosState& state, int input_w
         state.cached_input_width = input_width;
         state.cached_input_height = input_height;
         state.cached_dtype = dtype;
-        torch::cuda::synchronize();
     });
     return state.cached_grid;
 }
@@ -321,11 +343,10 @@ struct OutputMaterializationShape {
     int pad_left = 0;
 };
 
-MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
-                                              const torch::Tensor& fg_cuda,
-                                              OutputMaterializationShape shape,
-                                              bool include_foreground,
-                                              const StageTimingCallback& on_stage) {
+MaterializedOutputTensors materialize_outputs(
+    const torch::Tensor& alpha_cuda, const torch::Tensor& fg_cuda, OutputMaterializationShape shape,
+    bool include_foreground, PinnedHostTensorRing& host_ring, c10::cuda::CUDAStream& copy_stream,
+    const StageTimingCallback& on_stage) {
     auto alpha_nchw = crop_output_nchw(alpha_cuda, shape.crop_width, shape.crop_height,
                                        shape.pad_top, shape.pad_left);
     torch::Tensor fg_nchw;
@@ -343,36 +364,48 @@ MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
                 resize_output_if_needed(fg_nchw, shape.crop_width, shape.crop_height,
                                         shape.final_width, shape.final_height);
             }
-            torch::cuda::synchronize();
         },
         1);
 
-    auto alpha_flat = flatten_hwc(alpha_nchw);
     torch::Tensor bulk_cuda;
-    if (include_foreground) {
-        auto fg_flat = flatten_hwc(fg_nchw);
-        bulk_cuda = torch::cat({alpha_flat, fg_flat}, 0).contiguous();
-    } else {
-        bulk_cuda = alpha_flat.contiguous();
-    }
+    common::measure_stage(on_stage, "torchtrt_output_pack", [&]() {
+        auto alpha_flat = flatten_hwc(alpha_nchw);
+        if (include_foreground) {
+            auto fg_flat = flatten_hwc(fg_nchw);
+            bulk_cuda = torch::cat({alpha_flat, fg_flat}, 0).contiguous();
+        } else {
+            bulk_cuda = alpha_flat.contiguous();
+        }
+    });
 
-    auto host_bulk = allocate_host_tensor({bulk_cuda.numel()});
-    host_bulk.copy_(bulk_cuda, true);
-    torch::cuda::synchronize();
+    auto host_bulk = host_ring.acquire(bulk_cuda.numel());
+    common::measure_stage(on_stage, "torchtrt_output_d2h", [&]() {
+        const auto producer_stream = c10::cuda::getCurrentCUDAStream();
+        at::cuda::CUDAEvent producer_done;
+        producer_done.record(producer_stream);
+        producer_done.block(copy_stream);
+        {
+            const c10::cuda::CUDAStreamGuard copy_guard(copy_stream);
+            host_bulk.copy_(bulk_cuda, true);
+        }
+        copy_stream.synchronize();
+    });
 
     MaterializedOutputTensors result;
     const auto alpha_count =
         static_cast<std::size_t>(shape.final_width) * static_cast<std::size_t>(shape.final_height);
-    const auto* src = host_bulk.data_ptr<float>();
-    result.alpha = ImageBuffer(shape.final_width, shape.final_height, 1);
-    std::memcpy(result.alpha.view().data.data(), src, alpha_count * sizeof(float));
+    common::measure_stage(on_stage, "torchtrt_output_unpack_cpu", [&]() {
+        const auto* src = host_bulk.data_ptr<float>();
+        result.alpha = ImageBuffer(shape.final_width, shape.final_height, 1);
+        std::memcpy(result.alpha.view().data.data(), src, alpha_count * sizeof(float));
 
-    if (include_foreground) {
-        const auto foreground_count = alpha_count * 3U;
-        result.foreground = ImageBuffer(shape.final_width, shape.final_height, 3);
-        std::memcpy(result.foreground.view().data.data(), src + alpha_count,
-                    foreground_count * sizeof(float));
-    }
+        if (include_foreground) {
+            const auto foreground_count = alpha_count * 3U;
+            result.foreground = ImageBuffer(shape.final_width, shape.final_height, 3);
+            std::memcpy(result.foreground.view().data.data(), src + alpha_count,
+                        foreground_count * sizeof(float));
+        }
+    });
     return result;
 }
 
@@ -381,7 +414,8 @@ Result<FrameResult> forward_and_materialize(
     torch::jit::script::Module& module, ExternalPosState& external_pos,
     const torch::Tensor& cuda_input, int crop_width, int crop_height, int final_width,
     int final_height, int inference_width, int inference_height, int pad_top, int pad_left,
-    torch::Dtype input_dtype, bool output_alpha_only, const StageTimingCallback& on_stage) {
+    torch::Dtype input_dtype, bool output_alpha_only, PinnedHostTensorRing& host_ring,
+    c10::cuda::CUDAStream& copy_stream, const StageTimingCallback& on_stage) {
     auto pos_grid = external_pos_grid_for(external_pos, inference_width, inference_height,
                                           input_dtype, on_stage);
     if (!pos_grid.has_value()) {
@@ -396,7 +430,6 @@ Result<FrameResult> forward_and_materialize(
         } else {
             raw_out = module.forward({cuda_input});
         }
-        torch::cuda::synchronize();
     });
 
     auto split = split_forward_output(raw_out);
@@ -430,7 +463,7 @@ Result<FrameResult> forward_and_materialize(
                                                            .final_height = final_height,
                                                            .pad_top = pad_top,
                                                            .pad_left = pad_left},
-                                include_foreground, on_stage);
+                                include_foreground, host_ring, copy_stream, on_stage);
         result.alpha = std::move(materialized.alpha);
         result.foreground = std::move(materialized.foreground);
     });
@@ -442,10 +475,12 @@ Result<FrameResult> forward_and_materialize(
 
 class TorchTrtSession::Impl {
    public:
-    Impl() = default;
+    Impl() : copy_stream(c10::cuda::getStreamFromPool(false)) {}
 
     torch::jit::script::Module module;
     ExternalPosState external_pos;
+    PinnedHostTensorRing host_ring;
+    c10::cuda::CUDAStream copy_stream;
     int resolution = 0;
     // Engine input dtype - inferred from filename (corridorkey_*_fp32_<res>.ts
     // vs corridorkey_*_fp16_<res>.ts). Sprint 0 found blue 1536+ needs FP32
@@ -604,10 +639,10 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
                 host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype, kNonBlockingCopy);
         });
 
-        return forward_and_materialize(m_impl->module, m_impl->external_pos, cuda_input, width,
-                                       height, width, height, inference_width, inference_height,
-                                       padding.top, padding.left, m_impl->input_dtype,
-                                       output_alpha_only, on_stage);
+        return forward_and_materialize(
+            m_impl->module, m_impl->external_pos, cuda_input, width, height, width, height,
+            inference_width, inference_height, padding.top, padding.left, m_impl->input_dtype,
+            output_alpha_only, m_impl->host_ring, m_impl->copy_stream, on_stage);
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InferenceFailed,
@@ -650,10 +685,10 @@ Result<FrameResult> TorchTrtSession::infer_prepared_planar(
                 host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype, kNonBlockingCopy);
         });
 
-        return forward_and_materialize(m_impl->module, m_impl->external_pos, cuda_input,
-                                       input_width, input_height, input_width, input_height,
-                                       input_width, input_height, 0, 0, m_impl->input_dtype,
-                                       output_alpha_only, on_stage);
+        return forward_and_materialize(
+            m_impl->module, m_impl->external_pos, cuda_input, input_width, input_height,
+            input_width, input_height, input_width, input_height, 0, 0, m_impl->input_dtype,
+            output_alpha_only, m_impl->host_ring, m_impl->copy_stream, on_stage);
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InferenceFailed,
@@ -703,10 +738,10 @@ Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
                                   [&]() { cuda_input = cuda_input.to(m_impl->input_dtype); });
         }
 
-        return forward_and_materialize(m_impl->module, m_impl->external_pos, cuda_input,
-                                       input_width, input_height, output_width, output_height,
-                                       input_width, input_height, 0, 0, m_impl->input_dtype,
-                                       output_alpha_only, on_stage);
+        return forward_and_materialize(
+            m_impl->module, m_impl->external_pos, cuda_input, input_width, input_height,
+            output_width, output_height, input_width, input_height, 0, 0, m_impl->input_dtype,
+            output_alpha_only, m_impl->host_ring, m_impl->copy_stream, on_stage);
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InferenceFailed,

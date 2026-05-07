@@ -90,6 +90,9 @@ if(CORRIDORKEY_HAS_TORCHTRT)
             torch::c10_cuda
             torchtrt::torchtrt
     )
+    if(TARGET CUDA::cudart_static)
+        target_link_libraries(corridorkey_torchtrt PRIVATE CUDA::cudart_static)
+    endif()
     if(MSVC)
         target_compile_options(corridorkey_torchtrt PRIVATE
             /bigobj
