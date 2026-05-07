@@ -174,12 +174,15 @@ mandatory bundle. Each pack is identified by product track and screen color
 variant. Packs are hosted on Hugging Face and addressable through the
 `download_url` field on every catalog entry.
 
-The installer or first-run flow offers the user a pack selection: green or
-green plus blue. Green is the base Windows RTX pack because it carries the
-primary model and required LibTorch/TorchTRT runtime. Selecting fewer packs reduces
-install footprint without disabling runtime features beyond the unselected
-variants. The `corridorkey doctor` command reports which packs are present,
-which are missing, and the canonical Hugging Face source for any missing pack.
+The Windows RTX installer offers the user a model pack selection: green, blue,
+or both. The LibTorch/TorchTRT runtime is a fixed shared pack, is not tied to a
+screen color, and is installed whenever at least one model pack is selected. The
+installer does not proceed with zero model packs selected. Selecting fewer packs
+reduces install footprint without disabling runtime features beyond the
+unselected variants. Blue-Green Channel Swap uses the green pack and is not a
+third model pack. The `corridorkey doctor` command reports which packs are
+present, which are missing, and the canonical Hugging Face source for any
+missing pack.
 
 Models are data, not executable code. Pack downloads after install do not
 invalidate macOS notarization or Windows Authenticode signatures of the
