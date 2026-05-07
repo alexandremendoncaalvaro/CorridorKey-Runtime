@@ -23,6 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import MethodType
+from typing import Any
 
 import torch
 import torch.nn.functional as F  # noqa: N812
@@ -45,6 +46,33 @@ DEFAULT_VALIDATE_RESOLUTIONS = (512, 1024)
 EXTERNAL_POS_META_NAME = "corridorkey.external_pos.v1.json"
 EXTERNAL_POS_DATA_NAME = "corridorkey.external_pos.v1.fp32"
 ValidationCase = tuple[int, torch.Tensor, list[torch.Tensor]]
+
+
+def _flatten_cli_values(values: list[str]) -> list[str]:
+    flattened: list[str] = []
+    for value in values:
+        flattened.extend(item.strip() for item in value.split(",") if item.strip())
+    return flattened
+
+
+def _resolve_torch_op(name: str) -> Any:
+    parts = name.removeprefix("torch.ops.").split(".")
+    if len(parts) < 3:
+        raise ValueError(f"torch op '{name}' must look like aten.layer_norm.default")
+
+    namespace_name = parts[0]
+    overload_name = parts[-1]
+    packet_name = ".".join(parts[1:-1])
+    namespace = getattr(torch.ops, namespace_name, None)
+    if namespace is None:
+        raise ValueError(f"torch op namespace '{namespace_name}' was not found")
+    packet = getattr(namespace, packet_name, None)
+    if packet is None:
+        raise ValueError(f"torch op packet '{namespace_name}.{packet_name}' was not found")
+    target = getattr(packet, overload_name, None)
+    if target is None:
+        raise ValueError(f"torch op overload '{name}' was not found")
+    return target
 
 
 def _project_feature(linear: torch.nn.Module, feature: torch.Tensor) -> torch.Tensor:
@@ -276,6 +304,16 @@ def compile_dynamic_torchtrt(
     output_path: Path,
     precision: str,
     enabled_precisions: list[str],
+    torch_executed_ops: list[str],
+    torch_executed_modules: list[str],
+    require_full_compilation: bool,
+    min_block_size: int,
+    workspace_size_mb: int,
+    optimization_level: int | None,
+    use_fp32_acc: bool,
+    use_fast_partitioner: bool,
+    pass_through_build_failures: bool,
+    dryrun: bool,
     min_resolution: int,
     opt_resolution: int,
     max_resolution: int,
@@ -288,6 +326,17 @@ def compile_dynamic_torchtrt(
     trt_precisions = {
         torch.float16 if item == "fp16" else torch.float32 for item in enabled_precisions
     }
+    torch_targets = {_resolve_torch_op(name) for name in torch_executed_ops}
+    if torch_executed_modules:
+        raise RuntimeError(
+            "Torch-TensorRT 2.8 Dynamo exposes torch_executed_modules but warns that "
+            "module fallback is unimplemented. Use --torch-executed-op for deterministic "
+            "partition diagnostics in this toolchain."
+        )
+    if require_full_compilation and torch_targets:
+        raise RuntimeError(
+            "--require-full-compilation cannot be combined with --torch-executed-op"
+        )
     model = _load_external_pos_model(checkpoint_path, dtype)
     base_model = model.model
 
@@ -319,6 +368,13 @@ def compile_dynamic_torchtrt(
         "[compile_dynamic_torchtrt] export "
         f"{checkpoint_path.name} precision={precision} "
         f"enabled_precisions={','.join(enabled_precisions)} "
+        f"torch_executed_ops={','.join(torch_executed_ops) or 'none'} "
+        f"min_block_size={min_block_size} "
+        f"workspace_size_mb={workspace_size_mb} "
+        f"optimization_level={optimization_level if optimization_level is not None else 'default'} "
+        f"use_fp32_acc={int(use_fp32_acc)} "
+        f"partitioner={'fast' if use_fast_partitioner else 'global'} "
+        f"dryrun={int(dryrun)} "
         f"range={min_resolution}-{max_resolution}",
         flush=True,
     )
@@ -334,8 +390,19 @@ def compile_dynamic_torchtrt(
             exported,
             inputs=inputs,
             enabled_precisions=trt_precisions,
-            min_block_size=1,
+            require_full_compilation=require_full_compilation,
+            min_block_size=min_block_size,
+            torch_executed_ops=torch_targets,
+            pass_through_build_failures=pass_through_build_failures,
+            workspace_size=workspace_size_mb * 1024 * 1024,
+            optimization_level=optimization_level,
+            use_fp32_acc=use_fp32_acc,
+            use_fast_partitioner=use_fast_partitioner,
+            dryrun=dryrun,
         )
+    if dryrun:
+        print("[compile_dynamic_torchtrt] dryrun complete; no artifact saved", flush=True)
+        return
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     extra_files = _external_pos_extra_files(base_model)
@@ -360,6 +427,8 @@ def compile_dynamic_torchtrt(
     loaded = torch.jit.load(str(output_path), map_location="cuda", _extra_files=loaded_extra).eval()
     if not loaded_extra[EXTERNAL_POS_META_NAME] or not loaded_extra[EXTERNAL_POS_DATA_NAME]:
         raise RuntimeError("saved TorchTRT artifact is missing embedded external positional data")
+    if "tensorrt" not in str(loaded.graph).lower():
+        raise RuntimeError("saved artifact does not contain TensorRT engine markers")
     for resolution, validation_input_cpu, eager_cpu in validation_cases:
         validation_input = validation_input_cpu.to("cuda")
         validation_pos = _make_pos_grid(base_model, resolution, dtype)
@@ -396,6 +465,50 @@ def parse_args() -> argparse.Namespace:
         choices=("fp16", "fp32"),
         nargs="*",
         help="TensorRT tactic precisions. Defaults to --precision.",
+    )
+    parser.add_argument(
+        "--torch-executed-op",
+        dest="torch_executed_ops",
+        action="append",
+        default=[],
+        help=(
+            "ATen op to keep in PyTorch inside the serialized hybrid graph, "
+            "for example aten.layer_norm.default. May be repeated or comma-separated."
+        ),
+    )
+    parser.add_argument(
+        "--torch-executed-module",
+        dest="torch_executed_modules",
+        action="append",
+        default=[],
+        help=(
+            "Rejected for the pinned Torch-TensorRT 2.8 Dynamo toolchain because "
+            "module fallback is reported as unimplemented."
+        ),
+    )
+    parser.add_argument("--require-full-compilation", action="store_true")
+    parser.add_argument("--min-block-size", type=int, default=1)
+    parser.add_argument("--workspace-size-mb", type=int, default=0)
+    parser.add_argument("--optimization-level", type=int, choices=range(0, 6))
+    parser.add_argument(
+        "--use-fp32-acc",
+        action="store_true",
+        help="Ask Torch-TensorRT to use FP32 accumulation around eligible matmul layers.",
+    )
+    parser.add_argument(
+        "--global-partitioner",
+        action="store_true",
+        help="Use Torch-TensorRT global partitioning instead of the fast adjacency partitioner.",
+    )
+    parser.add_argument(
+        "--pass-through-build-failures",
+        action="store_true",
+        help="Raise TensorRT build failures instead of silently keeping a failed segment in Torch.",
+    )
+    parser.add_argument(
+        "--dryrun",
+        action="store_true",
+        help="Run Torch-TensorRT partition analysis without building or saving an artifact.",
     )
     parser.add_argument("--min-resolution", type=int, default=512)
     parser.add_argument("--opt-resolution", type=int, default=1024)
@@ -436,11 +549,23 @@ def main() -> int:
     sys.path.insert(0, str(repo_path))
     try:
         enabled_precisions = args.enabled_precisions or [args.precision]
+        torch_executed_ops = _flatten_cli_values(args.torch_executed_ops)
+        torch_executed_modules = _flatten_cli_values(args.torch_executed_modules)
         compile_dynamic_torchtrt(
             args.checkpoint.resolve(),
             args.output.resolve(),
             args.precision,
             enabled_precisions,
+            torch_executed_ops,
+            torch_executed_modules,
+            args.require_full_compilation,
+            args.min_block_size,
+            args.workspace_size_mb,
+            args.optimization_level,
+            args.use_fp32_acc,
+            not args.global_partitioner,
+            args.pass_through_build_failures,
+            args.dryrun,
             args.min_resolution,
             args.opt_resolution,
             args.max_resolution,

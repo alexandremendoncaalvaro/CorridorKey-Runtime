@@ -24,6 +24,14 @@ color, but it embeds the source positional embedding as TorchScript extra data
 and expects the C++ runtime to pass a cached positional grid as the second
 forward input.
 
+`compile_dynamic_torchtrt.py` also owns diagnostic compile controls for the
+dynamic engine path. `--torch-executed-op` keeps named ATen operators in
+PyTorch inside the serialized hybrid graph, `--use-fp32-acc` requests FP32
+accumulation for eligible matmul layers, and `--dryrun` asks Torch-TensorRT to
+report partitioning without saving an artifact. The pinned Torch-TensorRT 2.8
+Dynamo compiler reports module fallback as unimplemented, so
+`--torch-executed-module` is rejected by this toolchain.
+
 Validate every promoted artifact from C++ at every runtime resolution the
 product contract exposes. Green FP16 has validated through `2048` on the local
 RTX 3080. Blue FP16 validates at `512` and `1024` but returns NaN at higher
