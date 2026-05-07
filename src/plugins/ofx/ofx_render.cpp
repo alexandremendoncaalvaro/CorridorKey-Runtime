@@ -1050,10 +1050,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.output_alpha_only = !output_mode_requires_model_foreground(output_mode);
     params.output_auxiliary_images = false;
 
+    const char* upscale_method_label =
+        params.upscale_method == UpscaleMethod::Bilinear ? "bilinear" : "lanczos4";
+
     log_message("render",
                 std::string("event=postprocess_params screen_color=") +
-                    std::string(screen_color_mode_label) +
-                    " loaded_model_is_blue=" + (loaded_model_is_blue ? "1" : "0") +
+                    std::string(screen_color_mode_label) + " loaded_model_is_blue=" +
+                    (loaded_model_is_blue ? "1" : "0") + " upscale_method=" + upscale_method_label +
+                    " upscale_method_choice=" + std::to_string(upscale_method) +
                     " requested_source_passthrough=" + (source_passthrough_requested ? "1" : "0") +
                     " effective_source_passthrough=" + (params.source_passthrough ? "1" : "0") +
                     " despill_screen_channel=" + std::to_string(params.despill_screen_channel) +

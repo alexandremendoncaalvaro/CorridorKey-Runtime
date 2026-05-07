@@ -5,6 +5,7 @@
 #include <npp.h>
 #include <nppi.h>
 
+#include "../common/stage_profiler.hpp"
 #include "npp_stream_context.hpp"
 #endif
 
@@ -80,7 +81,7 @@ struct GpuPrepState {
     GpuPrepState() {
         int device_count = 0;
         if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0) {
-            if (cudaStreamCreate(&stream) == cudaSuccess) {
+            if (cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess) {
                 if (detail::make_npp_stream_context(stream, npp_context)) {
                     gpu_available = true;
                 } else {
@@ -161,26 +162,34 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
                                                   int model_width, int model_height,
                                                   const std::array<float, 3>& mean,
                                                   const std::array<float, 3>& inv_stddev,
-                                                  bool synchronize) {
+                                                  bool synchronize,
+                                                  const StageTimingCallback& on_stage) {
     if (rgb.empty() || hint.empty() || rgb.channels < 3 || hint.channels < 1) {
         return Unexpected(
             Error{ErrorCode::InferenceFailed, "Invalid input images for GPU preparation"});
     }
 
-    if (!state.ensure_buffers(rgb.width, rgb.height, hint.width, hint.height, model_width,
-                              model_height)) {
+    bool buffers_ready = false;
+    common::measure_stage(on_stage, "gpu_prepare_ensure_buffers", [&]() {
+        buffers_ready = state.ensure_buffers(rgb.width, rgb.height, hint.width, hint.height,
+                                             model_width, model_height);
+    });
+    if (!buffers_ready) {
         return Unexpected(Error{ErrorCode::InferenceFailed, "Failed to allocate GPU prep buffers"});
     }
 
     const size_t model_pixels = static_cast<size_t>(model_width) * model_height;
 
-    const size_t src_rgb_row_bytes = static_cast<size_t>(rgb.width) * 3 * sizeof(float);
-    cudaMemcpy2DAsync(state.src_rgb_dev, src_rgb_row_bytes, rgb.data.data(), src_rgb_row_bytes,
-                      src_rgb_row_bytes, rgb.height, cudaMemcpyHostToDevice, state.stream);
+    common::measure_stage(on_stage, "gpu_prepare_upload_enqueue", [&]() {
+        const size_t src_rgb_row_bytes = static_cast<size_t>(rgb.width) * 3 * sizeof(float);
+        cudaMemcpy2DAsync(state.src_rgb_dev, src_rgb_row_bytes, rgb.data.data(), src_rgb_row_bytes,
+                          src_rgb_row_bytes, rgb.height, cudaMemcpyHostToDevice, state.stream);
 
-    const size_t src_hint_row_bytes = static_cast<size_t>(hint.width) * sizeof(float);
-    cudaMemcpy2DAsync(state.src_hint_dev, src_hint_row_bytes, hint.data.data(), src_hint_row_bytes,
-                      src_hint_row_bytes, hint.height, cudaMemcpyHostToDevice, state.stream);
+        const size_t src_hint_row_bytes = static_cast<size_t>(hint.width) * sizeof(float);
+        cudaMemcpy2DAsync(state.src_hint_dev, src_hint_row_bytes, hint.data.data(),
+                          src_hint_row_bytes, src_hint_row_bytes, hint.height,
+                          cudaMemcpyHostToDevice, state.stream);
+    });
 
     NppiSize src_rgb_size = {rgb.width, rgb.height};
     NppiRect src_rgb_roi = {0, 0, rgb.width, rgb.height};
@@ -195,9 +204,12 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     Npp32f* prepared_rgb = state.src_rgb_dev;
     int prepared_rgb_step = src_rgb_step;
     if (rgb_needs_resize) {
-        NppStatus status = nppiResize_32f_C3R_Ctx(
-            state.src_rgb_dev, src_rgb_step, src_rgb_size, src_rgb_roi, state.resized_rgb_dev,
-            dst_rgb_step, dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
+        NppStatus status = NPP_SUCCESS;
+        common::measure_stage(on_stage, "gpu_prepare_rgb_resize_enqueue", [&]() {
+            status = nppiResize_32f_C3R_Ctx(state.src_rgb_dev, src_rgb_step, src_rgb_size,
+                                            src_rgb_roi, state.resized_rgb_dev, dst_rgb_step,
+                                            dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
+        });
 
         if (status != NPP_SUCCESS) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -216,9 +228,12 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     Npp32f* prepared_hint = state.src_hint_dev;
     int prepared_hint_step = src_hint_step;
     if (hint_needs_resize) {
-        NppStatus status = nppiResize_32f_C1R_Ctx(
-            state.src_hint_dev, src_hint_step, src_hint_size, src_hint_roi, state.resized_hint_dev,
-            dst_hint_step, dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
+        NppStatus status = NPP_SUCCESS;
+        common::measure_stage(on_stage, "gpu_prepare_hint_resize_enqueue", [&]() {
+            status = nppiResize_32f_C1R_Ctx(state.src_hint_dev, src_hint_step, src_hint_size,
+                                            src_hint_roi, state.resized_hint_dev, dst_hint_step,
+                                            dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
+        });
 
         if (status != NPP_SUCCESS) {
             return Unexpected(
@@ -232,8 +247,11 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     Npp32f* planar_ptrs[3] = {state.planar_dev, state.planar_dev + model_pixels,
                               state.planar_dev + 2 * model_pixels};
 
-    NppStatus status = nppiCopy_32f_C3P3R_Ctx(prepared_rgb, prepared_rgb_step, planar_ptrs,
-                                              dst_hint_step, dst_size, npp_context);
+    NppStatus status = NPP_SUCCESS;
+    common::measure_stage(on_stage, "gpu_prepare_split_enqueue", [&]() {
+        status = nppiCopy_32f_C3P3R_Ctx(prepared_rgb, prepared_rgb_step, planar_ptrs, dst_hint_step,
+                                        dst_size, npp_context);
+    });
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -243,23 +261,26 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     for (int channel = 0; channel < 3; ++channel) {
         Npp32f* plane = state.planar_dev + static_cast<size_t>(channel) * model_pixels;
 
-        status = nppiSubC_32f_C1IR_Ctx(mean[channel], plane, dst_hint_step, dst_size, npp_context);
+        common::measure_stage(on_stage, "gpu_prepare_normalize_enqueue", [&]() {
+            status =
+                nppiSubC_32f_C1IR_Ctx(mean[channel], plane, dst_hint_step, dst_size, npp_context);
+            if (status == NPP_SUCCESS) {
+                status = nppiMulC_32f_C1IR_Ctx(inv_stddev[channel], plane, dst_hint_step, dst_size,
+                                               npp_context);
+            }
+        });
         if (status != NPP_SUCCESS) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
-                                    "NPP SubC failed on channel " + std::to_string(channel)});
-        }
-
-        status =
-            nppiMulC_32f_C1IR_Ctx(inv_stddev[channel], plane, dst_hint_step, dst_size, npp_context);
-        if (status != NPP_SUCCESS) {
-            return Unexpected(Error{ErrorCode::InferenceFailed,
-                                    "NPP MulC failed on channel " + std::to_string(channel)});
+                                    "NPP normalize failed on channel " + std::to_string(channel) +
+                                        " with status " + std::to_string(status)});
         }
     }
 
     Npp32f* hint_plane = state.planar_dev + 3 * model_pixels;
-    status = nppiCopy_32f_C1R_Ctx(prepared_hint, prepared_hint_step, hint_plane, dst_hint_step,
-                                  dst_size, npp_context);
+    common::measure_stage(on_stage, "gpu_prepare_hint_copy_enqueue", [&]() {
+        status = nppiCopy_32f_C1R_Ctx(prepared_hint, prepared_hint_step, hint_plane, dst_hint_step,
+                                      dst_size, npp_context);
+    });
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -267,7 +288,9 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     }
 
     if (synchronize) {
-        cudaError_t cuda_err = cudaStreamSynchronize(state.stream);
+        cudaError_t cuda_err = cudaSuccess;
+        common::measure_stage(on_stage, "gpu_prepare_sync",
+                              [&]() { cuda_err = cudaStreamSynchronize(state.stream); });
         if (cuda_err != cudaSuccess) {
             return Unexpected(Error{ErrorCode::InferenceFailed, "GPU prep synchronization failed"});
         }
@@ -305,7 +328,8 @@ bool GpuInputPrep::available() const {
 
 Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_dst, int model_width,
                                           int model_height, const std::array<float, 3>& mean,
-                                          const std::array<float, 3>& inv_stddev) {
+                                          const std::array<float, 3>& inv_stddev,
+                                          StageTimingCallback on_stage) {
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     if (!available()) {
         return Unexpected(
@@ -313,15 +337,19 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
     }
 
     auto prepared_res = prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height,
-                                                 mean, inv_stddev, false);
+                                                 mean, inv_stddev, false, on_stage);
     if (!prepared_res) {
         return Unexpected(prepared_res.error());
     }
     const size_t model_pixels = static_cast<size_t>(model_width) * model_height;
-    cudaMemcpyAsync(planar_dst, m_state->planar_dev, 4 * model_pixels * sizeof(float),
-                    cudaMemcpyDeviceToHost, m_state->stream);
+    common::measure_stage(on_stage, "gpu_prepare_download_enqueue", [&]() {
+        cudaMemcpyAsync(planar_dst, m_state->planar_dev, 4 * model_pixels * sizeof(float),
+                        cudaMemcpyDeviceToHost, m_state->stream);
+    });
 
-    cudaError_t cuda_err = cudaStreamSynchronize(m_state->stream);
+    cudaError_t cuda_err = cudaSuccess;
+    common::measure_stage(on_stage, "gpu_prepare_sync",
+                          [&]() { cuda_err = cudaStreamSynchronize(m_state->stream); });
     if (cuda_err != cudaSuccess) {
         return Unexpected(Error{ErrorCode::InferenceFailed, "GPU prep synchronization failed"});
     }
@@ -335,21 +363,24 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
     (void)model_height;
     (void)mean;
     (void)inv_stddev;
+    (void)on_stage;
     return Unexpected(
         Error{ErrorCode::HardwareNotSupported, "CorridorKey was built without CUDA support"});
 #endif
 }
 
-Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device(
-    Image rgb, Image hint, int model_width, int model_height, const std::array<float, 3>& mean,
-    const std::array<float, 3>& inv_stddev) {
+Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device(Image rgb, Image hint, int model_width,
+                                                             int model_height,
+                                                             const std::array<float, 3>& mean,
+                                                             const std::array<float, 3>& inv_stddev,
+                                                             StageTimingCallback on_stage) {
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     if (!available()) {
         return Unexpected(
             Error{ErrorCode::HardwareNotSupported, "GPU input preparation is not available"});
     }
     return prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height, mean,
-                                    inv_stddev, true);
+                                    inv_stddev, true, on_stage);
 #else
     (void)rgb;
     (void)hint;
@@ -357,6 +388,7 @@ Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device(
     (void)model_height;
     (void)mean;
     (void)inv_stddev;
+    (void)on_stage;
     return Unexpected(
         Error{ErrorCode::HardwareNotSupported, "CorridorKey was built without CUDA support"});
 #endif

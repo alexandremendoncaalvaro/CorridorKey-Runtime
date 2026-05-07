@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include "core/gpu_prep.hpp"
@@ -67,9 +69,24 @@ TEST_CASE("GpuInputPrep Correctness vs CPU reference", "[unit][core]") {
 
     // GPU path
     std::vector<float> gpu_planar(total_planar, 0.0f);
-    auto res =
-        prep.prepare_inputs(rgb, hint, gpu_planar.data(), model_w, model_h, mean, inv_stddev);
+    std::vector<std::string> stages;
+    auto record_stage = [&](const StageTiming& timing) { stages.push_back(timing.name); };
+    auto res = prep.prepare_inputs(rgb, hint, gpu_planar.data(), model_w, model_h, mean, inv_stddev,
+                                   record_stage);
     REQUIRE(res.has_value());
+
+    auto has_stage = [&](const std::string& name) {
+        return std::find(stages.begin(), stages.end(), name) != stages.end();
+    };
+    CHECK(has_stage("gpu_prepare_ensure_buffers"));
+    CHECK(has_stage("gpu_prepare_upload_enqueue"));
+    CHECK(has_stage("gpu_prepare_rgb_resize_enqueue"));
+    CHECK(has_stage("gpu_prepare_hint_resize_enqueue"));
+    CHECK(has_stage("gpu_prepare_split_enqueue"));
+    CHECK(has_stage("gpu_prepare_normalize_enqueue"));
+    CHECK(has_stage("gpu_prepare_hint_copy_enqueue"));
+    CHECK(has_stage("gpu_prepare_download_enqueue"));
+    CHECK(has_stage("gpu_prepare_sync"));
 
     // CPU reference
     ImageBuffer cpu_rgb_buf(model_w, model_h, 3);

@@ -2085,7 +2085,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 [&]() -> Result<core::GpuPreparedInput> {
                     return m_gpu_prep.prepare_inputs_device(rgb, alpha_hint, target_res, target_res,
                                                             kCorridorKeyRgbMean,
-                                                            kCorridorKeyRgbInvStddev);
+                                                            kCorridorKeyRgbInvStddev, on_stage);
                 },
                 1);
             if (gpu_prepare_res.has_value()) {
@@ -2208,7 +2208,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 if (m_io_binding_enabled && m_gpu_prep.available()) {
                     auto gpu_res = m_gpu_prep.prepare_inputs(
                         rgb, alpha_hint, planar_ptr, static_cast<int>(model_w),
-                        static_cast<int>(model_h), kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
+                        static_cast<int>(model_h), kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev,
+                        on_stage);
                     if (gpu_res.has_value()) {
                         return;
                     }

@@ -29,11 +29,12 @@ class GpuInputPrep {
     [[nodiscard]] Result<void> prepare_inputs(Image rgb, Image hint, float* planar_dst,
                                               int model_width, int model_height,
                                               const std::array<float, 3>& mean,
-                                              const std::array<float, 3>& inv_stddev);
+                                              const std::array<float, 3>& inv_stddev,
+                                              StageTimingCallback on_stage = nullptr);
 
     [[nodiscard]] Result<GpuPreparedInput> prepare_inputs_device(
         Image rgb, Image hint, int model_width, int model_height, const std::array<float, 3>& mean,
-        const std::array<float, 3>& inv_stddev);
+        const std::array<float, 3>& inv_stddev, StageTimingCallback on_stage = nullptr);
 
    private:
     std::unique_ptr<GpuPrepState> m_state;
