@@ -32,20 +32,32 @@ function Write-Success([string]$msg) {
 function Assert-CorridorKeyWindowsReleaseLabel {
     param(
         [string]$Version,
-        [string]$DisplayVersionLabel
+        [string]$DisplayVersionLabel,
+        [bool]$Publishing = $false
     )
     if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
         return
     }
     $pattern = '^(?<core>\d+\.\d+\.\d+)-win\.(?<counter>\d+)$'
     $match = [regex]::Match($DisplayVersionLabel, $pattern)
-    if (-not $match.Success) {
+    if ($match.Success) {
+        $labelCore = $match.Groups['core'].Value
+        if ($labelCore -ne $Version) {
+            throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
+        }
+        return
+    }
+
+    $localPattern = '^\d+\.\d+\.\d+-win\.\d+-\d+-g[0-9a-f]+(-dirty)?$'
+    if (-not $Publishing -and $DisplayVersionLabel -match $localPattern) {
+        return
+    }
+
+    if ($Publishing) {
         throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows prerelease label. Expected form: X.Y.Z-win.N (see docs/RELEASE_GUIDELINES.md section 1)."
     }
-    $labelCore = $match.Groups['core'].Value
-    if ($labelCore -ne $Version) {
-        throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
-    }
+
+    throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows local or prerelease label. Expected local git-describe form X.Y.Z-win.N-M-gSHA or published form X.Y.Z-win.N."
 }
 
 function Publish-CorridorKeyGithubRelease {
@@ -143,7 +155,10 @@ function Publish-CorridorKeyGithubRelease {
 
 try {
     $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version -SyncGuiMetadata
-    Assert-CorridorKeyWindowsReleaseLabel -Version $Version -DisplayVersionLabel $DisplayVersionLabel
+    Assert-CorridorKeyWindowsReleaseLabel `
+        -Version $Version `
+        -DisplayVersionLabel $DisplayVersionLabel `
+        -Publishing:$PublishGithub.IsPresent
     if ($PublishGithub -and $Flavor -ne "online") {
         throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
     }

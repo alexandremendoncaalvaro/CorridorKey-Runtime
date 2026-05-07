@@ -42,3 +42,20 @@ endif()
 
 add_test(NAME regression_tests COMMAND test_regression)
 set_tests_properties(regression_tests PROPERTIES LABELS "regression")
+
+if(WIN32)
+    find_program(CORRIDORKEY_POWERSHELL powershell.exe)
+    if(CORRIDORKEY_POWERSHELL)
+        add_test(
+            NAME windows_release_label_validation
+            COMMAND
+                ${CORRIDORKEY_POWERSHELL}
+                -NoProfile
+                -ExecutionPolicy
+                Bypass
+                -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_release_label_validation.ps1
+        )
+        set_tests_properties(windows_release_label_validation PROPERTIES LABELS "regression")
+    endif()
+endif()
