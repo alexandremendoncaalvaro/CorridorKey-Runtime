@@ -44,6 +44,7 @@ from compile_dynamic_torchscript import (
 DEFAULT_VALIDATE_RESOLUTIONS = (512, 1024)
 EXTERNAL_POS_META_NAME = "corridorkey.external_pos.v1.json"
 EXTERNAL_POS_DATA_NAME = "corridorkey.external_pos.v1.fp32"
+ValidationCase = tuple[int, torch.Tensor, list[torch.Tensor]]
 
 
 def _project_feature(linear: torch.nn.Module, feature: torch.Tensor) -> torch.Tensor:
@@ -234,6 +235,31 @@ def _external_pos_extra_files(model: torch.nn.Module) -> dict[str, bytes | str]:
     }
 
 
+def _collect_validation_cases(
+    model: torch.nn.Module,
+    base_model: torch.nn.Module,
+    dtype: torch.dtype,
+    validate_resolutions: list[int],
+) -> list[ValidationCase]:
+    cases: list[ValidationCase] = []
+    for resolution in validate_resolutions:
+        validation_input = torch.rand((1, 4, resolution, resolution), device="cuda", dtype=dtype)
+        validation_pos = _make_pos_grid(base_model, resolution, dtype)
+        with torch.no_grad():
+            eager_out = model(validation_input, validation_pos)
+        cases.append(
+            (
+                resolution,
+                validation_input.detach().cpu(),
+                [tensor.detach().float().cpu() for tensor in eager_out],
+            )
+        )
+        del validation_input, validation_pos, eager_out
+        gc.collect()
+        torch.cuda.empty_cache()
+    return cases
+
+
 def _load_external_pos_model(checkpoint_path: Path, dtype: torch.dtype) -> ExternalPosWrapper:
     from CorridorKeyModule.core import model_transformer
 
@@ -323,27 +349,27 @@ def compile_dynamic_torchtrt(
     torch.jit.save(staged, str(output_path), _extra_files=extra_files)
     staged_path.unlink()
 
+    validation_cases = _collect_validation_cases(model, base_model, dtype, validate_resolutions)
     loaded_extra = {EXTERNAL_POS_META_NAME: "", EXTERNAL_POS_DATA_NAME: ""}
     loaded = torch.jit.load(str(output_path), map_location="cuda", _extra_files=loaded_extra).eval()
     if not loaded_extra[EXTERNAL_POS_META_NAME] or not loaded_extra[EXTERNAL_POS_DATA_NAME]:
         raise RuntimeError("saved TorchTRT artifact is missing embedded external positional data")
-    for resolution in validate_resolutions:
-        validation_input = torch.rand((1, 4, resolution, resolution), device="cuda", dtype=dtype)
+    for resolution, validation_input_cpu, eager_cpu in validation_cases:
+        validation_input = validation_input_cpu.to("cuda")
         validation_pos = _make_pos_grid(base_model, resolution, dtype)
         with torch.no_grad():
-            eager_out = model(validation_input, validation_pos)
             loaded_out = loaded(validation_input, validation_pos)
-        for eager_tensor, loaded_tensor in zip(eager_out, loaded_out):
+        for eager_tensor, loaded_tensor in zip(eager_cpu, loaded_out):
             if torch.isnan(loaded_tensor).any():
                 raise RuntimeError(f"NaN output at validation resolution {resolution}")
             if loaded_tensor.shape[-2:] != (resolution, resolution):
                 raise RuntimeError(f"loaded TorchTRT shape mismatch at {resolution}: {loaded_tensor.shape}")
-            max_abs = (eager_tensor.float() - loaded_tensor.float()).abs().max().item()
+            max_abs = (eager_tensor - loaded_tensor.detach().float().cpu()).abs().max().item()
             print(
                 f"[compile_dynamic_torchtrt] validated {resolution} max_abs={max_abs:.6g}",
                 flush=True,
             )
-        del validation_input, validation_pos, eager_out, loaded_out
+        del validation_input, validation_pos, loaded_out
         gc.collect()
         torch.cuda.empty_cache()
 
