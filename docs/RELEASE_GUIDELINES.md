@@ -291,8 +291,8 @@ Windows has one canonical release entrypoint for OFX release packaging:
 - `scripts\windows.ps1` - canonical Windows build and release entrypoint
 
 Do not use global ONNX Runtime installations or `vendor\onnxruntime-universal`
-as a fallback path. The Windows RTX release flow packages the dynamic
-LibTorch/Torch-TensorRT runtime contract and fails when asked to emit DirectML
+as a fallback path. The Windows RTX release flow packages the dynamic `.ts`
+LibTorch/TorchTRT runtime contract and fails when asked to emit DirectML
 or combined OFX installers.
 
 The canonical Windows release command is:

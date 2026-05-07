@@ -259,10 +259,10 @@ files.
 
 | Resolution | Backend | Status |
 |------------|---------|--------|
-| 512px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
-| 1024px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
-| 1536px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
-| 2048px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
+| 512px | Dynamic TorchScript through the Windows RTX runtime | Officially supported through the blue dynamic pack |
+| 1024px | Dynamic TorchScript through the Windows RTX runtime | Officially supported through the blue dynamic pack |
+| 1536px | Dynamic TorchScript through the Windows RTX runtime | Officially supported through the blue dynamic pack |
+| 2048px | Dynamic TorchScript through the Windows RTX runtime | Officially supported through the blue dynamic pack |
 
 #### macOS Apple Silicon coverage
 
@@ -281,9 +281,10 @@ reported in diagnostics.
 #### Missing artifact UX
 
 When the dynamic blue pack is not installed or cannot initialize, the runtime
-reports the blue artifact condition through diagnostics and applies the
-green-domain canonicalization fallback. The fallback uses the green model at
-the requested quality path; it does not substitute a lower blue resolution.
+reports the blue artifact condition through diagnostics and fails that blue
+request. Blue-Green Channel Swap is a separate explicit mode that uses the
+green model at the requested quality path; it is never selected implicitly for
+a blue request.
 
 ### Pack distribution
 

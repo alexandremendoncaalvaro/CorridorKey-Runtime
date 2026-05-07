@@ -505,12 +505,14 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "reference_validation", false, false, false, {}, {}, {}),
         make_model_entry("dynamic-green", kTargetResolutionAuto,
                          std::string(kDynamicGreenModelFilename), "torchscript", "torchtrt",
-                         "Windows RTX green-screen pack with dynamic runtime resolution.",
+                         "Windows RTX green-screen pack with TensorRT-backed dynamic runtime "
+                         "resolution.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb", "rtx_10gb_plus", "rtx_16gb_plus", "rtx_24gb"}, "green"),
         make_model_entry("dynamic-blue", kTargetResolutionAuto,
                          std::string(kDynamicBlueModelFilename), "torchscript", "torchtrt",
-                         "Windows RTX blue-screen pack with dynamic runtime resolution.",
+                         "Windows RTX blue-screen pack with TorchScript dynamic runtime "
+                         "resolution.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_8gb", "rtx_10gb_plus", "rtx_16gb_plus", "rtx_24gb"}, "blue"),
         make_model_entry("fp32", kRes512, "corridorkey_fp32_512.onnx", "onnx", "cpu",

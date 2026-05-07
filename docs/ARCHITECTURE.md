@@ -30,8 +30,8 @@ plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
 3. **Predictable Operations.** Diagnostics, fallback behavior, and error
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
-   through MLX and Windows RTX through dynamic LibTorch/Torch-TensorRT `.ts`
-   artifacts on NVIDIA RTX 30 series and newer. Windows DirectML and Linux RTX (CUDA EP via ONNX
+   through MLX and Windows RTX through curated dynamic `.ts` artifacts loaded
+   by the LibTorch/TorchTRT runtime on NVIDIA RTX 30 series and newer. Windows DirectML and Linux RTX (CUDA EP via ONNX
    Runtime) are
    explicit experimental product tracks. Other provider hooks present in the
    core runtime do not become support claims unless they are packaged and
@@ -52,7 +52,7 @@ tracks can be added without cross-wiring unrelated paths.
   into a concrete inference adapter.
 - The Windows RTX track resolves `green` and `blue` to one dynamic artifact
   each. `Blue-Green Channel Swap` resolves to the green artifact with
-  blue-plate canonicalization.
+  blue-plate canonicalization only when that mode is selected explicitly.
 - ONNX provider hooks belong to non-Windows-RTX tracks and reference
   workflows. They are not shipped, probed, or selected by the Windows RTX
   product path.
@@ -66,7 +66,7 @@ tracks can be added without cross-wiring unrelated paths.
 The engine, math, and I/O capabilities.
 
 - **Inference:** Backend adapters and session management for the official MLX
-  and LibTorch/Torch-TensorRT product paths, the experimental DirectML and Linux CUDA EP
+  and LibTorch/TorchTRT product paths, the experimental DirectML and Linux CUDA EP
   tracks, and other internal provider hooks used for diagnostics, bring-up, or
   future packaging work.
 - **Hardware:** Device detection and provider selection.

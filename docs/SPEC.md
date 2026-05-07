@@ -105,8 +105,8 @@ curated execution tracks.
 The official product tracks are:
 
 - Apple Silicon via MLX model pack and bridge exports
-- Windows RTX via dynamic LibTorch/Torch-TensorRT `.ts` artifacts on NVIDIA
-  RTX 30 series and newer
+- Windows RTX via curated dynamic `.ts` artifacts loaded by the
+  LibTorch/TorchTRT runtime on NVIDIA RTX 30 series and newer
 
 The experimental product tracks are:
 
@@ -152,18 +152,19 @@ CorridorKey ships deterministic screen-color execution modes:
 
 - **Green** (`corridorkey_dynamic_green_fp16.ts` on Windows RTX): the
   canonical green-screen variant. On Windows RTX, green is distributed as one
-  dynamic artifact and uses the requested quality resolution at execution time.
+  TensorRT-backed dynamic artifact and uses the requested quality resolution
+  at execution time.
 - **Blue** (`corridorkey_dynamic_blue_fp16.ts` on Windows RTX): the dedicated
   blue-screen variant. On Windows RTX, blue is distributed as one dynamic
-  artifact and uses the requested quality resolution at execution time.
-- **Blue-Green Channel Swap:** a deterministic fallback that canonicalizes a
-  blue-screen plate into the green model domain. It uses the green model
-  artifact and is not a third model pack.
+  TorchScript artifact and uses the requested quality resolution at execution
+  time.
+- **Blue-Green Channel Swap:** a deterministic user-selected mode that
+  canonicalizes a blue-screen plate into the green model domain. It uses the
+  green model artifact and is not a third model pack.
 
-The runtime selects the variant by the user-provided screen color parameter.
-When the blue pack is not installed or cannot initialize, the runtime applies
-the documented green-domain canonicalization fallback rather than substituting
-another blue artifact.
+The runtime selects exactly the variant requested by the user-provided screen
+color parameter. Missing or failed Green and Blue artifacts surface as explicit
+errors. Blue-Green Channel Swap is used only when selected explicitly.
 
 ### 3.4.2 Model Pack Distribution
 
@@ -191,12 +192,13 @@ plugin, CLI, or GUI binaries.
 Fallback is surface-dependent.
 
 - The Windows RTX track fails explicitly when the selected dynamic RTX
-  artifact or runtime cannot initialize; it does not fall back to ONNX.
+  artifact or runtime cannot initialize; it does not fall back to ONNX, another
+  backend, or another screen-color mode.
 - Non-Windows-RTX experimental workflows may define their own fallback
   behavior when the product track documents it.
 
 Fallback or failure is logged explicitly. The `corridorkey doctor` command
-reports the active execution path and any fallback conditions before
+reports the active execution path and any fallback or failure condition before
 processing begins.
 
 ---
@@ -207,8 +209,8 @@ processing begins.
 
 - Native inference execution:
   - MLX for the official Apple Silicon track
-  - LibTorch/Torch-TensorRT for the official Windows RTX track on NVIDIA RTX
-    30 series and newer
+  - LibTorch/TorchTRT dynamic `.ts` artifacts for the official Windows RTX
+    track on NVIDIA RTX 30 series and newer
   - DirectML for the experimental Windows DirectML track
   - CUDA EP via ONNX Runtime for the experimental Linux RTX track
 - CLI surface (`corridorkey`) with stable JSON and NDJSON output contracts

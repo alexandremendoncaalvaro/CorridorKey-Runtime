@@ -1155,9 +1155,9 @@ function Resolve-CorridorKeyWindowsOrtRoot {
 }
 
 function Get-CorridorKeyPreparedModelList {
-    # Windows RTX is a dynamic LibTorch/Torch-TensorRT track: one green artifact and one
-    # blue artifact. The resolution is a runtime parameter, not part of the
-    # model identity.
+    # Windows RTX is a dynamic LibTorch/TorchTRT .ts track: one green artifact
+    # and one blue artifact. The resolution is a runtime parameter, not part of
+    # the model identity.
     param(
         [ValidateSet("green", "blue", "all")]
         [string]$Variant = "green"

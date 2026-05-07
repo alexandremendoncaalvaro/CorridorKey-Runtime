@@ -144,7 +144,7 @@ enum class Backend : std::uint8_t {
     MLX,
     WindowsML,
     OpenVINO,
-    /// Windows RTX backend for packaged dynamic Torch-TensorRT artifacts.
+    /// Windows RTX backend for packaged dynamic LibTorch/TorchTRT artifacts.
     TorchTRT
 };
 /**

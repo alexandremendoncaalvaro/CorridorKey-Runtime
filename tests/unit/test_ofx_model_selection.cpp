@@ -407,7 +407,7 @@ TEST_CASE("auto TorchTRT quality skips cached compile failures and keeps working
     REQUIRE(filtered.front().used_fallback);
 }
 
-TEST_CASE("dynamic blue compile failure cache blocks implicit green fallback",
+TEST_CASE("dynamic blue compile failure cache fails closed without alternate artifact",
           "[unit][ofx][screen-color]") {
     const QualityCompileFailureCacheContext context{
         .models_root = "C:/models",
@@ -582,6 +582,19 @@ TEST_CASE("missing quality artifact message names the expected model and folder"
     REQUIRE(message.find(temp_dir.path().string()) != std::string::npos);
 }
 
+TEST_CASE("missing blue quality artifact message names only the blue model",
+          "[unit][ofx][screen-color]") {
+    TempDirGuard temp_dir("corridorkey-ofx-missing-blue-quality-message");
+    touch_file(temp_dir.path() / "corridorkey_dynamic_green_fp16.ts");
+
+    auto message =
+        missing_quality_artifact_message(temp_dir.path(), Backend::TorchTRT, kQualityHigh, 1920,
+                                         1080, 10240, QualityFallbackMode::Auto, 0, false, "blue");
+
+    REQUIRE(message.find("corridorkey_dynamic_blue_fp16.ts") != std::string::npos);
+    REQUIRE(message.find("corridorkey_dynamic_green_fp16.ts") == std::string::npos);
+}
+
 TEST_CASE("missing bootstrap artifact message lists the expected bootstrap files",
           "[unit][ofx][regression]") {
     TempDirGuard temp_dir("corridorkey-ofx-missing-bootstrap-message");
@@ -669,9 +682,9 @@ TEST_CASE("blue artifact helpers recognize dynamic and legacy dedicated filename
     REQUIRE_FALSE(is_dedicated_blue_artifact_filename("corridorkey_fp16_1024.onnx"));
 }
 
-TEST_CASE("blue screen request without dedicated artifact does not fall back to packaged green",
+TEST_CASE("blue screen request without dedicated artifact fails closed",
           "[unit][ofx][screen-color]") {
-    TempDirGuard temp_dir("corridorkey-ofx-blue-fallback");
+    TempDirGuard temp_dir("corridorkey-ofx-blue-missing-deterministic");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
 
     auto selection =

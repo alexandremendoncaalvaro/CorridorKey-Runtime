@@ -1532,7 +1532,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 
         queue_backend_probes(
             Backend::TorchTRT, torchtrt_available,
-            "Primary Windows RTX path with dynamic LibTorch/Torch-TensorRT artifacts.");
+            "Primary Windows RTX path with dynamic LibTorch/TorchTRT .ts artifacts.");
     }
 
     json["provider_available"] = any_provider_available;

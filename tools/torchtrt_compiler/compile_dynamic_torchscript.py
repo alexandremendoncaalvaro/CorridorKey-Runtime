@@ -1,9 +1,8 @@
 """Export dynamic CorridorKey GreenFormer checkpoints to TorchScript.
 
-This script owns the Phase A fallback path when Torch-TensorRT cannot
-materialize the dynamic Hiera graph. It keeps the existing torch 2.8/cu128
-compiler stack and produces one `.ts` artifact per checkpoint that LibTorch C++
-can load with `torch::jit::load`.
+This script produces one dynamic `.ts` artifact per checkpoint for the
+LibTorch-backed Windows RTX runtime path. Runtime resolution is supplied by the
+caller and is not encoded in the artifact filename.
 """
 
 from __future__ import annotations

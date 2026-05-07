@@ -1066,9 +1066,9 @@ guardrail for the first true dynamic Torch-TensorRT optimization baseline.
     dynamic artifact at `49.8 ms` average latency
 - Decision:
   - use `corridorkey_dynamic_green_fp16.ts` as the single Windows RTX green
-    TorchScript fallback artifact
+    dynamic artifact
   - use `corridorkey_dynamic_blue_fp16.ts` as the single Windows RTX blue
-    TorchScript fallback artifact
+    dynamic artifact
   - exclude ONNX artifacts from the Windows RTX shipped path and fallback
     policy
   - measure green and blue at `1024` and `2048` through CLI and OFX before
@@ -1076,10 +1076,10 @@ guardrail for the first true dynamic Torch-TensorRT optimization baseline.
 
 #### Dynamic Torch-TensorRT Viability Probe
 
-The dynamic TorchScript fallback is not a serialized TensorRT engine. Binary
-inspection finds TorchScript and CUDA metadata in the dynamic green and blue
-artifacts, but not TensorRT engine markers. Fixed diagnostic Torch-TensorRT
-artifacts under `models/` do contain TensorRT markers.
+The measured dynamic TorchScript artifacts are not serialized TensorRT
+engines. Binary inspection finds TorchScript and CUDA metadata in the dynamic
+green and blue artifacts, but not TensorRT engine markers. Fixed diagnostic
+Torch-TensorRT artifacts under `models/` do contain TensorRT markers.
 
 The true dynamic Torch-TensorRT probe used the same patched Hiera dynamic graph
 and explicit `torch.export.Dim` constraints matching the runtime's multiple of
@@ -1127,8 +1127,8 @@ and produces finite outputs:
 The blue FP16 candidate with the same `512` through `2048` dynamic profile
 compiles and produces finite C++ runner output at `512` and `1024`, but returns
 NaN output at `1536` and `2048`. This matches the earlier blue FP16 instability
-recorded for high-resolution TensorRT artifacts and blocks publication of a
-blue FP16 product pack with the full Windows RTX quality contract.
+recorded for high-resolution TensorRT artifacts and blocks publication of the
+blue FP16 TensorRT candidate as the full Windows RTX blue product artifact.
 
 The blue FP32 candidate validates through a `1536` maximum profile with maximum
 absolute differences below `0.006` against the eager external-pos wrapper. The
@@ -1144,9 +1144,8 @@ C++ runner produces finite output with this artifact:
 The blue FP32 `2048` maximum profile does not build on the RTX 3080 10 GB
 validation machine. Limiting TensorRT workspace to `4 GiB` still fails with no
 implementation for the fused encoder/decoder TensorRT segment after rejecting
-a tactic that requests roughly `8.9 GiB`. The blue dynamic pack therefore
-remains unpromoted until a `2048` C++ runner baseline is finite or the product
-contract stops exposing `2048` for dedicated blue.
+a tactic that requests roughly `8.9 GiB`. The blue TensorRT candidate is
+separate from the promoted dynamic blue TorchScript product artifact.
 
 #### Dynamic TorchScript Pinned Upload Probe
 

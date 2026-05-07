@@ -2,13 +2,13 @@
 
 This directory owns the Windows RTX PyTorch-family export tools. The tools are
 split by artifact type so the release flow does not confuse dynamic
-TorchScript fallback artifacts with true Torch-TensorRT engines.
+TorchScript artifacts with true Torch-TensorRT engines.
 
 ## When To Use
 
 Use `compile_dynamic_torchscript.py` when a Windows RTX checkpoint or the
 PyTorch runtime stack changes and the selected artifact is the dynamic
-TorchScript fallback. The fallback writes one dynamic TorchScript file per
+TorchScript product path. The exporter writes one dynamic TorchScript file per
 screen color:
 
 - `corridorkey_dynamic_green_fp16.ts`
@@ -18,8 +18,8 @@ The exported file is loaded by the C++ LibTorch-backed RTX runtime path.
 Runtime resolution is selected by the caller and is not encoded in the
 filename.
 
-Use `compile_dynamic_torchtrt.py` when producing the true dynamic
-Torch-TensorRT candidate. The artifact is still one `.ts` file per screen
+Use `compile_dynamic_torchtrt.py` when producing a true dynamic
+Torch-TensorRT artifact. The artifact is still one `.ts` file per screen
 color, but it embeds the source positional embedding as TorchScript extra data
 and expects the C++ runtime to pass a cached positional grid as the second
 forward input.
