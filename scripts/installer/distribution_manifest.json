@@ -5,7 +5,7 @@
   "generated_by": "scripts/installer/build_distribution_manifest.py",
   "packs": {
     "green-models": {
-      "label": "Green pack - dynamic TorchScript model",
+      "label": "Green pack - dynamic Windows RTX model",
       "component": "green",
       "dest_subdir": "models",
       "files": [
@@ -20,7 +20,7 @@
       ]
     },
     "blue-models": {
-      "label": "Blue pack - dynamic TorchScript model",
+      "label": "Blue pack - dynamic Windows RTX model",
       "component": "blue",
       "dest_subdir": "models",
       "files": [

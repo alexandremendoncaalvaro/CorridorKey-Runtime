@@ -232,15 +232,14 @@ their own SDK integrations that have not been built.
 ## Screen Color Model Variants
 
 The runtime ships deterministic screen-color execution modes. On Windows RTX,
-green and blue are distributed as one dynamic TorchScript artifact each.
-Runtime quality is an input to the model session, not part of the artifact
-identity.
+green and blue are distributed as one dynamic artifact each. Runtime quality is
+an input to the model session, not part of the artifact identity.
 
 ### Green model variant
 
 The canonical CorridorKey model, trained on green screen plates.
 
-| Resolution | Windows RTX TorchScript | MLX (Apple Silicon) | Status |
+| Resolution | Windows RTX dynamic artifact | MLX (Apple Silicon) | Status |
 |------------|----------------------|---------------------|--------|
 | 512px | Dynamic artifact | Validated | Officially supported |
 | 1024px | Dynamic artifact | Validated | Officially supported |
@@ -253,17 +252,17 @@ remain part of every macOS Apple Silicon installer.
 ### Blue model variant
 
 A dedicated CorridorKey variant trained on blue screen plates. On Windows RTX,
-blue uses a dynamic TorchScript artifact and remains independent from
-per-resolution engine files.
+blue uses a dynamic artifact and remains independent from per-resolution engine
+files.
 
 #### Windows RTX coverage
 
 | Resolution | Backend | Status |
 |------------|---------|--------|
-| 512px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
-| 1024px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
-| 1536px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
-| 2048px | Dynamic TorchScript | Officially supported through the blue dynamic pack |
+| 512px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
+| 1024px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
+| 1536px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
+| 2048px | Dynamic Windows RTX | Officially supported through the blue dynamic pack |
 
 #### macOS Apple Silicon coverage
 

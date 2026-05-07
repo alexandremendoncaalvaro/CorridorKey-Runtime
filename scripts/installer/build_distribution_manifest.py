@@ -43,7 +43,7 @@ REVISION = "main"
 # working when the dynamic pack lands in `Resources/torchtrt-runtime/bin/`.
 PACKS = {
     "green-models": {
-        "label": "Green pack - dynamic TorchScript model",
+        "label": "Green pack - dynamic Windows RTX model",
         "component": "green",
         "dest_subdir": "models",
         "files": [
@@ -51,7 +51,7 @@ PACKS = {
         ],
     },
     "blue-models": {
-        "label": "Blue pack - dynamic TorchScript model",
+        "label": "Blue pack - dynamic Windows RTX model",
         "component": "blue",
         "dest_subdir": "models",
         "files": [

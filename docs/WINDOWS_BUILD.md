@@ -4,7 +4,7 @@ This document defines the end-to-end flow for building the Windows RTX
 distribution of CorridorKey Runtime from a clean clone. Windows is the most
 involved target because the release stages CUDA, the LibTorch/TorchTRT runtime, the OpenFX SDK,
 model packs, CorridorKey binaries, and installer packaging as one validated
-flow. The supported Windows RTX runtime path is dynamic LibTorch/TorchScript only. The
+flow. The supported Windows RTX runtime path is dynamic LibTorch/Torch-TensorRT only. The
 Windows RTX package does not import or ship ONNX Runtime DLLs, so the installed
 RTX path does not execute or fall back to ONNX.
 

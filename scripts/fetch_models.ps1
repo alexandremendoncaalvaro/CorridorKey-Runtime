@@ -3,21 +3,21 @@
     Downloads CorridorKey model files from Hugging Face Hub into the local models/ directory.
 
 .DESCRIPTION
-    Fetches the runtime model variants (TorchScript, ONNX, MLX,
+    Fetches the runtime model variants (dynamic RTX .ts, ONNX, MLX,
     hint-tracker fixtures) from alexandrealvaro/CorridorKey into the
     local models/ directory. Training checkpoints (.pth) are pulled
     direct from the upstream nikopueringer/* repos and never republished
     by us.
 
-    Windows RTX uses dynamic TorchScript artifacts. ONNX profiles are reference
+    Windows RTX uses dynamic `.ts` artifacts. ONNX profiles are reference
     inputs for non-product comparisons and are not Windows RTX fallback paths.
 
 .PARAMETER Profile
     Model set to download:
-      windows-rtx           : Dynamic green and blue TorchScript models (default)
-      windows-rtx-blue      : Dedicated CorridorKeyBlue dynamic TorchScript (.ts) model for blue-screen plates
+      windows-rtx           : Dynamic green and blue Windows RTX models (default)
+      windows-rtx-blue      : Dedicated CorridorKeyBlue dynamic .ts model for blue-screen plates
       windows-turing-source : Reference FP16 ONNX ladder + upstream green training checkpoint
-      windows-all           : Dynamic TorchScript models + green ONNX reference artifacts
+      windows-all           : Dynamic Windows RTX models + green ONNX reference artifacts
       apple                 : MLX safetensors + bridge files
       pytorch               : Upstream green and blue training checkpoints (from nikopueringer/*)
       hint-tracker          : MobileSAM + Cutie auxiliary fixtures for alpha-hint generation
@@ -78,7 +78,7 @@ $windowsRtxGreenFiles = @{
     "torchtrt/dynamic-green/corridorkey_dynamic_green_fp16.ts" = "corridorkey_dynamic_green_fp16.ts"
 }
 
-# The Windows RTX packs are single dynamic TorchScript artifacts.
+# The Windows RTX packs are single dynamic `.ts` artifacts.
 # Keep this filename aligned with src/app/runtime_contracts.cpp and
 # src/plugins/ofx/ofx_model_selection.hpp.
 $windowsRtxBlueFiles = @{

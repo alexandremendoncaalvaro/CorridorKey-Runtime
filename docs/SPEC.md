@@ -105,8 +105,8 @@ curated execution tracks.
 The official product tracks are:
 
 - Apple Silicon via MLX model pack and bridge exports
-- Windows RTX via dynamic LibTorch/TorchScript artifacts on NVIDIA RTX 30
-  series and newer
+- Windows RTX via dynamic LibTorch/Torch-TensorRT `.ts` artifacts on NVIDIA
+  RTX 30 series and newer
 
 The experimental product tracks are:
 
@@ -152,12 +152,10 @@ CorridorKey ships deterministic screen-color execution modes:
 
 - **Green** (`corridorkey_dynamic_green_fp16.ts` on Windows RTX): the
   canonical green-screen variant. On Windows RTX, green is distributed as one
-  dynamic TorchScript artifact and uses the requested quality resolution at
-  execution time.
+  dynamic artifact and uses the requested quality resolution at execution time.
 - **Blue** (`corridorkey_dynamic_blue_fp16.ts` on Windows RTX): the dedicated
   blue-screen variant. On Windows RTX, blue is distributed as one dynamic
-  TorchScript artifact and uses the requested quality resolution at execution
-  time.
+  artifact and uses the requested quality resolution at execution time.
 - **Blue-Green Channel Swap:** a deterministic fallback that canonicalizes a
   blue-screen plate into the green model domain. It uses the green model
   artifact and is not a third model pack.
@@ -209,8 +207,8 @@ processing begins.
 
 - Native inference execution:
   - MLX for the official Apple Silicon track
-  - LibTorch/TorchScript for the official Windows RTX track on NVIDIA RTX 30
-    series and newer
+  - LibTorch/Torch-TensorRT for the official Windows RTX track on NVIDIA RTX
+    30 series and newer
   - DirectML for the experimental Windows DirectML track
   - CUDA EP via ONNX Runtime for the experimental Linux RTX track
 - CLI surface (`corridorkey`) with stable JSON and NDJSON output contracts

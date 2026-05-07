@@ -45,7 +45,7 @@ Current headline:
 
 - the `prepare_inputs` slice worked
 - the `preview_writeback` slice also worked on the full-frame OFX-style harness
-- Windows RTX dynamic TorchScript and true dynamic Torch-TensorRT need their own green and blue baseline before
+- Windows RTX dynamic artifacts need their own green and blue baseline before
   optimization claims replace the fixed ONNX measurements
 - the attempted lower-rung bound-path expansion and resize-map caching did not
   justify themselves and were discarded instead of being carried forward
@@ -1092,6 +1092,35 @@ at runtime on dynamic reshape and resize shape propagation. Do not promote a
 dynamic `.ts` as Torch-TensorRT until it contains TensorRT engine markers,
 loads in C++, runs multiple resolutions, and has a recorded green and blue
 baseline.
+
+A reduced probe proves that the TensorRT blocker is not Hiera execution as a
+whole. Removing positional embedding and rewriting decoder resizes from
+dynamic `size` tensors to constant architectural scale factors allows
+Torch-TensorRT to compile and run one dynamic engine at `512` and `1024`.
+Keeping dynamic decoder `size` tensors fails in the TensorRT resize converter;
+keeping decoder `.view(..., -1, H, W)` fails because the converter treats the
+post-projection channel count as dynamic. The valid dynamic TensorRT candidate
+therefore uses explicit projection channel counts and fixed decoder scale
+factors.
+
+The valid positional-embedding materialization keeps one `.ts` file per model
+and uses TorchScript extra files to embed the source positional embedding.
+The C++ runtime loads that extra payload, builds a cached positional grid for
+the requested runtime resolution, and forwards the model tensor plus the grid
+to the TensorRT module. A green `512` through `1024` candidate loaded with
+`torch.jit.load` returned alpha and foreground tensors at both resolutions.
+The external-pos eager wrapper matches the original dynamic eager path exactly;
+the saved TensorRT candidate stays within FP16-level differences, with observed
+maximum absolute differences below `0.004`.
+
+The saved green candidate with embedded positional data is `392.5 MB`. The C++
+TorchTRT runner loads it, reports the embedded external positional metadata,
+and produces finite outputs:
+
+- `512`: `21.2 ms` average forward over five timed iterations after two warmup
+  iterations
+- `1024`: `126.1 ms` average forward over five timed iterations after two
+  warmup iterations
 
 #### Dynamic TorchScript Pinned Upload Probe
 
