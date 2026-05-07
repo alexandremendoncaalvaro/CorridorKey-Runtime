@@ -222,6 +222,19 @@ std::optional<int> windows_tensorrt_resolution_ceiling(std::int64_t available_me
     return kRes512;
 }
 
+std::optional<int> windows_torchtrt_dynamic_resolution_ceiling(std::int64_t available_memory_mb) {
+    if (available_memory_mb <= 0) {
+        return std::nullopt;
+    }
+    if (available_memory_mb >= kVram10GbMiB) {
+        return kRes2048;
+    }
+    if (available_memory_mb >= kVram8GbMiB) {
+        return kRes1024;
+    }
+    return kRes512;
+}
+
 std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_memory_mb) {
     if (available_memory_mb <= 0) {
         return std::nullopt;
@@ -277,6 +290,19 @@ std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
     }
 
     return {models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx")};
+}
+
+Result<std::filesystem::path> dynamic_torchtrt_artifact_path_for_screen_color(
+    const std::filesystem::path& models_root, std::string_view screen_color) {
+    auto filename = app::dynamic_torchtrt_model_filename_for_screen_color(screen_color);
+    if (!filename.has_value()) {
+        return Unexpected<Error>{Error{
+            .code = ErrorCode::InvalidParameters,
+            .message =
+                "Windows RTX dynamic artifact selection requires screen_color 'green' or 'blue'.",
+        }};
+    }
+    return models_root / *filename;
 }
 
 Result<std::pair<int, bool>> search_resolution_for_request(
@@ -600,7 +626,8 @@ std::vector<PresetDefinition> preset_catalog() {
             .id = "win-rtx-ultra-quality",
             .name = "Windows RTX Ultra Quality",
             .description =
-                "Extreme quality Windows RTX preset with cleanup enabled for 24 GB VRAM systems.",
+                "Extreme quality Windows RTX preset with cleanup enabled for the 10 GB and up "
+                "tier.",
             .params = make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
             .recommended_model = std::string(kDynamicGreenModelFilename),
             .intended_use = "windows_rtx_primary",
@@ -608,7 +635,7 @@ std::vector<PresetDefinition> preset_catalog() {
             .default_for_windows = false,
             .validated_platforms = {"windows_rtx_30_plus"},
             .intended_platforms = {"windows_rtx_30_plus"},
-            .validated_hardware_tiers = {"rtx_24gb"},
+            .validated_hardware_tiers = {"rtx_10gb_plus"},
         },
         PresetDefinition{
             .id = "mac-ultra-quality",
@@ -937,9 +964,11 @@ std::optional<int> max_supported_resolution_for_device(const DeviceInfo& request
         case Backend::CPU:
             return kRes512;
         case Backend::TensorRT:
-        case Backend::TorchTRT:
         case Backend::CUDA:
             return windows_tensorrt_resolution_ceiling(requested_device.available_memory_mb);
+        case Backend::TorchTRT:
+            return windows_torchtrt_dynamic_resolution_ceiling(
+                requested_device.available_memory_mb);
         case Backend::DirectML:
         case Backend::WindowsML:
         case Backend::OpenVINO:
@@ -952,7 +981,6 @@ std::optional<int> max_supported_resolution_for_device(const DeviceInfo& request
 std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, int resolution) {
     switch (backend) {
         case Backend::TensorRT:
-        case Backend::TorchTRT:
         case Backend::CUDA:
             if (resolution >= kRes2048) {
                 return static_cast<int>(kVram24GbMiB);
@@ -962,6 +990,14 @@ std::optional<int> minimum_supported_memory_mb_for_resolution(Backend backend, i
             }
             if (resolution >= kRes1024) {
                 return static_cast<int>(kVram10GbMiB);
+            }
+            return std::nullopt;
+        case Backend::TorchTRT:
+            if (resolution >= kRes1536) {
+                return static_cast<int>(kVram10GbMiB);
+            }
+            if (resolution >= kRes1024) {
+                return static_cast<int>(kVram8GbMiB);
             }
             return std::nullopt;
         case Backend::DirectML:
@@ -1096,7 +1132,7 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback,
     QualityFallbackMode fallback_mode, int coarse_resolution_override,
-    bool allow_unrestricted_quality_attempt) {
+    bool allow_unrestricted_quality_attempt, std::string_view screen_color) {
     if (requested_resolution <= 0) {
         return Unexpected<Error>{Error{
             .code = ErrorCode::InvalidParameters,
@@ -1117,7 +1153,12 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
         (void)fallback_mode;
         (void)coarse_resolution_override;
         (void)allow_unrestricted_quality_attempt;
-        return std::vector<std::filesystem::path>{models_root / kDynamicGreenModelFilename};
+        auto artifact_path =
+            dynamic_torchtrt_artifact_path_for_screen_color(models_root, screen_color);
+        if (!artifact_path) {
+            return Unexpected<Error>(artifact_path.error());
+        }
+        return std::vector<std::filesystem::path>{*artifact_path};
     }
 
     auto resolution_search = search_resolution_for_request(
@@ -1201,14 +1242,18 @@ bool should_skip_resolution(int resolution, const CandidateSelectionContext& con
 }
 
 std::vector<ArtifactSelection> dynamic_torchtrt_artifact_candidates_for_request(
-    const std::filesystem::path& models_root, int requested_resolution) {
-    const auto artifact_path = models_root / kDynamicGreenModelFilename;
-    if (!std::filesystem::exists(artifact_path)) {
+    const std::filesystem::path& models_root, int requested_resolution,
+    std::string_view screen_color) {
+    auto artifact_path = dynamic_torchtrt_artifact_path_for_screen_color(models_root, screen_color);
+    if (!artifact_path) {
+        return {};
+    }
+    if (!std::filesystem::exists(*artifact_path)) {
         return {};
     }
 
     return {ArtifactSelection{
-        .executable_model_path = artifact_path,
+        .executable_model_path = *artifact_path,
         .requested_resolution = requested_resolution,
         .effective_resolution = requested_resolution,
         .used_fallback = false,
@@ -1222,7 +1267,7 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback,
     QualityFallbackMode fallback_mode, int coarse_resolution_override,
-    bool allow_unrestricted_quality_attempt) {
+    bool allow_unrestricted_quality_attempt, std::string_view screen_color) {
     if (requested_resolution <= 0) {
         return Unexpected<Error>{Error{
             .code = ErrorCode::InvalidParameters,
@@ -1231,12 +1276,14 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     }
 
     if (backend_uses_dynamic_torchtrt_artifacts(requested_device.backend)) {
-        return dynamic_torchtrt_artifact_candidates_for_request(models_root, requested_resolution);
+        return dynamic_torchtrt_artifact_candidates_for_request(models_root, requested_resolution,
+                                                                screen_color);
     }
 
     auto expected_paths = expected_artifact_paths_for_request(
         models_root, requested_device, requested_resolution, allow_lower_resolution_fallback,
-        fallback_mode, coarse_resolution_override, allow_unrestricted_quality_attempt);
+        fallback_mode, coarse_resolution_override, allow_unrestricted_quality_attempt,
+        screen_color);
     if (!expected_paths) {
         return Unexpected<Error>(expected_paths.error());
     }

@@ -83,12 +83,14 @@ CORRIDORKEY_API Result<std::vector<std::filesystem::path>> expected_artifact_pat
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback = false,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    std::string_view screen_color = "green");
 CORRIDORKEY_API Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback = false,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
+    int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
+    std::string_view screen_color = "green");
 CORRIDORKEY_API Result<std::filesystem::path> resolve_model_artifact_for_request(
     const std::filesystem::path& model_path, const InferenceParams& params,
     const DeviceInfo& requested_device);

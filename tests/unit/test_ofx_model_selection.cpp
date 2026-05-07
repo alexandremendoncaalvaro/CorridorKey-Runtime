@@ -545,7 +545,7 @@ TEST_CASE("auto windows TorchTRT quality keeps direct 2048 only for fully suppor
             "corridorkey_dynamic_green_fp16.ts");
 }
 
-TEST_CASE("fixed windows TorchTRT quality reports unsupported tiers before engine creation",
+TEST_CASE("fixed windows TorchTRT quality reports unsupported tiers below dynamic 2048 floor",
           "[unit][ofx][regression]") {
     auto removed_rung_message = unsupported_quality_message(
         DeviceInfo{"RTX 4090", 24576, Backend::TorchTRT}, kQualityHigh, 768);
@@ -553,15 +553,18 @@ TEST_CASE("fixed windows TorchTRT quality reports unsupported tiers before engin
     REQUIRE(removed_rung_message->find("768px") != std::string::npos);
     REQUIRE(removed_rung_message->find("High (1024)") != std::string::npos);
 
-    auto message = unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT},
+    REQUIRE_FALSE(unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT},
+                                              kQualityMaximum, 2048)
+                      .has_value());
+    REQUIRE_FALSE(unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT},
+                                              kQualityUltra, 1536)
+                      .has_value());
+    auto message = unsupported_quality_message(DeviceInfo{"RTX 3070", 8192, Backend::TorchTRT},
                                                kQualityMaximum, 2048);
 
     REQUIRE(message.has_value());
-    REQUIRE(message->find("24 GB") != std::string::npos);
+    REQUIRE(message->find("10 GB") != std::string::npos);
     REQUIRE(message->find("High (1024)") != std::string::npos);
-    REQUIRE(unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT},
-                                        kQualityUltra, 1536)
-                .has_value());
     REQUIRE_FALSE(unsupported_quality_message(DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT},
                                               kQualityUltra, 1536, true)
                       .has_value());
@@ -671,6 +674,17 @@ TEST_CASE("blue screen request with dedicated artifact present uses dedicated pa
     REQUIRE_FALSE(selection->used_fallback);
     REQUIRE(selection->requested_resolution == 1024);
     REQUIRE(selection->effective_resolution == 1024);
+
+    auto maximum_selection =
+        select_quality_artifact(temp_dir.path(), Backend::TorchTRT, kQualityMaximum, 3840, 2160,
+                                10240, QualityFallbackMode::Auto, 0, false, "blue");
+
+    REQUIRE(maximum_selection.has_value());
+    REQUIRE(maximum_selection->executable_model_path.filename() ==
+            "corridorkey_dynamic_blue_fp16.ts");
+    REQUIRE_FALSE(maximum_selection->used_fallback);
+    REQUIRE(maximum_selection->requested_resolution == 2048);
+    REQUIRE(maximum_selection->effective_resolution == 2048);
 }
 
 TEST_CASE("blue artifact helpers recognize dynamic and legacy dedicated filenames",

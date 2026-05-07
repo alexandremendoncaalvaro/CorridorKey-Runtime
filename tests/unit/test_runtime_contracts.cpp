@@ -414,7 +414,8 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
     }
 }
 
-TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit][runtime]") {
+TEST_CASE("windows GPU resolution ceilings separate legacy TensorRT and dynamic TorchTRT",
+          "[unit][runtime]") {
     REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3070", 8192, Backend::TensorRT}) ==
             512);
     REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}) ==
@@ -431,14 +432,29 @@ TEST_CASE("windows GPU resolution ceilings stay aligned with VRAM tiers", "[unit
     REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 2048) == 24000);
     REQUIRE_FALSE(minimum_supported_memory_mb_for_resolution(Backend::TensorRT, 768).has_value());
     REQUIRE_FALSE(minimum_supported_memory_mb_for_resolution(Backend::DirectML, 768).has_value());
+
+    REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3070", 8192, Backend::TorchTRT}) ==
+            1024);
+    REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT}) ==
+            2048);
+    REQUIRE(max_supported_resolution_for_device(DeviceInfo{"RTX 3090", 24576, Backend::TorchTRT}) ==
+            2048);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TorchTRT, 1024) == 8000);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TorchTRT, 1536) == 10000);
+    REQUIRE(minimum_supported_memory_mb_for_resolution(Backend::TorchTRT, 2048) == 10000);
 }
 
 TEST_CASE("hardware profile delegates Windows safe quality ceilings to runtime contracts",
           "[unit][runtime][regression]") {
-    const auto rtx_strategy =
+    const auto legacy_tensorrt_strategy =
         HardwareProfile::get_best_strategy(DeviceInfo{"RTX 3080", 10240, Backend::TensorRT});
-    CHECK(rtx_strategy.target_resolution == 1024);
-    CHECK(rtx_strategy.recommended_variant == "fp16");
+    CHECK(legacy_tensorrt_strategy.target_resolution == 1024);
+    CHECK(legacy_tensorrt_strategy.recommended_variant == "fp16");
+
+    const auto torchtrt_strategy =
+        HardwareProfile::get_best_strategy(DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT});
+    CHECK(torchtrt_strategy.target_resolution == 2048);
+    CHECK(torchtrt_strategy.recommended_variant == "fp16");
 
     const auto directml_strategy =
         HardwareProfile::get_best_strategy(DeviceInfo{"AMD Radeon", 16384, Backend::DirectML});
@@ -486,15 +502,16 @@ TEST_CASE("runtime refinement override validation is explicit for current artifa
     REQUIRE(tiled_mode.error().message.find("refinement strategy override") != std::string::npos);
 }
 
-TEST_CASE("runtime artifact selection prefers lower packaged candidates automatically",
+TEST_CASE("runtime artifact selection keeps dynamic TorchTRT resolution and screen color",
           "[unit][runtime][regression]") {
     auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-runtime-artifact-select";
     std::filesystem::remove_all(temp_dir);
     std::filesystem::create_directories(temp_dir);
     std::ofstream(temp_dir / "corridorkey_dynamic_green_fp16.ts") << "stub";
+    std::ofstream(temp_dir / "corridorkey_dynamic_blue_fp16.ts") << "stub";
 
     auto selections = quality_artifact_candidates_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT}, 2048, false,
         QualityFallbackMode::Auto);
     REQUIRE(selections.has_value());
     REQUIRE_FALSE(selections->empty());
@@ -504,11 +521,29 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     CHECK_FALSE(selections->front().coarse_to_fine);
 
     auto expected = expected_artifact_paths_for_request(
-        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, 2048, false,
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT}, 2048, false,
         QualityFallbackMode::Auto);
     REQUIRE(expected.has_value());
     REQUIRE(expected->size() == 1);
     CHECK(expected->front().filename() == "corridorkey_dynamic_green_fp16.ts");
+
+    auto blue_expected = expected_artifact_paths_for_request(
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT}, 2048, false,
+        QualityFallbackMode::Auto, 0, false, "blue");
+    REQUIRE(blue_expected.has_value());
+    REQUIRE(blue_expected->size() == 1);
+    CHECK(blue_expected->front().filename() == "corridorkey_dynamic_blue_fp16.ts");
+
+    auto blue_selections = quality_artifact_candidates_for_request(
+        temp_dir, DeviceInfo{"RTX 3080", 10240, Backend::TorchTRT}, 2048, false,
+        QualityFallbackMode::Auto, 0, false, "blue");
+    REQUIRE(blue_selections.has_value());
+    REQUIRE_FALSE(blue_selections->empty());
+    CHECK(blue_selections->front().executable_model_path.filename() ==
+          "corridorkey_dynamic_blue_fp16.ts");
+    CHECK(blue_selections->front().requested_resolution == 2048);
+    CHECK(blue_selections->front().effective_resolution == 2048);
+    CHECK_FALSE(blue_selections->front().used_fallback);
 
     std::filesystem::remove_all(temp_dir);
 }

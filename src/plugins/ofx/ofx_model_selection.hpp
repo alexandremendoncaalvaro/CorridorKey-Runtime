@@ -441,7 +441,7 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
 
     auto expected = app::expected_artifact_paths_for_request(
         models_root, device, requested_resolution, allow_lower_resolution_fallback, fallback_mode,
-        coarse_resolution_override, allow_unrestricted_quality_attempt);
+        coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
     if (!expected) {
         return {};
     }
@@ -490,7 +490,7 @@ inline std::string missing_quality_artifact_message(
     };
     auto expected = app::expected_artifact_paths_for_request(
         models_root, device, requested_resolution, allow_lower_resolution_fallback, fallback_mode,
-        coarse_resolution_override, allow_unrestricted_quality_attempt);
+        coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
     if (!expected) {
         return expected.error().message;
     }
@@ -608,7 +608,7 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     };
     auto candidates = app::quality_artifact_candidates_for_request(
         models_root, device, requested_resolution, allow_lower_resolution_fallback, fallback_mode,
-        coarse_resolution_override, allow_unrestricted_quality_attempt);
+        coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
     if (candidates) {
         for (auto& candidate : *candidates) {
             selections.push_back(std::move(candidate));

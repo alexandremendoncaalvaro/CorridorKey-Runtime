@@ -38,8 +38,10 @@ class HardwareProfile {
         if (auto safe_ceiling = max_supported_resolution_for_device(device);
             safe_ceiling.has_value()) {
             const std::string variant =
-                (device.backend == Backend::TensorRT || device.backend == Backend::CUDA) ? "fp16"
-                                                                                         : "int8";
+                (device.backend == Backend::TensorRT || device.backend == Backend::TorchTRT ||
+                 device.backend == Backend::CUDA)
+                    ? "fp16"
+                    : "int8";
             return {.target_resolution = *safe_ceiling, .recommended_variant = variant};
         }
 
