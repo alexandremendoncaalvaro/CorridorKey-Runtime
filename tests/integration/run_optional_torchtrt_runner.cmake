@@ -33,7 +33,13 @@ if(MSVC_TOOLCHAIN AND BUILD_TYPE STREQUAL "Debug")
     return()
 endif()
 
-foreach(resolution IN ITEMS 512 1024 2048)
+if(DEFINED RESOLUTIONS AND NOT RESOLUTIONS STREQUAL "")
+    string(REPLACE "," ";" RESOLUTION_LIST "${RESOLUTIONS}")
+else()
+    set(RESOLUTION_LIST 512 1024 2048)
+endif()
+
+foreach(resolution IN LISTS RESOLUTION_LIST)
     execute_process(
         COMMAND "${RUNNER_EXE}"
             --ts "${TS_PATH}"

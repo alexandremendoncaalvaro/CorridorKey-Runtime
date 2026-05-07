@@ -8,6 +8,7 @@
 //
 // Build: gated on CORRIDORKEY_HAS_TORCHTRT in the root CMakeLists.txt.
 // Run  : corridorkey-torchtrt-runner --ts <path-to-corridorkey_torchtrt_fp16_<res>.ts>
+//        corridorkey-torchtrt-runner --ts <path-to-corridorkey_torchtrt_fp32_<res>.ts>
 //        [--resolution <n>] [--bin-dir <path>] [--iterations <n>]
 //
 // On success prints:
@@ -328,7 +329,7 @@ std::filesystem::path default_bin_dir_relative_to_exe() {
     return exe_dir / ".." / ".." / ".." / "vendor" / "torchtrt-windows" / "bin";
 }
 
-torch::Tensor make_synthetic_input(int resolution, std::mt19937& rng) {
+torch::Tensor make_synthetic_input(int resolution, torch::Dtype dtype, std::mt19937& rng) {
     std::uniform_real_distribution<float> dist(0.0F, 1.0F);
     std::vector<float> host(static_cast<std::size_t>(1) * kSyntheticInputChannels *
                             static_cast<std::size_t>(resolution) *
@@ -340,7 +341,7 @@ torch::Tensor make_synthetic_input(int resolution, std::mt19937& rng) {
         torch::from_blob(host.data(), {1, kSyntheticInputChannels, resolution, resolution},
                          torch::kFloat32)
             .clone();
-    return cpu_input.to(torch::TensorOptions().dtype(torch::kFloat16).device(torch::kCUDA));
+    return cpu_input.to(torch::TensorOptions().dtype(dtype).device(torch::kCUDA));
 }
 
 torch::Tensor make_pos_grid(const ExternalPosState& state, int resolution, torch::Dtype dtype) {
@@ -389,6 +390,14 @@ int finalise_options(Options& options) {
         log_ok("inferred resolution=" + std::to_string(options.resolution) + " from filename");
     }
     return 0;
+}
+
+torch::Dtype infer_input_dtype_from_filename(const std::filesystem::path& path) {
+    const auto stem = path.stem().string();
+    if (stem.find("fp32") != std::string::npos) {
+        return torch::kFloat32;
+    }
+    return torch::kFloat16;
 }
 
 torch::Tensor extract_alpha(const torch::IValue& output) {
@@ -520,7 +529,8 @@ int main(int argc, char** argv) {  // NOLINT(bugprone-exception-escape)
     module.eval();
 
     std::mt19937 rng(static_cast<std::uint32_t>(kRandomSeedBase + options.resolution));
-    auto input = make_synthetic_input(options.resolution, rng);
+    const auto input_dtype = infer_input_dtype_from_filename(options.ts_path);
+    auto input = make_synthetic_input(options.resolution, input_dtype, rng);
     auto pos_grid = make_pos_grid(external_pos, options.resolution, input.scalar_type());
 
     const auto outcome = run_bench(
