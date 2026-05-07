@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -364,7 +365,9 @@ torch::Tensor make_pos_grid(const ExternalPosState& state, int resolution, torch
 
 struct BenchOutcome {
     int exit_code = 0;
-    double avg_ms = 0.0;
+    double mean_ms = 0.0;
+    double p50_ms = 0.0;
+    double p99_ms = 0.0;
     float alpha_min = 0.0F;
     float alpha_max = 0.0F;
     bool has_nan = false;
@@ -423,6 +426,19 @@ torch::IValue forward_module(torch::jit::script::Module& module, const torch::Te
     return module.forward({input});
 }
 
+double percentile_latency(std::vector<double> latencies_ms, double percentile) {
+    if (latencies_ms.empty()) {
+        return 0.0;
+    }
+    std::ranges::sort(latencies_ms);
+    const auto last_index = latencies_ms.size() - 1U;
+    const auto rank = static_cast<std::size_t>(
+        std::clamp(std::ceil((percentile / 100.0) * static_cast<double>(latencies_ms.size())), 1.0,
+                   static_cast<double>(latencies_ms.size())) -
+        1.0);
+    return latencies_ms[std::min(rank, last_index)];
+}
+
 BenchOutcome run_bench(torch::jit::script::Module& module, const torch::Tensor& input,
                        const torch::Tensor& pos_grid, BenchSchedule schedule) {
     const int warmup = schedule.warmup_iterations;
@@ -475,7 +491,9 @@ BenchOutcome run_bench(torch::jit::script::Module& module, const torch::Tensor& 
     for (const auto value : latencies_ms) {
         sum_ms += value;
     }
-    outcome.avg_ms = sum_ms / static_cast<double>(latencies_ms.size());
+    outcome.mean_ms = sum_ms / static_cast<double>(latencies_ms.size());
+    outcome.p50_ms = percentile_latency(latencies_ms, 50.0);
+    outcome.p99_ms = percentile_latency(latencies_ms, 99.0);
     return outcome;
 }
 
@@ -540,10 +558,11 @@ int main(int argc, char** argv) {  // NOLINT(bugprone-exception-escape)
         return outcome.exit_code;
     }
 
-    (void)std::printf("[OK] forward avg=%.1f ms  alpha=[%.4f, %.4f]  nan=%s inf=%s  iters=%d\n",
-                      outcome.avg_ms, outcome.alpha_min, outcome.alpha_max,
-                      outcome.has_nan ? "true" : "false", outcome.has_inf ? "true" : "false",
-                      options.iterations);
+    (void)std::printf(
+        "[OK] forward mean=%.1f ms p50=%.1f ms p99=%.1f ms  alpha=[%.4f, %.4f]  "
+        "nan=%s inf=%s  iters=%d\n",
+        outcome.mean_ms, outcome.p50_ms, outcome.p99_ms, outcome.alpha_min, outcome.alpha_max,
+        outcome.has_nan ? "true" : "false", outcome.has_inf ? "true" : "false", options.iterations);
 
     return (outcome.has_nan || outcome.has_inf) ? kExitNanOrInf : 0;
 }
