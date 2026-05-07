@@ -1084,7 +1084,8 @@ artifacts under `models/` do contain TensorRT markers.
 The true dynamic Torch-TensorRT probe used the same patched Hiera dynamic graph
 and explicit `torch.export.Dim` constraints matching the runtime's multiple of
 `32` input padding. Export succeeds for `512` through `1024`, which validates
-the shape contract. Full TensorRT conversion fails on dynamic
+the shape contract. Torch-TensorRT dry-run can report one TensorRT engine for
+all graph operators, but full TensorRT conversion fails on dynamic
 `upsample_bicubic2d` in positional embedding. A partitioned probe that leaves
 dynamic bicubic and bilinear resize operations in PyTorch compiles, but fails
 at runtime on dynamic reshape and resize shape propagation. Do not promote a
@@ -1226,6 +1227,35 @@ Current reading: keep this OFX-specific transport flag because it removes
 deterministically unused host work without changing alpha, foreground, source
 passthrough, despeckle, despill, or CLI/file outputs. The dominant remaining
 dynamic RTX cost is still `torchtrt_forward`.
+
+#### Dynamic TorchScript Same-Resolution GPU Prep Probe
+
+The dynamic TorchScript path no longer routes frames that already match the
+requested runtime resolution through TorchTrtSession's host packing path. It
+reuses `GpuInputPrep` and hands the prepared CUDA planar buffer to LibTorch.
+`GpuInputPrep` skips NPP resize calls when source and target dimensions match,
+while preserving the existing NPP resize path when scaling is required.
+
+A same-resolution `2048 -> 2048` OFX RPC harness comparison with random input,
+source passthrough disabled, bilinear output resize, and auxiliary images
+disabled reports:
+
+- host pack checkpoint: `822.8 ms` average roundtrip over five frames; hot
+  `torchtrt_prepare_pack` is `18.8 ms` to `19.3 ms`; hot `torchtrt_forward` is
+  `646.6 ms` to `667.6 ms`
+- device prep with no-op resize bypass: `830.9 ms` average roundtrip over five
+  frames; hot `frame_prepare_inputs` is `13.7 ms` to `14.5 ms`;
+  `torchtrt_prepare_device_wrap` stays below `0.1 ms`; hot `torchtrt_forward`
+  is `665.2 ms` to `679.0 ms`
+
+A `2048 -> 3840x2160` cross-check with source passthrough enabled reports
+`1082.7 ms` average roundtrip over four frames; hot frames stay between
+`975.2 ms` and `1003.6 ms` with the unchanged resize path.
+
+Current reading: keep the no-op resize bypass because it removes redundant
+preprocessing work and keeps the scaled path unchanged. It is not a replacement
+for a true TensorRT engine because `torchtrt_forward` remains the dominant
+cost.
 
 ### `phase_8_gpu_prepare`
 

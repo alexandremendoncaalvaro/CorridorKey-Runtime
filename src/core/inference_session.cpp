@@ -2012,7 +2012,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
     if (m_torch_trt_session != nullptr) {
         const int target_res =
             params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-        if (target_res <= 0 || (rgb.width == target_res && rgb.height == target_res)) {
+        if (target_res <= 0) {
             auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
             if (!batch_res) return Unexpected(batch_res.error());
             return std::move((*batch_res)[0]);
@@ -2100,6 +2100,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                               params.output_alpha_only, on_stage);
                 if (!raw_res) {
                     return Unexpected(raw_res.error());
+                }
+                if (rgb.width == target_res && rgb.height == target_res) {
+                    return std::move(*raw_res);
                 }
                 if (params.upscale_method != UpscaleMethod::Lanczos4) {
                     return finalize_model_output(*raw_res);

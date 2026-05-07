@@ -189,36 +189,51 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
 
     const int src_rgb_step = rgb.width * 3 * static_cast<int>(sizeof(float));
     const int dst_rgb_step = model_width * 3 * static_cast<int>(sizeof(float));
+    const bool rgb_needs_resize = rgb.width != model_width || rgb.height != model_height;
 
     const NppStreamContext npp_context = state.npp_context;
-    NppStatus status = nppiResize_32f_C3R_Ctx(state.src_rgb_dev, src_rgb_step, src_rgb_size,
-                                              src_rgb_roi, state.resized_rgb_dev, dst_rgb_step,
-                                              dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
+    Npp32f* prepared_rgb = state.src_rgb_dev;
+    int prepared_rgb_step = src_rgb_step;
+    if (rgb_needs_resize) {
+        NppStatus status = nppiResize_32f_C3R_Ctx(
+            state.src_rgb_dev, src_rgb_step, src_rgb_size, src_rgb_roi, state.resized_rgb_dev,
+            dst_rgb_step, dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
 
-    if (status != NPP_SUCCESS) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                "NPP RGB resize failed with status " + std::to_string(status)});
+        if (status != NPP_SUCCESS) {
+            return Unexpected(Error{ErrorCode::InferenceFailed,
+                                    "NPP RGB resize failed with status " + std::to_string(status)});
+        }
+        prepared_rgb = state.resized_rgb_dev;
+        prepared_rgb_step = dst_rgb_step;
     }
 
     NppiSize src_hint_size = {hint.width, hint.height};
     NppiRect src_hint_roi = {0, 0, hint.width, hint.height};
     const int src_hint_step = hint.width * static_cast<int>(sizeof(float));
     const int dst_hint_step = model_width * static_cast<int>(sizeof(float));
+    const bool hint_needs_resize = hint.width != model_width || hint.height != model_height;
 
-    status = nppiResize_32f_C1R_Ctx(state.src_hint_dev, src_hint_step, src_hint_size, src_hint_roi,
-                                    state.resized_hint_dev, dst_hint_step, dst_size, dst_roi,
-                                    NPPI_INTER_LINEAR, npp_context);
+    Npp32f* prepared_hint = state.src_hint_dev;
+    int prepared_hint_step = src_hint_step;
+    if (hint_needs_resize) {
+        NppStatus status = nppiResize_32f_C1R_Ctx(
+            state.src_hint_dev, src_hint_step, src_hint_size, src_hint_roi, state.resized_hint_dev,
+            dst_hint_step, dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
 
-    if (status != NPP_SUCCESS) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                "NPP hint resize failed with status " + std::to_string(status)});
+        if (status != NPP_SUCCESS) {
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed,
+                      "NPP hint resize failed with status " + std::to_string(status)});
+        }
+        prepared_hint = state.resized_hint_dev;
+        prepared_hint_step = dst_hint_step;
     }
 
     Npp32f* planar_ptrs[3] = {state.planar_dev, state.planar_dev + model_pixels,
                               state.planar_dev + 2 * model_pixels};
 
-    status = nppiCopy_32f_C3P3R_Ctx(state.resized_rgb_dev, dst_rgb_step, planar_ptrs, dst_hint_step,
-                                    dst_size, npp_context);
+    NppStatus status = nppiCopy_32f_C3P3R_Ctx(prepared_rgb, prepared_rgb_step, planar_ptrs,
+                                              dst_hint_step, dst_size, npp_context);
 
     if (status != NPP_SUCCESS) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
@@ -243,7 +258,7 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     }
 
     Npp32f* hint_plane = state.planar_dev + 3 * model_pixels;
-    status = nppiCopy_32f_C1R_Ctx(state.resized_hint_dev, dst_hint_step, hint_plane, dst_hint_step,
+    status = nppiCopy_32f_C1R_Ctx(prepared_hint, prepared_hint_step, hint_plane, dst_hint_step,
                                   dst_size, npp_context);
 
     if (status != NPP_SUCCESS) {

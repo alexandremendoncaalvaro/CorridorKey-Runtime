@@ -201,10 +201,20 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
         if (used_device_wrap) {
             CHECK_FALSE(has_stage(timings, "torchtrt_prepare_planar_copy"));
         }
+        if (resolution.width == params.target_resolution &&
+            resolution.height == params.target_resolution) {
+            CHECK(used_device_wrap);
+            CHECK_FALSE(has_stage(timings, "torchtrt_prepare_pack"));
+            CHECK_FALSE(used_host_upload);
+            CHECK_FALSE(has_stage(timings, "frame_extract_outputs_finalize"));
+        }
         CHECK(has_stage(timings, "torchtrt_forward"));
         CHECK(has_stage(timings, "torchtrt_extract_outputs"));
         CHECK(has_stage(timings, "frame_extract_outputs_resize"));
-        CHECK(has_stage(timings, "frame_extract_outputs_finalize"));
+        if (resolution.width != params.target_resolution ||
+            resolution.height != params.target_resolution) {
+            CHECK(has_stage(timings, "frame_extract_outputs_finalize"));
+        }
     }
 #endif
 }
