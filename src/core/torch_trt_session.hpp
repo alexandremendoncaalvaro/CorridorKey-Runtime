@@ -75,6 +75,10 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
         void* planar_device_input, int input_width, int input_height,
         bool output_alpha_only = false, StageTimingCallback on_stage = nullptr);
 
+    [[nodiscard]] Result<FrameResult> infer_prepared_cuda_planar_resized(
+        void* planar_device_input, int input_width, int input_height, int output_width,
+        int output_height, bool output_alpha_only = false, StageTimingCallback on_stage = nullptr);
+
     [[nodiscard]] int model_resolution() const;
 
    private:

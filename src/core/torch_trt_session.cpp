@@ -20,6 +20,7 @@
 // Tensor, Device, kCUDA, kFloat16/32, cuda::is_available,
 // cuda::synchronize, c10::Error) and pull only the slice of CUDA
 // declarations libtorch already proxies internally.
+#include <ATen/ops/upsample_bilinear2d.h>
 #include <torch/cuda.h>
 #include <torch/script.h>
 
@@ -143,13 +144,26 @@ int reflect_index(int index, int size) {
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
-torch::Tensor flatten_cropped_hwc(const torch::Tensor& tensor_cuda, int output_width,
-                                  int output_height, int pad_top, int pad_left) {
-    auto cropped = tensor_cuda.detach()
-                       .narrow(2, pad_top, output_height)
-                       .narrow(3, pad_left, output_width)
-                       .to(torch::kFloat32);
-    return cropped.permute({0, 2, 3, 1}).contiguous().view({-1});
+torch::Tensor crop_output_nchw(const torch::Tensor& tensor_cuda, int output_width,
+                               int output_height, int pad_top, int pad_left) {
+    return tensor_cuda.detach()
+        .narrow(2, pad_top, output_height)
+        .narrow(3, pad_left, output_width)
+        .to(torch::kFloat32);
+}
+
+void resize_output_if_needed(torch::Tensor& tensor_cuda, int current_width, int current_height,
+                             int output_width, int output_height) {
+    if (current_width == output_width && current_height == output_height) {
+        return;
+    }
+    const std::vector<int64_t> output_size{output_height, output_width};
+    tensor_cuda =
+        at::upsample_bilinear2d(tensor_cuda, output_size, false, std::nullopt, std::nullopt);
+}
+
+torch::Tensor flatten_hwc(const torch::Tensor& tensor_cuda) {
+    return tensor_cuda.permute({0, 2, 3, 1}).contiguous().view({-1});
 }
 
 struct MaterializedOutputTensors {
@@ -157,15 +171,45 @@ struct MaterializedOutputTensors {
     ImageBuffer foreground;
 };
 
+struct OutputMaterializationShape {
+    int crop_width = 0;
+    int crop_height = 0;
+    int final_width = 0;
+    int final_height = 0;
+    int pad_top = 0;
+    int pad_left = 0;
+};
+
 MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
-                                              const torch::Tensor& fg_cuda, int output_width,
-                                              int output_height, int pad_top, int pad_left,
-                                              bool include_foreground) {
-    auto alpha_flat =
-        flatten_cropped_hwc(alpha_cuda, output_width, output_height, pad_top, pad_left);
+                                              const torch::Tensor& fg_cuda,
+                                              OutputMaterializationShape shape,
+                                              bool include_foreground,
+                                              const StageTimingCallback& on_stage) {
+    auto alpha_nchw = crop_output_nchw(alpha_cuda, shape.crop_width, shape.crop_height,
+                                       shape.pad_top, shape.pad_left);
+    torch::Tensor fg_nchw;
+    if (include_foreground) {
+        fg_nchw = crop_output_nchw(fg_cuda, shape.crop_width, shape.crop_height, shape.pad_top,
+                                   shape.pad_left);
+    }
+
+    common::measure_stage(
+        on_stage, "frame_extract_outputs_resize",
+        [&]() {
+            resize_output_if_needed(alpha_nchw, shape.crop_width, shape.crop_height,
+                                    shape.final_width, shape.final_height);
+            if (include_foreground) {
+                resize_output_if_needed(fg_nchw, shape.crop_width, shape.crop_height,
+                                        shape.final_width, shape.final_height);
+            }
+            torch::cuda::synchronize();
+        },
+        1);
+
+    auto alpha_flat = flatten_hwc(alpha_nchw);
     torch::Tensor bulk_cuda;
     if (include_foreground) {
-        auto fg_flat = flatten_cropped_hwc(fg_cuda, output_width, output_height, pad_top, pad_left);
+        auto fg_flat = flatten_hwc(fg_nchw);
         bulk_cuda = torch::cat({alpha_flat, fg_flat}, 0).contiguous();
     } else {
         bulk_cuda = alpha_flat.contiguous();
@@ -177,14 +221,14 @@ MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
 
     MaterializedOutputTensors result;
     const auto alpha_count =
-        static_cast<std::size_t>(output_width) * static_cast<std::size_t>(output_height);
+        static_cast<std::size_t>(shape.final_width) * static_cast<std::size_t>(shape.final_height);
     const auto* src = host_bulk.data_ptr<float>();
-    result.alpha = ImageBuffer(output_width, output_height, 1);
+    result.alpha = ImageBuffer(shape.final_width, shape.final_height, 1);
     std::memcpy(result.alpha.view().data.data(), src, alpha_count * sizeof(float));
 
     if (include_foreground) {
         const auto foreground_count = alpha_count * 3U;
-        result.foreground = ImageBuffer(output_width, output_height, 3);
+        result.foreground = ImageBuffer(shape.final_width, shape.final_height, 3);
         std::memcpy(result.foreground.view().data.data(), src + alpha_count,
                     foreground_count * sizeof(float));
     }
@@ -193,10 +237,10 @@ MaterializedOutputTensors materialize_outputs(const torch::Tensor& alpha_cuda,
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) - these dimensions mirror tensor shape order.
 Result<FrameResult> forward_and_materialize(torch::jit::script::Module& module,
-                                            const torch::Tensor& cuda_input, int output_width,
-                                            int output_height, int inference_width,
-                                            int inference_height, int pad_top, int pad_left,
-                                            bool output_alpha_only,
+                                            const torch::Tensor& cuda_input, int crop_width,
+                                            int crop_height, int final_width, int final_height,
+                                            int inference_width, int inference_height, int pad_top,
+                                            int pad_left, bool output_alpha_only,
                                             const StageTimingCallback& on_stage) {
     torch::IValue raw_out;
     common::measure_stage(on_stage, "torchtrt_forward", [&]() {
@@ -229,8 +273,14 @@ Result<FrameResult> forward_and_materialize(torch::jit::script::Module& module,
     common::measure_stage(on_stage, "torchtrt_extract_outputs", [&]() {
         const bool include_foreground = !output_alpha_only && split->foreground.defined();
         auto materialized =
-            materialize_outputs(split->alpha, split->foreground, output_width, output_height,
-                                pad_top, pad_left, include_foreground);
+            materialize_outputs(split->alpha, split->foreground,
+                                OutputMaterializationShape{.crop_width = crop_width,
+                                                           .crop_height = crop_height,
+                                                           .final_width = final_width,
+                                                           .final_height = final_height,
+                                                           .pad_top = pad_top,
+                                                           .pad_left = pad_left},
+                                include_foreground, on_stage);
         result.alpha = std::move(materialized.alpha);
         result.foreground = std::move(materialized.foreground);
     });
@@ -394,8 +444,8 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
                 host_input.to(torch::Device(torch::kCUDA), m_impl->input_dtype, kNonBlockingCopy);
         });
 
-        return forward_and_materialize(m_impl->module, cuda_input, width, height, inference_width,
-                                       inference_height, padding.top, padding.left,
+        return forward_and_materialize(m_impl->module, cuda_input, width, height, width, height,
+                                       inference_width, inference_height, padding.top, padding.left,
                                        output_alpha_only, on_stage);
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
@@ -440,8 +490,8 @@ Result<FrameResult> TorchTrtSession::infer_prepared_planar(
         });
 
         return forward_and_materialize(m_impl->module, cuda_input, input_width, input_height,
-                                       input_width, input_height, 0, 0, output_alpha_only,
-                                       on_stage);
+                                       input_width, input_height, input_width, input_height, 0, 0,
+                                       output_alpha_only, on_stage);
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InferenceFailed,
@@ -457,14 +507,25 @@ Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar(
     void* planar_device_input, int input_width, int input_height, bool output_alpha_only,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     StageTimingCallback on_stage) {
+    return infer_prepared_cuda_planar_resized(planar_device_input, input_width, input_height,
+                                              input_width, input_height, output_alpha_only,
+                                              std::move(on_stage));
+}
+
+Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
+    void* planar_device_input, int input_width, int input_height, int output_width,
+    int output_height, bool output_alpha_only,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    StageTimingCallback on_stage) {
     if (m_impl == nullptr) {
         return Unexpected<Error>{Error{.code = ErrorCode::InferenceFailed,
                                        .message = "TorchTrtSession in moved-from state"}};
     }
-    if (planar_device_input == nullptr || input_width <= 0 || input_height <= 0) {
+    if (planar_device_input == nullptr || input_width <= 0 || input_height <= 0 ||
+        output_width <= 0 || output_height <= 0) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InvalidParameters,
-                  .message = "Prepared CUDA TorchTRT input must be a non-empty planar tensor"}};
+                  .message = "Prepared CUDA TorchTRT input and output sizes must be positive"}};
     }
 
     try {
@@ -481,8 +542,8 @@ Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar(
         }
 
         return forward_and_materialize(m_impl->module, cuda_input, input_width, input_height,
-                                       input_width, input_height, 0, 0, output_alpha_only,
-                                       on_stage);
+                                       output_width, output_height, input_width, input_height, 0, 0,
+                                       output_alpha_only, on_stage);
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InferenceFailed,

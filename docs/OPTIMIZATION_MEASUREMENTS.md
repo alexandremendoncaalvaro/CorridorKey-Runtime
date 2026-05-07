@@ -1165,6 +1165,33 @@ boundary and improves the dynamic path under direct comparison. The dominant
 remaining costs are still model forward, output materialization, and CPU-side
 full-frame post-processing.
 
+#### Dynamic TorchScript GPU Output Resize Probe
+
+The dynamic path now mirrors the Python engine's output-resize placement for
+bilinear output scaling: alpha and foreground stay as CUDA tensors through the
+model-output resize, then the cropped and resized tensors are packed into one
+host transfer. The Lanczos path remains CPU-side because the maintained CUDA
+path is bilinear.
+
+A `2048 -> 3840x2160` OFX RPC harness run with random input, source
+passthrough, and bilinear output resize reports:
+
+- green dynamic: `1110.3 ms` average roundtrip over six frames;
+  `frame_extract_outputs_resize` averages `0.6 ms`; hot `torchtrt_forward`
+  stays at about `662 ms` to `674 ms`
+- blue dynamic: `1114.9 ms` average roundtrip over six frames;
+  `frame_extract_outputs_resize` averages `0.7 ms`; hot `torchtrt_forward`
+  stays at about `660 ms` to `673 ms`
+
+A sequential `1024 -> 1920x1080` cross-check reports `301.4 ms` average
+roundtrip for green dynamic and `311.0 ms` for blue dynamic over six frames.
+Hot forward calls stay at about `128 ms` to `131 ms`, matching the prior
+dynamic forward floor rather than the invalid concurrent-GPU probe.
+
+The GPU output-resize probe is kept because it removes the CPU output-resize
+work from the bilinear dynamic path without changing the dynamic artifact
+contract or the Lanczos fallback.
+
 ### `phase_8_gpu_prepare`
 
 - Source state: current `perf/optimization` working tree with CUDA NPP-based

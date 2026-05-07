@@ -184,6 +184,7 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
 
         InferenceParams params;
         params.target_resolution = 512;
+        params.upscale_method = UpscaleMethod::Bilinear;
         std::vector<StageTiming> timings;
         auto result = engine.value()->process_frame(
             rgb.view(), hint.view(), params,

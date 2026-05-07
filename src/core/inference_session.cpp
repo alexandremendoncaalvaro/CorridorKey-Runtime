@@ -2014,6 +2014,32 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             return std::move((*batch_res)[0]);
         }
 
+        auto finalize_model_output = [&](FrameResult& result) -> Result<FrameResult> {
+            auto finalize_res = common::measure_stage(
+                on_stage, "frame_extract_outputs_finalize",
+                [&]() -> Result<void> {
+                    ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
+                    auto alpha_final_res = finalize_output_image(
+                        m_device, target_res, result.alpha.view(), "alpha_resized_output");
+                    if (!alpha_final_res) {
+                        return Unexpected(alpha_final_res.error());
+                    }
+                    if (!result.foreground.view().empty()) {
+                        auto fg_final_res = finalize_output_image(
+                            m_device, target_res, result.foreground.view(), "fg_resized_output");
+                        if (!fg_final_res) {
+                            return Unexpected(fg_final_res.error());
+                        }
+                    }
+                    return {};
+                },
+                1);
+            if (!finalize_res) {
+                return Unexpected(finalize_res.error());
+            }
+            return std::move(result);
+        };
+
         auto resize_model_output = [&](FrameResult& raw_result) -> Result<FrameResult> {
             FrameResult result;
             result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
@@ -2046,29 +2072,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 return Unexpected(resize_res.error());
             }
 
-            auto finalize_res = common::measure_stage(
-                on_stage, "frame_extract_outputs_finalize",
-                [&]() -> Result<void> {
-                    ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-                    auto alpha_final_res = finalize_output_image(
-                        m_device, target_res, result.alpha.view(), "alpha_resized_output");
-                    if (!alpha_final_res) {
-                        return Unexpected(alpha_final_res.error());
-                    }
-                    if (!result.foreground.view().empty()) {
-                        auto fg_final_res = finalize_output_image(
-                            m_device, target_res, result.foreground.view(), "fg_resized_output");
-                        if (!fg_final_res) {
-                            return Unexpected(fg_final_res.error());
-                        }
-                    }
-                    return {};
-                },
-                1);
-            if (!finalize_res) {
-                return Unexpected(finalize_res.error());
-            }
-            return result;
+            return finalize_model_output(result);
         };
 
         if (m_gpu_prep.available()) {
@@ -2081,11 +2085,20 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 },
                 1);
             if (gpu_prepare_res.has_value()) {
-                auto raw_res = m_torch_trt_session->infer_prepared_cuda_planar(
-                    gpu_prepare_res->planar_device, gpu_prepare_res->width, gpu_prepare_res->height,
-                    params.output_alpha_only, on_stage);
+                Result<FrameResult> raw_res =
+                    params.upscale_method == UpscaleMethod::Lanczos4
+                        ? m_torch_trt_session->infer_prepared_cuda_planar(
+                              gpu_prepare_res->planar_device, gpu_prepare_res->width,
+                              gpu_prepare_res->height, params.output_alpha_only, on_stage)
+                        : m_torch_trt_session->infer_prepared_cuda_planar_resized(
+                              gpu_prepare_res->planar_device, gpu_prepare_res->width,
+                              gpu_prepare_res->height, rgb.width, rgb.height,
+                              params.output_alpha_only, on_stage);
                 if (!raw_res) {
                     return Unexpected(raw_res.error());
+                }
+                if (params.upscale_method != UpscaleMethod::Lanczos4) {
+                    return finalize_model_output(*raw_res);
                 }
                 return resize_model_output(*raw_res);
             }
