@@ -8,8 +8,8 @@ TorchScript fallback artifacts with true Torch-TensorRT engines.
 
 Use `compile_dynamic_torchscript.py` when a Windows RTX checkpoint or the
 PyTorch runtime stack changes and the selected artifact is the dynamic
-TorchScript fallback. The Windows RTX model packs currently consume one dynamic
-TorchScript file per screen color:
+TorchScript fallback. The fallback writes one dynamic TorchScript file per
+screen color:
 
 - `corridorkey_dynamic_green_fp16.ts`
 - `corridorkey_dynamic_blue_fp16.ts`
@@ -17,6 +17,12 @@ TorchScript file per screen color:
 The exported file is loaded by the C++ LibTorch-backed RTX runtime path.
 Runtime resolution is selected by the caller and is not encoded in the
 filename.
+
+Use `compile_dynamic_torchtrt.py` when producing the true dynamic
+Torch-TensorRT candidate. The artifact is still one `.ts` file per screen
+color, but it embeds the source positional embedding as TorchScript extra data
+and expects the C++ runtime to pass a cached positional grid as the second
+forward input.
 
 Use `compile_torchtrt.py` only for fixed-resolution diagnostic
 Torch-TensorRT engines. Those artifacts contain serialized TensorRT engine
@@ -42,14 +48,20 @@ uv run python compile_dynamic_torchscript.py `
   --precision fp16
 ```
 
-The exporter writes dynamic `.ts` files into the selected output directory.
+```powershell
+uv run python compile_dynamic_torchtrt.py `
+  --repo-path C:\Dev\CorridorKey-Engine `
+  --checkpoint C:\Dev\CorridorKey-Runtime\models\CorridorKey.pth `
+  --output C:\Dev\CorridorKey-Runtime\models\corridorkey_dynamic_green_fp16.ts `
+  --precision fp16 `
+  --min-resolution 512 `
+  --opt-resolution 1024 `
+  --max-resolution 2048
+```
+
+Each exporter writes dynamic `.ts` files into the selected output directory.
 Validation should load the same file from C++ at multiple runtime resolutions
 before it is promoted into the model pack.
-
-The dynamic exporter does not produce a TensorRT engine. A true dynamic
-Torch-TensorRT candidate must be exported through `torch.export` with explicit
-shape constraints, compiled by `torch_tensorrt.dynamo.compile`, loaded in C++,
-and benchmarked before it can replace this fallback.
 
 ## Upload Target
 
