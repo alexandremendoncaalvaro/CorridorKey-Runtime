@@ -550,6 +550,69 @@ path during installation.
 The Windows RTX installer must pass packaged `doctor` validation before it is
 considered releasable.
 
+### Windows RTX Release Readiness Audit
+
+The dynamic Windows RTX pre-release path is only releasable after an audit
+proves that the installer, model packs, runtime identity, OFX routing, and
+performance evidence all describe the same product. The audit exists to catch
+packaging and runtime mismatches before manual Resolve or Nuke validation.
+
+The readiness audit covers these gates:
+
+- Source and version identity:
+  - build and package through `scripts\windows.ps1`
+  - keep the display label consistent across installer filename, staged CLI
+    version output, OFX panel, and runtime-server log filename
+  - reject stale labels, dirty published artifacts, and direct delegate-script
+    packaging
+- Model artifact identity:
+  - verify that the green dynamic artifact is the promoted true Torch-TensorRT
+    artifact with embedded positional-grid metadata
+  - verify that the blue dynamic artifact is finite at the supported runtime
+    resolutions before packaging
+  - do not describe the blue dynamic artifact as true Torch-TensorRT unless it
+    contains TensorRT engine markers and passes the same C++ runner gates as
+    green
+  - keep diagnostic artifacts from `temp\` and failed Torch-TensorRT blue
+    probes out of model packs and installers
+- Installer and pack integrity:
+  - publish only the online Windows RTX installer
+  - require at least one selected model pack in the online installer
+  - install the screen-color-neutral TorchTRT runtime pack whenever any model
+    pack is selected
+  - preserve selected packs whose installed SHA256 already matches the
+    distribution manifest
+  - replace missing or invalid selected packs from the verified manifest source
+  - surface missing unselected packs only through inventory and doctor reports
+- Automated quality gates:
+  - pass release build, unit tests, regression tests, and integration tests
+  - pass documentation consistency and script syntax checks
+  - pass model-catalog, screen-color selection, mixed-mode rejection, runtime
+    protocol, panel-label, installer-pack, and artifact-identity tests
+- Performance gates:
+  - run the green and blue dynamic runner at exposed runtime resolutions and
+    reject NaN or Inf output
+  - compare green against the recorded dynamic Torch-TensorRT baseline and the
+    standing `phase_8_gpu_prepare` hot-path policy
+  - compare blue against the recorded dynamic blue baseline and reject
+    progressive per-frame degradation
+  - run the OFX RPC harness for Green, Blue, and Blue-Green Channel Swap at
+    2048
+  - require stage timings that prove the selected model is not changing during
+    a render
+- Manual UAT boundary:
+  - use manual Resolve and Nuke validation only after the automated audit
+    passes
+  - validate Green, Blue, and Blue-Green Channel Swap in Resolve at 2048
+  - validate Nuke loading and rendering without relying on dynamic host-side
+    panel updates
+
+The audit evidence is a release artifact. It records the commit, display
+label, installer path, model pack list, SHA256 checks, doctor result, runner
+results, OFX RPC results, and remaining manual UAT outcomes. A Windows RTX
+pre-release that lacks this evidence is a local experiment, not a releasable
+candidate.
+
 ### macOS Build Steps
 
 macOS has one curated runtime root and one canonical release entrypoint:
