@@ -275,6 +275,7 @@ def compile_dynamic_torchtrt(
     checkpoint_path: Path,
     output_path: Path,
     precision: str,
+    enabled_precisions: list[str],
     min_resolution: int,
     opt_resolution: int,
     max_resolution: int,
@@ -284,6 +285,9 @@ def compile_dynamic_torchtrt(
         raise RuntimeError("CUDA device required to compile dynamic Torch-TensorRT")
 
     dtype = torch.float16 if precision == "fp16" else torch.float32
+    trt_precisions = {
+        torch.float16 if item == "fp16" else torch.float32 for item in enabled_precisions
+    }
     model = _load_external_pos_model(checkpoint_path, dtype)
     base_model = model.model
 
@@ -313,7 +317,9 @@ def compile_dynamic_torchtrt(
 
     print(
         "[compile_dynamic_torchtrt] export "
-        f"{checkpoint_path.name} precision={precision} range={min_resolution}-{max_resolution}",
+        f"{checkpoint_path.name} precision={precision} "
+        f"enabled_precisions={','.join(enabled_precisions)} "
+        f"range={min_resolution}-{max_resolution}",
         flush=True,
     )
     exported = torch.export.export(
@@ -327,7 +333,7 @@ def compile_dynamic_torchtrt(
         compiled = torch_trt.dynamo.compile(
             exported,
             inputs=inputs,
-            enabled_precisions={dtype},
+            enabled_precisions=trt_precisions,
             min_block_size=1,
         )
 
@@ -385,6 +391,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--precision", choices=("fp16", "fp32"), default="fp16")
+    parser.add_argument(
+        "--enabled-precisions",
+        choices=("fp16", "fp32"),
+        nargs="*",
+        help="TensorRT tactic precisions. Defaults to --precision.",
+    )
     parser.add_argument("--min-resolution", type=int, default=512)
     parser.add_argument("--opt-resolution", type=int, default=1024)
     parser.add_argument("--max-resolution", type=int, default=2048)
@@ -423,10 +435,12 @@ def main() -> int:
 
     sys.path.insert(0, str(repo_path))
     try:
+        enabled_precisions = args.enabled_precisions or [args.precision]
         compile_dynamic_torchtrt(
             args.checkpoint.resolve(),
             args.output.resolve(),
             args.precision,
+            enabled_precisions,
             args.min_resolution,
             args.opt_resolution,
             args.max_resolution,
