@@ -1192,6 +1192,41 @@ The GPU output-resize probe is kept because it removes the CPU output-resize
 work from the bilinear dynamic path without changing the dynamic artifact
 contract or the Lanczos fallback.
 
+#### Dynamic TorchScript OFX Auxiliary Output Skip Probe
+
+The OFX runtime service transports alpha and foreground through shared memory.
+The OFX plugin applies per-node alpha adjustments, restores any screen-color
+canonicalization, converts foreground to linear, and writes the host output
+itself. Core `FrameResult` processed and composite images are therefore file and
+CLI outputs, not OFX transport outputs.
+
+The OFX RPC harness now exposes `output_auxiliary_images` so the same binary can
+compare the previous full `FrameResult` behavior with the OFX transport
+behavior. Measurements use dynamic TorchScript, `2048 -> 3840x2160`, random
+input, source passthrough, and bilinear output resize:
+
+- green with auxiliary images enabled:
+  - average roundtrip over four frames: `1141.4 ms`
+  - render frames include `post_premultiply` plus `post_composite`, averaging
+    `38.2 ms` per frame
+- green with auxiliary images disabled:
+  - average roundtrip over four frames: `1137.2 ms`
+  - render frames omit `post_premultiply` and `post_composite`
+  - last two hot frames improve from `1045.3 ms` to `1005.9 ms`
+- blue with auxiliary images enabled:
+  - average roundtrip over four frames: `1211.2 ms`
+  - render frames include `post_premultiply` plus `post_composite`, averaging
+    `40.7 ms` per frame
+- blue with auxiliary images disabled:
+  - average roundtrip over four clean frames: `1037.0 ms`
+  - render frames omit `post_premultiply` and `post_composite`
+  - last three hot frames improve from `1071.4 ms` to `971.3 ms`
+
+Current reading: keep this OFX-specific transport flag because it removes
+deterministically unused host work without changing alpha, foreground, source
+passthrough, despeckle, despill, or CLI/file outputs. The dominant remaining
+dynamic RTX cost is still `torchtrt_forward`.
+
 ### `phase_8_gpu_prepare`
 
 - Source state: current `perf/optimization` working tree with CUDA NPP-based

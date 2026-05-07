@@ -438,6 +438,9 @@ struct InferenceParams {
 
     // Skip foreground materialization when the caller only needs the matte.
     bool output_alpha_only = false;
+    // File/CLI callers need these FrameResult images; OFX writes host output
+    // from alpha and foreground after its own per-node adjustments.
+    bool output_auxiliary_images = true;
 
     // Quality fallback and validated refinement strategy selection
     int requested_quality_resolution = 0;  // 0 = use target_resolution

@@ -116,6 +116,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     params.sp_erode_px = 1;
     params.sp_blur_px = 2;
     params.output_alpha_only = true;
+    params.output_auxiliary_images = false;
 
     OfxRuntimeRenderFrameRequest request;
     request.session_id = "session-1";
@@ -142,6 +143,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     CHECK(parsed_request->params.spill_method == 1);
     CHECK(parsed_request->params.despill_screen_channel == 2);
     CHECK(parsed_request->params.output_alpha_only);
+    CHECK_FALSE(parsed_request->params.output_auxiliary_images);
     CHECK(parsed_request->render_index == 7);
 
     OfxRuntimeRequestEnvelope envelope;
@@ -163,6 +165,25 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     REQUIRE(parsed_ok.has_value());
     CHECK(parsed_ok->success);
     CHECK(parsed_ok->payload.at("accepted").get<bool>());
+}
+
+TEST_CASE("ofx runtime protocol defaults auxiliary images for legacy render requests",
+          "[unit][ofx][runtime][regression]") {
+    const InferenceParams params;
+
+    OfxRuntimeRenderFrameRequest request;
+    request.session_id = "session-legacy";
+    request.shared_frame_path = "frames/frame_legacy.ckfx";
+    request.width = 1280;
+    request.height = 720;
+    request.params = params;
+
+    auto request_json = to_json(request);
+    request_json.at("params").erase("output_auxiliary_images");
+
+    auto parsed_request = render_frame_request_from_json(request_json);
+    REQUIRE(parsed_request.has_value());
+    CHECK(parsed_request->params.output_auxiliary_images);
 }
 
 TEST_CASE("ofx runtime protocol rejects mismatched protocol versions",

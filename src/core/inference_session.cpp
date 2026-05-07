@@ -1594,6 +1594,10 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
         },
         1);
 
+    if (!params.output_auxiliary_images) {
+        return;
+    }
+
     // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
     const auto& lut = SrgbLut::instance();
     Image fg = result.foreground.const_view();

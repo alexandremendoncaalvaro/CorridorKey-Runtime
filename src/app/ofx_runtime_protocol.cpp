@@ -329,7 +329,8 @@ nlohmann::json to_json(const InferenceParams& params) {
         {"source_passthrough", params.source_passthrough},
         {"sp_erode_px", params.sp_erode_px},
         {"sp_blur_px", params.sp_blur_px},
-        {"output_alpha_only", params.output_alpha_only}};
+        {"output_alpha_only", params.output_alpha_only},
+        {"output_auxiliary_images", params.output_auxiliary_images}};
 }
 
 Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
@@ -423,6 +424,10 @@ Result<InferenceParams> inference_params_from_json(const nlohmann::json& json) {
     params.sp_blur_px = *sp_blur_px;
     if (json.contains("output_alpha_only") && json.at("output_alpha_only").is_boolean()) {
         params.output_alpha_only = json.at("output_alpha_only").get<bool>();
+    }
+    if (json.contains("output_auxiliary_images") &&
+        json.at("output_auxiliary_images").is_boolean()) {
+        params.output_auxiliary_images = json.at("output_auxiliary_images").get<bool>();
     }
     return params;
 }

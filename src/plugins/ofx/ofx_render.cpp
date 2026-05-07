@@ -187,6 +187,7 @@ bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& r
            lhs.upscale_method == rhs.upscale_method &&
            lhs.source_passthrough == rhs.source_passthrough && lhs.sp_erode_px == rhs.sp_erode_px &&
            lhs.sp_blur_px == rhs.sp_blur_px && lhs.output_alpha_only == rhs.output_alpha_only &&
+           lhs.output_auxiliary_images == rhs.output_auxiliary_images &&
            lhs.requested_quality_resolution == rhs.requested_quality_resolution &&
            lhs.quality_fallback_mode == rhs.quality_fallback_mode &&
            lhs.refinement_mode == rhs.refinement_mode &&
@@ -1047,6 +1048,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.sp_erode_px = effective_edge_erode;
     params.sp_blur_px = effective_edge_blur;
     params.output_alpha_only = !output_mode_requires_model_foreground(output_mode);
+    params.output_auxiliary_images = false;
 
     log_message("render",
                 std::string("event=postprocess_params screen_color=") +
@@ -1057,7 +1059,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                     " despill_screen_channel=" + std::to_string(params.despill_screen_channel) +
                     " spill_method=" + std::to_string(params.spill_method) +
                     " sp_erode_px=" + std::to_string(params.sp_erode_px) +
-                    " sp_blur_px=" + std::to_string(params.sp_blur_px));
+                    " sp_blur_px=" + std::to_string(params.sp_blur_px) +
+                    " output_auxiliary_images=" + (params.output_auxiliary_images ? "1" : "0"));
 
     data->last_guide_source = *guide_source;
     data->last_runtime_path = classify_runtime_path(data, params, width, height);

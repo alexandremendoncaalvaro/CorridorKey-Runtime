@@ -98,6 +98,7 @@ struct HarnessOptions {
     // Optional PRNG seed for --input-mode=random so runs are reproducible.
     std::uint32_t input_random_seed = 0xC0B7A1C0u;
     bool source_passthrough = true;
+    bool output_auxiliary_images = false;
     int sp_erode_px = InferenceParams::kDefaultSpErodePx;
     int sp_blur_px = InferenceParams::kDefaultSpBlurPx;
     UpscaleMethod upscale_method = UpscaleMethod::Lanczos4;
@@ -201,6 +202,12 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
             auto parsed = parse_bool_option(*value, "--source-passthrough");
             if (!parsed) return Unexpected(parsed.error());
             options.source_passthrough = *parsed;
+        } else if (argument == "--output-auxiliary-images") {
+            auto value = need("--output-auxiliary-images");
+            if (!value) return Unexpected(value.error());
+            auto parsed = parse_bool_option(*value, "--output-auxiliary-images");
+            if (!parsed) return Unexpected(parsed.error());
+            options.output_auxiliary_images = *parsed;
         } else if (argument == "--sp-erode") {
             auto value = need("--sp-erode");
             if (!value) return Unexpected(value.error());
@@ -390,6 +397,7 @@ int main(int argc, char* argv[]) {
     params.target_resolution = options.resolution;
     params.batch_size = 1;
     params.output_alpha_only = false;
+    params.output_auxiliary_images = options.output_auxiliary_images;
     params.source_passthrough = options.source_passthrough;
     params.sp_erode_px = options.sp_erode_px;
     params.sp_blur_px = options.sp_blur_px;
@@ -459,6 +467,7 @@ int main(int argc, char* argv[]) {
     report["parent_qos_class"] = options.parent_qos_class;
     report["input_mode"] = options.input_mode;
     report["source_passthrough"] = options.source_passthrough;
+    report["output_auxiliary_images"] = options.output_auxiliary_images;
     report["sp_erode_px"] = options.sp_erode_px;
     report["sp_blur_px"] = options.sp_blur_px;
     report["upscale_method"] = upscale_method_label(options.upscale_method);
