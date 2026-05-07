@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 
 namespace corridorkey {
@@ -22,11 +21,14 @@ enum class ModelRgbChannel : std::uint8_t {
 inline float normalize_corridorkey_rgb(float value, ModelRgbChannel channel) {
     switch (channel) {
         case ModelRgbChannel::Red:
-            return (value - kCorridorKeyRgbMean[0]) * kCorridorKeyRgbInvStddev[0];
+            return (value - std::get<0>(kCorridorKeyRgbMean)) *
+                   std::get<0>(kCorridorKeyRgbInvStddev);
         case ModelRgbChannel::Green:
-            return (value - kCorridorKeyRgbMean[1]) * kCorridorKeyRgbInvStddev[1];
+            return (value - std::get<1>(kCorridorKeyRgbMean)) *
+                   std::get<1>(kCorridorKeyRgbInvStddev);
         case ModelRgbChannel::Blue:
-            return (value - kCorridorKeyRgbMean[2]) * kCorridorKeyRgbInvStddev[2];
+            return (value - std::get<2>(kCorridorKeyRgbMean)) *
+                   std::get<2>(kCorridorKeyRgbInvStddev);
     }
     return value;
 }
