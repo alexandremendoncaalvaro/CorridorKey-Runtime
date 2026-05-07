@@ -19,12 +19,14 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <random>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -32,8 +34,11 @@
 #include <windows.h>
 #endif
 
+#include <ATen/ops/upsample_bicubic2d.h>
 #include <torch/cuda.h>
 #include <torch/script.h>
+
+#include <nlohmann/json.hpp>
 
 namespace {
 
@@ -51,6 +56,8 @@ constexpr int kExitWarmup = 7;
 constexpr int kExitForward = 8;
 constexpr int kExitForwardOutput = 9;
 constexpr int kExitNanOrInf = 10;
+constexpr std::string_view kExternalPosMetaName = "corridorkey.external_pos.v1.json";
+constexpr std::string_view kExternalPosDataName = "corridorkey.external_pos.v1.fp32";
 
 struct Options {
     std::filesystem::path ts_path;
@@ -79,6 +86,90 @@ void log_ok(std::string_view message) {
     (void)std::fputs("[ok] ", stdout);
     (void)std::fputs(std::string{message}.c_str(), stdout);
     (void)std::fputc('\n', stdout);
+}
+
+struct ExternalPosState {
+    bool enabled = false;
+    int channels = 0;
+    int source_grid = 0;
+    int patch_stride_height = 0;
+    int patch_stride_width = 0;
+    torch::Tensor base_cuda_float;
+};
+
+bool json_int_at(const nlohmann::json& array, std::size_t index, int& value) {
+    if (!array.is_array() || index >= array.size() || !array.at(index).is_number_integer()) {
+        return false;
+    }
+    value = array.at(index).get<int>();
+    return true;
+}
+
+bool parse_external_pos_state(const std::unordered_map<std::string, std::string>& extra_files,
+                              ExternalPosState& state) {
+    const auto meta_iter = extra_files.find(std::string{kExternalPosMetaName});
+    const auto data_iter = extra_files.find(std::string{kExternalPosDataName});
+    const bool has_meta = meta_iter != extra_files.end() && !meta_iter->second.empty();
+    const bool has_data = data_iter != extra_files.end() && !data_iter->second.empty();
+    if (!has_meta && !has_data) {
+        return true;
+    }
+    if (!has_meta || !has_data) {
+        log_error("external positional embedding metadata is incomplete");
+        return false;
+    }
+
+    const auto metadata = nlohmann::json::parse(meta_iter->second, nullptr, false);
+    if (metadata.is_discarded() ||
+        metadata.value("format", "") != "corridorkey_torchtrt_external_pos") {
+        log_error("external positional embedding metadata is invalid");
+        return false;
+    }
+
+    const auto shape = metadata.value("shape", nlohmann::json::array());
+    int batch = 0;
+    int channels = 0;
+    int source_height = 0;
+    int source_width = 0;
+    if (!json_int_at(shape, 0, batch) || !json_int_at(shape, 1, channels) ||
+        !json_int_at(shape, 2, source_height) || !json_int_at(shape, 3, source_width) ||
+        batch != 1 || channels <= 0 || source_height <= 0 || source_height != source_width) {
+        log_error("external positional embedding shape is invalid");
+        return false;
+    }
+
+    const auto stride = metadata.value("patch_stride", nlohmann::json::array());
+    int patch_stride_height = 0;
+    int patch_stride_width = 0;
+    if (!json_int_at(stride, 0, patch_stride_height) ||
+        !json_int_at(stride, 1, patch_stride_width) || patch_stride_height <= 0 ||
+        patch_stride_width <= 0) {
+        log_error("external positional embedding stride is invalid");
+        return false;
+    }
+
+    const auto expected_bytes =
+        static_cast<std::size_t>(batch) * channels * source_height * source_width * sizeof(float);
+    if (data_iter->second.size() != expected_bytes) {
+        log_error("external positional embedding payload size is invalid");
+        return false;
+    }
+
+    const auto element_count = expected_bytes / sizeof(float);
+    std::vector<float> values(element_count);
+    std::memcpy(values.data(), data_iter->second.data(), expected_bytes);
+    auto base_cpu =
+        torch::from_blob(values.data(), {1, channels, source_height, source_width},
+                         torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU))
+            .clone();
+
+    state.enabled = true;
+    state.channels = channels;
+    state.source_grid = source_height;
+    state.patch_stride_height = patch_stride_height;
+    state.patch_stride_width = patch_stride_width;
+    state.base_cuda_float = base_cpu.to(torch::Device(torch::kCUDA), torch::kFloat32);
+    return true;
 }
 
 // Hand-rolled key/value arg parser. Per-flag dispatch is table-driven so
@@ -124,21 +215,17 @@ std::vector<std::pair<std::string_view, ArgHandler>> build_arg_handlers(Options&
 
 bool dispatch_arg(std::span<char*> args, std::size_t& index,
                   const std::vector<std::pair<std::string_view, ArgHandler>>& handlers) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) — bounds
-    // checked by caller.
-    const std::string_view token{args[index]};
+    const std::string_view token{args.subspan(index, 1).front()};
     const auto found =
         std::ranges::find_if(handlers, [&](const auto& pair) { return pair.first == token; });
     if (found == handlers.end()) {
         log_error("unknown arg: " + std::string{token});
         return false;
     }
-    const std::string_view value =
-        (index + 1 < args.size())
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            // — guarded above.
-            ? std::string_view{args[index + 1]}
-            : std::string_view{};
+    const auto next_index = index + 1;
+    const std::string_view value = next_index < args.size()
+                                       ? std::string_view{args.subspan(next_index, 1).front()}
+                                       : std::string_view{};
     if (!found->second(value)) {
         return false;
     }
@@ -149,9 +236,7 @@ bool dispatch_arg(std::span<char*> args, std::size_t& index,
 bool parse_args(std::span<char*> args, Options& options) {
     const auto handlers = build_arg_handlers(options);
     for (std::size_t index = 1; index < args.size(); ++index) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) — bounds
-        // checked by loop guard.
-        const std::string_view token{args[index]};
+        const std::string_view token{args.subspan(index, 1).front()};
         if (token == "--help" || token == "-h") {
             (void)std::puts(
                 "Usage: corridorkey-torchtrt-runner --ts <path> "
@@ -258,6 +343,22 @@ torch::Tensor make_synthetic_input(int resolution, std::mt19937& rng) {
     return cpu_input.to(torch::TensorOptions().dtype(torch::kFloat16).device(torch::kCUDA));
 }
 
+torch::Tensor make_pos_grid(const ExternalPosState& state, int resolution, torch::Dtype dtype) {
+    if (!state.enabled) {
+        return {};
+    }
+    const std::vector<int64_t> output_size{
+        resolution / state.patch_stride_height,
+        resolution / state.patch_stride_width,
+    };
+    auto grid = at::upsample_bicubic2d(state.base_cuda_float, output_size, false, std::nullopt,
+                                       std::nullopt);
+    if (dtype != torch::kFloat32) {
+        grid = grid.to(dtype);
+    }
+    return grid;
+}
+
 }  // namespace
 
 struct BenchOutcome {
@@ -305,15 +406,23 @@ struct BenchSchedule {
     int timed_iterations = 0;
 };
 
+torch::IValue forward_module(torch::jit::script::Module& module, const torch::Tensor& input,
+                             const torch::Tensor& pos_grid) {
+    if (pos_grid.defined()) {
+        return module.forward({input, pos_grid});
+    }
+    return module.forward({input});
+}
+
 BenchOutcome run_bench(torch::jit::script::Module& module, const torch::Tensor& input,
-                       BenchSchedule schedule) {
+                       const torch::Tensor& pos_grid, BenchSchedule schedule) {
     const int warmup = schedule.warmup_iterations;
     const int iterations = schedule.timed_iterations;
     BenchOutcome outcome;
     const torch::NoGradGuard no_grad;
     for (int iter = 0; iter < warmup; ++iter) {
         try {
-            (void)module.forward({input});
+            (void)forward_module(module, input, pos_grid);
         } catch (const c10::Error& e) {
             log_error(std::string("warmup forward failed: ") + e.what());
             outcome.exit_code = kExitWarmup;
@@ -329,7 +438,7 @@ BenchOutcome run_bench(torch::jit::script::Module& module, const torch::Tensor& 
         const auto run_t0 = std::chrono::high_resolution_clock::now();
         torch::IValue out;
         try {
-            out = module.forward({input});
+            out = forward_module(module, input, pos_grid);
         } catch (const c10::Error& e) {
             log_error(std::string("forward iter ") + std::to_string(iter) + " failed: " + e.what());
             outcome.exit_code = kExitForward;
@@ -363,10 +472,7 @@ BenchOutcome run_bench(torch::jit::script::Module& module, const torch::Tensor& 
 
 }  // namespace
 
-// NOLINTNEXTLINE(bugprone-exception-escape) — top-level main; unrecoverable error path is process
-// exit.
-int main(int argc,
-         char* argv[]) {  // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+int main(int argc, char** argv) {  // NOLINT(bugprone-exception-escape)
     Options options;
     const std::span<char*> args(argv, static_cast<std::size_t>(argc));
     if (!parse_args(args, options)) {
@@ -388,9 +494,15 @@ int main(int argc,
     }
 
     torch::jit::script::Module module;
+    std::unordered_map<std::string, std::string> extra_files{
+        {std::string{kExternalPosMetaName}, {}},
+        {std::string{kExternalPosDataName}, {}},
+    };
+    ExternalPosState external_pos;
     try {
         const auto load_t0 = std::chrono::high_resolution_clock::now();
-        module = torch::jit::load(options.ts_path.string(), torch::Device(torch::kCUDA));
+        module =
+            torch::jit::load(options.ts_path.string(), torch::Device(torch::kCUDA), extra_files);
         const auto load_ms = std::chrono::duration<double, std::milli>(
                                  std::chrono::high_resolution_clock::now() - load_t0)
                                  .count();
@@ -399,13 +511,20 @@ int main(int argc,
         log_error(std::string("torch::jit::load failed: ") + e.what());
         return kExitJitLoad;
     }
+    if (!parse_external_pos_state(extra_files, external_pos)) {
+        return kExitJitLoad;
+    }
+    if (external_pos.enabled) {
+        log_ok("external positional embedding metadata loaded");
+    }
     module.eval();
 
     std::mt19937 rng(static_cast<std::uint32_t>(kRandomSeedBase + options.resolution));
     auto input = make_synthetic_input(options.resolution, rng);
+    auto pos_grid = make_pos_grid(external_pos, options.resolution, input.scalar_type());
 
     const auto outcome = run_bench(
-        module, input,
+        module, input, pos_grid,
         BenchSchedule{.warmup_iterations = options.warmup, .timed_iterations = options.iterations});
     if (outcome.exit_code != 0) {
         return outcome.exit_code;

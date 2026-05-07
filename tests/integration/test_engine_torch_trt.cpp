@@ -43,6 +43,11 @@ std::filesystem::path dynamic_torchscript_artifact() {
            "corridorkey_dynamic_green_fp16.ts";
 }
 
+std::filesystem::path dynamic_torchtrt_external_pos_artifact() {
+    return std::filesystem::path(PROJECT_ROOT) / "temp" / "torchtrt_external_pos_probe" /
+           "corridorkey_dynamic_green_external_pos_fp16.ts";
+}
+
 bool has_stage(const std::vector<StageTiming>& timings, std::string_view name) {
     return std::any_of(timings.begin(), timings.end(),
                        [&](const StageTiming& timing) { return timing.name == name; });
@@ -216,6 +221,49 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
             CHECK(has_stage(timings, "frame_extract_outputs_finalize"));
         }
     }
+#endif
+}
+
+TEST_CASE("TorchTRT session caches embedded external positional grids",
+          "[integration][torchtrt][dynamic][regression]") {
+#if !defined(_WIN32)
+    SUCCEED("TorchTRT in-process backend is Windows-only in Sprint 1.");
+#else
+    const auto model_path = dynamic_torchtrt_external_pos_artifact();
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
+            model_path, "dynamic TorchTRT external-pos artifact");
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
+    if (!engine.has_value()) {
+        SKIP("Engine::create failed: " + engine.error().message);
+    }
+    REQUIRE(engine.value()->recommended_resolution() == 0);
+
+    constexpr int kRes = 512;
+    ImageBuffer rgb(kRes, kRes, 3);
+    ImageBuffer hint(kRes, kRes, 1);
+    std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.5F);
+    std::fill(hint.view().data.begin(), hint.view().data.end(), 1.0F);
+
+    InferenceParams params;
+    params.target_resolution = kRes;
+
+    std::vector<StageTiming> first_timings;
+    auto first = engine.value()->process_frame(
+        rgb.view(), hint.view(), params,
+        [&](const StageTiming& timing) { first_timings.push_back(timing); });
+    REQUIRE(first.has_value());
+    CHECK(has_stage(first_timings, "torchtrt_prepare_pos_grid"));
+
+    std::vector<StageTiming> second_timings;
+    auto second = engine.value()->process_frame(
+        rgb.view(), hint.view(), params,
+        [&](const StageTiming& timing) { second_timings.push_back(timing); });
+    REQUIRE(second.has_value());
+    CHECK_FALSE(has_stage(second_timings, "torchtrt_prepare_pos_grid"));
 #endif
 }
 

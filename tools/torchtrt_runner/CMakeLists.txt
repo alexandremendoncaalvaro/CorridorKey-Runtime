@@ -37,6 +37,7 @@ target_include_directories(corridorkey-torchtrt-runner SYSTEM PRIVATE
 )
 
 target_link_libraries(corridorkey-torchtrt-runner PRIVATE
+    nlohmann_json::nlohmann_json
     torch::torch
     torch::torch_cpu
     torch::torch_cuda
