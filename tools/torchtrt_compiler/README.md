@@ -24,6 +24,13 @@ color, but it embeds the source positional embedding as TorchScript extra data
 and expects the C++ runtime to pass a cached positional grid as the second
 forward input.
 
+Validate every promoted artifact from C++ at every runtime resolution the
+product contract exposes. Green FP16 has validated through `2048` on the local
+RTX 3080. Blue FP16 validates at `512` and `1024` but returns NaN at higher
+runtime resolutions. Blue FP32 validates through `1536` on the local RTX 3080;
+do not publish it under the blue product filename until the exposed resolution
+contract is matched by a finite C++ runner baseline.
+
 Use `compile_torchtrt.py` only for fixed-resolution diagnostic
 Torch-TensorRT engines. Those artifacts contain serialized TensorRT engine
 markers and carry a trailing resolution token in the filename.

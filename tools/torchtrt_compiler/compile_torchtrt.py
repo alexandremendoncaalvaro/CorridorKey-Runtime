@@ -1,8 +1,8 @@
 """Compile a CorridorKey PyTorch checkpoint into fixed Torch-TensorRT engines.
 
-This is the legacy fixed-rung compiler retained for diagnostics. The current
-Windows RTX blue product pack uses `compile_dynamic_torchscript.py` to export
-one dynamic `corridorkey_dynamic_blue_fp16.ts` artifact.
+This is the legacy fixed-rung compiler retained for diagnostics. The Windows
+RTX product path uses dynamic `.ts` artifacts; keep this script as a reference
+for fixed-resolution precision and builder-memory investigations.
 
 Why this script exists separately from `tools/model_exporter/export_onnx.py`:
 - `export_onnx.py` is pinned to `torch==2.3.1+cu121` so it can produce ONNX

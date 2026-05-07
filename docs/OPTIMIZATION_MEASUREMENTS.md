@@ -1113,14 +1113,40 @@ The external-pos eager wrapper matches the original dynamic eager path exactly;
 the saved TensorRT candidate stays within FP16-level differences, with observed
 maximum absolute differences below `0.004`.
 
-The saved green candidate with embedded positional data is `392.5 MB`. The C++
+The saved green candidate with embedded positional data is `209.9 MB`. The C++
 TorchTRT runner loads it, reports the embedded external positional metadata,
 and produces finite outputs:
 
-- `512`: `21.2 ms` average forward over five timed iterations after two warmup
+- `512`: `14.7 ms` average forward over five timed iterations after two warmup
   iterations
-- `1024`: `126.1 ms` average forward over five timed iterations after two
+- `1024`: `50.5 ms` average forward over five timed iterations after two
   warmup iterations
+- `2048`: `277.8 ms` average forward over three timed iterations after one
+  warmup iteration
+
+The blue FP16 candidate with the same `512` through `2048` dynamic profile
+compiles and produces finite C++ runner output at `512` and `1024`, but returns
+NaN output at `1536` and `2048`. This matches the earlier blue FP16 instability
+recorded for high-resolution TensorRT artifacts and blocks publication of a
+blue FP16 product pack with the full Windows RTX quality contract.
+
+The blue FP32 candidate validates through a `1536` maximum profile with maximum
+absolute differences below `0.006` against the eager external-pos wrapper. The
+C++ runner produces finite output with this artifact:
+
+- `512`: `35.5 ms` average forward over three timed iterations after one
+  warmup iteration
+- `1024`: `183.6 ms` average forward over three timed iterations after one
+  warmup iteration
+- `1536`: `678.9 ms` average forward over two timed iterations after one
+  warmup iteration
+
+The blue FP32 `2048` maximum profile does not build on the RTX 3080 10 GB
+validation machine. Limiting TensorRT workspace to `4 GiB` still fails with no
+implementation for the fused encoder/decoder TensorRT segment after rejecting
+a tactic that requests roughly `8.9 GiB`. The blue dynamic pack therefore
+remains unpromoted until a `2048` C++ runner baseline is finite or the product
+contract stops exposing `2048` for dedicated blue.
 
 #### Dynamic TorchScript Pinned Upload Probe
 
