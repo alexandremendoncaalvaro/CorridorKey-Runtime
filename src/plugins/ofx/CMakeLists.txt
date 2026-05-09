@@ -172,6 +172,9 @@ if(WIN32)
         set(_corridorkey_ofx_copy_torchtrt_wrapper
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:corridorkey_torchtrt>
+                "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_corridorkey_ofx_cuda_dlls}
                 "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin/")
     else()
         set(_corridorkey_ofx_copy_torchtrt_wrapper

@@ -17,6 +17,7 @@ add_executable(test_unit
     test_execution_defaults.cpp
     test_device_detection.cpp
     test_inference_session.cpp
+    test_image_buffer.cpp
     test_inference_postprocess_policy.cpp
     test_job_orchestrator.cpp
     test_json_utils.cpp
@@ -34,6 +35,7 @@ add_executable(test_unit
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
     test_ofx_screen_color.cpp
+    test_ofx_shared_node_policy.cpp
     test_ofx_runtime_client.cpp
     test_ofx_runtime_panel.cpp
     test_ofx_runtime_protocol.cpp

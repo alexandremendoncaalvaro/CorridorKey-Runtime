@@ -1,12 +1,16 @@
 #include "ofx_runtime_client.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <mutex>
 #include <thread>
 #include <vector>
 
+#include "common/parallel_for.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
+#include "common/stage_profiler.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_runtime_family.hpp"
 
@@ -185,6 +189,72 @@ bool is_process_alive(int server_pid) {
 #endif
 }
 
+#ifdef _WIN32
+std::vector<HANDLE>& retained_server_job_handles() {
+    static std::vector<HANDLE> handles;
+    return handles;
+}
+
+std::mutex& retained_server_job_handles_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+void retain_sidecar_job_handle(HANDLE job_handle) {
+    std::scoped_lock lock(retained_server_job_handles_mutex());
+    retained_server_job_handles().push_back(job_handle);
+}
+
+void attach_server_to_parent_lifetime(HANDLE process, int server_pid) {
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (job == nullptr) {
+        log_message("ofx_runtime_client",
+                    "event=server_job_create_failed pid=" + std::to_string(server_pid));
+        return;
+    }
+
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits,
+                                sizeof(limits)) == 0) {
+        log_message("ofx_runtime_client",
+                    "event=server_job_config_failed pid=" + std::to_string(server_pid));
+        CloseHandle(job);
+        return;
+    }
+
+    if (AssignProcessToJobObject(job, process) == 0) {
+        log_message("ofx_runtime_client",
+                    "event=server_job_assign_failed pid=" + std::to_string(server_pid));
+        CloseHandle(job);
+        return;
+    }
+
+    retain_sidecar_job_handle(job);
+    log_message("ofx_runtime_client",
+                "event=server_job_attached pid=" + std::to_string(server_pid));
+}
+
+void wait_for_server_exit_after_shutdown(int server_pid) {
+    if (server_pid <= 0) {
+        return;
+    }
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(server_pid));
+    if (process == nullptr) {
+        return;
+    }
+    const DWORD wait_result = WaitForSingleObject(process, 5000);
+    CloseHandle(process);
+    log_message("ofx_runtime_client",
+                "event=server_shutdown_wait pid=" + std::to_string(server_pid) +
+                    " exited=" + std::to_string(wait_result == WAIT_OBJECT_0 ? 1 : 0));
+}
+#else
+void wait_for_server_exit_after_shutdown(int server_pid) {
+    (void)server_pid;
+}
+#endif
+
 // Compose a timeout / early-exit error message that names every artefact
 // the user needs to diagnose the failure: the resolved loopback port, the
 // configured timeout, the server log path, and the server binary path.
@@ -217,6 +287,42 @@ void replay_stage_timings(const std::vector<StageTiming>& timings, StageTimingCa
     for (const auto& timing : timings) {
         on_stage(timing);
     }
+}
+
+bool is_named_windows_shared_frame(const std::filesystem::path& path) {
+#ifdef _WIN32
+    const std::wstring value = path.wstring();
+    return value.rfind(L"Local\\CorridorKeyFrame_", 0) == 0;
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+void copy_image_rows(const Image& source, Image destination) {
+    if (source.empty() || destination.empty()) {
+        return;
+    }
+
+    const size_t copy_size = std::min(source.data.size(), destination.data.size());
+    if (copy_size == 0) {
+        return;
+    }
+    if (source.width != destination.width || source.height != destination.height ||
+        source.channels != destination.channels) {
+        std::copy_n(source.data.begin(), copy_size, destination.data.begin());
+        return;
+    }
+
+    const size_t row_size =
+        static_cast<size_t>(source.width) * static_cast<size_t>(source.channels);
+    common::parallel_for_rows(source.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const size_t offset = static_cast<size_t>(y_pos) * row_size;
+            std::copy_n(source.data.begin() + static_cast<std::ptrdiff_t>(offset), row_size,
+                        destination.data.begin() + static_cast<std::ptrdiff_t>(offset));
+        }
+    });
 }
 
 }  // namespace
@@ -259,6 +365,11 @@ OfxRuntimeClient::~OfxRuntimeClient() {
         if (!release_result) {
             log_message("ofx_runtime_client",
                         "release_session_failed detail=" + release_result.error().message);
+        }
+        auto shutdown_result = shutdown_server_if_unused();
+        if (!shutdown_result) {
+            log_message("ofx_runtime_client",
+                        "shutdown_if_unused_failed detail=" + shutdown_result.error().message);
         }
     } catch (...) {  // NOLINT(bugprone-empty-catch)
         // Destructors must not propagate exceptions; release_session relies on
@@ -378,15 +489,28 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
 
     const auto transport_path = common::next_ofx_shared_frame_path();
     auto render_result = [&]() -> Result<FrameResult> {
-        auto transport =
-            common::SharedFrameTransport::create(transport_path, rgb.width, rgb.height);
+        const std::uint64_t frame_pixels =
+            static_cast<std::uint64_t>(rgb.width) * static_cast<std::uint64_t>(rgb.height);
+        StageTimingCallback client_stage = [&](const StageTiming& timing) {
+            if (on_stage) {
+                on_stage(timing);
+            }
+        };
+
+        auto transport = common::measure_stage(
+            client_stage, "ofx_client_transport_create",
+            [&]() { return common::SharedFrameTransport::create(transport_path, rgb.width, rgb.height); },
+            frame_pixels);
         if (!transport) {
             return Unexpected<Error>(transport.error());
         }
 
-        std::copy(rgb.data.begin(), rgb.data.end(), transport->rgb_view().data.begin());
-        std::copy(alpha_hint.data.begin(), alpha_hint.data.end(),
-                  transport->hint_view().data.begin());
+        common::measure_stage(
+            client_stage, "ofx_client_transport_rgb_write",
+            [&]() { copy_image_rows(rgb, transport->rgb_view()); }, frame_pixels);
+        common::measure_stage(
+            client_stage, "ofx_client_transport_hint_write",
+            [&]() { copy_image_rows(alpha_hint, transport->hint_view()); }, frame_pixels);
 
         app::OfxRuntimeRenderFrameRequest request;
         request.session_id = m_session.session_id;
@@ -400,7 +524,9 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
             return send_command(app::OfxRuntimeCommand::RenderFrame, app::to_json(request));
         };
 
-        auto response = send_render_request();
+        auto response = common::measure_stage(
+            client_stage, "ofx_client_render_rpc",
+            [&]() { return send_render_request(); }, frame_pixels);
         if (!response && is_timeout_error(response.error())) {
             log_message("ofx_runtime_client",
                         "event=render_timeout reason=" + response.error().message);
@@ -413,7 +539,9 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
                 return Unexpected<Error>(recover_result.error());
             }
             request.session_id = m_session.session_id;
-            response = send_render_request();
+            response = common::measure_stage(
+                client_stage, "ofx_client_render_rpc_retry",
+                [&]() { return send_render_request(); }, frame_pixels);
         }
         if (!response &&
             (is_transport_error(response.error()) || is_session_missing_error(response.error()))) {
@@ -424,7 +552,9 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
                 return Unexpected<Error>(recover_result.error());
             }
             request.session_id = m_session.session_id;
-            response = send_render_request();
+            response = common::measure_stage(
+                client_stage, "ofx_client_render_rpc_recover",
+                [&]() { return send_render_request(); }, frame_pixels);
         }
         if (!response) {
             if (response.error().code == ErrorCode::InferenceFailed) {
@@ -443,20 +573,29 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         replay_stage_timings(parsed->timings, on_stage);
 
         FrameResult result;
-        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        std::copy(transport->alpha_view().data.begin(), transport->alpha_view().data.end(),
-                  result.alpha.view().data.begin());
+        common::measure_stage(
+            client_stage, "ofx_client_alpha_readback",
+            [&]() {
+                result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
+                copy_image_rows(transport->alpha_view(), result.alpha.view());
+            },
+            frame_pixels);
         if (!params.output_alpha_only) {
-            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
-            std::copy(transport->foreground_view().data.begin(),
-                      transport->foreground_view().data.end(),
-                      result.foreground.view().data.begin());
+            common::measure_stage(
+                client_stage, "ofx_client_foreground_readback",
+                [&]() {
+                    result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+                    copy_image_rows(transport->foreground_view(), result.foreground.view());
+                },
+                frame_pixels);
         }
         return result;
     }();
 
     std::error_code cleanup_error;
-    std::filesystem::remove(transport_path, cleanup_error);
+    if (!is_named_windows_shared_frame(transport_path)) {
+        std::filesystem::remove(transport_path, cleanup_error);
+    }
     if (!render_result) {
         if (cleanup_error) {
             log_message("ofx_runtime_client",
@@ -493,12 +632,55 @@ Result<void> OfxRuntimeClient::release_session() {
     return {};
 }
 
+Result<void> OfxRuntimeClient::shutdown_server_if_unused() {
+    auto health_response =
+        send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object(),
+                                    std::min(m_options.request_timeout_ms, 2000));
+    if (!health_response) {
+        if (is_transport_error(health_response.error())) {
+            return {};
+        }
+        return Unexpected<Error>(health_response.error());
+    }
+
+    auto health = app::health_response_from_json(*health_response);
+    if (!health) {
+        return Unexpected<Error>(health.error());
+    }
+    update_server_health(*health);
+    if (health->session_count > 0 || health->active_session_count > 0) {
+        log_message("ofx_runtime_client",
+                    "event=shutdown_if_unused_skip session_count=" +
+                        std::to_string(health->session_count) +
+                        " active_session_count=" + std::to_string(health->active_session_count));
+        return {};
+    }
+
+    app::OfxRuntimeShutdownRequest request;
+    request.reason = "last_ofx_client_released";
+    auto shutdown_response = send_command_without_launch(
+        app::OfxRuntimeCommand::Shutdown, app::to_json(request),
+        std::min(m_options.request_timeout_ms, 2000));
+    if (!shutdown_response && !is_transport_error(shutdown_response.error())) {
+        return Unexpected<Error>(shutdown_response.error());
+    }
+    log_message("ofx_runtime_client",
+                "event=shutdown_if_unused_sent pid=" + std::to_string(m_server_pid));
+    wait_for_server_exit_after_shutdown(m_server_pid);
+    m_server_pid = 0;
+    return {};
+}
+
 DeviceInfo OfxRuntimeClient::current_device() const {
     return m_session.effective_device;
 }
 
 std::optional<BackendFallbackInfo> OfxRuntimeClient::backend_fallback() const {
     return m_session.backend_fallback;
+}
+
+app::OfxRuntimeSessionSnapshot OfxRuntimeClient::current_session_snapshot() const {
+    return m_session;
 }
 
 bool OfxRuntimeClient::has_session() const {
@@ -756,7 +938,8 @@ Result<void> OfxRuntimeClient::launch_server() {
     startup_info.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION process_info{};
     if (CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
-                       DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &startup_info,
+                       DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr,
+                       &startup_info,
                        &process_info) == 0) {
         return Unexpected<Error>(
             Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
@@ -772,6 +955,14 @@ Result<void> OfxRuntimeClient::launch_server() {
     m_server_pid = static_cast<int>(process_info.dwProcessId);
     log_message("ofx_runtime_client",
                 "event=launch_server_spawned pid=" + std::to_string(m_server_pid));
+    attach_server_to_parent_lifetime(process_info.hProcess, m_server_pid);
+    if (ResumeThread(process_info.hThread) == static_cast<DWORD>(-1)) {
+        TerminateProcess(process_info.hProcess, 1);
+        CloseHandle(process_info.hThread);
+        CloseHandle(process_info.hProcess);
+        return Unexpected<Error>(
+            Error{ErrorCode::IoError, "Failed to resume the OFX runtime server process."});
+    }
     CloseHandle(process_info.hThread);
     CloseHandle(process_info.hProcess);
 #else

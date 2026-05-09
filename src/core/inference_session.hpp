@@ -105,7 +105,8 @@ class InferenceSession {
      */
     [[nodiscard]] Result<FrameResult> run(const Image& rgb, const Image& alpha_hint,
                                           const InferenceParams& params,
-                                          StageTimingCallback on_stage = nullptr);
+                                          StageTimingCallback on_stage = nullptr,
+                                          FrameOutputViews output_views = {});
 
     /**
      * @brief Run inference on a batch of frames.
@@ -141,7 +142,8 @@ class InferenceSession {
      */
     [[nodiscard]] Result<FrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
                                                 const InferenceParams& params,
-                                                StageTimingCallback on_stage = nullptr);
+                                                StageTimingCallback on_stage = nullptr,
+                                                FrameOutputViews output_views = {});
 
     /**
      * @brief Internal raw inference on a batch.
@@ -158,7 +160,8 @@ class InferenceSession {
 
     [[nodiscard]] Result<FrameResult> run_direct(const Image& rgb, const Image& alpha_hint,
                                                  const InferenceParams& params,
-                                                 StageTimingCallback on_stage = nullptr);
+                                                 StageTimingCallback on_stage = nullptr,
+                                                 FrameOutputViews output_views = {});
 
     [[nodiscard]] Result<FrameResult> run_coarse_to_fine(const Image& rgb, const Image& alpha_hint,
                                                          const InferenceParams& params,

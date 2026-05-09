@@ -4,6 +4,7 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <string_view>
 #include <thread>
 
 #include "runtime_paths.hpp"
@@ -51,11 +52,15 @@ Error transport_error(ErrorCode code, const std::string& message) {
 
 #ifdef _WIN32
 constexpr DWORD kSharedFrameShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-#endif
+constexpr std::wstring_view kWindowsSharedFramePrefix = L"Local\\CorridorKeyFrame_";
 
-#ifdef _WIN32
 std::wstring wide_path(const std::filesystem::path& path) {
     return path.wstring();
+}
+
+bool is_windows_named_mapping_path(const std::filesystem::path& path) {
+    const std::wstring value = wide_path(path);
+    return value.rfind(kWindowsSharedFramePrefix, 0) == 0;
 }
 #endif
 
@@ -165,33 +170,52 @@ SharedFrameTransportHeader SharedFrameTransport::build_header(int width, int hei
 Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& path,
                                                 std::size_t size) {
     std::error_code error;
-    std::filesystem::create_directories(path.parent_path(), error);
+    bool needs_parent_directory = true;
+#ifdef _WIN32
+    needs_parent_directory = !is_windows_named_mapping_path(path);
+#endif
+    if (needs_parent_directory) {
+        std::filesystem::create_directories(path.parent_path(), error);
+    }
     if (error) {
         return Unexpected<Error>(transport_error(
             ErrorCode::IoError, "Failed to create shared frame directory: " + error.message()));
     }
 
 #ifdef _WIN32
-    auto file_handle =
-        CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, kSharedFrameShareMode,
-                    nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
-    if (file_handle == INVALID_HANDLE_VALUE) {
-        return Unexpected<Error>(
-            transport_error(ErrorCode::IoError, "Failed to create shared frame file."));
+    HANDLE file_handle = nullptr;
+    const bool named_mapping = is_windows_named_mapping_path(path);
+    if (!named_mapping) {
+        file_handle =
+            CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE,
+                        kSharedFrameShareMode, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY,
+                        nullptr);
+        if (file_handle == INVALID_HANDLE_VALUE) {
+            return Unexpected<Error>(
+                transport_error(ErrorCode::IoError, "Failed to create shared frame file."));
+        }
+
+        LARGE_INTEGER desired_file_size;
+        desired_file_size.QuadPart = static_cast<LONGLONG>(size);
+        if (SetFilePointerEx(file_handle, desired_file_size, nullptr, FILE_BEGIN) == 0 ||
+            SetEndOfFile(file_handle) == 0) {
+            CloseHandle(file_handle);
+            return Unexpected<Error>(
+                transport_error(ErrorCode::IoError, "Failed to size shared frame file."));
+        }
     }
 
     LARGE_INTEGER desired_size;
     desired_size.QuadPart = static_cast<LONGLONG>(size);
-    if (SetFilePointerEx(file_handle, desired_size, nullptr, FILE_BEGIN) == 0 ||
-        SetEndOfFile(file_handle) == 0) {
-        CloseHandle(file_handle);
-        return Unexpected<Error>(
-            transport_error(ErrorCode::IoError, "Failed to size shared frame file."));
-    }
-
-    auto mapping_handle = CreateFileMappingW(file_handle, nullptr, PAGE_READWRITE, 0, 0, nullptr);
+    auto mapping_handle = CreateFileMappingW(
+        named_mapping ? INVALID_HANDLE_VALUE : file_handle, nullptr, PAGE_READWRITE,
+        named_mapping ? static_cast<DWORD>(desired_size.HighPart) : 0,
+        named_mapping ? static_cast<DWORD>(desired_size.LowPart) : 0,
+        named_mapping ? wide_path(path).c_str() : nullptr);
     if (mapping_handle == nullptr) {
-        CloseHandle(file_handle);
+        if (!named_mapping) {
+            CloseHandle(file_handle);
+        }
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to create file mapping for shared frame."));
     }
@@ -200,12 +224,16 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
         static_cast<std::byte*>(MapViewOfFile(mapping_handle, FILE_MAP_ALL_ACCESS, 0, 0, size));
     if (mapping == nullptr) {
         CloseHandle(mapping_handle);
-        CloseHandle(file_handle);
+        if (!named_mapping) {
+            CloseHandle(file_handle);
+        }
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to map shared frame file."));
     }
 
-    m_file_handle = file_handle;
+    if (!named_mapping) {
+        m_file_handle = file_handle;
+    }
     m_mapping_handle = mapping_handle;
 #else
     int fd = ::open(path.string().c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
@@ -231,53 +259,74 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
     m_path = path;
     m_mapping_size = size;
     m_mapping = mapping;
-    std::memset(m_mapping, 0, size);
     m_header = reinterpret_cast<SharedFrameTransportHeader*>(m_mapping);
     return {};
 }
 
 Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path& path) {
-    if (!std::filesystem::exists(path)) {
-        return Unexpected<Error>(transport_error(
-            ErrorCode::IoError, "Shared frame file does not exist: " + path.string()));
-    }
-
 #ifdef _WIN32
-    auto file_handle =
-        CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE, kSharedFrameShareMode,
-                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file_handle == INVALID_HANDLE_VALUE) {
-        return Unexpected<Error>(
-            transport_error(ErrorCode::IoError, "Failed to open shared frame file."));
-    }
+    const bool named_mapping = is_windows_named_mapping_path(path);
+    HANDLE file_handle = nullptr;
+    HANDLE mapping_handle = nullptr;
+    LARGE_INTEGER file_size{};
 
-    LARGE_INTEGER file_size;
-    if (GetFileSizeEx(file_handle, &file_size) == 0) {
-        CloseHandle(file_handle);
-        return Unexpected<Error>(
-            transport_error(ErrorCode::IoError, "Failed to read shared frame size."));
-    }
-
-    auto mapping_handle = CreateFileMappingW(file_handle, nullptr, PAGE_READWRITE, 0, 0, nullptr);
-    if (mapping_handle == nullptr) {
-        CloseHandle(file_handle);
-        return Unexpected<Error>(
-            transport_error(ErrorCode::IoError, "Failed to create file mapping for shared frame."));
+    if (named_mapping) {
+        mapping_handle = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, wide_path(path).c_str());
+        if (mapping_handle == nullptr) {
+            return Unexpected<Error>(
+                transport_error(ErrorCode::IoError, "Failed to open shared frame mapping."));
+        }
+    } else {
+        if (!std::filesystem::exists(path)) {
+            return Unexpected<Error>(transport_error(
+                ErrorCode::IoError, "Shared frame file does not exist: " + path.string()));
+        }
+        file_handle =
+            CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE,
+                        kSharedFrameShareMode, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                        nullptr);
+        if (file_handle == INVALID_HANDLE_VALUE) {
+            return Unexpected<Error>(
+                transport_error(ErrorCode::IoError, "Failed to open shared frame file."));
+        }
+        if (GetFileSizeEx(file_handle, &file_size) == 0) {
+            CloseHandle(file_handle);
+            return Unexpected<Error>(
+                transport_error(ErrorCode::IoError, "Failed to read shared frame size."));
+        }
+        mapping_handle = CreateFileMappingW(file_handle, nullptr, PAGE_READWRITE, 0, 0, nullptr);
+        if (mapping_handle == nullptr) {
+            CloseHandle(file_handle);
+            return Unexpected<Error>(transport_error(ErrorCode::IoError,
+                                                     "Failed to create file mapping for shared frame."));
+        }
     }
 
     auto mapping =
         static_cast<std::byte*>(MapViewOfFile(mapping_handle, FILE_MAP_ALL_ACCESS, 0, 0, 0));
     if (mapping == nullptr) {
         CloseHandle(mapping_handle);
-        CloseHandle(file_handle);
+        if (!named_mapping) {
+            CloseHandle(file_handle);
+        }
         return Unexpected<Error>(
             transport_error(ErrorCode::IoError, "Failed to map shared frame file."));
     }
 
-    m_file_handle = file_handle;
     m_mapping_handle = mapping_handle;
-    m_mapping_size = static_cast<std::size_t>(file_size.QuadPart);
+    if (named_mapping) {
+        const auto* header = reinterpret_cast<const SharedFrameTransportHeader*>(mapping);
+        m_mapping_size = static_cast<std::size_t>(header->total_bytes);
+    } else {
+        m_file_handle = file_handle;
+        m_mapping_size = static_cast<std::size_t>(file_size.QuadPart);
+    }
 #else
+    if (!std::filesystem::exists(path)) {
+        return Unexpected<Error>(transport_error(
+            ErrorCode::IoError, "Shared frame file does not exist: " + path.string()));
+    }
+
     int fd = ::open(path.string().c_str(), O_RDWR);
     if (fd < 0) {
         return Unexpected<Error>(
@@ -419,7 +468,11 @@ std::filesystem::path next_ofx_shared_frame_path() {
     auto seed = std::to_string(detail::fnv1a_64(root.string() + "|" + std::to_string(time_seed) +
                                                 "|" + std::to_string(thread_seed) + "|" +
                                                 std::to_string(std::time(nullptr))));
+#ifdef _WIN32
+    return std::filesystem::path("Local\\CorridorKeyFrame_" + seed);
+#else
     return root / ("frame_" + seed + ".ckfx");
+#endif
 }
 
 }  // namespace corridorkey::common

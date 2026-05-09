@@ -283,7 +283,7 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
     const char* depths[] = {kOfxBitDepthFloat, kOfxBitDepthByte};
     g_suites.property->propSetStringN(props, kOfxImageEffectPropSupportedPixelDepths, 2, depths);
     g_suites.property->propSetString(props, kOfxImageEffectPluginRenderThreadSafety, 0,
-                                     kOfxImageEffectRenderUnsafe);
+                                     kOfxImageEffectRenderInstanceSafe);
     g_suites.property->propSetInt(props, kOfxImageEffectPluginPropHostFrameThreading, 0, 0);
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsTiles, 0, 0);
     g_suites.property->propSetInt(props, kOfxImageEffectPropSupportsMultiResolution, 0, 1);
@@ -380,16 +380,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                              "and full TensorRT engine compile traces.",
                              "runtime_group");
 
-    // Per-host visibility decision for runtime telemetry params. Foundry
-    // Nuke 17 enforces ofxParam.h:1088 strictly: paramSetValue must run on
-    // the main thread, never from the render action. The plugin defers
-    // those updates correctly (in_render guard in update_runtime_panel_values)
-    // but the side effect is that on Nuke the per-frame fields *cannot*
-    // refresh until the user touches a control. Showing them anyway is
-    // dishonest UI -- they always lag. So we hide them on Nuke and let the
-    // node-graph badge + Open Log Folder carry the live signal there.
-    // Resolve has no such constraint: paramSetValue from the render thread
-    // is observed live, so the same fields are real-time feedback there.
+    // Per-host visibility decision for runtime telemetry params. OFX
+    // ofxParam.h:1088 scopes paramSetValue to InstanceChanged/interact
+    // actions, so render-time telemetry is recorded in logs and panel params
+    // are flushed from main-thread actions. Nuke hides volatile fields because
+    // they cannot be refreshed live there; Resolve keeps them visible as the
+    // main-thread-synchronized status surface.
     //
     // openfx-misc README-hosts.txt:150 verbatim: "Params that are described
     // as secret can never be 'revealed', they are doomed to remain secret".
@@ -473,10 +469,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                                 "Shows the actual model or bridge file loaded for the current "
                                 "quality mode.",
                                 "runtime_details_group");
-    // Same per-host visibility rule as the top-level params above:
-    // Runtime Path and Backend Work are recomputed every render frame and
-    // cannot refresh on Nuke without violating ofxParam.h:1088. Hidden on
-    // Nuke; visible on Resolve where mid-render paramSetValue works.
+    // Same per-host visibility rule as the top-level params above: Runtime
+    // Path and Backend Work are recomputed every render frame and flushed only
+    // from main-thread actions. Hidden on Nuke; visible on Resolve as the
+    // synchronized status surface.
     define_runtime_status_param(
         param_set, kParamRuntimePath, "Runtime Path", "Initializing...",
         "Shows whether the last render used the direct path, artifact fallback, or full-model "

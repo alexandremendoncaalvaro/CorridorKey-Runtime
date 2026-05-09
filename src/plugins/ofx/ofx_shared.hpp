@@ -243,8 +243,7 @@ struct InstanceData {
     std::vector<StageTiming> last_render_stage_timings;
     // True only during the body of kOfxImageEffectActionRender. Set by
     // RenderScope in ofx_render.cpp. Used to gate paramSetValue chains, which
-    // OFX 1.4 / 1.5 restrict to main-thread actions only (strict hosts such as
-    // Foundry Nuke 17 crash if paramSetValue is called from a render thread).
+    // OFX 1.4 / 1.5 restrict to main-thread actions only.
     bool in_render = false;
     // True from kOfxImageEffectActionBeginSequenceRender through
     // kOfxImageEffectActionEndSequenceRender. Covers ensure_engine_for_quality
@@ -252,6 +251,8 @@ struct InstanceData {
     // sequence (when in_render is briefly false between Render calls).
     bool in_render_sequence = false;
     bool runtime_panel_dirty = false;
+    bool shared_node_policy_registered = false;
+    bool shared_node_policy_ui_dirty = false;
 
     // Last (severity, body) pushed to the OFX message suite via
     // setPersistentMessage. setPersistentMessage replaces the alert bound to
@@ -362,9 +363,8 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 
 // Persistent node-indicator hooks (OFX MessageSuiteV2). See body in
 // ofx_plugin.cpp for the spec citation and Resolve-14 NULL-pointer
-// safety note. These exist so render-thread code can surface dynamic
-// runtime telemetry on hosts that do not allow render-thread
-// paramSetValue (Foundry Nuke 17).
+// safety note. These exist so render-thread code can surface dynamic runtime
+// telemetry on hosts that need a non-param live surface.
 void set_persistent_message(const char* message_type, const char* message_id, const char* message,
                             OfxImageEffectHandle effect);
 void clear_persistent_message(OfxImageEffectHandle effect);
@@ -442,6 +442,43 @@ void record_frame_timing(InstanceData* data, double elapsed_ms, LastRenderWorkOr
 Result<GuideSourceKind> resolve_alpha_hint_source(Image rgb_view, Image hint_view,
                                                   bool hint_from_clip,
                                                   AlphaHintPolicy alpha_hint_policy);
+struct SharedNodePolicyValues {
+    int screen_color = kDefaultScreenColor;
+    int quality_mode = kQualityPreview;
+    int quality_fallback_mode = kQualityFallbackAuto;
+    int refinement_mode = kRefinementAuto;
+    int coarse_resolution_override = kCoarseResolutionAutomatic;
+    int input_color_space = kDefaultInputColorSpace;
+    double despill_strength = 0.5;
+    int spill_method = kDefaultSpillMethod;
+    int despeckle_enabled = 0;
+    int despeckle_size = 400;
+    int upscale_method = kUpscaleBilinear;
+    int enable_tiling = 0;
+    int tile_overlap = 64;
+    int source_passthrough_enabled = kDefaultSourcePassthroughEnabled;
+    int edge_erode = kDefaultEdgeErode;
+    int edge_blur = kDefaultEdgeBlur;
+};
+
+struct SharedNodePolicyResult {
+    SharedNodePolicyValues values = {};
+    int screen_color = kDefaultScreenColor;
+    int quality_mode = kQualityPreview;
+    bool constrained = false;
+    bool changed = false;
+};
+void register_shared_node_policy(InstanceData* data, int screen_color, int quality_mode);
+void register_shared_node_policy(InstanceData* data, const SharedNodePolicyValues& values);
+void unregister_shared_node_policy(InstanceData* data);
+SharedNodePolicyResult enforce_shared_node_policy(InstanceData* data, int screen_color,
+                                                  int quality_mode);
+SharedNodePolicyResult enforce_shared_node_policy(InstanceData* data,
+                                                  const SharedNodePolicyValues& values);
+bool is_shared_node_policy_param(std::string_view param_name);
+void sync_shared_node_policy_params(InstanceData* data);
+void apply_shared_node_policy_warning(InstanceData* data, const SharedNodePolicyResult& policy);
+void reset_shared_node_policy_for_tests();
 void update_runtime_panel(InstanceData* data);
 void flush_runtime_panel(InstanceData* data);
 // Lazy-initializes the out-of-process runtime client on the first render. Must

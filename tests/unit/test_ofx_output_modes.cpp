@@ -24,6 +24,16 @@ TEST_CASE("matte-focused outputs do not require model foreground buffers",
     REQUIRE(output_mode_requires_model_foreground(kOutputFGMatte));
 }
 
+TEST_CASE("shared OFX nodes request foreground even for matte-focused outputs",
+          "[unit][ofx][cache][regression]") {
+    REQUIRE_FALSE(output_mode_requests_model_foreground(kOutputMatteOnly, false));
+    REQUIRE_FALSE(output_mode_requests_model_foreground(kOutputSourceMatte, false));
+
+    REQUIRE(output_mode_requests_model_foreground(kOutputMatteOnly, true));
+    REQUIRE(output_mode_requests_model_foreground(kOutputSourceMatte, true));
+    REQUIRE(output_mode_requests_model_foreground(kOutputProcessed, true));
+}
+
 TEST_CASE("display-referred conversion only applies to non-processed outputs with sRGB input",
           "[unit][ofx][regression]") {
     REQUIRE(should_apply_srgb_to_output(kOutputForegroundOnly, false, false));

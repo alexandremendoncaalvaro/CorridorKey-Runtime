@@ -280,6 +280,8 @@ struct Image {
  */
 class ImageBuffer {
    public:
+    using Deleter = std::function<void(float*)>;
+
     ImageBuffer() = default;
 
     // Aligned pixel buffer. _aligned_malloc / posix_memalign are documented
@@ -310,8 +312,26 @@ class ImageBuffer {
     }
     // NOLINTEND(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
+    static ImageBuffer adopt(int width, int height, int channels, float* ptr, Deleter deleter) {
+        ImageBuffer buffer;
+        buffer.m_width = width;
+        buffer.m_height = height;
+        buffer.m_channels = channels;
+        buffer.m_ptr = ptr;
+        buffer.m_deleter = std::move(deleter);
+        const size_t size = static_cast<size_t>(width) * height * channels;
+        if (ptr != nullptr && size > 0) {
+            buffer.m_data = std::span<float>(ptr, size);
+        }
+        return buffer;
+    }
+
     ~ImageBuffer() {
         if (m_ptr != nullptr) {
+            if (m_deleter) {
+                m_deleter(m_ptr);
+                return;
+            }
 #ifdef _WIN32
             _aligned_free(m_ptr);
 #else
@@ -328,27 +348,35 @@ class ImageBuffer {
           m_height(other.m_height),
           m_channels(other.m_channels),
           m_ptr(other.m_ptr),
-          m_data(other.m_data) {
+          m_data(other.m_data),
+          m_deleter(std::move(other.m_deleter)) {
         other.m_ptr = nullptr;
         other.m_data = {};
+        other.m_deleter = {};
     }
 
     ImageBuffer& operator=(ImageBuffer&& other) noexcept {
         if (this != &other) {
             if (m_ptr != nullptr) {
+                if (m_deleter) {
+                    m_deleter(m_ptr);
+                } else {
 #ifdef _WIN32
-                _aligned_free(m_ptr);
+                    _aligned_free(m_ptr);
 #else
-                free(m_ptr);
+                    free(m_ptr);
 #endif
+                }
             }
             m_width = other.m_width;
             m_height = other.m_height;
             m_channels = other.m_channels;
             m_ptr = other.m_ptr;
             m_data = other.m_data;
+            m_deleter = std::move(other.m_deleter);
             other.m_ptr = nullptr;
             other.m_data = {};
+            other.m_deleter = {};
         }
         return *this;
     }
@@ -366,6 +394,7 @@ class ImageBuffer {
     int m_channels = 0;
     float* m_ptr = nullptr;
     std::span<float> m_data;
+    Deleter m_deleter;
 };
 
 /**
@@ -510,6 +539,21 @@ struct FrameResult {
     ImageBuffer foreground;
     ImageBuffer processed;  // Premultiplied RGBA (VFX output)
     ImageBuffer composite;  // Preview on checkerboard (PNG)
+    bool post_processed = false;
+    bool external_output_written = false;
+};
+
+/**
+ * @brief Optional caller-owned output views for render hot paths.
+ *
+ * OFX uses shared-memory output planes. Passing those views down to the
+ * backend lets CUDA copy final tensors directly into the transport payload
+ * instead of materializing an intermediate FrameResult and copying again in
+ * the broker.
+ */
+struct FrameOutputViews {
+    Image alpha;
+    Image foreground;
 };
 
 }  // namespace corridorkey

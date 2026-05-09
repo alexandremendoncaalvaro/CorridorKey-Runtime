@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
 
 // NOLINTBEGIN(readability-uppercase-literal-suffix,cppcoreguidelines-avoid-magic-numbers,readability-math-missing-parentheses,cppcoreguidelines-pro-type-reinterpret-cast,readability-identifier-length,modernize-use-auto,readability-qualified-auto,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-easily-swappable-parameters,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
@@ -113,30 +114,32 @@ void copy_source_to_linear(Image dst, const void* src_data, int row_bytes,
     const bool is_float = is_depth(depth, kOfxBitDepthFloat);
     const bool is_byte = is_depth(depth, kOfxBitDepthByte);
 
-    for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
-        auto row = reinterpret_cast<const unsigned char*>(src_data) +
-                   static_cast<ptrdiff_t>(y_pos) * static_cast<ptrdiff_t>(row_bytes);
-        float* dst_row = &dst(y_pos, 0, 0);
-        if (is_float) {
-            const float* src_pixel = reinterpret_cast<const float*>(row);
-            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                dst_row[0] = src_pixel[0];
-                dst_row[1] = src_pixel[1];
-                dst_row[2] = src_pixel[2];
-                src_pixel += 4;
-                dst_row += 3;
-            }
-        } else if (is_byte) {
-            const unsigned char* src_pixel = row;
-            for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                dst_row[0] = static_cast<float>(src_pixel[0]) / 255.0f;
-                dst_row[1] = static_cast<float>(src_pixel[1]) / 255.0f;
-                dst_row[2] = static_cast<float>(src_pixel[2]) / 255.0f;
-                src_pixel += 4;
-                dst_row += 3;
+    common::parallel_for_rows(dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            auto row = reinterpret_cast<const unsigned char*>(src_data) +
+                       static_cast<ptrdiff_t>(y_pos) * static_cast<ptrdiff_t>(row_bytes);
+            float* dst_row = &dst(y_pos, 0, 0);
+            if (is_float) {
+                const float* src_pixel = reinterpret_cast<const float*>(row);
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[0] = src_pixel[0];
+                    dst_row[1] = src_pixel[1];
+                    dst_row[2] = src_pixel[2];
+                    src_pixel += 4;
+                    dst_row += 3;
+                }
+            } else if (is_byte) {
+                const unsigned char* src_pixel = row;
+                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                    dst_row[0] = static_cast<float>(src_pixel[0]) / 255.0f;
+                    dst_row[1] = static_cast<float>(src_pixel[1]) / 255.0f;
+                    dst_row[2] = static_cast<float>(src_pixel[2]) / 255.0f;
+                    src_pixel += 4;
+                    dst_row += 3;
+                }
             }
         }
-    }
+    });
 }
 
 void copy_alpha_hint(Image dst, const void* src_data, int row_bytes, const std::string& depth,
@@ -147,59 +150,61 @@ void copy_alpha_hint(Image dst, const void* src_data, int row_bytes, const std::
     const bool is_alpha = is_alpha_hint_single_channel(components);
     const bool is_rgb = is_alpha_hint_rgb(components);
 
-    for (int y_pos = 0; y_pos < dst.height; ++y_pos) {
-        const auto* row = reinterpret_cast<const unsigned char*>(src_data) +
-                          static_cast<size_t>(y_pos) * row_bytes;
-        float* dst_row = &dst(y_pos, 0);
+    common::parallel_for_rows(dst.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const auto* row = reinterpret_cast<const unsigned char*>(src_data) +
+                              static_cast<size_t>(y_pos) * row_bytes;
+            float* dst_row = &dst(y_pos, 0);
 
-        if (is_float) {
-            const float* src_pixel = reinterpret_cast<const float*>(row);
-            if (is_rgba) {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = src_pixel[3];
-                    src_pixel += 4;
+            if (is_float) {
+                const float* src_pixel = reinterpret_cast<const float*>(row);
+                if (is_rgba) {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = src_pixel[3];
+                        src_pixel += 4;
+                    }
+                } else if (is_alpha) {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = src_pixel[0];
+                        ++src_pixel;
+                    }
+                } else if (is_rgb) {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = src_pixel[0];
+                        src_pixel += 3;
+                    }
+                } else {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = src_pixel[0];
+                        ++src_pixel;
+                    }
                 }
-            } else if (is_alpha) {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = src_pixel[0];
-                    ++src_pixel;
-                }
-            } else if (is_rgb) {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = src_pixel[0];
-                    src_pixel += 3;
-                }
-            } else {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = src_pixel[0];
-                    ++src_pixel;
-                }
-            }
-        } else if (is_byte) {
-            const unsigned char* src_pixel = row;
-            if (is_rgba) {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = static_cast<float>(src_pixel[3]) / 255.0f;
-                    src_pixel += 4;
-                }
-            } else if (is_alpha) {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
-                    ++src_pixel;
-                }
-            } else if (is_rgb) {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
-                    src_pixel += 3;
-                }
-            } else {
-                for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
-                    dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
-                    ++src_pixel;
+            } else if (is_byte) {
+                const unsigned char* src_pixel = row;
+                if (is_rgba) {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = static_cast<float>(src_pixel[3]) / 255.0f;
+                        src_pixel += 4;
+                    }
+                } else if (is_alpha) {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
+                        ++src_pixel;
+                    }
+                } else if (is_rgb) {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
+                        src_pixel += 3;
+                    }
+                } else {
+                    for (int x_pos = 0; x_pos < dst.width; ++x_pos) {
+                        dst_row[x_pos] = static_cast<float>(src_pixel[0]) / 255.0f;
+                        ++src_pixel;
+                    }
                 }
             }
         }
-    }
+    });
 }
 
 void write_output_image(const Image& src, void* dst_data, int row_bytes, const std::string& depth,

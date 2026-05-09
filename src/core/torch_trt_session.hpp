@@ -28,6 +28,14 @@
 
 namespace corridorkey::core {
 
+struct TorchTrtDeviceSource {
+    Image host_rgb = {};
+    void* rgb_device = nullptr;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+};
+
 // Wraps a Torch-TensorRT compiled .ts engine for in-process forward.
 // Sister to MlxSession - same wrapping pattern used by InferenceSession,
 // gated on Backend::TorchTRT. Built only when CORRIDORKEY_HAS_TORCHTRT is
@@ -73,11 +81,17 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
 
     [[nodiscard]] Result<FrameResult> infer_prepared_cuda_planar(
         void* planar_device_input, int input_width, int input_height,
-        bool output_alpha_only = false, StageTimingCallback on_stage = nullptr);
+        bool output_alpha_only = false, StageTimingCallback on_stage = nullptr,
+        void* input_ready_event = nullptr,
+        const InferenceParams* post_process_params = nullptr,
+        TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
 
     [[nodiscard]] Result<FrameResult> infer_prepared_cuda_planar_resized(
         void* planar_device_input, int input_width, int input_height, int output_width,
-        int output_height, bool output_alpha_only = false, StageTimingCallback on_stage = nullptr);
+        int output_height, bool output_alpha_only = false, bool use_lanczos_resize = false,
+        StageTimingCallback on_stage = nullptr, void* input_ready_event = nullptr,
+        const InferenceParams* post_process_params = nullptr,
+        TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
 
     [[nodiscard]] int model_resolution() const;
 

@@ -373,6 +373,24 @@ Result<FrameResult> Engine::process_frame(const Image& rgb, const Image& alpha_h
         "render_frame", [&]() { return m_impl->session->run(rgb, alpha_hint, params, on_stage); });
 }
 
+Result<FrameResult> Engine::process_frame_into(const Image& rgb, const Image& alpha_hint,
+                                               const FrameOutputViews& outputs,
+                                               const InferenceParams& params,
+                                               StageTimingCallback on_stage) {
+    if (!m_impl->session) {
+        return Unexpected(Error{ErrorCode::ModelLoadFailed, "Engine not initialized"});
+    }
+
+    auto warmup_res = m_impl->ensure_warmup(on_stage, params.target_resolution);
+    if (!warmup_res) {
+        return Unexpected(warmup_res.error());
+    }
+
+    return m_impl->run_with_cpu_fallback<FrameResult>("render_frame", [&]() {
+        return m_impl->session->run(rgb, alpha_hint, params, on_stage, outputs);
+    });
+}
+
 Result<std::vector<FrameResult>> Engine::process_frame_batch(const std::vector<Image>& rgbs,
                                                              const std::vector<Image>& alpha_hints,
                                                              const InferenceParams& params,

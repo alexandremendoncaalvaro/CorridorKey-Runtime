@@ -11,6 +11,7 @@
 
 #include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
+#include "common/stage_profiler.hpp"
 #include "common/srgb_lut.hpp"
 #include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
@@ -539,15 +540,26 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
 
         fg_linear_buf = ImageBuffer(width, height, 3);
         Image fg_linear_local = fg_linear_buf.view();
-        common::parallel_for_rows(height, [&](int y_begin, int y_end) {
-            for (int y = y_begin; y < y_end; ++y) {
-                for (int x = 0; x < width; ++x) {
-                    fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
-                    fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
-                    fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
-                }
-            }
-        });
+        StageTimingCallback on_fg_linear_stage = [&](const StageTiming& timing) {
+            stage_timings.push_back(timing);
+            log_message("render", "event=ofx_plugin_stage stage=" + timing.name +
+                                      " total_ms=" + std::to_string(timing.total_ms) +
+                                      " work_units=" + std::to_string(timing.work_units));
+        };
+        common::measure_stage(
+            on_fg_linear_stage, "ofx_foreground_srgb_to_linear",
+            [&]() {
+                common::parallel_for_rows(height, [&](int y_begin, int y_end) {
+                    for (int y = y_begin; y < y_end; ++y) {
+                        for (int x = 0; x < width; ++x) {
+                            fg_linear_local(y, x, 0) = lut.to_linear(fg_srgb_view(y, x, 0));
+                            fg_linear_local(y, x, 1) = lut.to_linear(fg_srgb_view(y, x, 1));
+                            fg_linear_local(y, x, 2) = lut.to_linear(fg_srgb_view(y, x, 2));
+                        }
+                    }
+                });
+            },
+            static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height));
     }
 
     alpha_buf = std::move(result->alpha);
@@ -792,6 +804,75 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->screen_color_param) {
         g_suites.parameter->paramGetValueAtTime(data->screen_color_param, time, &screen_color);
     }
+    if (data->despeckle_param) {
+        g_suites.parameter->paramGetValueAtTime(data->despeckle_param, time, &despeckle_enabled);
+    }
+    if (data->despeckle_size_param) {
+        g_suites.parameter->paramGetValueAtTime(data->despeckle_size_param, time, &despeckle_size);
+    }
+    if (data->despill_param) {
+        g_suites.parameter->paramGetValueAtTime(data->despill_param, time, &despill_strength);
+    }
+    if (data->spill_method_param) {
+        g_suites.parameter->paramGetValueAtTime(data->spill_method_param, time, &spill_method);
+    }
+    if (data->upscale_method_param) {
+        g_suites.parameter->paramGetValueAtTime(data->upscale_method_param, time, &upscale_method);
+    }
+    if (data->enable_tiling_param) {
+        g_suites.parameter->paramGetValueAtTime(data->enable_tiling_param, time, &enable_tiling);
+    }
+    if (data->tile_overlap_param) {
+        g_suites.parameter->paramGetValueAtTime(data->tile_overlap_param, time, &tile_overlap);
+    }
+    if (data->source_passthrough_param) {
+        g_suites.parameter->paramGetValueAtTime(data->source_passthrough_param, time,
+                                                &source_passthrough_enabled);
+    }
+    if (data->edge_erode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->edge_erode_param, time, &edge_erode);
+    }
+    if (data->edge_blur_param) {
+        g_suites.parameter->paramGetValueAtTime(data->edge_blur_param, time, &edge_blur);
+    }
+    SharedNodePolicyValues requested_shared_policy;
+    requested_shared_policy.screen_color = screen_color;
+    requested_shared_policy.quality_mode = quality_mode;
+    requested_shared_policy.quality_fallback_mode = quality_fallback_mode;
+    requested_shared_policy.refinement_mode = refinement_mode;
+    requested_shared_policy.coarse_resolution_override = coarse_resolution_override;
+    requested_shared_policy.input_color_space = input_color_space;
+    requested_shared_policy.despill_strength = despill_strength;
+    requested_shared_policy.spill_method = spill_method;
+    requested_shared_policy.despeckle_enabled = despeckle_enabled;
+    requested_shared_policy.despeckle_size = despeckle_size;
+    requested_shared_policy.upscale_method = upscale_method;
+    requested_shared_policy.enable_tiling = enable_tiling;
+    requested_shared_policy.tile_overlap = tile_overlap;
+    requested_shared_policy.source_passthrough_enabled = source_passthrough_enabled;
+    requested_shared_policy.edge_erode = edge_erode;
+    requested_shared_policy.edge_blur = edge_blur;
+    const SharedNodePolicyResult shared_node_policy =
+        enforce_shared_node_policy(data, requested_shared_policy);
+    if (shared_node_policy.changed) {
+        const SharedNodePolicyValues& values = shared_node_policy.values;
+        screen_color = values.screen_color;
+        quality_mode = values.quality_mode;
+        quality_fallback_mode = values.quality_fallback_mode;
+        refinement_mode = values.refinement_mode;
+        coarse_resolution_override = values.coarse_resolution_override;
+        input_color_space = values.input_color_space;
+        despill_strength = values.despill_strength;
+        spill_method = values.spill_method;
+        despeckle_enabled = values.despeckle_enabled;
+        despeckle_size = values.despeckle_size;
+        upscale_method = values.upscale_method;
+        enable_tiling = values.enable_tiling;
+        tile_overlap = values.tile_overlap;
+        source_passthrough_enabled = values.source_passthrough_enabled;
+        edge_erode = values.edge_erode;
+        edge_blur = values.edge_blur;
+    }
     if (data->temporal_smoothing_param) {
         g_suites.parameter->paramGetValueAtTime(data->temporal_smoothing_param, time,
                                                 &temporal_smoothing);
@@ -831,22 +912,42 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         return kOfxStatFailed;
     }
 
+    const std::uint64_t frame_pixels =
+        static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+    std::vector<StageTiming> plugin_stage_timings;
+    StageTimingCallback on_plugin_stage = [&](const StageTiming& timing) {
+        plugin_stage_timings.push_back(timing);
+        log_message("render", "event=ofx_plugin_stage stage=" + timing.name +
+                                  " total_ms=" + std::to_string(timing.total_ms) +
+                                  " work_units=" + std::to_string(timing.work_units));
+    };
+
     ImageBuffer rgb_buffer(width, height, 3);
     ImageBuffer hint_buffer(width, height, 1);
     Image rgb_view = rgb_buffer.view();
     Image hint_view = hint_buffer.view();
 
-    copy_source_to_linear(rgb_view, source_data, source_row_bytes, source_depth);
+    common::measure_stage(
+        on_plugin_stage, "ofx_copy_source_to_linear",
+        [&]() { copy_source_to_linear(rgb_view, source_data, source_row_bytes, source_depth); },
+        frame_pixels);
 
     if (input_is_linear) {
         const SrgbLut& lut = SrgbLut::instance();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                rgb_view(y, x, 0) = lut.to_srgb(rgb_view(y, x, 0));
-                rgb_view(y, x, 1) = lut.to_srgb(rgb_view(y, x, 1));
-                rgb_view(y, x, 2) = lut.to_srgb(rgb_view(y, x, 2));
-            }
-        }
+        common::measure_stage(
+            on_plugin_stage, "ofx_input_linear_to_srgb",
+            [&]() {
+                common::parallel_for_rows(height, [&](int y_begin, int y_end) {
+                    for (int y = y_begin; y < y_end; ++y) {
+                        for (int x = 0; x < width; ++x) {
+                            rgb_view(y, x, 0) = lut.to_srgb(rgb_view(y, x, 0));
+                            rgb_view(y, x, 1) = lut.to_srgb(rgb_view(y, x, 1));
+                            rgb_view(y, x, 2) = lut.to_srgb(rgb_view(y, x, 2));
+                        }
+                    }
+                });
+            },
+            frame_pixels);
     }
 
     const ScreenColorMode screen_color_mode = screen_color_mode_from_choice(screen_color);
@@ -878,6 +979,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         }
         log_message("render", quality_error + " Using current engine.");
     }
+    if (shared_node_policy.changed) {
+        apply_shared_node_policy_warning(data, shared_node_policy);
+    }
 
     // Decide which screen-color path to run now that the engine is bound.
     // Green and Blue are deterministic model selections. Blue-Green is the
@@ -902,22 +1006,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         screen_color_transform.mode = screen_color_mode;
         screen_color_transform.is_identity = true;
     }
-    canonicalize_to_green_domain(rgb_view, screen_color_transform);
+    common::measure_stage(
+        on_plugin_stage, "ofx_screen_color_canonicalize",
+        [&]() { canonicalize_to_green_domain(rgb_view, screen_color_transform); }, frame_pixels);
 
     if (data->output_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->output_mode_param, time, &output_mode);
-    }
-    if (data->despeckle_param) {
-        g_suites.parameter->paramGetValueAtTime(data->despeckle_param, time, &despeckle_enabled);
-    }
-    if (data->despeckle_size_param) {
-        g_suites.parameter->paramGetValueAtTime(data->despeckle_size_param, time, &despeckle_size);
-    }
-    if (data->despill_param) {
-        g_suites.parameter->paramGetValueAtTime(data->despill_param, time, &despill_strength);
-    }
-    if (data->spill_method_param) {
-        g_suites.parameter->paramGetValueAtTime(data->spill_method_param, time, &spill_method);
     }
     if (data->alpha_black_point_param) {
         g_suites.parameter->paramGetValueAtTime(data->alpha_black_point_param, time,
@@ -935,25 +1029,6 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
     if (data->alpha_gamma_param) {
         g_suites.parameter->paramGetValueAtTime(data->alpha_gamma_param, time, &alpha_gamma);
-    }
-    if (data->upscale_method_param) {
-        g_suites.parameter->paramGetValueAtTime(data->upscale_method_param, time, &upscale_method);
-    }
-    if (data->enable_tiling_param) {
-        g_suites.parameter->paramGetValueAtTime(data->enable_tiling_param, time, &enable_tiling);
-    }
-    if (data->tile_overlap_param) {
-        g_suites.parameter->paramGetValueAtTime(data->tile_overlap_param, time, &tile_overlap);
-    }
-    if (data->source_passthrough_param) {
-        g_suites.parameter->paramGetValueAtTime(data->source_passthrough_param, time,
-                                                &source_passthrough_enabled);
-    }
-    if (data->edge_erode_param) {
-        g_suites.parameter->paramGetValueAtTime(data->edge_erode_param, time, &edge_erode);
-    }
-    if (data->edge_blur_param) {
-        g_suites.parameter->paramGetValueAtTime(data->edge_blur_param, time, &edge_blur);
     }
 
     bool hint_from_clip = false;
@@ -974,7 +1049,13 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                 get_int(hint_props, kOfxImagePropRowBytes, hint_row_bytes) &&
                 get_string(hint_props, kOfxImageEffectPropPixelDepth, hint_depth) &&
                 get_string(hint_props, kOfxImageEffectPropComponents, hint_components)) {
-                copy_alpha_hint(hint_view, hint_data, hint_row_bytes, hint_depth, hint_components);
+                common::measure_stage(
+                    on_plugin_stage, "ofx_copy_alpha_hint",
+                    [&]() {
+                        copy_alpha_hint(hint_view, hint_data, hint_row_bytes, hint_depth,
+                                        hint_components);
+                    },
+                    frame_pixels);
                 hint_from_clip = true;
                 log_message(
                     "render",
@@ -993,8 +1074,12 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     }
 
     const AlphaHintPolicy alpha_hint_policy = AlphaHintPolicy::AutoRoughFallback;
-    auto guide_source =
-        resolve_alpha_hint_source(rgb_view, hint_view, hint_from_clip, alpha_hint_policy);
+    auto guide_source = common::measure_stage(
+        on_plugin_stage, "ofx_resolve_alpha_hint",
+        [&]() {
+            return resolve_alpha_hint_source(rgb_view, hint_view, hint_from_clip, alpha_hint_policy);
+        },
+        frame_pixels);
     if (!guide_source) {
         const std::string message = guide_source.error().message;
         log_message("render", message);
@@ -1008,7 +1093,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                     "No readable Alpha Hint was provided. Using rough matte fallback guide.");
     }
 
-    const std::uint64_t signature = frame_signature(rgb_view, hint_view);
+    const std::uint64_t signature =
+        common::measure_stage(on_plugin_stage, "ofx_frame_signature",
+                              [&]() { return frame_signature(rgb_view, hint_view); }, frame_pixels);
     const double effective_alpha_erode =
         scale_pixels_to_source_long_edge(alpha_erode, width, height);
     const double effective_alpha_softness =
@@ -1047,7 +1134,8 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     params.source_passthrough = source_passthrough_requested && source_passthrough_allowed;
     params.sp_erode_px = effective_edge_erode;
     params.sp_blur_px = effective_edge_blur;
-    params.output_alpha_only = !output_mode_requires_model_foreground(output_mode);
+    params.output_alpha_only =
+        !output_mode_requests_model_foreground(output_mode, shared_node_policy.constrained);
     params.output_auxiliary_images = false;
 
     const char* upscale_method_label =
@@ -1095,6 +1183,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         fg_linear = data->cached_result.foreground.view();
         work_origin = LastRenderWorkOrigin::InstanceCache;
         data->last_render_stage_timings = data->cached_render_stage_timings;
+        data->last_render_stage_timings.insert(data->last_render_stage_timings.begin(),
+                                               plugin_stage_timings.begin(),
+                                               plugin_stage_timings.end());
     } else {
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
                                         path_hash(data->model_path), screen_color};
@@ -1113,6 +1204,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
         work_origin = inference.work_origin;
         data->last_render_stage_timings = inference.stage_timings;
+        data->last_render_stage_timings.insert(data->last_render_stage_timings.begin(),
+                                               plugin_stage_timings.begin(),
+                                               plugin_stage_timings.end());
 
         // Per-instance alpha edge adjustments (applied to this instance's own copy)
         Image alpha_view_local = inference.alpha.view();
@@ -1213,21 +1307,36 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     const bool apply_srgb =
         should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);
 
-    if (output_mode == kOutputMatteOnly) {
-        write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, lut);
-    } else if (output_mode == kOutputForegroundOnly) {
-        write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth, apply_srgb,
-                                lut);
-    } else if (output_mode == kOutputSourceMatte) {
-        write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes, output_depth,
-                                  apply_srgb, lut);
-    } else if (output_mode_uses_linear_premultiplied_rgba(output_mode)) {
-        write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth,
-                               false, lut);
-    } else {
-        write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes, output_depth,
-                               apply_srgb, lut);
-    }
+    std::vector<StageTiming> output_stage_timings;
+    StageTimingCallback on_output_stage = [&](const StageTiming& timing) {
+        output_stage_timings.push_back(timing);
+        log_message("render", "event=ofx_plugin_stage stage=" + timing.name +
+                                  " total_ms=" + std::to_string(timing.total_ms) +
+                                  " work_units=" + std::to_string(timing.work_units));
+    };
+    common::measure_stage(
+        on_output_stage, "ofx_write_output",
+        [&]() {
+            if (output_mode == kOutputMatteOnly) {
+                write_matte_output(alpha_view, output_data, output_row_bytes, output_depth, lut);
+            } else if (output_mode == kOutputForegroundOnly) {
+                write_foreground_output(fg_linear, output_data, output_row_bytes, output_depth,
+                                        apply_srgb, lut);
+            } else if (output_mode == kOutputSourceMatte) {
+                write_source_matte_output(rgb_view, alpha_view, output_data, output_row_bytes,
+                                          output_depth, apply_srgb, lut);
+            } else if (output_mode_uses_linear_premultiplied_rgba(output_mode)) {
+                write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
+                                       output_depth, false, lut);
+            } else {
+                write_processed_output(fg_linear, alpha_view, output_data, output_row_bytes,
+                                       output_depth, apply_srgb, lut);
+            }
+        },
+        frame_pixels);
+    data->last_render_stage_timings.insert(data->last_render_stage_timings.end(),
+                                           output_stage_timings.begin(),
+                                           output_stage_timings.end());
 
     const double render_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_start)

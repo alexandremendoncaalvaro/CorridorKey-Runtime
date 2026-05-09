@@ -158,9 +158,14 @@ std::string sanitize_log_token(const std::string& value) {
 // Stages that must always appear in the render-frame summary so the log alone
 // answers "eval-bound or wait-bound?" — mlx_eval tends to dominate the top-N
 // slots and hide the wait split that tells us whether we're Metal-queue-bound.
+// TorchTRT CUDA Graph stages are pinned for the same reason: fallback
+// telemetry is diagnostic even when the event itself is 0 ms.
 bool is_pinned_stage(const std::string& name) {
     return name == "mlx_eval" || name == "mlx_wait_alpha" || name == "mlx_wait_fg" ||
-           name == "mlx_eval_tile" || name == "mlx_wait_alpha_tile" || name == "mlx_wait_fg_tile";
+           name == "mlx_eval_tile" || name == "mlx_wait_alpha_tile" ||
+           name == "mlx_wait_fg_tile" || name == "torchtrt_forward_direct" ||
+           name == "torchtrt_forward_direct_gpu" ||
+           name.rfind("torchtrt_cuda_graph_", 0) == 0;
 }
 
 // Summarize stages into a compact "name:ms,name:ms" list. Returns the top-N by

@@ -133,6 +133,36 @@ TEST_CASE("instance_changed flushes pending updates for user edits", "[unit][ofx
     g_suites.image_effect = previous_image_suite;
 }
 
+TEST_CASE("instance_changed defers pending updates inside render sequence",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    data.runtime_panel_dirty = true;
+    data.in_render_sequence = true;
+
+    FakeProps args{};
+    args.change_reason = kOfxChangeUserEdited;
+
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propGetString = fake_prop_get_string;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+
+    auto* previous_suite = g_suites.property;
+    auto* previous_image_suite = g_suites.image_effect;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+
+    auto status = instance_changed(reinterpret_cast<OfxImageEffectHandle>(&data),
+                                   reinterpret_cast<OfxPropertySetHandle>(&args));
+
+    REQUIRE(status == kOfxStatOK);
+    REQUIRE(data.runtime_panel_dirty);
+
+    g_suites.property = previous_suite;
+    g_suites.image_effect = previous_image_suite;
+}
+
 TEST_CASE("runtime status omits frame timings when a dedicated timings field exists",
           "[unit][ofx][regression]") {
     InstanceData data{};

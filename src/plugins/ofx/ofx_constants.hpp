@@ -138,6 +138,10 @@ inline bool output_mode_requires_model_foreground(int output_mode) {
     return output_mode != kOutputMatteOnly && output_mode != kOutputSourceMatte;
 }
 
+inline bool output_mode_requests_model_foreground(int output_mode, bool shared_nodes_active) {
+    return shared_nodes_active || output_mode_requires_model_foreground(output_mode);
+}
+
 inline bool should_apply_srgb_to_output(int output_mode, bool host_managed, bool input_is_linear) {
     if (output_mode == kOutputMatteOnly) {
         return false;

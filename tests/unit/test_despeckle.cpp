@@ -1,5 +1,7 @@
 #include <catch2/catch_all.hpp>
 
+#include <cstdlib>
+
 #include "post_process/despeckle.hpp"
 
 using namespace corridorkey;
@@ -104,6 +106,59 @@ TEST_CASE("despeckle removes small components via connected-component analysis",
         despeckle(alpha, 5, state, 0, 0);
         for (size_t i = 0; i < alpha.data.size(); ++i) {
             REQUIRE(alpha.data[i] == Catch::Approx(1.0f));
+        }
+    }
+
+    SECTION("All-foreground matte above threshold is unchanged") {
+        for (size_t i = 0; i < alpha.data.size(); ++i) {
+            alpha.data[i] = 0.6f + (static_cast<float>(i % 4) * 0.1f);
+        }
+        std::vector<float> before(alpha.data.begin(), alpha.data.end());
+        despeckle(alpha, 400, state, 25, 5);
+        for (size_t i = 0; i < alpha.data.size(); ++i) {
+            REQUIRE(alpha.data[i] == Catch::Approx(before[i]));
+        }
+    }
+
+    SECTION("All-background matte below threshold is zeroed") {
+        for (size_t i = 0; i < alpha.data.size(); ++i) {
+            alpha.data[i] = 0.25f;
+        }
+        despeckle(alpha, 400, state, 25, 5);
+        for (size_t i = 0; i < alpha.data.size(); ++i) {
+            REQUIRE(alpha.data[i] == Catch::Approx(0.0f));
+        }
+    }
+
+    SECTION("Diagonal foreground remains 8-connected") {
+        ImageBuffer diagonal_buf(4, 4, 1);
+        Image diagonal = diagonal_buf.view();
+        std::fill(diagonal.data.begin(), diagonal.data.end(), 0.0f);
+        diagonal(0, 0) = 1.0f;
+        diagonal(1, 1) = 1.0f;
+        diagonal(2, 2) = 1.0f;
+
+        despeckle(diagonal, 3, state, 0, 0);
+
+        REQUIRE(diagonal(0, 0) == Catch::Approx(1.0f));
+        REQUIRE(diagonal(1, 1) == Catch::Approx(1.0f));
+        REQUIRE(diagonal(2, 2) == Catch::Approx(1.0f));
+    }
+
+    SECTION("Dilation preserves exact elliptical support before blur") {
+        ImageBuffer dilated_buf(7, 7, 1);
+        Image dilated = dilated_buf.view();
+        std::fill(dilated.data.begin(), dilated.data.end(), 0.25f);
+        dilated(3, 3) = 1.0f;
+
+        despeckle(dilated, 1, state, 1, 0);
+
+        for (int y = 0; y < 7; ++y) {
+            for (int x = 0; x < 7; ++x) {
+                const bool inside = std::abs(y - 3) <= 1 && std::abs(x - 3) <= 1;
+                const float expected = inside ? (y == 3 && x == 3 ? 1.0f : 0.25f) : 0.0f;
+                REQUIRE(dilated(y, x) == Catch::Approx(expected));
+            }
         }
     }
 }

@@ -491,7 +491,7 @@ TEST_CASE("ofx descriptor serializes host render calls for sidecar runtime",
     REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor)) == kOfxStatOK);
 
     CHECK(prop_strings(descriptor.props, kOfxImageEffectPluginRenderThreadSafety).front() ==
-          kOfxImageEffectRenderUnsafe);
+          kOfxImageEffectRenderInstanceSafe);
     CHECK(prop_ints(descriptor.props, kOfxImageEffectPluginPropHostFrameThreading).front() == 0);
 }
 

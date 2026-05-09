@@ -1,11 +1,9 @@
 #include "despeckle.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <numeric>
-#include <utility>
 #include <vector>
 
 #include "common/parallel_for.hpp"
@@ -29,100 +27,106 @@
 namespace corridorkey {
 namespace {
 
-// Union-Find with path compression and union by rank
-struct UnionFind {
-    std::vector<int> parent;
-    std::vector<int> rank_;
-
-    explicit UnionFind(int n) : parent(n), rank_(n, 0) {
-        std::iota(parent.begin(), parent.end(), 0);
-    }
-
-    int find(int x) {
-        while (parent[x] != x) {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        return x;
-    }
-
-    void unite(int a, int b) {
-        a = find(a);
-        b = find(b);
-        if (a == b) return;
-        if (rank_[a] < rank_[b]) std::swap(a, b);
-        parent[b] = a;
-        if (rank_[a] == rank_[b]) ++rank_[a];
-    }
+struct MaskRun {
+    int y = 0;
+    int x_begin = 0;
+    int x_end = 0;
+    int parent = 0;
+    int rank = 0;
+    int area = 0;
 };
 
-// 8-connected component labeling using union-find
-// Returns label map and area per label
-void find_components(const std::vector<uint8_t>& mask, int w, int h, std::vector<int>& labels,
-                     std::vector<int>& areas) {
-    int n = w * h;
-    UnionFind uf(n);
-    labels.assign(n, -1);
-
-    // First pass: label and merge
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            int idx = y * w + x;
-            if (mask[idx] == 0) continue;
-            labels[idx] = idx;
-
-            // Check 4 already-visited neighbors (up-left, up, up-right, left)
-            constexpr std::array<int, 4> dy = {-1, -1, -1, 0};
-            constexpr std::array<int, 4> dx = {-1, 0, 1, -1};
-            for (int d = 0; d < 4; ++d) {
-                int ny = y + dy[d];
-                int nx = x + dx[d];
-                if (ny < 0 || ny >= h || nx < 0 || nx >= w) continue;
-                int nidx = ny * w + nx;
-                if (labels[nidx] >= 0) {
-                    uf.unite(idx, nidx);
-                }
-            }
-        }
+int find_run_root(std::vector<MaskRun>& runs, int index) {
+    int root = index;
+    while (runs[root].parent != root) {
+        root = runs[root].parent;
     }
-
-    // Second pass: flatten labels and compute areas
-    std::vector<int> root_map(n, -1);
-    int num_labels = 0;
-    for (int i = 0; i < n; ++i) {
-        if (labels[i] < 0) continue;
-        int root = uf.find(i);
-        if (root_map[root] < 0) {
-            root_map[root] = num_labels++;
-        }
-        labels[i] = root_map[root];
+    while (runs[index].parent != index) {
+        int next = runs[index].parent;
+        runs[index].parent = root;
+        index = next;
     }
+    return root;
+}
 
-    areas.assign(num_labels, 0);
-    for (int i = 0; i < n; ++i) {
-        if (labels[i] >= 0) {
-            ++areas[labels[i]];
-        }
+void unite_runs(std::vector<MaskRun>& runs, int a, int b) {
+    a = find_run_root(runs, a);
+    b = find_run_root(runs, b);
+    if (a == b) return;
+    if (runs[a].rank < runs[b].rank) {
+        std::swap(a, b);
+    }
+    runs[b].parent = a;
+    runs[a].area += runs[b].area;
+    if (runs[a].rank == runs[b].rank) {
+        ++runs[a].rank;
     }
 }
 
-// Generate elliptical structuring element offsets
-std::vector<std::pair<int, int>> make_elliptical_kernel(int radius) {
-    std::vector<std::pair<int, int>> offsets;
-    int ksize = 2 * radius + 1;
-    float center = static_cast<float>(radius);
-    float r_sq = (center + 0.5F) * (center + 0.5F);
+void add_mask_run(std::vector<MaskRun>& runs, int y, int x_begin, int x_end, int previous_end,
+                  int& previous_cursor) {
+    const int index = static_cast<int>(runs.size());
+    runs.push_back(MaskRun{
+        .y = y,
+        .x_begin = x_begin,
+        .x_end = x_end,
+        .parent = index,
+        .rank = 0,
+        .area = x_end - x_begin + 1,
+    });
 
-    for (int ky = 0; ky < ksize; ++ky) {
-        for (int kx = 0; kx < ksize; ++kx) {
-            float dy = static_cast<float>(ky) - center;
-            float dx = static_cast<float>(kx) - center;
-            if (dy * dy + dx * dx <= r_sq) {
-                offsets.emplace_back(ky - radius, kx - radius);
-            }
-        }
+    while (previous_cursor < previous_end && runs[previous_cursor].x_end < x_begin - 1) {
+        ++previous_cursor;
     }
-    return offsets;
+    for (int candidate = previous_cursor;
+         candidate < previous_end && runs[candidate].x_begin <= x_end + 1; ++candidate) {
+        unite_runs(runs, index, candidate);
+    }
+}
+
+void filter_components_rle(const std::vector<uint8_t>& mask, std::vector<uint8_t>& cleaned, int w,
+                           int h, int area_threshold) {
+    std::vector<MaskRun> runs;
+    runs.reserve(static_cast<std::size_t>(h) * 8U);
+
+    int previous_begin = 0;
+    int previous_end = 0;
+
+    for (int y = 0; y < h; ++y) {
+        const int current_begin = static_cast<int>(runs.size());
+        int previous_cursor = previous_begin;
+        int x = 0;
+        const int row_offset = y * w;
+        while (x < w) {
+            while (x < w && mask[row_offset + x] == 0) {
+                ++x;
+            }
+            if (x >= w) {
+                break;
+            }
+            const int x_begin = x;
+            while (x + 1 < w && mask[row_offset + x + 1] != 0) {
+                ++x;
+            }
+            add_mask_run(runs, y, x_begin, x, previous_end, previous_cursor);
+            ++x;
+        }
+        previous_begin = current_begin;
+        previous_end = static_cast<int>(runs.size());
+    }
+
+    std::fill(cleaned.begin(), cleaned.end(), 0);
+    for (int i = 0; i < static_cast<int>(runs.size()); ++i) {
+        const int root = find_run_root(runs, i);
+        if (runs[root].area < area_threshold) {
+            continue;
+        }
+        const std::size_t row_offset = static_cast<std::size_t>(runs[i].y) *
+                                       static_cast<std::size_t>(w);
+        std::fill(cleaned.begin() + static_cast<std::ptrdiff_t>(row_offset + runs[i].x_begin),
+                  cleaned.begin() + static_cast<std::ptrdiff_t>(row_offset + runs[i].x_end + 1),
+                  255);
+    }
 }
 
 // Morphological dilation with elliptical kernel
@@ -130,38 +134,82 @@ void dilate_binary(std::vector<uint8_t>& mask, std::vector<uint8_t>& temp_result
                    int radius) {
     if (radius <= 0) return;
 
-    auto offsets = make_elliptical_kernel(radius);
     std::fill(temp_result.begin(), temp_result.end(), 0);
+    std::vector<int> row_reach(static_cast<std::size_t>(2 * radius + 1), 0);
+    const float center = static_cast<float>(radius);
+    const float r_sq = (center + 0.5F) * (center + 0.5F);
+    for (int dy = -radius; dy <= radius; ++dy) {
+        const float remaining = r_sq - static_cast<float>(dy * dy);
+        row_reach[static_cast<std::size_t>(dy + radius)] =
+            remaining > 0.0F ? static_cast<int>(std::floor(std::sqrt(remaining))) : 0;
+    }
 
-    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
-        for (int y = y_begin; y < y_end; ++y) {
-            for (int x = 0; x < w; ++x) {
-                if (temp_result[y * w + x] == 255) continue;
-                for (const auto& [dy, dx] : offsets) {
-                    int ny = y + dy;
-                    int nx = x + dx;
-                    if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
-                        if (mask[ny * w + nx] == 255) {
-                            temp_result[y * w + x] = 255;
-                            break;
-                        }
-                    }
-                }
+    for (int y = 0; y < h; ++y) {
+        const int row_offset = y * w;
+        int x = 0;
+        while (x < w) {
+            while (x < w && mask[row_offset + x] == 0) {
+                ++x;
             }
+            if (x >= w) {
+                break;
+            }
+            const int x_begin = x;
+            while (x + 1 < w && mask[row_offset + x + 1] != 0) {
+                ++x;
+            }
+            const int x_end = x;
+            for (int dy = -radius; dy <= radius; ++dy) {
+                const int ny = y + dy;
+                if (ny < 0 || ny >= h) {
+                    continue;
+                }
+                const int reach = row_reach[static_cast<std::size_t>(dy + radius)];
+                const int fill_begin = std::max(0, x_begin - reach);
+                const int fill_end = std::min(w - 1, x_end + reach);
+                const auto begin = temp_result.begin() +
+                                   static_cast<std::ptrdiff_t>(ny * w + fill_begin);
+                const auto end = temp_result.begin() +
+                                 static_cast<std::ptrdiff_t>(ny * w + fill_end + 1);
+                std::fill(begin, end, 255);
+            }
+            ++x;
         }
-    });
+    }
 
     mask.swap(temp_result);
 }
 
-void threshold_mask(const Image& alpha, std::vector<uint8_t>& mask) {
+struct MaskSummary {
+    int foreground_count = 0;
+};
+
+MaskSummary threshold_mask(const Image& alpha, std::vector<uint8_t>& mask) {
+    std::vector<int> row_counts(static_cast<std::size_t>(alpha.height), 0);
     common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
         for (int y = y_begin; y < y_end; ++y) {
+            int foreground_count = 0;
             size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(alpha.width);
             for (int x = 0; x < alpha.width; ++x) {
                 size_t index = row_offset + static_cast<size_t>(x);
-                mask[index] = alpha.data[index] > 0.5F ? 255 : 0;
+                const bool foreground = alpha.data[index] > 0.5F;
+                mask[index] = foreground ? 255 : 0;
+                foreground_count += foreground ? 1 : 0;
             }
+            row_counts[static_cast<std::size_t>(y)] = foreground_count;
+        }
+    });
+    return MaskSummary{
+        .foreground_count = std::accumulate(row_counts.begin(), row_counts.end(), 0),
+    };
+}
+
+void zero_alpha(Image alpha) {
+    common::parallel_for_rows(alpha.height, [&](int y_begin, int y_end) {
+        for (int y = y_begin; y < y_end; ++y) {
+            size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(alpha.width);
+            std::fill_n(alpha.data.data() + row_offset, static_cast<std::size_t>(alpha.width),
+                        0.0F);
         }
     });
 }
@@ -219,20 +267,6 @@ void gaussian_blur(std::vector<float>& data, std::vector<float>& temp, int w, in
     });
 }
 
-void filter_components(const std::vector<int>& labels, const std::vector<int>& areas,
-                       std::vector<uint8_t>& cleaned, int w, int h, int area_threshold) {
-    common::parallel_for_rows(h, [&](int y_begin, int y_end) {
-        for (int y = y_begin; y < y_end; ++y) {
-            size_t row_offset = static_cast<size_t>(y) * static_cast<size_t>(w);
-            for (int x = 0; x < w; ++x) {
-                size_t index = row_offset + static_cast<size_t>(x);
-                int label = labels[index];
-                cleaned[index] = (label >= 0 && areas[label] >= area_threshold) ? 255 : 0;
-            }
-        }
-    });
-}
-
 void convert_cleaned_to_safe_zone(const std::vector<uint8_t>& cleaned,
                                   std::vector<float>& safe_zone, int w, int h) {
     common::parallel_for_rows(h, [&](int y_begin, int y_end) {
@@ -270,15 +304,18 @@ void despeckle(Image alpha, int area_threshold, DespeckleState& state, int dilat
 
     // Step 1: Threshold alpha at 0.5 to binary mask
     state.mask.resize(n);
-    threshold_mask(alpha, state.mask);
+    const MaskSummary summary = threshold_mask(alpha, state.mask);
+    if (summary.foreground_count == n) {
+        return;
+    }
+    if (summary.foreground_count == 0) {
+        zero_alpha(alpha);
+        return;
+    }
 
     // Step 2: Find connected components and filter by area
-    state.labels.resize(n);
-    state.areas.resize(n);
-    find_components(state.mask, w, h, state.labels, state.areas);
-
     state.cleaned.resize(n);
-    filter_components(state.labels, state.areas, state.cleaned, w, h, area_threshold);
+    filter_components_rle(state.mask, state.cleaned, w, h, area_threshold);
 
     // Step 3: Dilate with elliptical kernel
     state.temp_mask.resize(n);

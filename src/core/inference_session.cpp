@@ -1556,6 +1556,7 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
 
 void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params,
                                           Image source_rgb, StageTimingCallback on_stage) {
+    if (result.post_processed) return;
     if (result.alpha.view().empty() || result.foreground.view().empty()) return;
 
     int w = result.foreground.view().width;
@@ -1633,7 +1634,8 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
 
 Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& alpha_hint,
                                                  const InferenceParams& params,
-                                                 StageTimingCallback on_stage) {
+                                                 StageTimingCallback on_stage,
+                                                 FrameOutputViews output_views) {
     const int model_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
 
     if (params.enable_tiling && (rgb.width > model_resolution || rgb.height > model_resolution)) {
@@ -1645,7 +1647,7 @@ Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& 
         return tiled_result;
     }
 
-    auto result = infer_raw(rgb, alpha_hint, params, on_stage);
+    auto result = infer_raw(rgb, alpha_hint, params, on_stage, output_views);
     if (!result) {
         return Unexpected(result.error());
     }
@@ -2007,7 +2009,9 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
 
 Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
                                                 const InferenceParams& params,
-                                                StageTimingCallback on_stage) {
+                                                StageTimingCallback on_stage,
+                                                FrameOutputViews output_views) {
+    (void)output_views;
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
     if (m_torch_trt_session != nullptr) {
         const int target_res =
@@ -2090,24 +2094,26 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 1);
             if (gpu_prepare_res.has_value()) {
                 Result<FrameResult> raw_res =
-                    params.upscale_method == UpscaleMethod::Lanczos4
-                        ? m_torch_trt_session->infer_prepared_cuda_planar(
-                              gpu_prepare_res->planar_device, gpu_prepare_res->width,
-                              gpu_prepare_res->height, params.output_alpha_only, on_stage)
-                        : m_torch_trt_session->infer_prepared_cuda_planar_resized(
-                              gpu_prepare_res->planar_device, gpu_prepare_res->width,
-                              gpu_prepare_res->height, rgb.width, rgb.height,
-                              params.output_alpha_only, on_stage);
+                    m_torch_trt_session->infer_prepared_cuda_planar_resized(
+                        gpu_prepare_res->planar_device, gpu_prepare_res->width,
+                        gpu_prepare_res->height, rgb.width, rgb.height,
+                        params.output_alpha_only, params.upscale_method == UpscaleMethod::Lanczos4,
+                        on_stage, gpu_prepare_res->ready_event, &params,
+                        core::TorchTrtDeviceSource{
+                            .host_rgb = rgb,
+                            .rgb_device = gpu_prepare_res->source_rgb_device,
+                            .width = gpu_prepare_res->source_width,
+                            .height = gpu_prepare_res->source_height,
+                            .channels = gpu_prepare_res->source_channels,
+                        },
+                        output_views);
                 if (!raw_res) {
                     return Unexpected(raw_res.error());
                 }
                 if (rgb.width == target_res && rgb.height == target_res) {
                     return std::move(*raw_res);
                 }
-                if (params.upscale_method != UpscaleMethod::Lanczos4) {
-                    return finalize_model_output(*raw_res);
-                }
-                return resize_model_output(*raw_res);
+                return finalize_model_output(*raw_res);
             }
             debug_log("GPU TorchScript prep failed, falling back to CPU: " +
                       gpu_prepare_res.error().message);
@@ -2412,19 +2418,20 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
 
 Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,
                                           const InferenceParams& params,
-                                          StageTimingCallback on_stage) {
+                                          StageTimingCallback on_stage,
+                                          FrameOutputViews output_views) {
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
     const bool dynamic_torchtrt_session =
         m_torch_trt_session != nullptr && m_recommended_resolution == 0;
     if (dynamic_torchtrt_session) {
-        return run_direct(rgb, alpha_hint, params, on_stage);
+        return run_direct(rgb, alpha_hint, params, on_stage, output_views);
     }
 #endif
     if (core::should_use_coarse_to_fine_path(params, m_recommended_resolution)) {
         return run_coarse_to_fine(rgb, alpha_hint, params, on_stage);
     }
 
-    return run_direct(rgb, alpha_hint, params, on_stage);
+    return run_direct(rgb, alpha_hint, params, on_stage, output_views);
 }
 
 }  // namespace corridorkey

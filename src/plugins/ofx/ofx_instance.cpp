@@ -4,6 +4,7 @@
 #include <chrono>
 #include <corridorkey/engine.hpp>
 #include <cstdint>
+#include <cmath>
 #include <filesystem>
 #include <iomanip>
 #include <mutex>
@@ -12,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "app/runtime_contracts.hpp"
@@ -45,6 +47,7 @@ extern char** environ;
 namespace corridorkey::ofx {
 
 void set_param_secret(OfxParamHandle param, bool secret);
+void set_param_enabled(OfxParamHandle param, bool enabled);
 
 namespace {
 
@@ -82,6 +85,74 @@ struct UpdateCheckState {
     std::mutex mutex;
     std::optional<app::CachedCheck> cache;
 };
+
+struct SharedNodePolicyState {
+    std::mutex mutex;
+    std::unordered_set<InstanceData*> instances;
+    SharedNodePolicyValues values = {};
+};
+
+SharedNodePolicyState& shared_node_policy_state() {
+    static SharedNodePolicyState state;
+    return state;
+}
+
+const char* screen_color_policy_label(int screen_color) {
+    switch (screen_color) {
+        case kScreenColorBlue:
+            return "Blue";
+        case kScreenColorBlueGreen:
+            return "Blue-Green Channel Swap";
+        case kScreenColorGreen:
+        default:
+            return "Green";
+    }
+}
+
+int current_int_param_value(OfxParamHandle param, int fallback) {
+    int value = fallback;
+    if (param != nullptr && g_suites.parameter != nullptr) {
+        g_suites.parameter->paramGetValue(param, &value);
+    }
+    return value;
+}
+
+double current_double_param_value(OfxParamHandle param, double fallback) {
+    double value = fallback;
+    if (param != nullptr && g_suites.parameter != nullptr) {
+        g_suites.parameter->paramGetValue(param, &value);
+    }
+    return value;
+}
+
+bool same_shared_node_policy_values(const SharedNodePolicyValues& lhs,
+                                    const SharedNodePolicyValues& rhs) {
+    constexpr double kDoubleEpsilon = 1e-6;
+    return lhs.screen_color == rhs.screen_color && lhs.quality_mode == rhs.quality_mode &&
+           lhs.quality_fallback_mode == rhs.quality_fallback_mode &&
+           lhs.refinement_mode == rhs.refinement_mode &&
+           lhs.coarse_resolution_override == rhs.coarse_resolution_override &&
+           lhs.input_color_space == rhs.input_color_space &&
+           std::abs(lhs.despill_strength - rhs.despill_strength) < kDoubleEpsilon &&
+           lhs.spill_method == rhs.spill_method &&
+           lhs.despeckle_enabled == rhs.despeckle_enabled &&
+           lhs.despeckle_size == rhs.despeckle_size &&
+           lhs.upscale_method == rhs.upscale_method && lhs.enable_tiling == rhs.enable_tiling &&
+           lhs.tile_overlap == rhs.tile_overlap &&
+           lhs.source_passthrough_enabled == rhs.source_passthrough_enabled &&
+           lhs.edge_erode == rhs.edge_erode && lhs.edge_blur == rhs.edge_blur;
+}
+
+SharedNodePolicyResult make_shared_node_policy_result(const SharedNodePolicyValues& values,
+                                                      bool constrained, bool changed) {
+    SharedNodePolicyResult result;
+    result.values = values;
+    result.screen_color = values.screen_color;
+    result.quality_mode = values.quality_mode;
+    result.constrained = constrained;
+    result.changed = changed;
+    return result;
+}
 
 UpdateCheckState& update_check_state() {
     static UpdateCheckState state;
@@ -614,12 +685,10 @@ std::string runtime_backend_work_runtime_label_impl(const InstanceData& data) {
 
 // Compose the one-line node-indicator summary that mirrors the runtime
 // panel telemetry into a form OFX MessageSuiteV2 setPersistentMessage
-// can carry. Used so Foundry Nuke (which does not allow render-thread
-// paramSetValue and therefore leaves the runtime panel showing
-// "Initializing..." between user clicks per the OFX 1.5 paramSetValue
-// rule in ofxParam.h:1088) still surfaces dynamic backend / effective
-// quality / last-frame telemetry on the node icon. Resolve users see
-// both surfaces; Nuke users see the node indicator only.
+// can carry. Used so Foundry Nuke (whose panel cannot refresh render-time
+// paramSetValue safely per the OFX 1.5 paramSetValue rule in ofxParam.h:1088)
+// still surfaces dynamic backend / effective quality / last-frame telemetry on
+// the node icon. Resolve keeps the host panel plus log-file telemetry.
 //
 // The body text follows the same field ordering the panel uses but
 // collapses each line into a single readable token so the host's
@@ -881,15 +950,15 @@ void update_runtime_panel_values(InstanceData* data) {
     // GetFramesNeeded) defer by marking dirty so the next main-thread
     // action flushes the panel.
     //
-    // DaVinci Resolve tolerates render-thread paramSetValue and its inspector
-    // panel is the validated live telemetry surface for per-frame render
-    // timing. Foundry Nuke rejects the same dynamic parameter writes, so Nuke
-    // and any unvalidated host take the canonical defer-to-main-thread path.
+    // Resolve/Fusion logs report dirty notifications when panel params are
+    // written from render-thread actions, and Nuke rejects the same dynamic
+    // parameter writes. Keep all hosts on the canonical defer-to-main-thread
+    // path and use logs as the live render telemetry surface.
     // References:
     // https://openfx.readthedocs.io/en/main/Reference/ofxThreadSafety.html
     // https://openfx.readthedocs.io/en/main/Reference/ofxRendering.html
     // https://openfx.readthedocs.io/en/main/Reference/ofxPropertiesByObject.html
-    if ((data->in_render || data->in_render_sequence) && !is_resolve_host()) {
+    if (data->in_render || data->in_render_sequence) {
         data->runtime_panel_dirty = true;
         log_message("update_runtime_panel_values",
                     std::string("defer reason=render_thread in_render=") +
@@ -1365,6 +1434,39 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     if (data->quality_mode_param != nullptr) {
         g_suites.parameter->paramGetValue(data->quality_mode_param, &initial_quality_mode);
     }
+    int initial_screen_color = kDefaultScreenColor;
+    if (data->screen_color_param != nullptr) {
+        g_suites.parameter->paramGetValue(data->screen_color_param, &initial_screen_color);
+    }
+    SharedNodePolicyValues initial_shared_policy;
+    initial_shared_policy.screen_color = initial_screen_color;
+    initial_shared_policy.quality_mode = initial_quality_mode;
+    initial_shared_policy.quality_fallback_mode =
+        current_int_param_value(data->quality_fallback_mode_param, kQualityFallbackAuto);
+    initial_shared_policy.refinement_mode =
+        current_int_param_value(data->refinement_mode_param, kRefinementAuto);
+    initial_shared_policy.coarse_resolution_override = current_int_param_value(
+        data->coarse_resolution_override_param, kCoarseResolutionAutomatic);
+    initial_shared_policy.input_color_space =
+        current_int_param_value(data->input_color_space_param, kDefaultInputColorSpace);
+    initial_shared_policy.despill_strength =
+        current_double_param_value(data->despill_param, initial_shared_policy.despill_strength);
+    initial_shared_policy.spill_method =
+        current_int_param_value(data->spill_method_param, kDefaultSpillMethod);
+    initial_shared_policy.despeckle_enabled =
+        current_int_param_value(data->despeckle_param, 0);
+    initial_shared_policy.despeckle_size =
+        current_int_param_value(data->despeckle_size_param, 400);
+    initial_shared_policy.upscale_method =
+        current_int_param_value(data->upscale_method_param, kUpscaleBilinear);
+    initial_shared_policy.enable_tiling = current_int_param_value(data->enable_tiling_param, 0);
+    initial_shared_policy.tile_overlap = current_int_param_value(data->tile_overlap_param, 64);
+    initial_shared_policy.source_passthrough_enabled = current_int_param_value(
+        data->source_passthrough_param, kDefaultSourcePassthroughEnabled);
+    initial_shared_policy.edge_erode =
+        current_int_param_value(data->edge_erode_param, kDefaultEdgeErode);
+    initial_shared_policy.edge_blur =
+        current_int_param_value(data->edge_blur_param, kDefaultEdgeBlur);
 
     DeviceInfo preferred_device = detected_device;
     data->preferred_device = preferred_device;
@@ -1402,7 +1504,9 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
     set_param_secret(data->update_status_param, true);
     set_param_secret(data->open_update_page_param, true);
 
-    set_instance_data(instance, data.release());
+    InstanceData* instance_data = data.release();
+    set_instance_data(instance, instance_data);
+    register_shared_node_policy(instance_data, initial_shared_policy);
     log_create_total("success", "bootstrap=deferred");
     return kOfxStatOK;
 }
@@ -1790,14 +1894,328 @@ RuntimeNodeSummary compose_runtime_node_summary(const InstanceData& data) {
     return compose_runtime_node_summary_impl(data);
 }
 
+void apply_shared_node_policy_warning(InstanceData* data, const SharedNodePolicyResult& policy) {
+    if (data == nullptr || !policy.changed) {
+        return;
+    }
+    data->last_warning = std::string("Shared nodes use Screen Color ") +
+                         screen_color_policy_label(policy.screen_color) + " and Quality " +
+                         quality_mode_ui_label(policy.quality_mode) +
+                         ", plus shared inference setup.";
+    data->runtime_panel_dirty = true;
+}
+
+void mark_shared_node_policy_instances_dirty(SharedNodePolicyState& state,
+                                             InstanceData* except = nullptr) {
+    for (InstanceData* instance : state.instances) {
+        if (instance != nullptr && instance != except) {
+            instance->shared_node_policy_ui_dirty = true;
+        }
+    }
+}
+
+void register_shared_node_policy(InstanceData* data, int screen_color, int quality_mode) {
+    SharedNodePolicyValues values;
+    values.screen_color = screen_color;
+    values.quality_mode = quality_mode;
+    register_shared_node_policy(data, values);
+}
+
+void register_shared_node_policy(InstanceData* data, const SharedNodePolicyValues& values) {
+    if (data == nullptr) {
+        return;
+    }
+
+    SharedNodePolicyResult policy = make_shared_node_policy_result(values, false, false);
+    {
+        auto& state = shared_node_policy_state();
+        const std::scoped_lock lock(state.mutex);
+        const bool was_empty = state.instances.empty();
+        state.instances.insert(data);
+        data->shared_node_policy_registered = true;
+        if (was_empty) {
+            state.values = values;
+        } else if (!same_shared_node_policy_values(values, state.values)) {
+            state.values = values;
+            mark_shared_node_policy_instances_dirty(state, data);
+        }
+        policy = make_shared_node_policy_result(
+            state.values, state.instances.size() > 1,
+            state.instances.size() > 1 && !same_shared_node_policy_values(values, state.values));
+    }
+
+    if (policy.changed) {
+        data->shared_node_policy_ui_dirty = true;
+        apply_shared_node_policy_warning(data, policy);
+        log_message("shared_node_policy",
+                    std::string("event=register_mismatch effective_screen_color=") +
+                        screen_color_policy_label(policy.screen_color) + " effective_quality=" +
+                        quality_mode_ui_label(policy.quality_mode));
+    }
+}
+
+void unregister_shared_node_policy(InstanceData* data) {
+    if (data == nullptr || !data->shared_node_policy_registered) {
+        return;
+    }
+
+    InstanceData* remaining = nullptr;
+    {
+        auto& state = shared_node_policy_state();
+        const std::scoped_lock lock(state.mutex);
+        state.instances.erase(data);
+        data->shared_node_policy_registered = false;
+        data->shared_node_policy_ui_dirty = false;
+        if (state.instances.empty()) {
+            state.values = {};
+            return;
+        }
+        if (state.instances.size() == 1) {
+            remaining = *state.instances.begin();
+        }
+    }
+
+    if (remaining != nullptr) {
+        const int screen_color =
+            current_int_param_value(remaining->screen_color_param, kDefaultScreenColor);
+        const int quality_mode =
+            current_int_param_value(remaining->quality_mode_param, kQualityPreview);
+        SharedNodePolicyValues values;
+        values.screen_color = screen_color;
+        values.quality_mode = quality_mode;
+        values.quality_fallback_mode = current_int_param_value(
+            remaining->quality_fallback_mode_param, kQualityFallbackAuto);
+        values.refinement_mode =
+            current_int_param_value(remaining->refinement_mode_param, kRefinementAuto);
+        values.coarse_resolution_override = current_int_param_value(
+            remaining->coarse_resolution_override_param, kCoarseResolutionAutomatic);
+        values.input_color_space =
+            current_int_param_value(remaining->input_color_space_param, kDefaultInputColorSpace);
+        values.despill_strength =
+            current_double_param_value(remaining->despill_param, values.despill_strength);
+        values.spill_method =
+            current_int_param_value(remaining->spill_method_param, kDefaultSpillMethod);
+        values.despeckle_enabled = current_int_param_value(remaining->despeckle_param, 0);
+        values.despeckle_size = current_int_param_value(remaining->despeckle_size_param, 400);
+        values.upscale_method =
+            current_int_param_value(remaining->upscale_method_param, kUpscaleBilinear);
+        values.enable_tiling = current_int_param_value(remaining->enable_tiling_param, 0);
+        values.tile_overlap = current_int_param_value(remaining->tile_overlap_param, 64);
+        values.source_passthrough_enabled = current_int_param_value(
+            remaining->source_passthrough_param, kDefaultSourcePassthroughEnabled);
+        values.edge_erode = current_int_param_value(remaining->edge_erode_param, kDefaultEdgeErode);
+        values.edge_blur = current_int_param_value(remaining->edge_blur_param, kDefaultEdgeBlur);
+        auto& state = shared_node_policy_state();
+        const std::scoped_lock lock(state.mutex);
+        if (state.instances.size() == 1 && state.instances.contains(remaining)) {
+            state.values = values;
+            remaining->shared_node_policy_ui_dirty = false;
+        }
+    }
+}
+
+SharedNodePolicyResult enforce_shared_node_policy(InstanceData* data, int screen_color,
+                                                  int quality_mode) {
+    SharedNodePolicyValues values;
+    values.screen_color = screen_color;
+    values.quality_mode = quality_mode;
+    return enforce_shared_node_policy(data, values);
+}
+
+SharedNodePolicyResult enforce_shared_node_policy(InstanceData* data,
+                                                  const SharedNodePolicyValues& values) {
+    SharedNodePolicyResult policy = make_shared_node_policy_result(values, false, false);
+    if (data == nullptr) {
+        return policy;
+    }
+
+    {
+        auto& state = shared_node_policy_state();
+        const std::scoped_lock lock(state.mutex);
+        if (!data->shared_node_policy_registered) {
+            state.instances.insert(data);
+            data->shared_node_policy_registered = true;
+            if (state.instances.size() == 1) {
+                state.values = values;
+            }
+        }
+        if (state.instances.size() <= 1) {
+            state.values = values;
+            data->shared_node_policy_ui_dirty = false;
+            return policy;
+        }
+
+        if (!same_shared_node_policy_values(values, state.values)) {
+            if (!data->shared_node_policy_ui_dirty) {
+                state.values = values;
+                mark_shared_node_policy_instances_dirty(state, data);
+                policy = make_shared_node_policy_result(state.values, true, false);
+                log_message("shared_node_policy",
+                            std::string("event=render_policy_update effective_screen_color=") +
+                                screen_color_policy_label(policy.screen_color) +
+                                " effective_quality=" +
+                                quality_mode_ui_label(policy.quality_mode));
+                return policy;
+            }
+            data->shared_node_policy_ui_dirty = true;
+            policy = make_shared_node_policy_result(state.values, true, true);
+        } else {
+            policy = make_shared_node_policy_result(state.values, true, false);
+        }
+    }
+
+    if (policy.changed) {
+        apply_shared_node_policy_warning(data, policy);
+        log_message("shared_node_policy",
+                    std::string("event=render_policy_override effective_screen_color=") +
+                        screen_color_policy_label(policy.screen_color) + " effective_quality=" +
+                        quality_mode_ui_label(policy.quality_mode));
+    }
+    return policy;
+}
+
+bool is_shared_node_policy_param(std::string_view param_name) {
+    return param_name == kParamScreenColor || param_name == kParamQualityMode ||
+           param_name == kParamQualityFallbackMode || param_name == kParamRefinementMode ||
+           param_name == kParamCoarseResolutionOverride || param_name == kParamInputColorSpace ||
+           param_name == kParamDespillStrength || param_name == kParamSpillMethod ||
+           param_name == kParamAutoDespeckle || param_name == kParamDespeckleSize ||
+           param_name == kParamUpscaleMethod || param_name == kParamEnableTiling ||
+           param_name == kParamTileOverlap || param_name == kParamSourcePassthrough ||
+           param_name == kParamEdgeErode || param_name == kParamEdgeBlur;
+}
+
+void sync_shared_node_policy_params(InstanceData* data) {
+    if (data == nullptr || data->in_render || data->in_render_sequence) {
+        return;
+    }
+
+    SharedNodePolicyValues requested;
+    requested.screen_color = current_int_param_value(data->screen_color_param, kDefaultScreenColor);
+    requested.quality_mode = current_int_param_value(data->quality_mode_param, kQualityPreview);
+    requested.quality_fallback_mode =
+        current_int_param_value(data->quality_fallback_mode_param, kQualityFallbackAuto);
+    requested.refinement_mode =
+        current_int_param_value(data->refinement_mode_param, kRefinementAuto);
+    requested.coarse_resolution_override = current_int_param_value(
+        data->coarse_resolution_override_param, kCoarseResolutionAutomatic);
+    requested.input_color_space =
+        current_int_param_value(data->input_color_space_param, kDefaultInputColorSpace);
+    requested.despill_strength =
+        current_double_param_value(data->despill_param, requested.despill_strength);
+    requested.spill_method =
+        current_int_param_value(data->spill_method_param, kDefaultSpillMethod);
+    requested.despeckle_enabled = current_int_param_value(data->despeckle_param, 0);
+    requested.despeckle_size = current_int_param_value(data->despeckle_size_param, 400);
+    requested.upscale_method =
+        current_int_param_value(data->upscale_method_param, kUpscaleBilinear);
+    requested.enable_tiling = current_int_param_value(data->enable_tiling_param, 0);
+    requested.tile_overlap = current_int_param_value(data->tile_overlap_param, 64);
+    requested.source_passthrough_enabled = current_int_param_value(
+        data->source_passthrough_param, kDefaultSourcePassthroughEnabled);
+    requested.edge_erode = current_int_param_value(data->edge_erode_param, kDefaultEdgeErode);
+    requested.edge_blur = current_int_param_value(data->edge_blur_param, kDefaultEdgeBlur);
+
+    const SharedNodePolicyResult policy = enforce_shared_node_policy(data, requested);
+
+    if (!policy.changed && !data->shared_node_policy_ui_dirty) {
+        return;
+    }
+
+    if (g_suites.parameter != nullptr) {
+        const SharedNodePolicyValues& values = policy.values;
+        if (data->screen_color_param != nullptr && requested.screen_color != values.screen_color) {
+            g_suites.parameter->paramSetValue(data->screen_color_param, policy.screen_color);
+        }
+        if (data->quality_mode_param != nullptr && requested.quality_mode != values.quality_mode) {
+            g_suites.parameter->paramSetValue(data->quality_mode_param, policy.quality_mode);
+        }
+        if (data->quality_fallback_mode_param != nullptr &&
+            requested.quality_fallback_mode != values.quality_fallback_mode) {
+            g_suites.parameter->paramSetValue(data->quality_fallback_mode_param,
+                                              values.quality_fallback_mode);
+        }
+        if (data->refinement_mode_param != nullptr &&
+            requested.refinement_mode != values.refinement_mode) {
+            g_suites.parameter->paramSetValue(data->refinement_mode_param,
+                                              values.refinement_mode);
+        }
+        if (data->coarse_resolution_override_param != nullptr &&
+            requested.coarse_resolution_override != values.coarse_resolution_override) {
+            g_suites.parameter->paramSetValue(data->coarse_resolution_override_param,
+                                              values.coarse_resolution_override);
+        }
+        if (data->input_color_space_param != nullptr &&
+            requested.input_color_space != values.input_color_space) {
+            g_suites.parameter->paramSetValue(data->input_color_space_param,
+                                              values.input_color_space);
+        }
+        if (data->despill_param != nullptr &&
+            std::abs(requested.despill_strength - values.despill_strength) >= 1e-6) {
+            g_suites.parameter->paramSetValue(data->despill_param, values.despill_strength);
+        }
+        if (data->spill_method_param != nullptr &&
+            requested.spill_method != values.spill_method) {
+            g_suites.parameter->paramSetValue(data->spill_method_param, values.spill_method);
+        }
+        if (data->despeckle_param != nullptr &&
+            requested.despeckle_enabled != values.despeckle_enabled) {
+            g_suites.parameter->paramSetValue(data->despeckle_param, values.despeckle_enabled);
+        }
+        if (data->despeckle_size_param != nullptr &&
+            requested.despeckle_size != values.despeckle_size) {
+            g_suites.parameter->paramSetValue(data->despeckle_size_param, values.despeckle_size);
+        }
+        if (data->upscale_method_param != nullptr &&
+            requested.upscale_method != values.upscale_method) {
+            g_suites.parameter->paramSetValue(data->upscale_method_param, values.upscale_method);
+        }
+        if (data->enable_tiling_param != nullptr &&
+            requested.enable_tiling != values.enable_tiling) {
+            g_suites.parameter->paramSetValue(data->enable_tiling_param, values.enable_tiling);
+        }
+        if (data->tile_overlap_param != nullptr &&
+            requested.tile_overlap != values.tile_overlap) {
+            g_suites.parameter->paramSetValue(data->tile_overlap_param, values.tile_overlap);
+        }
+        if (data->source_passthrough_param != nullptr &&
+            requested.source_passthrough_enabled != values.source_passthrough_enabled) {
+            g_suites.parameter->paramSetValue(data->source_passthrough_param,
+                                              values.source_passthrough_enabled);
+        }
+        if (data->edge_erode_param != nullptr && requested.edge_erode != values.edge_erode) {
+            g_suites.parameter->paramSetValue(data->edge_erode_param, values.edge_erode);
+        }
+        if (data->edge_blur_param != nullptr && requested.edge_blur != values.edge_blur) {
+            g_suites.parameter->paramSetValue(data->edge_blur_param, values.edge_blur);
+        }
+        set_param_enabled(data->tile_overlap_param, values.enable_tiling != 0);
+        set_param_enabled(data->despeckle_size_param, values.despeckle_enabled != 0);
+        set_param_enabled(data->edge_erode_param, values.source_passthrough_enabled != 0);
+        set_param_enabled(data->edge_blur_param, values.source_passthrough_enabled != 0);
+    }
+    data->shared_node_policy_ui_dirty = false;
+    clear_instance_render_caches(data, true);
+    if (policy.changed) {
+        apply_shared_node_policy_warning(data, policy);
+        update_runtime_panel(data);
+    }
+}
+
+void reset_shared_node_policy_for_tests() {
+    auto& state = shared_node_policy_state();
+    const std::scoped_lock lock(state.mutex);
+    state.instances.clear();
+    state.values = {};
+}
+
 // Push the same telemetry the panel displays onto the OFX node indicator
 // via OFX MessageSuiteV2 setPersistentMessage. Unlike the param-driven
 // panel update, this is callable from any plugin action including the
 // render thread (ofxMessage.h:118-142 imposes no threading restriction
-// equivalent to ofxParam.h:1088). On hosts that allow render-thread
-// paramSetValue (DaVinci Resolve) this is a duplicate channel; on hosts
-// that defer paramSetValue to the next user interaction (Foundry Nuke 17)
-// this is the only live surface for dynamic runtime state.
+// equivalent to ofxParam.h:1088). On hosts whose panels cannot refresh
+// render-time paramSetValue safely, this is the live surface for dynamic
+// runtime state.
 //
 // Safe to invoke when the host does not implement setPersistentMessage:
 // the helper in ofx_plugin.cpp null-checks the V2 function pointer per
@@ -1811,10 +2229,10 @@ void update_runtime_node_indicator(InstanceData* data) {
     // message suite V2, but setPersistentMessage is NULL and
     // clearPersistentMessage is garbage." The set_persistent_message helper
     // already null-checks the function pointers, but skip the work entirely
-    // when the host is Resolve so we don't waste cycles formatting a body
-    // that nothing will display. Resolve users get their dynamic feedback
-    // through the panel params instead (Resolve allows mid-render
-    // paramSetValue).
+    // when the host is Resolve so we don't waste cycles formatting a body that
+    // nothing will display. Resolve users get detailed live telemetry from the
+    // per-frame log lines and the panel is synchronized from main-thread
+    // actions.
     if (is_resolve_host()) {
         return;
     }
@@ -2066,6 +2484,9 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 changed_param == kParamSourcePassthrough) {
                 sync_dependent_params(data);
             }
+            if (is_shared_node_policy_param(changed_param)) {
+                sync_shared_node_policy_params(data);
+            }
             if (changed_param == kParamRenderTimeout || changed_param == kParamPrepareTimeout) {
                 if (data->runtime_client != nullptr) {
                     int render_t = common::kDefaultOfxRenderTimeoutSeconds;
@@ -2089,8 +2510,8 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
             return kOfxStatOK;
         }
     }
-    if (data->runtime_panel_dirty && !data->in_render) {
-        data->runtime_panel_dirty = false;
+    if (data->runtime_panel_dirty && !data->in_render && !data->in_render_sequence) {
+        sync_shared_node_policy_params(data);
         update_runtime_panel_values(data);
     }
     return kOfxStatOK;
@@ -2119,6 +2540,7 @@ OfxStatus sync_private_data(OfxImageEffectHandle instance) {
                 std::string("enter dirty=") + (data->runtime_panel_dirty ? "1" : "0") +
                     " in_render=" + (data->in_render ? "1" : "0") +
                     " in_render_sequence=" + (data->in_render_sequence ? "1" : "0"));
+    sync_shared_node_policy_params(data);
     flush_runtime_panel(data);
     log_message("sync_private_data", "exit ok");
     return kOfxStatOK;
@@ -2133,6 +2555,7 @@ OfxStatus destroy_instance(OfxImageEffectHandle instance) {
     clear_persistent_message(instance);
     InstanceData* data = get_instance_data(instance);
     if (data != nullptr) {
+        unregister_shared_node_policy(data);
         // OFX hosts own the instance data slot via kOfxPropInstanceData;
         // ownership is handed to us in create_instance via .release() and
         // returned here through delete. A smart pointer cannot manage the

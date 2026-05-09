@@ -93,6 +93,10 @@ if(CORRIDORKEY_HAS_TORCHTRT)
     if(TARGET CUDA::cudart_static)
         target_link_libraries(corridorkey_torchtrt PRIVATE CUDA::cudart_static)
     endif()
+    if(CORRIDORKEY_HAS_CUDA)
+        target_link_libraries(corridorkey_torchtrt PRIVATE CUDA::nppc CUDA::nppig)
+        target_compile_definitions(corridorkey_torchtrt PRIVATE CORRIDORKEY_HAS_CUDA=1)
+    endif()
     if(MSVC)
         target_compile_options(corridorkey_torchtrt PRIVATE
             /bigobj
@@ -135,11 +139,24 @@ if(CORRIDORKEY_HAS_TORCHTRT)
     # stages the same DLL under <pack>/torchtrt-runtime/bin/ via the
     # packaging pipeline.
     if(WIN32 AND DEFINED CORRIDORKEY_TORCHTRT_RUNTIME_DIR)
+        set(_corridorkey_torchtrt_runtime_cuda_dlls)
+        if(CORRIDORKEY_HAS_CUDA AND CUDAToolkit_BIN_DIR)
+            foreach(_npp_name nppc64_12 nppial64_12 nppidei64_12 nppig64_12)
+                set(_npp_path "${CUDAToolkit_BIN_DIR}/${_npp_name}.dll")
+                if(EXISTS "${_npp_path}")
+                    list(APPEND _corridorkey_torchtrt_runtime_cuda_dlls "${_npp_path}")
+                endif()
+            endforeach()
+        endif()
         add_custom_command(TARGET corridorkey_torchtrt POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:corridorkey_torchtrt>"
                 "${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}/$<TARGET_FILE_NAME:corridorkey_torchtrt>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_corridorkey_torchtrt_runtime_cuda_dlls}
+                "${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}/"
             COMMENT "Staging corridorkey_torchtrt.dll into vendor/torchtrt-windows/bin (dev only)"
+            COMMAND_EXPAND_LISTS
             VERBATIM
         )
     endif()

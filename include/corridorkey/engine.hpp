@@ -103,6 +103,14 @@ class CORRIDORKEY_API Engine {
                                       StageTimingCallback on_stage = nullptr);
 
     /**
+     * @brief Process a frame and write alpha/foreground directly into caller-owned outputs.
+     */
+    Result<FrameResult> process_frame_into(const Image& rgb, const Image& alpha_hint,
+                                           const FrameOutputViews& outputs,
+                                           const InferenceParams& params = {},
+                                           StageTimingCallback on_stage = nullptr);
+
+    /**
      * @brief Process a batch of RGB frames with alpha hints.
      * @param rgbs List of input RGB images.
      * @param alpha_hints List of alpha hint images.

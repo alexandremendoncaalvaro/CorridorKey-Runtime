@@ -1,8 +1,10 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <corridorkey/types.hpp>
+#include <cstdint>
 #include <cstddef>
 #include <span>
 #include <sstream>
@@ -90,12 +92,23 @@ inline Result<NumericStats> analyze_finite_values(std::span<const float> values,
     });
 }
 
+inline bool contains_non_finite_value(std::span<const float> values) {
+    constexpr std::uint32_t kExponentMask = 0x7F800000U;
+    for (const float value : values) {
+        const auto bits = std::bit_cast<std::uint32_t>(value);
+        if ((bits & kExponentMask) == kExponentMask) {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline Result<void> validate_finite_values(std::span<const float> values, std::string_view label) {
-    const auto analysis = analyze_finite_values(values, label);
-    if (analysis) {
+    if (!contains_non_finite_value(values)) {
         return {};
     }
 
+    const auto analysis = analyze_finite_values(values, label);
     return Unexpected(analysis.error());
 }
 

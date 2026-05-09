@@ -6,10 +6,6 @@
 namespace corridorkey::core::detail {
 
 inline bool make_npp_stream_context(cudaStream_t stream, NppStreamContext& context) {
-    if (stream == nullptr) {
-        return false;
-    }
-
     int device_id = 0;
     if (cudaGetDevice(&device_id) != cudaSuccess) {
         return false;
@@ -32,8 +28,8 @@ inline bool make_npp_stream_context(cudaStream_t stream, NppStreamContext& conte
     }
 
     unsigned int stream_flags = 0;
-    if (cudaStreamGetFlags(stream, &stream_flags) != cudaSuccess) {
-        return false;
+    if (stream != nullptr) {
+        (void)cudaStreamGetFlags(stream, &stream_flags);
     }
 
     context = NppStreamContext{};

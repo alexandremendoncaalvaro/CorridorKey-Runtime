@@ -1,12 +1,16 @@
 #include "gpu_prep.hpp"
 
+#include <algorithm>
+
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
 #include <cuda_runtime_api.h>
 #include <npp.h>
 #include <nppi.h>
 
+#include "../common/parallel_for.hpp"
 #include "../common/stage_profiler.hpp"
 #include "npp_stream_context.hpp"
+#include "pinned_buffer.hpp"
 #endif
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-math-missing-parentheses,bugprone-implicit-widening-of-multiplication-result,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,performance-unnecessary-value-param,cppcoreguidelines-special-member-functions,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions)
@@ -66,6 +70,8 @@ struct GpuPrepState {
     float* resized_rgb_dev = nullptr;
     float* resized_hint_dev = nullptr;
     float* planar_dev = nullptr;
+    PinnedBuffer<float> src_rgb_host_pinned;
+    PinnedBuffer<float> src_hint_host_pinned;
 
     int current_src_rgb_w = 0;
     int current_src_rgb_h = 0;
@@ -76,6 +82,7 @@ struct GpuPrepState {
 
     bool gpu_available = false;
     cudaStream_t stream = nullptr;
+    cudaEvent_t completion_event = nullptr;
     NppStreamContext npp_context{};
 
     GpuPrepState() {
@@ -83,7 +90,13 @@ struct GpuPrepState {
         if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0) {
             if (cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess) {
                 if (detail::make_npp_stream_context(stream, npp_context)) {
-                    gpu_available = true;
+                    if (cudaEventCreateWithFlags(&completion_event, cudaEventDisableTiming) ==
+                        cudaSuccess) {
+                        gpu_available = true;
+                    } else {
+                        cudaStreamDestroy(stream);
+                        stream = nullptr;
+                    }
                 } else {
                     cudaStreamDestroy(stream);
                     stream = nullptr;
@@ -99,6 +112,9 @@ struct GpuPrepState {
 
     ~GpuPrepState() {
         release_buffers();
+        if (completion_event != nullptr) {
+            cudaEventDestroy(completion_event);
+        }
         if (stream != nullptr) {
             cudaStreamDestroy(stream);
         }
@@ -116,6 +132,8 @@ struct GpuPrepState {
         resized_rgb_dev = nullptr;
         resized_hint_dev = nullptr;
         planar_dev = nullptr;
+        src_rgb_host_pinned = PinnedBuffer<float>{};
+        src_hint_host_pinned = PinnedBuffer<float>{};
     }
 
     bool ensure_buffers(int src_rgb_w, int src_rgb_h, int src_hint_w, int src_hint_h, int model_w,
@@ -133,19 +151,31 @@ struct GpuPrepState {
         const size_t model_pixels = static_cast<size_t>(model_w) * model_h;
 
         if (cudaMalloc(&src_rgb_dev, 3 * src_rgb_pixels * sizeof(float)) != cudaSuccess) {
+            release_buffers();
             return false;
         }
         if (cudaMalloc(&src_hint_dev, src_hint_pixels * sizeof(float)) != cudaSuccess) {
+            release_buffers();
             return false;
         }
         if (cudaMalloc(&resized_rgb_dev, 3 * model_pixels * sizeof(float)) != cudaSuccess) {
+            release_buffers();
             return false;
         }
         if (cudaMalloc(&resized_hint_dev, model_pixels * sizeof(float)) != cudaSuccess) {
+            release_buffers();
             return false;
         }
         if (cudaMalloc(&planar_dev, 4 * model_pixels * sizeof(float)) != cudaSuccess) {
+            release_buffers();
             return false;
+        }
+
+        auto rgb_host_pinned = PinnedBuffer<float>::try_allocate(3 * src_rgb_pixels);
+        auto hint_host_pinned = PinnedBuffer<float>::try_allocate(src_hint_pixels);
+        if (rgb_host_pinned.has_value() && hint_host_pinned.has_value()) {
+            src_rgb_host_pinned = std::move(*rgb_host_pinned);
+            src_hint_host_pinned = std::move(*hint_host_pinned);
         }
 
         current_src_rgb_w = src_rgb_w;
@@ -157,6 +187,16 @@ struct GpuPrepState {
         return true;
     }
 };
+
+void copy_image_rows_to_pinned(Image image, float* dst, int copied_channels) {
+    const size_t row_floats = static_cast<size_t>(image.width) * copied_channels;
+    common::parallel_for_rows(image.height, [&](int row_begin, int row_end) {
+        for (int y = row_begin; y < row_end; ++y) {
+            const size_t row_offset = static_cast<size_t>(y) * row_floats;
+            std::copy_n(image.data.data() + row_offset, row_floats, dst + row_offset);
+        }
+    });
+}
 
 Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb, Image hint,
                                                   int model_width, int model_height,
@@ -180,13 +220,27 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
 
     const size_t model_pixels = static_cast<size_t>(model_width) * model_height;
 
+    const bool use_pinned_upload = !state.src_rgb_host_pinned.empty() &&
+                                   !state.src_hint_host_pinned.empty();
+    const float* upload_rgb_src = rgb.data.data();
+    const float* upload_hint_src = hint.data.data();
+
+    if (use_pinned_upload) {
+        common::measure_stage(on_stage, "gpu_prepare_pinned_stage", [&]() {
+            copy_image_rows_to_pinned(rgb, state.src_rgb_host_pinned.data(), 3);
+            copy_image_rows_to_pinned(hint, state.src_hint_host_pinned.data(), 1);
+        });
+        upload_rgb_src = state.src_rgb_host_pinned.data();
+        upload_hint_src = state.src_hint_host_pinned.data();
+    }
+
     common::measure_stage(on_stage, "gpu_prepare_upload_enqueue", [&]() {
         const size_t src_rgb_row_bytes = static_cast<size_t>(rgb.width) * 3 * sizeof(float);
-        cudaMemcpy2DAsync(state.src_rgb_dev, src_rgb_row_bytes, rgb.data.data(), src_rgb_row_bytes,
+        cudaMemcpy2DAsync(state.src_rgb_dev, src_rgb_row_bytes, upload_rgb_src, src_rgb_row_bytes,
                           src_rgb_row_bytes, rgb.height, cudaMemcpyHostToDevice, state.stream);
 
         const size_t src_hint_row_bytes = static_cast<size_t>(hint.width) * sizeof(float);
-        cudaMemcpy2DAsync(state.src_hint_dev, src_hint_row_bytes, hint.data.data(),
+        cudaMemcpy2DAsync(state.src_hint_dev, src_hint_row_bytes, upload_hint_src,
                           src_hint_row_bytes, src_hint_row_bytes, hint.height,
                           cudaMemcpyHostToDevice, state.stream);
     });
@@ -294,10 +348,27 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
         if (cuda_err != cudaSuccess) {
             return Unexpected(Error{ErrorCode::InferenceFailed, "GPU prep synchronization failed"});
         }
+    } else {
+        if (state.completion_event == nullptr) {
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed, "GPU prep completion event is unavailable"});
+        }
+        cudaError_t cuda_err = cudaSuccess;
+        common::measure_stage(on_stage, "gpu_prepare_event_record",
+                              [&]() { cuda_err = cudaEventRecord(state.completion_event, state.stream); });
+        if (cuda_err != cudaSuccess) {
+            return Unexpected(Error{ErrorCode::InferenceFailed,
+                                    "GPU prep completion event recording failed"});
+        }
     }
 
     return GpuPreparedInput{
         .planar_device = state.planar_dev,
+        .ready_event = state.completion_event,
+        .source_rgb_device = state.src_rgb_dev,
+        .source_width = rgb.width,
+        .source_height = rgb.height,
+        .source_channels = 3,
         .width = model_width,
         .height = model_height,
     };
@@ -380,7 +451,7 @@ Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device(Image rgb, Image hi
             Error{ErrorCode::HardwareNotSupported, "GPU input preparation is not available"});
     }
     return prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height, mean,
-                                    inv_stddev, true, on_stage);
+                                    inv_stddev, false, on_stage);
 #else
     (void)rgb;
     (void)hint;

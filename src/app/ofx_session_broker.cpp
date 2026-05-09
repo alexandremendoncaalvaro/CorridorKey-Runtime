@@ -392,19 +392,23 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
             on_stage, "prewarm_wait", [&]() { session->second.prewarm_ready.wait(); }, 1);
     }
 
-    auto result = session->second.engine->process_frame(
-        transport->rgb_view(), transport->hint_view(), request.params, on_stage);
+    auto alpha = transport->alpha_view();
+    auto foreground = transport->foreground_view();
+    auto result = session->second.engine->process_frame_into(
+        transport->rgb_view(), transport->hint_view(),
+        FrameOutputViews{.alpha = alpha, .foreground = foreground}, request.params, on_stage);
     if (!result) {
         m_sessions.erase(session);
         return Unexpected<Error>(result.error());
     }
 
-    auto alpha = transport->alpha_view();
-    auto foreground = transport->foreground_view();
     auto result_alpha = result->alpha.const_view();
     common::measure_stage(
         on_stage, "ofx_broker_writeback",
         [&]() {
+            if (result->external_output_written) {
+                return;
+            }
             copy_image_rows(result_alpha, alpha);
             if (!request.params.output_alpha_only) {
                 auto result_foreground = result->foreground.const_view();

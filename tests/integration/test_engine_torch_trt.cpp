@@ -1,7 +1,10 @@
 #include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
+#include <cstdlib>
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -52,6 +55,59 @@ bool has_stage(const std::vector<StageTiming>& timings, std::string_view name) {
     return std::any_of(timings.begin(), timings.end(),
                        [&](const StageTiming& timing) { return timing.name == name; });
 }
+
+bool has_stage_prefix(const std::vector<StageTiming>& timings, std::string_view prefix) {
+    return std::any_of(timings.begin(), timings.end(), [&](const StageTiming& timing) {
+        return timing.name.starts_with(prefix);
+    });
+}
+
+std::optional<std::string> environment_variable_copy(const char* name) {
+#if defined(_WIN32)
+    char* value = nullptr;
+    std::size_t size = 0;
+    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
+        return std::nullopt;
+    }
+    std::string result(value);
+    std::free(value);
+    return result;
+#else
+    const char* value = std::getenv(name);
+    if (value == nullptr) {
+        return std::nullopt;
+    }
+    return std::string(value);
+#endif
+}
+
+class ScopedEnvVar {
+   public:
+    ScopedEnvVar(const char* name, std::string value) : m_name(name) {
+        m_previous = environment_variable_copy(name);
+#if defined(_WIN32)
+        _putenv_s(m_name.c_str(), value.c_str());
+#else
+        setenv(m_name.c_str(), value.c_str(), 1);
+#endif
+    }
+
+    ~ScopedEnvVar() {
+#if defined(_WIN32)
+        _putenv_s(m_name.c_str(), m_previous.value_or("").c_str());
+#else
+        if (!m_previous.has_value()) {
+            unsetenv(m_name.c_str());
+        } else {
+            setenv(m_name.c_str(), m_previous->c_str(), 1);
+        }
+#endif
+    }
+
+   private:
+    std::string m_name;
+    std::optional<std::string> m_previous;
+};
 
 }  // namespace
 
@@ -264,6 +320,55 @@ TEST_CASE("TorchTRT session caches embedded external positional grids",
         [&](const StageTiming& timing) { second_timings.push_back(timing); });
     REQUIRE(second.has_value());
     CHECK_FALSE(has_stage(second_timings, "torchtrt_prepare_pos_grid"));
+#endif
+}
+
+TEST_CASE("TorchTRT CUDA graph path emits replay or explicit fallback telemetry",
+          "[integration][torchtrt][dynamic][regression]") {
+#if !defined(_WIN32)
+    SUCCEED("TorchTRT in-process backend is Windows-only in Sprint 1.");
+#else
+    const auto model_path = dynamic_torchtrt_external_pos_artifact();
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
+            model_path, "dynamic TorchTRT external-pos artifact");
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    ScopedEnvVar graph_env("CORRIDORKEY_TRT_CUDA_GRAPH", "1");
+    std::vector<StageTiming> create_timings;
+    auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT},
+                                 [&](const StageTiming& timing) {
+                                     create_timings.push_back(timing);
+                                 });
+    if (!engine.has_value()) {
+        SKIP("Engine::create failed: " + engine.error().message);
+    }
+    REQUIRE(has_stage(create_timings, "torchtrt_cuda_graph_config_enabled"));
+
+    constexpr int kRes = 512;
+    ImageBuffer rgb(kRes, kRes, 3);
+    ImageBuffer hint(kRes, kRes, 1);
+    std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.5F);
+    std::fill(hint.view().data.begin(), hint.view().data.end(), 1.0F);
+
+    InferenceParams params;
+    params.target_resolution = kRes;
+
+    std::vector<StageTiming> timings;
+    for (int iteration = 0; iteration < 4; ++iteration) {
+        auto result = engine.value()->process_frame(
+            rgb.view(), hint.view(), params,
+            [&](const StageTiming& timing) { timings.push_back(timing); });
+        REQUIRE(result.has_value());
+    }
+
+    const bool replayed = has_stage(timings, "torchtrt_cuda_graph_replay");
+    const bool reported_fallback = has_stage_prefix(timings, "torchtrt_cuda_graph_fallback_");
+    CHECK((replayed || reported_fallback));
+    if (reported_fallback) {
+        CHECK(has_stage(timings, "torchtrt_forward_direct"));
+    }
 #endif
 }
 
