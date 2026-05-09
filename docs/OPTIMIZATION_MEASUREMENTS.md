@@ -34,6 +34,11 @@ remain the source of truth for methodology and caveats.
 | `phase_8_gpu_prepare` | `0.7.4-12` | GPU-accelerated input preparation via NPP resizing, splitting, and normalization | full-frame `2048 -> 3840x2160` OFX-style harness `frame_prepare_inputs` improved by `~74%` | keep; effectively eliminates the final CPU bottleneck, achieving end-to-end device residence |
 | `phase_9_blue_dedicated_screen_color` | `0.8.3-win.1` (proposed) | dedicated CorridorKeyBlue catalog + screen-color OFX selection / render branching + despill `screen_channel` generalization | green-path bench gate within +1.5% (`avg_latency_ms`) and +4.3% (`ort_run`); blue dedicated baseline pending FP32-I/O wrapper re-export | gate passes; blue 512 measured; 1024 / 1536 / 2048 to be re-recorded after the in-flight re-export |
 | `phase_10_blue_dynamic_hybrid` | `0.8.3-win.1` | dynamic TorchScript candidates for green and blue | dynamic TorchScript loads and produces finite output at `512`, `1024`, and `2048`; dynamic green is `~40%` to `~54%` slower than the optimized green ONNX path in the recorded runner comparison | Windows RTX artifact identity is dynamic green plus dynamic blue; keep `phase_8_gpu_prepare` as the hot-path regression gate until a true dynamic Torch-TensorRT baseline is recorded |
+| `torchtrt_dynamic_windows_pinned_input` | `0.8.4-win.1-40-g9772a28-dirty-wc82aa0fe39c2` | persistent pinned host staging for TorchTRT GPU input upload | green heavy source passthrough `2048` RPC average improved from `620.0 ms` to `547.8 ms`; `gpu_prepare_upload_enqueue` dropped to about `0.08 ms` in the readiness matrix | keep; this ports the pinned host transfer rule to the TorchTRT input path without changing visual math |
+| `torchtrt_dynamic_windows_async_input` | `0.8.5-win.1-40-g9772a28-dirty-wc24b619e0786` | CUDA event handoff from GPU preparation to TorchTRT | green heavy source passthrough `2048` RPC average improved from the Resolve-observed `~1431 ms` frame average to `503.0 ms` in the readiness matrix; `frame_prepare_inputs` is now about `20.3 ms` and no longer exposes `gpu_prepare_sync` in the device-prepared path | keep; the remaining green bottleneck is model inference plus selected post-processing, not input synchronization |
+| `torchtrt_dynamic_windows_gpu_postprocess_writeback` | derived local `0.8.5-win.1-40-g9772a28-dirty` label | direct OFX output views plus TorchTRT GPU despill/source-passthrough post-processing | green alpha-only `2048` RPC average improved from `435.5 ms` to `385.9 ms`; OFX broker writeback is about `0.000 ms` | keep direct output views and GPU despill/source passthrough; constant-only despeckle measurements are not valid for readiness claims because they can hit post-processing early exits |
+| `torchtrt_dynamic_windows_cuda_graph_replay_sync` | `0.8.5-win.1-40-g9772a28-dirty-w996ada37955c` | TorchTRT CUDA Graph capture on a side stream with explicit replay/fallback telemetry | green model `2048` runner `p50 285.6 ms`; green processed plate `2048` OFX RPC `507.8 ms`; green alpha-only `2048` OFX RPC `417.3 ms`; every green and Blue-Green case reported replay and no fallback | keep; this brings the TorchTRT path in line with the documented CUDA Graph constraints already enforced by the ONNX path |
+| `torchtrt_dynamic_windows_resolve_host_contract` | derived local `0.8.5-win.1-40-g9772a28-dirty` label | restore OFX `RenderInstanceSafe`, defer render-sequence panel writes, and add CUDA event elapsed stages for TorchTRT replay/direct forward | readiness matrix stays green; green model `2048` runner `p50 293.0 ms`; green alpha-only `2048` RPC `390.5 ms`; green source-passthrough plate `2048` RPC `507.0 ms`; green replay CPU/GPU split is about `296.1 ms` vs `288.9 ms` in the harness | keep; this removes host-contract noise and gives the next Resolve manual test enough telemetry to distinguish GPU work from queue wait |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -69,6 +74,23 @@ The canonical automation path for repo-side measurements remains:
 - `scripts/run_corpus.sh`
 - `scripts/compare_benchmarks.py`
 
+Windows RTX dynamic TorchTRT checkpoints also require:
+
+- `scripts/run_windows_torchtrt_matrix.ps1`
+
+The TorchTRT matrix records model-only runner metrics, OFX RPC sidecar metrics,
+stage-timing bottleneck classification, and parameter coverage for runtime
+paths. When a prior matrix report exists, run the next checkpoint with
+`-BaselineReport <path>` so matching RPC cases fail on regressions above the
+same percent threshold used for the hot-path gate.
+
+TorchTRT optimization claims require non-constant input coverage. The
+`readiness` profile includes `plate` cases for green processed output, green
+source passthrough, green despeckle, blue processed output, blue source
+passthrough, and Blue-Green Channel Swap, plus a `random` green despeckle case.
+Reports that only exercise `constant` input are compatibility checks, not
+release-readiness or optimization evidence.
+
 ## Why Checkpoint Names Must Be Stable
 
 Each recorded state gets a stable checkpoint label. Use the same label in:
@@ -83,8 +105,10 @@ same installed product identity and overwrite the previous local plugin state.
 
 Display version policy for this track:
 
-- baseline remains `0.7.3`
-- optimization checkpoints use `0.7.4-X`
+- new Windows local checkpoints use the derived `git describe` label from
+  `scripts/windows.ps1`
+- historical baseline remains `0.7.3`
+- historical optimization checkpoints used `0.7.4-X`
 - shared-ORT checkpoint is `0.7.4-0`
 - extract-output attribution checkpoint is `0.7.4-1`
 - runtime-panel timing correction checkpoint is `0.7.4-2`
@@ -1421,6 +1445,337 @@ real opportunity is no longer basic host-side loop structure; it is the
 lower-copy output and memory-placement path, especially for the quality rungs
 that still do not benefit from the narrow bound-output contract.
 
+### `torchtrt_dynamic_windows_transport`
+
+This checkpoint uses the Windows TorchTRT readiness matrix with dynamic green
+and blue artifacts at `3840x2160 -> 2048`. It covers processed output,
+alpha-only output, source passthrough, heavier source passthrough, despeckle,
+tiling, dedicated blue, and Blue-Green Channel Swap.
+
+Decision: keep the Windows OFX shared-frame path on named shared memory rather
+than a temporary file mapping for generated runtime frames. Microsoft documents
+the `CreateFileMapping(INVALID_HANDLE_VALUE, ..., name)` pattern as named
+shared memory for processes that share memory without an associated file. The
+plugin still supports explicit file-backed mappings for tests and non-generated
+paths.
+
+Decision: do not clear the entire shared-frame payload on creation. The client
+fully writes `rgb` and `hint`, and the runtime fully writes `alpha` and
+`foreground` before either result plane is read. Clearing the full mapped
+payload touched about `265 MB` per UHD frame and added about `90 ms` per frame
+without changing visual output.
+
+Measured readiness results after the transport correction:
+
+- green model `2048`: `p50 303.8 ms`, finite output
+- blue model `2048`: `p50 682.1 ms`, finite output
+- green processed `2048`: `531.9 ms` average RPC roundtrip
+- green source passthrough `2048`: `600.9 ms` average RPC roundtrip
+- green heavy source passthrough `2048`: `620.0 ms` average RPC roundtrip
+- green despeckle `2048`: `565.6 ms` average RPC roundtrip
+- blue processed `2048`: `1012.0 ms` average RPC roundtrip
+- blue source passthrough `2048`: `1091.1 ms` average RPC roundtrip
+- Blue-Green Channel Swap `2048`: `550.0 ms` average RPC roundtrip
+
+The measured transfer shape changed materially:
+
+- generated transport creation is no longer a frame bottleneck:
+  `ofx_client_transport_create` averages about `0.1 ms`
+- host-to-device upload remains visible but bounded:
+  `gpu_prepare_upload_enqueue` averages about `47-54 ms`
+- device-to-host output is no longer the dominant issue:
+  `torchtrt_output_d2h_direct` averages about `14-16 ms`
+- green E2E is now dominated by `torchtrt_forward`, about `310-313 ms`
+- blue E2E is now dominated by `torchtrt_forward`, about `725-799 ms` in the
+  readiness runs
+
+Current reading: the Resolve-visible slowdown was not caused by green model
+inference. The unoptimized Windows transport and unnecessary full-payload clear
+were real E2E costs that the previous runner-only gate did not expose. The
+readiness matrix now reports client transport stages and ignores aggregate RPC
+wrapper stages when naming the dominant bottleneck, so this class of failure is
+covered by automation instead of manual Resolve testing alone.
+
+### `torchtrt_dynamic_windows_pinned_input`
+
+This checkpoint keeps the dynamic Windows TorchTRT artifact set and changes only
+the host memory source used by GPU input preparation. The RGB and hint frames are
+copied into persistent CUDA pinned host staging buffers when `cudaMallocHost`
+succeeds; the existing pageable upload path remains the fallback when pinned
+allocation is unavailable.
+
+Decision: keep this input staging path. NVIDIA's CUDA documentation defines
+page-locked host memory as the higher-bandwidth path for host-to-device
+transfers and states that asynchronous copies require page-locked memory. The
+Resolve logs showed `gpu_prepare_upload_enqueue` blocking for hundreds of
+milliseconds from the OFX runtime path even though model inference stayed near
+the expected green TorchTRT range, so moving the upload source to pinned memory
+matches both the measured bottleneck and the vendor guidance.
+
+Measured readiness results after pinned input staging:
+
+- green model `2048`: `p50 313.8 ms`, finite output
+- blue model `2048`: `p50 723.0 ms`, finite output
+- green processed `2048`: `498.1 ms` average RPC roundtrip
+- green source passthrough `2048`: `556.7 ms` average RPC roundtrip
+- green heavy source passthrough `2048`: `547.8 ms` average RPC roundtrip
+- green despeckle `2048`: `502.1 ms` average RPC roundtrip
+- blue processed `2048`: `1001.6 ms` average RPC roundtrip
+- blue source passthrough `2048`: `1075.7 ms` average RPC roundtrip
+- Blue-Green Channel Swap `2048`: `493.9 ms` average RPC roundtrip
+
+The measured transfer shape after pinned input staging:
+
+- `gpu_prepare_pinned_stage` averages about `13.0 ms` in the green heavy source
+  passthrough case
+- `gpu_prepare_upload_enqueue` averages about `0.08 ms` in the same case
+- `gpu_prepare_sync` averages about `5.9 ms` in the same case
+- `frame_prepare_inputs` averages about `28.9 ms` in the same case
+- green E2E remains dominated by `torchtrt_forward`, about `310-314 ms`
+
+Current reading: the repo-side readiness harness now validates the input memory
+placement fix directly. This does not prove Resolve will match the harness under
+host GPU contention, but it removes the exact upload behavior that the latest
+Resolve logs exposed and does not change color conversion, resize, normalization,
+post-processing, or model outputs.
+
+### `torchtrt_dynamic_windows_async_input`
+
+This checkpoint keeps the same dynamic Windows TorchTRT artifacts and changes
+the synchronization contract between GPU input preparation and TorchTRT. The
+device-prepared input path records a CUDA event on the preparation stream and
+passes that event to TorchTRT, where the current CUDA stream waits on it before
+wrapping the prepared planar tensor. The host-output `prepare_inputs` path still
+synchronizes because it must read the prepared tensor back to CPU memory.
+
+Decision: keep this handoff. NVIDIA's CUDA runtime documentation defines
+`cudaEventRecord` as capturing the work currently queued in a stream and defines
+`cudaStreamWaitEvent` as the stream-side dependency primitive for waiting on
+that captured work. The Resolve logs showed `gpu_prepare_sync` dominating the
+green E2E path while model-only green TorchTRT stayed near `~290-310 ms`, so a
+device-side stream dependency matches the measured bottleneck without changing
+resize, normalization, model math, source passthrough, despill, despeckle, or
+writeback semantics.
+
+Measured readiness results after async input handoff:
+
+- green model `2048`: `p50 290.9 ms`, finite output
+- blue model `2048`: `p50 677.3 ms`, finite output
+- green processed `2048`: `456.4 ms` average RPC roundtrip
+- green processed bilinear `2048`: `450.3 ms` average RPC roundtrip
+- green source passthrough `2048`: `488.9 ms` average RPC roundtrip
+- green heavy source passthrough `2048`: `503.0 ms` average RPC roundtrip
+- green alpha-only `2048`: `391.1 ms` average RPC roundtrip
+- green despeckle `2048`: `461.8 ms` average RPC roundtrip
+- blue processed `2048`: `934.2 ms` average RPC roundtrip
+- blue source passthrough `2048`: `1043.5 ms` average RPC roundtrip
+- Blue-Green Channel Swap `2048`: `452.2 ms` average RPC roundtrip
+
+The measured stage shape after async input handoff:
+
+- `frame_prepare_inputs` averages about `19-22 ms` across non-tiled green RPC
+  cases
+- `gpu_prepare_pinned_stage` averages about `10.7-12.4 ms`
+- `gpu_prepare_sync` is absent from the device-prepared TorchTRT path
+- `torchtrt_input_wait_event_enqueue` is the ordering point between preparation
+  and inference
+- green E2E is now dominated by `torchtrt_forward`, about `293-298 ms`
+
+Current reading: the fixed path now matches the same device-resident intent as
+the optimized ONNX green path for input preparation. The next measurable green
+targets are post-processing and host writeback for parameter-heavy paths; the
+input synchronization regression is covered by the unit GPU stage test and by
+the Windows TorchTRT readiness matrix.
+
+### `torchtrt_dynamic_windows_gpu_postprocess_writeback`
+
+This checkpoint keeps the dynamic Windows TorchTRT artifact set and changes the
+OFX output contract plus the TorchTRT post-processing path. The OFX runtime now
+passes alpha and foreground output spans into the engine. TorchTRT writes the
+final transport planes directly when the selected output mode and dimensions
+match the OFX transport. Green and blue GPU paths apply despill on CUDA tensors;
+source passthrough also runs on CUDA tensors when auxiliary outputs and
+despeckle are not requested.
+
+Decision: keep direct output views. The OFX broker writeback stage measured
+about `0.000 ms` in the readiness matrix because the runtime no longer creates
+a full `FrameResult` payload and then copies it back into the shared transport
+for the normal OFX render path.
+
+Decision: keep TorchTRT GPU despill and source passthrough. The matrix covers
+processed, alpha-only, source-passthrough, heavy source-passthrough, blue, and
+Blue-Green Channel Swap paths with the same stage timing contract. The steady
+green source-passthrough post stage is about `21 ms` after the first CUDA/Torch
+kernel setup frame, and visual math stays on the same alpha/output contract.
+
+Decision: reject the NPP connected-component despeckle experiment. The
+implementation followed the NPP marker-label compression contract, including
+CUDA destination storage, matching pitch requirements, stream context, and
+contour buffers for compressed label info. It passed functionally after those
+requirements were satisfied, but green despeckle measured `569.2 ms` average RPC
+roundtrip against the accepted `516.2 ms` checkpoint, a `+10.3%` regression.
+The accepted path keeps CPU despeckle for this optional parameter because it
+preserves visual quality and measures `471.0 ms` after direct output views.
+
+Measured readiness results after GPU post-processing and direct writeback:
+
+- green model `2048`: `p50 291.1 ms`, finite output
+- blue model `2048`: `p50 681.1 ms`, finite output
+- green alpha-only `2048`: `385.9 ms` average RPC roundtrip
+- green processed `2048`: `467.0 ms` average RPC roundtrip
+- green processed bilinear `2048`: `462.3 ms` average RPC roundtrip
+- green source passthrough `2048`: `599.8 ms` average RPC roundtrip
+- green heavy source passthrough `2048`: `540.7 ms` average RPC roundtrip
+- green despeckle `2048`: `463.7 ms` average RPC roundtrip
+- green tiled `2048`: `977.8 ms` average RPC roundtrip
+- blue processed `2048`: `911.4 ms` average RPC roundtrip
+- blue source passthrough `2048`: `951.3 ms` average RPC roundtrip
+- Blue-Green Channel Swap `2048`: `462.8 ms` average RPC roundtrip
+
+The measured stage shape after direct writeback:
+
+- `ofx_broker_writeback` averages about `0.000 ms` in direct-output OFX cases
+- non-tiled green cases are still dominated by `torchtrt_forward`, about
+  `295-318 ms` depending on color mode
+- `torchtrt_output_d2h_direct` averages about `36-45 ms` in the covered OFX
+  cases
+- green source-passthrough `post_source_passthrough_gpu` averages about
+  `21 ms` after first-frame CUDA/Torch setup
+- auto-despeckle uses the CPU post-processing path and measures about
+  `5 ms` for `post_despeckle`
+
+Current reading: the accepted changes port the output/writeback and GPU
+post-processing wins that are valid for the TorchTRT dynamic path without
+weakening quality. The optional despeckle parameter remains CPU-side because the
+measured GPU connected-component path regressed beyond the hot-path gate. The
+remaining green cost is model inference plus unavoidable device-to-host output
+download for the OFX transport.
+
+### `torchtrt_dynamic_windows_cuda_graph_replay_sync`
+
+This checkpoint keeps the dynamic Windows TorchTRT artifact set and changes the
+TorchTRT forward path instrumentation and CUDA Graph execution path. The OFX
+runtime report now records CUDA Graph configuration, warmup, capture, replay,
+direct-forward fallback, and sanitized fallback reason stages. The Windows
+TorchTRT matrix rejects a case when graph configuration is enabled but neither a
+replay nor an explicit fallback stage is present.
+
+Decision: keep TorchTRT CUDA Graph capture on a side stream with persistent
+static input and output tensors. The implementation follows the same constraints
+used by the ONNX runtime path: CUDA Graph replay uses stable virtual memory
+addresses, warmup runs before capture, capture runs on a non-default stream, and
+shape changes reset the recorded graph.
+
+Decision: keep synchronized replay timing. Earlier telemetry measured only the
+enqueue cost and shifted the model work into output materialization. The accepted
+path synchronizes replay inside `torchtrt_cuda_graph_replay`, so
+`torchtrt_forward` is the measured model stage instead of a hidden async cost.
+
+Measured readiness results with synchronized replay telemetry:
+
+- green model `2048`: `p50 285.6 ms`, `p99 287.8 ms`, finite output, TensorRT
+  marker present, external positional metadata present
+- blue model `2048`: `p50 665.6 ms`, `p99 667.5 ms`, finite output, TensorRT
+  marker present
+- green alpha-only `2048`: `417.3 ms` average RPC roundtrip
+- green processed `2048`: `518.6 ms` average RPC roundtrip
+- green processed plate `2048`: `507.8 ms` average RPC roundtrip
+- green source passthrough `2048`: `634.5 ms` average RPC roundtrip
+- green source passthrough plate `2048`: `556.5 ms` average RPC roundtrip
+- green heavy source passthrough `2048`: `585.7 ms` average RPC roundtrip
+- green heavy source passthrough plate `2048`: `595.2 ms` average RPC roundtrip
+- green despeckle `2048`: `515.6 ms` average RPC roundtrip
+- green despeckle plate `2048`: `552.7 ms` average RPC roundtrip
+- green tiled `2048`: `1063.2 ms` average RPC roundtrip
+- blue processed `2048`: `996.6 ms` average RPC roundtrip
+- blue source passthrough `2048`: `1089.2 ms` average RPC roundtrip
+- Blue-Green Channel Swap `2048`: `521.7 ms` average RPC roundtrip
+
+The measured stage shape after synchronized replay:
+
+- green and Blue-Green non-tiled RPC cases report
+  `torchtrt_cuda_graph_config_enabled`, replay samples, and zero fallback
+  events
+- blue RPC cases report `torchtrt_cuda_graph_config_marker_missing` and direct
+  forward samples because the current blue dynamic artifact is not the external
+  positional-metadata TorchTRT path
+- non-tiled green cases are dominated by `torchtrt_forward`, about
+  `313-319 ms` in the readiness matrix
+- direct single-case OFX probe measured `torchtrt_cuda_graph_replay` at
+  `289.7 ms`, `torchtrt_output_d2h_direct` at `33.4 ms`, and
+  `frame_prepare_inputs` at `19.7 ms`
+
+Current reading: the CUDA Graph replay implementation is correct under the
+standalone runner and RPC harness, but a real Resolve/Fusion session exposed a
+separate host-contract issue around render-safety declaration and render-thread
+panel writes. That issue must stay separate from model artifact validation: the
+same installed build showed stable green replay in the harness and slow replay
+only under the real Resolve render context.
+
+### TorchTRT Resolve Host Contract And Queue Attribution
+
+Decision: advertise the OFX plugin as `kOfxImageEffectRenderInstanceSafe` with
+`kOfxImageEffectPluginPropHostFrameThreading = 0`. The render path already owns
+an instance-level `render_mutex`, so this descriptor matches the OpenFX contract
+for one render action per instance without telling Fusion that the plugin is
+globally render-unsafe.
+
+Decision: defer runtime-panel `paramSetValue` during both `Render` and the
+`BeginSequenceRender`/`EndSequenceRender` window for every host. Runtime logs
+remain the live per-frame telemetry surface; panel params are synchronized from
+main-thread actions.
+
+Decision: keep CUDA event elapsed telemetry alongside the CPU wall-time stage:
+
+- `torchtrt_cuda_graph_replay` is the CPU wait for graph replay completion
+- `torchtrt_cuda_graph_replay_gpu` is the elapsed GPU work between CUDA events
+- `torchtrt_forward_direct` is the CPU wait for direct forward completion
+- `torchtrt_forward_direct_gpu` is the elapsed GPU work between CUDA events
+
+Resolve/Fusion log evidence that motivated this checkpoint:
+
+- the installed `w9558167b4cf0` build used green TorchTRT `2048`,
+  `source_passthrough=1`, `sp_erode_px=6`, and `sp_blur_px=14`
+- that manual session had `17` render requests with request `p50 1500.5 ms`
+  and `torchtrt_cuda_graph_replay p50 1367.8 ms`
+- the same build's automated green source-passthrough sessions kept graph replay
+  near `315-318 ms`
+- Resolve logged that `OfxImageEffectRenderUnsafe` is not supported in Fusion
+- the OFX log recorded `585` `OfxActionInstanceChanged` entries during the
+  manual render window
+- the sidecar lifecycle was clean in that session: release destroyed the session,
+  the runtime server logged `server_shutdown` and `server_stop`, and no
+  CorridorKey/OFX process remained alive
+
+Measured readiness results after the host-contract and attribution fix:
+
+- green model `2048`: `p50 293.0 ms`, `p99 293.9 ms`, finite output, TensorRT
+  marker present, external positional metadata present
+- blue model `2048`: `p50 681.9 ms`, `p99 682.7 ms`, finite output, TensorRT
+  marker present
+- green alpha-only `2048`: `390.5 ms` average RPC roundtrip
+- green processed `2048`: `468.8 ms` average RPC roundtrip
+- green source passthrough `2048`: `562.6 ms` average RPC roundtrip
+- green source passthrough plate `2048`: `507.0 ms` average RPC roundtrip
+- green heavy source passthrough `2048`: `543.1 ms` average RPC roundtrip
+- green heavy source passthrough plate `2048`: `530.5 ms` average RPC roundtrip
+- green despeckle `2048`: `465.6 ms` average RPC roundtrip
+- green tiled `2048`: `988.2 ms` average RPC roundtrip
+- blue processed `2048`: `986.1 ms` average RPC roundtrip
+- blue source passthrough `2048`: `992.4 ms` average RPC roundtrip
+- Blue-Green Channel Swap `2048`: `515.4 ms` average RPC roundtrip
+
+The measured queue split after the fix:
+
+- non-tiled green RPC cases report replay CPU/GPU deltas of about `5-8 ms` in
+  the harness
+- blue RPC cases report direct-forward CPU/GPU deltas of about `5-12 ms` in the
+  harness
+- a future Resolve manual run where CPU replay remains near seconds while GPU
+  replay remains near `290-315 ms` is queue/contention wait, not model compute
+- a future Resolve manual run where both CPU replay and GPU replay rise together
+  is actual model execution slowdown under the Resolve render context
+
 ## Why Installer Handling Must Stay Predictable
 
 Release packaging recreates `dist/`, so the local checkpoint folder must be
@@ -1445,7 +1800,7 @@ After each optimization slice:
 
 For the current Windows flow, build checkpoint installers with:
 
-- `scripts/windows.ps1 -Task release -Version 0.7.4 -Track rtx -DisplayVersionLabel 0.7.4-X`
+- `scripts/windows.ps1 -Task release -Version X.Y.Z -Track rtx -Flavor online`
 
 When recording a manual OFX run, always write down:
 
