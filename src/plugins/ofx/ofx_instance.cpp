@@ -2308,8 +2308,14 @@ OfxStatus end_sequence_render(OfxImageEffectHandle instance, OfxPropertySetHandl
     clear_instance_render_caches(data, false);
     log_message("end_sequence_render", "Sequence render caches cleared.");
     // Clear the sequence flag last so anything triggered above still defers
-    // paramSetValue. The flush happens on the next main-thread action.
+    // paramSetValue. Resolve keeps the runtime timing fields visible and does
+    // not reliably request a main-thread sync after every manual frame, so
+    // flush its panel here once the render sequence has ended. Strict hosts
+    // keep the deferred path.
     data->in_render_sequence = false;
+    if (is_resolve_host()) {
+        flush_runtime_panel(data);
+    }
     return kOfxStatOK;
 }
 

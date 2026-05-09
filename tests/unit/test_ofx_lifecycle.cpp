@@ -464,6 +464,80 @@ TEST_CASE("DaVinci Resolve defers paramSetValue during render", "[unit][ofx][reg
     CHECK(data.runtime_panel_dirty);
 }
 
+TEST_CASE("DaVinci Resolve flushes runtime panel at end of render sequence",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    data.in_render_sequence = true;
+    data.runtime_panel_dirty = true;
+    data.last_frame_ms = 33.0;
+
+    FakeEffectProps props{.instance_data = &data};
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameResolve;
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_param_set_value_count = 0;
+
+    REQUIRE(end_sequence_render(reinterpret_cast<OfxImageEffectHandle>(&props), nullptr) ==
+            kOfxStatOK);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_host_name = previous_host_name;
+
+    CHECK_FALSE(data.in_render_sequence);
+    CHECK(g_param_set_value_count > 0);
+    CHECK_FALSE(data.runtime_panel_dirty);
+}
+
+TEST_CASE("Foundry Nuke keeps runtime panel deferred at end of render sequence",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    data.in_render_sequence = true;
+    data.runtime_panel_dirty = true;
+    data.last_frame_ms = 33.0;
+
+    FakeEffectProps props{.instance_data = &data};
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameNuke;
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_param_set_value_count = 0;
+
+    REQUIRE(end_sequence_render(reinterpret_cast<OfxImageEffectHandle>(&props), nullptr) ==
+            kOfxStatOK);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_host_name = previous_host_name;
+
+    CHECK_FALSE(data.in_render_sequence);
+    CHECK(g_param_set_value_count == 0);
+    CHECK(data.runtime_panel_dirty);
+}
+
 TEST_CASE("update_runtime_panel flushes paramSetValue on the main thread",
           "[unit][ofx][regression]") {
     InstanceData data{};
