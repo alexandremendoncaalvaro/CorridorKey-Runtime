@@ -518,10 +518,6 @@ Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device_on_stream(
         return Unexpected(
             Error{ErrorCode::HardwareNotSupported, "GPU input preparation is not available"});
     }
-    if (cuda_stream == nullptr) {
-        return Unexpected(Error{ErrorCode::InferenceFailed,
-                                "TorchTRT current CUDA stream is unavailable for GPU prep"});
-    }
     NppStreamContext npp_context{};
     cudaStream_t stream = reinterpret_cast<cudaStream_t>(cuda_stream);
     if (!detail::make_npp_stream_context(stream, npp_context)) {

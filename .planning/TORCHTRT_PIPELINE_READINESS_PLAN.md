@@ -89,7 +89,9 @@ de cor compartilhados.
 - P0: Implementar ADR-0003 e task `0004`: mover o preparo TorchTRT
   prepared-input para a current stream do Torch/PyTorch, com `NppStreamContext`
   associado a essa stream e sem dependencia de `cudaStreamWaitEvent` de uma
-  stream independente no caminho preparado.
+  stream independente no caminho preparado. A disponibilidade da stream deve ser
+  separada do valor do handle, porque CUDA define handle `0` como default stream
+  valido.
 - P0: Validar em Resolve que `gpu_prepare_wait_over_device` desaparece ou fica
   perto de zero, e que o tempo nao reaparece em outro stage pinado.
 - P0: Manter o caminho device-input e o device-to-device de Source Passthrough

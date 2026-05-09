@@ -2108,10 +2108,15 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
             auto gpu_prepare_res = common::measure_stage(
                 on_stage, "frame_prepare_inputs",
                 [&]() -> Result<core::GpuPreparedInput> {
+                    const auto current_stream = m_torch_trt_session->current_cuda_stream();
+                    if (!current_stream.available) {
+                        return Unexpected(Error{
+                            ErrorCode::HardwareNotSupported,
+                            "TorchTRT current CUDA stream is unavailable for GPU prep"});
+                    }
                     return m_gpu_prep.prepare_inputs_device_on_stream(
                         rgb, alpha_hint, target_res, target_res, kCorridorKeyRgbMean,
-                        kCorridorKeyRgbInvStddev, m_torch_trt_session->current_cuda_stream(),
-                        on_stage);
+                        kCorridorKeyRgbInvStddev, current_stream.handle, on_stage);
                 },
                 1);
             if (gpu_prepare_res.has_value()) {

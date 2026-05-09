@@ -27,6 +27,16 @@ or falsified by Resolve logs.
   and `torchtrt_replay_queue_wait` near zero.
 - The same build in the OFX RPC harness shows `gpu_prepare_wait_over_device` at
   0 ms and total processed Green 2048 frames near 508 to 518 ms.
+- Resolve logs from package `0.8.5-win.1-54-g6c4dad5` show
+  `GPU TorchScript prep failed, falling back to CPU: TorchTRT current CUDA
+  stream is unavailable for GPU prep`, followed by CPU `frame_prepare_inputs`
+  and `torchtrt_prepare_pack`.
+- The same logs show `torchtrt_cuda_graph_input_copy_gpu` near 0.10 ms while
+  `torchtrt_cuda_graph_input_copy_queue_wait` is about 734 to 807 ms, proving
+  the reported copy wall time is queue wait, not the device copy itself.
+- Official CUDA Runtime documentation defines `cudaStream_t` value `0` as the
+  default stream. The code treated `nullptr` as unavailable, so a valid default
+  current stream was rejected.
 - `main` avoids this exact boundary by synchronizing GPU prep and returning a
   host tensor before inference, but that path loses the branch's device-input
   optimization.
@@ -61,6 +71,8 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [x] The TorchTRT prepared-input path no longer requires
   `cudaStreamWaitEvent` on an independent GPU-prep completion event.
 - [x] Public headers still do not expose CUDA, NPP, or LibTorch types.
+- [x] The current-stream contract treats CUDA stream handle `0` as valid when
+  the TorchTRT session reports stream availability.
 - [x] Error handling remains `Result<T>` based for expected failures.
 - [x] Source passthrough still uses device-to-device copy when the prepared
   source RGB device pointer is available.
@@ -83,6 +95,8 @@ applicable.
 - [x] Route the TorchTRT prepared path in `src/core/inference_session.cpp` and
   `src/core/torch_trt_session.cpp` so input prep and tensor consumption are
   ordered on the Torch current CUDA stream.
+- [x] Separate current-stream availability from the opaque handle value so the
+  CUDA default stream does not trigger CPU fallback.
 - [x] Keep the existing independent-stream path only where it remains required
   by non-TorchTRT callers or tests, and keep telemetry able to prove which path
   ran.
@@ -133,6 +147,14 @@ did not exercise the prepared-input GPU path because the available packaged
 model took the CPU pack/upload TorchTRT path and the external-pos dynamic
 TorchTRT test artifact is absent from this workspace. Resolve manual logs remain
 the required validation for the P0 wait removal.
+
+Resolve logs from package `0.8.5-win.1-54-g6c4dad5` falsified the first
+current-stream implementation. The runtime entered GPU prep, but the TorchTRT
+current stream handle was `0`; `GpuInputPrep` interpreted that as unavailable
+and forced CPU fallback. CUDA defines stream `0` as the default stream, so the
+fix separates stream availability from the opaque handle and allows
+`prepare_inputs_device_on_stream(..., nullptr, ...)` when the caller has already
+proved that the stream is available.
 
 ## Definition of Done
 

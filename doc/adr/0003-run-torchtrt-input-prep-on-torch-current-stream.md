@@ -28,6 +28,11 @@ independent NPP stream a required shape for this pipeline. Relevant open-source
 PyTorch CUDA extensions use the PyTorch current stream when launching adjacent
 custom CUDA work so ordering remains owned by the tensor runtime.
 
+CUDA Runtime documentation also defines the default stream as the stream used
+when `0` is passed as a `cudaStream_t`. Therefore a raw CUDA stream handle
+cannot double as an availability sentinel: `0` can mean a valid default stream,
+not "no stream."
+
 Repository history explains why `main` does not show this exact failure mode:
 `main` synchronizes GPU input preparation and downloads the prepared tensor to
 host before inference. This branch removed that boundary to keep the TorchTRT
@@ -49,6 +54,8 @@ or fallback, not as the primary fix.
 The change must remain inside `src/core/` internals. Public headers must not
 expose CUDA, NPP, or LibTorch types. Any stream parameter crossing internal
 class boundaries must use an internal-only abstraction or opaque pointer.
+Availability must be represented separately from the opaque stream value so the
+CUDA default stream remains a valid current-stream path.
 
 ## Consequences
 

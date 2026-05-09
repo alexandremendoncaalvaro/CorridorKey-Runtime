@@ -42,6 +42,11 @@ struct TorchTrtFrameResult {
     bool post_despill_applied = false;
 };
 
+struct TorchTrtCudaStream {
+    void* handle = nullptr;
+    bool available = false;
+};
+
 // Wraps a Torch-TensorRT compiled .ts engine for in-process forward.
 // Sister to MlxSession - same wrapping pattern used by InferenceSession,
 // gated on Backend::TorchTRT. Built only when CORRIDORKEY_HAS_TORCHTRT is
@@ -101,7 +106,7 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
         const InferenceParams* post_process_params = nullptr,
         TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
 
-    [[nodiscard]] void* current_cuda_stream() const;
+    [[nodiscard]] TorchTrtCudaStream current_cuda_stream() const;
 
     [[nodiscard]] int model_resolution() const;
 

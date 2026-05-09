@@ -1557,14 +1557,17 @@ int TorchTrtSession::model_resolution() const {
     return m_impl ? m_impl->resolution : 0;
 }
 
-void* TorchTrtSession::current_cuda_stream() const {
+TorchTrtCudaStream TorchTrtSession::current_cuda_stream() const {
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     if (m_impl == nullptr) {
-        return nullptr;
+        return {};
     }
-    return c10::cuda::getCurrentCUDAStream().stream();
+    return TorchTrtCudaStream{
+        .handle = c10::cuda::getCurrentCUDAStream().stream(),
+        .available = true,
+    };
 #else
-    return nullptr;
+    return {};
 #endif
 }
 
