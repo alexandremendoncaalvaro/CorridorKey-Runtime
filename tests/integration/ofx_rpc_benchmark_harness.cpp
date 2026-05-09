@@ -8,7 +8,7 @@
 //
 // Usage:
 //   ofx_rpc_benchmark_harness \
-//     --server-binary <path-to-corridorkey> \
+//     --server-binary <path-to-corridorkey_ofx_runtime_server> \
 //     --model <path-to-model> \
 //     --device mlx \
 //     --resolution 1024 \
@@ -80,25 +80,28 @@ struct HarnessOptions {
     int idle_timeout_ms = 300000;
     int launch_timeout_ms = 15000;
     bool keep_server = false;
+    std::string screen_color_mode = "green";
     // macOS-only: QoS class to apply to the harness (and therefore inherit into
     // the spawned runtime server, absent a fix) before launching. Values:
     // "user-initiated" (default), "utility", "background". This reproduces the
     // Resolve render-action thread's QoS context used to diagnose the
     // v0.7.6-mac.1 per-frame slowdown.
     std::string parent_qos_class = "user-initiated";
-    // Input-content mode. "constant" fills with a fixed green-screen tone
-    // (the legacy synthetic harness behavior, and equivalent to the zero-fill
-    // the CLI `benchmark` subcommand uses). "random" regenerates a PRNG
-    // image per iteration so MLX cannot exploit identical-input paths or
-    // constant-tensor optimizations. Use "random" to produce a
-    // content-varying steady-state baseline comparable to real Resolve
-    // traffic; the gap between constant and random exposes how much of
-    // the documented ~287 ms MLX floor is a degenerate-input artifact.
+    // Input-content mode. "constant" preserves the legacy fixed green-screen
+    // synthetic frame. "plate" generates deterministic green/blue-screen
+    // frames with a foreground subject and mild texture. "random" is the
+    // stress case that regenerates full-frame PRNG pixels each iteration.
     std::string input_mode = "constant";
-    // Optional PRNG seed for --input-mode=random so runs are reproducible.
+    // Optional seed for --input-mode=plate or --input-mode=random.
     std::uint32_t input_random_seed = 0xC0B7A1C0u;
     bool source_passthrough = true;
+    bool output_alpha_only = false;
     bool output_auxiliary_images = false;
+    float despill_strength = InferenceParams::kDefaultDespillStrength;
+    bool auto_despeckle = false;
+    int despeckle_size = InferenceParams::kDefaultDespeckleSizePx;
+    bool enable_tiling = false;
+    int tile_padding = InferenceParams::kDefaultTilePaddingPx;
     int sp_erode_px = InferenceParams::kDefaultSpErodePx;
     int sp_blur_px = InferenceParams::kDefaultSpBlurPx;
     UpscaleMethod upscale_method = UpscaleMethod::Lanczos4;
@@ -183,6 +186,10 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
             options.request_timeout_ms = std::atoi(value->c_str());
         } else if (argument == "--keep-server") {
             options.keep_server = true;
+        } else if (argument == "--screen-color-mode") {
+            auto value = need("--screen-color-mode");
+            if (!value) return Unexpected(value.error());
+            options.screen_color_mode = *value;
         } else if (argument == "--parent-qos-class") {
             auto value = need("--parent-qos-class");
             if (!value) return Unexpected(value.error());
@@ -208,6 +215,36 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
             auto parsed = parse_bool_option(*value, "--output-auxiliary-images");
             if (!parsed) return Unexpected(parsed.error());
             options.output_auxiliary_images = *parsed;
+        } else if (argument == "--output-alpha-only") {
+            auto value = need("--output-alpha-only");
+            if (!value) return Unexpected(value.error());
+            auto parsed = parse_bool_option(*value, "--output-alpha-only");
+            if (!parsed) return Unexpected(parsed.error());
+            options.output_alpha_only = *parsed;
+        } else if (argument == "--despill-strength") {
+            auto value = need("--despill-strength");
+            if (!value) return Unexpected(value.error());
+            options.despill_strength = std::strtof(value->c_str(), nullptr);
+        } else if (argument == "--despeckle") {
+            auto value = need("--despeckle");
+            if (!value) return Unexpected(value.error());
+            auto parsed = parse_bool_option(*value, "--despeckle");
+            if (!parsed) return Unexpected(parsed.error());
+            options.auto_despeckle = *parsed;
+        } else if (argument == "--despeckle-size") {
+            auto value = need("--despeckle-size");
+            if (!value) return Unexpected(value.error());
+            options.despeckle_size = std::atoi(value->c_str());
+        } else if (argument == "--enable-tiling") {
+            auto value = need("--enable-tiling");
+            if (!value) return Unexpected(value.error());
+            auto parsed = parse_bool_option(*value, "--enable-tiling");
+            if (!parsed) return Unexpected(parsed.error());
+            options.enable_tiling = *parsed;
+        } else if (argument == "--tile-padding") {
+            auto value = need("--tile-padding");
+            if (!value) return Unexpected(value.error());
+            options.tile_padding = std::atoi(value->c_str());
         } else if (argument == "--sp-erode") {
             auto value = need("--sp-erode");
             if (!value) return Unexpected(value.error());
@@ -300,6 +337,76 @@ void fill_random_hint(ImageBuffer& buffer, std::uint32_t seed) {
     }
 }
 
+float hashed_unit(int x, int y, std::uint32_t seed) {
+    std::uint32_t state = seed ^ (static_cast<std::uint32_t>(x) * 0x9E3779B9u) ^
+                          (static_cast<std::uint32_t>(y) * 0x85EBCA6Bu);
+    return static_cast<float>(xorshift32(state) & 0x00FFFFFFu) /
+           static_cast<float>(0x00FFFFFFu);
+}
+
+void fill_plate_rgb(ImageBuffer& buffer, const std::string& screen_color_mode,
+                    std::uint32_t seed) {
+    auto image = buffer.view();
+    const bool blue_screen = screen_color_mode == "blue" || screen_color_mode == "blue_green";
+    const float bg_r = blue_screen ? 0.08f : 0.12f;
+    const float bg_g = blue_screen ? 0.18f : 0.68f;
+    const float bg_b = blue_screen ? 0.72f : 0.10f;
+    const float subject_r = 0.72f;
+    const float subject_g = 0.52f;
+    const float subject_b = 0.42f;
+    const float width = static_cast<float>(image.width);
+    const float height = static_cast<float>(image.height);
+    const float cx = width * 0.50f +
+                     static_cast<float>(static_cast<int>(seed % 73u) - 36) * 0.5f;
+    const float cy = height * 0.52f +
+                     static_cast<float>(static_cast<int>((seed >> 8u) % 61u) - 30) * 0.5f;
+    const float rx = width * 0.18f;
+    const float ry = height * 0.34f;
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            const auto index =
+                (static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) +
+                 static_cast<std::size_t>(x)) *
+                3U;
+            const float nx = (static_cast<float>(x) - cx) / rx;
+            const float ny = (static_cast<float>(y) - cy) / ry;
+            const float subject = std::clamp((1.14f - (nx * nx + ny * ny)) * 6.0f, 0.0f, 1.0f);
+            const float grain = (hashed_unit(x, y, seed) - 0.5f) * 0.035f;
+            const float vertical = static_cast<float>(y) / std::max(height, 1.0f);
+            const float bg_shade = (vertical - 0.5f) * 0.06f + grain;
+            image.data[index + 0] =
+                std::clamp(bg_r + bg_shade + subject * (subject_r - bg_r), 0.0f, 1.0f);
+            image.data[index + 1] =
+                std::clamp(bg_g + bg_shade + subject * (subject_g - bg_g), 0.0f, 1.0f);
+            image.data[index + 2] =
+                std::clamp(bg_b + bg_shade + subject * (subject_b - bg_b), 0.0f, 1.0f);
+        }
+    }
+}
+
+void fill_plate_hint(ImageBuffer& buffer, std::uint32_t seed) {
+    auto image = buffer.view();
+    const float width = static_cast<float>(image.width);
+    const float height = static_cast<float>(image.height);
+    const float cx = width * 0.50f +
+                     static_cast<float>(static_cast<int>(seed % 73u) - 36) * 0.5f;
+    const float cy = height * 0.52f +
+                     static_cast<float>(static_cast<int>((seed >> 8u) % 61u) - 30) * 0.5f;
+    const float rx = width * 0.20f;
+    const float ry = height * 0.36f;
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            const auto index =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) +
+                static_cast<std::size_t>(x);
+            const float nx = (static_cast<float>(x) - cx) / rx;
+            const float ny = (static_cast<float>(y) - cy) / ry;
+            const float subject = std::clamp((1.10f - (nx * nx + ny * ny)) * 4.0f, 0.0f, 1.0f);
+            image.data[index] = 0.25f + subject * 0.60f;
+        }
+    }
+}
+
 nlohmann::json failure_json(const std::string& message) {
     return nlohmann::json{{"success", false}, {"error", message}};
 }
@@ -370,6 +477,7 @@ int main(int argc, char* argv[]) {
     prepare.requested_resolution = options.resolution;
     prepare.effective_resolution = options.resolution;
     prepare.engine_options.allow_cpu_fallback = true;
+    prepare.screen_color_mode = options.screen_color_mode;
 
     common::StageProfiler profiler;
     auto prepare_start = std::chrono::steady_clock::now();
@@ -380,11 +488,13 @@ int main(int argc, char* argv[]) {
         std::cout << failure_json(prepare_response.error().message).dump(4) << std::endl;
         return 1;
     }
+    const auto prepared_session = prepare_response->session;
     profiler.record("rpc_prepare_session",
                     std::chrono::duration<double, std::milli>(prepare_end - prepare_start).count(),
                     1);
 
-    if (options.input_mode != "constant" && options.input_mode != "random") {
+    if (options.input_mode != "constant" && options.input_mode != "plate" &&
+        options.input_mode != "random") {
         std::cout << failure_json("unknown --input-mode: " + options.input_mode).dump(4)
                   << std::endl;
         return 1;
@@ -396,8 +506,14 @@ int main(int argc, char* argv[]) {
     InferenceParams params;
     params.target_resolution = options.resolution;
     params.batch_size = 1;
-    params.output_alpha_only = false;
+    params.output_alpha_only = options.output_alpha_only;
     params.output_auxiliary_images = options.output_auxiliary_images;
+    params.despill_strength = options.despill_strength;
+    params.despill_screen_channel = options.screen_color_mode == "blue" ? 2 : 1;
+    params.auto_despeckle = options.auto_despeckle;
+    params.despeckle_size = options.despeckle_size;
+    params.enable_tiling = options.enable_tiling;
+    params.tile_padding = options.tile_padding;
     params.source_passthrough = options.source_passthrough;
     params.sp_erode_px = options.sp_erode_px;
     params.sp_blur_px = options.sp_blur_px;
@@ -410,13 +526,15 @@ int main(int argc, char* argv[]) {
 
     for (int iteration = 0; iteration < options.iterations; ++iteration) {
         if (options.input_mode == "random") {
-            // Derive a per-iteration seed so every frame is a distinct
-            // noise pattern. This blocks any MLX constant-tensor fast path
-            // and forces real per-frame compute.
             const std::uint32_t iter_seed =
                 options.input_random_seed + static_cast<std::uint32_t>(iteration) * 0x9E3779B9u;
             fill_random_rgb(rgb_buffer, iter_seed);
             fill_random_hint(hint_buffer, iter_seed);
+        } else if (options.input_mode == "plate") {
+            const std::uint32_t iter_seed =
+                options.input_random_seed + static_cast<std::uint32_t>(iteration) * 0x9E3779B9u;
+            fill_plate_rgb(rgb_buffer, options.screen_color_mode, iter_seed);
+            fill_plate_hint(hint_buffer, iter_seed);
         }
         std::vector<StageTiming> iter_stages;
         auto start = std::chrono::steady_clock::now();
@@ -429,6 +547,14 @@ int main(int argc, char* argv[]) {
         auto end = std::chrono::steady_clock::now();
         if (!frame_res) {
             std::cout << failure_json(frame_res.error().message).dump(4) << std::endl;
+            return 1;
+        }
+        const auto render_session = client->current_session_snapshot();
+        if (render_session.model_path != prepared_session.model_path ||
+            render_session.artifact_name != prepared_session.artifact_name ||
+            render_session.screen_color_mode != prepared_session.screen_color_mode) {
+            std::cout << failure_json("render changed prepared model identity").dump(4)
+                      << std::endl;
             return 1;
         }
         const double roundtrip = std::chrono::duration<double, std::milli>(end - start).count();
@@ -464,14 +590,22 @@ int main(int argc, char* argv[]) {
     report["frame_height"] = options.frame_height;
     report["iterations"] = options.iterations;
     report["endpoint_port"] = options.endpoint_port;
+    report["screen_color_mode"] = options.screen_color_mode;
     report["parent_qos_class"] = options.parent_qos_class;
     report["input_mode"] = options.input_mode;
     report["source_passthrough"] = options.source_passthrough;
+    report["output_alpha_only"] = options.output_alpha_only;
     report["output_auxiliary_images"] = options.output_auxiliary_images;
+    report["despill_strength"] = options.despill_strength;
+    report["despill_screen_channel"] = params.despill_screen_channel;
+    report["auto_despeckle"] = options.auto_despeckle;
+    report["despeckle_size"] = options.despeckle_size;
+    report["enable_tiling"] = options.enable_tiling;
+    report["tile_padding"] = options.tile_padding;
     report["sp_erode_px"] = options.sp_erode_px;
     report["sp_blur_px"] = options.sp_blur_px;
     report["upscale_method"] = upscale_method_label(options.upscale_method);
-    if (options.input_mode == "random") {
+    if (options.input_mode != "constant") {
         report["input_random_seed"] = options.input_random_seed;
     }
     if (!latencies.empty()) {
@@ -481,6 +615,8 @@ int main(int argc, char* argv[]) {
         report["fps"] = avg > 0.0 ? 1000.0 / avg : 0.0;
     }
     report["per_frame_timings"] = per_frame;
+    report["render_session_identity_stable"] = true;
+    report["prepared_session"] = app::to_json(prepared_session);
 
     nlohmann::json stage_summary = nlohmann::json::array();
     for (const auto& entry : profiler.snapshot()) {

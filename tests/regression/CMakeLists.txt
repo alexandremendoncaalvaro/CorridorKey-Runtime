@@ -57,5 +57,16 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_release_label_validation.ps1
         )
         set_tests_properties(windows_release_label_validation PROPERTIES LABELS "regression")
+        add_test(
+            NAME windows_torchtrt_matrix_case_coverage
+            COMMAND
+                ${CORRIDORKEY_POWERSHELL}
+                -NoProfile
+                -ExecutionPolicy
+                Bypass
+                -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_torchtrt_matrix_case_coverage.ps1
+        )
+        set_tests_properties(windows_torchtrt_matrix_case_coverage PROPERTIES LABELS "regression")
     endif()
 endif()
