@@ -3,7 +3,7 @@
 // Validates the AddDllDirectory + LoadLibrary + torch::jit::load chain
 // that PR 3 will adopt inside src/core/torch_trt_session.cpp. Intentionally
 // not linked into the main runtime - this is tools/ scratch (per
-// docs/ARCHITECTURE.md section "tools/") that proves the C++ path works
+// ARCHITECTURE.md section "tools/") that proves the C++ path works
 // on the operator's machine before the heavier integration lands.
 //
 // Build: gated on CORRIDORKEY_HAS_TORCHTRT in the root CMakeLists.txt.

@@ -19,6 +19,7 @@ def project_markdown_files() -> list[Path]:
         ROOT / "CLAUDE.md",
         ROOT / "ARCHITECTURE.md",
         ROOT / "DESIGN.md",
+        ROOT / "WORKFLOW.md",
         ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md",
     ]
     files.extend(sorted((ROOT / "docs").glob("*.md")))
@@ -31,8 +32,10 @@ def project_markdown_files() -> list[Path]:
 def check_agent_files(errors: list[str]) -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    if claude.strip() == "@AGENTS.md":
+        return
     if agents != claude:
-        errors.append("AGENTS.md and CLAUDE.md must stay identical.")
+        errors.append("CLAUDE.md must either import AGENTS.md with @AGENTS.md or match it exactly.")
 
 
 def check_markdown_links(errors: list[str]) -> None:

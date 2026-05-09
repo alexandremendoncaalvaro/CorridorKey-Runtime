@@ -125,6 +125,7 @@ directories only.
 |-------|---------|
 | `ARCHITECTURE.md` | Source structure and dependency rules |
 | `DESIGN.md` | Frontend product and interface design rules |
+| `WORKFLOW.md` | Agent workflow contract |
 | `CMakeLists.txt` | Root build definition |
 | `vcpkg.json` | Dependency manifest |
 | `vcpkg-configuration.json` | Baseline pin for reproducible builds |

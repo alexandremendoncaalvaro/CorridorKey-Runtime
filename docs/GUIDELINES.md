@@ -347,7 +347,8 @@ project is, what it does, how it works, and why specific choices were made.
 
 - Speculation or unfounded plans. Use GitHub Issues for proposals.
 - Historical notes. Git history and PRs serve that purpose.
-- Dates, version stamps, or status markers in prose.
+- Dates, version stamps, or status markers in prose, except ADR and task
+  record template fields used for lifecycle tracking.
 - Source code, except CLI usage examples in README that document the user
   interface.
 - Emoji.
