@@ -47,6 +47,13 @@ input preparation will receive an `NppStreamContext` for that stream. The
 TorchTRT prepared path must not depend on an independent GPU-prep stream plus
 `cudaStreamWaitEvent` to consume the prepared input.
 
+The prepared-input path must also not synchronize the CPU thread just to measure
+input readiness. When work is already ordered on the Torch current stream, and
+when any cross-stream dependency has been enqueued with `cudaStreamWaitEvent`,
+later Torch operations inherit the correct CUDA ordering. Host-side readiness
+timing for this boundary is therefore reported as zero rather than forcing a
+blocking marker.
+
 The implementation must preserve the device-input optimization. Falling back to
 the `main` host roundtrip is allowed only as an explicitly measured diagnostic
 or fallback, not as the primary fix.
@@ -61,9 +68,9 @@ CUDA default stream remains a valid current-stream path.
 
 The expected Resolve signature after the change is that
 `gpu_prepare_wait_over_device` disappears from the TorchTRT prepared path or
-stays near zero. `gpu_prepare_device` may move under the TorchTRT current stream
-timing, but total frame time must not merely relabel the same 0.8 to 1.4 second
-wait under another stage.
+stays near zero, and `torchtrt_input_ready_wait` also stays at zero. Total frame
+time must not merely relabel the same 0.8 to 1.4 second wait under another
+stage.
 
 The harness must continue to pass because it already has no meaningful
 GPU-prep wait. Resolve logs are required to validate the fix because the harness

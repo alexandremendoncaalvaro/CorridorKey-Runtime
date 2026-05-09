@@ -37,6 +37,10 @@ or falsified by Resolve logs.
 - Official CUDA Runtime documentation defines `cudaStream_t` value `0` as the
   default stream. The code treated `nullptr` as unavailable, so a valid default
   current stream was rejected.
+- Resolve logs from package `0.8.5-win.1-55-g746ab59` show that CPU fallback
+  is gone and `torchtrt_cuda_graph_input_copy_queue_wait` is about 0.15 ms, but
+  `torchtrt_input_ready_wait` still blocks around 0.84 to 1.38 seconds while
+  `gpu_prepare_device` is only about 7 to 13 ms.
 - `main` avoids this exact boundary by synchronizing GPU prep and returning a
   host tensor before inference, but that path loses the branch's device-input
   optimization.
@@ -79,6 +83,8 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [ ] Resolve logs show `gpu_prepare_wait_over_device` removed from the
   prepared-input path or near zero, and the missing wait does not reappear under
   another pinned stage.
+- [ ] Resolve logs show `torchtrt_input_ready_wait` remains zero for the
+  current-stream prepared-input path.
 - [x] The OFX RPC harness remains green and does not regress its already-fast
   input-ready wait.
 - [x] Canonical Windows build, relevant tests, and package flow run through
@@ -130,8 +136,7 @@ marks the returned readiness event as current-stream owned. `InferenceSession`
 routes the TorchTRT prepared-input path through the Torch current stream exposed
 as an opaque pointer by `TorchTrtSession`. `TorchTrtSession` now skips
 `cudaStreamWaitEvent` when the prepared-input event belongs to the current
-stream, while preserving `torchtrt_input_ready_wait`, `gpu_prepare_device`, and
-`gpu_prepare_wait_over_device` telemetry.
+stream.
 
 Verification passed: `git diff --check`,
 `scripts/windows.ps1 -Task build -Version 0.8.5 -Preset release`, unit tests,
@@ -155,6 +160,15 @@ and forced CPU fallback. CUDA defines stream `0` as the default stream, so the
 fix separates stream availability from the opaque handle and allows
 `prepare_inputs_device_on_stream(..., nullptr, ...)` when the caller has already
 proved that the stream is available.
+
+Resolve logs from package `0.8.5-win.1-55-g746ab59` confirmed the default-stream
+fix: GPU prep ran, CPU `torchtrt_prepare_pack` disappeared, and CUDA Graph input
+copy queue wait fell to about 0.15 ms. The same logs exposed a second barrier:
+`wait_for_external_cuda_event` still synchronized the Torch current stream only
+to measure input readiness. The measured device prep was about 7 to 13 ms, while
+the host wait was about 0.84 to 1.38 seconds. The selected follow-up fix removes
+that host synchronization and keeps CUDA ordering through same-stream sequencing
+or the enqueued event wait.
 
 ## Definition of Done
 

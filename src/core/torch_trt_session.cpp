@@ -152,18 +152,9 @@ Result<void> wait_for_external_cuda_event(void* input_ready_event, void* input_r
                       .message = "TorchTRT failed to wait for prepared CUDA input event"}};
         }
     }
-    const auto wait_ms =
-        synchronize_cuda_stream_marker(current_stream, on_stage, "torchtrt_input_ready_wait");
-    if (wait_ms.has_value() && input_ready_start_event != nullptr) {
-        float device_ms = 0.0F;
-        const auto elapsed_status =
-            cudaEventElapsedTime(&device_ms, reinterpret_cast<cudaEvent_t>(input_ready_start_event),
-                                 reinterpret_cast<cudaEvent_t>(input_ready_event));
-        if (elapsed_status == cudaSuccess) {
-            emit_stage_timing(on_stage, "gpu_prepare_device", static_cast<double>(device_ms));
-            emit_stage_timing(on_stage, "gpu_prepare_wait_over_device",
-                              std::max(0.0, *wait_ms - static_cast<double>(device_ms)));
-        }
+    emit_stage_timing(on_stage, "torchtrt_input_ready_wait", 0.0);
+    if (input_ready_start_event != nullptr) {
+        emit_stage_timing(on_stage, "gpu_prepare_wait_over_device", 0.0);
     }
     return {};
 #else

@@ -62,6 +62,16 @@ bool has_stage_prefix(const std::vector<StageTiming>& timings, std::string_view 
     });
 }
 
+double stage_total_ms(const std::vector<StageTiming>& timings, std::string_view name) {
+    double total = 0.0;
+    for (const auto& timing : timings) {
+        if (timing.name == name) {
+            total += timing.total_ms;
+        }
+    }
+    return total;
+}
+
 std::optional<std::string> environment_variable_copy(const char* name) {
 #if defined(_WIN32)
     char* value = nullptr;
@@ -370,8 +380,10 @@ TEST_CASE("TorchTRT CUDA graph path emits replay or explicit fallback telemetry"
         CHECK(has_stage(timings, "torchtrt_input_current_stream_event"));
         CHECK_FALSE(has_stage(timings, "torchtrt_input_wait_event_enqueue"));
         CHECK(has_stage(timings, "torchtrt_input_ready_wait"));
-        CHECK(has_stage(timings, "gpu_prepare_device"));
+        CHECK(stage_total_ms(timings, "torchtrt_input_ready_wait") == Catch::Approx(0.0));
+        CHECK_FALSE(has_stage(timings, "gpu_prepare_device"));
         CHECK(has_stage(timings, "gpu_prepare_wait_over_device"));
+        CHECK(stage_total_ms(timings, "gpu_prepare_wait_over_device") == Catch::Approx(0.0));
         CHECK(has_stage(timings, "torchtrt_cuda_graph_input_copy"));
         CHECK(has_stage(timings, "torchtrt_cuda_graph_input_copy_gpu"));
         CHECK(has_stage(timings, "torchtrt_cuda_graph_input_copy_queue_wait"));

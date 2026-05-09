@@ -41,6 +41,10 @@ de cor compartilhados.
   fica em 0 ms e Green 2048 processado fica perto de 508 a 518 ms. Logo, o
   bloqueio atual e especifico da fronteira Resolve -> GPU prep stream ->
   TorchTRT stream.
+- Depois do fix do default stream, os logs do Resolve confirmam que o fallback
+  CPU saiu e que `torchtrt_cuda_graph_input_copy_queue_wait` caiu para cerca de
+  0.15 ms. O gargalo restante e `torchtrt_input_ready_wait` em cerca de 0.84 a
+  1.38 s, apesar de `gpu_prepare_device` medir cerca de 7 a 13 ms.
 - A `main` evita essa fronteira sincronizando o preparo GPU e retornando para
   host antes da inferencia. Isso e uma evidencia historica de estabilidade, mas
   nao e a solucao principal porque perderia a otimizacao device-input desta
@@ -54,6 +58,12 @@ de cor compartilhados.
    de 0.8 a 1.4 s, embora o trabalho GPU medido dure cerca de 7 a 13 ms.
    Hipotese: enfileirar o preparo na current stream do Torch/PyTorch elimina o
    wait cross-stream sem voltar ao roundtrip de host da `main`.
+
+0.1. Medicao de readiness nao deve sincronizar o host.
+   Quando a dependencia ja esta ordenada pela mesma stream ou por
+   `cudaStreamWaitEvent`, bloquear o host em `torchtrt_input_ready_wait` apenas
+   para medir readiness reintroduz o mesmo gargalo. Hipotese: manter a ordem no
+   grafo CUDA e reportar readiness wait como zero remove esse bloqueio.
 
 1. Auto Despeckle ativa CPU demais.
    Quando `auto_despeckle` esta ligado, o TorchTRT desliga todo o post-process
@@ -94,6 +104,9 @@ de cor compartilhados.
   valido.
 - P0: Validar em Resolve que `gpu_prepare_wait_over_device` desaparece ou fica
   perto de zero, e que o tempo nao reaparece em outro stage pinado.
+- P0: Remover a sincronizacao host-side de `torchtrt_input_ready_wait` no
+  prepared-input path; preservar a ordenacao por CUDA stream/evento, nao por
+  bloqueio do host.
 - P0: Manter o caminho device-input e o device-to-device de Source Passthrough
   quando `source_rgb_device` esta disponivel.
 - P0: Se a current-stream path nao resolver em Resolve, executar A/B
