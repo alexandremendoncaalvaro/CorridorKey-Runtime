@@ -1,0 +1,5 @@
+interface:
+  display_name: agentic-spec
+  short_description: Draft a feature spec at doc/specs/NNNN-<slug>.md (Spec Kit-aligned mandatory sections + the kit's documentation discipline).
+policy:
+  allow_implicit_invocation: false

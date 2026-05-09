@@ -1,0 +1,5 @@
+interface:
+  display_name: agentic-ground
+  short_description: Four-source pre-implementation research (docs / OSS / in-repo / git history) plus happy-path synthesis and deviation gate. WORKFLOW §4 + §5.
+policy:
+  allow_implicit_invocation: false
