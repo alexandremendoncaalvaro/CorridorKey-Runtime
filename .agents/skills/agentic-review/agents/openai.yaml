@@ -1,0 +1,5 @@
+interface:
+  display_name: agentic-review
+  short_description: Fresh-context code review per WORKFLOW §10 — assemble a /clear handoff for a clean review session.
+policy:
+  allow_implicit_invocation: false

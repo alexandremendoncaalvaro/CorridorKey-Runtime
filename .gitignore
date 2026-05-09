@@ -95,6 +95,7 @@ __pycache__/
 *.pyc
 uv.lock
 .env
+# Claude Code project skills/agents are committed; local runtime state is not.
 .claude/*
 !.claude/
 !.claude/skills/

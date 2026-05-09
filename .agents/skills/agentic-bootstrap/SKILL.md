@@ -1,64 +1,49 @@
 ---
 name: agentic-bootstrap
-description: Generate AGENTS.md at the repo root by scanning the codebase first, pre-filling placeholders from observed signals, and asking only the genuine gaps. Use whenever the user wants to bootstrap, scaffold, generate, create, set up, or audit AGENTS.md / agents.md / CLAUDE.md (the operational guide for agents working on this project). Covers greenfield (empty repo), brownfield (code exists, no AGENTS.md), and audit (drift report against existing AGENTS.md).
-allowed-tools: Read, Write, Glob, Grep, Bash
+description: Generate AGENTS.md at the repo root by scanning the codebase first, pre-filling placeholders from observed signals, and asking only the genuine gaps. Use whenever the user wants to bootstrap, scaffold, generate, create, set up, or audit AGENTS.md / CLAUDE.md / agents.md (the operational guide for agents working on this project).
 ---
 
-# /agentic-bootstrap
+<background_information>
+Produces `AGENTS.md` at the repo root, ≤150 lines, every line operational. Generic agent behavior (think-before-coding, verify-before-claiming-done, etc.) does NOT belong here — that lives in the `agentic-philosophy` skill.
 
-Produces `AGENTS.md` at the repo root, ≤150 lines, every line operational. Generic agent behavior (think-before-coding, verify-before-claiming-done, etc.) does **not** belong here — that lives in the `agentic-philosophy` skill.
+Three modes, detected from filesystem state:
+- `AGENTS.md` exists at the repo root → audit (do not rewrite, output drift list only)
+- `AGENTS.md` absent and only trivial files present (`.git`, `node_modules`, `.gitignore`, `.gitattributes`, `.DS_Store`, `.env*`, `.idea`, `.vscode`, `LICENSE*`, `README.md`) → greenfield (interview by placeholder, no scan)
+- `AGENTS.md` absent and meaningful code present → brownfield (scan first, pre-fill, ask only gaps)
+</background_information>
 
-## Step 0 — Detect mode
+<instructions>
+Step 0 — detect mode from the filesystem state above. Skip Step 1 unless the mode is brownfield.
 
-Inspect the repo:
-
-* `AGENTS.md` exists at the repo root → **audit** mode. **Do not rewrite it.** Stop after producing a drift list (see Step 4).
-* `AGENTS.md` absent and the directory only holds trivial entries (`.git`, `node_modules`, `.gitignore`, `.gitattributes`, `.DS_Store`, `.env*`, `.idea`, `.vscode`, `LICENSE*`, `README.md`) → **greenfield** mode. There is nothing to scan; walk the template's `<placeholders>` with the user one at a time and skip Step 1.
-* `AGENTS.md` absent and meaningful code is present → **brownfield** mode. Scan first, pre-fill, ask only the gaps.
-
-## Step 1 — Scan (brownfield only)
-
-Read in this order, taking the first that exists for each category:
-
-* Manifests: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`, `pubspec.yaml`.
-* `README.md`, plus any `doc/` or `docs/` directory.
-* Top-level directory listing.
-* `doc/adr/` — binding decisions; read every ADR.
-* `.claude/`, `.cursor/`, `.openai/`, `.agents/` — existing agent config.
-* Hook configs: `.husky/`, `.pre-commit-config.yaml`, `.github/workflows/`, `.gitlab-ci.yml`, `.circleci/`.
-* Lockfiles: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `Cargo.lock`.
-* `git remote -v` for the repo URL.
+Step 1 — scan (brownfield only). Read in this order, taking the first that exists for each category:
+- Manifests: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`, `pubspec.yaml`.
+- `README.md`, plus any `doc/` or `docs/` directory.
+- Top-level directory listing.
+- `doc/adr/` — binding decisions; read every ADR.
+- `.claude/`, `.cursor/`, `.openai/`, `.agents/` — existing agent config.
+- Hook configs: `.husky/`, `.pre-commit-config.yaml`, `.github/workflows/`, `.gitlab-ci.yml`, `.circleci/`.
+- Lockfiles: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `Cargo.lock`.
+- `git remote -v` for the repo URL.
 
 Build a model of: stack (languages and versions), entry points, build / test / lint commands, conventions, quality gates, security boundaries, gotchas confirmed by code.
 
-## Step 2 — Pre-fill
+Step 2 — pre-fill. For every `<placeholder>` in the template, fill from observed signals. No fabrication. If a section has no signal, write `<TODO: not yet wired>` in one line and move on. Do not write meta-prose explaining the gap.
 
-For every `<placeholder>` in the template below, fill from observed signals. **No fabrication.** If a section has no signal, write `<TODO: not yet wired>` in one line and move on. Do not write meta-prose explaining the gap.
+Step 3 — show only the gaps. Print to the user:
+- (a) placeholders that could not be filled from repo signals;
+- (b) signals that conflict (two test commands, two style configs, README contradicts code, etc.).
 
-## Step 3 — Show only the gaps
+One question per gap. Skip everything filled confidently. Do NOT ask philosophical questions ("is this doc for agents or humans?", "what is the most important quality bar?") — those are decisions, not interview material.
 
-Print to the user:
+Step 4 — write the file. On user confirmation, write `AGENTS.md` at the repo root. Cut every line that does not change agent behavior. No "External Resources" section (URLs are derivable from `git remote` and the manifest). No appended Universal Agent Behavior block. No marketing prose.
 
-* (a) placeholders that could not be filled from repo signals;
-* (b) signals that conflict (two test commands, two style configs, README contradicts code, etc.).
-
-One question per gap. Skip everything filled confidently. Do **not** ask philosophical questions ("is this doc for agents or humans?", "what is the most important quality bar?") — those are decisions, not interview material.
-
-## Step 4 — Write the file
-
-On user confirmation, write `AGENTS.md` at the repo root. Cut every line that does not change agent behavior. No "External Resources" section (URLs are derivable from `git remote` and the manifest). No appended Universal Agent Behavior block. No marketing prose.
-
-**Audit mode override:** do **not** write the file. Produce a drift list. Format each line as:
-
-```
-[file or section]: spec says X, code says Y. Suggested resolution: change spec / change code / discuss.
-```
+Audit-mode override: do NOT write the file. Produce a drift list. Format each line as:
+`[file or section]: spec says X, code says Y. Suggested resolution: change spec / change code / discuss.`
 
 If something the user says contradicts what the code shows, surface the conflict. Don't silently trust the user; don't silently trust the code.
+</instructions>
 
-## Template — `AGENTS.md`
-
-````markdown
+<template path="AGENTS.md">
 # AGENTS.md
 
 ## Project Overview
@@ -146,8 +131,8 @@ Real traps. Each one should map to an incident or to specific code.
 
 * `<e.g., migrations not idempotent — never edit, always create new>`
 * `<e.g., DB is UTC, app displays America/Sao_Paulo>`
-````
+</template>
 
-## Output contract
-
+<output_contract>
 A single `AGENTS.md` at the repo root, ≤150 lines, every line operational. No "External Resources" section. No appended Universal Agent Behavior block — that lives in the `agentic-philosophy` skill. No meta-prose explaining gaps. In audit mode: a drift list, no file written.
+</output_contract>

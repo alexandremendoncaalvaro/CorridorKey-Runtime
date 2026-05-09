@@ -1,48 +1,37 @@
 ---
 name: agentic-task
-description: Draft a new task tracking file at doc/tasks/NNNN-<short-slug>.md, using a checkbox-toggle + append-only-Notes format optimized for LLM editing. Use when the user wants to create, draft, scaffold, or open a task, ticket, work item, or backlog entry tracked in the repo. Status starts at proposed; the file is the source of truth, not a board.
-allowed-tools: Read, Write, Glob, Bash
+description: Draft a new task tracking file at doc/tasks/NNNN-<short-slug>.md, using a checkbox-toggle + append-only-Notes format optimized for LLM editing. Use when the user wants to create, draft, scaffold, or open a task, ticket, work item, or backlog entry tracked in the repo. Status starts at proposed.
 ---
 
-# /agentic-task
-
+<background_information>
 Drafts `doc/tasks/<NNNN>-<short-slug>.md` for one tracked task. Format chosen so status changes via single checkbox toggles and Notes is append-only — cheap, reviewable, idempotent edits.
+</background_information>
 
-## Step 1 — Determine NNNN and slug
+<instructions>
+Step 1 — determine NNNN and slug. List `doc/tasks/`. NNNN = next available 4-digit number after the highest existing (mirrors the ADR convention). If `doc/tasks/` does not exist, create it; start at 0001. Slug: kebab-case, ≤6 words, derived from the user's task title.
 
-List `doc/tasks/`. NNNN = next available 4-digit number after the highest existing (mirrors the ADR convention). If `doc/tasks/` does not exist, create it; start at `0001`. Slug: kebab-case, ≤6 words, derived from the user's task title.
+Step 2 — interview to fill. Ask one question per missing field, in this order:
+- Context: why this task exists, what problem it solves, any assumption being tested.
+- Acceptance Criteria: measurable conditions. Each is a checkbox; pass/fail must be observable, not aspirational ("loads in under 2s", not "fast enough").
+- Plan: concrete sequential steps with file paths where applicable. Each is a checkbox.
+- Owner: ask.
+- Board ref: ask; leave blank if solo work.
 
-## Step 2 — Interview to fill
+Status starts at proposed. Created: today, ISO format. Notes: empty. Definition of Done section: copy verbatim from the template.
 
-Ask one question per missing field, in this order:
+Do NOT invent values. When the user does not know something, leave `<TODO>` and ask. Stop after writing the file — do not start work.
 
-* **Context:** why this task exists, what problem it solves, any assumption being tested.
-* **Acceptance Criteria:** measurable conditions. Each is a checkbox; pass/fail must be observable, not aspirational ("loads in under 2s", not "fast enough").
-* **Plan:** concrete sequential steps with file paths where applicable. Each is a checkbox.
-* **Owner:** ask.
-* **Board ref:** ask; leave blank if solo work.
+Step 3 — write the file. Path: `doc/tasks/<NNNN>-<short-slug>.md`. Use the template below.
 
-Status starts at `proposed`. Created: today, ISO format. Notes: empty (filled during execution). Definition of Done section: copy verbatim from the template.
+Step 4 — editing guidance for later turns. When the user later works on the task, edit the file by:
+- toggling checkboxes (`- [ ]` → `- [x]`),
+- appending to Notes (date each entry, `### YYYY-MM-DD`),
+- never rewriting existing sections.
 
-**Do not invent values.** When the user does not know something, leave `<TODO>` and ask. Stop after writing the file — do not start work.
+Status flips to done only when every Acceptance Criterion and every Definition of Done item is checked.
+</instructions>
 
-## Step 3 — Write the file
-
-Path: `doc/tasks/<NNNN>-<short-slug>.md`. Use the template below.
-
-## Step 4 — Editing guidance for later turns
-
-When the user later works on the task, edit the file by:
-
-* Toggling checkboxes (`- [ ]` → `- [x]`).
-* Appending to Notes (date each entry, `### YYYY-MM-DD`).
-* Never rewriting existing sections.
-
-Status flips to `done` only when every Acceptance Criterion and every Definition of Done item is checked.
-
-## Template — `doc/tasks/NNNN-<slug>.md`
-
-````markdown
+<template path="doc/tasks/NNNN-<slug>.md">
 # Task `<NNNN>`: `<short imperative title>`
 
 **Status:** `<proposed | in-progress | blocked | done>`
@@ -86,8 +75,8 @@ All Acceptance Criteria checked, plus:
 - [ ] Code review completed (human or fresh-context reviewer per WORKFLOW §10)
 - [ ] No orphan `TODO`/`FIXME` introduced
 - [ ] Status updated to `done` and Notes log closes the task
-````
+</template>
 
-## Output contract
-
-A single new file at `doc/tasks/<NNNN>-<short-slug>.md`. Status `proposed`. Notes empty. No existing tasks modified. No invented values.
+<output_contract>
+A single new file at `doc/tasks/<NNNN>-<short-slug>.md`. Status proposed. Notes empty. No existing tasks modified. No invented values.
+</output_contract>

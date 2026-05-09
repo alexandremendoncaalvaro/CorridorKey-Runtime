@@ -1,0 +1,5 @@
+interface:
+  display_name: agentic-design
+  short_description: Bootstrap DESIGN.md from existing design tokens (Figma, tailwind.config, tokens.json, CSS custom properties).
+policy:
+  allow_implicit_invocation: false

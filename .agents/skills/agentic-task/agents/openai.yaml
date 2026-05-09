@@ -1,7 +1,5 @@
-version: 1
-name: agentic-task
-description: Draft tracked task records under doc/tasks.
-entrypoint: SKILL.md
-instructions: |
-  Read SKILL.md in this directory and follow it as the source of truth.
-  Store task records under doc/tasks with the skill's numbering convention.
+interface:
+  display_name: agentic-task
+  short_description: Draft a new task at doc/tasks/NNNN-<slug>.md via a one-question-per-gap interview.
+policy:
+  allow_implicit_invocation: false

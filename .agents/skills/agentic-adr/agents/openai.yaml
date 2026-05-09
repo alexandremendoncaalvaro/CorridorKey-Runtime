@@ -1,7 +1,5 @@
-version: 1
-name: agentic-adr
-description: Draft Architecture Decision Records under doc/adr.
-entrypoint: SKILL.md
-instructions: |
-  Read SKILL.md in this directory and follow it as the source of truth.
-  Produce or update only the artifacts that the skill allows.
+interface:
+  display_name: agentic-adr
+  short_description: Draft a new ADR at doc/adr/NNNN-<slug>.md from the current conversation only.
+policy:
+  allow_implicit_invocation: false

@@ -1,62 +1,46 @@
 ---
 name: agentic-architecture
-description: Generate ARCHITECTURE.md at the repo root by scanning the code first, pre-filling layers/patterns/observability/deployment from observed signals, then asking only the genuine gaps. Use when the user wants to bootstrap, scaffold, generate, document, or audit ARCHITECTURE.md (system-level patterns and boundaries, paired with ADRs in doc/adr/). Covers brownfield (code exists) and audit (drift report against existing ARCHITECTURE.md).
-allowed-tools: Read, Write, Glob, Grep, Bash
+description: Generate ARCHITECTURE.md at the repo root by scanning the code first, pre-filling layers/patterns/observability/deployment from observed signals, then asking only the genuine gaps. Use when the user wants to bootstrap, scaffold, generate, document, or audit ARCHITECTURE.md (system-level patterns and boundaries, paired with ADRs in doc/adr/).
 ---
 
-# /agentic-architecture
+<background_information>
+Produces `ARCHITECTURE.md` at the repo root. Pairs with ADRs in `doc/adr/` — architecture is the binding pattern; ADRs are individual decisions with status.
 
-Produces `ARCHITECTURE.md` at the repo root. Pairs with ADRs in `doc/adr/` — architecture is the binding pattern; ADRs are individual decisions with status. ADRs in `doc/adr/` with `Status: accepted` are binding; read every one before writing.
+Two modes detected from filesystem state:
+- `ARCHITECTURE.md` exists at the repo root → audit (do not rewrite, output drift list only)
+- `ARCHITECTURE.md` absent → bootstrap (scan first, pre-fill, ask only gaps)
+</background_information>
 
-## Step 0 — Detect mode
+<instructions>
+Step 0 — detect mode from the filesystem state above.
 
-Inspect the repo:
-
-* `ARCHITECTURE.md` exists at the repo root → **audit** mode. **Do not rewrite it.** Stop after producing a drift list (see Step 4).
-* `ARCHITECTURE.md` absent → **bootstrap** mode. Scan first, pre-fill, ask only the gaps.
-
-## Step 1 — Scan the code
-
-Read in this order, taking the first that exists for each category:
-
-* Top-level directory listing — infer the layered/hexagonal/clean structure.
-* Main entry points — servers (`main.go`, `app/server.ts`, `manage.py`, `cmd/`), CLI binaries, background jobs.
-* Boundary code — `handlers/`, `controllers/`, `repositories/`, `gateways/`, `middleware/`.
-* Config and env loading.
-* Observability hooks — logger setup, metrics export, tracing init.
-* Deploy config — `Dockerfile`, `docker-compose.yml`, `k8s/`, `terraform/`, `.github/workflows/`, `Procfile`, `serverless.yml`.
-* `doc/adr/` — read every ADR with `Status: accepted`. Currently-binding decisions belong in the Active ADRs section.
+Step 1 — scan the code. Read in this order, taking the first that exists for each category:
+- Top-level directory listing — infer the layered/hexagonal/clean structure.
+- Main entry points — servers, CLI binaries, background jobs.
+- Boundary code — `handlers/`, `controllers/`, `repositories/`, `gateways/`, `middleware/`.
+- Config and env loading.
+- Observability hooks — logger setup, metrics export, tracing init.
+- Deploy config — `Dockerfile`, `docker-compose.yml`, `k8s/`, `terraform/`, `.github/workflows/`, `Procfile`, `serverless.yml`.
+- `doc/adr/` — read every ADR with `Status: accepted`. Currently-binding decisions belong in the Active ADRs section.
 
 Build a model of: layers and boundaries, data access pattern, HTTP middleware chain, async/messaging, error and validation patterns, naming conventions, logging/metrics/tracing, deployment topology.
 
-## Step 2 — Pre-fill
+Step 2 — pre-fill. For every `<placeholder>` in the template, fill from observed signals. No fabrication. If a section has no signal, write `<TODO: not yet wired>` in one line.
 
-For every `<placeholder>` in the template below, fill from observed signals. **No fabrication.** If a section has no signal, write `<TODO: not yet wired>` in one line and move on.
-
-## Step 3 — Show only the gaps
-
-Print to the user:
-
-* (a) placeholders without a code signal;
-* (b) places where the code shows two competing patterns (some handlers go through middleware, some don't; mixed data-access styles, etc.).
-
+Step 3 — show only the gaps. Print:
+- (a) placeholders without a code signal;
+- (b) places where the code shows two competing patterns.
 One question per gap.
 
-## Step 4 — Write the file
+Step 4 — write the file. On user confirmation, write `ARCHITECTURE.md` at the repo root. Cut every line that does not lock a binding pattern. List any decision that should become an ADR — flag, do not write the ADR yet (use the `agentic-adr` skill for that).
 
-On user confirmation, write `ARCHITECTURE.md` at the repo root. Cut every line that does not lock a binding pattern. At the end of the response, list any decision that should become an ADR — flag, do not write the ADR yet (use the `agentic-adr` skill for that).
-
-**Audit-mode override:** do **not** write the file. Produce a drift list. Format each line as:
-
-```
-[file or section]: spec says X, code says Y. Suggested resolution: change spec / change code / discuss.
-```
+Audit-mode override: do NOT write the file. Produce a drift list. Format each line as:
+`[file or section]: spec says X, code says Y. Suggested resolution: change spec / change code / discuss.`
 
 If something the user says contradicts what the code shows, surface the conflict. Don't silently trust the user; don't silently trust the code.
+</instructions>
 
-## Template — `ARCHITECTURE.md`
-
-````markdown
+<template path="ARCHITECTURE.md">
 # Architecture
 
 System-level patterns and boundaries. Pair with ADRs in `doc/adr/` for individual decisions.
@@ -97,8 +81,8 @@ Currently-binding decisions. Link each to `doc/adr/`.
 
 * ADR-0001 — `<title>`
 * ADR-0002 — `<title>`
-````
+</template>
 
-## Output contract
-
+<output_contract>
 A single `ARCHITECTURE.md` at the repo root. Every line locks a binding pattern. ADR candidates flagged in the response, not written. In audit mode: drift list only, no file written.
+</output_contract>
