@@ -1,0 +1,7 @@
+version: 1
+name: agentic-philosophy
+description: Shared agent behavior guidance kept out of repository rules.
+entrypoint: SKILL.md
+instructions: |
+  Read SKILL.md in this directory and follow it as the source of truth.
+  Keep philosophy guidance separate from operational repository rules.

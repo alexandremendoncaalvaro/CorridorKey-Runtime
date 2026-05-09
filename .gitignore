@@ -95,7 +95,14 @@ __pycache__/
 *.pyc
 uv.lock
 .env
-.claude/
+.claude/*
+!.claude/
+!.claude/skills/
+!.claude/skills/**
+!.claude/agents/
+!.claude/agents/**
+.claude/settings.local.json
+.claude/worktrees/
 
 # Temporary and Device names
 nul

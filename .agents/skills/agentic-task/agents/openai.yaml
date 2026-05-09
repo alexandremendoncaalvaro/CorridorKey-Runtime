@@ -1,0 +1,7 @@
+version: 1
+name: agentic-task
+description: Draft tracked task records under doc/tasks.
+entrypoint: SKILL.md
+instructions: |
+  Read SKILL.md in this directory and follow it as the source of truth.
+  Store task records under doc/tasks with the skill's numbering convention.

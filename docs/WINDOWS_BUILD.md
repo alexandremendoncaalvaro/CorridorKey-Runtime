@@ -12,7 +12,7 @@ RTX path does not execute or fall back to ONNX.
 **See also:**
 [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup across platforms |
 [RELEASE_GUIDELINES.md](RELEASE_GUIDELINES.md) — versioning and distribution policy |
-[ARCHITECTURE.md](ARCHITECTURE.md) — source structure
+[ARCHITECTURE.md](../ARCHITECTURE.md) — source structure
 
 ## 1. Prerequisites
 

@@ -10,7 +10,7 @@ each session. It contains the non-negotiable rules for this repository.
 - **Build:** CMake 3.28+ with vcpkg manifest mode and CMake Presets
 - **License:** CC BY-NC-SA 4.0
 
-## Structural Rules (enforced — see docs/ARCHITECTURE.md for details)
+## Structural Rules (enforced — see ARCHITECTURE.md for details)
 
 - Public headers go in `include/corridorkey/` — this is the external API
 - Use **PIMPL Pattern** for main classes such as `Engine` to ensure ABI stability
@@ -31,7 +31,7 @@ each session. It contains the non-negotiable rules for this repository.
 - External library types (`OrtSession`, `Imf::*`, `AVFrame`, etc.) never appear in
   public headers — they are wrapped in `src/`
 - Do not create new top-level directories or new `src/` subdirectories without
-  updating docs/ARCHITECTURE.md
+  updating ARCHITECTURE.md
 
 ## Code Standards (see docs/GUIDELINES.md for details)
 
@@ -150,3 +150,16 @@ each session. It contains the non-negotiable rules for this repository.
 - Do not write comments that restate what the code does
 - Do not use `std::exit` or `abort` in the library; return `Result<T>` instead
 - Do not use global state or static variables in the library
+
+## Skills installed by agentic
+
+<!-- agentic:skills:start -->
+- `agentic-adr` — draft Architecture Decision Records in `doc/adr/`
+- `agentic-architecture` — bootstrap or audit root `ARCHITECTURE.md`
+- `agentic-audit` — read-only drift audit across agent rules, architecture, and ADRs
+- `agentic-bootstrap` — bootstrap or audit `AGENTS.md`
+- `agentic-philosophy` — shared agent behavior guidance kept out of repo rules
+- `agentic-task` — draft tracked tasks in `doc/tasks/`
+- Claude Code target: `.claude/skills/agentic-*/SKILL.md`
+- Codex target: `.agents/skills/agentic-*/{SKILL.md, agents/openai.yaml}`
+<!-- agentic:skills:end -->

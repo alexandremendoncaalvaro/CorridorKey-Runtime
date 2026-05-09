@@ -1,0 +1,8 @@
+version: 1
+name: agentic-bootstrap
+description: Bootstrap or audit AGENTS.md.
+entrypoint: SKILL.md
+instructions: |
+  Read SKILL.md in this directory and follow it as the source of truth.
+  Preserve user-authored AGENTS.md content and use managed sections only where
+  the skill allows them.

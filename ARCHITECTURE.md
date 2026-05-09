@@ -6,8 +6,8 @@ for structural decisions. Any deviation must be discussed and approved in a
 PR before it happens.
 
 **See also:**
-[SPEC.md](SPEC.md) - product scope and support philosophy |
-[GUIDELINES.md](GUIDELINES.md) - code standards, testing, build rules
+[SPEC.md](docs/SPEC.md) - product scope and support philosophy |
+[GUIDELINES.md](docs/GUIDELINES.md) - code standards, testing, build rules
 
 ---
 
@@ -35,7 +35,7 @@ plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
    Runtime) are
    explicit experimental product tracks. Other provider hooks present in the
    core runtime do not become support claims unless they are packaged and
-   validated. See [Support Matrix](../help/SUPPORT_MATRIX.md).
+   validated. See [Support Matrix](help/SUPPORT_MATRIX.md).
 5. **Shared Runtime, Curated Artifacts.** The runtime contract is stable
    across product tracks. Model artifacts and backend adapters may differ by
    platform when required for predictable performance.
@@ -118,10 +118,13 @@ User-facing surfaces. Each is a thin consumer of App/Core contracts.
 
 ### Root (`/`)
 
-Project-level configuration and documentation only.
+Project-level configuration, project documentation, and top-level domain
+directories only.
 
 | Entry | Purpose |
 |-------|---------|
+| `ARCHITECTURE.md` | Source structure and dependency rules |
+| `DESIGN.md` | Frontend product and interface design rules |
 | `CMakeLists.txt` | Root build definition |
 | `vcpkg.json` | Dependency manifest |
 | `vcpkg-configuration.json` | Baseline pin for reproducible builds |
@@ -130,6 +133,39 @@ Project-level configuration and documentation only.
 | `CONTRIBUTING.md` | Developer onboarding and PR process |
 | `AGENTS.md` | Machine-readable rule summary for AI tools |
 | `CLAUDE.md` | Machine-readable rule summary for AI tools |
+| `.agents/` | Codex-facing agentic skills and agent definitions |
+| `.claude/` | Claude Code-facing agentic skills and agents |
+| `doc/` | ADR and task records |
+| `docs/` | Supporting project documentation |
+| `help/` | User-facing help and support docs |
+
+### `doc/`
+
+Agentic project records live under `doc/` so architecture and task decisions
+are discoverable by both human maintainers and coding agents.
+
+```text
+doc/
+|-- adr/       Architecture Decision Records: NNNN-<slug>.md
+`-- tasks/     Agentic task records: NNNN-<slug>.md
+```
+
+ADR status values are `proposed`, `accepted`, `deprecated`, or
+`superseded by ADR-NNNN`.
+
+### Agent Targets
+
+```text
+.claude/
+|-- skills/agentic-*/SKILL.md
+`-- agents/fresh-context-reviewer.md
+
+.agents/
+`-- skills/agentic-*/{SKILL.md, agents/openai.yaml}
+```
+
+`.claude/settings.local.json` and `.claude/worktrees/` are local state and are
+not repository records.
 
 ### `include/corridorkey/`
 
@@ -226,6 +262,8 @@ Standalone auxiliary tools. Must not leak dependencies into the main build.
 
 ```text
 tools/
+|-- browser_poc/        Browser-based proof of concept and export surface
+|-- hint_generator/     Python helper for generating alpha hints
 |-- model_exporter/     Python scripts to export PyTorch models to ONNX
 |-- torchtrt_compiler/  Python scripts to export dynamic RTX `.ts` artifacts
 |-- torchtrt_runner/    C++ smoke test that loads a .ts engine standalone
@@ -294,7 +332,11 @@ throughout. `std::exit` and `abort` are never called from library code.
 
 ---
 
-## 6. Adding New Code - Decision Tree
+## 6. Active ADRs
+
+- [ADR-0001: Agentic Repository Layout](doc/adr/0001-agentic-repository-layout.md)
+
+## 7. Adding New Code - Decision Tree
 
 ```text
 Is it a public API type or function?

@@ -1,0 +1,7 @@
+version: 1
+name: agentic-audit
+description: Run a read-only drift audit across agent rules, architecture, and ADRs.
+entrypoint: SKILL.md
+instructions: |
+  Read SKILL.md in this directory and follow it as the source of truth.
+  Do not write files when the skill is in audit mode.

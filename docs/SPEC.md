@@ -7,7 +7,7 @@ why it exists, and what it explicitly includes and excludes.
 **See also:**
 [Support Matrix](../help/SUPPORT_MATRIX.md) - explicit support status by
 platform and hardware |
-[ARCHITECTURE.md](ARCHITECTURE.md) - source structure and dependency rules |
+[ARCHITECTURE.md](../ARCHITECTURE.md) - source structure and dependency rules |
 [GUIDELINES.md](GUIDELINES.md) - code standards and build rules
 
 ---

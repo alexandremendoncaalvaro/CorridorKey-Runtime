@@ -17,10 +17,14 @@ def project_markdown_files() -> list[Path]:
         ROOT / "CONTRIBUTING.md",
         ROOT / "AGENTS.md",
         ROOT / "CLAUDE.md",
+        ROOT / "ARCHITECTURE.md",
+        ROOT / "DESIGN.md",
         ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md",
     ]
     files.extend(sorted((ROOT / "docs").glob("*.md")))
     files.extend(sorted((ROOT / "help").glob("*.md")))
+    files.extend(sorted((ROOT / "doc" / "adr").glob("*.md")))
+    files.extend(sorted((ROOT / "doc" / "tasks").glob("*.md")))
     return files
 
 

@@ -5,7 +5,7 @@ requirements, testing strategy, and documentation standards for this project.
 It is the reference for contributors and reviewers.
 
 **See also:**
-[ARCHITECTURE.md](ARCHITECTURE.md) — source structure and dependency rules |
+[ARCHITECTURE.md](../ARCHITECTURE.md) — source structure and dependency rules |
 [SPEC.md](SPEC.md) — product scope and support philosophy
 
 ---
@@ -362,7 +362,7 @@ project is, what it does, how it works, and why specific choices were made.
 | `README.md` | What this is, how to install, how to use | Users |
 | `CONTRIBUTING.md` | Dev environment setup, PR process | Contributors |
 | `docs/SPEC.md` | Product scope and support philosophy | Architects, developers |
-| `docs/ARCHITECTURE.md` | Source structure and dependency rules | Developers |
+| `ARCHITECTURE.md` | Source structure and dependency rules | Developers |
 | `docs/GUIDELINES.md` | Code standards, testing, build rules (this document) | Developers |
 | `help/SUPPORT_MATRIX.md` | Support status by platform and hardware | Users, operators |
 | `help/TROUBLESHOOTING.md` | Practical operational troubleshooting | Users, operators |

@@ -1,0 +1,7 @@
+version: 1
+name: agentic-architecture
+description: Bootstrap or audit the root architecture document.
+entrypoint: SKILL.md
+instructions: |
+  Read SKILL.md in this directory and follow it as the source of truth.
+  Treat root ARCHITECTURE.md as the binding architecture document.
