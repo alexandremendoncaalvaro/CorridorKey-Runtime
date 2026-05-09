@@ -138,10 +138,10 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
     $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
 }
 
-# When a `-DisplayVersionLabel` (e.g. `0.8.2-win.1`) is supplied, the
-# staged bundle folder uses it instead of the base version. This keeps
-# the packaged payload identity aligned with the setup executable and
-# the binaries it installs.
+# When a `-DisplayVersionLabel` is supplied by the canonical wrapper,
+# the staged bundle folder uses it instead of the base version. Local
+# Windows installers use the git-describe label so the folder, setup
+# executable, OFX panel, CLI, and log filename identify the same build.
 $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
 $releaseBasename = "CorridorKey_OFX_v${artifactVersionTag}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)

@@ -45,11 +45,19 @@ function Assert-CorridorKeyWindowsReleaseLabel {
         if ($labelCore -ne $Version) {
             throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
         }
+        if (-not $Publishing) {
+            throw "DisplayVersionLabel '$DisplayVersionLabel' has the published tag shape X.Y.Z-win.N, which is reserved for -PublishGithub. Local Windows installers must use the git-describe label derived by scripts\windows.ps1 so the artifact name, OFX panel, CLI, and logs identify the exact tested build."
+        }
         return
     }
 
-    $localPattern = '^\d+\.\d+\.\d+-win\.\d+-\d+-g[0-9a-f]+(-dirty)?$'
-    if (-not $Publishing -and $DisplayVersionLabel -match $localPattern) {
+    $localPattern = '^(?<core>\d+\.\d+\.\d+)-win\.\d+-\d+-g[0-9a-f]+(-dirty(-w[0-9a-f]+)?)?$'
+    $localMatch = [regex]::Match($DisplayVersionLabel, $localPattern)
+    if (-not $Publishing -and $localMatch.Success) {
+        $labelCore = $localMatch.Groups['core'].Value
+        if (-not [string]::IsNullOrWhiteSpace($Version) -and $labelCore -ne $Version) {
+            throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. Local Windows installers must use the requested release version in the visible label."
+        }
         return
     }
 
@@ -57,7 +65,7 @@ function Assert-CorridorKeyWindowsReleaseLabel {
         throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows prerelease label. Expected form: X.Y.Z-win.N (see docs/RELEASE_GUIDELINES.md section 1)."
     }
 
-    throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows local or prerelease label. Expected local git-describe form X.Y.Z-win.N-M-gSHA or published form X.Y.Z-win.N."
+    throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows local or prerelease label. Expected local git-describe form X.Y.Z-win.N-M-gSHA[-dirty], or published form X.Y.Z-win.N when -PublishGithub is set."
 }
 
 function Publish-CorridorKeyGithubRelease {

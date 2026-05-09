@@ -79,12 +79,19 @@ $env:VCPKG_ROOT = "C:\tools\vcpkg"
 ### 2.3 Pre-release
 
 ```powershell
-# Pre-release candidate. Bakes the label into the runtime, the panel, and the
-# log filename without bumping the root CMakeLists.txt version.
-.\scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-10
+# Local pre-release candidate. The wrapper derives the display label from
+# the requested -Version plus git describe, then bakes that same label into
+# the installer filename, OFX panel, CLI --version output, and runtime-server
+# log filename.
+.\scripts\windows.ps1 -Task release -Version 0.7.5 -Flavor online
 ```
 
 See [RELEASE_GUIDELINES.md](RELEASE_GUIDELINES.md) section "Pre-release labels" for the numbering policy.
+Do not hand a regenerated installer to a tester as a new build unless the
+derived label changed. If validation or audit work changes the release
+decision after an installer was generated, record the correction in a tracked
+or unignored build input first, then rerun the canonical wrapper so the new
+installer name and in-panel version are distinct.
 
 ## 3. Troubleshooting
 
@@ -345,6 +352,73 @@ file and key fields:
   progressive degradation within a single session (cold-frame spike
   aside, steady-state numbers should be flat — if `ort_run` climbs
   frame-over-frame in the harness, investigate before shipping).
+
+### 4.4 TorchTRT Windows matrix
+
+`scripts\run_windows_torchtrt_matrix.ps1` is the Windows RTX dynamic
+readiness harness for TorchTRT artifacts. It runs the canonical Windows
+build through `scripts\windows.ps1`, validates the green and blue `.ts`
+artifacts with the standalone TorchTRT runner, then runs the real OFX
+runtime sidecar through `ofx_rpc_benchmark_harness.exe`.
+
+```powershell
+.\scripts\run_windows_torchtrt_matrix.ps1 -Profile readiness
+```
+
+Use `-SkipBuild` only when the current `build\<preset>\` tree was already
+produced by `scripts\windows.ps1` in the same workspace.
+
+The report is written to
+`build\<preset>\torchtrt_matrix\torchtrt_matrix_report.json`. The report
+contains:
+
+- git identity and dirty state
+- model SHA256 values
+- runner finiteness and p50/p99 latency per model resolution
+- RPC roundtrip, stage timings, and dominant bottleneck class per case
+- TorchTRT CUDA Graph replay/fallback telemetry per RPC case
+- render-session identity stability for each RPC render loop
+- coverage classification for runtime parameters and host-layer parameters
+
+The `readiness` profile covers:
+
+- green alpha-only output
+- green processed output
+- green source passthrough with default and heavy erode/blur settings
+- green bilinear and Lanczos output resize requests
+- green despeckle
+- green tiling
+- blue processed output
+- blue source passthrough
+- Blue-Green Channel Swap as a separate deterministic mode
+
+The `readiness` profile must include non-constant `plate` input cases for
+green processed output, green source passthrough, green despeckle, blue
+processed output, blue source passthrough, and Blue-Green Channel Swap. It must
+also include a `random` green despeckle case. Constant-input cases remain in the
+matrix for compatibility, but a constant-only report is not a release-readiness
+or optimization gate because constant mattes can exercise post-processing early
+exits.
+
+Use `-ListCases` to audit the selected RPC matrix without building or launching
+the sidecar:
+
+```powershell
+.\scripts\run_windows_torchtrt_matrix.ps1 -Profile readiness -RpcResolutions 2048 -ListCases
+```
+
+The `smoke` profile is for short local checks. The `full` profile adds
+additional content-varying random input cases. Use `-BaselineReport <path>` to compare
+the current run against an earlier matrix report; any matching RPC case whose
+`avg_latency_ms` regresses by more than `-MaxRegressionPercent` fails the
+matrix.
+
+The RPC matrix covers runtime `InferenceParams` and the sidecar transport. It
+does not claim coverage for OFX host-layer controls that are applied in
+`ofx_render.cpp` after the runtime response, including alpha edge controls,
+temporal smoothing, and output-mode writeback. Those remain covered by OFX host
+tests, Nuke smoke, or Resolve UAT until an OFX-host render harness drives that
+layer directly.
 
 ## 5. What NOT to do
 

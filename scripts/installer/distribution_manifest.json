@@ -13,8 +13,8 @@
           "remote_path": "torchtrt/dynamic-green/corridorkey_dynamic_green_fp16.ts",
           "filename": "corridorkey_dynamic_green_fp16.ts",
           "url": "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/torchtrt/dynamic-green/corridorkey_dynamic_green_fp16.ts",
-          "sha256": "b8ba133d4bd546a7c31c9b2abbed7a9bcb6acb302ecb4cee6f5280880ad60237",
-          "size_bytes": 145142473,
+          "sha256": "8d773d6dde77ec3fb72b8469e3c94d2a1f25be78c441ec469def42ff766f98c7",
+          "size_bytes": 209878094,
           "status": "ready"
         }
       ]

@@ -379,6 +379,7 @@ if ($torchTrtOnlyRtx) {
 $requiresCudaRuntime = $torchTrtOnlyRtx -or ($null -ne $tensorrtProvider) -or ($null -ne $cudaProvider)
 if ($requiresCudaRuntime) {
     Copy-CudaToolkitRuntimeDlls -DestinationDir $win64Dir -IncludeCudaRuntime
+    Copy-CudaToolkitRuntimeDlls -DestinationDir $torchTrtRuntimeDir -IncludeCudaRuntime
 } else {
     Write-Host "Skipping CUDA runtime staging because no CUDA/TensorRT provider was found."
 }

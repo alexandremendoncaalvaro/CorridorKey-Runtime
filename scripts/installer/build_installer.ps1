@@ -36,7 +36,8 @@
 .PARAMETER DisplayVersionLabel
     Long-form build identifier shown to the operator (in the wizard
     title bar, in the OFX panel after install, in the "About" dialog).
-    Falls back to -Version when empty.
+    Falls back to -Version when empty. The canonical Windows wrapper
+    derives this from `git describe` for local installers.
 
 .PARAMETER PluginPayloadDir
     Path to the pre-staged OFX bundle layout, typically the
@@ -71,12 +72,12 @@
 
 .EXAMPLE
     pwsh scripts/installer/build_installer.ps1 -Flavor online \
-      -Version 0.8.3 -DisplayVersionLabel '0.8.3-win.4' \
+      -Version 0.8.3 -DisplayVersionLabel '0.8.3-win.4-12-gabc1234' \
       -PluginPayloadDir build/release/CorridorKey.ofx.bundle
 
 .EXAMPLE
     pwsh scripts/installer/build_installer.ps1 -Flavor offline \
-      -Version 0.8.3 -DisplayVersionLabel '0.8.3-win.4' \
+      -Version 0.8.3 -DisplayVersionLabel '0.8.3-win.4-12-gabc1234' \
       -PluginPayloadDir build/release/CorridorKey.ofx.bundle \
       -ModelPayloadDir dist/_offline_payload/
 #>
@@ -416,6 +417,35 @@ function Get-PackByName {
     return $match[0].Value
 }
 
+function Get-LocalFileSha256Lower {
+    param([string]$Path)
+    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+}
+
+function Assert-ManifestMatchesPluginPayloadModels {
+    param([object]$Manifest, [string]$PayloadRoot)
+    foreach ($pack in $Manifest.packs.PSObject.Properties) {
+        $packMeta = $pack.Value
+        if (Test-PackExtractsArchive -PackMeta $packMeta) { continue }
+        $destSubdir = $packMeta.dest_subdir -replace '/', '\'
+        foreach ($file in $packMeta.files) {
+            if ($file.status -ne 'ready') { continue }
+            $payloadPath = Join-Path $PayloadRoot ("Contents\Resources\$destSubdir\$($file.filename)")
+            if (-not (Test-Path $payloadPath)) {
+                throw "Plugin payload is missing manifest pack file: $payloadPath"
+            }
+            $actualSize = (Get-Item -LiteralPath $payloadPath).Length
+            if ([Int64]$file.size_bytes -ne $actualSize) {
+                throw "Distribution manifest size mismatch for $($file.filename): manifest=$($file.size_bytes) payload=$actualSize. Regenerate/upload the pack before building the installer."
+            }
+            $actualSha256 = Get-LocalFileSha256Lower -Path $payloadPath
+            if ($actualSha256 -ne $file.sha256.ToLowerInvariant()) {
+                throw "Distribution manifest SHA256 mismatch for $($file.filename): manifest=$($file.sha256) payload=$actualSha256. Regenerate/upload the pack before building the installer."
+            }
+        }
+    }
+}
+
 function Test-PackExtractsArchive {
     param([object]$PackMeta)
     return ($PackMeta.PSObject.Properties.Match('is_archive').Count -gt 0 -and $PackMeta.is_archive) `
@@ -597,6 +627,7 @@ function Build-OnlineDownloadQueueProcedure {
 # ---------------------------------------------------------------------------
 
 $manifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
+Assert-ManifestMatchesPluginPayloadModels -Manifest $manifest -PayloadRoot $PluginPayloadDir
 $iscc = Resolve-IsccPath -Override $ISCCPath
 $runtimeComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "runtime"
 $greenComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "green"

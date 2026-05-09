@@ -39,7 +39,7 @@ project(CorridorKey-Runtime
 
     Write-Utf8File -Path (Join-Path $tempRepo "models\corridorkey_fp16_2048.onnx") -Content "fake-2048-model"
     Write-Utf8File -Path (Join-Path $tempRepo "models\corridorkey_fp16_2048_ctx.onnx") -Content "fake-2048-context"
-    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_OFX_v0.6.0_Windows_RTX_Install.exe") -Content "fake-installer"
+    Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_v0.6.0_Windows_online_Setup.exe") -Content "fake-installer"
     Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_OFX_v0.6.0_Windows_RTX\bundle_validation.json") -Content "{`"healthy`":true}"
     Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_OFX_v0.6.0_Windows_RTX\doctor_report.json") -Content "{`"healthy`":true}"
     Write-Utf8File -Path (Join-Path $tempRepo "dist\CorridorKey_OFX_v0.6.0_Windows_RTX\model_inventory.json") -Content "{`"present_models`":[`"corridorkey_fp16_2048.onnx`"]}"
@@ -73,7 +73,7 @@ project(CorridorKey-Runtime
     foreach ($expectedEntry in @(
             "models\corridorkey_fp16_2048.onnx",
             "models\corridorkey_fp16_2048_ctx.onnx",
-            "installers\CorridorKey_OFX_v0.6.0_Windows_RTX_Install.exe",
+            "installers\CorridorKey_v0.6.0_Windows_online_Setup.exe",
             "reports\RTX_bundle_validation.json",
             "reports\RTX_doctor_report.json",
             "reports\RTX_model_inventory.json",

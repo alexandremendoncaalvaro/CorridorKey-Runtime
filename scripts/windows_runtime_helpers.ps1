@@ -875,6 +875,69 @@ function Sync-CorridorKeyGuiVersionMetadata {
     return $Version
 }
 
+function Get-CorridorKeyWorktreeFingerprint {
+    param(
+        [string]$RepoRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RepoRoot) -or -not (Test-Path $RepoRoot)) {
+        return ""
+    }
+
+    $gitCommonArgs = @("-C", $RepoRoot, "-c", "core.autocrlf=false")
+
+    $priorErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $status = & git @gitCommonArgs status --porcelain=v1 --untracked-files=all 2>$null
+        if ($LASTEXITCODE -ne 0 -or $null -eq $status -or $status.Count -eq 0) {
+            return ""
+        }
+
+        $encoding = [System.Text.Encoding]::UTF8
+        $addText = {
+            param([string]$Text)
+            $bytes = $encoding.GetBytes($Text)
+            if ($bytes.Length -gt 0) {
+                $hasher.TransformBlock($bytes, 0, $bytes.Length, $null, 0) | Out-Null
+            }
+            $newline = $encoding.GetBytes("`n")
+            $hasher.TransformBlock($newline, 0, $newline.Length, $null, 0) | Out-Null
+        }
+
+        foreach ($line in @($status)) {
+            & $addText "status:$line"
+        }
+
+        $trackedDiff = & git @gitCommonArgs diff --binary --full-index --no-ext-diff 2>$null
+        foreach ($line in @($trackedDiff)) {
+            & $addText "diff:$line"
+        }
+
+        $stagedDiff = & git @gitCommonArgs diff --cached --binary --full-index --no-ext-diff 2>$null
+        foreach ($line in @($stagedDiff)) {
+            & $addText "cached:$line"
+        }
+
+        $untrackedFiles = & git @gitCommonArgs ls-files --others --exclude-standard 2>$null
+        foreach ($relativePath in @($untrackedFiles | Sort-Object)) {
+            if ([string]::IsNullOrWhiteSpace($relativePath)) { continue }
+            $fullPath = Join-Path $RepoRoot $relativePath
+            if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { continue }
+            $fileHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullPath).Hash.ToLowerInvariant()
+            & $addText "untracked:${relativePath}:$fileHash"
+        }
+
+        $empty = [byte[]]::new(0)
+        $hasher.TransformFinalBlock($empty, 0, 0) | Out-Null
+        return ([System.BitConverter]::ToString($hasher.Hash).Replace("-", "").ToLowerInvariant()).Substring(0, 12)
+    } finally {
+        $ErrorActionPreference = $priorErrorActionPreference
+        $hasher.Dispose()
+    }
+}
+
 function Get-CorridorKeyDerivedDisplayLabel {
     <#
     .SYNOPSIS
@@ -884,15 +947,17 @@ function Get-CorridorKeyDerivedDisplayLabel {
 
     .DESCRIPTION
         For builds produced without `-DisplayVersionLabel` and without
-        `-PublishGithub`, the canonical local label comes from
-        `git describe --tags --dirty --match "v*-win.*"` with the leading
-        `v` stripped. The derived label naturally encodes:
+        `-PublishGithub`, the canonical local label comes from the release
+        version being built plus the commit distance / SHA from
+        `git describe --tags --long --match "v*-win.*"`. The derived label
+        naturally encodes:
 
-        - The closest published prerelease tag in HEAD's ancestry (e.g.
-          `v0.8.2-win.2`).
+        - The requested release version and local prerelease lane (e.g.
+          `0.8.5-win.1` for a `-Version 0.8.5` local tester build).
         - The number of commits HEAD is past that tag (e.g. `-82-`).
         - The short SHA of HEAD (e.g. `g4a75ef2`).
-        - A `-dirty` suffix when the working tree has uncommitted changes.
+        - A `-dirty-w<hash>` suffix when the working tree has uncommitted
+          changes or untracked files that can affect the build.
 
         Two builds at the same commit produce the same label (because the
         same git state derives the same description); two builds at
@@ -918,6 +983,7 @@ function Get-CorridorKeyDerivedDisplayLabel {
     #>
     param(
         [string]$RepoRoot,
+        [string]$Version = "",
         [string]$PlatformMatch = "v*-win.*"
     )
 
@@ -925,12 +991,28 @@ function Get-CorridorKeyDerivedDisplayLabel {
         return ""
     }
 
-    $gitArgs = @("-C", $RepoRoot, "describe", "--tags", "--dirty", "--match", $PlatformMatch)
+    $gitArgs = @("-C", $RepoRoot, "describe", "--tags", "--long", "--match", $PlatformMatch)
     $rawLabel = & git @gitArgs 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($rawLabel)) {
         return ""
     }
-    return ($rawLabel | Select-Object -First 1).ToString().Trim() -replace '^v', ''
+    $rawText = ($rawLabel | Select-Object -First 1).ToString().Trim() -replace '^v', ''
+    $match = [regex]::Match($rawText, '^(?<core>\d+\.\d+\.\d+)-win\.(?<counter>\d+)-(?<distance>\d+)-g(?<sha>[0-9a-f]+)$')
+    if (-not $match.Success) {
+        return ""
+    }
+
+    $labelCore = if ([string]::IsNullOrWhiteSpace($Version)) { $match.Groups["core"].Value } else { $Version }
+    $labelCounter = $match.Groups["counter"].Value
+    if (-not [string]::IsNullOrWhiteSpace($Version) -and $match.Groups["core"].Value -ne $Version) {
+        $labelCounter = "1"
+    }
+    $label = "$labelCore-win.$labelCounter-$($match.Groups["distance"].Value)-g$($match.Groups["sha"].Value)"
+    $worktreeFingerprint = Get-CorridorKeyWorktreeFingerprint -RepoRoot $RepoRoot
+    if (-not [string]::IsNullOrWhiteSpace($worktreeFingerprint)) {
+        $label = "$label-dirty-w$worktreeFingerprint"
+    }
+    return $label
 }
 
 function Initialize-CorridorKeyVersion {

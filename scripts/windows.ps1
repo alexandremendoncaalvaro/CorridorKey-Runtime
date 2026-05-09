@@ -26,20 +26,40 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 function Assert-CorridorKeyWindowsReleaseLabelFormat {
     param(
         [string]$Version,
-        [string]$DisplayVersionLabel
+        [string]$DisplayVersionLabel,
+        [bool]$Publishing = $false
     )
     if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
         return
     }
     $pattern = '^(?<core>\d+\.\d+\.\d+)-win\.(?<counter>\d+)$'
     $match = [regex]::Match($DisplayVersionLabel, $pattern)
-    if (-not $match.Success) {
+    if ($match.Success) {
+        $labelCore = $match.Groups['core'].Value
+        if (-not [string]::IsNullOrWhiteSpace($Version) -and $labelCore -ne $Version) {
+            throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
+        }
+        if (-not $Publishing) {
+            throw "DisplayVersionLabel '$DisplayVersionLabel' has the published tag shape X.Y.Z-win.N, which is reserved for -PublishGithub. For local Windows installers, omit -DisplayVersionLabel so scripts\windows.ps1 derives the git-describe label used by the artifact name, OFX panel, CLI, and logs."
+        }
+        return
+    }
+
+    $localPattern = '^(?<core>\d+\.\d+\.\d+)-win\.\d+-\d+-g[0-9a-f]+(-dirty(-w[0-9a-f]+)?)?$'
+    $localMatch = [regex]::Match($DisplayVersionLabel, $localPattern)
+    if (-not $Publishing -and $localMatch.Success) {
+        $labelCore = $localMatch.Groups['core'].Value
+        if (-not [string]::IsNullOrWhiteSpace($Version) -and $labelCore -ne $Version) {
+            throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. Local Windows installers must use the requested release version in the visible label."
+        }
+        return
+    }
+
+    if ($Publishing) {
         throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows prerelease label. Expected form: X.Y.Z-win.N (see docs/RELEASE_GUIDELINES.md section 1)."
     }
-    $labelCore = $match.Groups['core'].Value
-    if (-not [string]::IsNullOrWhiteSpace($Version) -and $labelCore -ne $Version) {
-        throw "DisplayVersionLabel core '$labelCore' does not match -Version '$Version'. The label must be '$Version-win.<counter>'."
-    }
+
+    throw "DisplayVersionLabel '$DisplayVersionLabel' is not a valid Windows local build label. Expected git-describe form X.Y.Z-win.N-M-gSHA[-dirty], or omit -DisplayVersionLabel to derive it automatically."
 }
 
 function Assert-CorridorKeyVariantDoctorHealthy {
@@ -94,21 +114,21 @@ $resolvedVersion = Initialize-CorridorKeyVersion `
     -Version $Version `
     -SyncGuiMetadata:$syncGuiMetadata
 
-$publishGithubRequested = $additionalArguments | Where-Object { $_ -eq "-PublishGithub" -or $_ -eq "/PublishGithub" }
-if ($Task -eq "release" -and $publishGithubRequested -and $Flavor -ne "online") {
+$publishGithubRequested = @($additionalArguments | Where-Object { $_ -eq "-PublishGithub" -or $_ -eq "/PublishGithub" })
+$publishing = $Task -eq "release" -and $publishGithubRequested.Count -gt 0
+if ($publishing -and $Flavor -ne "online") {
     throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
 }
 
 # Validate any user-provided override BEFORE we attempt to derive a
-# label from git. The strict X.Y.Z-win.N format only applies when the
-# operator explicitly opts in to the published-prerelease label shape;
-# the derived form (mechanism #3 in docs/RELEASE_GUIDELINES.md
-# "Windows Release Label Plumbing") is the longer git-describe shape
-# `0.8.2-win.2-82-g4a75ef2[-dirty]` and is intentionally allowed to
-# bypass that strict format.
+# label from git. The strict X.Y.Z-win.N format is reserved for the
+# publication path. Local builds use the longer git-describe shape
+# `0.8.2-win.2-82-g4a75ef2[-dirty]` so every installer, OFX panel,
+# CLI version, and log filename identifies the exact tested source.
 Assert-CorridorKeyWindowsReleaseLabelFormat `
     -Version $resolvedVersion `
-    -DisplayVersionLabel $DisplayVersionLabel
+    -DisplayVersionLabel $DisplayVersionLabel `
+    -Publishing:$publishing
 
 # Mechanism #3: derive the local-build label from `git describe` when
 # the operator did not pass an explicit override. Without this the
@@ -120,7 +140,7 @@ Assert-CorridorKeyWindowsReleaseLabelFormat `
 # Empty derivation result keeps the historical fallback (CMake
 # version), so old branches without matching tags do not regress.
 if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
-    $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
+    $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot -Version $resolvedVersion
     if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
         $DisplayVersionLabel = $derivedLabel
         Write-Host "[windows] Derived display version label from git: $DisplayVersionLabel" -ForegroundColor Yellow

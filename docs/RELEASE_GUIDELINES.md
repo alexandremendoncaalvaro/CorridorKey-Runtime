@@ -33,7 +33,7 @@ counter file.
 | Kind | Who sees it | How it is produced | When it changes |
 |---|---|---|---|
 | **Published tag** | GitHub Releases consumers, auto-updater | `vX.Y.Z-<platform>.N`, written by the publishing pipeline | Only when a release is published to GitHub |
-| **Local build label** | OFX panel, CLI `--version`, runtime-server log filename, dist artifact filenames | Output of `git describe --tags --dirty --match "v*-<platform>.*"` (or `--match "v*"` for stable) | Every commit; also flips to `-dirty` on uncommitted changes |
+| **Local build label** | OFX panel, CLI `--version`, runtime-server log filename, dist artifact filenames | Requested `X.Y.Z` plus local prerelease lane, Git distance/SHA, and dirty worktree fingerprint when needed | Every release version, every commit, and every uncommitted or untracked build input change |
 
 This split follows the pattern used by the Linux kernel, Go, Rust
 nightly, Kubernetes, and most projects that ship a binary carrying a
@@ -60,32 +60,43 @@ to all platforms universally.
 **Per-platform counters**. Each platform maintains its own independent
 counter `N`. Windows and macOS iterate at whatever cadence their track
 demands; they do not share or coordinate the counter. `N` is the count
-of **published** prereleases for that `X.Y.Z-<platform>` cycle — it is
+of **published** prereleases for that `X.Y.Z-<platform>` cycle - it is
 never incremented by a local build, so it grows slowly and predictably
 (typically 1 to 5 per cycle, matching how Kubernetes, Node.js, and
 Python number their RCs).
 
 **Local build label format**. When a build is produced without
-`-DisplayVersionLabel`, the pipeline derives the label from
-`git describe --tags --dirty --match "v*-<platform>.*"`, stripping the
-leading `v`. Concrete examples for a Windows build:
+`-DisplayVersionLabel`, the pipeline derives the label from the requested
+release version, the local prerelease lane, and
+`git describe --tags --long --match "v*-<platform>.*"`. If the working tree
+has uncommitted changes or untracked files, the wrapper appends
+`-dirty-w<hash>`, where `<hash>` is a short SHA256 fingerprint of the dirty
+build inputs. Concrete examples for a Windows build:
 
 | Git state | Derived label |
 |---|---|
-| Clean checkout at exactly the tag `v0.8.1-win.1` | `0.8.1-win.1` |
+| Clean checkout at exactly the tag `v0.8.1-win.1` | `0.8.1-win.1-0-gabc1234` |
 | 3 commits past `v0.8.1-win.1`, at commit `abc1234`, clean | `0.8.1-win.1-3-gabc1234` |
-| Same as above, with uncommitted changes | `0.8.1-win.1-3-gabc1234-dirty` |
-| Before the first prerelease of this `X.Y.Z` cycle | `0.0.0-win.0-<n>-g<sha>` (fallback — pipeline falls back to the repo's initial commit) |
+| Same as above, with uncommitted changes | `0.8.1-win.1-3-gabc1234-dirty-w1a2b3c4d5e6f` |
+| Building `-Version 0.8.5` while the closest existing tag is `v0.8.4-win.1` | `0.8.5-win.1-<n>-g<sha>` |
 
 The label reads directly as a statement about the repo state:
 `0.8.1-win.1-3-gabc1234` means "three commits past the `v0.8.1-win.1`
-prerelease, at commit `abc1234`". Two rebuilds of the same commit
-produce the same label, which is what you want — the label identifies
-the source, not the build attempt.
+prerelease, at commit `abc1234`". For local tester builds, the `X.Y.Z` core
+must match the `-Version` being built; a `-Version 0.8.5` installer must not
+display or ship as `0.8.4-...`. Local tester installers must never be
+presented as a new test build unless this label changes. If an audit,
+measurement, or packaging correction happens after an installer has
+already been handed to a tester, the correction must change a tracked or
+unignored build input before the next installer is generated, so the
+dirty fingerprint changes and the installer filename, panel label, CLI
+version, and runtime log filename all distinguish the new artifact.
+Ignored reports under `dist/` or `build/` are evidence files; changing
+only those files does not create a new testable build identity.
 
 **Counter advancement rule (absolute)**. `N` advances only inside the
 `-PublishGithub` code path of the canonical release pipeline. There is
-no other mechanism — no manual edit to a version file, no
+no other mechanism - no manual edit to a version file, no
 `-DisplayVersionLabel` override that bumps state, no local task that
 writes a new tag. The next `N` is computed as
 `max(existing-N-for-this-X.Y.Z-platform) + 1`, from the tags already on
@@ -98,17 +109,22 @@ pushed-or-pushable HEAD. This closes the loophole where a label baked
 from an uncommitted working tree could reach users and be
 unreproducible from Git.
 
-**`-DisplayVersionLabel` override**. The flag remains for the narrow
-case where the operator needs to force a specific label string — for
-example, when cutting a bespoke build for a single tester. It is not
-the normal flow; the normal flow is letting `git describe` derive the
-label. Using `-DisplayVersionLabel` does not publish anything and does
-not advance `N`.
+**`-DisplayVersionLabel` override**. Local Windows builds intended for
+testing must not pass `-DisplayVersionLabel`. They must omit the flag
+so the wrapper derives the source-identifying `git describe` label and
+uses it everywhere. Dirty local builds include a short worktree fingerprint,
+so changing uncommitted source, scripts, tests, or untracked build inputs
+changes the visible label. A local build label with the published tag shape
+`X.Y.Z-win.N` is forbidden because it cannot distinguish one local test
+build from another. The wrapper rejects that shape unless the
+`-PublishGithub` path is active. The flag remains only for replaying an
+already-derived local `git describe` label or for publication plumbing;
+it does not publish anything and does not advance `N`.
 
 **Measurement ledger**. Published prereleases must be recorded in
 [OPTIMIZATION_MEASUREMENTS.md](OPTIMIZATION_MEASUREMENTS.md) with the
 measured hot-path numbers at the time of cut. Unpublished local builds
-do not go in the ledger — they are ephemeral by definition and their
+do not go in the ledger - they are ephemeral by definition and their
 labels contain the commit sha, so any measurement taken from one is
 already traceable to the exact source.
 
@@ -132,8 +148,8 @@ its platform's assets.
 The canonical Windows release pipeline calls `gh release create` with
 these flags, derived from the tag shape:
 
-- Tag with `-<platform>.N` suffix → `--prerelease`
-- Tag with no suffix → `--latest`
+- Tag with `-<platform>.N` suffix -> `--prerelease`
+- Tag with no suffix -> `--latest`
 
 Stable release `vX.Y.Z` is published only after every active platform
 track has shipped its final prerelease for that `X.Y.Z` cycle.
@@ -161,7 +177,7 @@ deleted by the pipeline. The operator may manually delete a superseded
 prerelease only when (a) a strictly newer `vX.Y.Z-<platform>.M` with
 `M > N` already exists on the same platform and `X.Y.Z`, and (b) the
 older build is known broken or obsolete. Absent both conditions, keep
-the release — the release list is also an audit log.
+the release - the release list is also an audit log.
 
 **Known-broken prereleases may be deleted.** A prerelease that shipped
 a reproducible fatal defect (for example, the `v0.7.5-21` Windows build
@@ -180,7 +196,7 @@ and costs historical traceability.
 **Mutation is forbidden on any published tag.** See the "Tag and
 release immutability" subsection above. This applies regardless of
 platform, age, or supersession state. A broken tag gets deleted (under
-the rules above) and replaced with a new tag — never mutated in place.
+the rules above) and replaced with a new tag - never mutated in place.
 
 ## 2. Standardized Artifact Naming
 
@@ -378,12 +394,10 @@ Producing local installer flavors:
 
 ```powershell
 # Online (small stub, downloads packs; default for Windows RTX)
-.\scripts\windows.ps1 -Task package-ofx -Track rtx -Flavor online \
-    -DisplayVersionLabel <label>
+.\scripts\windows.ps1 -Task package-ofx -Track rtx -Flavor online
 
 # Offline (self-contained)
-.\scripts\windows.ps1 -Task package-ofx -Track rtx -Flavor offline \
-    -DisplayVersionLabel <label>
+.\scripts\windows.ps1 -Task package-ofx -Track rtx -Flavor offline
 ```
 
 The offline command is for local/private distribution only. Do not upload
@@ -447,8 +461,15 @@ reinventing them.
 - **Do not skip the quality gate on the release pipeline.** Running
   `scripts\windows.ps1 -Task release` with `-SkipTests` forwarded through
   `-ForwardArguments` is a debug convenience only. Any build intended
-  for a user — even an internal pre-release — must pass the quality
+  for a user - even an internal pre-release - must pass the quality
   gate.
+- **Do not accept a constant-only TorchTRT readiness matrix.** Windows RTX
+  local tester builds and prereleases must run the TorchTRT readiness matrix
+  with non-constant `plate` cases for green processed output, green source
+  passthrough, green despeckle, blue processed output, blue source passthrough,
+  and Blue-Green Channel Swap, plus a `random` green despeckle case. Constant
+  cases are compatibility coverage only because they can miss post-processing
+  work through early exits.
 - **Do not touch the render hot path without measuring.** Any change
   under `src/plugins/ofx/`, `src/core/inference_session.cpp`,
   `src/core/engine.cpp`, `src/core/gpu_prep.cpp`, `src/core/gpu_resize.cpp`,
@@ -472,28 +493,27 @@ also bake the label into the dist artifact names when present:
 
 The label is produced by one of three mechanisms, in priority order:
 
-1. `-DisplayVersionLabel <string>` explicitly passed. Override for
-   narrow cases (bespoke tester build, reproducing a historical label).
-   The wrapper validates the label shape before build, and packaging
-   validates that the staged CLI reports the same label through
-   `corridorkey --version`.
-2. Publication flow (`-Task release -PublishGithub`). The pipeline
+1. Publication flow (`-Task release -PublishGithub`). The pipeline
    computes the next canonical tag `vX.Y.Z-win.N` and uses that, after
    enforcing the dirty-tree rule.
-3. Default (every local `build`, `package-ofx`, or `release` without
+2. Default (every local `build`, `package-ofx`, or `release` without
    `-PublishGithub`). Derived from
    `git describe --tags --dirty --match "v*-win.*"` with the leading
    `v` stripped.
+3. Explicit local replay. `-DisplayVersionLabel` may carry an
+   already-derived local git-describe label of the form
+   `X.Y.Z-win.N-M-gSHA[-dirty-wHASH]`. It must not carry the published tag
+   shape `X.Y.Z-win.N` unless `-PublishGithub` is active.
 
 The full derivation rules, dirty-tree rejection, and counter advancement
 semantics are documented in section 1 "Pre-release labels". On Windows,
 published labels must be of the form `X.Y.Z-win.N`; local labels are
 free to be the longer `git describe` form ending in `-<count>-g<sha>`
-or `-<count>-g<sha>-dirty`.
+or `-<count>-g<sha>-dirty-w<hash>`.
 
-When a label override is used for a local installer, the binaries and the
-installer must carry the same label. Build with that label first, then package
-with that same label. `package-ofx` validates the staged bundle before it emits
+For a local tester installer, omit `-DisplayVersionLabel`. The wrapper derives
+the label once and passes it through build, bundle staging, validation, and
+installer generation. `package-ofx` validates the staged bundle before it emits
 an installer and fails when the installer label differs from the packaged CLI
 label. This keeps the installer filename, OFX panel, CLI version output, and
 runtime-server log filename aligned.
@@ -554,8 +574,8 @@ considered releasable.
 
 macOS has one curated runtime root and one canonical release entrypoint:
 
-- `vendor/onnxruntime/` — vendored Apple Silicon ONNX Runtime dylib
-- `scripts/release_pipeline_macos.sh` — canonical macOS build, package, and
+- `vendor/onnxruntime/` - vendored Apple Silicon ONNX Runtime dylib
+- `scripts/release_pipeline_macos.sh` - canonical macOS build, package, and
   publish entrypoint
 
 The canonical macOS release command is:
@@ -574,16 +594,16 @@ otherwise.
 
 Other flags supported by the wrapper:
 
-- `--skip-tests` — debug convenience; any build intended for a user must
+- `--skip-tests` - debug convenience; any build intended for a user must
   pass the quality gate, same rule as Windows.
-- `--clean-only` — sanitize `build/release-macos-portable`,
+- `--clean-only` - sanitize `build/release-macos-portable`,
   `build/debug-macos-portable`, and `dist/` then exit.
-- `--publish-github` — after the build, package, and validation gates
+- `--publish-github` - after the build, package, and validation gates
   pass, invoke `scripts/publish_github_release.sh` with the produced
   DMG. Requires `--display-label`. Looks for release notes at
   `build/release_notes/v<label>.md` by default, or at
   `--notes-file PATH` when provided.
-- `--github-repo OWNER/REPO` — override the publish target.
+- `--github-repo OWNER/REPO` - override the publish target.
 
 ### Linux Build Steps
 
