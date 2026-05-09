@@ -32,8 +32,28 @@ de cor compartilhados.
 - A pipeline OFX ainda materializa alpha/foreground no cliente antes de cache,
   ajustes por instancia e escrita OFX. Esse custo e real e deve ser medido,
   mas nao existe implementacao melhor pronta na `main`.
+- Os logs atuais do Resolve com o pacote instrumentado mostram
+  `gpu_prepare_device` em cerca de 7 a 13 ms e
+  `gpu_prepare_wait_over_device` em cerca de 834 a 1445 ms. O replay do modelo
+  permanece em cerca de 276 a 289 ms na maioria dos frames, com queue wait
+  quase zero.
+- O mesmo build no harness nao reproduz esse wait: `gpu_prepare_wait_over_device`
+  fica em 0 ms e Green 2048 processado fica perto de 508 a 518 ms. Logo, o
+  bloqueio atual e especifico da fronteira Resolve -> GPU prep stream ->
+  TorchTRT stream.
+- A `main` evita essa fronteira sincronizando o preparo GPU e retornando para
+  host antes da inferencia. Isso e uma evidencia historica de estabilidade, mas
+  nao e a solucao principal porque perderia a otimizacao device-input desta
+  branch.
 
 ## Hipoteses Testaveis
+
+0. Fronteira de stream do input TorchTRT e o bloqueio P0.
+   Quando o preparo CUDA/NPP roda em uma stream independente e o TorchTRT consome
+   via evento, o Resolve atrasa a conclusao observada pelo consumidor em cerca
+   de 0.8 a 1.4 s, embora o trabalho GPU medido dure cerca de 7 a 13 ms.
+   Hipotese: enfileirar o preparo na current stream do Torch/PyTorch elimina o
+   wait cross-stream sem voltar ao roundtrip de host da `main`.
 
 1. Auto Despeckle ativa CPU demais.
    Quando `auto_despeckle` esta ligado, o TorchTRT desliga todo o post-process
@@ -66,6 +86,16 @@ de cor compartilhados.
 
 ## Trabalho Restante
 
+- P0: Implementar ADR-0003 e task `0004`: mover o preparo TorchTRT
+  prepared-input para a current stream do Torch/PyTorch, com `NppStreamContext`
+  associado a essa stream e sem dependencia de `cudaStreamWaitEvent` de uma
+  stream independente no caminho preparado.
+- P0: Validar em Resolve que `gpu_prepare_wait_over_device` desaparece ou fica
+  perto de zero, e que o tempo nao reaparece em outro stage pinado.
+- P0: Manter o caminho device-input e o device-to-device de Source Passthrough
+  quando `source_rgb_device` esta disponivel.
+- P0: Se a current-stream path nao resolver em Resolve, executar A/B
+  diagnostico com sincronizacao estilo `main` antes de CUDA Graph on/off.
 - Separar o status `post_processed` em flags por etapa ou outro contrato
   equivalente, para permitir post-process parcial em GPU quando Despeckle
   ainda precisar de CPU.
