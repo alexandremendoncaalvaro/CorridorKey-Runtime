@@ -2108,9 +2108,10 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
             auto gpu_prepare_res = common::measure_stage(
                 on_stage, "frame_prepare_inputs",
                 [&]() -> Result<core::GpuPreparedInput> {
-                    return m_gpu_prep.prepare_inputs_device(rgb, alpha_hint, target_res, target_res,
-                                                            kCorridorKeyRgbMean,
-                                                            kCorridorKeyRgbInvStddev, on_stage);
+                    return m_gpu_prep.prepare_inputs_device_on_stream(
+                        rgb, alpha_hint, target_res, target_res, kCorridorKeyRgbMean,
+                        kCorridorKeyRgbInvStddev, m_torch_trt_session->current_cuda_stream(),
+                        on_stage);
                 },
                 1);
             if (gpu_prepare_res.has_value()) {
@@ -2120,7 +2121,7 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
                         gpu_prepare_res->height, rgb.width, rgb.height,
                         params.output_alpha_only, params.upscale_method == UpscaleMethod::Lanczos4,
                         on_stage, gpu_prepare_res->ready_event, gpu_prepare_res->ready_start_event,
-                        &params,
+                        gpu_prepare_res->ready_event_on_current_stream, &params,
                         core::TorchTrtDeviceSource{
                             .host_rgb = rgb,
                             .rgb_device = gpu_prepare_res->source_rgb_device,

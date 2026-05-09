@@ -231,7 +231,10 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
                                                   int model_width, int model_height,
                                                   const std::array<float, 3>& mean,
                                                   const std::array<float, 3>& inv_stddev,
+                                                  cudaStream_t stream,
+                                                  const NppStreamContext& npp_context,
                                                   bool synchronize,
+                                                  bool ready_event_on_current_stream,
                                                   const StageTimingCallback& on_stage) {
     if (rgb.empty() || hint.empty() || rgb.channels < 3 || hint.channels < 1) {
         return Unexpected(
@@ -266,7 +269,7 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     if (!synchronize) {
         cudaError_t cuda_err = cudaSuccess;
         common::measure_stage(on_stage, "gpu_prepare_start_event_record",
-                              [&]() { cuda_err = cudaEventRecord(state.prep_start_event, state.stream); });
+                              [&]() { cuda_err = cudaEventRecord(state.prep_start_event, stream); });
         if (cuda_err != cudaSuccess) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
                                     "GPU prep start event recording failed"});
@@ -276,12 +279,12 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     common::measure_stage(on_stage, "gpu_prepare_upload_enqueue", [&]() {
         const size_t src_rgb_row_bytes = static_cast<size_t>(rgb.width) * 3 * sizeof(float);
         cudaMemcpy2DAsync(state.src_rgb_dev, src_rgb_row_bytes, upload_rgb_src, src_rgb_row_bytes,
-                          src_rgb_row_bytes, rgb.height, cudaMemcpyHostToDevice, state.stream);
+                          src_rgb_row_bytes, rgb.height, cudaMemcpyHostToDevice, stream);
 
         const size_t src_hint_row_bytes = static_cast<size_t>(hint.width) * sizeof(float);
         cudaMemcpy2DAsync(state.src_hint_dev, src_hint_row_bytes, upload_hint_src,
                           src_hint_row_bytes, src_hint_row_bytes, hint.height,
-                          cudaMemcpyHostToDevice, state.stream);
+                          cudaMemcpyHostToDevice, stream);
     });
 
     NppiSize src_rgb_size = {rgb.width, rgb.height};
@@ -293,7 +296,6 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     const int dst_rgb_step = model_width * 3 * static_cast<int>(sizeof(float));
     const bool rgb_needs_resize = rgb.width != model_width || rgb.height != model_height;
 
-    const NppStreamContext npp_context = state.npp_context;
     Npp32f* prepared_rgb = state.src_rgb_dev;
     int prepared_rgb_step = src_rgb_step;
     if (rgb_needs_resize) {
@@ -383,7 +385,7 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
     if (synchronize) {
         cudaError_t cuda_err = cudaSuccess;
         common::measure_stage(on_stage, "gpu_prepare_sync",
-                              [&]() { cuda_err = cudaStreamSynchronize(state.stream); });
+                              [&]() { cuda_err = cudaStreamSynchronize(stream); });
         if (cuda_err != cudaSuccess) {
             return Unexpected(Error{ErrorCode::InferenceFailed, "GPU prep synchronization failed"});
         }
@@ -394,7 +396,7 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
         }
         cudaError_t cuda_err = cudaSuccess;
         common::measure_stage(on_stage, "gpu_prepare_event_record",
-                              [&]() { cuda_err = cudaEventRecord(state.completion_event, state.stream); });
+                              [&]() { cuda_err = cudaEventRecord(state.completion_event, stream); });
         if (cuda_err != cudaSuccess) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
                                     "GPU prep completion event recording failed"});
@@ -405,6 +407,7 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
         .planar_device = state.planar_dev,
         .ready_start_event = state.prep_start_event,
         .ready_event = state.completion_event,
+        .ready_event_on_current_stream = ready_event_on_current_stream,
         .source_rgb_device = state.src_rgb_dev,
         .source_width = rgb.width,
         .source_height = rgb.height,
@@ -447,8 +450,9 @@ Result<void> GpuInputPrep::prepare_inputs(Image rgb, Image hint, float* planar_d
             Error{ErrorCode::HardwareNotSupported, "GPU input preparation is not available"});
     }
 
-    auto prepared_res = prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height,
-                                                 mean, inv_stddev, false, on_stage);
+    auto prepared_res =
+        prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height, mean, inv_stddev,
+                                 m_state->stream, m_state->npp_context, false, false, on_stage);
     if (!prepared_res) {
         return Unexpected(prepared_res.error());
     }
@@ -491,7 +495,8 @@ Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device(Image rgb, Image hi
             Error{ErrorCode::HardwareNotSupported, "GPU input preparation is not available"});
     }
     return prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height, mean,
-                                    inv_stddev, false, on_stage);
+                                    inv_stddev, m_state->stream, m_state->npp_context, false,
+                                    false, on_stage);
 #else
     (void)rgb;
     (void)hint;
@@ -499,6 +504,40 @@ Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device(Image rgb, Image hi
     (void)model_height;
     (void)mean;
     (void)inv_stddev;
+    (void)on_stage;
+    return Unexpected(
+        Error{ErrorCode::HardwareNotSupported, "CorridorKey was built without CUDA support"});
+#endif
+}
+
+Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device_on_stream(
+    Image rgb, Image hint, int model_width, int model_height, const std::array<float, 3>& mean,
+    const std::array<float, 3>& inv_stddev, void* cuda_stream, StageTimingCallback on_stage) {
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+    if (!available()) {
+        return Unexpected(
+            Error{ErrorCode::HardwareNotSupported, "GPU input preparation is not available"});
+    }
+    if (cuda_stream == nullptr) {
+        return Unexpected(Error{ErrorCode::InferenceFailed,
+                                "TorchTRT current CUDA stream is unavailable for GPU prep"});
+    }
+    NppStreamContext npp_context{};
+    cudaStream_t stream = reinterpret_cast<cudaStream_t>(cuda_stream);
+    if (!detail::make_npp_stream_context(stream, npp_context)) {
+        return Unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to bind NPP to TorchTRT CUDA stream"});
+    }
+    return prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height, mean,
+                                    inv_stddev, stream, npp_context, false, true, on_stage);
+#else
+    (void)rgb;
+    (void)hint;
+    (void)model_width;
+    (void)model_height;
+    (void)mean;
+    (void)inv_stddev;
+    (void)cuda_stream;
     (void)on_stage;
     return Unexpected(
         Error{ErrorCode::HardwareNotSupported, "CorridorKey was built without CUDA support"});

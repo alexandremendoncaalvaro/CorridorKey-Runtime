@@ -54,22 +54,22 @@ or falsified by Resolve logs.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] The TorchTRT prepared-input path can enqueue GPU input preparation on the
+- [x] The TorchTRT prepared-input path can enqueue GPU input preparation on the
   Torch current CUDA stream.
-- [ ] NPP input-prep calls use an `NppStreamContext` bound to the stream that
+- [x] NPP input-prep calls use an `NppStreamContext` bound to the stream that
   owns the TorchTRT input work.
-- [ ] The TorchTRT prepared-input path no longer requires
+- [x] The TorchTRT prepared-input path no longer requires
   `cudaStreamWaitEvent` on an independent GPU-prep completion event.
-- [ ] Public headers still do not expose CUDA, NPP, or LibTorch types.
-- [ ] Error handling remains `Result<T>` based for expected failures.
-- [ ] Source passthrough still uses device-to-device copy when the prepared
+- [x] Public headers still do not expose CUDA, NPP, or LibTorch types.
+- [x] Error handling remains `Result<T>` based for expected failures.
+- [x] Source passthrough still uses device-to-device copy when the prepared
   source RGB device pointer is available.
 - [ ] Resolve logs show `gpu_prepare_wait_over_device` removed from the
   prepared-input path or near zero, and the missing wait does not reappear under
   another pinned stage.
-- [ ] The OFX RPC harness remains green and does not regress its already-fast
+- [x] The OFX RPC harness remains green and does not regress its already-fast
   input-ready wait.
-- [ ] Canonical Windows build, relevant tests, and package flow run through
+- [x] Canonical Windows build, relevant tests, and package flow run through
   `scripts/windows.ps1`.
 
 ## Plan
@@ -77,25 +77,25 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 Concrete sequential steps. Each as a checkbox. Reference file paths where
 applicable.
 
-- [ ] Add an internal-only GPU-prep entry point in `src/core/gpu_prep.cpp` and
+- [x] Add an internal-only GPU-prep entry point in `src/core/gpu_prep.cpp` and
   `src/core/gpu_prep.hpp` that accepts the owning CUDA stream as an opaque
   internal value and builds `NppStreamContext` for that stream.
-- [ ] Route the TorchTRT prepared path in `src/core/inference_session.cpp` and
+- [x] Route the TorchTRT prepared path in `src/core/inference_session.cpp` and
   `src/core/torch_trt_session.cpp` so input prep and tensor consumption are
   ordered on the Torch current CUDA stream.
-- [ ] Keep the existing independent-stream path only where it remains required
+- [x] Keep the existing independent-stream path only where it remains required
   by non-TorchTRT callers or tests, and keep telemetry able to prove which path
   ran.
-- [ ] Update focused tests or integration assertions so the selected path and
+- [x] Update focused tests or integration assertions so the selected path and
   telemetry contract are covered where the test environment can observe them.
-- [ ] Run `git diff --check`.
-- [ ] Run the canonical Windows release build through `scripts/windows.ps1`.
-- [ ] Run unit, regression, and integration tests relevant to GPU prep,
+- [x] Run `git diff --check`.
+- [x] Run the canonical Windows release build through `scripts/windows.ps1`.
+- [x] Run unit, regression, and integration tests relevant to GPU prep,
   TorchTRT, and OFX lifecycle.
-- [ ] Run the OFX RPC harness with Green 2048, processed output, source
+- [x] Run the OFX RPC harness with Green 2048, processed output, source
   passthrough, and the same `sp_erode`/`sp_blur` parameters used in manual
   Resolve testing.
-- [ ] Produce a local RTX OFX package through `scripts/windows.ps1`.
+- [x] Produce a local RTX OFX package through `scripts/windows.ps1`.
 - [ ] Validate with Resolve logs and record the before/after evidence in Notes.
 - [ ] If Resolve still shows a dominant wait, run the defined fallback A/B:
   main-style synchronized device prep as diagnostic only, then CUDA Graph on/off
@@ -109,12 +109,39 @@ Task opened from the post-instrumentation Resolve evidence. The high-priority
 independent GPU-prep stream is not the fix path because the latest Resolve logs
 still show `gpu_prepare_wait_over_device` around 0.8 to 1.4 seconds.
 
+Implemented the current-stream prepared-input path. `GpuInputPrep` now has an
+internal stream-bound entry point that accepts an opaque CUDA stream, builds the
+NPP stream context for that stream, records readiness events on that stream, and
+marks the returned readiness event as current-stream owned. `InferenceSession`
+routes the TorchTRT prepared-input path through the Torch current stream exposed
+as an opaque pointer by `TorchTrtSession`. `TorchTrtSession` now skips
+`cudaStreamWaitEvent` when the prepared-input event belongs to the current
+stream, while preserving `torchtrt_input_ready_wait`, `gpu_prepare_device`, and
+`gpu_prepare_wait_over_device` telemetry.
+
+Verification passed: `git diff --check`,
+`scripts/windows.ps1 -Task build -Version 0.8.5 -Preset release`, unit tests,
+regression tests, integration tests, and
+`scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset release -Track
+rtx -Flavor online`. The installer is
+`dist/CorridorKey_v0.8.5-win.1-52-g8cc99ae-dirty-wac1824ed2766_Windows_online_Setup.exe`.
+SHA256:
+`0636a0abc1ea7b8d67da017a014c7ce6b4d233ff0e2fb006031334648c313b5e`.
+
+The local OFX RPC harness remained green with Green 2048, 3840x2160 plate input,
+source passthrough enabled, `sp_erode=6`, `sp_blur=14`, and bilinear upscale.
+Average roundtrip was 633.30 ms over three iterations. This local harness run
+did not exercise the prepared-input GPU path because the available packaged
+model took the CPU pack/upload TorchTRT path and the external-pos dynamic
+TorchTRT test artifact is absent from this workspace. Resolve manual logs remain
+the required validation for the P0 wait removal.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
-- [ ] Local tests pass (or N/A documented in Notes)
+- [x] Local tests pass (or N/A documented in Notes)
 - [ ] Code review completed (human or fresh-context reviewer per WORKFLOW
   section 10)
-- [ ] No orphan `TODO`/`FIXME` introduced
+- [x] No orphan `TODO`/`FIXME` introduced
 - [ ] Status updated to `done` and Notes log closes the task

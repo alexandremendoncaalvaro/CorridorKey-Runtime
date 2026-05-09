@@ -131,6 +131,7 @@ int round_up_to_multiple(int value, int multiple) {
 }
 
 Result<void> wait_for_external_cuda_event(void* input_ready_event, void* input_ready_start_event,
+                                          bool input_ready_event_on_current_stream,
                                           const StageTimingCallback& on_stage) {
     if (input_ready_event == nullptr) {
         return {};
@@ -138,14 +139,18 @@ Result<void> wait_for_external_cuda_event(void* input_ready_event, void* input_r
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     cudaError_t status = cudaSuccess;
     const auto current_stream = c10::cuda::getCurrentCUDAStream();
-    common::measure_stage(on_stage, "torchtrt_input_wait_event_enqueue", [&]() {
-        status = cudaStreamWaitEvent(current_stream.stream(),
-                                     reinterpret_cast<cudaEvent_t>(input_ready_event), 0);
-    });
-    if (status != cudaSuccess) {
-        return Unexpected<Error>{
-            Error{.code = ErrorCode::InferenceFailed,
-                  .message = "TorchTRT failed to wait for prepared CUDA input event"}};
+    if (input_ready_event_on_current_stream) {
+        emit_stage_timing(on_stage, "torchtrt_input_current_stream_event", 0.0);
+    } else {
+        common::measure_stage(on_stage, "torchtrt_input_wait_event_enqueue", [&]() {
+            status = cudaStreamWaitEvent(current_stream.stream(),
+                                         reinterpret_cast<cudaEvent_t>(input_ready_event), 0);
+        });
+        if (status != cudaSuccess) {
+            return Unexpected<Error>{
+                Error{.code = ErrorCode::InferenceFailed,
+                      .message = "TorchTRT failed to wait for prepared CUDA input event"}};
+        }
     }
     const auto wait_ms =
         synchronize_cuda_stream_marker(current_stream, on_stage, "torchtrt_input_ready_wait");
@@ -163,6 +168,7 @@ Result<void> wait_for_external_cuda_event(void* input_ready_event, void* input_r
     return {};
 #else
     (void)input_ready_start_event;
+    (void)input_ready_event_on_current_stream;
     (void)on_stage;
     return Unexpected<Error>{
         Error{.code = ErrorCode::HardwareNotSupported,
@@ -1551,6 +1557,17 @@ int TorchTrtSession::model_resolution() const {
     return m_impl ? m_impl->resolution : 0;
 }
 
+void* TorchTrtSession::current_cuda_stream() const {
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+    if (m_impl == nullptr) {
+        return nullptr;
+    }
+    return c10::cuda::getCurrentCUDAStream().stream();
+#else
+    return nullptr;
+#endif
+}
+
 Result<TorchTrtFrameResult> TorchTrtSession::infer(
     const Image& rgb, const Image& alpha_hint, bool output_alpha_only,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
@@ -1691,13 +1708,14 @@ Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar(
     void* planar_device_input, int input_width, int input_height, bool output_alpha_only,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     StageTimingCallback on_stage, void* input_ready_event, void* input_ready_start_event,
-    const InferenceParams* post_process_params, TorchTrtDeviceSource source,
-    FrameOutputViews output_views) {
+    bool input_ready_event_on_current_stream, const InferenceParams* post_process_params,
+    TorchTrtDeviceSource source, FrameOutputViews output_views) {
     return infer_prepared_cuda_planar_resized(planar_device_input, input_width, input_height,
                                               input_width, input_height, output_alpha_only,
                                               false, std::move(on_stage), input_ready_event,
-                                              input_ready_start_event, post_process_params, source,
-                                              output_views);
+                                              input_ready_start_event,
+                                              input_ready_event_on_current_stream,
+                                              post_process_params, source, output_views);
 }
 
 Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
@@ -1705,8 +1723,8 @@ Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
     int output_height, bool output_alpha_only, bool use_lanczos_resize,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     StageTimingCallback on_stage, void* input_ready_event, void* input_ready_start_event,
-    const InferenceParams* post_process_params, TorchTrtDeviceSource source,
-    FrameOutputViews output_views) {
+    bool input_ready_event_on_current_stream, const InferenceParams* post_process_params,
+    TorchTrtDeviceSource source, FrameOutputViews output_views) {
     if (m_impl == nullptr) {
         return Unexpected<Error>{Error{.code = ErrorCode::InferenceFailed,
                                        .message = "TorchTrtSession in moved-from state"}};
@@ -1719,8 +1737,9 @@ Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
     }
 
     try {
-        auto wait_res =
-            wait_for_external_cuda_event(input_ready_event, input_ready_start_event, on_stage);
+        auto wait_res = wait_for_external_cuda_event(input_ready_event, input_ready_start_event,
+                                                     input_ready_event_on_current_stream,
+                                                     on_stage);
         if (!wait_res) {
             return Unexpected<Error>{wait_res.error()};
         }

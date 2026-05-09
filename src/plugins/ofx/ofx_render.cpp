@@ -217,6 +217,10 @@ void log_render_summary(const InstanceData& data, double render_ms, LastRenderWo
             std::to_string(stage_total_ms(timings, "gpu_prepare_wait_over_device")) +
             " ofx_client_render_rpc_ms=" +
             std::to_string(stage_total_ms(timings, "ofx_client_render_rpc")) +
+            " torchtrt_input_current_stream_event_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_input_current_stream_event")) +
+            " torchtrt_input_wait_event_enqueue_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_input_wait_event_enqueue")) +
             " torchtrt_input_ready_wait_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_input_ready_wait")) +
             " torchtrt_forward_ms=" + std::to_string(stage_total_ms(timings, "torchtrt_forward")) +
