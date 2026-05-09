@@ -123,10 +123,8 @@ Verification passed: `git diff --check`,
 `scripts/windows.ps1 -Task build -Version 0.8.5 -Preset release`, unit tests,
 regression tests, integration tests, and
 `scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset release -Track
-rtx -Flavor online`. The installer is
-`dist/CorridorKey_v0.8.5-win.1-52-g8cc99ae-dirty-wac1824ed2766_Windows_online_Setup.exe`.
-SHA256:
-`0636a0abc1ea7b8d67da017a014c7ce6b4d233ff0e2fb006031334648c313b5e`.
+rtx -Flavor online`. The package output records the exact display label,
+installer path, and SHA256 for each generated build.
 
 The local OFX RPC harness remained green with Green 2048, 3840x2160 plate input,
 source passthrough enabled, `sp_erode=6`, `sp_blur=14`, and bilinear upscale.
