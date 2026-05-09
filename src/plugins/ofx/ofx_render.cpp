@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
@@ -174,6 +175,74 @@ bool update_color_management_status(InstanceData* data, InputColorRuntimeMode mo
         return true;
     }
     return false;
+}
+
+double stage_total_ms(const std::vector<StageTiming>& timings, std::string_view stage_name) {
+    double total_ms = 0.0;
+    for (const StageTiming& timing : timings) {
+        if (timing.name == stage_name) {
+            total_ms += timing.total_ms;
+        }
+    }
+    return total_ms;
+}
+
+const char* work_origin_log_label(LastRenderWorkOrigin origin) {
+    switch (origin) {
+        case LastRenderWorkOrigin::SharedCache:
+            return "shared_cache";
+        case LastRenderWorkOrigin::InstanceCache:
+            return "instance_cache";
+        case LastRenderWorkOrigin::BackendRender:
+            return "backend_render";
+        case LastRenderWorkOrigin::None:
+        default:
+            return "none";
+    }
+}
+
+void log_render_summary(const InstanceData& data, double render_ms, LastRenderWorkOrigin work_origin) {
+    const std::vector<StageTiming>& timings = data.last_render_stage_timings;
+    const double client_readback_ms = stage_total_ms(timings, "ofx_client_alpha_readback") +
+                                      stage_total_ms(timings, "ofx_client_foreground_readback");
+    log_message(
+        "render",
+        "event=ofx_render_summary total_ms=" + std::to_string(render_ms) +
+            " work_origin=" + work_origin_log_label(work_origin) +
+            " frame_prepare_inputs_ms=" +
+            std::to_string(stage_total_ms(timings, "frame_prepare_inputs")) +
+            " gpu_prepare_device_ms=" +
+            std::to_string(stage_total_ms(timings, "gpu_prepare_device")) +
+            " gpu_prepare_wait_over_device_ms=" +
+            std::to_string(stage_total_ms(timings, "gpu_prepare_wait_over_device")) +
+            " ofx_client_render_rpc_ms=" +
+            std::to_string(stage_total_ms(timings, "ofx_client_render_rpc")) +
+            " torchtrt_input_ready_wait_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_input_ready_wait")) +
+            " torchtrt_forward_ms=" + std::to_string(stage_total_ms(timings, "torchtrt_forward")) +
+            " torchtrt_input_copy_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_input_copy")) +
+            " torchtrt_input_copy_gpu_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_input_copy_gpu")) +
+            " torchtrt_input_copy_queue_wait_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_input_copy_queue_wait")) +
+            " torchtrt_capture_stream_wait_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_capture_stream_wait")) +
+            " torchtrt_replay_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_replay")) +
+            " torchtrt_replay_gpu_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_replay_gpu")) +
+            " torchtrt_replay_queue_wait_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_replay_queue_wait")) +
+            " torchtrt_current_stream_wait_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_current_stream_wait")) +
+            " post_gpu_prepare_ms=" + std::to_string(stage_total_ms(timings, "post_gpu_prepare")) +
+            " torchtrt_output_d2h_direct_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_output_d2h_direct")) +
+            " ofx_client_readback_ms=" + std::to_string(client_readback_ms) +
+            " ofx_foreground_srgb_to_linear_ms=" +
+            std::to_string(stage_total_ms(timings, "ofx_foreground_srgb_to_linear")) +
+            " ofx_write_output_ms=" + std::to_string(stage_total_ms(timings, "ofx_write_output")));
 }
 
 bool inference_params_equal(const InferenceParams& lhs, const InferenceParams& rhs) {
@@ -1342,6 +1411,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - render_start)
             .count();
     record_frame_timing(data, render_ms, work_origin);
+    log_render_summary(*data, render_ms, work_origin);
     if (data != nullptr) {
         data->last_error.clear();
         data->runtime_panel_dirty = true;

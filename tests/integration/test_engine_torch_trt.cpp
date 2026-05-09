@@ -366,9 +366,70 @@ TEST_CASE("TorchTRT CUDA graph path emits replay or explicit fallback telemetry"
     const bool replayed = has_stage(timings, "torchtrt_cuda_graph_replay");
     const bool reported_fallback = has_stage_prefix(timings, "torchtrt_cuda_graph_fallback_");
     CHECK((replayed || reported_fallback));
+    if (replayed) {
+        CHECK(has_stage(timings, "torchtrt_input_ready_wait"));
+        CHECK(has_stage(timings, "gpu_prepare_device"));
+        CHECK(has_stage(timings, "gpu_prepare_wait_over_device"));
+        CHECK(has_stage(timings, "torchtrt_cuda_graph_input_copy"));
+        CHECK(has_stage(timings, "torchtrt_cuda_graph_input_copy_gpu"));
+        CHECK(has_stage(timings, "torchtrt_cuda_graph_input_copy_queue_wait"));
+        CHECK(has_stage(timings, "torchtrt_cuda_graph_capture_stream_wait"));
+        CHECK(has_stage(timings, "torchtrt_cuda_graph_replay_gpu"));
+        CHECK(has_stage(timings, "torchtrt_cuda_graph_replay_queue_wait"));
+        CHECK(has_stage(timings, "torchtrt_cuda_graph_current_stream_wait"));
+    }
     if (reported_fallback) {
         CHECK(has_stage(timings, "torchtrt_forward_direct"));
     }
+#endif
+}
+
+TEST_CASE("TorchTRT keeps GPU source and despill when despeckle uses CPU",
+          "[integration][torchtrt][dynamic][regression]") {
+#if !defined(_WIN32)
+    SUCCEED("TorchTRT in-process backend is Windows-only in Sprint 1.");
+#else
+    const auto model_path = dynamic_torchtrt_external_pos_artifact();
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
+            model_path, "dynamic TorchTRT external-pos artifact");
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
+    if (!engine.has_value()) {
+        SKIP("Engine::create failed: " + engine.error().message);
+    }
+
+    constexpr int kRes = 512;
+    ImageBuffer rgb(kRes, kRes, 3);
+    ImageBuffer hint(kRes, kRes, 1);
+    std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.5F);
+    std::fill(hint.view().data.begin(), hint.view().data.end(), 1.0F);
+
+    InferenceParams params;
+    params.target_resolution = kRes;
+    params.upscale_method = UpscaleMethod::Bilinear;
+    params.output_auxiliary_images = false;
+    params.source_passthrough = true;
+    params.auto_despeckle = true;
+    params.despeckle_size = 1;
+
+    std::vector<StageTiming> timings;
+    auto result = engine.value()->process_frame(
+        rgb.view(), hint.view(), params,
+        [&](const StageTiming& timing) { timings.push_back(timing); });
+    REQUIRE(result.has_value());
+    if (!has_stage(timings, "post_gpu_prepare")) {
+        SKIP("TorchTRT CUDA post-process path unavailable.");
+    }
+
+    CHECK(has_stage(timings, "post_source_passthrough_gpu"));
+    CHECK(has_stage(timings, "post_source_passthrough_gpu_copy_device_to_device"));
+    CHECK(has_stage(timings, "post_despill_gpu"));
+    CHECK(has_stage(timings, "post_despeckle"));
+    CHECK_FALSE(has_stage(timings, "post_source_passthrough"));
+    CHECK_FALSE(has_stage(timings, "post_despill"));
 #endif
 }
 

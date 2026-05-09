@@ -82,18 +82,44 @@ struct GpuPrepState {
 
     bool gpu_available = false;
     cudaStream_t stream = nullptr;
+    cudaEvent_t prep_start_event = nullptr;
     cudaEvent_t completion_event = nullptr;
     NppStreamContext npp_context{};
+
+    static cudaStream_t create_prepare_stream() {
+        cudaStream_t created_stream = nullptr;
+        int least_priority = 0;
+        int greatest_priority = 0;
+        if (cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority) == cudaSuccess &&
+            cudaStreamCreateWithPriority(&created_stream, cudaStreamNonBlocking,
+                                         greatest_priority) == cudaSuccess) {
+            return created_stream;
+        }
+        created_stream = nullptr;
+        if (cudaStreamCreateWithFlags(&created_stream, cudaStreamNonBlocking) != cudaSuccess) {
+            return nullptr;
+        }
+        return created_stream;
+    }
 
     GpuPrepState() {
         int device_count = 0;
         if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0) {
-            if (cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess) {
+            stream = create_prepare_stream();
+            if (stream != nullptr) {
                 if (detail::make_npp_stream_context(stream, npp_context)) {
-                    if (cudaEventCreateWithFlags(&completion_event, cudaEventDisableTiming) ==
-                        cudaSuccess) {
+                    if (cudaEventCreate(&prep_start_event) == cudaSuccess &&
+                        cudaEventCreate(&completion_event) == cudaSuccess) {
                         gpu_available = true;
                     } else {
+                        if (prep_start_event != nullptr) {
+                            cudaEventDestroy(prep_start_event);
+                            prep_start_event = nullptr;
+                        }
+                        if (completion_event != nullptr) {
+                            cudaEventDestroy(completion_event);
+                            completion_event = nullptr;
+                        }
                         cudaStreamDestroy(stream);
                         stream = nullptr;
                     }
@@ -112,6 +138,9 @@ struct GpuPrepState {
 
     ~GpuPrepState() {
         release_buffers();
+        if (prep_start_event != nullptr) {
+            cudaEventDestroy(prep_start_event);
+        }
         if (completion_event != nullptr) {
             cudaEventDestroy(completion_event);
         }
@@ -232,6 +261,16 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
         });
         upload_rgb_src = state.src_rgb_host_pinned.data();
         upload_hint_src = state.src_hint_host_pinned.data();
+    }
+
+    if (!synchronize) {
+        cudaError_t cuda_err = cudaSuccess;
+        common::measure_stage(on_stage, "gpu_prepare_start_event_record",
+                              [&]() { cuda_err = cudaEventRecord(state.prep_start_event, state.stream); });
+        if (cuda_err != cudaSuccess) {
+            return Unexpected(Error{ErrorCode::InferenceFailed,
+                                    "GPU prep start event recording failed"});
+        }
     }
 
     common::measure_stage(on_stage, "gpu_prepare_upload_enqueue", [&]() {
@@ -364,6 +403,7 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
 
     return GpuPreparedInput{
         .planar_device = state.planar_dev,
+        .ready_start_event = state.prep_start_event,
         .ready_event = state.completion_event,
         .source_rgb_device = state.src_rgb_dev,
         .source_width = rgb.width,

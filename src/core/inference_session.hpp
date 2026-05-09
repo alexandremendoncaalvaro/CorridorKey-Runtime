@@ -124,6 +124,14 @@ class InferenceSession {
 
    private:
     struct BoundIoState;
+    struct PostProcessProgress {
+        bool source_passthrough_applied = false;
+        bool despill_applied = false;
+    };
+    struct RawFrameResult {
+        FrameResult frame;
+        PostProcessProgress post_process;
+    };
 
     explicit InferenceSession(DeviceInfo device);
 
@@ -140,10 +148,10 @@ class InferenceSession {
     /**
      * @brief Internal raw inference (no post-processing).
      */
-    [[nodiscard]] Result<FrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params,
-                                                StageTimingCallback on_stage = nullptr,
-                                                FrameOutputViews output_views = {});
+    [[nodiscard]] Result<RawFrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
+                                                   const InferenceParams& params,
+                                                   StageTimingCallback on_stage = nullptr,
+                                                   FrameOutputViews output_views = {});
 
     /**
      * @brief Internal raw inference on a batch.
@@ -156,7 +164,8 @@ class InferenceSession {
      * @brief Apply despeckle, despill and composition to raw results.
      */
     void apply_post_process(FrameResult& result, const InferenceParams& params, Image source_rgb,
-                            StageTimingCallback on_stage = nullptr);
+                            StageTimingCallback on_stage = nullptr,
+                            PostProcessProgress post_process = {});
 
     [[nodiscard]] Result<FrameResult> run_direct(const Image& rgb, const Image& alpha_hint,
                                                  const InferenceParams& params,

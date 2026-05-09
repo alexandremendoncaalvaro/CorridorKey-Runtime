@@ -36,6 +36,12 @@ struct TorchTrtDeviceSource {
     int channels = 0;
 };
 
+struct TorchTrtFrameResult {
+    FrameResult frame;
+    bool post_source_passthrough_applied = false;
+    bool post_despill_applied = false;
+};
+
 // Wraps a Torch-TensorRT compiled .ts engine for in-process forward.
 // Sister to MlxSession - same wrapping pattern used by InferenceSession,
 // gated on Backend::TorchTRT. Built only when CORRIDORKEY_HAS_TORCHTRT is
@@ -70,26 +76,26 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
     TorchTrtSession(TorchTrtSession&&) noexcept;
     TorchTrtSession& operator=(TorchTrtSession&&) noexcept;
 
-    [[nodiscard]] Result<FrameResult> infer(const Image& rgb, const Image& alpha_hint,
-                                            bool output_alpha_only = false,
-                                            StageTimingCallback on_stage = nullptr);
+    [[nodiscard]] Result<TorchTrtFrameResult> infer(const Image& rgb, const Image& alpha_hint,
+                                                    bool output_alpha_only = false,
+                                                    StageTimingCallback on_stage = nullptr);
 
-    [[nodiscard]] Result<FrameResult> infer_prepared_planar(const float* planar_input,
-                                                            int input_width, int input_height,
-                                                            bool output_alpha_only = false,
-                                                            StageTimingCallback on_stage = nullptr);
+    [[nodiscard]] Result<TorchTrtFrameResult> infer_prepared_planar(
+        const float* planar_input, int input_width, int input_height,
+        bool output_alpha_only = false, StageTimingCallback on_stage = nullptr);
 
-    [[nodiscard]] Result<FrameResult> infer_prepared_cuda_planar(
+    [[nodiscard]] Result<TorchTrtFrameResult> infer_prepared_cuda_planar(
         void* planar_device_input, int input_width, int input_height,
         bool output_alpha_only = false, StageTimingCallback on_stage = nullptr,
-        void* input_ready_event = nullptr,
+        void* input_ready_event = nullptr, void* input_ready_start_event = nullptr,
         const InferenceParams* post_process_params = nullptr,
         TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
 
-    [[nodiscard]] Result<FrameResult> infer_prepared_cuda_planar_resized(
+    [[nodiscard]] Result<TorchTrtFrameResult> infer_prepared_cuda_planar_resized(
         void* planar_device_input, int input_width, int input_height, int output_width,
         int output_height, bool output_alpha_only = false, bool use_lanczos_resize = false,
         StageTimingCallback on_stage = nullptr, void* input_ready_event = nullptr,
+        void* input_ready_start_event = nullptr,
         const InferenceParams* post_process_params = nullptr,
         TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
 

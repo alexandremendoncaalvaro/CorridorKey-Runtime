@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -119,19 +120,26 @@ constexpr std::string_view kExternalPosDataName = "corridorkey.external_pos.v1.f
 
 enum class OutputResizeFilter { Bilinear, Lanczos };
 
+std::optional<double> synchronize_cuda_stream_marker(c10::cuda::CUDAStream stream,
+                                                     const StageTimingCallback& on_stage,
+                                                     std::string_view stage_name);
+void emit_stage_timing(const StageTimingCallback& on_stage, std::string_view name,
+                       double total_ms);
+
 int round_up_to_multiple(int value, int multiple) {
     return ((value + multiple - 1) / multiple) * multiple;
 }
 
-Result<void> wait_for_external_cuda_event(void* input_ready_event,
+Result<void> wait_for_external_cuda_event(void* input_ready_event, void* input_ready_start_event,
                                           const StageTimingCallback& on_stage) {
     if (input_ready_event == nullptr) {
         return {};
     }
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     cudaError_t status = cudaSuccess;
+    const auto current_stream = c10::cuda::getCurrentCUDAStream();
     common::measure_stage(on_stage, "torchtrt_input_wait_event_enqueue", [&]() {
-        status = cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream().stream(),
+        status = cudaStreamWaitEvent(current_stream.stream(),
                                      reinterpret_cast<cudaEvent_t>(input_ready_event), 0);
     });
     if (status != cudaSuccess) {
@@ -139,8 +147,22 @@ Result<void> wait_for_external_cuda_event(void* input_ready_event,
             Error{.code = ErrorCode::InferenceFailed,
                   .message = "TorchTRT failed to wait for prepared CUDA input event"}};
     }
+    const auto wait_ms =
+        synchronize_cuda_stream_marker(current_stream, on_stage, "torchtrt_input_ready_wait");
+    if (wait_ms.has_value() && input_ready_start_event != nullptr) {
+        float device_ms = 0.0F;
+        const auto elapsed_status =
+            cudaEventElapsedTime(&device_ms, reinterpret_cast<cudaEvent_t>(input_ready_start_event),
+                                 reinterpret_cast<cudaEvent_t>(input_ready_event));
+        if (elapsed_status == cudaSuccess) {
+            emit_stage_timing(on_stage, "gpu_prepare_device", static_cast<double>(device_ms));
+            emit_stage_timing(on_stage, "gpu_prepare_wait_over_device",
+                              std::max(0.0, *wait_ms - static_cast<double>(device_ms)));
+        }
+    }
     return {};
 #else
+    (void)input_ready_start_event;
     (void)on_stage;
     return Unexpected<Error>{
         Error{.code = ErrorCode::HardwareNotSupported,
@@ -453,13 +475,13 @@ void emit_stage_timing(const StageTimingCallback& on_stage, std::string_view nam
 }
 
 template <typename Function>
-void run_and_synchronize_with_cuda_event_timing(const StageTimingCallback& on_stage,
-                                               std::string_view gpu_stage_name,
-                                               Function&& function) {
+std::optional<double> run_and_synchronize_with_cuda_event_timing(
+    const StageTimingCallback& on_stage, std::string_view gpu_stage_name, Function&& function) {
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     const auto stream = c10::cuda::getCurrentCUDAStream();
     cudaEvent_t start_event = nullptr;
     cudaEvent_t stop_event = nullptr;
+    std::optional<double> gpu_elapsed_ms;
     bool can_time_on_stream = on_stage != nullptr;
     can_time_on_stream =
         can_time_on_stream && cudaEventCreate(&start_event) == cudaSuccess;
@@ -485,7 +507,8 @@ void run_and_synchronize_with_cuda_event_timing(const StageTimingCallback& on_st
         cudaEventSynchronize(stop_event) == cudaSuccess) {
         float elapsed_ms = 0.0F;
         if (cudaEventElapsedTime(&elapsed_ms, start_event, stop_event) == cudaSuccess) {
-            emit_stage_timing(on_stage, gpu_stage_name, static_cast<double>(elapsed_ms));
+            gpu_elapsed_ms = static_cast<double>(elapsed_ms);
+            emit_stage_timing(on_stage, gpu_stage_name, *gpu_elapsed_ms);
         }
     } else {
         synchronize_current_cuda_stream();
@@ -497,11 +520,90 @@ void run_and_synchronize_with_cuda_event_timing(const StageTimingCallback& on_st
     if (stop_event != nullptr) {
         cudaEventDestroy(stop_event);
     }
+    return gpu_elapsed_ms;
 #else
     (void)on_stage;
     (void)gpu_stage_name;
     std::forward<Function>(function)();
     synchronize_current_cuda_stream();
+    return std::nullopt;
+#endif
+}
+
+template <typename Function>
+void measure_cuda_wall_and_gpu_stage(const StageTimingCallback& on_stage,
+                                     std::string_view wall_stage_name,
+                                     std::string_view gpu_stage_name,
+                                     std::string_view queue_wait_stage_name,
+                                     Function&& function) {
+    const auto start = std::chrono::steady_clock::now();
+    std::optional<double> gpu_elapsed_ms;
+    try {
+        gpu_elapsed_ms = run_and_synchronize_with_cuda_event_timing(
+            on_stage, gpu_stage_name, std::forward<Function>(function));
+    } catch (...) {
+        const auto end = std::chrono::steady_clock::now();
+        emit_stage_timing(
+            on_stage, wall_stage_name,
+            std::chrono::duration<double, std::milli>(end - start).count());
+        throw;
+    }
+    const auto end = std::chrono::steady_clock::now();
+    const double wall_ms = std::chrono::duration<double, std::milli>(end - start).count();
+    emit_stage_timing(on_stage, wall_stage_name, wall_ms);
+    if (gpu_elapsed_ms.has_value()) {
+        emit_stage_timing(on_stage, queue_wait_stage_name,
+                          std::max(0.0, wall_ms - *gpu_elapsed_ms));
+    }
+}
+
+template <typename Function>
+void measure_cuda_graph_replay(const StageTimingCallback& on_stage, Function&& function) {
+    measure_cuda_wall_and_gpu_stage(
+        on_stage, "torchtrt_cuda_graph_replay", "torchtrt_cuda_graph_replay_gpu",
+        "torchtrt_cuda_graph_replay_queue_wait", std::forward<Function>(function));
+}
+
+std::optional<double> synchronize_cuda_stream_marker(c10::cuda::CUDAStream stream,
+                                                     const StageTimingCallback& on_stage,
+                                                     std::string_view stage_name) {
+    if (!on_stage) {
+        return std::nullopt;
+    }
+    const auto measure_wait = [&](auto&& wait_function) -> double {
+        const auto start = std::chrono::steady_clock::now();
+        try {
+            wait_function();
+        } catch (...) {
+            const auto end = std::chrono::steady_clock::now();
+            const double elapsed_ms =
+                std::chrono::duration<double, std::milli>(end - start).count();
+            emit_stage_timing(on_stage, stage_name, elapsed_ms);
+            throw;
+        }
+        const auto end = std::chrono::steady_clock::now();
+        const double elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
+        emit_stage_timing(on_stage, stage_name, elapsed_ms);
+        return elapsed_ms;
+    };
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+    cudaEvent_t marker = nullptr;
+    cudaError_t status = cudaEventCreateWithFlags(&marker, cudaEventDisableTiming);
+    if (status != cudaSuccess || marker == nullptr) {
+        return measure_wait([&]() { stream.synchronize(); });
+    }
+
+    status = cudaEventRecord(marker, stream.stream());
+    double elapsed_ms = 0.0;
+    if (status == cudaSuccess) {
+        elapsed_ms = measure_wait([&]() { status = cudaEventSynchronize(marker); });
+    } else {
+        elapsed_ms = measure_wait([&]() { stream.synchronize(); });
+    }
+    cudaEventDestroy(marker);
+    return elapsed_ms;
+#else
+    return measure_wait([&]() { stream.synchronize(); });
 #endif
 }
 
@@ -519,6 +621,21 @@ void make_stream_wait_for(c10::cuda::CUDAStream waiting_stream,
     at::cuda::CUDAEvent event;
     event.record(dependency_stream);
     event.block(waiting_stream);
+}
+
+void replay_forward_graph(ForwardGraphState& state, c10::cuda::CUDAStream& capture_stream,
+                          const StageTimingCallback& on_stage) {
+    const auto current_stream = c10::cuda::getCurrentCUDAStream();
+    make_stream_wait_for(capture_stream, current_stream);
+    synchronize_cuda_stream_marker(capture_stream, on_stage,
+                                   "torchtrt_cuda_graph_capture_stream_wait");
+    {
+        const c10::cuda::CUDAStreamGuard replay_guard(capture_stream);
+        measure_cuda_graph_replay(on_stage, [&]() { state.graph.replay(); });
+    }
+    make_stream_wait_for(current_stream, capture_stream);
+    synchronize_cuda_stream_marker(current_stream, on_stage,
+                                   "torchtrt_cuda_graph_current_stream_wait");
 }
 
 bool graph_shape_matches(const ForwardGraphState& state, const torch::Tensor& input,
@@ -554,8 +671,9 @@ std::optional<AlphaFgTensors> try_forward_cuda_graph(
         state.input_dtype = input_dtype;
     }
 
-    common::measure_stage(on_stage, "torchtrt_cuda_graph_input_copy",
-                          [&]() { state.static_input.copy_(input); });
+    measure_cuda_wall_and_gpu_stage(
+        on_stage, "torchtrt_cuda_graph_input_copy", "torchtrt_cuda_graph_input_copy_gpu",
+        "torchtrt_cuda_graph_input_copy_queue_wait", [&]() { state.static_input.copy_(input); });
 
     try {
         if (!state.warmed) {
@@ -597,18 +715,11 @@ std::optional<AlphaFgTensors> try_forward_cuda_graph(
             }
             state.static_outputs = *split;
             state.captured = true;
-            common::measure_stage(on_stage, "torchtrt_cuda_graph_replay", [&]() {
-                run_and_synchronize_with_cuda_event_timing(
-                    on_stage, "torchtrt_cuda_graph_replay_gpu",
-                    [&]() { state.graph.replay(); });
-            });
+            replay_forward_graph(state, capture_stream, on_stage);
             return state.static_outputs;
         }
 
-        common::measure_stage(on_stage, "torchtrt_cuda_graph_replay", [&]() {
-            run_and_synchronize_with_cuda_event_timing(
-                on_stage, "torchtrt_cuda_graph_replay_gpu", [&]() { state.graph.replay(); });
-        });
+        replay_forward_graph(state, capture_stream, on_stage);
         return state.static_outputs;
     } catch (const c10::Error& e) {
         disable_forward_graph(
@@ -746,7 +857,15 @@ struct MaterializedOutputTensors {
     ImageBuffer alpha;
     ImageBuffer foreground;
     bool post_processed = false;
+    bool post_source_passthrough_applied = false;
+    bool post_despill_applied = false;
     bool external_output_written = false;
+};
+
+struct CudaPostProcessResult {
+    bool source_passthrough_applied = false;
+    bool despill_applied = false;
+    bool alpha_clamped = false;
 };
 
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
@@ -974,20 +1093,22 @@ bool apply_source_passthrough_cuda(torch::Tensor& foreground_nchw, const torch::
         const auto byte_count = static_cast<std::size_t>(source.width) *
                                 static_cast<std::size_t>(source.height) * 3U * sizeof(float);
         const auto stream = c10::cuda::getCurrentCUDAStream().stream();
-        if (!source.host_rgb.empty()) {
-            const cudaError_t copy_status =
-                cudaMemcpyAsync(source_hwc.data_ptr<float>(), source.host_rgb.data.data(),
-                                byte_count, cudaMemcpyHostToDevice, stream);
-            if (copy_status != cudaSuccess) {
-                throw std::runtime_error(std::string("TorchTRT source passthrough H2D copy failed: ") +
-                                         cudaGetErrorString(copy_status));
-            }
-        } else if (source.rgb_device != nullptr) {
+        if (source.rgb_device != nullptr) {
+            emit_graph_event(on_stage, "post_source_passthrough_gpu_copy_device_to_device");
             const cudaError_t copy_status =
                 cudaMemcpyAsync(source_hwc.data_ptr<float>(), source.rgb_device, byte_count,
                                 cudaMemcpyDeviceToDevice, stream);
             if (copy_status != cudaSuccess) {
                 throw std::runtime_error(std::string("TorchTRT source passthrough D2D copy failed: ") +
+                                         cudaGetErrorString(copy_status));
+            }
+        } else if (!source.host_rgb.empty()) {
+            emit_graph_event(on_stage, "post_source_passthrough_gpu_copy_host_to_device");
+            const cudaError_t copy_status =
+                cudaMemcpyAsync(source_hwc.data_ptr<float>(), source.host_rgb.data.data(),
+                                byte_count, cudaMemcpyHostToDevice, stream);
+            if (copy_status != cudaSuccess) {
+                throw std::runtime_error(std::string("TorchTRT source passthrough H2D copy failed: ") +
                                          cudaGetErrorString(copy_status));
             }
         }
@@ -1000,11 +1121,11 @@ bool apply_source_passthrough_cuda(torch::Tensor& foreground_nchw, const torch::
     return true;
 }
 
-void apply_despill_cuda(torch::Tensor& foreground_nchw, const InferenceParams& params,
+bool apply_despill_cuda(torch::Tensor& foreground_nchw, const InferenceParams& params,
                         const StageTimingCallback& on_stage) {
     if (params.despill_strength <= 0.0F || params.despill_screen_channel < 0 ||
         params.despill_screen_channel > 2) {
-        return;
+        return false;
     }
 
     common::measure_stage(on_stage, "post_despill_gpu", [&]() {
@@ -1052,24 +1173,41 @@ void apply_despill_cuda(torch::Tensor& foreground_nchw, const InferenceParams& p
             other_b_view.copy_(torch::where(active, b + fill, b));
         }
     });
+    return true;
 }
 
-bool apply_cuda_postprocess_if_supported(torch::Tensor& alpha_nchw, torch::Tensor& foreground_nchw,
-                                         const InferenceParams* params,
-                                         TorchTrtDeviceSource source,
-                                         const StageTimingCallback& on_stage) {
+CudaPostProcessResult apply_cuda_postprocess_if_supported(
+    torch::Tensor& alpha_nchw, torch::Tensor& foreground_nchw, const InferenceParams* params,
+    TorchTrtDeviceSource source, const StageTimingCallback& on_stage) {
+    CudaPostProcessResult result;
     if (params == nullptr || foreground_nchw.numel() == 0 || params->output_alpha_only) {
-        return false;
-    }
-    if (params->output_auxiliary_images || params->auto_despeckle) {
-        return false;
+        return result;
     }
     common::measure_stage(on_stage, "post_gpu_prepare", [&]() {
-        apply_source_passthrough_cuda(foreground_nchw, alpha_nchw, source, *params, on_stage);
-        apply_despill_cuda(foreground_nchw, *params, on_stage);
+        if (params->source_passthrough) {
+            result.source_passthrough_applied =
+                apply_source_passthrough_cuda(foreground_nchw, alpha_nchw, source, *params,
+                                              on_stage);
+        }
+        if (!params->source_passthrough || result.source_passthrough_applied) {
+            result.despill_applied = apply_despill_cuda(foreground_nchw, *params, on_stage);
+        }
         alpha_nchw.clamp_(0.0F, 1.0F);
+        result.alpha_clamped = true;
     });
-    return true;
+    return result;
+}
+
+bool despill_needed(const InferenceParams& params) {
+    return params.despill_strength > 0.0F && params.despill_screen_channel >= 0 &&
+           params.despill_screen_channel <= 2;
+}
+
+bool cuda_postprocess_completed(const InferenceParams& params,
+                                const CudaPostProcessResult& result) {
+    return result.alpha_clamped && !params.output_auxiliary_images && !params.auto_despeckle &&
+           (!params.source_passthrough || result.source_passthrough_applied) &&
+           (!despill_needed(params) || result.despill_applied);
 }
 
 MaterializedOutputTensors materialize_outputs(
@@ -1101,7 +1239,7 @@ MaterializedOutputTensors materialize_outputs(
         },
         1);
 
-    const bool gpu_post_processed =
+    const CudaPostProcessResult gpu_post_process =
         apply_cuda_postprocess_if_supported(alpha_nchw, fg_nchw, post_process_params, source,
                                             on_stage);
 
@@ -1115,7 +1253,11 @@ MaterializedOutputTensors materialize_outputs(
     });
 
     MaterializedOutputTensors result;
-    result.post_processed = gpu_post_processed;
+    if (post_process_params != nullptr) {
+        result.post_processed = cuda_postprocess_completed(*post_process_params, gpu_post_process);
+    }
+    result.post_source_passthrough_applied = gpu_post_process.source_passthrough_applied;
+    result.post_despill_applied = gpu_post_process.despill_applied;
     const auto alpha_count =
         static_cast<std::size_t>(shape.final_width) * static_cast<std::size_t>(shape.final_height);
     const bool direct_alpha =
@@ -1215,7 +1357,7 @@ MaterializedOutputTensors materialize_outputs(
 }
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) - these dimensions mirror tensor shape order.
-Result<FrameResult> forward_and_materialize(
+Result<TorchTrtFrameResult> forward_and_materialize(
     torch::jit::script::Module& module, ExternalPosState& external_pos,
     ForwardGraphState& forward_graph,
     const torch::Tensor& cuda_input, int crop_width, int crop_height, int final_width,
@@ -1272,7 +1414,7 @@ Result<FrameResult> forward_and_materialize(
                        std::to_string(inference_width) + "x" + std::to_string(inference_height)}};
     }
 
-    FrameResult result;
+    TorchTrtFrameResult result;
     common::measure_stage(on_stage, "torchtrt_extract_outputs", [&]() {
         const bool include_foreground = !output_alpha_only && split.foreground.defined();
         auto materialized =
@@ -1286,10 +1428,12 @@ Result<FrameResult> forward_and_materialize(
                                 include_foreground, resize_filter, host_ring, output_pool,
                                 copy_stream, on_stage, post_process_params, source,
                                 output_views);
-        result.alpha = std::move(materialized.alpha);
-        result.foreground = std::move(materialized.foreground);
-        result.post_processed = materialized.post_processed;
-        result.external_output_written = materialized.external_output_written;
+        result.frame.alpha = std::move(materialized.alpha);
+        result.frame.foreground = std::move(materialized.foreground);
+        result.frame.post_processed = materialized.post_processed;
+        result.post_source_passthrough_applied = materialized.post_source_passthrough_applied;
+        result.post_despill_applied = materialized.post_despill_applied;
+        result.frame.external_output_written = materialized.external_output_written;
     });
     return result;
 }
@@ -1301,7 +1445,7 @@ class TorchTrtSession::Impl {
    public:
     Impl()
         : copy_stream(c10::cuda::getStreamFromPool(false)),
-          capture_stream(c10::cuda::getStreamFromPool(false)) {}
+          capture_stream(c10::cuda::getStreamFromPool(true)) {}
 
     torch::jit::script::Module module;
     ExternalPosState external_pos;
@@ -1407,10 +1551,10 @@ int TorchTrtSession::model_resolution() const {
     return m_impl ? m_impl->resolution : 0;
 }
 
-Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_hint,
-                                           bool output_alpha_only,
-                                           // NOLINTNEXTLINE(performance-unnecessary-value-param)
-                                           StageTimingCallback on_stage) {
+Result<TorchTrtFrameResult> TorchTrtSession::infer(
+    const Image& rgb, const Image& alpha_hint, bool output_alpha_only,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    StageTimingCallback on_stage) {
     if (m_impl == nullptr) {
         return Unexpected<Error>{Error{.code = ErrorCode::InferenceFailed,
                                        .message = "TorchTrtSession in moved-from state"}};
@@ -1495,7 +1639,7 @@ Result<FrameResult> TorchTrtSession::infer(const Image& rgb, const Image& alpha_
     }
 }
 
-Result<FrameResult> TorchTrtSession::infer_prepared_planar(
+Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_planar(
     const float* planar_input, int input_width, int input_height, bool output_alpha_only,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     StageTimingCallback on_stage) {
@@ -1543,23 +1687,24 @@ Result<FrameResult> TorchTrtSession::infer_prepared_planar(
     }
 }
 
-Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar(
+Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar(
     void* planar_device_input, int input_width, int input_height, bool output_alpha_only,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    StageTimingCallback on_stage, void* input_ready_event,
+    StageTimingCallback on_stage, void* input_ready_event, void* input_ready_start_event,
     const InferenceParams* post_process_params, TorchTrtDeviceSource source,
     FrameOutputViews output_views) {
     return infer_prepared_cuda_planar_resized(planar_device_input, input_width, input_height,
                                               input_width, input_height, output_alpha_only,
                                               false, std::move(on_stage), input_ready_event,
-                                              post_process_params, source, output_views);
+                                              input_ready_start_event, post_process_params, source,
+                                              output_views);
 }
 
-Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
+Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
     void* planar_device_input, int input_width, int input_height, int output_width,
     int output_height, bool output_alpha_only, bool use_lanczos_resize,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    StageTimingCallback on_stage, void* input_ready_event,
+    StageTimingCallback on_stage, void* input_ready_event, void* input_ready_start_event,
     const InferenceParams* post_process_params, TorchTrtDeviceSource source,
     FrameOutputViews output_views) {
     if (m_impl == nullptr) {
@@ -1574,7 +1719,8 @@ Result<FrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
     }
 
     try {
-        auto wait_res = wait_for_external_cuda_event(input_ready_event, on_stage);
+        auto wait_res =
+            wait_for_external_cuda_event(input_ready_event, input_ready_start_event, on_stage);
         if (!wait_res) {
             return Unexpected<Error>{wait_res.error()};
         }

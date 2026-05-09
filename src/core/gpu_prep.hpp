@@ -10,6 +10,7 @@ struct GpuPrepState;
 
 struct GpuPreparedInput {
     void* planar_device = nullptr;
+    void* ready_start_event = nullptr;
     void* ready_event = nullptr;
     void* source_rgb_device = nullptr;
     int source_width = 0;
