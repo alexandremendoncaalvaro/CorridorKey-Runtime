@@ -259,6 +259,12 @@ averaged 490.09 ms after the change versus 578.36 ms in the prior JSON;
 `torchtrt_cuda_graph_replay_gpu=290.44 ms`, and
 `torchtrt_output_d2h_direct=40.73 ms`.
 
+The local RTX online installer for Resolve validation was produced and
+validated through `scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset
+release -Track rtx -Flavor online`. Installer:
+`dist/CorridorKey_v0.8.5-win.1-72-g4b72798_Windows_online_Setup.exe`. SHA256:
+`a9319de0f5505ef0203b6b9d8ed1e0a99c9c9cef800f8ee8833a40b2d5b0e701`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
