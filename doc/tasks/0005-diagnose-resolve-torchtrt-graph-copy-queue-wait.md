@@ -42,11 +42,11 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
   `torchtrt_work_stream_guard_ms` field from a real zero-duration stage.
 - [x] A diagnostic CUDA Graph disabled run is measured in Resolve with the same
   Green 2048 settings and source-passthrough parameters as the failing window.
-- [ ] A diagnostic main-style host-roundtrip input path is measured in Resolve
+- [x] A diagnostic main-style host-roundtrip input path is measured in Resolve
   with the same settings, without replacing the primary device-input path.
 - [x] The OFX RPC harness still runs the comparable Green 2048 case so the
   Resolve-only gap is visible beside the automated path.
-- [ ] The outcome identifies whether the remaining wait is CUDA Graph specific,
+- [x] The outcome identifies whether the remaining wait is CUDA Graph specific,
   host/context specific, or still unattributed.
 - [ ] Any selected implementation fix is captured in a follow-up ADR before code
   changes if it changes execution topology.
@@ -68,7 +68,7 @@ applicable.
 - [x] Build and package through `scripts/windows.ps1`.
 - [x] Run the clean OFX RPC harness case for Green 2048 processed/source
   passthrough.
-- [ ] Run the Resolve manual A/B windows and capture them with
+- [x] Run the Resolve manual A/B windows and capture them with
   `scripts/analyze_resolve_ofx_logs.ps1 -SinceLocalTime`.
 - [ ] Record the comparison in Notes and either close this task or open the
   implementation ADR/task for the selected fix.
@@ -188,6 +188,37 @@ with separate occasional GPU spikes up to about 1981 ms. The next diagnostic is
 therefore P2 host-roundtrip with graph still off, to test whether the remaining
 Resolve-only direct-forward wall time is tied to the device-input boundary or
 to broader Resolve host/context contention.
+
+Resolve P2 host-roundtrip validation ran on the same package after launching
+through `scripts/run_resolve_torchtrt_diagnostic.ps1 -Mode host-roundtrip
+-LaunchResolve`. The selected backend-render-only window used plugin PID
+`27452` and 27 samples. The runtime start line recorded `cuda_graph_env=0`,
+`torchtrt_cuda_graph_env=0`, `io_binding_env=off`, and
+`torchtrt_input_boundary=host_roundtrip`; the summaries recorded
+`torchtrt_input_boundary_host_roundtrip_present=27`,
+`torchtrt_forward_direct_present=27`,
+`torchtrt_cuda_graph_fallback_not_enabled_present=27`, and
+`torchtrt_input_copy_queue_wait_ms=0`.
+
+P2 did not improve total Resolve latency, so host-roundtrip is not a candidate
+implementation fix. Backend renders averaged `total_ms=2144.02`,
+`ofx_client_render_rpc_ms=1735.82`, `frame_prepare_inputs_ms=86.86`,
+`torchtrt_forward_direct_ms=1016.99`,
+`torchtrt_forward_direct_gpu_ms=287.85`,
+`torchtrt_output_d2h_direct_ms=2.95`, `ofx_client_readback_ms=19.42`, and
+`ofx_write_output_ms=15.08`. Runtime detail stages after the matching
+`server_start` show the CPU fallback costs introduced by the diagnostic:
+`frame_extract_outputs_resize` averaged 293.34 ms and
+`post_source_passthrough` averaged 264.92 ms. The device-input boundary appears
+to contribute to direct-forward wall time, but removing it shifts enough work
+to CPU that the overall Resolve path regresses.
+
+The diagnostic classification is now: the old static input-copy queue wait is
+CUDA Graph specific; the remaining end-to-end Resolve slowness is not fixed by
+disabling CUDA Graph or by forcing a main-style host input boundary. The next
+implementation slice must target the Resolve-only host/context gap around
+TorchTRT direct forward and the expensive CPU/output fallback stages, without
+promoting host-roundtrip to the normal path.
 
 ## Definition of Done
 
