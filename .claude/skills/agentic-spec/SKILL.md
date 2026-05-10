@@ -127,3 +127,10 @@ The spec is a narrative document but is exempt from ADR-0008's no-dates rule for
 - One scope: one feature per spec. Multiple features implies multiple specs.
 - No speculation. Open Questions go in their named section; everywhere else captures decisions.
 - No commented-out requirements or TODO/FIXME — every deferred item references a tracked work item or lives under Open Questions.
+
+## Next
+
+- `/agentic-ground` for the four-source research pass before code (WORKFLOW §4 + §5).
+- `/agentic-task` to break the spec into work units; each task carries a `Spec ref` field pointing back to this file.
+- `/agentic-adr` if scoping the spec surfaced a binding architectural decision worth recording (one decision per ADR).
+- Flip Status to `accepted` once you sign off and tasks start being created. Flip to `shipped` after release.

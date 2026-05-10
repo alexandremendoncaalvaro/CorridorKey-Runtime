@@ -103,3 +103,10 @@ Spec is a narrative document but is exempt from ADR-0008's no-dates rule for the
 - No speculation. Open Questions go in their named section.
 - No commented-out requirements or TODO/FIXME — every deferred item references a tracked work item or lives under Open Questions.
 </output_contract>
+
+## Next
+
+- `/agentic-ground` for the four-source research pass before code (WORKFLOW §4 + §5).
+- `/agentic-task` to break the spec into work units; each task carries a `Spec ref` field pointing back to this file.
+- `/agentic-adr` if scoping the spec surfaced a binding architectural decision.
+- Flip Status to `accepted` once you sign off and tasks start being created. Flip to `shipped` after release.

@@ -100,3 +100,10 @@ A single message structured as:
 ```
 
 No code is written by this skill. The output feeds the next turn (or `/agentic-task`, `/agentic-philosophy`'s Goal-Driven Execution, or freeform implementation).
+
+## Next
+
+- Implement per the synthesized happy path. Cite the sources you grounded against in commit messages or task `Notes`.
+- `/agentic-task` if the work needs explicit decomposition into checkbox-toggle work units.
+- `/agentic-review main..HEAD` (or current scope) before merge — WORKFLOW §10.
+- `/agentic-adr` if the deviation gate surfaced a binding architectural decision.

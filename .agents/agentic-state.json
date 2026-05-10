@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "kitVersion": "0.10.0-beta.1",
+  "kitVersion": "0.11.0-beta.1",
   "agent": "codex",
   "profile": "team",
   "skills": {
     "agentic-adr": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-adr/agents/openai.yaml",
@@ -13,12 +13,12 @@
         },
         {
           "path": ".agents/skills/agentic-adr/SKILL.md",
-          "sourceSha": "2f65800140481860d6cf983311317e8d141f6e21e5e74442bd427a01f3d70d61"
+          "sourceSha": "53500dcf77f91896c5e6ddf0288e34b2204f1110990ae8e981d801a0a9d8dd21"
         }
       ]
     },
     "agentic-architecture": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-architecture/agents/openai.yaml",
@@ -26,12 +26,12 @@
         },
         {
           "path": ".agents/skills/agentic-architecture/SKILL.md",
-          "sourceSha": "9503222a2cb7df34a20941b29e64b428da52b27d627d6c5168bbbe15d083865a"
+          "sourceSha": "db28880284c9aa8dd28b332fa8a76e5b8fc9b862d49280a0133a817a440086f0"
         }
       ]
     },
     "agentic-audit": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-audit/agents/openai.yaml",
@@ -39,12 +39,12 @@
         },
         {
           "path": ".agents/skills/agentic-audit/SKILL.md",
-          "sourceSha": "8a87f1588b012729198b21764f3711dd125f414b9fac4e98a5453a047715fafe"
+          "sourceSha": "c882ef7d576f6388d035c6ce85d0110b0d87c76f4ffeedc84ff461d371ed18de"
         }
       ]
     },
     "agentic-bootstrap": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-bootstrap/agents/openai.yaml",
@@ -52,12 +52,12 @@
         },
         {
           "path": ".agents/skills/agentic-bootstrap/SKILL.md",
-          "sourceSha": "25c226eb31e1304922a19241d966cfed9335e0d90ad1a456c003fa52001fe63d"
+          "sourceSha": "cf84c0d13bc85b7a9bb7281318077fe6a88e5197e2bf0c9bacb5bb8d2aed7bf7"
         }
       ]
     },
     "agentic-design": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-design/agents/openai.yaml",
@@ -65,12 +65,12 @@
         },
         {
           "path": ".agents/skills/agentic-design/SKILL.md",
-          "sourceSha": "79eb8970063db24cc0e062a0c0483394d16049a5eb67c55eb6bc4ea8b656d9c2"
+          "sourceSha": "2936417ed4055939986b060e54d5ff64372b1f26f87530955ba6caac6029bdb5"
         }
       ]
     },
     "agentic-ground": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-ground/agents/openai.yaml",
@@ -78,12 +78,12 @@
         },
         {
           "path": ".agents/skills/agentic-ground/SKILL.md",
-          "sourceSha": "331b7c752112cae9b6e74e462dd93b69976c111c23b0ebdf8a3e577e793856ac"
+          "sourceSha": "cc8f3f2b5c23ef71f47a53151b78951e8a9b90866a8eb028dc441502e2ce437a"
         }
       ]
     },
     "agentic-next": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-next/agents/openai.yaml",
@@ -96,7 +96,7 @@
       ]
     },
     "agentic-philosophy": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-philosophy/agents/openai.yaml",
@@ -104,12 +104,12 @@
         },
         {
           "path": ".agents/skills/agentic-philosophy/SKILL.md",
-          "sourceSha": "3452c176b75c3f1395f4f1bedcaca450cecf6789fa42c56a21f0fe80bd471b90"
+          "sourceSha": "bd43b6f05f3847dbabd4614f9f54bd06ff73bbd0588da465a1ca82f838365115"
         }
       ]
     },
     "agentic-review": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-review/agents/openai.yaml",
@@ -117,12 +117,12 @@
         },
         {
           "path": ".agents/skills/agentic-review/SKILL.md",
-          "sourceSha": "0fa03d28028e7abae259f3c20dbfd433c16c2b8067c5acb8290176e1751d45e5"
+          "sourceSha": "5e73c3c2f1499d90d70252fb3d2da048311dc4b4f68226cb383bc5e22640bec9"
         }
       ]
     },
     "agentic-spec": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-spec/agents/openai.yaml",
@@ -130,12 +130,12 @@
         },
         {
           "path": ".agents/skills/agentic-spec/SKILL.md",
-          "sourceSha": "adbdade136ba99b4cb04edfd18191c5c26e0936e1b7406d652a46738a9dfa21a"
+          "sourceSha": "d13fa9dc99008710cdca0cb0e377ba6528d4c20e8d845c9f3c03a75d54bfff2b"
         }
       ]
     },
     "agentic-task": {
-      "version": "0.10.0-beta.1",
+      "version": "0.11.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/agentic-task/agents/openai.yaml",
@@ -143,7 +143,7 @@
         },
         {
           "path": ".agents/skills/agentic-task/SKILL.md",
-          "sourceSha": "82a0af712f8da596e8025a6a14f6dfb0bd9d153755d79082dab5d2dee14f0a07"
+          "sourceSha": "abf9dedc97854ff0c2a2119d58a0bd1337199dbee43ceaf1c763797993da28ef"
         }
       ]
     }
