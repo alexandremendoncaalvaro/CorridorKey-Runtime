@@ -70,8 +70,13 @@ applicable.
   passthrough.
 - [x] Run the Resolve manual A/B windows and capture them with
   `scripts/analyze_resolve_ofx_logs.ps1 -SinceLocalTime`.
-- [ ] Record the comparison in Notes and either close this task or open the
+- [x] Record the comparison in Notes and either close this task or open the
   implementation ADR/task for the selected fix.
+- [x] Implement the first non-topology slice: direct-forward queue-wait
+  telemetry, post-sync GPU-prep device timing, and pure-inference guard.
+- [x] Re-run the automated Green 2048 harness/matrix slice and compare
+  `torchtrt_forward_direct_queue_wait`, `gpu_prepare_device`,
+  `post_gpu_prepare`, and total latency.
 
 ## Priority Order
 
@@ -219,6 +224,40 @@ disabling CUDA Graph or by forcing a main-style host input boundary. The next
 implementation slice must target the Resolve-only host/context gap around
 TorchTRT direct forward and the expensive CPU/output fallback stages, without
 promoting host-roundtrip to the normal path.
+
+The selected first implementation slice does not change execution topology, so
+it does not require a follow-up ADR before code changes. Official PyTorch C++
+guidance recommends `c10::InferenceMode` over `NoGradGuard` for pure inference
+workloads, and its CUDA stream guidance supports the existing
+`CUDAStreamGuard` integration point. Official CUDA stream/event guidance
+confirms that events measure device progress while host wall time can include
+queued prior work. The code change therefore keeps the owned work stream,
+keeps host-roundtrip diagnostic-only, emits
+`torchtrt_forward_direct_queue_wait`, emits `gpu_prepare_device` after the
+frame has synchronized, and runs TorchTRT forward/materialization inside
+`InferenceMode`.
+
+Implemented the first non-topology slice. The TorchTRT forward/materialization
+path now runs under `c10::InferenceMode`, direct fallback reports
+`torchtrt_forward_direct_queue_wait`, the OFX render summary and analyzer expose
+that field, and prepared-input runs emit `gpu_prepare_device` after the frame's
+real synchronization point instead of hiding device-prep duration behind the
+next synchronizing stage.
+
+Verification passed: `git diff --check`,
+`scripts/windows.ps1 -Task build -Version 0.8.5 -Preset release`,
+`ctest --test-dir build/release -R "unit_tests_gpu|integration_tests|windows_torchtrt_matrix_case_coverage" --output-on-failure`,
+and the focused OFX RPC Green 2048 plate/source-passthrough harness. Graph-off
+direct averaged 492.76 ms after the change versus 480.82 ms in the prior JSON,
+inside the 10% regression budget; the new split showed
+`gpu_prepare_device=7.70 ms` and
+`torchtrt_forward_direct_queue_wait=6.94 ms`, proving the automated path still
+does not reproduce the Resolve-only ~1 second direct-forward wait. Graph-on
+averaged 490.09 ms after the change versus 578.36 ms in the prior JSON;
+`gpu_prepare_device=7.05 ms`,
+`torchtrt_cuda_graph_input_copy_queue_wait=6.78 ms`,
+`torchtrt_cuda_graph_replay_gpu=290.44 ms`, and
+`torchtrt_output_d2h_direct=40.73 ms`.
 
 ## Definition of Done
 

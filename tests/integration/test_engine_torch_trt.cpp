@@ -382,7 +382,7 @@ TEST_CASE("TorchTRT CUDA graph path emits replay or explicit fallback telemetry"
         CHECK_FALSE(has_stage(timings, "torchtrt_input_wait_event_enqueue"));
         CHECK(has_stage(timings, "torchtrt_input_ready_wait"));
         CHECK(stage_total_ms(timings, "torchtrt_input_ready_wait") == Catch::Approx(0.0));
-        CHECK_FALSE(has_stage(timings, "gpu_prepare_device"));
+        CHECK(has_stage(timings, "gpu_prepare_device"));
         CHECK(has_stage(timings, "gpu_prepare_wait_over_device"));
         CHECK(stage_total_ms(timings, "gpu_prepare_wait_over_device") == Catch::Approx(0.0));
         CHECK(has_stage(timings, "torchtrt_cuda_graph_input_copy"));
@@ -395,6 +395,7 @@ TEST_CASE("TorchTRT CUDA graph path emits replay or explicit fallback telemetry"
     }
     if (reported_fallback) {
         CHECK(has_stage(timings, "torchtrt_forward_direct"));
+        CHECK(has_stage(timings, "torchtrt_forward_direct_queue_wait"));
     }
 #endif
 }

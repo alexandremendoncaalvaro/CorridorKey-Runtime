@@ -36,6 +36,7 @@
 #include <ATen/ops/replication_pad2d.h>
 #include <ATen/ops/upsample_bicubic2d.h>
 #include <ATen/ops/upsample_bilinear2d.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/cuda.h>
 #include <torch/script.h>
@@ -125,6 +126,24 @@ std::optional<double> synchronize_cuda_stream_marker(c10::cuda::CUDAStream strea
                                                      std::string_view stage_name);
 void emit_stage_timing(const StageTimingCallback& on_stage, std::string_view name,
                        double total_ms);
+
+void emit_cuda_event_elapsed(const StageTimingCallback& on_stage, std::string_view name,
+                             void* start_event, void* stop_event) {
+    if (!on_stage || start_event == nullptr || stop_event == nullptr) {
+        return;
+    }
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+    float elapsed_ms = 0.0F;
+    const auto status =
+        cudaEventElapsedTime(&elapsed_ms, reinterpret_cast<cudaEvent_t>(start_event),
+                             reinterpret_cast<cudaEvent_t>(stop_event));
+    if (status == cudaSuccess) {
+        emit_stage_timing(on_stage, name, static_cast<double>(elapsed_ms));
+    }
+#else
+    (void)name;
+#endif
+}
 
 int round_up_to_multiple(int value, int multiple) {
     return ((value + multiple - 1) / multiple) * multiple;
@@ -606,7 +625,6 @@ std::optional<double> synchronize_cuda_stream_marker(c10::cuda::CUDAStream strea
 
 torch::IValue run_direct_forward(torch::jit::script::Module& module, const torch::Tensor& input,
                                  const torch::Tensor& pos_grid) {
-    const torch::NoGradGuard no_grad;
     if (pos_grid.defined()) {
         return module.forward({input, pos_grid});
     }
@@ -1364,6 +1382,7 @@ Result<TorchTrtFrameResult> forward_and_materialize(
     c10::cuda::CUDAStream& copy_stream, c10::cuda::CUDAStream& capture_stream,
     const StageTimingCallback& on_stage, const InferenceParams* post_process_params = nullptr,
     TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {}) {
+    const c10::InferenceMode inference_guard(true);
     auto pos_grid = external_pos_grid_for(external_pos, inference_width, inference_height,
                                           input_dtype, on_stage);
     if (!pos_grid.has_value()) {
@@ -1380,16 +1399,17 @@ Result<TorchTrtFrameResult> forward_and_materialize(
             return;
         }
         emit_graph_event(on_stage, fallback_stage_name(forward_graph));
-        common::measure_stage(on_stage, "torchtrt_forward_direct", [&]() {
-            torch::IValue raw_out;
-            run_and_synchronize_with_cuda_event_timing(
-                on_stage, "torchtrt_forward_direct_gpu",
-                [&]() { raw_out = run_direct_forward(module, cuda_input, *pos_grid); });
-            auto direct_split = split_forward_output(raw_out);
-            if (direct_split.has_value()) {
-                split = *direct_split;
-            }
-        });
+        torch::IValue raw_out;
+        measure_cuda_wall_and_gpu_stage(on_stage, "torchtrt_forward_direct",
+                                        "torchtrt_forward_direct_gpu",
+                                        "torchtrt_forward_direct_queue_wait", [&]() {
+                                            raw_out = run_direct_forward(module, cuda_input,
+                                                                         *pos_grid);
+                                        });
+        auto direct_split = split_forward_output(raw_out);
+        if (direct_split.has_value()) {
+            split = *direct_split;
+        }
     });
 
     if (!split.alpha.defined()) {
@@ -1758,13 +1778,18 @@ Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
                                   [&]() { cuda_input = cuda_input.to(m_impl->input_dtype); });
         }
 
-        return forward_and_materialize(
+        auto frame_res = forward_and_materialize(
             m_impl->module, m_impl->external_pos, m_impl->forward_graph, cuda_input, input_width,
             input_height, output_width, output_height, input_width, input_height, 0, 0,
             m_impl->input_dtype, output_alpha_only,
             use_lanczos_resize ? OutputResizeFilter::Lanczos : OutputResizeFilter::Bilinear,
             m_impl->host_ring, m_impl->output_pool, m_impl->copy_stream,
             m_impl->capture_stream, on_stage, post_process_params, source, output_views);
+        if (frame_res.has_value()) {
+            emit_cuda_event_elapsed(on_stage, "gpu_prepare_device", input_ready_start_event,
+                                    input_ready_event);
+        }
+        return frame_res;
     } catch (const c10::Error& e) {
         return Unexpected<Error>{
             Error{.code = ErrorCode::InferenceFailed,

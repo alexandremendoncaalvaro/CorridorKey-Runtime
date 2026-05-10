@@ -170,7 +170,8 @@ bool is_pinned_stage(const std::string& name) {
     return name == "mlx_eval" || name == "mlx_wait_alpha" || name == "mlx_wait_fg" ||
            name == "mlx_eval_tile" || name == "mlx_wait_alpha_tile" ||
            name == "mlx_wait_fg_tile" || name == "torchtrt_forward_direct" ||
-           name == "torchtrt_forward_direct_gpu" || name == "frame_prepare_inputs" ||
+           name == "torchtrt_forward_direct_gpu" ||
+           name == "torchtrt_forward_direct_queue_wait" || name == "frame_prepare_inputs" ||
            name.rfind("gpu_prepare_", 0) == 0 || name.rfind("torchtrt_input_", 0) == 0 ||
            name.rfind("torchtrt_cuda_graph_", 0) == 0;
 }

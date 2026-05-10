@@ -244,6 +244,8 @@ void log_render_summary(const InstanceData& data, double render_ms, LastRenderWo
             (stage_present(timings, "torchtrt_forward_direct") ? "1" : "0") +
             " torchtrt_forward_direct_gpu_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_forward_direct_gpu")) +
+            " torchtrt_forward_direct_queue_wait_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_forward_direct_queue_wait")) +
             " torchtrt_input_copy_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_input_copy")) +
             " torchtrt_input_copy_gpu_ms=" +
