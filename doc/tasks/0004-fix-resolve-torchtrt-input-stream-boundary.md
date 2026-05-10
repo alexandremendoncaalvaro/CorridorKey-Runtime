@@ -3,6 +3,7 @@
 **Status:** blocked
 **Created:** 2026-05-09
 **Owner:** Runtime maintainers
+**Spec ref:** doc/specs/0001-torchtrt-resolve-performance.md
 **Board ref:**
 
 ## Context
