@@ -318,8 +318,8 @@ the package default now uses the direct TorchTRT path.
 The local RTX online installer was produced and validated through
 `scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset release -Track rtx
 -Flavor online`. Installer:
-`dist/CorridorKey_v0.8.5-win.1-73-g0beea3d-dirty-we84205fee6ae_Windows_online_Setup.exe`.
-SHA256: `6753e09b9224f69a70d572f6470567d2ca594eabe1b4bb0ae9c233f41d8d3220`.
+`dist/CorridorKey_v0.8.5-win.1-74-g2c57c94_Windows_online_Setup.exe`.
+SHA256: `7d3ba23f2770493298433f6e665b93d840fe25a4f238acc5f59f97e956e712cf`.
 
 ## Definition of Done
 
