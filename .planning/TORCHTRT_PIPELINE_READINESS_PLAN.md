@@ -63,6 +63,15 @@ de cor compartilhados.
   host antes da inferencia. Isso e uma evidencia historica de estabilidade, mas
   nao e a solucao principal porque perderia a otimizacao device-input desta
   branch.
+- A validacao Resolve do pacote `0.8.5-win.1-72-g4b72798` ainda subiu com
+  `cuda_graph_env=1` por default e mostrou
+  `torchtrt_cuda_graph_input_copy_queue_wait` em media cerca de 1055 ms,
+  enquanto o replay GPU ficou em cerca de 294 ms e a copia medida continuou
+  perto de 0.10 ms. ADR-0005 torna CUDA Graph opt-in no servidor OFX.
+- ADR-0005 foi implementado e o harness RPC Green 2048 confirmou o novo default
+  com `cuda_graph_env=0`, `torchtrt_forward_direct` em cerca de 300 ms e
+  `torchtrt_forward_direct_queue_wait` em cerca de 7 ms. O proximo Resolve run
+  deve validar o mesmo sinal no host real.
 
 ## Hipoteses Testaveis
 
@@ -123,12 +132,10 @@ de cor compartilhados.
 
 ## Trabalho Restante
 
-- P0: Executar Task-0005: diagnosticar o `torchtrt_input_copy_queue_wait` que
-  permanece no Resolve com CUDA Graph on/off e roundtrip host estilo `main`
-  como A/B diagnostico, mantendo as mesmas configuracoes Green 2048.
-- P0: Garantir que `torchtrt_work_stream_guard_ms` esta presente no
-  `ofx_render_summary` do pacote instalado e que o analisador distingue campo
-  ausente de zero real.
+- P0: Rodar nova validacao Resolve com o pacote ADR-0005 para confirmar que
+  `cuda_graph_env=0`, `torchtrt_cuda_graph_input_copy_queue_wait` nao domina, e
+  o gargalo remanescente aparece em `torchtrt_forward_direct` ou nos custos
+  perifericos instrumentados.
 - P0: Manter o caminho device-input e o device-to-device de Source Passthrough
   quando `source_rgb_device` esta disponivel.
 - Separar o status `post_processed` em flags por etapa ou outro contrato

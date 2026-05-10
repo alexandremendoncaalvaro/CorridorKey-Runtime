@@ -110,12 +110,15 @@ a true TorchTRT artifact, changing Resolve host behavior, or shipping a broad
 OFX architecture rewrite. A main-style host roundtrip is allowed only as a
 diagnostic comparison unless a later ADR accepts it as the product path.
 
+## Resolved Findings
+
+- The static-input copy queue wait is CUDA Graph specific in the measured
+  Resolve windows; ADR-0005 changes the OFX default so graph capture is opt-in.
+- The main-style synchronized host-roundtrip diagnostic did not improve
+  end-to-end Resolve latency enough to become the product path.
+
 ## Open Questions
 
-- Does disabling CUDA Graph in the same Resolve window remove the remaining
-  static-input copy queue wait?
-- Does a main-style synchronized host-roundtrip diagnostic match `main`
-  behavior closely enough to isolate Resolve host/context contention?
 - Does the missing `torchtrt_work_stream_guard_ms` value in current analyzer
   summaries represent an absent log field, a zero-duration measured stage, or an
   older plugin log window?
@@ -127,7 +130,8 @@ diagnostic comparison unless a later ADR accepts it as the product path.
 
 - ADRs: `doc/adr/0002-measure-torchtrt-stream-boundaries.md`,
   `doc/adr/0003-run-torchtrt-input-prep-on-torch-current-stream.md`,
-  `doc/adr/0004-own-torchtrt-work-stream.md`
+  `doc/adr/0004-own-torchtrt-work-stream.md`,
+  `doc/adr/0005-default-ofx-torchtrt-cuda-graph-off.md`
 - Tasks: `doc/tasks/0002-validate-resolve-panel-timing.md`,
   `doc/tasks/0003-instrument-torchtrt-queue-wait.md`,
   `doc/tasks/0004-fix-resolve-torchtrt-input-stream-boundary.md`,

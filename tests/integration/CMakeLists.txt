@@ -56,11 +56,20 @@ target_compile_definitions(test_integration PRIVATE
     OFX_RUNTIME_TEST_QUICK_EXIT_PATH="$<TARGET_FILE:ofx_runtime_test_quick_exit>"
 )
 
+if(WIN32 AND TARGET corridorkey_ofx_runtime_server)
+    target_compile_definitions(test_integration PRIVATE
+        OFX_RUNTIME_SERVER_PATH="$<TARGET_FILE:corridorkey_ofx_runtime_server>"
+    )
+endif()
+
 # test_ofx_plugin_exceptions dlopen's the built OFX bundle at runtime — the
 # generator-expression path alone does not imply a build-order edge, so without
 # this dependency a targeted "ninja test_integration" leaves the plugin unbuilt
 # and the test fails with a nullptr handle.
 add_dependencies(test_integration corridorkey_ofx ofx_runtime_test_quick_exit)
+if(WIN32 AND TARGET corridorkey_ofx_runtime_server)
+    add_dependencies(test_integration corridorkey_ofx_runtime_server)
+endif()
 
 # corridorkey_core carries -fsanitize=address under ENABLE_ASAN while
 # test_integration itself does not. When the test dlopen's CorridorKey.ofx the

@@ -48,7 +48,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
   Resolve-only gap is visible beside the automated path.
 - [x] The outcome identifies whether the remaining wait is CUDA Graph specific,
   host/context specific, or still unattributed.
-- [ ] Any selected implementation fix is captured in a follow-up ADR before code
+- [x] Any selected implementation fix is captured in a follow-up ADR before code
   changes if it changes execution topology.
 
 ## Plan
@@ -77,6 +77,10 @@ applicable.
 - [x] Re-run the automated Green 2048 harness/matrix slice and compare
   `torchtrt_forward_direct_queue_wait`, `gpu_prepare_device`,
   `post_gpu_prepare`, and total latency.
+- [x] Change the OFX runtime default so TorchTRT CUDA Graph is opt-in while the
+  device-input path remains the default inference topology.
+- [x] Rebuild, retest the focused gates, package the local RTX installer, and
+  record the new installer hash before manual Resolve validation.
 
 ## Priority Order
 
@@ -263,7 +267,59 @@ The local RTX online installer for Resolve validation was produced and
 validated through `scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset
 release -Track rtx -Flavor online`. Installer:
 `dist/CorridorKey_v0.8.5-win.1-72-g4b72798_Windows_online_Setup.exe`. SHA256:
-`a9319de0f5505ef0203b6b9d8ed1e0a99c9c9cef800f8ee8833a40b2d5b0e701`.
+`a9319de0f5505ef0203b6b9d8ed1e0a99c9ccef800f8ee8833a40b2d5b0e701`.
+
+Resolve validation on that installer still used the graph-on product default.
+The selected backend-render-only window used plugin PID `32688` and 22 samples
+from line `213415` through `215432`. The runtime start line recorded
+`cuda_graph_env=1`, `torchtrt_cuda_graph_env=unset`, `io_binding_env=on`, and
+`torchtrt_input_boundary=unset`. Averages were `total_ms=2184.60`,
+`ofx_client_render_rpc_ms=1618.07`, `frame_prepare_inputs_ms=13.65`,
+`gpu_prepare_wait_over_device_ms=0`, `torchtrt_input_ready_wait_ms=0`,
+`torchtrt_input_copy_queue_wait_ms=1055.34`, `torchtrt_replay_gpu_ms=294.13`,
+`post_gpu_prepare_ms=151.48`, `torchtrt_output_d2h_direct_ms=67.24`,
+`ofx_client_readback_ms=35.50`, and `ofx_write_output_ms=16.78`. The measured
+input copy remained around 0.10 ms in the raw runtime details, so the default
+graph-on policy is still inserting a Resolve-specific queue wait before replay.
+
+ADR-0005 records the selected topology change: the OFX runtime server must
+default CUDA Graph off unless `CORRIDORKEY_TRT_CUDA_GRAPH=1` or
+`CORRIDORKEY_TORCHTRT_CUDA_GRAPH=1` is supplied explicitly. This does not solve
+the remaining direct-forward wall-time gap, but it removes the proven graph
+static-input-copy default regression before continuing with the next
+instrumented slice.
+
+Implemented ADR-0005 in the OFX runtime server entrypoint. With no graph-related
+environment variables set, a direct server startup check recorded
+`cuda_graph_env=0`, `torchtrt_cuda_graph_env=unset`, `io_binding_env=off`, and
+`torchtrt_input_boundary=unset`.
+
+Verification passed: `git diff --check`,
+`scripts/windows.ps1 -Task build -Version 0.8.5 -Preset release`, and
+`ctest --test-dir build/release -R
+"unit_tests_gpu|integration_tests|windows_torchtrt_matrix_case_coverage"
+--output-on-failure`. The integration suite now includes a regression guard
+that launches the real Windows OFX runtime server with graph variables unset
+and checks the startup log for `cuda_graph_env=0`.
+
+The focused OFX RPC Green 2048 plate/source-passthrough harness was rerun with
+the new default and no graph environment variables. Output:
+`build/release/task0005_rpc_green_2048_default_graph_off_after_regression_test.json`.
+It averaged `avg_latency_ms=494.08`, `ofx_client_render_rpc=429.99 ms`,
+`frame_prepare_inputs=16.38 ms`, `gpu_prepare_device=8.92 ms`,
+`gpu_prepare_wait_over_device=0`, `torchtrt_input_ready_wait=0`,
+`torchtrt_forward_direct=295.89 ms`,
+`torchtrt_forward_direct_gpu=287.81 ms`,
+`torchtrt_forward_direct_queue_wait=8.08 ms`,
+`post_gpu_prepare=37.01 ms`, and `torchtrt_output_d2h_direct=43.16 ms`.
+The runtime log for that harness process recorded `cuda_graph_env=0`, proving
+the package default now uses the direct TorchTRT path.
+
+The local RTX online installer was produced and validated through
+`scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset release -Track rtx
+-Flavor online`. Installer:
+`dist/CorridorKey_v0.8.5-win.1-73-g0beea3d-dirty-we84205fee6ae_Windows_online_Setup.exe`.
+SHA256: `6753e09b9224f69a70d572f6470567d2ca594eabe1b4bb0ae9c233f41d8d3220`.
 
 ## Definition of Done
 
