@@ -21,6 +21,13 @@ around 0.10 ms and graph replay GPU time averages about 307 ms. The remaining
 failure is therefore the queue wait before CUDA Graph replay, not raw copy
 bandwidth and not replay alone.
 
+The same failure reproduced on diagnostic package
+`0.8.5-win.1-65-g22b01d3-dirty-w59c6f8033046`. A single-PID Resolve window
+with 14 backend renders showed `torchtrt_work_stream_guard_present=1`,
+`gpu_prepare_wait_over_device=0`, `torchtrt_input_ready_wait=0`, and
+`torchtrt_input_copy_queue_wait` averaging about 975 ms while the measured
+device copy remained about 0.10 ms.
+
 This task owns the next diagnostic slice. It must separate a CUDA Graph
 static-input-copy interaction from Resolve host/context contention before any
 broader post-process or OFX writeback optimization is attempted.
@@ -51,7 +58,7 @@ applicable.
 
 - [x] Update `scripts/analyze_resolve_ofx_logs.ps1` if needed so missing stage
   fields are reported separately from numeric zero.
-- [ ] Verify `src/plugins/ofx/ofx_render.cpp` emits
+- [x] Verify `src/plugins/ofx/ofx_render.cpp` emits
   `torchtrt_work_stream_guard_ms` in the installed package used for Resolve
   testing.
 - [x] Add a diagnostic-only way to run the TorchTRT Resolve path with CUDA Graph
@@ -65,6 +72,20 @@ applicable.
   `scripts/analyze_resolve_ofx_logs.ps1 -SinceLocalTime`.
 - [ ] Record the comparison in Notes and either close this task or open the
   implementation ADR/task for the selected fix.
+
+## Priority Order
+
+The next work is diagnostic classification, not broad optimization. The
+current evidence already rules out model replay, post-process, readback, and
+OFX writeback as the dominant 1.8 second-class cost in the failing Resolve
+window.
+
+| Priority | Run | Required environment before starting Resolve | Evidence required | Decision rule |
+| --- | --- | --- | --- | --- |
+| P0 | Default graph-on/device-input baseline | `CORRIDORKEY_TRT_CUDA_GRAPH=1`; `CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY` unset | `torchtrt_work_stream_guard_present=1`; single PID; backend renders only; `torchtrt_input_copy_queue_wait` still dominates | Done for package `0.8.5-win.1-65-g22b01d3-dirty-w59c6f8033046`; the wait is reproduced. |
+| P1 | CUDA Graph off, device-input unchanged | `CORRIDORKEY_TRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY` unset | `server_start` records both graph envs as `0`; `torchtrt_cuda_graph_fallback_not_enabled_present_count > 0`; `torchtrt_forward_direct_present_count > 0`; `torchtrt_input_copy_queue_wait` absent or zero | If total render time drops near the OFX RPC harness class, classify as CUDA Graph specific and open the implementation ADR. |
+| P2 | Host-roundtrip input boundary, graph still off | `CORRIDORKEY_TRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY=host_roundtrip` | `torchtrt_input_boundary_host_roundtrip_present_count > 0`; `torchtrt_forward_direct_present_count > 0`; same Green 2048/source-passthrough settings | If P1 remains slow but P2 improves, classify as device-input boundary/context interaction. If both are slow, classify as Resolve host/context contention outside CUDA Graph static-input copy. |
+| P3 | Record outcome and choose fix path | No new code before classification | Notes include analyzer JSON summary, selected classification, and whether a follow-up ADR is required | Only implement after the classification is documented. |
 
 ## Notes
 
@@ -107,6 +128,21 @@ The local RTX online installer was produced and validated through
 -Flavor online`. Installer:
 `dist/CorridorKey_v0.8.5-win.1-65-g22b01d3-dirty-w59c6f8033046_Windows_online_Setup.exe`.
 SHA256: `0bf3edb3e5ee12affb5acd515e4624e4fbf048a884f8a9e124da9e2adf154030`.
+
+Resolve validation on the same package confirmed the diagnostic fields are
+present in the installed plugin. The selected window used
+`scripts/analyze_resolve_ofx_logs.ps1 -TailSummaries 20 -SinceLocalTime
+"2026-05-09 22:24:12" -Pid 34048`, which selected 14 backend renders from a
+single plugin PID. The runtime start line recorded `cuda_graph_env=1`,
+`torchtrt_cuda_graph_env=unset`, `io_binding_env=on`, and
+`torchtrt_input_boundary=unset`, so this was still the default graph-on
+device-input path. The averages were `total_ms=1753.87`,
+`ofx_client_render_rpc_ms=1425.77`, `frame_prepare_inputs_ms=13.87`,
+`gpu_prepare_wait_over_device_ms=0`, `torchtrt_input_ready_wait_ms=0`,
+`torchtrt_input_copy_queue_wait_ms=975.35`, `torchtrt_replay_gpu_ms=299.97`,
+`post_gpu_prepare_ms=35.63`, `torchtrt_output_d2h_direct_ms=64.78`,
+`ofx_client_readback_ms=38.99`, and `ofx_write_output_ms=17.73`. This locks the
+next priority to P1: CUDA Graph off with device-input unchanged.
 
 ## Definition of Done
 
