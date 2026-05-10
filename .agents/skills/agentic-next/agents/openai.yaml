@@ -1,0 +1,5 @@
+interface:
+  display_name: agentic-next
+  short_description: State-aware navigation aid (flutter doctor pattern). Surveys four-layer artifact stack + recommends prioritized next actions. Read-only.
+policy:
+  allow_implicit_invocation: false
