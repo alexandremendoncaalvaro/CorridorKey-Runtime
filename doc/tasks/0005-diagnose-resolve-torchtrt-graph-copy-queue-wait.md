@@ -87,6 +87,12 @@ window.
 | P2 | Host-roundtrip input boundary, graph still off | `CORRIDORKEY_TRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY=host_roundtrip` | `torchtrt_input_boundary_host_roundtrip_present_count > 0`; `torchtrt_forward_direct_present_count > 0`; same Green 2048/source-passthrough settings | If P1 remains slow but P2 improves, classify as device-input boundary/context interaction. If both are slow, classify as Resolve host/context contention outside CUDA Graph static-input copy. |
 | P3 | Record outcome and choose fix path | No new code before classification | Notes include analyzer JSON summary, selected classification, and whether a follow-up ADR is required | Only implement after the classification is documented. |
 
+Use `scripts/run_resolve_torchtrt_diagnostic.ps1 -Mode graph-off
+-LaunchResolve` for P1 and `scripts/run_resolve_torchtrt_diagnostic.ps1 -Mode
+host-roundtrip -LaunchResolve` for P2 when launching Resolve from this repo.
+Use `-ApplyUserEnvironment` only when Resolve must be started manually outside
+the helper, then restart Resolve before measuring.
+
 ## Notes
 
 ### 2026-05-09
@@ -143,6 +149,22 @@ device-input path. The averages were `total_ms=1753.87`,
 `post_gpu_prepare_ms=35.63`, `torchtrt_output_d2h_direct_ms=64.78`,
 `ofx_client_readback_ms=38.99`, and `ofx_write_output_ms=17.73`. This locks the
 next priority to P1: CUDA Graph off with device-input unchanged.
+
+Automated preflight A/B outside Resolve completed with the same Green 2048
+3840x2160 plate/source-passthrough settings. Graph-on device-input averaged
+578.36 ms with `torchtrt_cuda_graph_input_copy_queue_wait=6.26 ms`. Graph-off
+device-input averaged 480.82 ms, emitted `torchtrt_forward_direct`, removed the
+static graph input-copy wait, and kept `frame_prepare_inputs=14.50 ms`. Graph-off
+host-roundtrip averaged 595.17 ms; it also removed the static graph input-copy
+wait, but moved work to CPU input prep and CPU post-process
+(`frame_prepare_inputs=84.53 ms`, `post_source_passthrough=73.61 ms`). The
+automated result supports prioritizing P1 over P2 for the real Resolve
+classification.
+
+Added `scripts/run_resolve_torchtrt_diagnostic.ps1` so P1/P2 Resolve launches
+use the exact environment contract recorded in the priority table. The script
+can either launch Resolve with process-scoped variables or set user-level
+variables when the manual launch path is unavoidable.
 
 ## Definition of Done
 
