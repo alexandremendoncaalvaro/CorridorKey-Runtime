@@ -40,7 +40,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
   `work_origin` counts so cached frames cannot hide backend-render behavior.
 - [x] `ofx_render_summary` and the analyzer distinguish a missing
   `torchtrt_work_stream_guard_ms` field from a real zero-duration stage.
-- [ ] A diagnostic CUDA Graph disabled run is measured in Resolve with the same
+- [x] A diagnostic CUDA Graph disabled run is measured in Resolve with the same
   Green 2048 settings and source-passthrough parameters as the failing window.
 - [ ] A diagnostic main-style host-roundtrip input path is measured in Resolve
   with the same settings, without replacing the primary device-input path.
@@ -165,6 +165,29 @@ Added `scripts/run_resolve_torchtrt_diagnostic.ps1` so P1/P2 Resolve launches
 use the exact environment contract recorded in the priority table. The script
 can either launch Resolve with process-scoped variables or set user-level
 variables when the manual launch path is unavoidable.
+
+Resolve P1 graph-off validation ran on the same package after launching through
+`scripts/run_resolve_torchtrt_diagnostic.ps1 -Mode graph-off -LaunchResolve`.
+The selected backend-render-only window used plugin PID `29864` and 40 samples.
+The runtime start line recorded `cuda_graph_env=0`,
+`torchtrt_cuda_graph_env=0`, `io_binding_env=off`, and
+`torchtrt_input_boundary=unset`; the summaries recorded
+`torchtrt_forward_direct_present=40`,
+`torchtrt_cuda_graph_fallback_not_enabled_present=40`, and
+`torchtrt_input_copy_queue_wait_ms=0`. This proves the prior
+`torchtrt_cuda_graph_input_copy_queue_wait` stall is CUDA Graph specific.
+
+The P1 run did not resolve the real Resolve latency. Backend renders averaged
+`total_ms=1915.95`, `ofx_client_render_rpc_ms=1661.67`,
+`frame_prepare_inputs_ms=12.30`, `torchtrt_forward_direct_ms=1386.74`,
+`torchtrt_forward_direct_gpu_ms=427.02`, `post_gpu_prepare_ms=167.07`,
+`torchtrt_output_d2h_direct_ms=61.54`, `ofx_client_readback_ms=32.40`, and
+`ofx_write_output_ms=15.82`. Several runtime detail lines show direct-forward
+wall time around 1200-1700 ms while direct GPU event time is around 280-350 ms,
+with separate occasional GPU spikes up to about 1981 ms. The next diagnostic is
+therefore P2 host-roundtrip with graph still off, to test whether the remaining
+Resolve-only direct-forward wall time is tied to the device-input boundary or
+to broader Resolve host/context contention.
 
 ## Definition of Done
 
