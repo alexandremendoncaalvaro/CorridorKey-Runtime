@@ -397,6 +397,13 @@ the local bottleneck; high `event_sync_over_gpu` with small `enqueue_wall`
 means the runtime is waiting for the stream/event to be scheduled under the
 Resolve GPU context.
 
+The local RTX online installer for Resolve validation was produced and
+validated through `scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset
+release -Track rtx -Flavor online` after rebuilding with the clean commit label.
+Installer:
+`dist/CorridorKey_v0.8.5-win.1-77-g35adcf8_Windows_online_Setup.exe`. SHA256:
+`969ccf5fa5a84fdfce22624c89a6037a4242e12f6b331c8e77bec4b557b32828`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
