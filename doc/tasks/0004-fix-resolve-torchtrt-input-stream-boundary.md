@@ -1,6 +1,6 @@
 # Task `0004`: Fix Resolve TorchTRT Input Stream Boundary
 
-**Status:** in-progress
+**Status:** blocked
 **Created:** 2026-05-09
 **Owner:** Runtime maintainers
 **Board ref:**
@@ -13,6 +13,12 @@ isolated the missing time at the producer and consumer boundary between GPU
 input preparation and TorchTRT inference. ADR-0003 removed the independent
 GPU-prep stream wait. ADR-0004 closes the remaining default-stream gap by
 making the TorchTRT session own and guard its work stream end to end.
+
+ADR-0004 is implemented and accepted, but real Resolve validation did not close
+the full user-visible performance issue. The older waits at
+`gpu_prepare_wait_over_device` and `torchtrt_input_ready_wait` are gone in the
+latest filtered Resolve window. The remaining dominant wait is now
+`torchtrt_input_copy_queue_wait`, tracked separately by Task `0005`.
 
 This task is P0 because it blocks meaningful performance comparison of model,
 post-process, readback, and OFX writeback costs. No broader OFX or
@@ -44,6 +50,11 @@ or falsified by Resolve logs.
 - Resolve logs from package `0.8.5-win.1-59-g7f5514a` show
   `torchtrt_input_ready_wait` and `gpu_prepare_wait_over_device` at 0 ms, while
   `torchtrt_cuda_graph_input_copy_queue_wait` dominates at about 840 to 1249 ms.
+- Filtered Resolve logs from package `0.8.5-win.1-61-g6c6df24`, single PID
+  `40112`, show `gpu_prepare_wait_over_device=0`,
+  `torchtrt_input_ready_wait=0`, and `torchtrt_input_copy_queue_wait`
+  averaging about 806 ms with a maximum about 1249 ms. The old stream-boundary
+  waits are removed, but the frame is still blocked before CUDA Graph replay.
 - The PyTorch CUDAStream implementation initializes thread-local current
   streams to the default stream and creates pooled streams with
   `cudaStreamNonBlocking`. The current code queried the current stream before
@@ -69,8 +80,8 @@ or falsified by Resolve logs.
   failing wait.
 - P1: After P0, measure remaining peripheral costs: post-process, direct output
   copy, client readback, foreground conversion, and OFX writeback.
-- P2: Only after P0/P1, run CUDA Graph on/off and other topology A/B tests if
-  Resolve logs still show an unexplained dominant wait.
+- P0 follow-up: Task `0005` owns the remaining CUDA Graph static-input copy
+  queue wait exposed after this task's stream-boundary fixes.
 
 ## Acceptance Criteria
 
@@ -90,10 +101,10 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [x] Error handling remains `Result<T>` based for expected failures.
 - [x] Source passthrough still uses device-to-device copy when the prepared
   source RGB device pointer is available.
-- [ ] Resolve logs show `gpu_prepare_wait_over_device` removed from the
+- [x] Resolve logs show `gpu_prepare_wait_over_device` removed from the
   prepared-input path or near zero, and the missing wait does not reappear under
   another pinned stage.
-- [ ] Resolve logs show `torchtrt_input_ready_wait` remains zero for the
+- [x] Resolve logs show `torchtrt_input_ready_wait` remains zero for the
   current-stream prepared-input path.
 - [ ] Resolve logs show `torchtrt_input_copy_queue_wait` no longer dominates
   the prepared-input CUDA Graph path.
@@ -132,7 +143,7 @@ applicable.
   passthrough, and the same `sp_erode`/`sp_blur` parameters used in manual
   Resolve testing.
 - [x] Produce a local RTX OFX package through `scripts/windows.ps1`.
-- [ ] Validate with Resolve logs and record the before/after evidence in Notes.
+- [x] Validate with Resolve logs and record the before/after evidence in Notes.
 - [ ] If Resolve still shows a dominant wait, run the defined fallback A/B:
   main-style synchronized device prep as diagnostic only, then CUDA Graph on/off
   with the same parameters.
@@ -210,12 +221,26 @@ iterations, with `torchtrt_work_stream_guard` present,
 `torchtrt_input_ready_wait=0`, `gpu_prepare_wait_over_device=0`, and
 `torchtrt_cuda_graph_input_copy_queue_wait` averaging about 6.79 ms.
 
+Filtered Resolve validation on package `0.8.5-win.1-61-g6c6df24` used
+`scripts/analyze_resolve_ofx_logs.ps1 -TailSummaries 20 -SinceLocalTime
+"2026-05-09 21:03:00"`. The analyzer selected one plugin PID (`40112`) from
+`2026-05-09 21:03:04` through `2026-05-09 21:03:44`, with 12 backend renders
+and 2 shared-cache summaries. The old waits are removed:
+`gpu_prepare_wait_over_device=0` and `torchtrt_input_ready_wait=0`. The
+remaining wait is `torchtrt_input_copy_queue_wait`, averaging about 806 ms and
+peaking around 1249 ms while `torchtrt_replay_gpu` averages about 307 ms.
+
+Outcome: ADR-0004's owned work-stream implementation is kept, but this task is
+blocked for final closure because the remaining Resolve-only queue wait is not
+resolved. Task `0005` owns the next diagnostic slice: CUDA Graph on/off and
+main-style host-roundtrip A/B under the same Resolve settings.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
 - [x] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW
   section 10)
 - [x] No orphan `TODO`/`FIXME` introduced
 - [ ] Status updated to `done` and Notes log closes the task

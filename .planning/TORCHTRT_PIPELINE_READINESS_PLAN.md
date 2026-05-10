@@ -50,11 +50,15 @@ de cor compartilhados.
   `gpu_prepare_wait_over_device` em zero. O gargalo restante foi movido para
   `torchtrt_cuda_graph_input_copy_queue_wait`, cerca de 840 a 1249 ms, enquanto
   `torchtrt_cuda_graph_input_copy_gpu` permanece perto de 0.10 ms.
-- O ADR-0003 ficou incompleto: consultar `getCurrentCUDAStream()` sem
-  `CUDAStreamGuard` usa a current stream default do PyTorch. A implementacao
-  atual deve seguir o ADR-0004: stream de trabalho TorchTRT propria, guardada
-  no escopo que prepara, copia para o CUDA Graph, executa inferencia e faz
-  post-process GPU.
+- O ADR-0004 foi implementado: a sessao TorchTRT tem work stream propria do
+  pool do PyTorch e instala `CUDAStreamGuard` no escopo do prepared-input path.
+  O harness limpo confirma queue waits pequenos nessa configuracao.
+- A validacao filtrada no Resolve do pacote `0.8.5-win.1-61-g6c6df24`, PID
+  unico `40112`, confirma `gpu_prepare_wait_over_device=0` e
+  `torchtrt_input_ready_wait=0`, mas ainda mostra
+  `torchtrt_input_copy_queue_wait` em media cerca de 806 ms e maximo cerca de
+  1249 ms. O gargalo P0 agora e Task-0005: diferenciar interacao CUDA Graph
+  static-input-copy de contencao host/contexto do Resolve.
 - A `main` evita essa fronteira sincronizando o preparo GPU e retornando para
   host antes da inferencia. Isso e uma evidencia historica de estabilidade, mas
   nao e a solucao principal porque perderia a otimizacao device-input desta
@@ -75,12 +79,18 @@ de cor compartilhados.
    para medir readiness reintroduz o mesmo gargalo. Hipotese: manter a ordem no
    grafo CUDA e reportar readiness wait como zero remove esse bloqueio.
 
-0.2. A default current stream do PyTorch sob Resolve cria a fila do static
-   input copy.
+0.2. A default current stream do PyTorch sob Resolve cria parte da fila do
+   static input copy.
    Quando `getCurrentCUDAStream()` e usado sem `CUDAStreamGuard`, o PyTorch
-   entrega a default stream. Hipotese: uma work stream propria do TorchTRT,
-   criada pelo pool do PyTorch e instalada por `CUDAStreamGuard`, remove a
-   sincronizacao implicita da default stream no `state.static_input.copy_`.
+   entrega a default stream. A work stream propria do TorchTRT remove os waits
+   anteriores, mas a validacao real ainda mostra fila no static input copy.
+
+0.3. CUDA Graph static input copy interage mal com o contexto Resolve.
+   Com GPU prep e input readiness zerados, o wait restante ocorre antes do
+   replay e nao no device copy. Hipotese: uma comparacao Resolve com CUDA Graph
+   off e uma comparacao diagnostica com roundtrip host estilo `main` isolam se
+   o problema e especifico do graph, do contexto host, ou de outra dependencia
+   ainda nao instrumentada.
 
 1. Auto Despeckle ativa CPU demais.
    Quando `auto_despeckle` esta ligado, o TorchTRT desliga todo o post-process
@@ -113,18 +123,14 @@ de cor compartilhados.
 
 ## Trabalho Restante
 
-- P0: Validar ADR-0004 em Resolve: preparo TorchTRT prepared-input em work
-  stream propria do TorchTRT, com `NppStreamContext` associado a essa stream e
-  `CUDAStreamGuard` antes de wrap/cast/static input copy/forward/post-process.
-- P0: Validar em Resolve que `gpu_prepare_wait_over_device` desaparece ou fica
-  perto de zero, e que o tempo nao reaparece em outro stage pinado.
-- P0: Remover a sincronizacao host-side de `torchtrt_input_ready_wait` no
-  prepared-input path; preservar a ordenacao por CUDA stream/evento, nao por
-  bloqueio do host.
+- P0: Executar Task-0005: diagnosticar o `torchtrt_input_copy_queue_wait` que
+  permanece no Resolve com CUDA Graph on/off e roundtrip host estilo `main`
+  como A/B diagnostico, mantendo as mesmas configuracoes Green 2048.
+- P0: Garantir que `torchtrt_work_stream_guard_ms` esta presente no
+  `ofx_render_summary` do pacote instalado e que o analisador distingue campo
+  ausente de zero real.
 - P0: Manter o caminho device-input e o device-to-device de Source Passthrough
   quando `source_rgb_device` esta disponivel.
-- P0: Se a current-stream path nao resolver em Resolve, executar A/B
-  diagnostico com sincronizacao estilo `main` antes de CUDA Graph on/off.
 - Separar o status `post_processed` em flags por etapa ou outro contrato
   equivalente, para permitir post-process parcial em GPU quando Despeckle
   ainda precisar de CPU.
