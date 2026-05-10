@@ -4,6 +4,7 @@ param(
     [string]$SinceLocalTime = "",
     [Alias("Pid")]
     [string]$PluginPid = "",
+    [string]$WorkOrigin = "",
     [double]$InputReadyWaitBudgetMs = 5.0,
     [double]$InputCopyQueueWaitBudgetMs = 5.0,
     [double]$GpuPrepareWaitBudgetMs = 5.0
@@ -161,6 +162,65 @@ function Max-Field {
     return (($values | Measure-Object -Maximum).Maximum)
 }
 
+function Stats-Field {
+    param(
+        [object[]]$Rows,
+        [string]$Name
+    )
+
+    $values = @(
+        foreach ($row in $Rows) {
+            if ($row.ContainsKey($Name) -and $row[$Name] -is [double]) {
+                $row[$Name]
+            }
+        }
+    )
+    if ($values.Count -eq 0) {
+        return [ordered]@{
+            count = 0
+            average_ms = 0.0
+            maximum_ms = 0.0
+        }
+    }
+    return [ordered]@{
+        count = $values.Count
+        average_ms = (($values | Measure-Object -Average).Average)
+        maximum_ms = (($values | Measure-Object -Maximum).Maximum)
+    }
+}
+
+function Parse-RuntimeDetailLine {
+    param([string]$Line)
+
+    $values = Parse-KeyValueLine -Line $Line
+    $stagesMatch = [regex]::Match($Line, "stages=(?<stages>.+)$")
+    if (-not $stagesMatch.Success) {
+        return $values
+    }
+
+    foreach ($part in ($stagesMatch.Groups["stages"].Value -split ",")) {
+        $stageMatch = [regex]::Match($part.Trim(), "^(?<key>[A-Za-z0-9_]+):(?<value>[-+0-9.eE]+)$")
+        if (-not $stageMatch.Success) {
+            continue
+        }
+        $numeric = 0.0
+        if (-not [double]::TryParse(
+                $stageMatch.Groups["value"].Value,
+                [System.Globalization.NumberStyles]::Float,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [ref]$numeric)) {
+            continue
+        }
+        $key = $stageMatch.Groups["key"].Value
+        if ($values.ContainsKey($key) -and $values[$key] -is [double]) {
+            $values[$key] = $values[$key] + $numeric
+        } else {
+            $values[$key] = $numeric
+        }
+    }
+    return $values
+}
+
 if (-not (Test-Path -LiteralPath $LogDir -PathType Container)) {
     throw "Log directory not found: $LogDir"
 }
@@ -221,12 +281,36 @@ if (-not [string]::IsNullOrWhiteSpace($PluginPid)) {
         $allSummaryMatches | Where-Object { $_.Line -match $pidPattern }
     )
 }
+if (-not [string]::IsNullOrWhiteSpace($WorkOrigin)) {
+    $workOriginPattern = "work_origin=$([regex]::Escape($WorkOrigin))(\s|$)"
+    $allSummaryMatches = @(
+        $allSummaryMatches | Where-Object { $_.Line -match $workOriginPattern }
+    )
+}
 $summaryMatches = $allSummaryMatches | Select-Object -Last $TailSummaries
 $summaries = @(
     foreach ($match in $summaryMatches) {
         Parse-KeyValueLine -Line $match.Line
     }
 )
+
+$runtimeDetails = @()
+if ($serverLog -ne $null -and $runtimeEnvironment.Contains("pid")) {
+    $runtimePid = [string]$runtimeEnvironment["pid"]
+    $serverStartPattern = "event=server_start .*pid=$([regex]::Escape($runtimePid))(\s|$)"
+    $selectedServerStart = Select-String -LiteralPath $serverLog.FullName -Pattern $serverStartPattern |
+        Select-Object -Last 1
+    if ($selectedServerStart -ne $null) {
+        $runtimeDetailMatches = Select-String -LiteralPath $serverLog.FullName -Pattern "event=render_frame_details" |
+            Where-Object { $_.LineNumber -gt $selectedServerStart.LineNumber } |
+            Select-Object -Last $TailSummaries
+        $runtimeDetails = @(
+            foreach ($match in $runtimeDetailMatches) {
+                Parse-RuntimeDetailLine -Line $match.Line
+            }
+        )
+    }
+}
 
 $firstSummaryLineNumber = if ($summaryMatches.Count -gt 0) {
     ($summaryMatches | Select-Object -First 1).LineNumber
@@ -315,6 +399,7 @@ if ((Count-Field $summaries "pid").Count -gt 1) {
     filters = [ordered]@{
         since_local_time = $SinceLocalTime
         pid = $PluginPid
+        work_origin = $WorkOrigin
         tail_summaries = $TailSummaries
     }
     summary_window = [ordered]@{
@@ -333,6 +418,19 @@ if ((Count-Field $summaries "pid").Count -gt 1) {
     }
     averages_ms = $averages
     maximums_ms = $maximums
+    runtime_detail_sample_count = $runtimeDetails.Count
+    runtime_detail_stages_ms = [ordered]@{
+        frame_prepare_inputs = Stats-Field $runtimeDetails "frame_prepare_inputs"
+        torchtrt_forward_direct = Stats-Field $runtimeDetails "torchtrt_forward_direct"
+        torchtrt_forward_direct_gpu = Stats-Field $runtimeDetails "torchtrt_forward_direct_gpu"
+        torchtrt_cuda_graph_input_copy_queue_wait = Stats-Field $runtimeDetails "torchtrt_cuda_graph_input_copy_queue_wait"
+        frame_extract_outputs_resize = Stats-Field $runtimeDetails "frame_extract_outputs_resize"
+        post_source_passthrough = Stats-Field $runtimeDetails "post_source_passthrough"
+        post_despeckle = Stats-Field $runtimeDetails "post_despeckle"
+        post_despill = Stats-Field $runtimeDetails "post_despill"
+        post_gpu_prepare = Stats-Field $runtimeDetails "post_gpu_prepare"
+        torchtrt_output_d2h_direct = Stats-Field $runtimeDetails "torchtrt_output_d2h_direct"
+    }
     stage_observability = $stageObservability
     findings = @($findings)
     recent_cpu_fallback_lines = @($fallbackMatches | ForEach-Object { $_.Line })
