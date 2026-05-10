@@ -117,6 +117,7 @@ $averages = [ordered]@{
     ofx_client_render_rpc_ms = Average-Field $summaries "ofx_client_render_rpc_ms"
     frame_prepare_inputs_ms = Average-Field $summaries "frame_prepare_inputs_ms"
     gpu_prepare_wait_over_device_ms = Average-Field $summaries "gpu_prepare_wait_over_device_ms"
+    torchtrt_work_stream_guard_ms = Average-Field $summaries "torchtrt_work_stream_guard_ms"
     torchtrt_input_ready_wait_ms = Average-Field $summaries "torchtrt_input_ready_wait_ms"
     torchtrt_input_copy_queue_wait_ms = Average-Field $summaries "torchtrt_input_copy_queue_wait_ms"
     torchtrt_forward_ms = Average-Field $summaries "torchtrt_forward_ms"

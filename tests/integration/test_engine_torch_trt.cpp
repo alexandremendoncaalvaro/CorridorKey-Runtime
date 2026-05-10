@@ -377,6 +377,7 @@ TEST_CASE("TorchTRT CUDA graph path emits replay or explicit fallback telemetry"
     const bool reported_fallback = has_stage_prefix(timings, "torchtrt_cuda_graph_fallback_");
     CHECK((replayed || reported_fallback));
     if (replayed) {
+        CHECK(has_stage(timings, "torchtrt_work_stream_guard"));
         CHECK(has_stage(timings, "torchtrt_input_current_stream_event"));
         CHECK_FALSE(has_stage(timings, "torchtrt_input_wait_event_enqueue"));
         CHECK(has_stage(timings, "torchtrt_input_ready_wait"));

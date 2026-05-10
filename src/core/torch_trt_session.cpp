@@ -1441,13 +1441,15 @@ Result<TorchTrtFrameResult> forward_and_materialize(
 class TorchTrtSession::Impl {
    public:
     Impl()
-        : copy_stream(c10::cuda::getStreamFromPool(false)),
+        : work_stream(c10::cuda::getStreamFromPool(true)),
+          copy_stream(c10::cuda::getStreamFromPool(false)),
           capture_stream(c10::cuda::getStreamFromPool(true)) {}
 
     torch::jit::script::Module module;
     ExternalPosState external_pos;
     PinnedHostTensorRing host_ring;
     PinnedImageBufferPool output_pool;
+    c10::cuda::CUDAStream work_stream;
     c10::cuda::CUDAStream copy_stream;
     c10::cuda::CUDAStream capture_stream;
     ForwardGraphState forward_graph;
@@ -1554,7 +1556,7 @@ TorchTrtCudaStream TorchTrtSession::current_cuda_stream() const {
         return {};
     }
     return TorchTrtCudaStream{
-        .handle = c10::cuda::getCurrentCUDAStream().stream(),
+        .handle = m_impl->work_stream.stream(),
         .available = true,
     };
 #else
@@ -1597,6 +1599,8 @@ Result<TorchTrtFrameResult> TorchTrtSession::infer(
     }
 
     try {
+        const c10::cuda::CUDAStreamGuard work_guard(m_impl->work_stream);
+        emit_graph_event(on_stage, "torchtrt_work_stream_guard");
         const DynamicPadding padding = dynamic_padding_for_input(width, height, dynamic_resolution);
         const int inference_width = padding.width;
         const int inference_height = padding.height;
@@ -1665,6 +1669,8 @@ Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_planar(
     }
 
     try {
+        const c10::cuda::CUDAStreamGuard work_guard(m_impl->work_stream);
+        emit_graph_event(on_stage, "torchtrt_work_stream_guard");
         torch::Tensor host_input;
         common::measure_stage(on_stage, "torchtrt_prepare_planar_copy", [&]() {
             host_input = allocate_host_input_tensor(input_height, input_width);
@@ -1731,6 +1737,8 @@ Result<TorchTrtFrameResult> TorchTrtSession::infer_prepared_cuda_planar_resized(
     }
 
     try {
+        const c10::cuda::CUDAStreamGuard work_guard(m_impl->work_stream);
+        emit_graph_event(on_stage, "torchtrt_work_stream_guard");
         auto wait_res = wait_for_external_cuda_event(input_ready_event, input_ready_start_event,
                                                      input_ready_event_on_current_stream,
                                                      on_stage);

@@ -10,9 +10,9 @@
 Resolve manual renders remain slower than `main` and the branch harness even
 though TorchTRT model replay is not the dominant measured cost. Task `0003`
 isolated the missing time at the producer and consumer boundary between GPU
-input preparation and TorchTRT inference. ADR-0003 defines the selected fix:
-enqueue TorchTRT input preparation on the Torch/PyTorch current CUDA stream
-instead of consuming an independent GPU-prep stream through a CUDA event wait.
+input preparation and TorchTRT inference. ADR-0003 removed the independent
+GPU-prep stream wait. ADR-0004 closes the remaining default-stream gap by
+making the TorchTRT session own and guard its work stream end to end.
 
 This task is P0 because it blocks meaningful performance comparison of model,
 post-process, readback, and OFX writeback costs. No broader OFX or
@@ -41,6 +41,14 @@ or falsified by Resolve logs.
   is gone and `torchtrt_cuda_graph_input_copy_queue_wait` is about 0.15 ms, but
   `torchtrt_input_ready_wait` still blocks around 0.84 to 1.38 seconds while
   `gpu_prepare_device` is only about 7 to 13 ms.
+- Resolve logs from package `0.8.5-win.1-59-g7f5514a` show
+  `torchtrt_input_ready_wait` and `gpu_prepare_wait_over_device` at 0 ms, while
+  `torchtrt_cuda_graph_input_copy_queue_wait` dominates at about 840 to 1249 ms.
+- The PyTorch CUDAStream implementation initializes thread-local current
+  streams to the default stream and creates pooled streams with
+  `cudaStreamNonBlocking`. The current code queried the current stream before
+  installing a guard, so the prepared-input path used the default stream under
+  Resolve.
 - `main` avoids this exact boundary by synchronizing GPU prep and returning a
   host tensor before inference, but that path loses the branch's device-input
   optimization.
@@ -70,6 +78,8 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 
 - [x] The TorchTRT prepared-input path can enqueue GPU input preparation on the
   Torch current CUDA stream.
+- [x] The TorchTRT prepared-input path uses an owned PyTorch work stream guarded
+  by `CUDAStreamGuard`, not the unguarded default current stream.
 - [x] NPP input-prep calls use an `NppStreamContext` bound to the stream that
   owns the TorchTRT input work.
 - [x] The TorchTRT prepared-input path no longer requires
@@ -85,6 +95,9 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
   another pinned stage.
 - [ ] Resolve logs show `torchtrt_input_ready_wait` remains zero for the
   current-stream prepared-input path.
+- [ ] Resolve logs show `torchtrt_input_copy_queue_wait` no longer dominates
+  the prepared-input CUDA Graph path.
+- [ ] Resolve logs include `torchtrt_work_stream_guard_ms` for backend renders.
 - [x] The OFX RPC harness remains green and does not regress its already-fast
   input-ready wait.
 - [x] Canonical Windows build, relevant tests, and package flow run through
@@ -101,6 +114,9 @@ applicable.
 - [x] Route the TorchTRT prepared path in `src/core/inference_session.cpp` and
   `src/core/torch_trt_session.cpp` so input prep and tensor consumption are
   ordered on the Torch current CUDA stream.
+- [x] Route the TorchTRT prepared path through an owned work stream and guard it
+  before tensor wrapping, cast, graph input copy, forward, and GPU
+  post-process.
 - [x] Separate current-stream availability from the opaque handle value so the
   CUDA default stream does not trigger CPU fallback.
 - [x] Keep the existing independent-stream path only where it remains required
@@ -169,6 +185,30 @@ to measure input readiness. The measured device prep was about 7 to 13 ms, while
 the host wait was about 0.84 to 1.38 seconds. The selected follow-up fix removes
 that host synchronization and keeps CUDA ordering through same-stream sequencing
 or the enqueued event wait.
+
+Resolve logs from package `0.8.5-win.1-59-g7f5514a` confirmed the host readiness
+sync fix: `torchtrt_input_ready_wait` and `gpu_prepare_wait_over_device` are
+zero. The dominant wait moved to `torchtrt_cuda_graph_input_copy_queue_wait`,
+which measures about 840 to 1249 ms while the device copy itself remains around
+0.10 ms. ADR-0004 selects a TorchTRT-owned PyTorch pooled work stream guarded
+before the prepared-input tensor path, instead of querying the unguarded default
+current stream.
+
+Implemented ADR-0004. `TorchTrtSession` now owns a PyTorch pooled work stream,
+returns that stream to GPU input preparation, and guards that stream before
+prepared CUDA input consumption and regular TorchTRT inference paths. The OFX
+render summary and log analyzer expose `torchtrt_work_stream_guard_ms`.
+
+Local verification passed: `git diff --check`,
+`scripts/windows.ps1 -Task build -Version 0.8.5 -Preset release`, relevant
+unit/regression/integration tests, the OFX RPC harness with Green 2048
+3840x2160 plate input/source passthrough/`sp_erode=6`/`sp_blur=14`, the
+readiness TorchTRT matrix, and
+`scripts/windows.ps1 -Task package-ofx -Version 0.8.5 -Preset release -Track
+rtx -Flavor online`. The same focused harness case averaged 485.87 ms over 20
+iterations, with `torchtrt_work_stream_guard` present,
+`torchtrt_input_ready_wait=0`, `gpu_prepare_wait_over_device=0`, and
+`torchtrt_cuda_graph_input_copy_queue_wait` averaging about 6.79 ms.
 
 ## Definition of Done
 

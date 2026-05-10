@@ -45,6 +45,16 @@ de cor compartilhados.
   CPU saiu e que `torchtrt_cuda_graph_input_copy_queue_wait` caiu para cerca de
   0.15 ms. O gargalo restante e `torchtrt_input_ready_wait` em cerca de 0.84 a
   1.38 s, apesar de `gpu_prepare_device` medir cerca de 7 a 13 ms.
+- Depois do fix de readiness sync, os logs do Resolve no pacote
+  `0.8.5-win.1-59-g7f5514a` confirmam `torchtrt_input_ready_wait` e
+  `gpu_prepare_wait_over_device` em zero. O gargalo restante foi movido para
+  `torchtrt_cuda_graph_input_copy_queue_wait`, cerca de 840 a 1249 ms, enquanto
+  `torchtrt_cuda_graph_input_copy_gpu` permanece perto de 0.10 ms.
+- O ADR-0003 ficou incompleto: consultar `getCurrentCUDAStream()` sem
+  `CUDAStreamGuard` usa a current stream default do PyTorch. A implementacao
+  atual deve seguir o ADR-0004: stream de trabalho TorchTRT propria, guardada
+  no escopo que prepara, copia para o CUDA Graph, executa inferencia e faz
+  post-process GPU.
 - A `main` evita essa fronteira sincronizando o preparo GPU e retornando para
   host antes da inferencia. Isso e uma evidencia historica de estabilidade, mas
   nao e a solucao principal porque perderia a otimizacao device-input desta
@@ -64,6 +74,13 @@ de cor compartilhados.
    `cudaStreamWaitEvent`, bloquear o host em `torchtrt_input_ready_wait` apenas
    para medir readiness reintroduz o mesmo gargalo. Hipotese: manter a ordem no
    grafo CUDA e reportar readiness wait como zero remove esse bloqueio.
+
+0.2. A default current stream do PyTorch sob Resolve cria a fila do static
+   input copy.
+   Quando `getCurrentCUDAStream()` e usado sem `CUDAStreamGuard`, o PyTorch
+   entrega a default stream. Hipotese: uma work stream propria do TorchTRT,
+   criada pelo pool do PyTorch e instalada por `CUDAStreamGuard`, remove a
+   sincronizacao implicita da default stream no `state.static_input.copy_`.
 
 1. Auto Despeckle ativa CPU demais.
    Quando `auto_despeckle` esta ligado, o TorchTRT desliga todo o post-process
@@ -96,12 +113,9 @@ de cor compartilhados.
 
 ## Trabalho Restante
 
-- P0: Implementar ADR-0003 e task `0004`: mover o preparo TorchTRT
-  prepared-input para a current stream do Torch/PyTorch, com `NppStreamContext`
-  associado a essa stream e sem dependencia de `cudaStreamWaitEvent` de uma
-  stream independente no caminho preparado. A disponibilidade da stream deve ser
-  separada do valor do handle, porque CUDA define handle `0` como default stream
-  valido.
+- P0: Validar ADR-0004 em Resolve: preparo TorchTRT prepared-input em work
+  stream propria do TorchTRT, com `NppStreamContext` associado a essa stream e
+  `CUDAStreamGuard` antes de wrap/cast/static input copy/forward/post-process.
 - P0: Validar em Resolve que `gpu_prepare_wait_over_device` desaparece ou fica
   perto de zero, e que o tempo nao reaparece em outro stage pinado.
 - P0: Remover a sincronizacao host-side de `torchtrt_input_ready_wait` no
