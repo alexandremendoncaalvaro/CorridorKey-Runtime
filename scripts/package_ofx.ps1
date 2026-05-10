@@ -268,7 +268,7 @@ function Copy-CudaToolkitRuntimeDlls {
     if ($IncludeCudaRuntime.IsPresent) {
         $cudaDllNames += "cudart64_12.dll"
     }
-    $cudaDllNames += @("nppc64_12.dll", "nppial64_12.dll", "nppidei64_12.dll", "nppig64_12.dll")
+    $cudaDllNames += @("nppc64_12.dll", "nppial64_12.dll", "nppidei64_12.dll", "nppif64_12.dll", "nppig64_12.dll")
 
     foreach ($dllName in $cudaDllNames) {
         $dllPath = Join-Path $cudaBin $dllName
