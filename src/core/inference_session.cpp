@@ -171,6 +171,15 @@ namespace corridorkey {
 
 namespace {
 
+bool torchtrt_host_roundtrip_input_enabled() {
+    const auto value = common::environment_variable_copy("CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY");
+    if (!value.has_value()) {
+        return false;
+    }
+    const std::string_view mode(*value);
+    return mode == "host_roundtrip" || mode == "host";
+}
+
 template <typename T>
 class AlignedTensorBuffer {
    public:
@@ -2104,7 +2113,14 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
             return finalize_model_output(result);
         };
 
-        if (m_gpu_prep.available()) {
+        const bool use_host_roundtrip_input = torchtrt_host_roundtrip_input_enabled();
+        if (use_host_roundtrip_input) {
+            common::measure_stage(on_stage, "torchtrt_input_boundary_host_roundtrip", []() {});
+            debug_log("TorchTRT device input boundary disabled by "
+                      "CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY=host_roundtrip");
+        }
+
+        if (!use_host_roundtrip_input && m_gpu_prep.available()) {
             auto gpu_prepare_res = common::measure_stage(
                 on_stage, "frame_prepare_inputs",
                 [&]() -> Result<core::GpuPreparedInput> {

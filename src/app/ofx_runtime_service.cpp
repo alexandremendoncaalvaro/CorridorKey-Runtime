@@ -4,6 +4,7 @@
 #include <chrono>
 #include <corridorkey/version.hpp>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <mutex>
 
@@ -153,6 +154,11 @@ std::string sanitize_log_token(const std::string& value) {
         output = "none";
     }
     return output;
+}
+
+std::string environment_log_token(const char* name) {
+    const char* value = std::getenv(name);
+    return sanitize_log_token(value == nullptr ? "unset" : value);
 }
 
 // Stages that must always appear in the render-frame summary so the log alone
@@ -460,7 +466,15 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                               std::to_string(current_process_id()) +
                               " port=" + std::to_string(options.endpoint.port) +
                               " version=" + CORRIDORKEY_VERSION_STRING +
-                              " display_version=" + CORRIDORKEY_DISPLAY_VERSION_STRING;
+                              " display_version=" + CORRIDORKEY_DISPLAY_VERSION_STRING +
+                              " cuda_graph_env=" +
+                              environment_log_token("CORRIDORKEY_TRT_CUDA_GRAPH") +
+                              " torchtrt_cuda_graph_env=" +
+                              environment_log_token("CORRIDORKEY_TORCHTRT_CUDA_GRAPH") +
+                              " io_binding_env=" +
+                              environment_log_token("CORRIDORKEY_IO_BINDING") +
+                              " torchtrt_input_boundary=" +
+                              environment_log_token("CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY");
 #ifdef __APPLE__
     start_event += " qos_class=" + current_qos_label();
     start_event += " task_role=" + current_task_role_label();

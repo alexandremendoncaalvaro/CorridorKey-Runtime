@@ -2,6 +2,8 @@ param(
     [string]$LogDir = (Join-Path $env:LOCALAPPDATA "CorridorKey\Logs"),
     [int]$TailSummaries = 20,
     [string]$SinceLocalTime = "",
+    [Alias("Pid")]
+    [string]$PluginPid = "",
     [double]$InputReadyWaitBudgetMs = 5.0,
     [double]$InputCopyQueueWaitBudgetMs = 5.0,
     [double]$GpuPrepareWaitBudgetMs = 5.0
@@ -86,6 +88,41 @@ function Count-Field {
     return $counts
 }
 
+function Count-FieldPresence {
+    param(
+        [object[]]$Rows,
+        [string]$Name
+    )
+
+    $count = 0
+    foreach ($row in $Rows) {
+        if ($row.ContainsKey($Name)) {
+            $count += 1
+        }
+    }
+    return $count
+}
+
+function Count-FlagSet {
+    param(
+        [object[]]$Rows,
+        [string]$Name
+    )
+
+    $count = 0
+    foreach ($row in $Rows) {
+        if (-not $row.ContainsKey($Name)) {
+            continue
+        }
+        if ($row[$Name] -is [double] -and $row[$Name] -ne 0.0) {
+            $count += 1
+        } elseif ($row[$Name] -is [string] -and $row[$Name] -eq "1") {
+            $count += 1
+        }
+    }
+    return $count
+}
+
 function Average-Field {
     param(
         [object[]]$Rows,
@@ -152,11 +189,20 @@ $serverLog = Get-ChildItem -LiteralPath $LogDir -Filter "ofx_runtime_server*.log
     Select-Object -First 1
 
 $runtimeDisplayVersion = ""
+$runtimeEnvironment = [ordered]@{}
 if ($serverLog -ne $null) {
     $serverStart = Select-String -LiteralPath $serverLog.FullName -Pattern "event=server_start" |
-        Select-Object -First 1
-    if ($serverStart -ne $null -and $serverStart.Line -match "display_version=(?<label>\S+)") {
-        $runtimeDisplayVersion = $matches["label"]
+        Select-Object -Last 1
+    if ($serverStart -ne $null) {
+        $serverStartValues = Parse-KeyValueLine -Line $serverStart.Line
+        if ($serverStartValues.ContainsKey("display_version")) {
+            $runtimeDisplayVersion = [string]$serverStartValues["display_version"]
+        }
+        foreach ($name in @("pid", "cuda_graph_env", "torchtrt_cuda_graph_env", "io_binding_env", "torchtrt_input_boundary")) {
+            if ($serverStartValues.ContainsKey($name)) {
+                $runtimeEnvironment[$name] = $serverStartValues[$name]
+            }
+        }
     }
 }
 
@@ -167,6 +213,12 @@ if ($sinceFilterActive) {
             $lineTimestamp = Get-LogTimestamp -Line $_.Line
             $lineTimestamp -ne $null -and $lineTimestamp -ge $sinceTimestamp
         }
+    )
+}
+if (-not [string]::IsNullOrWhiteSpace($PluginPid)) {
+    $pidPattern = "pid=$([regex]::Escape($PluginPid))([^0-9]|$)"
+    $allSummaryMatches = @(
+        $allSummaryMatches | Where-Object { $_.Line -match $pidPattern }
     )
 }
 $summaryMatches = $allSummaryMatches | Select-Object -Last $TailSummaries
@@ -193,9 +245,13 @@ $averages = [ordered]@{
     frame_prepare_inputs_ms = Average-Field $summaries "frame_prepare_inputs_ms"
     gpu_prepare_wait_over_device_ms = Average-Field $summaries "gpu_prepare_wait_over_device_ms"
     torchtrt_work_stream_guard_ms = Average-Field $summaries "torchtrt_work_stream_guard_ms"
+    torchtrt_input_boundary_host_roundtrip_ms = Average-Field $summaries "torchtrt_input_boundary_host_roundtrip_ms"
     torchtrt_input_ready_wait_ms = Average-Field $summaries "torchtrt_input_ready_wait_ms"
     torchtrt_input_copy_queue_wait_ms = Average-Field $summaries "torchtrt_input_copy_queue_wait_ms"
     torchtrt_forward_ms = Average-Field $summaries "torchtrt_forward_ms"
+    torchtrt_forward_direct_ms = Average-Field $summaries "torchtrt_forward_direct_ms"
+    torchtrt_forward_direct_gpu_ms = Average-Field $summaries "torchtrt_forward_direct_gpu_ms"
+    torchtrt_cuda_graph_fallback_not_enabled_ms = Average-Field $summaries "torchtrt_cuda_graph_fallback_not_enabled_ms"
     torchtrt_replay_gpu_ms = Average-Field $summaries "torchtrt_replay_gpu_ms"
     post_gpu_prepare_ms = Average-Field $summaries "post_gpu_prepare_ms"
     torchtrt_output_d2h_direct_ms = Average-Field $summaries "torchtrt_output_d2h_direct_ms"
@@ -206,9 +262,21 @@ $averages = [ordered]@{
 $maximums = [ordered]@{
     total_ms = Max-Field $summaries "total_ms"
     gpu_prepare_wait_over_device_ms = Max-Field $summaries "gpu_prepare_wait_over_device_ms"
+    torchtrt_input_boundary_host_roundtrip_ms = Max-Field $summaries "torchtrt_input_boundary_host_roundtrip_ms"
     torchtrt_input_ready_wait_ms = Max-Field $summaries "torchtrt_input_ready_wait_ms"
     torchtrt_input_copy_queue_wait_ms = Max-Field $summaries "torchtrt_input_copy_queue_wait_ms"
+    torchtrt_forward_direct_ms = Max-Field $summaries "torchtrt_forward_direct_ms"
+    torchtrt_forward_direct_gpu_ms = Max-Field $summaries "torchtrt_forward_direct_gpu_ms"
     torchtrt_replay_gpu_ms = Max-Field $summaries "torchtrt_replay_gpu_ms"
+}
+
+$stageObservability = [ordered]@{
+    torchtrt_work_stream_guard_ms_field_count = Count-FieldPresence $summaries "torchtrt_work_stream_guard_ms"
+    torchtrt_work_stream_guard_present_field_count = Count-FieldPresence $summaries "torchtrt_work_stream_guard_present"
+    torchtrt_work_stream_guard_present_count = Count-FlagSet $summaries "torchtrt_work_stream_guard_present"
+    torchtrt_input_boundary_host_roundtrip_present_count = Count-FlagSet $summaries "torchtrt_input_boundary_host_roundtrip_present"
+    torchtrt_forward_direct_present_count = Count-FlagSet $summaries "torchtrt_forward_direct_present"
+    torchtrt_cuda_graph_fallback_not_enabled_present_count = Count-FlagSet $summaries "torchtrt_cuda_graph_fallback_not_enabled_present"
 }
 
 $findings = New-Object System.Collections.Generic.List[string]
@@ -223,6 +291,13 @@ if ($averages.gpu_prepare_wait_over_device_ms -gt $GpuPrepareWaitBudgetMs) {
 }
 if ($averages.torchtrt_input_copy_queue_wait_ms -gt $InputCopyQueueWaitBudgetMs) {
     $findings.Add("CUDA Graph static input copy queue wait exceeds budget.")
+}
+if ($summaries.Count -gt 0 -and $stageObservability.torchtrt_work_stream_guard_ms_field_count -eq 0) {
+    $findings.Add("TorchTRT work stream guard timing field missing in selected OFX summaries.")
+} elseif ($summaries.Count -gt 0 -and $stageObservability.torchtrt_work_stream_guard_present_field_count -eq 0) {
+    $findings.Add("TorchTRT work stream guard presence flag missing; selected package/log predates Task 0005 instrumentation.")
+} elseif ($summaries.Count -gt 0 -and $stageObservability.torchtrt_work_stream_guard_present_count -eq 0) {
+    $findings.Add("TorchTRT work stream guard stage absent in selected OFX summaries.")
 }
 if ($summaries.Count -eq 0) {
     $findings.Add("No OFX render summaries found.")
@@ -239,6 +314,7 @@ if ((Count-Field $summaries "pid").Count -gt 1) {
     sample_count = $summaries.Count
     filters = [ordered]@{
         since_local_time = $SinceLocalTime
+        pid = $PluginPid
         tail_summaries = $TailSummaries
     }
     summary_window = [ordered]@{
@@ -249,6 +325,7 @@ if ((Count-Field $summaries "pid").Count -gt 1) {
         pids = Count-Field $summaries "pid"
         work_origins = Count-Field $summaries "work_origin"
     }
+    runtime_environment = $runtimeEnvironment
     budgets_ms = [ordered]@{
         torchtrt_input_ready_wait_ms = $InputReadyWaitBudgetMs
         gpu_prepare_wait_over_device_ms = $GpuPrepareWaitBudgetMs
@@ -256,6 +333,7 @@ if ((Count-Field $summaries "pid").Count -gt 1) {
     }
     averages_ms = $averages
     maximums_ms = $maximums
+    stage_observability = $stageObservability
     findings = @($findings)
     recent_cpu_fallback_lines = @($fallbackMatches | ForEach-Object { $_.Line })
 } | ConvertTo-Json -Depth 6

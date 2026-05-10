@@ -187,6 +187,12 @@ double stage_total_ms(const std::vector<StageTiming>& timings, std::string_view 
     return total_ms;
 }
 
+bool stage_present(const std::vector<StageTiming>& timings, std::string_view stage_name) {
+    return std::any_of(timings.begin(), timings.end(), [stage_name](const StageTiming& timing) {
+        return timing.name == stage_name;
+    });
+}
+
 const char* work_origin_log_label(LastRenderWorkOrigin origin) {
     switch (origin) {
         case LastRenderWorkOrigin::SharedCache:
@@ -219,6 +225,12 @@ void log_render_summary(const InstanceData& data, double render_ms, LastRenderWo
             std::to_string(stage_total_ms(timings, "ofx_client_render_rpc")) +
             " torchtrt_work_stream_guard_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_work_stream_guard")) +
+            " torchtrt_work_stream_guard_present=" +
+            (stage_present(timings, "torchtrt_work_stream_guard") ? "1" : "0") +
+            " torchtrt_input_boundary_host_roundtrip_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_input_boundary_host_roundtrip")) +
+            " torchtrt_input_boundary_host_roundtrip_present=" +
+            (stage_present(timings, "torchtrt_input_boundary_host_roundtrip") ? "1" : "0") +
             " torchtrt_input_current_stream_event_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_input_current_stream_event")) +
             " torchtrt_input_wait_event_enqueue_ms=" +
@@ -226,12 +238,22 @@ void log_render_summary(const InstanceData& data, double render_ms, LastRenderWo
             " torchtrt_input_ready_wait_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_input_ready_wait")) +
             " torchtrt_forward_ms=" + std::to_string(stage_total_ms(timings, "torchtrt_forward")) +
+            " torchtrt_forward_direct_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_forward_direct")) +
+            " torchtrt_forward_direct_present=" +
+            (stage_present(timings, "torchtrt_forward_direct") ? "1" : "0") +
+            " torchtrt_forward_direct_gpu_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_forward_direct_gpu")) +
             " torchtrt_input_copy_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_input_copy")) +
             " torchtrt_input_copy_gpu_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_input_copy_gpu")) +
             " torchtrt_input_copy_queue_wait_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_input_copy_queue_wait")) +
+            " torchtrt_cuda_graph_fallback_not_enabled_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_fallback_not_enabled")) +
+            " torchtrt_cuda_graph_fallback_not_enabled_present=" +
+            (stage_present(timings, "torchtrt_cuda_graph_fallback_not_enabled") ? "1" : "0") +
             " torchtrt_capture_stream_wait_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_cuda_graph_capture_stream_wait")) +
             " torchtrt_replay_ms=" +
