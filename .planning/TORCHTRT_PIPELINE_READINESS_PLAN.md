@@ -72,6 +72,15 @@ de cor compartilhados.
   com `cuda_graph_env=0`, `torchtrt_forward_direct` em cerca de 300 ms e
   `torchtrt_forward_direct_queue_wait` em cerca de 7 ms. O proximo Resolve run
   deve validar o mesmo sinal no host real.
+- A validacao Resolve do pacote `0.8.5-win.1-74-g2c57c94`, depois de limpar as
+  variaveis de ambiente, confirmou `cuda_graph_env=0` e
+  `torchtrt_cuda_graph_input_copy_queue_wait=0`, mas o tempo ainda ficou em
+  cerca de 1.9 s. O gargalo remanescente agora esta isolado em
+  `torchtrt_forward_direct_queue_wait`: cerca de 901 ms no Resolve contra cerca
+  de 7 ms no harness com as mesmas configuracoes efetivas.
+- Quando o harness replica Lanczos4 e Source Passthrough efetivo 12/28, o
+  `post_gpu_prepare` fica em cerca de 135 ms, proximo dos cerca de 141 ms do
+  Resolve. Portanto esse custo e secundario e mensurado, nao o gargalo P0.
 
 ## Hipoteses Testaveis
 
@@ -132,10 +141,11 @@ de cor compartilhados.
 
 ## Trabalho Restante
 
-- P0: Rodar nova validacao Resolve com o pacote ADR-0005 para confirmar que
-  `cuda_graph_env=0`, `torchtrt_cuda_graph_input_copy_queue_wait` nao domina, e
-  o gargalo remanescente aparece em `torchtrt_forward_direct` ou nos custos
-  perifericos instrumentados.
+- P0: Investigar e reduzir o `torchtrt_forward_direct_queue_wait` especifico do
+  Resolve, preservando `cuda_graph_env=0`, `torchtrt_input_ready_wait=0` e
+  `gpu_prepare_wait_over_device=0`.
+- P1: Depois do P0, otimizar Source Passthrough 12/28 e output copies apenas
+  como custos secundarios ja mensurados.
 - P0: Manter o caminho device-input e o device-to-device de Source Passthrough
   quando `source_rgb_device` esta disponivel.
 - Separar o status `post_processed` em flags por etapa ou outro contrato

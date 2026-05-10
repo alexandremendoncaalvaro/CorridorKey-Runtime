@@ -321,6 +321,43 @@ The local RTX online installer was produced and validated through
 `dist/CorridorKey_v0.8.5-win.1-74-g2c57c94_Windows_online_Setup.exe`.
 SHA256: `7d3ba23f2770493298433f6e665b93d840fe25a4f238acc5f59f97e956e712cf`.
 
+Resolve validation on the clean `0.8.5-win.1-74-g2c57c94` installer confirms
+ADR-0005 is active in the host. The first new run used plugin PID `860`; the
+second run, after clearing user-level diagnostic environment variables, used
+plugin PID `42052`. Both runtime server starts in the matching runtime log
+recorded `cuda_graph_env=0`, `torchtrt_cuda_graph_env=unset`,
+`io_binding_env=off`, and `torchtrt_input_boundary=unset`.
+
+The valid post-clear window is PID `42052`, backend renders only, 22 samples
+from `2026-05-09 23:53:20` through `2026-05-09 23:54:23`. Averages were
+`total_ms=1904.69`, `ofx_client_render_rpc_ms=1431.33`,
+`frame_prepare_inputs_ms=13.26`, `gpu_prepare_wait_over_device_ms=0`,
+`torchtrt_input_ready_wait_ms=0`, `torchtrt_input_copy_queue_wait_ms=0`,
+`torchtrt_forward_direct_ms=1189.88`,
+`torchtrt_forward_direct_gpu_ms=288.99`,
+`torchtrt_forward_direct_queue_wait_ms=900.89`,
+`post_gpu_prepare_ms=141.09`, `torchtrt_output_d2h_direct_ms=52.70`,
+`ofx_client_readback_ms=28.64`, and `ofx_write_output_ms=16.49`. Excluding the
+first backend-render outlier, average total time was still `1745.19 ms` and the
+direct-forward queue wait averaged `943.74 ms`.
+
+A matching automated OFX RPC harness was run with the Resolve-effective settings
+now visible in logs: Green 2048, 3840x2160 plate input, Source Passthrough on,
+Lanczos4, `sp_erode=12`, and `sp_blur=28`. Output:
+`build/release/task0005_rpc_green_2048_default_graph_off_lanczos_sp12_28_after_resolve.json`.
+It averaged `avg_latency_ms=701.15`, `ofx_client_render_rpc=610.17 ms`,
+`torchtrt_forward_direct=281.04 ms`,
+`torchtrt_forward_direct_gpu=274.12 ms`,
+`torchtrt_forward_direct_queue_wait=6.92 ms`,
+`post_source_passthrough_gpu=134.80 ms`,
+`post_gpu_prepare=135.47 ms`, and `torchtrt_output_d2h_direct=97.65 ms`.
+
+The new classification is narrower: CUDA Graph static-input-copy wait is fixed
+by default-off policy, and Source Passthrough/post-process cost is real but
+matches the automated harness when the effective 12/28 radii are reproduced.
+The remaining Resolve-only gap is the queue before direct TorchTRT forward:
+about `900 ms` in Resolve versus about `7 ms` in the matching harness.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
