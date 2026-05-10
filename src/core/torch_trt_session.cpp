@@ -492,12 +492,16 @@ void emit_stage_timing(const StageTimingCallback& on_stage, std::string_view nam
 
 template <typename Function>
 std::optional<double> run_and_synchronize_with_cuda_event_timing(
-    const StageTimingCallback& on_stage, std::string_view gpu_stage_name, Function&& function) {
+    const StageTimingCallback& on_stage, std::string_view gpu_stage_name, Function&& function,
+    std::string_view enqueue_wall_stage_name = {},
+    std::string_view event_sync_wait_stage_name = {},
+    std::string_view event_sync_over_gpu_stage_name = {}) {
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     const auto stream = c10::cuda::getCurrentCUDAStream();
     cudaEvent_t start_event = nullptr;
     cudaEvent_t stop_event = nullptr;
     std::optional<double> gpu_elapsed_ms;
+    std::optional<double> event_sync_ms;
     bool can_time_on_stream = on_stage != nullptr;
     can_time_on_stream =
         can_time_on_stream && cudaEventCreate(&start_event) == cudaSuccess;
@@ -507,7 +511,14 @@ std::optional<double> run_and_synchronize_with_cuda_event_timing(
         can_time_on_stream && cudaEventRecord(start_event, stream.stream()) == cudaSuccess;
 
     try {
+        const auto enqueue_start = std::chrono::steady_clock::now();
         std::forward<Function>(function)();
+        const auto enqueue_end = std::chrono::steady_clock::now();
+        if (!enqueue_wall_stage_name.empty()) {
+            emit_stage_timing(
+                on_stage, enqueue_wall_stage_name,
+                std::chrono::duration<double, std::milli>(enqueue_end - enqueue_start).count());
+        }
     } catch (...) {
         if (start_event != nullptr) {
             cudaEventDestroy(start_event);
@@ -519,12 +530,27 @@ std::optional<double> run_and_synchronize_with_cuda_event_timing(
     }
 
     if (can_time_on_stream &&
-        cudaEventRecord(stop_event, stream.stream()) == cudaSuccess &&
-        cudaEventSynchronize(stop_event) == cudaSuccess) {
-        float elapsed_ms = 0.0F;
-        if (cudaEventElapsedTime(&elapsed_ms, start_event, stop_event) == cudaSuccess) {
-            gpu_elapsed_ms = static_cast<double>(elapsed_ms);
-            emit_stage_timing(on_stage, gpu_stage_name, *gpu_elapsed_ms);
+        cudaEventRecord(stop_event, stream.stream()) == cudaSuccess) {
+        const auto sync_start = std::chrono::steady_clock::now();
+        const cudaError_t sync_status = cudaEventSynchronize(stop_event);
+        const auto sync_end = std::chrono::steady_clock::now();
+        event_sync_ms =
+            std::chrono::duration<double, std::milli>(sync_end - sync_start).count();
+        if (!event_sync_wait_stage_name.empty()) {
+            emit_stage_timing(on_stage, event_sync_wait_stage_name, *event_sync_ms);
+        }
+        if (sync_status == cudaSuccess) {
+            float elapsed_ms = 0.0F;
+            if (cudaEventElapsedTime(&elapsed_ms, start_event, stop_event) == cudaSuccess) {
+                gpu_elapsed_ms = static_cast<double>(elapsed_ms);
+                emit_stage_timing(on_stage, gpu_stage_name, *gpu_elapsed_ms);
+                if (!event_sync_over_gpu_stage_name.empty() && event_sync_ms.has_value()) {
+                    emit_stage_timing(on_stage, event_sync_over_gpu_stage_name,
+                                      std::max(0.0, *event_sync_ms - *gpu_elapsed_ms));
+                }
+            }
+        } else {
+            synchronize_current_cuda_stream();
         }
     } else {
         synchronize_current_cuda_stream();
@@ -540,6 +566,9 @@ std::optional<double> run_and_synchronize_with_cuda_event_timing(
 #else
     (void)on_stage;
     (void)gpu_stage_name;
+    (void)enqueue_wall_stage_name;
+    (void)event_sync_wait_stage_name;
+    (void)event_sync_over_gpu_stage_name;
     std::forward<Function>(function)();
     synchronize_current_cuda_stream();
     return std::nullopt;
@@ -551,12 +580,16 @@ void measure_cuda_wall_and_gpu_stage(const StageTimingCallback& on_stage,
                                      std::string_view wall_stage_name,
                                      std::string_view gpu_stage_name,
                                      std::string_view queue_wait_stage_name,
-                                     Function&& function) {
+                                     Function&& function,
+                                     std::string_view enqueue_wall_stage_name = {},
+                                     std::string_view event_sync_wait_stage_name = {},
+                                     std::string_view event_sync_over_gpu_stage_name = {}) {
     const auto start = std::chrono::steady_clock::now();
     std::optional<double> gpu_elapsed_ms;
     try {
         gpu_elapsed_ms = run_and_synchronize_with_cuda_event_timing(
-            on_stage, gpu_stage_name, std::forward<Function>(function));
+            on_stage, gpu_stage_name, std::forward<Function>(function), enqueue_wall_stage_name,
+            event_sync_wait_stage_name, event_sync_over_gpu_stage_name);
     } catch (...) {
         const auto end = std::chrono::steady_clock::now();
         emit_stage_timing(
@@ -1405,7 +1438,10 @@ Result<TorchTrtFrameResult> forward_and_materialize(
                                         "torchtrt_forward_direct_queue_wait", [&]() {
                                             raw_out = run_direct_forward(module, cuda_input,
                                                                          *pos_grid);
-                                        });
+                                        },
+                                        "torchtrt_forward_direct_enqueue_wall",
+                                        "torchtrt_forward_direct_event_sync_wait",
+                                        "torchtrt_forward_direct_event_sync_over_gpu");
         auto direct_split = split_forward_output(raw_out);
         if (direct_split.has_value()) {
             split = *direct_split;

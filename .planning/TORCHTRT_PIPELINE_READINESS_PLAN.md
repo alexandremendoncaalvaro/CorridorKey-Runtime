@@ -81,6 +81,11 @@ de cor compartilhados.
 - Quando o harness replica Lanczos4 e Source Passthrough efetivo 12/28, o
   `post_gpu_prepare` fica em cerca de 135 ms, proximo dos cerca de 141 ms do
   Resolve. Portanto esse custo e secundario e mensurado, nao o gargalo P0.
+- A medicao atual ainda agrega coisas diferentes em
+  `torchtrt_forward_direct_queue_wait`. O padrao de referencia do TensorRT
+  separa `Enqueue Time` de `GPU Compute Time`; por isso o proximo slice precisa
+  separar o tempo de `module.forward` no host do tempo bloqueado em
+  `cudaEventSynchronize` e o excedente desse sync acima do tempo GPU medido.
 
 ## Hipoteses Testaveis
 
@@ -109,6 +114,13 @@ de cor compartilhados.
    off e uma comparacao diagnostica com roundtrip host estilo `main` isolam se
    o problema e especifico do graph, do contexto host, ou de outra dependencia
    ainda nao instrumentada.
+
+0.4. Direct forward pode estar enqueue-bound ou sync-bound.
+   `torchtrt_forward_direct_queue_wait` hoje e `wall - gpu_event`. Hipotese:
+   separar `torchtrt_forward_direct_enqueue_wall` e
+   `torchtrt_forward_direct_event_sync_over_gpu` mostra se o gargalo esta na
+   chamada TorchTRT/driver que enfileira kernels ou no host esperando o evento de
+   fim do stream sob o contexto Resolve.
 
 1. Auto Despeckle ativa CPU demais.
    Quando `auto_despeckle` esta ligado, o TorchTRT desliga todo o post-process
@@ -141,7 +153,7 @@ de cor compartilhados.
 
 ## Trabalho Restante
 
-- P0: Investigar e reduzir o `torchtrt_forward_direct_queue_wait` especifico do
+- P0: Separar e reduzir o `torchtrt_forward_direct_queue_wait` especifico do
   Resolve, preservando `cuda_graph_env=0`, `torchtrt_input_ready_wait=0` e
   `gpu_prepare_wait_over_device=0`.
 - P1: Depois do P0, otimizar Source Passthrough 12/28 e output copies apenas

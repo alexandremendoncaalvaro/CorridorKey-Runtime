@@ -81,6 +81,13 @@ applicable.
   device-input path remains the default inference topology.
 - [x] Rebuild, retest the focused gates, package the local RTX installer, and
   record the new installer hash before manual Resolve validation.
+- [x] Split direct-forward queue wait into host enqueue wall time and CUDA event
+  synchronization wait, following the TensorRT `Enqueue Time` versus `GPU
+  Compute Time` diagnostic model.
+- [x] Re-run the automated Green 2048 harness and verify the new split stays
+  small outside Resolve.
+- [ ] Use the next Resolve run only to classify whether the remaining direct
+  wait is enqueue-bound or event-sync-bound.
 
 ## Priority Order
 
@@ -357,6 +364,38 @@ by default-off policy, and Source Passthrough/post-process cost is real but
 matches the automated harness when the effective 12/28 radii are reproduced.
 The remaining Resolve-only gap is the queue before direct TorchTRT forward:
 about `900 ms` in Resolve versus about `7 ms` in the matching harness.
+
+The next slice follows the official TensorRT/trtexec diagnostic pattern rather
+than treating `wall - gpu_event` as a single root cause. CUDA events measure the
+device-timestamped interval between recorded events; TensorRT reports host
+`Enqueue Time` separately from `GPU Compute Time` and warns when enqueue becomes
+comparable to compute. The code therefore must emit
+`torchtrt_forward_direct_enqueue_wall` around `module.forward` and
+`torchtrt_forward_direct_event_sync_wait` around `cudaEventSynchronize`; it
+also emits `torchtrt_forward_direct_event_sync_over_gpu` so the wait above the
+measured GPU compute is visible while keeping the historical
+`torchtrt_forward_direct_queue_wait` aggregate.
+
+Implementation and automated validation completed. Verification passed:
+`git diff --check`, `scripts/windows.ps1 -Task build -Version 0.8.5 -Preset
+release`, and `ctest --test-dir build/release -R
+"unit_tests_gpu|integration_tests|windows_torchtrt_matrix_case_coverage"
+--output-on-failure`. The matching Green 2048 RPC harness with plate input,
+Source Passthrough on, Lanczos4, `sp_erode=12`, and `sp_blur=28` wrote
+`build/release/task0005_rpc_green_2048_direct_split_probe.json`. Across the
+eight measured frames it averaged `617.58 ms` roundtrip,
+`torchtrt_forward_direct=296.07 ms`,
+`torchtrt_forward_direct_gpu=286.71 ms`,
+`torchtrt_forward_direct_queue_wait=9.36 ms`,
+`torchtrt_forward_direct_enqueue_wall=4.93 ms`,
+`torchtrt_forward_direct_event_sync_wait=291.07 ms`,
+`torchtrt_forward_direct_event_sync_over_gpu=4.74 ms`,
+`post_gpu_prepare=140.81 ms`, and `torchtrt_output_d2h_direct=46.74 ms`. This
+keeps the automated path in the same class as before and gives the next Resolve
+run a precise classifier: high `enqueue_wall` means TorchTRT/PyTorch enqueue is
+the local bottleneck; high `event_sync_over_gpu` with small `enqueue_wall`
+means the runtime is waiting for the stream/event to be scheduled under the
+Resolve GPU context.
 
 ## Definition of Done
 

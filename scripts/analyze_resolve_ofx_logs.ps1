@@ -336,6 +336,9 @@ $averages = [ordered]@{
     torchtrt_forward_direct_ms = Average-Field $summaries "torchtrt_forward_direct_ms"
     torchtrt_forward_direct_gpu_ms = Average-Field $summaries "torchtrt_forward_direct_gpu_ms"
     torchtrt_forward_direct_queue_wait_ms = Average-Field $summaries "torchtrt_forward_direct_queue_wait_ms"
+    torchtrt_forward_direct_enqueue_wall_ms = Average-Field $summaries "torchtrt_forward_direct_enqueue_wall_ms"
+    torchtrt_forward_direct_event_sync_wait_ms = Average-Field $summaries "torchtrt_forward_direct_event_sync_wait_ms"
+    torchtrt_forward_direct_event_sync_over_gpu_ms = Average-Field $summaries "torchtrt_forward_direct_event_sync_over_gpu_ms"
     torchtrt_cuda_graph_fallback_not_enabled_ms = Average-Field $summaries "torchtrt_cuda_graph_fallback_not_enabled_ms"
     torchtrt_replay_gpu_ms = Average-Field $summaries "torchtrt_replay_gpu_ms"
     post_gpu_prepare_ms = Average-Field $summaries "post_gpu_prepare_ms"
@@ -353,6 +356,9 @@ $maximums = [ordered]@{
     torchtrt_forward_direct_ms = Max-Field $summaries "torchtrt_forward_direct_ms"
     torchtrt_forward_direct_gpu_ms = Max-Field $summaries "torchtrt_forward_direct_gpu_ms"
     torchtrt_forward_direct_queue_wait_ms = Max-Field $summaries "torchtrt_forward_direct_queue_wait_ms"
+    torchtrt_forward_direct_enqueue_wall_ms = Max-Field $summaries "torchtrt_forward_direct_enqueue_wall_ms"
+    torchtrt_forward_direct_event_sync_wait_ms = Max-Field $summaries "torchtrt_forward_direct_event_sync_wait_ms"
+    torchtrt_forward_direct_event_sync_over_gpu_ms = Max-Field $summaries "torchtrt_forward_direct_event_sync_over_gpu_ms"
     torchtrt_replay_gpu_ms = Max-Field $summaries "torchtrt_replay_gpu_ms"
 }
 
@@ -363,6 +369,9 @@ $stageObservability = [ordered]@{
     torchtrt_input_boundary_host_roundtrip_present_count = Count-FlagSet $summaries "torchtrt_input_boundary_host_roundtrip_present"
     torchtrt_forward_direct_present_count = Count-FlagSet $summaries "torchtrt_forward_direct_present"
     torchtrt_forward_direct_queue_wait_field_count = Count-FieldPresence $summaries "torchtrt_forward_direct_queue_wait_ms"
+    torchtrt_forward_direct_enqueue_wall_field_count = Count-FieldPresence $summaries "torchtrt_forward_direct_enqueue_wall_ms"
+    torchtrt_forward_direct_event_sync_wait_field_count = Count-FieldPresence $summaries "torchtrt_forward_direct_event_sync_wait_ms"
+    torchtrt_forward_direct_event_sync_over_gpu_field_count = Count-FieldPresence $summaries "torchtrt_forward_direct_event_sync_over_gpu_ms"
     torchtrt_cuda_graph_fallback_not_enabled_present_count = Count-FlagSet $summaries "torchtrt_cuda_graph_fallback_not_enabled_present"
 }
 
@@ -427,6 +436,9 @@ if ((Count-Field $summaries "pid").Count -gt 1) {
         torchtrt_forward_direct = Stats-Field $runtimeDetails "torchtrt_forward_direct"
         torchtrt_forward_direct_gpu = Stats-Field $runtimeDetails "torchtrt_forward_direct_gpu"
         torchtrt_forward_direct_queue_wait = Stats-Field $runtimeDetails "torchtrt_forward_direct_queue_wait"
+        torchtrt_forward_direct_enqueue_wall = Stats-Field $runtimeDetails "torchtrt_forward_direct_enqueue_wall"
+        torchtrt_forward_direct_event_sync_wait = Stats-Field $runtimeDetails "torchtrt_forward_direct_event_sync_wait"
+        torchtrt_forward_direct_event_sync_over_gpu = Stats-Field $runtimeDetails "torchtrt_forward_direct_event_sync_over_gpu"
         torchtrt_cuda_graph_input_copy_queue_wait = Stats-Field $runtimeDetails "torchtrt_cuda_graph_input_copy_queue_wait"
         frame_extract_outputs_resize = Stats-Field $runtimeDetails "frame_extract_outputs_resize"
         post_source_passthrough = Stats-Field $runtimeDetails "post_source_passthrough"

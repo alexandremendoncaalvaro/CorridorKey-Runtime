@@ -47,8 +47,9 @@ raw model execution.
 - [ ] Resolve-visible render timing records cache origin, backend timing, and
   stage attribution without leaving stale panel values pinned to an old frame.
 - [ ] TorchTRT Green 2048 logs distinguish model replay from input readiness,
-  static graph input copy queue wait, output materialization, readback, and OFX
-  writeback.
+  static graph input copy queue wait, direct-forward enqueue wall time,
+  direct-forward event synchronization wait, direct-forward event wait above
+  measured GPU time, output materialization, readback, and OFX writeback.
 - [ ] The analyzer can isolate a single Resolve test window by timestamp and
   plugin process id.
 - [ ] The Green TorchTRT prepared-input path preserves device-input operation
@@ -81,6 +82,9 @@ Measurable conditions. Each as a checkbox; pass/fail observable, not aspirationa
 - [ ] The remaining `torchtrt_input_copy_queue_wait_ms` behavior is classified
   as CUDA Graph specific, Resolve host/context specific, or fixed by an accepted
   implementation change.
+- [ ] In graph-off Resolve windows, `torchtrt_forward_direct_queue_wait_ms` is
+  split into enqueue wall time versus event synchronization wait before another
+  topology change is selected.
 - [ ] The clean OFX RPC readiness matrix passes for Green, Blue, and Blue-Green
   2048 cases without constant-output regressions.
 - [ ] Any final implementation fix has a matching task, accepted ADR when it
@@ -122,6 +126,8 @@ diagnostic comparison unless a later ADR accepts it as the product path.
 - Does the missing `torchtrt_work_stream_guard_ms` value in current analyzer
   summaries represent an absent log field, a zero-duration measured stage, or an
   older plugin log window?
+- Is the remaining graph-off direct-forward gap enqueue-bound in
+  TorchTRT/PyTorch, or event-sync-bound under the Resolve/WDDM GPU context?
 - After the queue wait is classified, which peripheral cost is next:
   post-processing, output D2H, OFX client readback, foreground conversion, or
   OFX writeback?

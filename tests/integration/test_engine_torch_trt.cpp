@@ -396,6 +396,9 @@ TEST_CASE("TorchTRT CUDA graph path emits replay or explicit fallback telemetry"
     if (reported_fallback) {
         CHECK(has_stage(timings, "torchtrt_forward_direct"));
         CHECK(has_stage(timings, "torchtrt_forward_direct_queue_wait"));
+        CHECK(has_stage(timings, "torchtrt_forward_direct_enqueue_wall"));
+        CHECK(has_stage(timings, "torchtrt_forward_direct_event_sync_wait"));
+        CHECK(has_stage(timings, "torchtrt_forward_direct_event_sync_over_gpu"));
     }
 #endif
 }
