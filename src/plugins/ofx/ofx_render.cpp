@@ -275,6 +275,14 @@ void log_render_summary(const InstanceData& data, double render_ms, LastRenderWo
             " post_gpu_prepare_ms=" + std::to_string(stage_total_ms(timings, "post_gpu_prepare")) +
             " torchtrt_output_d2h_direct_ms=" +
             std::to_string(stage_total_ms(timings, "torchtrt_output_d2h_direct")) +
+            " torchtrt_output_host_register_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_output_host_register")) +
+            " torchtrt_output_copy_enqueue_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_output_copy_enqueue")) +
+            " torchtrt_output_copy_sync_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_output_copy_sync")) +
+            " torchtrt_output_host_unregister_ms=" +
+            std::to_string(stage_total_ms(timings, "torchtrt_output_host_unregister")) +
             " ofx_client_readback_ms=" + std::to_string(client_readback_ms) +
             " ofx_foreground_srgb_to_linear_ms=" +
             std::to_string(stage_total_ms(timings, "ofx_foreground_srgb_to_linear")) +

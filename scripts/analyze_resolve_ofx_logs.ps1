@@ -258,7 +258,7 @@ if ($serverLog -ne $null) {
         if ($serverStartValues.ContainsKey("display_version")) {
             $runtimeDisplayVersion = [string]$serverStartValues["display_version"]
         }
-        foreach ($name in @("pid", "cuda_graph_env", "torchtrt_cuda_graph_env", "io_binding_env", "torchtrt_input_boundary")) {
+        foreach ($name in @("pid", "cuda_graph_env", "torchtrt_cuda_graph_env", "io_binding_env", "torchtrt_input_boundary", "torchtrt_forward_sync_timing_env")) {
             if ($serverStartValues.ContainsKey($name)) {
                 $runtimeEnvironment[$name] = $serverStartValues[$name]
             }
@@ -343,6 +343,10 @@ $averages = [ordered]@{
     torchtrt_replay_gpu_ms = Average-Field $summaries "torchtrt_replay_gpu_ms"
     post_gpu_prepare_ms = Average-Field $summaries "post_gpu_prepare_ms"
     torchtrt_output_d2h_direct_ms = Average-Field $summaries "torchtrt_output_d2h_direct_ms"
+    torchtrt_output_host_register_ms = Average-Field $summaries "torchtrt_output_host_register_ms"
+    torchtrt_output_copy_enqueue_ms = Average-Field $summaries "torchtrt_output_copy_enqueue_ms"
+    torchtrt_output_copy_sync_ms = Average-Field $summaries "torchtrt_output_copy_sync_ms"
+    torchtrt_output_host_unregister_ms = Average-Field $summaries "torchtrt_output_host_unregister_ms"
     ofx_client_readback_ms = Average-Field $summaries "ofx_client_readback_ms"
     ofx_write_output_ms = Average-Field $summaries "ofx_write_output_ms"
 }
@@ -359,6 +363,9 @@ $maximums = [ordered]@{
     torchtrt_forward_direct_enqueue_wall_ms = Max-Field $summaries "torchtrt_forward_direct_enqueue_wall_ms"
     torchtrt_forward_direct_event_sync_wait_ms = Max-Field $summaries "torchtrt_forward_direct_event_sync_wait_ms"
     torchtrt_forward_direct_event_sync_over_gpu_ms = Max-Field $summaries "torchtrt_forward_direct_event_sync_over_gpu_ms"
+    torchtrt_output_host_register_ms = Max-Field $summaries "torchtrt_output_host_register_ms"
+    torchtrt_output_copy_sync_ms = Max-Field $summaries "torchtrt_output_copy_sync_ms"
+    torchtrt_output_host_unregister_ms = Max-Field $summaries "torchtrt_output_host_unregister_ms"
     torchtrt_replay_gpu_ms = Max-Field $summaries "torchtrt_replay_gpu_ms"
 }
 
@@ -442,10 +449,19 @@ if ((Count-Field $summaries "pid").Count -gt 1) {
         torchtrt_cuda_graph_input_copy_queue_wait = Stats-Field $runtimeDetails "torchtrt_cuda_graph_input_copy_queue_wait"
         frame_extract_outputs_resize = Stats-Field $runtimeDetails "frame_extract_outputs_resize"
         post_source_passthrough = Stats-Field $runtimeDetails "post_source_passthrough"
+        post_source_passthrough_gpu_threshold = Stats-Field $runtimeDetails "post_source_passthrough_gpu_threshold"
+        post_source_passthrough_gpu_erode = Stats-Field $runtimeDetails "post_source_passthrough_gpu_erode"
+        post_source_passthrough_gpu_blur = Stats-Field $runtimeDetails "post_source_passthrough_gpu_blur"
+        post_source_passthrough_gpu_source_copy_enqueue = Stats-Field $runtimeDetails "post_source_passthrough_gpu_source_copy_enqueue"
+        post_source_passthrough_gpu_blend = Stats-Field $runtimeDetails "post_source_passthrough_gpu_blend"
         post_despeckle = Stats-Field $runtimeDetails "post_despeckle"
         post_despill = Stats-Field $runtimeDetails "post_despill"
         post_gpu_prepare = Stats-Field $runtimeDetails "post_gpu_prepare"
         torchtrt_output_d2h_direct = Stats-Field $runtimeDetails "torchtrt_output_d2h_direct"
+        torchtrt_output_host_register = Stats-Field $runtimeDetails "torchtrt_output_host_register"
+        torchtrt_output_copy_enqueue = Stats-Field $runtimeDetails "torchtrt_output_copy_enqueue"
+        torchtrt_output_copy_sync = Stats-Field $runtimeDetails "torchtrt_output_copy_sync"
+        torchtrt_output_host_unregister = Stats-Field $runtimeDetails "torchtrt_output_host_unregister"
     }
     stage_observability = $stageObservability
     findings = @($findings)

@@ -86,6 +86,17 @@ de cor compartilhados.
   separa `Enqueue Time` de `GPU Compute Time`; por isso o proximo slice precisa
   separar o tempo de `module.forward` no host do tempo bloqueado em
   `cudaEventSynchronize` e o excedente desse sync acima do tempo GPU medido.
+- O pacote `0.8.5-win.1-77-g35adcf8` classificou o gargalo:
+  `torchtrt_forward_direct_enqueue_wall` ficou perto de 2.6 ms, mas
+  `torchtrt_forward_direct_event_sync_over_gpu` ficou perto de 1048 ms. A
+  barreira era a sincronizacao de evento colocada no meio da pipeline para
+  medir o forward direto.
+- O harness local depois do defer dessa medicao e da otimizacao de Source
+  Passthrough mede Green 2048, plate, Lanczos4, SP efetivo 12/28 em cerca de
+  519 ms na ultima execucao verificada, com melhor execucao local perto de 437
+  ms. `post_source_passthrough_gpu_blur` caiu para menos de 0.1 ms nos frames
+  quentes com NPP separavel; `torchtrt_output_d2h_direct` e agora o maior custo
+  periferico restante, com registro pinado do shared frame medido separadamente.
 
 ## Hipoteses Testaveis
 
@@ -122,6 +133,25 @@ de cor compartilhados.
    chamada TorchTRT/driver que enfileira kernels ou no host esperando o evento de
    fim do stream sob o contexto Resolve.
 
+0.5. O sync do evento do forward nao deve estar no meio da pipeline.
+   O Resolve mostrou `torchtrt_forward_direct_enqueue_wall` em cerca de 2.6 ms e
+   `torchtrt_forward_direct_event_sync_over_gpu` em cerca de 1048 ms. Hipotese:
+   registrar os eventos do forward, continuar enfileirando pos-processamento e
+   copia de saida, e ler o elapsed apenas depois da sincronizacao obrigatoria de
+   saida remove uma barreira host/device desnecessaria.
+
+0.6. Source Passthrough 12/28 deve usar operadores GPU especializados.
+   A reproducao automatica com os parametros efetivos do Resolve mostrou blur
+   como custo dominante do post-process. Hipotese: manter a erosao exata por
+   min-pool horizontal e usar NPP separavel para blur remove o custo sem mudar
+   a semantica visual esperada.
+
+0.7. Shared output direto precisa de memoria host registrada.
+   O destino de saida do RPC e memoria compartilhada, nao alocacao CUDA pinned.
+   Hipotese: registrar a faixa alpha/foreground com `cudaHostRegister` antes do
+   D2H direto evita que `cudaMemcpyAsync` para shared memory bloqueie no
+   enqueue e torna register/sync/unregister visiveis na telemetry.
+
 1. Auto Despeckle ativa CPU demais.
    Quando `auto_despeckle` esta ligado, o TorchTRT desliga todo o post-process
    GPU, nao apenas o despeckle. Hipotese: manter Source Passthrough, Despill e
@@ -153,11 +183,11 @@ de cor compartilhados.
 
 ## Trabalho Restante
 
-- P0: Separar e reduzir o `torchtrt_forward_direct_queue_wait` especifico do
-  Resolve, preservando `cuda_graph_env=0`, `torchtrt_input_ready_wait=0` e
-  `gpu_prepare_wait_over_device=0`.
-- P1: Depois do P0, otimizar Source Passthrough 12/28 e output copies apenas
-  como custos secundarios ja mensurados.
+- P0: Validar no Resolve o pacote que remove a sincronizacao intermediaria de
+  `torchtrt_forward_direct_event_sync_wait`.
+- P1: Comparar `torchtrt_output_host_register`,
+  `torchtrt_output_copy_sync`, `ofx_client_*_readback` e `ofx_write_output`
+  no Resolve depois do P0, porque esses sao os custos perifericos restantes.
 - P0: Manter o caminho device-input e o device-to-device de Source Passthrough
   quando `source_rgb_device` esta disponivel.
 - Separar o status `post_processed` em flags por etapa ou outro contrato

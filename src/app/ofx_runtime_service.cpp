@@ -172,7 +172,9 @@ bool is_pinned_stage(const std::string& name) {
            name == "mlx_wait_fg_tile" || name == "torchtrt_forward_direct" ||
            name.rfind("torchtrt_forward_direct_", 0) == 0 || name == "frame_prepare_inputs" ||
            name.rfind("gpu_prepare_", 0) == 0 || name.rfind("torchtrt_input_", 0) == 0 ||
-           name.rfind("torchtrt_cuda_graph_", 0) == 0;
+           name.rfind("post_source_passthrough_gpu_", 0) == 0 ||
+           name.rfind("torchtrt_cuda_graph_", 0) == 0 ||
+           name.rfind("torchtrt_output_", 0) == 0;
 }
 
 // Summarize stages into a compact "name:ms,name:ms" list. Returns the top-N by
@@ -474,7 +476,9 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                               " io_binding_env=" +
                               environment_log_token("CORRIDORKEY_IO_BINDING") +
                               " torchtrt_input_boundary=" +
-                              environment_log_token("CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY");
+                              environment_log_token("CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY") +
+                              " torchtrt_forward_sync_timing_env=" +
+                              environment_log_token("CORRIDORKEY_TORCHTRT_FORWARD_SYNC_TIMING");
 #ifdef __APPLE__
     start_event += " qos_class=" + current_qos_label();
     start_event += " task_role=" + current_task_role_label();

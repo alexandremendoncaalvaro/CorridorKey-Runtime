@@ -86,14 +86,22 @@ applicable.
   Compute Time` diagnostic model.
 - [x] Re-run the automated Green 2048 harness and verify the new split stays
   small outside Resolve.
-- [ ] Use the next Resolve run only to classify whether the remaining direct
+- [x] Use the next Resolve run only to classify whether the remaining direct
   wait is enqueue-bound or event-sync-bound.
+- [x] Remove the non-essential direct-forward host/device event sync from the
+  default path and defer CUDA event elapsed-time reporting until the required
+  output synchronization has already completed.
+- [x] Optimize the measured Source Passthrough 12/28 post-process cost without
+  changing the CPU fallback contract.
+- [x] Split direct output D2H into host register, copy enqueue, copy sync, and
+  host unregister timings.
+- [ ] Package the verified build and validate the new Resolve log window.
 
 ## Priority Order
 
-The next work is diagnostic classification, not broad optimization. The
-current evidence already rules out model replay, post-process, readback, and
-OFX writeback as the dominant 1.8 second-class cost in the failing Resolve
+The classification phase is complete for the direct-forward wait. The current
+work is to validate the implementation that removes the event-sync barrier and
+then inspect the remaining output-transfer/readback costs in the same Resolve
 window.
 
 | Priority | Run | Required environment before starting Resolve | Evidence required | Decision rule |
@@ -102,6 +110,7 @@ window.
 | P1 | CUDA Graph off, device-input unchanged | `CORRIDORKEY_TRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY` unset | `server_start` records both graph envs as `0`; `torchtrt_cuda_graph_fallback_not_enabled_present_count > 0`; `torchtrt_forward_direct_present_count > 0`; `torchtrt_input_copy_queue_wait` absent or zero | If total render time drops near the OFX RPC harness class, classify as CUDA Graph specific and open the implementation ADR. |
 | P2 | Host-roundtrip input boundary, graph still off | `CORRIDORKEY_TRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_CUDA_GRAPH=0`; `CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY=host_roundtrip` | `torchtrt_input_boundary_host_roundtrip_present_count > 0`; `torchtrt_forward_direct_present_count > 0`; same Green 2048/source-passthrough settings | If P1 remains slow but P2 improves, classify as device-input boundary/context interaction. If both are slow, classify as Resolve host/context contention outside CUDA Graph static-input copy. |
 | P3 | Record outcome and choose fix path | No new code before classification | Notes include analyzer JSON summary, selected classification, and whether a follow-up ADR is required | Only implement after the classification is documented. |
+| P4 | Post-fix Resolve validation | No graph env variables unless explicitly testing CUDA Graph; `CORRIDORKEY_TORCHTRT_FORWARD_SYNC_TIMING` unset | No `torchtrt_forward_direct_event_sync_wait_ms` in default summaries; output D2H split present | If render remains slow, prioritize the largest measured peripheral stage, not the old forward-sync field. |
 
 Use `scripts/run_resolve_torchtrt_diagnostic.ps1 -Mode graph-off
 -LaunchResolve` for P1 and `scripts/run_resolve_torchtrt_diagnostic.ps1 -Mode
@@ -403,6 +412,56 @@ release -Track rtx -Flavor online` after rebuilding with the clean commit label.
 Installer:
 `dist/CorridorKey_v0.8.5-win.1-77-g35adcf8_Windows_online_Setup.exe`. SHA256:
 `969ccf5fa5a84fdfce22624c89a6037a4242e12f6b331c8e77bec4b557b32828`.
+
+Resolve validation on package `0.8.5-win.1-77-g35adcf8` classified the direct
+wait. The selected window used plugin PID `11328`, runtime PID `11088`, and 19
+backend-render runtime samples. The runtime start line recorded
+`cuda_graph_env=0`, `torchtrt_cuda_graph_env=unset`, `io_binding_env=off`, and
+`torchtrt_input_boundary=unset`. Averages were
+`torchtrt_forward_direct=1364.85 ms`,
+`torchtrt_forward_direct_gpu=314.11 ms`,
+`torchtrt_forward_direct_queue_wait=1050.75 ms`,
+`torchtrt_forward_direct_enqueue_wall=2.64 ms`,
+`torchtrt_forward_direct_event_sync_wait=1362.17 ms`, and
+`torchtrt_forward_direct_event_sync_over_gpu=1048.17 ms`. This rules the local
+enqueue call out for this slice and points directly at the host/device event
+sync in the middle of the direct-forward path.
+
+The selected fix follows the TensorRT/trtexec timing pattern: record CUDA start
+and stop events around the enqueue, continue the pipeline, and read
+`cudaEventElapsedTime` only after the already-required output synchronization
+has completed. The old synchronous direct-forward timing remains available only
+when `CORRIDORKEY_TORCHTRT_FORWARD_SYNC_TIMING=1` is explicitly set.
+
+Implemented the selected fix and the next measured peripheral slice. The
+default direct-forward path now emits `torchtrt_forward_direct_enqueue_wall`
+without synchronizing on the forward stop event; `torchtrt_forward_direct_gpu`
+is emitted after output materialization has already synchronized. The legacy
+sync timing fields are diagnostic-only behind
+`CORRIDORKEY_TORCHTRT_FORWARD_SYNC_TIMING=1`.
+
+The Source Passthrough GPU path now measures threshold, erode, blur, source
+copy, and blend separately. The exact elliptical erosion uses pooled horizontal
+min windows instead of per-offset tensor shifts, and blur uses the CUDA Toolkit
+NPP separable row/column filter with the existing PyTorch replicate-border path
+as fallback. Output D2H direct now also measures shared-frame host registration,
+copy enqueue, copy sync, and unregister separately.
+
+Automated verification before packaging: `git diff --check`,
+`scripts/windows.ps1 -Task build -Version 0.8.5 -Preset release`, and
+`ctest --test-dir build/release -R
+"unit_tests_gpu|integration_tests|windows_torchtrt_matrix_case_coverage"
+--output-on-failure` passed. The final Green 2048 OFX RPC harness with
+3840x2160 plate input, Source Passthrough on, Lanczos4, `sp_erode=12`, and
+`sp_blur=28` wrote
+`build/release/task0005_rpc_green_2048_final_default_graph_off.json` and
+averaged `518.57 ms` roundtrip, `ofx_client_render_rpc=424.32 ms`,
+`frame_prepare_inputs=20.46 ms`, `post_gpu_prepare=18.91 ms`,
+`post_source_passthrough_gpu=16.94 ms`, `post_source_passthrough_gpu_blur=1.77
+ms` including warmup, `torchtrt_output_d2h_direct=276.02 ms`, and
+`torchtrt_forward_direct_gpu=282.96 ms`. The best local run of the same binary
+class was `437.25 ms`; the graph-enabled comparison averaged `457.59 ms`, so
+the opt-in graph path remains non-preferred for this Resolve track.
 
 ## Definition of Done
 

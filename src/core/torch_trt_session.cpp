@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -33,6 +34,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/ops/conv2d.h>
+#include <ATen/ops/max_pool2d.h>
 #include <ATen/ops/replication_pad2d.h>
 #include <ATen/ops/upsample_bicubic2d.h>
 #include <ATen/ops/upsample_bilinear2d.h>
@@ -376,6 +378,11 @@ bool torchtrt_cuda_graph_requested() {
     return false;
 }
 
+bool torchtrt_direct_forward_sync_timing_requested() {
+    const char* value = std::getenv("CORRIDORKEY_TORCHTRT_FORWARD_SYNC_TIMING");
+    return value != nullptr && std::string_view(value) == "1";
+}
+
 bool artifact_contains_true_torchtrt_marker(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
@@ -489,6 +496,91 @@ void emit_stage_timing(const StageTimingCallback& on_stage, std::string_view nam
     }
     on_stage(StageTiming{std::string{name}, total_ms, 1, 1});
 }
+
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+struct DeferredCudaEventTiming {
+    cudaEvent_t start_event = nullptr;
+    cudaEvent_t stop_event = nullptr;
+    std::string gpu_stage_name;
+    bool active = false;
+
+    DeferredCudaEventTiming() = default;
+    DeferredCudaEventTiming(const DeferredCudaEventTiming&) = delete;
+    DeferredCudaEventTiming& operator=(const DeferredCudaEventTiming&) = delete;
+
+    DeferredCudaEventTiming(DeferredCudaEventTiming&& other) noexcept
+        : start_event(std::exchange(other.start_event, nullptr)),
+          stop_event(std::exchange(other.stop_event, nullptr)),
+          gpu_stage_name(std::move(other.gpu_stage_name)),
+          active(std::exchange(other.active, false)) {}
+
+    DeferredCudaEventTiming& operator=(DeferredCudaEventTiming&& other) noexcept {
+        if (this != &other) {
+            reset();
+            start_event = std::exchange(other.start_event, nullptr);
+            stop_event = std::exchange(other.stop_event, nullptr);
+            gpu_stage_name = std::move(other.gpu_stage_name);
+            active = std::exchange(other.active, false);
+        }
+        return *this;
+    }
+
+    ~DeferredCudaEventTiming() { reset(); }
+
+    void reset() {
+        if (start_event != nullptr) {
+            cudaEventDestroy(start_event);
+            start_event = nullptr;
+        }
+        if (stop_event != nullptr) {
+            cudaEventDestroy(stop_event);
+            stop_event = nullptr;
+        }
+        active = false;
+        gpu_stage_name.clear();
+    }
+};
+
+DeferredCudaEventTiming begin_deferred_cuda_event_timing(
+    const StageTimingCallback& on_stage, std::string_view gpu_stage_name) {
+    DeferredCudaEventTiming timing;
+    if (!on_stage) {
+        return timing;
+    }
+    const auto stream = c10::cuda::getCurrentCUDAStream();
+    timing.gpu_stage_name = std::string(gpu_stage_name);
+    if (cudaEventCreate(&timing.start_event) != cudaSuccess ||
+        cudaEventCreate(&timing.stop_event) != cudaSuccess ||
+        cudaEventRecord(timing.start_event, stream.stream()) != cudaSuccess) {
+        timing.reset();
+        return timing;
+    }
+    timing.active = true;
+    return timing;
+}
+
+void record_deferred_cuda_event_stop(DeferredCudaEventTiming& timing) {
+    if (!timing.active) {
+        return;
+    }
+    const auto stream = c10::cuda::getCurrentCUDAStream();
+    if (cudaEventRecord(timing.stop_event, stream.stream()) != cudaSuccess) {
+        timing.reset();
+    }
+}
+
+void emit_deferred_cuda_event_elapsed(const StageTimingCallback& on_stage,
+                                      DeferredCudaEventTiming& timing) {
+    if (!timing.active) {
+        return;
+    }
+    float elapsed_ms = 0.0F;
+    if (cudaEventElapsedTime(&elapsed_ms, timing.start_event, timing.stop_event) == cudaSuccess) {
+        emit_stage_timing(on_stage, timing.gpu_stage_name, static_cast<double>(elapsed_ms));
+    }
+    timing.reset();
+}
+#endif
 
 template <typename Function>
 std::optional<double> run_and_synchronize_with_cuda_event_timing(
@@ -1032,24 +1124,71 @@ ImageBuffer adopt_external_output(Image view) {
                               [](float*) {});
 }
 
-std::vector<std::pair<int, int>> elliptical_offsets(int radius) {
-    std::vector<std::pair<int, int>> offsets;
-    if (radius <= 0) {
-        offsets.emplace_back(0, 0);
-        return offsets;
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+class ScopedCudaHostRegistration {
+   public:
+    ScopedCudaHostRegistration() = default;
+    ScopedCudaHostRegistration(const ScopedCudaHostRegistration&) = delete;
+    ScopedCudaHostRegistration& operator=(const ScopedCudaHostRegistration&) = delete;
+
+    ~ScopedCudaHostRegistration() {
+        unregister();
     }
-    offsets.reserve(static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1)));
-    const float radius_sq = static_cast<float>(radius) * static_cast<float>(radius);
-    for (int dy = -radius; dy <= radius; ++dy) {
-        for (int dx = -radius; dx <= radius; ++dx) {
-            const float dist_sq = static_cast<float>(dy * dy + dx * dx);
-            if (dist_sq <= radius_sq) {
-                offsets.emplace_back(dy, dx);
-            }
+
+    bool register_views(Image alpha, bool include_alpha, Image foreground, bool include_foreground) {
+        std::uintptr_t begin = 0;
+        std::uintptr_t end = 0;
+        if (include_alpha) {
+            extend_range(alpha, begin, end);
         }
+        if (include_foreground) {
+            extend_range(foreground, begin, end);
+        }
+        if (begin == 0 || end <= begin) {
+            return false;
+        }
+
+        // cudaHostRegister works on OS page ranges; round the shared mapping span outward.
+        constexpr std::uintptr_t kPageAlignment = 4096;
+        const std::uintptr_t aligned_begin = begin & ~(kPageAlignment - 1U);
+        const std::uintptr_t aligned_end = (end + kPageAlignment - 1U) & ~(kPageAlignment - 1U);
+        m_ptr = reinterpret_cast<void*>(aligned_begin);
+        m_size = static_cast<std::size_t>(aligned_end - aligned_begin);
+        const cudaError_t status = cudaHostRegister(m_ptr, m_size, cudaHostRegisterPortable);
+        m_registered = status == cudaSuccess;
+        if (!m_registered) {
+            m_ptr = nullptr;
+            m_size = 0;
+        }
+        return m_registered;
     }
-    return offsets;
-}
+
+    void unregister() {
+        if (!m_registered || m_ptr == nullptr) {
+            return;
+        }
+        (void)cudaHostUnregister(m_ptr);
+        m_ptr = nullptr;
+        m_size = 0;
+        m_registered = false;
+    }
+
+   private:
+    static void extend_range(Image view, std::uintptr_t& begin, std::uintptr_t& end) {
+        if (view.empty()) {
+            return;
+        }
+        const auto view_begin = reinterpret_cast<std::uintptr_t>(view.data.data());
+        const auto view_end = view_begin + view.data.size_bytes();
+        begin = begin == 0 ? view_begin : std::min(begin, view_begin);
+        end = std::max(end, view_end);
+    }
+
+    void* m_ptr = nullptr;
+    std::size_t m_size = 0;
+    bool m_registered = false;
+};
+#endif
 
 torch::Tensor shifted_mask_zero_border(const torch::Tensor& mask, int dy, int dx) {
     const int64_t height = mask.size(2);
@@ -1064,15 +1203,53 @@ torch::Tensor shifted_mask_zero_border(const torch::Tensor& mask, int dy, int dx
     return padded.narrow(2, start_y, height).narrow(3, start_x, width);
 }
 
-torch::Tensor erode_mask_elliptical(const torch::Tensor& mask, int radius) {
+torch::Tensor horizontal_min_mask_zero_border(const torch::Tensor& mask, int radius) {
     if (radius <= 0) {
         return mask;
     }
-    auto eroded = mask.clone();
-    for (const auto& [dy, dx] : elliptical_offsets(radius)) {
-        eroded = torch::minimum(eroded, shifted_mask_zero_border(mask, dy, dx));
+    auto padded = torch::constant_pad_nd(mask, {radius, radius, 0, 0}, 0.0);
+    const std::array<int64_t, 2> kernel = {1, (radius * 2) + 1};
+    const std::array<int64_t, 2> stride = {1, 1};
+    const std::array<int64_t, 2> padding = {0, 0};
+    const std::array<int64_t, 2> dilation = {1, 1};
+    return -at::max_pool2d(-padded, kernel, stride, padding, dilation, false);
+}
+
+torch::Tensor erode_mask_elliptical_pool(const torch::Tensor& mask, int radius) {
+    if (radius <= 0) {
+        return mask;
+    }
+    std::unordered_map<int, torch::Tensor> horizontal_by_radius;
+    auto eroded = torch::ones_like(mask);
+    const int radius_sq = radius * radius;
+    for (int dy = -radius; dy <= radius; ++dy) {
+        const int dx_radius =
+            static_cast<int>(std::floor(std::sqrt(static_cast<float>(radius_sq - (dy * dy)))));
+        auto [entry, inserted] = horizontal_by_radius.try_emplace(dx_radius);
+        if (inserted) {
+            entry->second = horizontal_min_mask_zero_border(mask, dx_radius);
+        }
+        eroded = torch::minimum(eroded, shifted_mask_zero_border(entry->second, dy, 0));
     }
     return eroded;
+}
+
+std::vector<float> gaussian_kernel_values(int half_size) {
+    const int kernel_size = half_size * 2 + 1;
+    const float sigma =
+        0.3F * ((static_cast<float>(kernel_size) - 1.0F) * 0.5F - 1.0F) + 0.8F;
+    std::vector<float> values(static_cast<std::size_t>(kernel_size));
+    float sum = 0.0F;
+    for (int index = 0; index < kernel_size; ++index) {
+        const float x = static_cast<float>(index - half_size);
+        const float value = std::exp(-0.5F * (x * x) / (sigma * sigma));
+        values[static_cast<std::size_t>(index)] = value;
+        sum += value;
+    }
+    for (float& value : values) {
+        value /= sum;
+    }
+    return values;
 }
 
 torch::Tensor gaussian_kernel_tensor(int half_size, const torch::Tensor& reference,
@@ -1098,6 +1275,65 @@ torch::Tensor gaussian_kernel_tensor(int half_size, const torch::Tensor& referen
     }
     return horizontal ? kernel.view({1, 1, 1, kernel_size})
                       : kernel.view({1, 1, kernel_size, 1});
+}
+
+bool blur_mask_npp_separable(torch::Tensor& mask, int half_size) {
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+    if (half_size <= 0) {
+        return true;
+    }
+    const int width = static_cast<int>(mask.size(3));
+    const int height = static_cast<int>(mask.size(2));
+    if (width <= 0 || height <= 0 || !mask.is_cuda() || mask.scalar_type() != torch::kFloat32) {
+        return false;
+    }
+    if (!mask.is_contiguous()) {
+        mask = mask.contiguous();
+    }
+
+    const auto stream = c10::cuda::getCurrentCUDAStream();
+    NppStreamContext npp_context{};
+    if (!detail::make_npp_stream_context(stream.stream(), npp_context)) {
+        return false;
+    }
+
+    auto temp = torch::empty_like(mask);
+    auto blurred = torch::empty_like(mask);
+    const auto kernel = gaussian_kernel_values(half_size);
+    auto kernel_tensor =
+        torch::empty({static_cast<int64_t>(kernel.size())}, mask.options().dtype(torch::kFloat32));
+    const int step = width * static_cast<int>(sizeof(float));
+    NppiSize source_size = {width, height};
+    NppiPoint source_offset = {0, 0};
+    NppiSize roi = {width, height};
+    const int kernel_size = static_cast<int>(kernel.size());
+    const cudaError_t kernel_copy_status =
+        cudaMemcpyAsync(kernel_tensor.data_ptr<float>(), kernel.data(),
+                        kernel.size() * sizeof(float), cudaMemcpyHostToDevice, stream.stream());
+    if (kernel_copy_status != cudaSuccess) {
+        return false;
+    }
+    const NppStatus row_status = nppiFilterRowBorder_32f_C1R_Ctx(
+        mask.data_ptr<float>(), step, source_size, source_offset, temp.data_ptr<float>(), step,
+        roi, kernel_tensor.data_ptr<float>(), kernel_size, half_size, NPP_BORDER_REPLICATE,
+        npp_context);
+    if (row_status != NPP_SUCCESS) {
+        return false;
+    }
+    const NppStatus column_status = nppiFilterColumnBorder_32f_C1R_Ctx(
+        temp.data_ptr<float>(), step, source_size, source_offset, blurred.data_ptr<float>(), step,
+        roi, kernel_tensor.data_ptr<float>(), kernel_size, half_size, NPP_BORDER_REPLICATE,
+        npp_context);
+    if (column_status != NPP_SUCCESS) {
+        return false;
+    }
+    mask = blurred;
+    return true;
+#else
+    (void)mask;
+    (void)half_size;
+    return false;
+#endif
 }
 
 torch::Tensor blur_mask_replicate_border(const torch::Tensor& mask, int half_size) {
@@ -1126,12 +1362,24 @@ bool apply_source_passthrough_cuda(torch::Tensor& foreground_nchw, const torch::
     }
 
     common::measure_stage(on_stage, "post_source_passthrough_gpu", [&]() {
-        auto mask = (alpha_nchw > kSourcePassthroughInteriorThreshold).to(torch::kFloat32);
-        mask = erode_mask_elliptical(mask, params.sp_erode_px);
+        torch::Tensor interior_mask;
+        common::measure_stage(on_stage, "post_source_passthrough_gpu_threshold", [&]() {
+            interior_mask =
+                (alpha_nchw > kSourcePassthroughInteriorThreshold).to(torch::kFloat32);
+        });
+        auto mask = interior_mask;
+        if (params.sp_erode_px > 0) {
+            common::measure_stage(on_stage, "post_source_passthrough_gpu_erode", [&]() {
+                mask = erode_mask_elliptical_pool(mask, params.sp_erode_px);
+            });
+        }
         if (params.sp_blur_px > 0) {
-            mask = blur_mask_replicate_border(mask, params.sp_blur_px);
-            mask = torch::where(alpha_nchw > kSourcePassthroughInteriorThreshold, mask,
-                                torch::zeros_like(mask));
+            common::measure_stage(on_stage, "post_source_passthrough_gpu_blur", [&]() {
+                if (!blur_mask_npp_separable(mask, params.sp_blur_px)) {
+                    mask = blur_mask_replicate_border(mask, params.sp_blur_px);
+                }
+                mask.mul_(interior_mask);
+            });
         }
 
         torch::Tensor source_hwc;
@@ -1143,18 +1391,27 @@ bool apply_source_passthrough_cuda(torch::Tensor& foreground_nchw, const torch::
         const auto stream = c10::cuda::getCurrentCUDAStream().stream();
         if (source.rgb_device != nullptr) {
             emit_graph_event(on_stage, "post_source_passthrough_gpu_copy_device_to_device");
-            const cudaError_t copy_status =
-                cudaMemcpyAsync(source_hwc.data_ptr<float>(), source.rgb_device, byte_count,
-                                cudaMemcpyDeviceToDevice, stream);
+            cudaError_t copy_status = cudaSuccess;
+            common::measure_stage(on_stage, "post_source_passthrough_gpu_source_copy_enqueue",
+                                  [&]() {
+                                      copy_status = cudaMemcpyAsync(
+                                          source_hwc.data_ptr<float>(), source.rgb_device,
+                                          byte_count, cudaMemcpyDeviceToDevice, stream);
+                                  });
             if (copy_status != cudaSuccess) {
                 throw std::runtime_error(std::string("TorchTRT source passthrough D2D copy failed: ") +
                                          cudaGetErrorString(copy_status));
             }
         } else if (!source.host_rgb.empty()) {
             emit_graph_event(on_stage, "post_source_passthrough_gpu_copy_host_to_device");
-            const cudaError_t copy_status =
-                cudaMemcpyAsync(source_hwc.data_ptr<float>(), source.host_rgb.data.data(),
-                                byte_count, cudaMemcpyHostToDevice, stream);
+            cudaError_t copy_status = cudaSuccess;
+            common::measure_stage(on_stage, "post_source_passthrough_gpu_source_copy_enqueue",
+                                  [&]() {
+                                      copy_status = cudaMemcpyAsync(
+                                          source_hwc.data_ptr<float>(),
+                                          source.host_rgb.data.data(), byte_count,
+                                          cudaMemcpyHostToDevice, stream);
+                                  });
             if (copy_status != cudaSuccess) {
                 throw std::runtime_error(std::string("TorchTRT source passthrough H2D copy failed: ") +
                                          cudaGetErrorString(copy_status));
@@ -1164,7 +1421,8 @@ bool apply_source_passthrough_cuda(torch::Tensor& foreground_nchw, const torch::
         return false;
 #endif
         auto source_nchw = source_hwc.permute({0, 3, 1, 2});
-        foreground_nchw.copy_(mask * source_nchw + (1.0F - mask) * foreground_nchw);
+        common::measure_stage(on_stage, "post_source_passthrough_gpu_blend",
+                              [&]() { foreground_nchw.lerp_(source_nchw, mask); });
     });
     return true;
 }
@@ -1333,6 +1591,12 @@ MaterializedOutputTensors materialize_outputs(
 
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     common::measure_stage(on_stage, "torchtrt_output_d2h_direct", [&]() {
+        ScopedCudaHostRegistration output_registration;
+        common::measure_stage(on_stage, "torchtrt_output_host_register", [&]() {
+            (void)output_registration.register_views(result.alpha.view(), direct_alpha,
+                                                     result.foreground.view(),
+                                                     include_foreground && direct_foreground);
+        });
         const auto producer_stream = c10::cuda::getCurrentCUDAStream();
         at::cuda::CUDAEvent producer_done;
         common::measure_stage(on_stage, "torchtrt_output_wait_enqueue", [&]() {
@@ -1364,6 +1628,8 @@ MaterializedOutputTensors materialize_outputs(
         }
         common::measure_stage(on_stage, "torchtrt_output_copy_sync",
                               [&]() { copy_stream.synchronize(); });
+        common::measure_stage(on_stage, "torchtrt_output_host_unregister",
+                              [&]() { output_registration.unregister(); });
     });
 #else
     auto host_alpha = host_ring.acquire(alpha_flat.numel());
@@ -1423,6 +1689,9 @@ Result<TorchTrtFrameResult> forward_and_materialize(
     }
 
     AlphaFgTensors split;
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+    DeferredCudaEventTiming direct_forward_timing;
+#endif
     common::measure_stage(on_stage, "torchtrt_forward", [&]() {
         auto graph_out = try_forward_cuda_graph(module, forward_graph, cuda_input, *pos_grid,
                                                 capture_stream, inference_width, inference_height,
@@ -1433,15 +1702,36 @@ Result<TorchTrtFrameResult> forward_and_materialize(
         }
         emit_graph_event(on_stage, fallback_stage_name(forward_graph));
         torch::IValue raw_out;
-        measure_cuda_wall_and_gpu_stage(on_stage, "torchtrt_forward_direct",
-                                        "torchtrt_forward_direct_gpu",
-                                        "torchtrt_forward_direct_queue_wait", [&]() {
-                                            raw_out = run_direct_forward(module, cuda_input,
-                                                                         *pos_grid);
-                                        },
-                                        "torchtrt_forward_direct_enqueue_wall",
-                                        "torchtrt_forward_direct_event_sync_wait",
-                                        "torchtrt_forward_direct_event_sync_over_gpu");
+        if (torchtrt_direct_forward_sync_timing_requested()) {
+            measure_cuda_wall_and_gpu_stage(on_stage, "torchtrt_forward_direct",
+                                            "torchtrt_forward_direct_gpu",
+                                            "torchtrt_forward_direct_queue_wait", [&]() {
+                                                raw_out = run_direct_forward(module, cuda_input,
+                                                                             *pos_grid);
+                                            },
+                                            "torchtrt_forward_direct_enqueue_wall",
+                                            "torchtrt_forward_direct_event_sync_wait",
+                                            "torchtrt_forward_direct_event_sync_over_gpu");
+        } else {
+            common::measure_stage(on_stage, "torchtrt_forward_direct", [&]() {
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+                direct_forward_timing =
+                    begin_deferred_cuda_event_timing(on_stage, "torchtrt_forward_direct_gpu");
+#endif
+                const auto enqueue_start = std::chrono::steady_clock::now();
+                raw_out = run_direct_forward(module, cuda_input, *pos_grid);
+                const auto enqueue_end = std::chrono::steady_clock::now();
+                emit_stage_timing(
+                    on_stage, "torchtrt_forward_direct_enqueue_wall",
+                    std::chrono::duration<double, std::milli>(enqueue_end - enqueue_start)
+                        .count());
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+                record_deferred_cuda_event_stop(direct_forward_timing);
+#else
+                synchronize_current_cuda_stream();
+#endif
+            });
+        }
         auto direct_split = split_forward_output(raw_out);
         if (direct_split.has_value()) {
             split = *direct_split;
@@ -1487,6 +1777,9 @@ Result<TorchTrtFrameResult> forward_and_materialize(
         result.post_source_passthrough_applied = materialized.post_source_passthrough_applied;
         result.post_despill_applied = materialized.post_despill_applied;
         result.frame.external_output_written = materialized.external_output_written;
+#if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
+        emit_deferred_cuda_event_elapsed(on_stage, direct_forward_timing);
+#endif
     });
     return result;
 }

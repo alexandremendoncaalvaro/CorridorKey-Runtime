@@ -85,6 +85,12 @@ Measurable conditions. Each as a checkbox; pass/fail observable, not aspirationa
 - [ ] In graph-off Resolve windows, `torchtrt_forward_direct_queue_wait_ms` is
   split into enqueue wall time versus event synchronization wait before another
   topology change is selected.
+- [x] The default graph-off direct-forward path does not synchronize the host
+  immediately after enqueue only to collect timing; elapsed GPU timing is
+  reported after the required output synchronization.
+- [x] Source Passthrough 12/28 and output D2H direct expose sub-stage timings
+  for threshold, erode, blur, source copy, blend, host register, copy enqueue,
+  copy sync, and host unregister.
 - [ ] The clean OFX RPC readiness matrix passes for Green, Blue, and Blue-Green
   2048 cases without constant-output regressions.
 - [ ] Any final implementation fix has a matching task, accepted ADR when it
@@ -120,17 +126,25 @@ diagnostic comparison unless a later ADR accepts it as the product path.
   Resolve windows; ADR-0005 changes the OFX default so graph capture is opt-in.
 - The main-style synchronized host-roundtrip diagnostic did not improve
   end-to-end Resolve latency enough to become the product path.
+- Package `0.8.5-win.1-77-g35adcf8` showed the remaining direct-forward gap is
+  event-sync-bound, not enqueue-bound.
+- The direct-forward timing sync is removable without changing inference
+  topology by deferring CUDA event elapsed-time reporting until output
+  synchronization.
+- In the OFX RPC harness, Source Passthrough 12/28 was dominated by blur before
+  the NPP separable path; after the change, output D2H/shared-memory transfer is
+  the next measured peripheral cost.
 
 ## Open Questions
 
 - Does the missing `torchtrt_work_stream_guard_ms` value in current analyzer
   summaries represent an absent log field, a zero-duration measured stage, or an
   older plugin log window?
-- Is the remaining graph-off direct-forward gap enqueue-bound in
-  TorchTRT/PyTorch, or event-sync-bound under the Resolve/WDDM GPU context?
 - After the queue wait is classified, which peripheral cost is next:
   post-processing, output D2H, OFX client readback, foreground conversion, or
   OFX writeback?
+- Does the Resolve host show the same output D2H split as the harness after the
+  direct-forward timing sync is removed from the default path?
 
 ## Related
 
