@@ -65,7 +65,8 @@
 
 .PARAMETER ISCCPath
     Path to ISCC.exe. Auto-detected from common install paths when
-    omitted.
+    omitted, including user-scope winget installs under
+    `%LOCALAPPDATA%\Programs\Inno Setup 6\`.
 
 .EXAMPLE
     pwsh scripts/installer/build_installer.ps1 -Flavor online \

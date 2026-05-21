@@ -254,7 +254,8 @@ still has to install manually; everything else is fetched on demand by
 | vcpkg | `C:\tools\vcpkg` with `VCPKG_ROOT` pointing at it | pinned baseline is in `vcpkg-configuration.json`; every shell that calls the pipeline must export `VCPKG_ROOT` |
 | Python 3.12 | default per-user install from python.org | auto-discovered by `Resolve-CorridorKeyPython312Path`; the pin lives in `Get-CorridorKeyWindowsRtxBuildContract.required_python_version` |
 | uv | `%USERPROFILE%\.local\bin\uv.exe` (default installer path) | auto-discovered via `Resolve-CorridorKeyUvPath`; install once with `irm https://astral.sh/uv/install.ps1 \| iex` |
-| NSIS 3.x | default install at `C:\Program Files (x86)\NSIS\` | auto-discovered |
+| Inno Setup 6 | `ISCC.exe` under `%LOCALAPPDATA%\Programs\Inno Setup 6\`, `C:\Program Files (x86)\Inno Setup 6\`, `C:\Program Files\Inno Setup 6\`, or on `PATH` | required for modern `-Flavor online|offline` OFX installers; `winget install --id JRSoftware.InnoSetup --exact` may install it per-user under `%LOCALAPPDATA%` |
+| NSIS 3.x | default install at `C:\Program Files (x86)\NSIS\` | required only for the legacy OFX installer path used when no modern `-Flavor` is selected |
 
 What the pipeline handles for the operator:
 
@@ -322,11 +323,11 @@ The Windows wrapper tasks are intentionally different:
     artifact manifest without regenerating the `.onnx` files from the
     checkpoint
 - `package-ofx`
-  - package Windows installers from an already certified model set. The
-    legacy NSIS installer (one large `.exe` with every model bundled) is
-    always produced. The modern Inno Setup installer is also produced when
-    `-Flavor online|offline` is passed; see "Modern installer (Inno Setup)"
-    below for the flavor semantics.
+  - package Windows installers from an already certified model set. Without
+    `-Flavor`, the task emits the legacy NSIS installer. With
+    `-Flavor online|offline`, the task emits the selected modern Inno Setup
+    installer and skips the legacy NSIS wrapper; see "Modern installer
+    (Inno Setup)" below for the flavor semantics.
 - `release`
   - package the official Windows release tracks from the currently staged,
     validated inputs

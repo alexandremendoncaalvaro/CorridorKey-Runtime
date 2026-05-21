@@ -1,11 +1,11 @@
 ; CorridorKey Windows installer (Inno Setup 6.4+).
 ;
-; This template is consumed by scripts/package_ofx_installer_windows.ps1,
+; This template is consumed by scripts/installer/build_installer.ps1,
 ; which substitutes @@TOKEN@@ placeholders against a per-build context
 ; (display label, pack manifest, build dir, flavor) and then invokes
 ; ISCC.exe to compile the resulting .iss into the final installer
 ; executable. The template is the single source of truth for installer
-; structure; the PowerShell packager only injects values, never logic.
+; structure; the PowerShell builder only injects values, never logic.
 ;
 ; Two flavors are produced from the SAME template via the `Flavor`
 ; preprocessor directive:

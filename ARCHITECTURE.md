@@ -220,9 +220,9 @@ tools/
 ### `scripts/installer/`
 
 Modern Windows installer authoring (Inno Setup 6). The canonical Windows
-release pipeline produces both the legacy NSIS installer
-(`scripts/package_ofx_installer_windows.ps1`) and the Inno Setup installer
-when `-Flavor online|offline` is passed. See `docs/RELEASE_GUIDELINES.md`
+release wrapper emits the legacy NSIS installer when no modern flavor is
+selected, and emits the selected Inno Setup installer when
+`-Flavor online|offline` is passed. See `docs/RELEASE_GUIDELINES.md`
 "Modern installer (Inno Setup)" for the operator workflow and the
 authoritative flavor matrix.
 
