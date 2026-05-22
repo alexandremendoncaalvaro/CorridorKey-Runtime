@@ -1,6 +1,6 @@
 # Task `0017`: Build Adobe Runtime Bridge
 
-**Status:** in_progress
+**Status:** done
 **Created:** 2026-05-22
 **Owner:** Runtime maintainers
 **Spec ref:**
@@ -29,22 +29,22 @@ not fork model selection, diagnostics, or inference policy.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] The Adobe plugin module has no direct import or link dependency on ONNX
+- [x] The Adobe plugin module has no direct import or link dependency on ONNX
       Runtime, CUDA, LibTorch, TensorRT, or packaged model files.
-- [ ] The bridge exposes health, prepare-session, process-frame, and
+- [x] The bridge exposes health, prepare-session, process-frame, and
       release-session operations using `Result<T>`-style error handling.
-- [ ] Frame conversion from Adobe host buffers into CorridorKey `Image` or
+- [x] Frame conversion from Adobe host buffers into CorridorKey `Image` or
       `ImageBuffer` handles row stride, bounds, channel order, and alpha without
       using `std::vector` for image data.
-- [ ] Unsupported Adobe pixel formats fail with a host-visible error instead
+- [x] Unsupported Adobe pixel formats fail with a host-visible error instead
       of silent color corruption.
-- [ ] Runtime session identity includes the Adobe host surface and effect
+- [x] Runtime session identity includes the Adobe host surface and effect
       identity so Adobe renders cannot accidentally share state with OFX nodes
       or a different Adobe effect identity.
-- [ ] Unit tests cover frame conversion, unsupported-format failures, and
+- [x] Unit tests cover frame conversion, unsupported-format failures, and
       prepare-request construction without requiring Adobe, GPU, I/O, or model
       files.
-- [ ] Integration or smoke coverage proves the bridge can talk to the runtime
+- [x] Integration or smoke coverage proves the bridge can talk to the runtime
       service health endpoint when the service binary is staged.
 
 ## Plan
@@ -53,15 +53,15 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 
 - [x] Identify the narrow reusable seam between `src/plugins/ofx` runtime
       client code and Adobe plugin needs.
-- [ ] Add Adobe bridge source under the architecture-approved Adobe plugin
+- [x] Add Adobe bridge source under the architecture-approved Adobe plugin
       directory.
-- [ ] Add frame-view conversion helpers for Adobe worlds and host pixel formats.
-- [ ] Add prepare-request mapping for CorridorKey quality, model, screen color,
+- [x] Add frame-view conversion helpers for Adobe worlds and host pixel formats.
+- [x] Add prepare-request mapping for CorridorKey quality, model, screen color,
       alpha hint, and post-process controls.
-- [ ] Add tests for conversion and request construction.
-- [ ] Add an import/link audit script or test that blocks backend libraries from
+- [x] Add tests for conversion and request construction.
+- [x] Add an import/link audit script or test that blocks backend libraries from
       the Adobe plugin module.
-- [ ] Run focused unit tests and the runtime-service health smoke.
+- [x] Run focused unit tests and the runtime-service health smoke.
 
 ## Notes
 
@@ -110,12 +110,39 @@ Deepening follow-up for the reusable runtime seam:
   forwarded `-SkipNsisInstaller -BuildDir C:\Dev\CorridorKey-Runtime\build\debug`.
   The staged RTX bundle validation found the new host-plugin runtime server,
   verified its PE imports, and completed packaged doctor as healthy.
+- Added `src/plugins/adobe/adobe_bridge.hpp`,
+  `src/plugins/adobe/adobe_bridge.cpp`, and
+  `src/plugins/adobe/adobe_runtime_bridge.cpp` as the Adobe host adapter over
+  the shared App-layer `HostPluginRuntimeClient`. The bridge exposes health,
+  prepare-session, process-frame, and release-session operations with
+  `Result<T>` errors and keeps the Adobe target linked only to
+  `corridorkey_common`.
+- Adobe frame conversion is SDK-agnostic and covers After Effects ARGB32,
+  ARGB64, ARGB128, and Premiere BGRA32. It copies into CorridorKey
+  `ImageBuffer` RGB plus alpha-hint buffers, validates row bytes and optional
+  data size, rejects unsupported formats, and does not use `std::vector` for
+  image data.
+- Prepare-session construction scopes runtime identity as
+  `adobe:<host_surface>:<effect_identity>` and appends the caller instance id
+  only to `client_instance_id`, preventing Adobe effects from sharing state
+  with OFX nodes or different Adobe effect identities.
+- Screen color remains represented by the selected model artifact, alpha hint
+  is derived from the Adobe source alpha channel, and post-process controls stay
+  in the `InferenceParams` passed through `process_frame`; the bridge preserves
+  those existing App/Core contracts instead of adding Adobe-specific policy.
+- Verification passed:
+  `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
+  `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and
+  `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`,
+  plus `ctest --test-dir build\debug -R regression_adobe_cmake_scaffold --output-on-failure`.
+  `dumpbin /dependents build\debug\src\plugins\adobe\corridorkey_adobe.aex`
+  reported only `WS2_32.dll` and `KERNEL32.dll`.
 
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
-- [ ] Local tests pass (or N/A documented in Notes)
+- [x] Local tests pass (or N/A documented in Notes)
 - [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
-- [ ] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] No orphan `TODO`/`FIXME` introduced
+- [x] Status updated to `done` and Notes log closes the task

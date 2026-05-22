@@ -8,7 +8,10 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_plugin_descriptors.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_bridge.cpp
     test_alpha_edge.cpp
+    test_adobe_bridge.cpp
     test_color_utils.cpp
     test_coarse_to_fine_policy.cpp
     test_despill.cpp

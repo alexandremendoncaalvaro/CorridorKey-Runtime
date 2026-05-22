@@ -22,6 +22,9 @@ configure_file(
 )
 
 add_library(corridorkey_adobe MODULE
+    adobe_bridge.cpp
+    adobe_bridge.hpp
+    adobe_runtime_bridge.cpp
     adobe_effect.cpp
 )
 

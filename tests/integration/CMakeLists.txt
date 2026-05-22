@@ -2,6 +2,9 @@
 
 add_executable(test_integration
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_bridge.cpp
+    test_adobe_runtime_bridge.cpp
     test_cache_fallback.cpp
     test_doctor_report.cpp
     test_engine_fallback_policy.cpp
@@ -54,6 +57,13 @@ target_compile_definitions(test_integration PRIVATE
     OFX_PLUGIN_PATH="$<TARGET_FILE:corridorkey_ofx>"
     HOST_PLUGIN_RUNTIME_TEST_QUICK_EXIT_PATH="$<TARGET_FILE:host_plugin_runtime_test_quick_exit>"
 )
+
+if(TARGET corridorkey_host_plugin_runtime_server)
+    target_compile_definitions(test_integration PRIVATE
+        HOST_PLUGIN_RUNTIME_SERVER_PATH="$<TARGET_FILE:corridorkey_host_plugin_runtime_server>"
+    )
+    add_dependencies(test_integration corridorkey_host_plugin_runtime_server)
+endif()
 
 # test_ofx_plugin_exceptions dlopen's the built OFX bundle at runtime — the
 # generator-expression path alone does not imply a build-order edge, so without
