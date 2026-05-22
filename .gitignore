@@ -46,6 +46,7 @@ vendor/CUDA-*/
 vendor/openfx/
 vendor/onnxruntime-universal/
 vendor/torchtrt-windows/
+vendor/adobe-after-effects-sdk/
 
 # Compiled objects
 *.o
@@ -96,6 +97,7 @@ __pycache__/
 uv.lock
 .env
 .claude/
+.agentic/reviews/
 
 # Temporary and Device names
 nul

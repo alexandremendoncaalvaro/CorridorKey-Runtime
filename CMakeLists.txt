@@ -88,6 +88,19 @@ set(CORRIDORKEY_WINDOWS_ORT_ROOT "" CACHE PATH
 set(CORRIDORKEY_LINUX_ORT_ROOT "" CACHE PATH
     "Curated Linux ONNX Runtime root (vendor/onnxruntime-linux-cuda)")
 set(CORRIDORKEY_ORT_RUNTIME_DIR "" CACHE INTERNAL "Resolved ONNX Runtime runtime library directory")
+option(CORRIDORKEY_ENABLE_ADOBE_PLUGIN "Build the Adobe After Effects SDK plugin target" OFF)
+set(CORRIDORKEY_ADOBE_SDK_ROOT "" CACHE PATH "Adobe After Effects SDK root")
+include(cmake/CorridorKeyAdobeSdk.cmake)
+corridorkey_resolve_adobe_sdk()
+
+if(CORRIDORKEY_ADOBE_PLUGIN_AVAILABLE)
+    message(STATUS "Adobe plugin support enabled at: ${CORRIDORKEY_ADOBE_SDK_ROOT}")
+elseif(CORRIDORKEY_ENABLE_ADOBE_PLUGIN)
+    message(FATAL_ERROR
+        "Adobe plugin support requested but SDK files were not found. "
+        "Set CORRIDORKEY_ADOBE_SDK_ROOT to an After Effects SDK root with "
+        "Headers/Resources or Examples/Headers/Resources.")
+endif()
 
 # --- Project Rules & Standards ---
 
@@ -413,7 +426,7 @@ find_package(Catch2 3 REQUIRED)
 # --- Windows: app-local Visual C++ Redistributable ---
 #
 # Why we ship the VC++ Redist DLLs (MSVCP140.dll, VCRUNTIME140.dll, et al.)
-# next to corridorkey_ofx_runtime_server.exe inside the OFX bundle:
+# next to corridorkey_host_plugin_runtime_server.exe inside the OFX bundle:
 #
 # Foundry Nuke calls SetDllDirectory("C:\Program Files\Nuke<ver>") on its
 # own process to pin its app-local C++ runtime. Per Microsoft's documented

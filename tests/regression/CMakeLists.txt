@@ -42,3 +42,33 @@ endif()
 
 add_test(NAME regression_tests COMMAND test_regression)
 set_tests_properties(regression_tests PROPERTIES LABELS "regression")
+
+add_test(
+    NAME regression_adobe_sdk_resolution
+    COMMAND ${CMAKE_COMMAND} -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_adobe_sdk_resolution.cmake
+)
+set_tests_properties(regression_adobe_sdk_resolution PROPERTIES LABELS "regression")
+
+add_test(
+    NAME regression_adobe_pipl_metadata
+    COMMAND ${CMAKE_COMMAND} -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_adobe_pipl_metadata.cmake
+)
+set_tests_properties(regression_adobe_pipl_metadata PROPERTIES LABELS "regression")
+
+if(WIN32)
+    add_test(
+        NAME regression_adobe_cmake_scaffold
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_adobe_cmake_scaffold.ps1
+    )
+    set_tests_properties(regression_adobe_cmake_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_adobe_windows_wrapper_args
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_adobe_windows_wrapper_args.ps1
+    )
+    set_tests_properties(regression_adobe_windows_wrapper_args PROPERTIES LABELS "regression")
+endif()

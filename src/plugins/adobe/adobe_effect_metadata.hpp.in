@@ -1,0 +1,19 @@
+#pragma once
+
+#include <cstdint>
+
+namespace corridorkey::adobe {
+
+inline constexpr char kEffectDisplayName[] = "@CORRIDORKEY_ADOBE_EFFECT_NAME@";
+inline constexpr char kEffectCategory[] = "@CORRIDORKEY_ADOBE_EFFECT_CATEGORY@";
+inline constexpr char kEffectMatchName[] = "@CORRIDORKEY_ADOBE_EFFECT_MATCH_NAME@";
+inline constexpr std::int32_t kEffectVersionMajor = @CORRIDORKEY_ADOBE_EFFECT_VERSION_MAJOR@;
+inline constexpr std::int32_t kEffectVersionMinor = @CORRIDORKEY_ADOBE_EFFECT_VERSION_MINOR@;
+inline constexpr std::int32_t kEffectVersionBug = @CORRIDORKEY_ADOBE_EFFECT_VERSION_BUG@;
+inline constexpr std::int32_t kEffectVersionStage = @CORRIDORKEY_ADOBE_EFFECT_VERSION_STAGE@;
+inline constexpr std::int32_t kEffectVersionBuild = @CORRIDORKEY_ADOBE_EFFECT_VERSION_BUILD@;
+inline constexpr std::int32_t kGlobalOutFlags = @CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS@;
+inline constexpr std::int32_t kGlobalOutFlags2 = @CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS2@;
+inline constexpr std::int32_t kEffectParameterCount = 1;
+
+}  // namespace corridorkey::adobe

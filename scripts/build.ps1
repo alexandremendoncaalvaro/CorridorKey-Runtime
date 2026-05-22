@@ -1,7 +1,9 @@
 param(
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
-    [string]$DisplayVersionLabel = ""
+    [string]$DisplayVersionLabel = "",
+    [switch]$EnableAdobePlugin,
+    [string]$AdobeSdkRoot = ""
 )
 
 Set-StrictMode -Version Latest
@@ -24,6 +26,23 @@ if ($isWindowsHost) {
 }
 
 $configureArgs = @("--preset", $Preset)
+
+if ($EnableAdobePlugin) {
+    if ([string]::IsNullOrWhiteSpace($AdobeSdkRoot)) {
+        throw "-AdobeSdkRoot is required when -EnableAdobePlugin is set."
+    }
+    if (-not (Test-Path $AdobeSdkRoot)) {
+        throw "Adobe SDK root does not exist: $AdobeSdkRoot"
+    }
+    $resolvedAdobeSdkRoot = (Resolve-Path $AdobeSdkRoot).Path
+    $configureArgs += "-DCORRIDORKEY_ENABLE_ADOBE_PLUGIN=ON"
+    $configureArgs += "-DCORRIDORKEY_ADOBE_SDK_ROOT=$resolvedAdobeSdkRoot"
+    Write-Host "[build] Adobe plugin enabled with SDK: $resolvedAdobeSdkRoot" -ForegroundColor Yellow
+} elseif (-not [string]::IsNullOrWhiteSpace($AdobeSdkRoot)) {
+    throw "-AdobeSdkRoot requires -EnableAdobePlugin."
+} else {
+    $configureArgs += "-DCORRIDORKEY_ENABLE_ADOBE_PLUGIN=OFF"
+}
 
 if ($isWindowsHost) {
     $windowsOrtRoot = Resolve-CorridorKeyWindowsOrtRoot -RepoRoot $repoRoot -PreferredTrack "any" -AllowEnvironmentOverride

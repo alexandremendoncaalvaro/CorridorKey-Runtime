@@ -15,6 +15,8 @@ param(
     # Inno Setup installer from the same staged OFX bundle.
     [ValidateSet("", "online", "offline")]
     [string]$Flavor = "",
+    [switch]$EnableAdobePlugin,
+    [string]$AdobeSdkRoot = "",
     [string[]]$ForwardArguments = @()
 )
 
@@ -23,6 +25,10 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+
+if ($Task -ne "build" -and ($EnableAdobePlugin -or -not [string]::IsNullOrWhiteSpace($AdobeSdkRoot))) {
+    throw "-EnableAdobePlugin and -AdobeSdkRoot are supported only with -Task build."
+}
 
 function Assert-CorridorKeyWindowsReleaseLabelFormat {
     param(
@@ -173,6 +179,14 @@ switch ($Task) {
         $arguments = @("-Preset", $Preset)
         if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
             $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        if ($EnableAdobePlugin) {
+            $arguments += @("-EnableAdobePlugin")
+            if (-not [string]::IsNullOrWhiteSpace($AdobeSdkRoot)) {
+                $arguments += @("-AdobeSdkRoot", $AdobeSdkRoot)
+            }
+        } elseif (-not [string]::IsNullOrWhiteSpace($AdobeSdkRoot)) {
+            throw "-AdobeSdkRoot requires -EnableAdobePlugin."
         }
         Invoke-CorridorKeyScript -ScriptName "build.ps1" -Arguments $arguments
         break

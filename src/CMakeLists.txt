@@ -16,7 +16,7 @@
 # way to prevent the host's CUDA from binding to our delay-loaded sibling
 # DLLs and tripping ERROR_DLL_INIT_FAILED (1114) inside the TensorRT-RTX
 # provider's DllMain. All inference work runs out-of-process in
-# corridorkey_ofx_runtime_server.exe, which has its own loader namespace.
+# corridorkey_host_plugin_runtime_server.exe, which has its own loader namespace.
 add_library(corridorkey_common STATIC)
 target_compile_definitions(corridorkey_common PUBLIC CORRIDORKEY_STATIC_DEFINE)
 corridorkey_apply_windows_common_compile_defs(corridorkey_common)
@@ -141,7 +141,7 @@ endif()
 target_compile_definitions(corridorkey_common PRIVATE CORRIDORKEY_EXPORTS)
 
 # corridorkey_core depends PUBLIC on corridorkey_common so existing consumers
-# (CLI, OFX runtime server) keep working with a single link line.
+# (CLI, host plugin runtime server) keep working with a single link line.
 target_link_libraries(corridorkey_core PUBLIC corridorkey_common)
 
 target_sources(corridorkey_common PRIVATE
@@ -167,6 +167,9 @@ add_subdirectory(app)
 add_subdirectory(frame_io)
 add_subdirectory(post_process)
 add_subdirectory(plugins/ofx)
+if(CORRIDORKEY_ADOBE_PLUGIN_AVAILABLE)
+    add_subdirectory(plugins/adobe)
+endif()
 
 # Static library for testing (exposes all symbols without CORRIDORKEY_API)
 if(BUILD_TESTING)
