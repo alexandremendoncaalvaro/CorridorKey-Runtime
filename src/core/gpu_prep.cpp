@@ -227,15 +227,11 @@ void copy_image_rows_to_pinned(Image image, float* dst, int copied_channels) {
     });
 }
 
-Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb, Image hint,
-                                                  int model_width, int model_height,
-                                                  const std::array<float, 3>& mean,
-                                                  const std::array<float, 3>& inv_stddev,
-                                                  cudaStream_t stream,
-                                                  const NppStreamContext& npp_context,
-                                                  bool synchronize,
-                                                  bool ready_event_on_current_stream,
-                                                  const StageTimingCallback& on_stage) {
+Result<GpuPreparedInput> prepare_inputs_on_device(
+    GpuPrepState& state, Image rgb, Image hint, int model_width, int model_height,
+    const std::array<float, 3>& mean, const std::array<float, 3>& inv_stddev, cudaStream_t stream,
+    const NppStreamContext& npp_context, bool synchronize, bool ready_event_on_current_stream,
+    const StageTimingCallback& on_stage) {
     if (rgb.empty() || hint.empty() || rgb.channels < 3 || hint.channels < 1) {
         return Unexpected(
             Error{ErrorCode::InferenceFailed, "Invalid input images for GPU preparation"});
@@ -252,8 +248,8 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
 
     const size_t model_pixels = static_cast<size_t>(model_width) * model_height;
 
-    const bool use_pinned_upload = !state.src_rgb_host_pinned.empty() &&
-                                   !state.src_hint_host_pinned.empty();
+    const bool use_pinned_upload =
+        !state.src_rgb_host_pinned.empty() && !state.src_hint_host_pinned.empty();
     const float* upload_rgb_src = rgb.data.data();
     const float* upload_hint_src = hint.data.data();
 
@@ -268,11 +264,12 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
 
     if (!synchronize) {
         cudaError_t cuda_err = cudaSuccess;
-        common::measure_stage(on_stage, "gpu_prepare_start_event_record",
-                              [&]() { cuda_err = cudaEventRecord(state.prep_start_event, stream); });
+        common::measure_stage(on_stage, "gpu_prepare_start_event_record", [&]() {
+            cuda_err = cudaEventRecord(state.prep_start_event, stream);
+        });
         if (cuda_err != cudaSuccess) {
-            return Unexpected(Error{ErrorCode::InferenceFailed,
-                                    "GPU prep start event recording failed"});
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed, "GPU prep start event recording failed"});
         }
     }
 
@@ -395,11 +392,12 @@ Result<GpuPreparedInput> prepare_inputs_on_device(GpuPrepState& state, Image rgb
                 Error{ErrorCode::InferenceFailed, "GPU prep completion event is unavailable"});
         }
         cudaError_t cuda_err = cudaSuccess;
-        common::measure_stage(on_stage, "gpu_prepare_event_record",
-                              [&]() { cuda_err = cudaEventRecord(state.completion_event, stream); });
+        common::measure_stage(on_stage, "gpu_prepare_event_record", [&]() {
+            cuda_err = cudaEventRecord(state.completion_event, stream);
+        });
         if (cuda_err != cudaSuccess) {
-            return Unexpected(Error{ErrorCode::InferenceFailed,
-                                    "GPU prep completion event recording failed"});
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed, "GPU prep completion event recording failed"});
         }
     }
 
@@ -495,8 +493,8 @@ Result<GpuPreparedInput> GpuInputPrep::prepare_inputs_device(Image rgb, Image hi
             Error{ErrorCode::HardwareNotSupported, "GPU input preparation is not available"});
     }
     return prepare_inputs_on_device(*m_state, rgb, hint, model_width, model_height, mean,
-                                    inv_stddev, m_state->stream, m_state->npp_context, false,
-                                    false, on_stage);
+                                    inv_stddev, m_state->stream, m_state->npp_context, false, false,
+                                    on_stage);
 #else
     (void)rgb;
     (void)hint;

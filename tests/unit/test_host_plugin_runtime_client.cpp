@@ -1,10 +1,10 @@
 #include <catch2/catch_all.hpp>
 
+#include "app/host_plugin_runtime_client.hpp"
+#include "app/host_plugin_runtime_family.hpp"
 #include "app/host_plugin_runtime_service.hpp"
 #include "app/host_plugin_session_broker.hpp"
 #include "common/host_plugin_runtime_defaults.hpp"
-#include "app/host_plugin_runtime_client.hpp"
-#include "app/host_plugin_runtime_family.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -69,14 +69,14 @@ TEST_CASE("host plugin runtime family separates ORT TensorRT and TorchTRT artifa
                 Backend::CPU, std::filesystem::path("corridorkey_fp16_2048.onnx")) ==
             HostPluginRuntimeFamily::Other);
 
-    REQUIRE(should_restart_for_host_plugin_runtime_family_switch(HostPluginRuntimeFamily::OrtTensorRt,
-                                                         HostPluginRuntimeFamily::TorchTrt));
-    REQUIRE(should_restart_for_host_plugin_runtime_family_switch(HostPluginRuntimeFamily::TorchTrt,
-                                                         HostPluginRuntimeFamily::OrtTensorRt));
-    REQUIRE_FALSE(should_restart_for_host_plugin_runtime_family_switch(HostPluginRuntimeFamily::OrtTensorRt,
-                                                               HostPluginRuntimeFamily::OrtTensorRt));
-    REQUIRE_FALSE(should_restart_for_host_plugin_runtime_family_switch(HostPluginRuntimeFamily::Other,
-                                                               HostPluginRuntimeFamily::TorchTrt));
+    REQUIRE(should_restart_for_host_plugin_runtime_family_switch(
+        HostPluginRuntimeFamily::OrtTensorRt, HostPluginRuntimeFamily::TorchTrt));
+    REQUIRE(should_restart_for_host_plugin_runtime_family_switch(
+        HostPluginRuntimeFamily::TorchTrt, HostPluginRuntimeFamily::OrtTensorRt));
+    REQUIRE_FALSE(should_restart_for_host_plugin_runtime_family_switch(
+        HostPluginRuntimeFamily::OrtTensorRt, HostPluginRuntimeFamily::OrtTensorRt));
+    REQUIRE_FALSE(should_restart_for_host_plugin_runtime_family_switch(
+        HostPluginRuntimeFamily::Other, HostPluginRuntimeFamily::TorchTrt));
 }
 
 TEST_CASE("host plugin runtime family follows the prepare request executable artifact",
@@ -91,7 +91,8 @@ TEST_CASE("host plugin runtime family follows the prepare request executable art
 
     REQUIRE(host_plugin_runtime_family_for_prepare_request(green_request) ==
             HostPluginRuntimeFamily::OrtTensorRt);
-    REQUIRE(host_plugin_runtime_family_for_prepare_request(blue_request) == HostPluginRuntimeFamily::TorchTrt);
+    REQUIRE(host_plugin_runtime_family_for_prepare_request(blue_request) ==
+            HostPluginRuntimeFamily::TorchTrt);
     REQUIRE(should_restart_for_host_plugin_runtime_family_switch(
         host_plugin_runtime_family_for_prepare_request(green_request),
         host_plugin_runtime_family_for_prepare_request(blue_request)));

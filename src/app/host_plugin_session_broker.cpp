@@ -39,7 +39,7 @@ void refresh_engine_snapshot(HostPluginRuntimeSessionSnapshot& snapshot, const E
 }
 
 HostPluginRuntimeSessionSnapshot response_snapshot(const HostPluginRuntimeSessionSnapshot& snapshot,
-                                            bool reused_existing_session) {
+                                                   bool reused_existing_session) {
     auto response = snapshot;
     response.reused_existing_session = reused_existing_session;
     return response;
@@ -179,8 +179,8 @@ Result<HostPluginRuntimePrepareSessionResponse> HostPluginSessionBroker::prepare
         refresh_engine_snapshot(existing->second.snapshot, *existing->second.engine);
         existing->second.snapshot.ref_count += 1;
         existing->second.last_used_at = now();
-        return HostPluginRuntimePrepareSessionResponse{response_snapshot(existing->second.snapshot, true),
-                                                {}};
+        return HostPluginRuntimePrepareSessionResponse{
+            response_snapshot(existing->second.snapshot, true), {}};
     }
 
     // Capture the current MLX / Metal memory state. This is the input to
@@ -331,10 +331,11 @@ Result<HostPluginRuntimeRenderFrameResponse> HostPluginSessionBroker::render_fra
     refresh_engine_snapshot(session->second.snapshot, *session->second.engine);
     session->second.last_used_at = now();
     return HostPluginRuntimeRenderFrameResponse{response_snapshot(session->second.snapshot, false),
-                                         timings};
+                                                timings};
 }
 
-Result<void> HostPluginSessionBroker::release_session(const HostPluginRuntimeReleaseSessionRequest& request) {
+Result<void> HostPluginSessionBroker::release_session(
+    const HostPluginRuntimeReleaseSessionRequest& request) {
     auto session = m_sessions.find(request.session_id);
     if (session == m_sessions.end()) {
         return {};
@@ -377,7 +378,8 @@ std::size_t HostPluginSessionBroker::cleanup_idle_sessions() {
     return removed_sessions;
 }
 
-std::string HostPluginSessionBroker::session_key(const HostPluginRuntimePrepareSessionRequest& request) {
+std::string HostPluginSessionBroker::session_key(
+    const HostPluginRuntimePrepareSessionRequest& request) {
     std::error_code error;
     auto canonical_model_path = std::filesystem::weakly_canonical(request.model_path, error);
     if (error) {
@@ -395,7 +397,8 @@ std::string HostPluginSessionBroker::session_key(const HostPluginRuntimePrepareS
         request.node_identity));
 }
 
-std::vector<StageTiming> HostPluginSessionBroker::collect_stage_timings(StageTimingCallback& callback) {
+std::vector<StageTiming> HostPluginSessionBroker::collect_stage_timings(
+    StageTimingCallback& callback) {
     (void)callback;
     return {};
 }

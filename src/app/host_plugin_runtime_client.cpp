@@ -5,9 +5,9 @@
 #include <thread>
 #include <vector>
 
+#include "app/host_plugin_runtime_family.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
-#include "app/host_plugin_runtime_family.hpp"
 
 #ifdef __APPLE__
 #include <pthread.h>
@@ -69,7 +69,8 @@ bool same_prepare_request(const HostPluginRuntimePrepareSessionRequest& lhs,
 }
 
 HostPluginRuntimeSessionSnapshot with_prepare_request_metadata(
-    HostPluginRuntimeSessionSnapshot snapshot, const HostPluginRuntimePrepareSessionRequest& request) {
+    HostPluginRuntimeSessionSnapshot snapshot,
+    const HostPluginRuntimePrepareSessionRequest& request) {
     snapshot.model_path = request.model_path;
     snapshot.artifact_name = request.artifact_name;
     snapshot.requested_device = request.requested_device;
@@ -109,7 +110,8 @@ bool is_timeout_error(const Error& error) {
 
 bool is_protocol_mismatch_error(const Error& error) {
     return error.code == ErrorCode::InvalidParameters &&
-           error.message.find("Unsupported host plugin runtime protocol version") != std::string::npos;
+           error.message.find("Unsupported host plugin runtime protocol version") !=
+               std::string::npos;
 }
 
 bool is_restartable_server_error(const Error& error) {
@@ -220,7 +222,8 @@ void replay_stage_timings(const std::vector<StageTiming>& timings, StageTimingCa
 
 std::filesystem::path resolve_host_plugin_runtime_server_binary(
     const std::filesystem::path& plugin_module_path) {
-    if (auto override_path = common::environment_variable_copy("CORRIDORKEY_HOST_PLUGIN_RUNTIME_SERVER");
+    if (auto override_path =
+            common::environment_variable_copy("CORRIDORKEY_HOST_PLUGIN_RUNTIME_SERVER");
         override_path.has_value()) {
         return std::filesystem::path(*override_path);
     }
@@ -243,7 +246,8 @@ std::filesystem::path resolve_host_plugin_runtime_server_binary(
 
 Result<std::unique_ptr<HostPluginRuntimeClient>> HostPluginRuntimeClient::create(
     HostPluginRuntimeClientOptions options) {
-    auto client = std::unique_ptr<HostPluginRuntimeClient>(new HostPluginRuntimeClient(std::move(options)));
+    auto client =
+        std::unique_ptr<HostPluginRuntimeClient>(new HostPluginRuntimeClient(std::move(options)));
     return client;
 }
 
@@ -293,7 +297,8 @@ Result<HostPluginRuntimePrepareSessionResponse> HostPluginRuntimeClient::prepare
         HostPluginRuntimeFamily current_family = HostPluginRuntimeFamily::Other;
         HostPluginRuntimeFamily next_family = HostPluginRuntimeFamily::Other;
         if (m_last_prepare_request.has_value()) {
-            current_family = host_plugin_runtime_family_for_prepare_request(*m_last_prepare_request);
+            current_family =
+                host_plugin_runtime_family_for_prepare_request(*m_last_prepare_request);
             next_family = host_plugin_runtime_family_for_prepare_request(request);
             requires_family_restart =
                 should_restart_for_host_plugin_runtime_family_switch(current_family, next_family);
@@ -305,9 +310,10 @@ Result<HostPluginRuntimePrepareSessionResponse> HostPluginRuntimeClient::prepare
         }
         if (requires_family_restart) {
             const std::string reason = std::string("runtime_family_switch from=") +
-                                       host_plugin_runtime_family_label(current_family) + " to=" +
-                                       host_plugin_runtime_family_label(next_family);
-            log_message("host_plugin_runtime_client", "event=runtime_family_switch_restart " + reason);
+                                       host_plugin_runtime_family_label(current_family) +
+                                       " to=" + host_plugin_runtime_family_label(next_family);
+            log_message("host_plugin_runtime_client",
+                        "event=runtime_family_switch_restart " + reason);
             auto restart_result = restart_server(reason);
             if (!restart_result) {
                 return Unexpected<Error>(restart_result.error());
@@ -349,10 +355,11 @@ Result<HostPluginRuntimePrepareSessionResponse> HostPluginRuntimeClient::prepare
     return parsed;
 }
 
-Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb, const Image& alpha_hint,
-                                                    const InferenceParams& params,
-                                                    std::uint64_t render_index,
-                                                    StageTimingCallback on_stage) {
+Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb,
+                                                           const Image& alpha_hint,
+                                                           const InferenceParams& params,
+                                                           std::uint64_t render_index,
+                                                           StageTimingCallback on_stage) {
     if (m_session.session_id.empty()) {
         return Unexpected<Error>(
             Error{ErrorCode::InvalidParameters, "host plugin runtime session is not prepared."});
@@ -535,11 +542,12 @@ Result<void> HostPluginRuntimeClient::ensure_server_running() {
             // process object first turns the dead-sidecar case into a
             // sub-millisecond return.
             if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
-                const std::string reason = "host plugin runtime server process (pid=" +
-                                           std::to_string(m_server_pid) +
-                                           ") exited during startup";
-                log_message("host_plugin_runtime_client", "event=server_exited_during_startup pid=" +
-                                                      std::to_string(m_server_pid));
+                const std::string reason =
+                    "host plugin runtime server process (pid=" + std::to_string(m_server_pid) +
+                    ") exited during startup";
+                log_message(
+                    "host_plugin_runtime_client",
+                    "event=server_exited_during_startup pid=" + std::to_string(m_server_pid));
                 return Unexpected<Error>(Error{
                     ErrorCode::IoError,
                     compose_launch_failure_message(reason, m_options.endpoint,
@@ -564,9 +572,9 @@ Result<void> HostPluginRuntimeClient::ensure_server_running() {
 
         return Unexpected<Error>(Error{
             ErrorCode::IoError,
-            compose_launch_failure_message("Timed out waiting for the host plugin runtime server to start",
-                                           m_options.endpoint, m_options.launch_timeout_ms,
-                                           m_options.server_binary),
+            compose_launch_failure_message(
+                "Timed out waiting for the host plugin runtime server to start", m_options.endpoint,
+                m_options.launch_timeout_ms, m_options.server_binary),
         });
     };
 
@@ -606,7 +614,7 @@ Result<void> HostPluginRuntimeClient::ensure_server_running() {
 }
 
 Result<nlohmann::json> HostPluginRuntimeClient::send_command(HostPluginRuntimeCommand command,
-                                                      const nlohmann::json& payload) {
+                                                             const nlohmann::json& payload) {
     auto ensure_result = ensure_server_running();
     if (!ensure_result) {
         return Unexpected<Error>(ensure_result.error());
@@ -620,15 +628,13 @@ Result<nlohmann::json> HostPluginRuntimeClient::send_command_without_launch(
     return send_command_without_launch(command, payload, m_options.request_timeout_ms);
 }
 
-Result<nlohmann::json> HostPluginRuntimeClient::send_command_without_launch(HostPluginRuntimeCommand command,
-                                                                     const nlohmann::json& payload,
-                                                                     int timeout_ms) const {
+Result<nlohmann::json> HostPluginRuntimeClient::send_command_without_launch(
+    HostPluginRuntimeCommand command, const nlohmann::json& payload, int timeout_ms) const {
     HostPluginRuntimeRequestEnvelope envelope;
     envelope.command = command;
     envelope.payload = payload;
 
-    auto response =
-        common::send_json_request(m_options.endpoint, to_json(envelope), timeout_ms);
+    auto response = common::send_json_request(m_options.endpoint, to_json(envelope), timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
@@ -638,7 +644,8 @@ Result<nlohmann::json> HostPluginRuntimeClient::send_command_without_launch(Host
 Result<void> HostPluginRuntimeClient::recover_runtime_session(StageTimingCallback on_stage) {
     if (!m_last_prepare_request.has_value()) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "The host plugin runtime session was lost and cannot be recovered."});
+            Error{ErrorCode::IoError,
+                  "The host plugin runtime session was lost and cannot be recovered."});
     }
 
     log_message("host_plugin_runtime_client", "event=recover_session_begin");
@@ -656,9 +663,8 @@ Result<void> HostPluginRuntimeClient::recover_runtime_session(StageTimingCallbac
     if (outgoing.prepare_timeout_ms <= 0) {
         outgoing.prepare_timeout_ms = (m_options.prepare_timeout_ms * 9) / 10;
     }
-    auto response =
-        send_command_without_launch(HostPluginRuntimeCommand::PrepareSession, to_json(outgoing),
-                                    m_options.prepare_timeout_ms);
+    auto response = send_command_without_launch(HostPluginRuntimeCommand::PrepareSession,
+                                                to_json(outgoing), m_options.prepare_timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
@@ -678,8 +684,9 @@ Result<void> HostPluginRuntimeClient::recover_runtime_session(StageTimingCallbac
 }
 
 Result<void> HostPluginRuntimeClient::restart_server(const std::string& reason) {
-    log_message("host_plugin_runtime_client", "event=restart_server_begin pid=" +
-                                          std::to_string(m_server_pid) + " reason=" + reason);
+    log_message(
+        "host_plugin_runtime_client",
+        "event=restart_server_begin pid=" + std::to_string(m_server_pid) + " reason=" + reason);
     auto terminate_result = terminate_server_process(m_server_pid);
     if (!terminate_result) {
         return Unexpected<Error>(terminate_result.error());
@@ -705,8 +712,8 @@ Result<void> HostPluginRuntimeClient::restart_server(const std::string& reason) 
             const std::string exit_reason = "Restarted host plugin runtime server process (pid=" +
                                             std::to_string(m_server_pid) +
                                             ") exited during startup";
-            log_message("host_plugin_runtime_client", "event=restart_server_exited pid=" +
-                                                  std::to_string(m_server_pid));
+            log_message("host_plugin_runtime_client",
+                        "event=restart_server_exited pid=" + std::to_string(m_server_pid));
             return Unexpected<Error>(Error{
                 ErrorCode::IoError,
                 compose_launch_failure_message(exit_reason, m_options.endpoint,
@@ -731,17 +738,17 @@ Result<void> HostPluginRuntimeClient::restart_server(const std::string& reason) 
 
     return Unexpected<Error>(Error{
         ErrorCode::IoError,
-        compose_launch_failure_message("Timed out waiting for the restarted host plugin runtime server",
-                                       m_options.endpoint, m_options.launch_timeout_ms,
-                                       m_options.server_binary),
+        compose_launch_failure_message(
+            "Timed out waiting for the restarted host plugin runtime server", m_options.endpoint,
+            m_options.launch_timeout_ms, m_options.server_binary),
     });
 }
 
 Result<void> HostPluginRuntimeClient::launch_server() {
     if (m_options.server_binary.empty() || !std::filesystem::exists(m_options.server_binary)) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError,
-                  "host plugin runtime server binary was not found: " + m_options.server_binary.string()});
+            Error{ErrorCode::IoError, "host plugin runtime server binary was not found: " +
+                                          m_options.server_binary.string()});
     }
 
     log_message("host_plugin_runtime_client",
@@ -807,7 +814,7 @@ Result<void> HostPluginRuntimeClient::launch_server() {
     int caller_relative = 0;
     pthread_get_qos_class_np(pthread_self(), &caller_qos, &caller_relative);
     log_message("host_plugin_runtime_client", std::string("event=launch_server_parent_qos qos=") +
-                                          std::to_string(static_cast<int>(caller_qos)));
+                                                  std::to_string(static_cast<int>(caller_qos)));
     pthread_override_t qos_override =
         pthread_override_qos_class_start_np(pthread_self(), QOS_CLASS_USER_INITIATED, 0);
 
@@ -866,7 +873,8 @@ void HostPluginRuntimeClient::invalidate_session(const std::string& reason) {
     m_session_server_pid = 0;
 }
 
-void HostPluginRuntimeClient::update_session_snapshot(const HostPluginRuntimeSessionSnapshot& snapshot) {
+void HostPluginRuntimeClient::update_session_snapshot(
+    const HostPluginRuntimeSessionSnapshot& snapshot) {
     m_session = snapshot;
     m_session_server_pid = m_server_pid;
 }

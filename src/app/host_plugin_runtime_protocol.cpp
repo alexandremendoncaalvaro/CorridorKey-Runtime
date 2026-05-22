@@ -29,9 +29,10 @@ Error invalid_protocol_error(const std::string& message) {
 
 Result<void> validate_protocol_version(int protocol_version) {
     if (protocol_version != kHostPluginRuntimeProtocolVersion) {
-        return Unexpected<Error>(invalid_protocol_error(
-            "Unsupported host plugin runtime protocol version: " + std::to_string(protocol_version) +
-            ". Expected " + std::to_string(kHostPluginRuntimeProtocolVersion) + "."));
+        return Unexpected<Error>(
+            invalid_protocol_error("Unsupported host plugin runtime protocol version: " +
+                                   std::to_string(protocol_version) + ". Expected " +
+                                   std::to_string(kHostPluginRuntimeProtocolVersion) + "."));
     }
     return {};
 }
@@ -452,7 +453,8 @@ nlohmann::json to_json(const HostPluginRuntimeRequestEnvelope& envelope) {
                 {"payload", envelope.payload}};
 }
 
-Result<HostPluginRuntimeRequestEnvelope> host_plugin_runtime_request_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeRequestEnvelope> host_plugin_runtime_request_from_json(
+    const nlohmann::json& json) {
     auto protocol_version = required_int(json, "protocol_version");
     if (!protocol_version) return Unexpected<Error>(protocol_version.error());
     auto protocol_valid = validate_protocol_version(*protocol_version);
@@ -473,7 +475,8 @@ nlohmann::json to_json(const HostPluginRuntimeResponseEnvelope& envelope) {
                 {"payload", envelope.payload}};
 }
 
-Result<HostPluginRuntimeResponseEnvelope> host_plugin_runtime_response_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeResponseEnvelope> host_plugin_runtime_response_from_json(
+    const nlohmann::json& json) {
     auto protocol_version = required_int(json, "protocol_version");
     if (!protocol_version) return Unexpected<Error>(protocol_version.error());
     auto protocol_valid = validate_protocol_version(*protocol_version);
@@ -651,7 +654,8 @@ nlohmann::json to_json(const HostPluginRuntimeRenderFrameRequest& request) {
                 {"render_index", request.render_index}};
 }
 
-Result<HostPluginRuntimeRenderFrameRequest> render_frame_request_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeRenderFrameRequest> render_frame_request_from_json(
+    const nlohmann::json& json) {
     auto session_id = required_string(json, "session_id");
     if (!session_id) return Unexpected<Error>(session_id.error());
     auto shared_frame_path = required_string(json, "shared_frame_path");
@@ -685,7 +689,8 @@ nlohmann::json to_json(const HostPluginRuntimeRenderFrameResponse& response) {
     return Json{{"session", to_json(response.session)}, {"timings", timings}};
 }
 
-Result<HostPluginRuntimeRenderFrameResponse> render_frame_response_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeRenderFrameResponse> render_frame_response_from_json(
+    const nlohmann::json& json) {
     auto session_json = required_object(json, "session");
     if (!session_json) return Unexpected<Error>(session_json.error());
     auto session = session_snapshot_from_json(*session_json);

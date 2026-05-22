@@ -389,8 +389,8 @@ TEST_CASE("fixed TensorRT abort predicate only trips on the exact requested arti
         Backend::TensorRT, kQualityMaximum, false, fallback_selection));
     REQUIRE_FALSE(should_abort_quality_fallback_after_compile_failure(
         Backend::TensorRT, kQualityAuto, false, exact_selection));
-    REQUIRE(should_abort_quality_fallback_after_compile_failure(
-        Backend::TensorRT, kQualityMaximum, false, dynamic_blue_selection));
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(Backend::TensorRT, kQualityMaximum,
+                                                                false, dynamic_blue_selection));
 }
 
 TEST_CASE("auto TensorRT quality skips cached compile failures and keeps working fallback",
@@ -436,8 +436,8 @@ TEST_CASE("dynamic blue compile failure cache blocks implicit green fallback",
     QualityCompileFailureCache cache;
     record_quality_compile_failure(cache, context, candidates.front(), "blue init failed");
 
-    REQUIRE(should_abort_quality_fallback_after_compile_failure(
-        Backend::TensorRT, kQualityHigh, false, candidates.front()));
+    REQUIRE(should_abort_quality_fallback_after_compile_failure(Backend::TensorRT, kQualityHigh,
+                                                                false, candidates.front()));
     auto filtered = filter_quality_artifacts_with_compile_cache(candidates, cache, context);
     REQUIRE(filtered.empty());
 }
@@ -531,16 +531,16 @@ TEST_CASE("kQualityAuto ignores VRAM and input size after the static-default mig
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
 
-    auto selection_low_vram = select_quality_artifact(
-        temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160, 10240);
+    auto selection_low_vram = select_quality_artifact(temp_dir.path(), Backend::TensorRT,
+                                                      kQualityAuto, 4096, 2160, 10240);
     REQUIRE(selection_low_vram.has_value());
     REQUIRE(selection_low_vram->requested_resolution == 512);
     REQUIRE(selection_low_vram->effective_resolution == 512);
     REQUIRE_FALSE(selection_low_vram->used_fallback);
     REQUIRE(selection_low_vram->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 
-    auto selection_high_vram = select_quality_artifact(
-        temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160, 24576);
+    auto selection_high_vram = select_quality_artifact(temp_dir.path(), Backend::TensorRT,
+                                                       kQualityAuto, 4096, 2160, 24576);
     REQUIRE(selection_high_vram.has_value());
     REQUIRE(selection_high_vram->requested_resolution == 512);
     REQUIRE(selection_high_vram->effective_resolution == 512);
@@ -641,7 +641,8 @@ TEST_CASE("ofx defaults open new instances with source passthrough enabled",
     REQUIRE(kDefaultInputColorSpace == kInputColorAutoHostManaged);
 }
 
-TEST_CASE("host plugin runtime panel fields are read-only dynamic strings", "[unit][ofx][regression]") {
+TEST_CASE("host plugin runtime panel fields are read-only dynamic strings",
+          "[unit][ofx][regression]") {
     REQUIRE(std::string_view{kRuntimeStatusStringMode} == kOfxParamStringIsSingleLine);
     REQUIRE(kRuntimeStatusEnabled == 0);
 }
@@ -769,16 +770,14 @@ TEST_CASE("quality artifact runtime backend follows the selected file format",
     }
 
     SECTION("ONNX fallback after a TorchTRT blue attempt returns to TensorRT") {
-        REQUIRE(runtime_backend_for_quality_artifact(Backend::TorchTRT,
-                                                    std::filesystem::path{
-                                                        "corridorkey_fp16_1024.onnx"}) ==
+        REQUIRE(runtime_backend_for_quality_artifact(
+                    Backend::TorchTRT, std::filesystem::path{"corridorkey_fp16_1024.onnx"}) ==
                 Backend::TensorRT);
     }
 
     SECTION("green TensorRT ONNX selections stay on TensorRT") {
-        REQUIRE(runtime_backend_for_quality_artifact(Backend::TensorRT,
-                                                    std::filesystem::path{
-                                                        "corridorkey_fp16_1024.onnx"}) ==
+        REQUIRE(runtime_backend_for_quality_artifact(
+                    Backend::TensorRT, std::filesystem::path{"corridorkey_fp16_1024.onnx"}) ==
                 Backend::TensorRT);
     }
 }

@@ -416,8 +416,8 @@ inline std::filesystem::path host_plugin_runtime_server_log_path() {
         override_path.has_value()) {
         return std::filesystem::path(*override_path);
     }
-    return default_logs_root() /
-           ("host_plugin_runtime_server_v" + std::string(CORRIDORKEY_DISPLAY_VERSION_STRING) + ".log");
+    return default_logs_root() / ("host_plugin_runtime_server_v" +
+                                  std::string(CORRIDORKEY_DISPLAY_VERSION_STRING) + ".log");
 }
 
 // Spec 0002 task 0010 follow-up: derive a stable sidecar port per node-family

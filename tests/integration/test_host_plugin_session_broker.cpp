@@ -85,14 +85,14 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 1);
 
-    auto first_release =
-        broker.release_session(HostPluginRuntimeReleaseSessionRequest{first_prepare->session.session_id});
+    auto first_release = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{first_prepare->session.session_id});
     REQUIRE(first_release.has_value());
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 1);
 
-    auto second_release =
-        broker.release_session(HostPluginRuntimeReleaseSessionRequest{second_prepare->session.session_id});
+    auto second_release = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{second_prepare->session.session_id});
     REQUIRE(second_release.has_value());
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 0);
@@ -149,8 +149,8 @@ TEST_CASE("OFX session broker records broker writeback timing on render",
     CHECK(has_stage(render_res->timings, "frame_prepare_inputs"));
     CHECK(has_stage(render_res->timings, "host_plugin_broker_writeback"));
 
-    auto release_res =
-        broker.release_session(HostPluginRuntimeReleaseSessionRequest{prepare_res->session.session_id});
+    auto release_res = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{prepare_res->session.session_id});
     REQUIRE(release_res.has_value());
 }
 
@@ -202,14 +202,14 @@ TEST_CASE("OFX session broker keys sessions by node identity",
     CHECK(green_again->session.session_id == green_prepare->session.session_id);
     CHECK(green_again->session.session_id != blue_prepare->session.session_id);
 
-    auto release_green =
-        broker.release_session(HostPluginRuntimeReleaseSessionRequest{green_prepare->session.session_id});
+    auto release_green = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{green_prepare->session.session_id});
     REQUIRE(release_green.has_value());
     auto release_green_again = broker.release_session(
         HostPluginRuntimeReleaseSessionRequest{green_again->session.session_id});
     REQUIRE(release_green_again.has_value());
-    auto release_blue =
-        broker.release_session(HostPluginRuntimeReleaseSessionRequest{blue_prepare->session.session_id});
+    auto release_blue = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{blue_prepare->session.session_id});
     REQUIRE(release_blue.has_value());
 }
 

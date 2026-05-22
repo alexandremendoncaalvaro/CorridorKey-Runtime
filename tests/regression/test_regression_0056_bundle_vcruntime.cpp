@@ -55,11 +55,7 @@ namespace {
 // blocking; the core MSVCP140 + VCRUNTIME140 entries are what protect against
 // the Issue #56 crash.
 constexpr std::array<const char*, 5> kRequiredRedistNames = {
-    "MSVCP140.dll",
-    "MSVCP140_1.dll",
-    "MSVCP140_2.dll",
-    "VCRUNTIME140.dll",
-    "VCRUNTIME140_1.dll",
+    "MSVCP140.dll", "MSVCP140_1.dll", "MSVCP140_2.dll", "VCRUNTIME140.dll", "VCRUNTIME140_1.dll",
 };
 
 }  // namespace
@@ -67,9 +63,10 @@ constexpr std::array<const char*, 5> kRequiredRedistNames = {
 TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local",
           "[regression][packaging][windows]") {
 #if !defined(CORRIDORKEY_OFX_BUNDLE_WIN64_DIR)
-    SKIP("CORRIDORKEY_OFX_BUNDLE_WIN64_DIR not defined; bundle staging path "
-         "not propagated by CMake (e.g. when the test target was built without "
-         "corridorkey_ofx as a dependency).");
+    SKIP(
+        "CORRIDORKEY_OFX_BUNDLE_WIN64_DIR not defined; bundle staging path "
+        "not propagated by CMake (e.g. when the test target was built without "
+        "corridorkey_ofx as a dependency).");
 #else
     const std::filesystem::path bundle_win64_dir = CORRIDORKEY_OFX_BUNDLE_WIN64_DIR;
 
@@ -79,7 +76,8 @@ TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local
 
     for (const char* name : kRequiredRedistNames) {
         const auto candidate = bundle_win64_dir / name;
-        INFO("Expecting app-local " << name << " at " << candidate.string()
+        INFO("Expecting app-local "
+             << name << " at " << candidate.string()
              << " (Issue #56: required to win Win32 DLL search step #1 over "
              << "Foundry Nuke's app-local MSVCP140 inherited via SetDllDirectory)");
         REQUIRE(std::filesystem::exists(candidate));
@@ -107,8 +105,9 @@ TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local
 
 TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local",
           "[regression][packaging][windows]") {
-    SUCCEED("Visual C++ Redistributable bundling only applies to Windows; "
-            "non-Windows builds are not affected by Issue #56.");
+    SUCCEED(
+        "Visual C++ Redistributable bundling only applies to Windows; "
+        "non-Windows builds are not affected by Issue #56.");
 }
 
 #endif  // _WIN32

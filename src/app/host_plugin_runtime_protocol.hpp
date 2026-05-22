@@ -105,7 +105,8 @@ struct HostPluginRuntimeShutdownRequest {
 };
 
 CORRIDORKEY_API std::string host_plugin_runtime_command_to_string(HostPluginRuntimeCommand command);
-CORRIDORKEY_API Result<HostPluginRuntimeCommand> host_plugin_runtime_command_from_string(const std::string& value);
+CORRIDORKEY_API Result<HostPluginRuntimeCommand> host_plugin_runtime_command_from_string(
+    const std::string& value);
 
 CORRIDORKEY_API nlohmann::json to_json(const DeviceInfo& device);
 CORRIDORKEY_API Result<DeviceInfo> device_from_json(const nlohmann::json& json);

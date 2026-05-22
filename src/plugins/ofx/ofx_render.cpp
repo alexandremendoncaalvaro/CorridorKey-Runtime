@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 
+#include "app/host_plugin_runtime_client.hpp"
 #include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
@@ -15,7 +16,6 @@
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
-#include "app/host_plugin_runtime_client.hpp"
 #include "ofx_screen_color.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"
@@ -404,9 +404,8 @@ void bypass_with_source(const void* source_data, void* output_data, int width, i
         const auto* src_row =
             reinterpret_cast<const unsigned char*>(source_data) +
             (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(source_row_bytes));
-        auto* dst_row =
-            reinterpret_cast<unsigned char*>(output_data) +
-            (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(output_row_bytes));
+        auto* dst_row = reinterpret_cast<unsigned char*>(output_data) +
+                        (static_cast<ptrdiff_t>(y) * static_cast<ptrdiff_t>(output_row_bytes));
         std::memcpy(dst_row, src_row, static_cast<size_t>(copy_bytes));
     }
 }
@@ -565,15 +564,15 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                 lookups == 0 ? 0.0
                              : static_cast<double>(cache_stats.hits) / static_cast<double>(lookups);
             std::array<char, kCacheStatsBufferBytes> message{};
-            const int written = std::snprintf(
-                message.data(), message.size(),
-                "event=shared_cache_stats hits=%llu misses=%llu hit_rate=%.3f "
-                "stores=%llu evictions=%llu entries=%zu bytes=%zu budget=%zu",
-                static_cast<unsigned long long>(cache_stats.hits),
-                static_cast<unsigned long long>(cache_stats.misses), hit_rate,
-                static_cast<unsigned long long>(cache_stats.stores),
-                static_cast<unsigned long long>(cache_stats.evictions), cache_stats.entries,
-                cache_stats.bytes, cache_stats.byte_budget);
+            const int written =
+                std::snprintf(message.data(), message.size(),
+                              "event=shared_cache_stats hits=%llu misses=%llu hit_rate=%.3f "
+                              "stores=%llu evictions=%llu entries=%zu bytes=%zu budget=%zu",
+                              static_cast<unsigned long long>(cache_stats.hits),
+                              static_cast<unsigned long long>(cache_stats.misses), hit_rate,
+                              static_cast<unsigned long long>(cache_stats.stores),
+                              static_cast<unsigned long long>(cache_stats.evictions),
+                              cache_stats.entries, cache_stats.bytes, cache_stats.byte_budget);
             if (written > 0) {
                 log_message("render", message.data());
             }
@@ -888,10 +887,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     // model domain.
     const std::string loaded_artifact_filename =
         data->model_path.empty() ? std::string{} : data->model_path.filename().string();
-    const bool loaded_model_is_blue =
-        is_dedicated_blue_artifact_filename(loaded_artifact_filename);
-    const bool blue_canonicalization_fallback = blue_green_requested && !loaded_model_is_blue &&
-                                                !loaded_artifact_filename.empty();
+    const bool loaded_model_is_blue = is_dedicated_blue_artifact_filename(loaded_artifact_filename);
+    const bool blue_canonicalization_fallback =
+        blue_green_requested && !loaded_model_is_blue && !loaded_artifact_filename.empty();
 
     ScreenColorTransform screen_color_transform;
     if (blue_canonicalization_fallback) {
@@ -1055,15 +1053,14 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
 
     log_message("render",
                 std::string("event=postprocess_params screen_color=") +
-                    std::string(screen_color_mode_label) + " loaded_model_is_blue=" +
-                    (loaded_model_is_blue ? "1" : "0") + " requested_source_passthrough=" +
-                    (source_passthrough_requested ? "1" : "0") +
+                    std::string(screen_color_mode_label) +
+                    " loaded_model_is_blue=" + (loaded_model_is_blue ? "1" : "0") +
+                    " requested_source_passthrough=" + (source_passthrough_requested ? "1" : "0") +
                     " effective_source_passthrough=" + (params.source_passthrough ? "1" : "0") +
-                    " despill_screen_channel=" +
-                    std::to_string(params.despill_screen_channel) + " spill_method=" +
-                    std::to_string(params.spill_method) + " sp_erode_px=" +
-                    std::to_string(params.sp_erode_px) + " sp_blur_px=" +
-                    std::to_string(params.sp_blur_px));
+                    " despill_screen_channel=" + std::to_string(params.despill_screen_channel) +
+                    " spill_method=" + std::to_string(params.spill_method) +
+                    " sp_erode_px=" + std::to_string(params.sp_erode_px) +
+                    " sp_blur_px=" + std::to_string(params.sp_blur_px));
 
     data->last_guide_source = *guide_source;
     data->last_runtime_path = classify_runtime_path(data, params, width, height);

@@ -1,9 +1,8 @@
-#include "adobe_effect_metadata.hpp"
-#include "adobe_effect_parameters.hpp"
+#include <cstdio>
 
 #include "AE_Effect.h"
-
-#include <cstdio>
+#include "adobe_effect_metadata.hpp"
+#include "adobe_effect_parameters.hpp"
 
 #if defined(_WIN32)
 #define CORRIDORKEY_ADOBE_EXPORT extern "C" __declspec(dllexport)
@@ -21,19 +20,15 @@ constexpr AdobeStatus kAdobeStatusUnsupported = PF_Err_BAD_CALLBACK_PARAM;
 
 auto make_effect_version() noexcept -> A_long {
     return static_cast<A_long>(
-        PF_VERSION(corridorkey::adobe::kEffectVersionMajor,
-                   corridorkey::adobe::kEffectVersionMinor,
-                   corridorkey::adobe::kEffectVersionBug,
-                   corridorkey::adobe::kEffectVersionStage,
+        PF_VERSION(corridorkey::adobe::kEffectVersionMajor, corridorkey::adobe::kEffectVersionMinor,
+                   corridorkey::adobe::kEffectVersionBug, corridorkey::adobe::kEffectVersionStage,
                    corridorkey::adobe::kEffectVersionBuild));
 }
 
 void setup_global(PF_OutData& output_data) noexcept {
     output_data.my_version = make_effect_version();
-    output_data.out_flags =
-        static_cast<PF_OutFlags>(corridorkey::adobe::kGlobalOutFlags);
-    output_data.out_flags2 =
-        static_cast<PF_OutFlags2>(corridorkey::adobe::kGlobalOutFlags2);
+    output_data.out_flags = static_cast<PF_OutFlags>(corridorkey::adobe::kGlobalOutFlags);
+    output_data.out_flags2 = static_cast<PF_OutFlags2>(corridorkey::adobe::kGlobalOutFlags2);
 }
 
 bool is_render_selector(PF_Cmd command) noexcept {
@@ -52,12 +47,9 @@ AdobeStatus reject_unimplemented_render(PF_OutData& output_data) noexcept {
 
 }  // namespace
 
-CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command,
-                                                PF_InData* input_data,
-                                                PF_OutData* output_data,
-                                                PF_ParamDef*[],
-                                                PF_LayerDef*,
-                                                void*) noexcept {
+CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command, PF_InData* input_data,
+                                                PF_OutData* output_data, PF_ParamDef*[],
+                                                PF_LayerDef*, void*) noexcept {
     try {
         if (output_data == nullptr) {
             return command == PF_Cmd_PARAMS_SETUP || is_render_selector(command)

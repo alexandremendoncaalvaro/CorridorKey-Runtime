@@ -807,7 +807,8 @@ BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_di
             std::filesystem::exists(executable_dir / "corridorkey.exe", error) && !error;
         error.clear();
         const bool runtime_server_present =
-            std::filesystem::exists(executable_dir / "corridorkey_host_plugin_runtime_server.exe", error) &&
+            std::filesystem::exists(executable_dir / "corridorkey_host_plugin_runtime_server.exe",
+                                    error) &&
             !error;
         error.clear();
         const bool plugin_present =
@@ -1062,8 +1063,9 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                            : std::filesystem::path{};
     json["cli_binary_found"] = !cli_binary_path.empty() && std::filesystem::exists(cli_binary_path);
     json["cli_binary_path"] = cli_binary_path.string();
-    json["host_plugin_runtime_server_found"] = !host_plugin_runtime_server_path.empty() &&
-                                               std::filesystem::exists(host_plugin_runtime_server_path);
+    json["host_plugin_runtime_server_found"] =
+        !host_plugin_runtime_server_path.empty() &&
+        std::filesystem::exists(host_plugin_runtime_server_path);
     json["host_plugin_runtime_server_path"] = host_plugin_runtime_server_path.string();
     json["runtime_library_found"] = runtime_library.has_value();
     json["runtime_library_path"] = runtime_library.has_value() ? runtime_library->string() : "";

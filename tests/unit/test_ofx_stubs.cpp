@@ -41,8 +41,8 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 // fetch machinery the tests stub manually), so the symbols are provided
 // here as no-ops. Tests that need to assert the message-suite call path
 // stub g_suites.message with their own table.
-void set_persistent_message(const char* message_type, const char* message_id,
-                            const char* message, OfxImageEffectHandle effect) {
+void set_persistent_message(const char* message_type, const char* message_id, const char* message,
+                            OfxImageEffectHandle effect) {
     (void)message_type;
     (void)message_id;
     (void)message;
@@ -62,8 +62,7 @@ void clear_persistent_message(OfxImageEffectHandle effect) {
 // ofx_plugin.cpp (it owns the global suite-fetch machinery the tests stub
 // manually); test cases that exercise progress-suite behaviour install
 // their own table on g_suites.
-ProgressScope::ProgressScope(OfxImageEffectHandle effect, const char* label,
-                             const char* message_id)
+ProgressScope::ProgressScope(OfxImageEffectHandle effect, const char* label, const char* message_id)
     : m_effect(effect) {
     (void)label;
     (void)message_id;

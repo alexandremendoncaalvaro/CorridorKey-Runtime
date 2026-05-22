@@ -96,8 +96,7 @@ TEST_CASE("Each descriptor advertises the OFX image-effect API and a non-null ma
     }
 }
 
-TEST_CASE("Per-descriptor trampolines are distinct function pointers",
-          "[unit][ofx][descriptor]") {
+TEST_CASE("Per-descriptor trampolines are distinct function pointers", "[unit][ofx][descriptor]") {
     OfxPlugin* green = descriptor_at(0);
     OfxPlugin* blue = descriptor_at(1);
     REQUIRE(green != nullptr);
@@ -170,8 +169,7 @@ TEST_CASE("Green trampoline forwards kPluginIdentifierGreen into the dispatcher"
 
     dispatch_capture::last_identifier = nullptr;
     dispatch_capture::last_action = nullptr;
-    const OfxStatus status =
-        green->mainEntry("test_dispatch_action", nullptr, nullptr, nullptr);
+    const OfxStatus status = green->mainEntry("test_dispatch_action", nullptr, nullptr, nullptr);
     REQUIRE(status == kOfxStatReplyDefault);
     REQUIRE(dispatch_capture::last_identifier != nullptr);
     REQUIRE(std::string(dispatch_capture::last_identifier) == kPluginIdentifierGreen);
@@ -186,16 +184,14 @@ TEST_CASE("Blue trampoline forwards kPluginIdentifierBlue into the dispatcher",
 
     dispatch_capture::last_identifier = nullptr;
     dispatch_capture::last_action = nullptr;
-    const OfxStatus status =
-        blue->mainEntry("test_dispatch_action", nullptr, nullptr, nullptr);
+    const OfxStatus status = blue->mainEntry("test_dispatch_action", nullptr, nullptr, nullptr);
     REQUIRE(status == kOfxStatReplyDefault);
     REQUIRE(dispatch_capture::last_identifier != nullptr);
     REQUIRE(std::string(dispatch_capture::last_identifier) == kPluginIdentifierBlue);
     REQUIRE(std::string(dispatch_capture::last_action) == "test_dispatch_action");
 }
 
-TEST_CASE("Trampolines do not cross-route Green and Blue identifiers",
-          "[unit][ofx][descriptor]") {
+TEST_CASE("Trampolines do not cross-route Green and Blue identifiers", "[unit][ofx][descriptor]") {
     OfxPlugin* green = descriptor_at(0);
     OfxPlugin* blue = descriptor_at(1);
     REQUIRE(green != nullptr);

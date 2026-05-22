@@ -6,10 +6,10 @@
 #include <string>
 #include <thread>
 
+#include "app/host_plugin_runtime_client.hpp"
 #include "app/host_plugin_runtime_protocol.hpp"
 #include "common/local_ipc.hpp"
 #include "common/shared_memory_transport.hpp"
-#include "app/host_plugin_runtime_client.hpp"
 
 //
 // Test-file tidy-suppression rationale.
@@ -231,7 +231,7 @@ TEST_CASE("host plugin runtime client recovers when the runtime loses the curren
         auto health_response = send_json_request(
             endpoint,
             to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
-                                              .payload = nlohmann::json::object()}),
+                                                     .payload = nlohmann::json::object()}),
             500);
         if (health_response) {
             ready = true;
@@ -283,11 +283,12 @@ TEST_CASE("host plugin runtime client recovers when the runtime loses the curren
     REQUIRE(released.has_value());
     CHECK(release_count.load() == 1);
 
-    auto shutdown_response = send_json_request(
-        endpoint,
-        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
-                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
-        2000);
+    auto shutdown_response =
+        send_json_request(endpoint,
+                          to_json(HostPluginRuntimeRequestEnvelope{
+                              .command = HostPluginRuntimeCommand::Shutdown,
+                              .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
+                          2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
     server_thread.join();
@@ -424,7 +425,7 @@ TEST_CASE("host plugin runtime client re-prepares before render when the server 
         auto probe = send_json_request(
             endpoint,
             to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
-                                              .payload = nlohmann::json::object()}),
+                                                     .payload = nlohmann::json::object()}),
             500);
         if (probe) {
             ready = true;
@@ -473,7 +474,7 @@ TEST_CASE("host plugin runtime client re-prepares before render when the server 
     auto shutdown_response = send_json_request(
         endpoint,
         to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
-                                          .payload = nlohmann::json::object()}),
+                                                 .payload = nlohmann::json::object()}),
         500);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
@@ -602,7 +603,7 @@ TEST_CASE("host plugin runtime client skips foreground hydration for alpha-only 
         auto probe = send_json_request(
             endpoint,
             to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
-                                              .payload = nlohmann::json::object()}),
+                                                     .payload = nlohmann::json::object()}),
             500);
         if (probe) {
             ready = true;
@@ -651,11 +652,12 @@ TEST_CASE("host plugin runtime client skips foreground hydration for alpha-only 
     auto released = (*client)->release_session();
     REQUIRE(released.has_value());
 
-    auto shutdown_response = send_json_request(
-        endpoint,
-        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
-                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
-        2000);
+    auto shutdown_response =
+        send_json_request(endpoint,
+                          to_json(HostPluginRuntimeRequestEnvelope{
+                              .command = HostPluginRuntimeCommand::Shutdown,
+                              .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
+                          2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
     server_thread.join();
@@ -760,7 +762,7 @@ TEST_CASE("host plugin runtime client re-prepares when quality metadata changes 
         auto probe = send_json_request(
             endpoint,
             to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
-                                              .payload = nlohmann::json::object()}),
+                                                     .payload = nlohmann::json::object()}),
             500);
         if (probe) {
             ready = true;
@@ -811,11 +813,12 @@ TEST_CASE("host plugin runtime client re-prepares when quality metadata changes 
     REQUIRE(released.has_value());
     CHECK(release_count.load() == 2);
 
-    auto shutdown_response = send_json_request(
-        endpoint,
-        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
-                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
-        2000);
+    auto shutdown_response =
+        send_json_request(endpoint,
+                          to_json(HostPluginRuntimeRequestEnvelope{
+                              .command = HostPluginRuntimeCommand::Shutdown,
+                              .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
+                          2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
     server_thread.join();
@@ -948,7 +951,7 @@ TEST_CASE("host plugin runtime client invalidates structural render failures unt
         auto probe = send_json_request(
             endpoint,
             to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
-                                              .payload = nlohmann::json::object()}),
+                                                     .payload = nlohmann::json::object()}),
             500);
         if (probe) {
             ready = true;
@@ -1012,11 +1015,12 @@ TEST_CASE("host plugin runtime client invalidates structural render failures unt
     CHECK(recovered_frame->alpha.const_view().data.front() == Catch::Approx(0.5F));
     CHECK(recovered_frame->foreground.const_view().data.front() == Catch::Approx(0.9F));
 
-    auto shutdown_response = send_json_request(
-        endpoint,
-        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
-                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
-        2000);
+    auto shutdown_response =
+        send_json_request(endpoint,
+                          to_json(HostPluginRuntimeRequestEnvelope{
+                              .command = HostPluginRuntimeCommand::Shutdown,
+                              .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
+                          2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
     server_thread.join();
@@ -1066,7 +1070,7 @@ TEST_CASE("host plugin runtime client surfaces protocol mismatches from a stale 
         auto probe = send_json_request(
             endpoint,
             to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
-                                              .payload = nlohmann::json::object()}),
+                                                     .payload = nlohmann::json::object()}),
             500);
         if (probe) {
             ready = true;

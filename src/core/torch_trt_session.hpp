@@ -94,17 +94,16 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
         bool output_alpha_only = false, StageTimingCallback on_stage = nullptr,
         void* input_ready_event = nullptr, void* input_ready_start_event = nullptr,
         bool input_ready_event_on_current_stream = false,
-        const InferenceParams* post_process_params = nullptr,
-        TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
+        const InferenceParams* post_process_params = nullptr, TorchTrtDeviceSource source = {},
+        FrameOutputViews output_views = {});
 
     [[nodiscard]] Result<TorchTrtFrameResult> infer_prepared_cuda_planar_resized(
         void* planar_device_input, int input_width, int input_height, int output_width,
         int output_height, bool output_alpha_only = false, bool use_lanczos_resize = false,
         StageTimingCallback on_stage = nullptr, void* input_ready_event = nullptr,
-        void* input_ready_start_event = nullptr,
-        bool input_ready_event_on_current_stream = false,
-        const InferenceParams* post_process_params = nullptr,
-        TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
+        void* input_ready_start_event = nullptr, bool input_ready_event_on_current_stream = false,
+        const InferenceParams* post_process_params = nullptr, TorchTrtDeviceSource source = {},
+        FrameOutputViews output_views = {});
 
     [[nodiscard]] TorchTrtCudaStream current_cuda_stream() const;
 

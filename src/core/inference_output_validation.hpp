@@ -4,8 +4,8 @@
 #include <bit>
 #include <cmath>
 #include <corridorkey/types.hpp>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <sstream>
 #include <string>

@@ -56,9 +56,10 @@ TEST_CASE("TorchTRT session loads and runs a green .ts engine end-to-end",
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
             model_path, "TorchTRT engine (Sprint 0 fixture)");
         reason.has_value()) {
-        FAIL("Sprint 0 fixture was present at CMake configure time but is now "
-             "unusable: " +
-             *reason);
+        FAIL(
+            "Sprint 0 fixture was present at CMake configure time but is now "
+            "unusable: " +
+            *reason);
     }
 
     auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
@@ -125,9 +126,10 @@ TEST_CASE("TorchTRT session honours output_alpha_only by skipping foreground mat
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
             model_path, "TorchTRT engine (Sprint 0 fixture)");
         reason.has_value()) {
-        FAIL("Sprint 0 fixture was present at CMake configure time but is now "
-             "unusable: " +
-             *reason);
+        FAIL(
+            "Sprint 0 fixture was present at CMake configure time but is now "
+            "unusable: " +
+            *reason);
     }
 
     auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
@@ -163,9 +165,10 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
             model_path, "dynamic TorchScript RTX artifact");
         reason.has_value()) {
-        FAIL("Dynamic TorchScript artifact was present at CMake configure time "
-             "but is now unusable: " +
-             *reason);
+        FAIL(
+            "Dynamic TorchScript artifact was present at CMake configure time "
+            "but is now unusable: " +
+            *reason);
     }
 
     auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
@@ -180,8 +183,8 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
         int height;
     };
 
-    for (const auto resolution : {ResolutionCase{512, 512}, ResolutionCase{1024, 1024},
-                                  ResolutionCase{640, 360}}) {
+    for (const auto resolution :
+         {ResolutionCase{512, 512}, ResolutionCase{1024, 1024}, ResolutionCase{640, 360}}) {
         ImageBuffer rgb(resolution.width, resolution.height, 3);
         ImageBuffer hint(resolution.width, resolution.height, 1);
         std::fill(rgb.view().data.begin(), rgb.view().data.end(), 0.5F);

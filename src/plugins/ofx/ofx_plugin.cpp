@@ -93,10 +93,9 @@ bool fetch_suites() {
         g_host->fetchSuite(g_host->host, kOfxProgressSuite, 2));
     g_suites.progress_v1 = static_cast<const OfxProgressSuiteV1*>(
         g_host->fetchSuite(g_host->host, kOfxProgressSuite, 1));
-    log_message("fetch_suites",
-                std::string("event=ofx_progress_suite v2_fetched=") +
-                    (g_suites.progress_v2 != nullptr ? "1" : "0") + " v1_fetched=" +
-                    (g_suites.progress_v1 != nullptr ? "1" : "0"));
+    log_message("fetch_suites", std::string("event=ofx_progress_suite v2_fetched=") +
+                                    (g_suites.progress_v2 != nullptr ? "1" : "0") +
+                                    " v1_fetched=" + (g_suites.progress_v1 != nullptr ? "1" : "0"));
 
     // Surface the V2-suite capability so the runtime log answers
     // "did the host actually expose setPersistentMessage" without a
@@ -112,11 +111,10 @@ bool fetch_suites() {
         const bool has_setpersist = g_suites.message->setPersistentMessage != nullptr;
         const bool has_clearpersist = g_suites.message->clearPersistentMessage != nullptr;
         log_message("fetch_suites",
-                    std::string("event=ofx_message_suite v2_fetched=") +
-                        (fetched_v2 ? "1" : "0") + " has_message=" +
-                        (has_message ? "1" : "0") + " has_setPersistentMessage=" +
-                        (has_setpersist ? "1" : "0") + " has_clearPersistentMessage=" +
-                        (has_clearpersist ? "1" : "0"));
+                    std::string("event=ofx_message_suite v2_fetched=") + (fetched_v2 ? "1" : "0") +
+                        " has_message=" + (has_message ? "1" : "0") +
+                        " has_setPersistentMessage=" + (has_setpersist ? "1" : "0") +
+                        " has_clearPersistentMessage=" + (has_clearpersist ? "1" : "0"));
     }
 
     if (g_suites.property == nullptr || g_suites.image_effect == nullptr ||
@@ -149,29 +147,29 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 // the function pointers individually; on hosts where they are absent
 // the call degrades to a no-op and the in-panel display remains the
 // only telemetry surface (which is the historical behavior).
-void set_persistent_message(const char* message_type, const char* message_id,
-                            const char* message, OfxImageEffectHandle effect) {
+void set_persistent_message(const char* message_type, const char* message_id, const char* message,
+                            OfxImageEffectHandle effect) {
     if (g_suites.message == nullptr || g_suites.message->setPersistentMessage == nullptr ||
         effect == nullptr || message == nullptr) {
-        log_message("set_persistent_message",
-                    std::string("skip reason=missing suite_null=") +
-                        (g_suites.message == nullptr ? "1" : "0") + " set_fn_null=" +
-                        ((g_suites.message != nullptr &&
-                          g_suites.message->setPersistentMessage == nullptr)
-                             ? "1"
-                             : "0") +
-                        " effect_null=" + (effect == nullptr ? "1" : "0") + " message_null=" +
-                        (message == nullptr ? "1" : "0"));
+        log_message(
+            "set_persistent_message",
+            std::string("skip reason=missing suite_null=") +
+                (g_suites.message == nullptr ? "1" : "0") + " set_fn_null=" +
+                ((g_suites.message != nullptr && g_suites.message->setPersistentMessage == nullptr)
+                     ? "1"
+                     : "0") +
+                " effect_null=" + (effect == nullptr ? "1" : "0") +
+                " message_null=" + (message == nullptr ? "1" : "0"));
         return;
     }
     const OfxStatus status =
         g_suites.message->setPersistentMessage(effect, message_type, message_id, "%s", message);
-    log_message(
-        "set_persistent_message",
-        std::string("event=posted type=") + (message_type != nullptr ? message_type : "(null)") +
-            " id=" + (message_id != nullptr ? message_id : "(null)") +
-            " status=" + std::to_string(status) +
-            " body_len=" + std::to_string(message != nullptr ? std::strlen(message) : 0));
+    log_message("set_persistent_message",
+                std::string("event=posted type=") +
+                    (message_type != nullptr ? message_type : "(null)") +
+                    " id=" + (message_id != nullptr ? message_id : "(null)") +
+                    " status=" + std::to_string(status) +
+                    " body_len=" + std::to_string(message != nullptr ? std::strlen(message) : 0));
 }
 
 // ProgressScope implementation. The scope owns one progressStart /
@@ -180,8 +178,7 @@ void set_persistent_message(const char* message_type, const char* message_id,
 // calls progressEnd() so a thrown exception or early return cannot leak
 // the modal dialog. ofxProgress.h:17-27 documents Cancel as
 // "kOfxStatReplyNo returned during progressUpdate".
-ProgressScope::ProgressScope(OfxImageEffectHandle effect, const char* label,
-                             const char* message_id)
+ProgressScope::ProgressScope(OfxImageEffectHandle effect, const char* label, const char* message_id)
     : m_effect(effect) {
     if (m_effect == nullptr || label == nullptr) {
         return;

@@ -109,8 +109,7 @@ Result<void> validate_frame_view(const AdobeFrameView& frame, std::size_t pixel_
     }
     const std::size_t last_row_offset = (height - 1) * row_bytes;
     if (last_row_offset > std::numeric_limits<std::size_t>::max() - required_row_bytes) {
-        return Unexpected<Error>(
-            invalid_adobe_frame_error("Adobe frame buffer size overflows."));
+        return Unexpected<Error>(invalid_adobe_frame_error("Adobe frame buffer size overflows."));
     }
     if (frame.data_size_bytes < last_row_offset + required_row_bytes) {
         return Unexpected<Error>(
@@ -125,8 +124,8 @@ Result<AdobeRuntimeFrame> make_runtime_frame(int width, int height) {
     frame.alpha_hint = ImageBuffer(width, height, 1);
     const auto rgb = frame.rgb.view();
     const auto alpha_hint = frame.alpha_hint.view();
-    const auto expected_rgb_size = static_cast<std::size_t>(width) *
-                                   static_cast<std::size_t>(height) * 3U;
+    const auto expected_rgb_size =
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3U;
     const auto expected_alpha_size =
         static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
     if (rgb.data.size() != expected_rgb_size || alpha_hint.data.size() != expected_alpha_size) {
@@ -136,15 +135,20 @@ Result<AdobeRuntimeFrame> make_runtime_frame(int width, int height) {
     return frame;
 }
 
-float normalize_argb8(std::uint8_t value) { return static_cast<float>(value) / kAdobeArgb8White; }
+float normalize_argb8(std::uint8_t value) {
+    return static_cast<float>(value) / kAdobeArgb8White;
+}
 
-float normalize_argb16(std::uint16_t value) { return static_cast<float>(value) / kAdobeArgb16White; }
+float normalize_argb16(std::uint16_t value) {
+    return static_cast<float>(value) / kAdobeArgb16White;
+}
 
-float normalize_argb_float(float value) { return value; }
+float normalize_argb_float(float value) {
+    return value;
+}
 
 template <typename Pixel, typename Normalizer>
-void copy_pixel_rows(const AdobeFrameView& frame, AdobeRuntimeFrame& output,
-                     Normalizer normalize) {
+void copy_pixel_rows(const AdobeFrameView& frame, AdobeRuntimeFrame& output, Normalizer normalize) {
     const auto* base = static_cast<const std::byte*>(frame.data);
     auto rgb = output.rgb.view();
     auto alpha_hint = output.alpha_hint.view();

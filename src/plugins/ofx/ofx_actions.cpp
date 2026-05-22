@@ -565,18 +565,16 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     //   deterministic equivalent using the Green model.
     const int screen_color_default = 0;
     const std::vector<const char*> screen_color_options =
-        is_blue_descriptor
-            ? std::vector<const char*>{"Blue"}
-            : std::vector<const char*>{"Green", "Blue-Green Channel Swap"};
+        is_blue_descriptor ? std::vector<const char*>{"Blue"}
+                           : std::vector<const char*>{"Green", "Blue-Green Channel Swap"};
     const char* screen_color_hint =
-        is_blue_descriptor
-            ? "Locked to Blue for this dedicated node. The screen path uses the "
-              "Blue Torch-TensorRT model directly."
-            : "Select the deterministic Green path. 'Green' uses the optimized "
-              "Green model on a green screen plate. 'Blue-Green Channel Swap' "
-              "maps a blue screen plate into the Green model domain via the "
-              "validated channel-swap technique. For a blue screen with the "
-              "dedicated Blue model, use the CorridorKey Blue node.";
+        is_blue_descriptor ? "Locked to Blue for this dedicated node. The screen path uses the "
+                             "Blue Torch-TensorRT model directly."
+                           : "Select the deterministic Green path. 'Green' uses the optimized "
+                             "Green model on a green screen plate. 'Blue-Green Channel Swap' "
+                             "maps a blue screen plate into the Green model domain via the "
+                             "validated channel-swap technique. For a blue screen with the "
+                             "dedicated Blue model, use the CorridorKey Blue node.";
     define_choice_param(param_set, kParamScreenColor, "Screen Color", screen_color_default,
                         screen_color_options, screen_color_hint, "setup_group",
                         /*enabled=*/true, /*secret=*/is_blue_descriptor);

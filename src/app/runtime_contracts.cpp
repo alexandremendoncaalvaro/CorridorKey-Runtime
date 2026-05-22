@@ -64,10 +64,9 @@ bool has_backend(const RuntimeCapabilities& capabilities, Backend backend) {
 }
 
 std::string normalized_lower(std::string value) {
-    std::ranges::transform(value, value.begin(),
-                           [](unsigned char character) {
-                               return static_cast<char>(std::tolower(character));
-                           });
+    std::ranges::transform(value, value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
     return value;
 }
 
@@ -185,11 +184,9 @@ std::vector<std::string> validation_tiers_for_device(const DeviceInfo& device,
 bool has_validated_tier_for_device(const ModelCatalogEntry& model, const DeviceInfo& device,
                                    const RuntimeCapabilities& capabilities) {
     auto device_tiers = validation_tiers_for_device(device, capabilities);
-    return std::ranges::any_of(model.validated_hardware_tiers,
-                       [&](const std::string& tier) {
-                           return std::ranges::find(device_tiers, tier) !=
-                                  device_tiers.end();
-                       });
+    return std::ranges::any_of(model.validated_hardware_tiers, [&](const std::string& tier) {
+        return std::ranges::find(device_tiers, tier) != device_tiers.end();
+    });
 }
 
 bool windows_tensorrt_packaged_resolution_supported(int resolution) {
@@ -475,10 +472,9 @@ bool is_windows_rtx_request(const DeviceInfo& requested_device,
 
 bool is_windows_universal_request(const DeviceInfo& requested_device,
                                   const RuntimeCapabilities& capabilities) {
-    return capabilities.platform == "windows" &&
-           (requested_device.backend == Backend::DirectML ||
-            requested_device.backend == Backend::WindowsML ||
-            requested_device.backend == Backend::OpenVINO);
+    return capabilities.platform == "windows" && (requested_device.backend == Backend::DirectML ||
+                                                  requested_device.backend == Backend::WindowsML ||
+                                                  requested_device.backend == Backend::OpenVINO);
 }
 
 }  // namespace
@@ -531,12 +527,11 @@ std::vector<ModelCatalogEntry> model_catalog() {
                          "Extreme quality Windows RTX pack for 24 GB VRAM systems.",
                          "windows_rtx_primary", false, false, true, {}, {"windows_rtx_30_plus"},
                          {"rtx_24gb"}),
-        make_model_entry(
-            "dynamic-blue", kTargetResolutionAuto, std::string(kDynamicBlueModelFilename),
-            "torchscript", "torchtrt",
-            "Windows RTX blue-screen pack with dynamic runtime resolution.",
-            "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
-            {"rtx_8gb", "rtx_10gb_plus", "rtx_16gb_plus", "rtx_24gb"}, "blue"),
+        make_model_entry("dynamic-blue", kTargetResolutionAuto,
+                         std::string(kDynamicBlueModelFilename), "torchscript", "torchtrt",
+                         "Windows RTX blue-screen pack with dynamic runtime resolution.",
+                         "windows_rtx_blue_screen", false, false, true, {}, {"windows_rtx_30_plus"},
+                         {"rtx_8gb", "rtx_10gb_plus", "rtx_16gb_plus", "rtx_24gb"}, "blue"),
         make_model_entry("fp32", kRes512, "corridorkey_fp32_512.onnx", "onnx", "cpu",
                          "Reference validation variant.", "reference_validation", false, false,
                          false, {}, {"macos_apple_silicon", "windows_rtx"}, {}),
@@ -565,8 +560,8 @@ std::vector<PresetDefinition> preset_catalog() {
             .description =
                 "Default Apple Silicon preset using the native MLX model pack with automatic "
                 "tiling and no implicit cleanup.",
-            .params =
-                make_preset_inference_params(kTargetResolutionAuto, false, true, kDefaultTilePadding),
+            .params = make_preset_inference_params(kTargetResolutionAuto, false, true,
+                                                   kDefaultTilePadding),
             .recommended_model = "corridorkey_mlx.safetensors",
             .intended_use = "apple_acceleration_primary",
             .default_for_macos = true,
@@ -578,9 +573,10 @@ std::vector<PresetDefinition> preset_catalog() {
         PresetDefinition{
             .id = "mac-max-quality",
             .name = "Mac Max Quality",
-            .description = "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
-            .params =
-                make_preset_inference_params(kTargetResolutionAuto, true, true, kDefaultTilePadding),
+            .description =
+                "Apple Silicon preset for higher-quality tiled runs with cleanup enabled.",
+            .params = make_preset_inference_params(kTargetResolutionAuto, true, true,
+                                                   kDefaultTilePadding),
             .recommended_model = "corridorkey_mlx.safetensors",
             .intended_use = "native_resolution_examples",
             .default_for_macos = false,
@@ -634,8 +630,8 @@ std::vector<PresetDefinition> preset_catalog() {
         PresetDefinition{
             .id = "mac-ultra-quality",
             .name = "Mac Ultra Quality",
-            .description =
-                "Extreme quality Apple Silicon preset using 2048px MLX bridge with cleanup enabled.",
+            .description = "Extreme quality Apple Silicon preset using 2048px MLX bridge with "
+                           "cleanup enabled.",
             .params = make_preset_inference_params(kRes2048, true, true, kDefaultTilePadding),
             .recommended_model = "corridorkey_mlx.safetensors",
             .intended_use = "native_resolution_examples",
@@ -689,9 +685,8 @@ std::optional<DeviceInfo> preferred_runtime_device(const RuntimeCapabilities& ca
         }
     }
 
-    auto non_cpu = std::ranges::find_if(devices, [](const DeviceInfo& device) {
-        return device.backend != Backend::CPU;
-    });
+    auto non_cpu = std::ranges::find_if(
+        devices, [](const DeviceInfo& device) { return device.backend != Backend::CPU; });
     if (non_cpu != devices.end()) {
         return *non_cpu;
     }
@@ -1111,8 +1106,9 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     if (coarse_resolution_override > 0 && coarse_resolution_override >= requested_resolution) {
         return Unexpected<Error>{Error{
             .code = ErrorCode::InvalidParameters,
-            .message = "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
-                       "quality.",
+            .message =
+                "Coarse-to-fine requires --coarse-resolution to be smaller than the requested "
+                "quality.",
         }};
     }
 
@@ -1180,8 +1176,7 @@ bool append_selections_for_resolution(int resolution, const CandidateSelectionCo
             .executable_model_path = artifact_path,
             .requested_resolution = context.requested_resolution,
             .effective_resolution = resolution,
-            .used_fallback =
-                resolution != context.requested_resolution || context.coarse_to_fine,
+            .used_fallback = resolution != context.requested_resolution || context.coarse_to_fine,
             .coarse_to_fine = context.coarse_to_fine,
         });
     }
@@ -1224,9 +1219,8 @@ Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
         .requested_resolution = requested_resolution,
         .search_resolution = resolution_search->first,
         .coarse_to_fine = resolution_search->second,
-        .require_exact_resolution =
-            !allow_lower_resolution_fallback &&
-            (!resolution_search->second || coarse_resolution_override > 0),
+        .require_exact_resolution = !allow_lower_resolution_fallback &&
+                                    (!resolution_search->second || coarse_resolution_override > 0),
     };
 
     std::vector<ArtifactSelection> selections;
@@ -1291,9 +1285,8 @@ nlohmann::json to_json(const StageTiming& timing) {
     json["total_ms"] = timing.total_ms;
     json["sample_count"] = timing.sample_count;
     json["work_units"] = timing.work_units;
-    json["avg_ms"] = timing.sample_count > 0
-                         ? timing.total_ms / static_cast<double>(timing.sample_count)
-                         : 0.0;
+    json["avg_ms"] =
+        timing.sample_count > 0 ? timing.total_ms / static_cast<double>(timing.sample_count) : 0.0;
     if (timing.work_units > 0) {
         json["ms_per_unit"] = timing.total_ms / static_cast<double>(timing.work_units);
     }

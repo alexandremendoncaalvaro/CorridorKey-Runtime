@@ -27,14 +27,12 @@ void set_host(OfxHost* host) {
 }
 
 OfxStatus plugin_main_entry_green(const char* action, const void* handle,
-                                  OfxPropertySetHandle in_args,
-                                  OfxPropertySetHandle out_args) {
+                                  OfxPropertySetHandle in_args, OfxPropertySetHandle out_args) {
     return plugin_main_entry_dispatch(kPluginIdentifierGreen, action, handle, in_args, out_args);
 }
 
 OfxStatus plugin_main_entry_blue(const char* action, const void* handle,
-                                 OfxPropertySetHandle in_args,
-                                 OfxPropertySetHandle out_args) {
+                                 OfxPropertySetHandle in_args, OfxPropertySetHandle out_args) {
     return plugin_main_entry_dispatch(kPluginIdentifierBlue, action, handle, in_args, out_args);
 }
 

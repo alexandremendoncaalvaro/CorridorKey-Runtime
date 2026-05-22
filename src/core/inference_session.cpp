@@ -2030,8 +2030,7 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
     (void)output_views;
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
     if (m_torch_trt_session != nullptr) {
-        auto make_raw_result =
-            [](core::TorchTrtFrameResult&& torch_result) -> RawFrameResult {
+        auto make_raw_result = [](core::TorchTrtFrameResult&& torch_result) -> RawFrameResult {
             RawFrameResult raw_result;
             raw_result.frame = std::move(torch_result.frame);
             raw_result.post_process.source_passthrough_applied =
@@ -2054,9 +2053,9 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
                 on_stage, "frame_extract_outputs_finalize",
                 [&]() -> Result<void> {
                     ColorUtils::clamp_image(raw_result.frame.alpha.view(), 0.0F, 1.0F);
-                    auto alpha_final_res = finalize_output_image(
-                        m_device, target_res, raw_result.frame.alpha.view(),
-                        "alpha_resized_output");
+                    auto alpha_final_res =
+                        finalize_output_image(m_device, target_res, raw_result.frame.alpha.view(),
+                                              "alpha_resized_output");
                     if (!alpha_final_res) {
                         return Unexpected(alpha_final_res.error());
                     }
@@ -2088,9 +2087,8 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
                 on_stage, "frame_extract_outputs_resize",
                 [&]() -> Result<void> {
                     if (use_lanczos) {
-                        ColorUtils::resize_lanczos_into(raw_frame.alpha.view(),
-                                                        result.frame.alpha.view(),
-                                                        m_color_utils_state);
+                        ColorUtils::resize_lanczos_into(
+                            raw_frame.alpha.view(), result.frame.alpha.view(), m_color_utils_state);
                         if (!result.frame.foreground.view().empty()) {
                             ColorUtils::resize_lanczos_into(raw_frame.foreground.view(),
                                                             result.frame.foreground.view(),
@@ -2116,8 +2114,9 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
         const bool use_host_roundtrip_input = torchtrt_host_roundtrip_input_enabled();
         if (use_host_roundtrip_input) {
             common::measure_stage(on_stage, "torchtrt_input_boundary_host_roundtrip", []() {});
-            debug_log("TorchTRT device input boundary disabled by "
-                      "CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY=host_roundtrip");
+            debug_log(
+                "TorchTRT device input boundary disabled by "
+                "CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY=host_roundtrip");
         }
 
         if (!use_host_roundtrip_input && m_gpu_prep.available()) {
@@ -2126,9 +2125,9 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
                 [&]() -> Result<core::GpuPreparedInput> {
                     const auto current_stream = m_torch_trt_session->current_cuda_stream();
                     if (!current_stream.available) {
-                        return Unexpected(Error{
-                            ErrorCode::HardwareNotSupported,
-                            "TorchTRT current CUDA stream is unavailable for GPU prep"});
+                        return Unexpected(
+                            Error{ErrorCode::HardwareNotSupported,
+                                  "TorchTRT current CUDA stream is unavailable for GPU prep"});
                     }
                     return m_gpu_prep.prepare_inputs_device_on_stream(
                         rgb, alpha_hint, target_res, target_res, kCorridorKeyRgbMean,
@@ -2136,21 +2135,20 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
                 },
                 1);
             if (gpu_prepare_res.has_value()) {
-                auto raw_res =
-                    m_torch_trt_session->infer_prepared_cuda_planar_resized(
-                        gpu_prepare_res->planar_device, gpu_prepare_res->width,
-                        gpu_prepare_res->height, rgb.width, rgb.height,
-                        params.output_alpha_only, params.upscale_method == UpscaleMethod::Lanczos4,
-                        on_stage, gpu_prepare_res->ready_event, gpu_prepare_res->ready_start_event,
-                        gpu_prepare_res->ready_event_on_current_stream, &params,
-                        core::TorchTrtDeviceSource{
-                            .host_rgb = rgb,
-                            .rgb_device = gpu_prepare_res->source_rgb_device,
-                            .width = gpu_prepare_res->source_width,
-                            .height = gpu_prepare_res->source_height,
-                            .channels = gpu_prepare_res->source_channels,
-                        },
-                        output_views);
+                auto raw_res = m_torch_trt_session->infer_prepared_cuda_planar_resized(
+                    gpu_prepare_res->planar_device, gpu_prepare_res->width, gpu_prepare_res->height,
+                    rgb.width, rgb.height, params.output_alpha_only,
+                    params.upscale_method == UpscaleMethod::Lanczos4, on_stage,
+                    gpu_prepare_res->ready_event, gpu_prepare_res->ready_start_event,
+                    gpu_prepare_res->ready_event_on_current_stream, &params,
+                    core::TorchTrtDeviceSource{
+                        .host_rgb = rgb,
+                        .rgb_device = gpu_prepare_res->source_rgb_device,
+                        .width = gpu_prepare_res->source_width,
+                        .height = gpu_prepare_res->source_height,
+                        .channels = gpu_prepare_res->source_channels,
+                    },
+                    output_views);
                 if (!raw_res) {
                     return Unexpected(raw_res.error());
                 }

@@ -168,7 +168,8 @@ inline int quality_search_resolution(const DeviceInfo& device, int quality_mode,
 }
 
 inline int rounded_gb_from_mb(std::int64_t memory_mb) {
-    return static_cast<int>((memory_mb + selection_detail::kCeilToMib) / selection_detail::kBytesPerMib);
+    return static_cast<int>((memory_mb + selection_detail::kCeilToMib) /
+                            selection_detail::kBytesPerMib);
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): see note on
@@ -261,8 +262,8 @@ inline std::optional<CachedQualityCompileFailure> cached_quality_compile_failure
         return std::nullopt;
     }
 
-    auto existing = std::ranges::find_if(
-        cache.entries, [&](const QualityCompileFailureEntry& entry) {
+    auto existing =
+        std::ranges::find_if(cache.entries, [&](const QualityCompileFailureEntry& entry) {
             return entry.artifact_path == selection.executable_model_path &&
                    entry.requested_resolution == selection.requested_resolution &&
                    entry.effective_resolution == selection.effective_resolution;
@@ -286,8 +287,8 @@ inline void record_quality_compile_failure(QualityCompileFailureCache& cache,
     }
 
     prepare_quality_compile_failure_cache(cache, context);
-    auto existing = std::ranges::find_if(
-        cache.entries, [&](const QualityCompileFailureEntry& entry) {
+    auto existing =
+        std::ranges::find_if(cache.entries, [&](const QualityCompileFailureEntry& entry) {
             return entry.artifact_path == selection.executable_model_path &&
                    entry.requested_resolution == selection.requested_resolution &&
                    entry.effective_resolution == selection.effective_resolution;
@@ -493,7 +494,8 @@ inline bool path_exists(const std::filesystem::path& path) {
 
 inline bool has_mlx_bootstrap_artifacts(const std::filesystem::path& models_root) {
     return path_exists(mlx_pack_path(models_root)) &&
-           path_exists(artifact_path_for_backend(models_root, Backend::MLX, selection_detail::kRes512));
+           path_exists(
+               artifact_path_for_backend(models_root, Backend::MLX, selection_detail::kRes512));
 }
 
 inline std::vector<std::filesystem::path> expected_bootstrap_artifact_paths(
@@ -627,9 +629,8 @@ inline void append_unique_candidate(std::vector<BootstrapEngineCandidate>& candi
     if (candidate.executable_model_path.empty()) {
         return;
     }
-    auto duplicate = std::ranges::find_if(
-        candidates,
-        [&](const BootstrapEngineCandidate& existing) {
+    auto duplicate =
+        std::ranges::find_if(candidates, [&](const BootstrapEngineCandidate& existing) {
             return same_backend_and_path(existing, candidate);
         });
     if (duplicate == candidates.end()) {
@@ -686,19 +687,19 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
     if (capabilities.platform == "macos" && capabilities.apple_silicon &&
         capabilities.mlx_probe_available && has_mlx_bootstrap_artifacts(models_root)) {
         selection_detail::append_unique_candidate(
-            candidates,
-            BootstrapEngineCandidate{
-                .device = DeviceInfo{
-                    .name = "Apple Silicon MLX",
-                    .available_memory_mb = detected_device.available_memory_mb,
-                    .backend = Backend::MLX,
-                },
-                .requested_model_path = mlx_pack_path(models_root),
-                .executable_model_path = artifact_path_for_backend(
-                    models_root, Backend::MLX, selection_detail::kRes512),
-                .requested_resolution = selection_detail::kRes512,
-                .effective_resolution = selection_detail::kRes512,
-            });
+            candidates, BootstrapEngineCandidate{
+                            .device =
+                                DeviceInfo{
+                                    .name = "Apple Silicon MLX",
+                                    .available_memory_mb = detected_device.available_memory_mb,
+                                    .backend = Backend::MLX,
+                                },
+                            .requested_model_path = mlx_pack_path(models_root),
+                            .executable_model_path = artifact_path_for_backend(
+                                models_root, Backend::MLX, selection_detail::kRes512),
+                            .requested_resolution = selection_detail::kRes512,
+                            .effective_resolution = selection_detail::kRes512,
+                        });
     }
 #else
     (void)capabilities;
@@ -712,8 +713,8 @@ inline std::vector<BootstrapEngineCandidate> build_bootstrap_candidates(
         return candidates;
     }
 
-    if (auto default_candidate =
-            selection_detail::resolve_default_candidate(models_root, capabilities, detected_device)) {
+    if (auto default_candidate = selection_detail::resolve_default_candidate(
+            models_root, capabilities, detected_device)) {
         selection_detail::append_unique_candidate(candidates, std::move(*default_candidate));
     }
 

@@ -56,11 +56,11 @@
 #include <corridorkey/types.hpp>
 #include <nlohmann/json.hpp>
 
+#include "app/host_plugin_runtime_client.hpp"
 #include "app/host_plugin_runtime_protocol.hpp"
 #include "app/runtime_contracts.hpp"
 #include "common/local_ipc.hpp"
 #include "common/stage_profiler.hpp"
-#include "app/host_plugin_runtime_client.hpp"
 
 using namespace corridorkey;
 

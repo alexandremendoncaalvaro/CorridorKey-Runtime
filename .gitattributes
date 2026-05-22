@@ -1,5 +1,24 @@
-# Enforce LF line endings on POSIX shell scripts and CMake configuration files
-# so they stay executable on Linux/macOS hosts when checked out on Windows.
+# Enforce LF line endings on portable source and configuration files so
+# clang-format and POSIX tooling behave consistently on Windows checkouts.
+*.c text eol=lf
+*.cc text eol=lf
+*.cpp text eol=lf
+*.cxx text eol=lf
+*.h text eol=lf
+*.hh text eol=lf
+*.hpp text eol=lf
+*.hxx text eol=lf
+*.inl text eol=lf
+*.cmake text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+CMakeLists.txt text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
+.githooks/* text eol=lf
+.pre-commit-config.yaml text eol=lf
+.clang-format text eol=lf
+.clang-tidy text eol=lf
 *.sh text eol=lf
 *.bash text eol=lf
 scripts/vcpkg-triplets/*.cmake text eol=lf

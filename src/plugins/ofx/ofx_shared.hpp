@@ -356,8 +356,8 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 // safety note. These exist so render-thread code can surface dynamic
 // runtime telemetry on hosts that do not allow render-thread
 // paramSetValue (Foundry Nuke 17).
-void set_persistent_message(const char* message_type, const char* message_id,
-                            const char* message, OfxImageEffectHandle effect);
+void set_persistent_message(const char* message_type, const char* message_id, const char* message,
+                            OfxImageEffectHandle effect);
 void clear_persistent_message(OfxImageEffectHandle effect);
 
 // kOfxProgressSuite (V1 + V2) wrapper used during long-running prepare /

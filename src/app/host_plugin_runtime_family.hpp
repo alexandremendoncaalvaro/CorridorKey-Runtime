@@ -40,8 +40,7 @@ inline HostPluginRuntimeFamily host_plugin_runtime_family_for_prepare_request(
 }
 
 inline bool should_restart_for_host_plugin_runtime_family_switch(
-    HostPluginRuntimeFamily current_family,
-    HostPluginRuntimeFamily next_family) {
+    HostPluginRuntimeFamily current_family, HostPluginRuntimeFamily next_family) {
     if (current_family == next_family) {
         return false;
     }

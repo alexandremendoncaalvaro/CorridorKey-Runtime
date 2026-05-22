@@ -1,8 +1,8 @@
-#include "adobe_bridge.hpp"
-
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include "adobe_bridge.hpp"
 
 namespace corridorkey::adobe {
 namespace {
@@ -60,14 +60,12 @@ Result<void> validate_prepare_options(const AdobePrepareSessionOptions& options)
         return Unexpected<Error>(quality.error());
     }
     auto requested_resolution = validate_range(options.requested_resolution, 0,
-                                               kMaxAdobePrepareResolution,
-                                               "requested resolution");
+                                               kMaxAdobePrepareResolution, "requested resolution");
     if (!requested_resolution) {
         return Unexpected<Error>(requested_resolution.error());
     }
     auto effective_resolution = validate_range(options.effective_resolution, 0,
-                                               kMaxAdobePrepareResolution,
-                                               "effective resolution");
+                                               kMaxAdobePrepareResolution, "effective resolution");
     if (!effective_resolution) {
         return Unexpected<Error>(effective_resolution.error());
     }

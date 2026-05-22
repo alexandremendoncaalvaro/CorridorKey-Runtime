@@ -121,8 +121,8 @@ void filter_components_rle(const std::vector<uint8_t>& mask, std::vector<uint8_t
         if (runs[root].area < area_threshold) {
             continue;
         }
-        const std::size_t row_offset = static_cast<std::size_t>(runs[i].y) *
-                                       static_cast<std::size_t>(w);
+        const std::size_t row_offset =
+            static_cast<std::size_t>(runs[i].y) * static_cast<std::size_t>(w);
         std::fill(cleaned.begin() + static_cast<std::ptrdiff_t>(row_offset + runs[i].x_begin),
                   cleaned.begin() + static_cast<std::ptrdiff_t>(row_offset + runs[i].x_end + 1),
                   255);
@@ -167,10 +167,10 @@ void dilate_binary(std::vector<uint8_t>& mask, std::vector<uint8_t>& temp_result
                 const int reach = row_reach[static_cast<std::size_t>(dy + radius)];
                 const int fill_begin = std::max(0, x_begin - reach);
                 const int fill_end = std::min(w - 1, x_end + reach);
-                const auto begin = temp_result.begin() +
-                                   static_cast<std::ptrdiff_t>(ny * w + fill_begin);
-                const auto end = temp_result.begin() +
-                                 static_cast<std::ptrdiff_t>(ny * w + fill_end + 1);
+                const auto begin =
+                    temp_result.begin() + static_cast<std::ptrdiff_t>(ny * w + fill_begin);
+                const auto end =
+                    temp_result.begin() + static_cast<std::ptrdiff_t>(ny * w + fill_end + 1);
                 std::fill(begin, end, 255);
             }
             ++x;

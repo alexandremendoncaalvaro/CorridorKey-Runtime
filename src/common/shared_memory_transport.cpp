@@ -186,10 +186,9 @@ Result<void> SharedFrameTransport::map_new_file(const std::filesystem::path& pat
     HANDLE file_handle = nullptr;
     const bool named_mapping = is_windows_named_mapping_path(path);
     if (!named_mapping) {
-        file_handle =
-            CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE,
-                        kSharedFrameShareMode, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY,
-                        nullptr);
+        file_handle = CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE,
+                                  kSharedFrameShareMode, nullptr, CREATE_ALWAYS,
+                                  FILE_ATTRIBUTE_TEMPORARY, nullptr);
         if (file_handle == INVALID_HANDLE_VALUE) {
             return Unexpected<Error>(
                 transport_error(ErrorCode::IoError, "Failed to create shared frame file."));
@@ -281,10 +280,9 @@ Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path
             return Unexpected<Error>(transport_error(
                 ErrorCode::IoError, "Shared frame file does not exist: " + path.string()));
         }
-        file_handle =
-            CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE,
-                        kSharedFrameShareMode, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
-                        nullptr);
+        file_handle = CreateFileW(wide_path(path).c_str(), GENERIC_READ | GENERIC_WRITE,
+                                  kSharedFrameShareMode, nullptr, OPEN_EXISTING,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file_handle == INVALID_HANDLE_VALUE) {
             return Unexpected<Error>(
                 transport_error(ErrorCode::IoError, "Failed to open shared frame file."));
@@ -297,8 +295,8 @@ Result<void> SharedFrameTransport::map_existing_file(const std::filesystem::path
         mapping_handle = CreateFileMappingW(file_handle, nullptr, PAGE_READWRITE, 0, 0, nullptr);
         if (mapping_handle == nullptr) {
             CloseHandle(file_handle);
-            return Unexpected<Error>(transport_error(ErrorCode::IoError,
-                                                     "Failed to create file mapping for shared frame."));
+            return Unexpected<Error>(transport_error(
+                ErrorCode::IoError, "Failed to create file mapping for shared frame."));
         }
     }
 

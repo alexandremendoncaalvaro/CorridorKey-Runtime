@@ -5,8 +5,8 @@
 #include <map>
 #include <string>
 
-#include "plugins/ofx/ofx_frame_cache.hpp"
 #include "app/host_plugin_runtime_client.hpp"
+#include "plugins/ofx/ofx_frame_cache.hpp"
 #include "plugins/ofx/ofx_shared.hpp"
 
 using namespace corridorkey;
@@ -513,8 +513,7 @@ TEST_CASE("Foundry Nuke defers paramSetValue inside the BeginSequenceRender wind
 // DaVinci Resolve has historically tolerated render-thread paramSetValue
 // through internal locking. The live runtime panel is the validated Resolve
 // feedback path for per-frame timings; strict hosts still defer above.
-TEST_CASE("DaVinci Resolve flushes paramSetValue live during render",
-          "[unit][ofx][regression]") {
+TEST_CASE("DaVinci Resolve flushes paramSetValue live during render", "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     data.in_render = true;
@@ -677,8 +676,7 @@ TEST_CASE("sync_private_data drains a deferred render-thread update", "[unit][of
 // deferral that originally motivated the SyncPrivateData drain explicitly
 // excludes Resolve, so the flush here is structurally redundant for that host
 // and is the only safe thing to remove from the teardown sequence.
-TEST_CASE("sync_private_data does not paramSetValue on Resolve hosts",
-          "[unit][ofx][regression]") {
+TEST_CASE("sync_private_data does not paramSetValue on Resolve hosts", "[unit][ofx][regression]") {
     InstanceData data{};
     wire_runtime_status_param_handles(data);
     // Same precondition as the deferred-drain test: panel marked dirty by a

@@ -1,8 +1,8 @@
 #include "adobe_effect_parameters.hpp"
 
 #include <array>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 
 namespace {
 
@@ -33,17 +33,16 @@ constexpr std::array<ParameterDefinition, 12> kParameterDefinitions{{
     {"Node Identity", ParameterKind::Popup, 1001, 2, 1, "Green|Blue", 0.0, 0.0, 0.0,
      PF_Precision_INTEGER, 0, ""},
     {"Quality", ParameterKind::Popup, 1002, 5, 2,
-     "Default (Draft 512)|Draft (512)|High (1024)|Ultra (1536)|Maximum (2048)", 0.0,
+     "Default (Draft 512)|Draft (512)|High (1024)|Ultra (1536)|Maximum (2048)", 0.0, 0.0, 0.0,
+     PF_Precision_INTEGER, 0, ""},
+    {"Screen Color", ParameterKind::Popup, 1003, 3, 1, "Green|Blue|Blue-Green Channel Swap", 0.0,
      0.0, 0.0, PF_Precision_INTEGER, 0, ""},
-    {"Screen Color", ParameterKind::Popup, 1003, 3, 1, "Green|Blue|Blue-Green Channel Swap",
-     0.0, 0.0, 0.0, PF_Precision_INTEGER, 0, ""},
     {"Alpha Hint Policy", ParameterKind::Popup, 1004, 2, 1,
-     "Auto Rough Fallback|Require External Hint", 0.0, 0.0, 0.0, PF_Precision_INTEGER, 0,
-     ""},
+     "Auto Rough Fallback|Require External Hint", 0.0, 0.0, 0.0, PF_Precision_INTEGER, 0, ""},
     {"Despill Strength", ParameterKind::FloatSlider, 1005, 0, 0, "", 0.0, 1.0, 0.5,
      PF_Precision_HUNDREDTHS, 0, ""},
-    {"Spill Method", ParameterKind::Popup, 1006, 3, 1, "Average|Double Limit|Neutral", 0.0,
-     0.0, 0.0, PF_Precision_INTEGER, 0, ""},
+    {"Spill Method", ParameterKind::Popup, 1006, 3, 1, "Average|Double Limit|Neutral", 0.0, 0.0,
+     0.0, PF_Precision_INTEGER, 0, ""},
     {"Recover Original Details", ParameterKind::Checkbox, 1007, 0, 0, "", 0.0, 0.0, 0.0,
      PF_Precision_INTEGER, 1, "Enabled"},
     {"Details Edge Shrink", ParameterKind::FloatSlider, 1008, 0, 0, "", 0.0, 100.0, 3.0,
@@ -63,8 +62,7 @@ void copy_parameter_name(PF_ParamDef& definition, const char* name) noexcept {
     std::snprintf(definition.PF_DEF_NAME, sizeof(definition.PF_DEF_NAME), "%s", name);
 }
 
-void configure_popup(PF_ParamDef& definition,
-                     const ParameterDefinition& parameter) noexcept {
+void configure_popup(PF_ParamDef& definition, const ParameterDefinition& parameter) noexcept {
     definition.param_type = PF_Param_POPUP;
     definition.flags = kPopupFlags;
     definition.u.pd.num_choices = parameter.choice_count;
@@ -86,8 +84,7 @@ void configure_float_slider(PF_ParamDef& definition,
     definition.u.fs_d.precision = parameter.precision;
 }
 
-void configure_checkbox(PF_ParamDef& definition,
-                        const ParameterDefinition& parameter) noexcept {
+void configure_checkbox(PF_ParamDef& definition, const ParameterDefinition& parameter) noexcept {
     definition.param_type = PF_Param_CHECKBOX;
     definition.flags = kCheckboxFlags;
     definition.u.bd.value = parameter.default_boolean;
@@ -95,8 +92,7 @@ void configure_checkbox(PF_ParamDef& definition,
     definition.u.bd.u.PF_DEF_NAMEPTR = parameter.checkbox_label;
 }
 
-PF_Err configure_parameter(PF_ParamDef& definition,
-                           const ParameterDefinition& parameter) noexcept {
+PF_Err configure_parameter(PF_ParamDef& definition, const ParameterDefinition& parameter) noexcept {
     copy_parameter_name(definition, parameter.name);
     definition.uu.id = parameter.disk_id;
 
@@ -115,8 +111,7 @@ PF_Err configure_parameter(PF_ParamDef& definition,
     return PF_Err_BAD_CALLBACK_PARAM;
 }
 
-PF_Err add_parameter(PF_InData& input_data,
-                     const ParameterDefinition& parameter) noexcept {
+PF_Err add_parameter(PF_InData& input_data, const ParameterDefinition& parameter) noexcept {
     if (input_data.inter.add_param == nullptr) {
         return PF_Err_BAD_CALLBACK_PARAM;
     }

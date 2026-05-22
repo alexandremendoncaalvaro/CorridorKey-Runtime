@@ -355,9 +355,9 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
 
     SECTION("Blue request returns the same artifact across VRAM tiers") {
         for (const auto memory_mb : {8192, 10240, 16384, 24576}) {
-            auto entry = default_model_for_request(
-                windows_capabilities, DeviceInfo{"RTX", memory_mb, Backend::TensorRT},
-                windows_default, "blue");
+            auto entry = default_model_for_request(windows_capabilities,
+                                                   DeviceInfo{"RTX", memory_mb, Backend::TensorRT},
+                                                   windows_default, "blue");
             REQUIRE(entry.has_value());
             REQUIRE(entry->filename == "corridorkey_dynamic_blue_fp16.ts");
             REQUIRE(entry->screen_color == "blue");

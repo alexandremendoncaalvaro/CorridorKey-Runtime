@@ -129,8 +129,8 @@ HostPluginRuntimeResponseEnvelope ok_response(const nlohmann::json& payload) {
 }
 
 HostPluginRuntimeResponseEnvelope error_response(const Error& error) {
-    return HostPluginRuntimeResponseEnvelope{kHostPluginRuntimeProtocolVersion, false, error.message,
-                                      nlohmann::json::object()};
+    return HostPluginRuntimeResponseEnvelope{kHostPluginRuntimeProtocolVersion, false,
+                                             error.message, nlohmann::json::object()};
 }
 
 std::string response_detail(const HostPluginRuntimeResponseEnvelope& response) {
@@ -529,12 +529,12 @@ Result<void> HostPluginRuntimeService::run(const HostPluginRuntimeServiceOptions
             continue;
         }
 
-        logger.log(
-            "event=request_received command=" + host_plugin_runtime_command_to_string(request->command) +
-            " protocol_version=" + std::to_string(request->protocol_version));
+        logger.log("event=request_received command=" +
+                   host_plugin_runtime_command_to_string(request->command) +
+                   " protocol_version=" + std::to_string(request->protocol_version));
 
-        HostPluginRuntimeResponseEnvelope response =
-            error_response(Error{ErrorCode::InvalidParameters, "Unsupported host plugin runtime command."});
+        HostPluginRuntimeResponseEnvelope response = error_response(
+            Error{ErrorCode::InvalidParameters, "Unsupported host plugin runtime command."});
 
         // Capturing a per-request start timestamp lets us emit duration_ms at completion.
         // This is the single most useful signal for the "is it slow, and where?" question.
@@ -681,11 +681,11 @@ Result<void> HostPluginRuntimeService::run(const HostPluginRuntimeServiceOptions
 
         (void)(*client)->write_json(to_json(response));
         const auto request_end = std::chrono::steady_clock::now();
-        logger.log(
-            "event=request_completed command=" + host_plugin_runtime_command_to_string(request->command) +
-            " success=" + std::to_string(response.success) +
-            " duration_ms=" + format_ms(elapsed_ms(request_start, request_end)) +
-            " detail=" + sanitize_log_token(response_detail(response)));
+        logger.log("event=request_completed command=" +
+                   host_plugin_runtime_command_to_string(request->command) +
+                   " success=" + std::to_string(response.success) +
+                   " duration_ms=" + format_ms(elapsed_ms(request_start, request_end)) +
+                   " detail=" + sanitize_log_token(response_detail(response)));
         const std::size_t removed_idle_sessions = broker.cleanup_idle_sessions();
         if (removed_idle_sessions > 0) {
             logger.log("event=session_idle_destroyed removed_count=" +
