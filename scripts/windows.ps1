@@ -96,6 +96,8 @@ $publishGithubRequested = $additionalArguments | Where-Object { $_ -eq "-Publish
 if ($Task -eq "release" -and $publishGithubRequested -and $Flavor -ne "online") {
     throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
 }
+$stableGithubReleaseRequested = $Task -eq "release" -and $publishGithubRequested -and
+    [string]::IsNullOrWhiteSpace($DisplayVersionLabel)
 
 # Validate any user-provided override BEFORE we attempt to derive a
 # label from git. The strict X.Y.Z-win.N format only applies when the
@@ -108,20 +110,33 @@ Assert-CorridorKeyWindowsReleaseLabelFormat `
     -Version $resolvedVersion `
     -DisplayVersionLabel $DisplayVersionLabel
 
-# Mechanism #3: derive the local-build label from `git describe` when
-# the operator did not pass an explicit override. Without this the
-# packaged binary's `CORRIDORKEY_DISPLAY_VERSION_STRING` falls back to
-# the bare CMakeLists `PROJECT_VERSION`, which collides across every
-# local build of the same X.Y.Z cycle and defeats the operator's
-# ability to confirm a fresh build loaded in the editor (the OFX
-# panel just shows "0.8.3" no matter how many rebuilds happened).
-# Empty derivation result keeps the historical fallback (CMake
-# version), so old branches without matching tags do not regress.
+# Mechanism #3: derive the local-build label from `git describe` plus a
+# per-build reference when the operator did not pass an explicit override.
+# Without the build reference, rebuilding the same dirty commit overwrites
+# an installer name that still looks identical in Resolve's OFX panel.
+# Stable GitHub releases are the only clean-label path: when publishing
+# with no prerelease label, the release pipeline keeps X.Y.Z as the tag,
+# installer name, and panel version.
 if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
-    $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
-    if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
-        $DisplayVersionLabel = $derivedLabel
-        Write-Host "[windows] Derived display version label from git: $DisplayVersionLabel" -ForegroundColor Yellow
+    if ($stableGithubReleaseRequested) {
+        Write-Host "[windows] Stable GitHub release requested; using clean version label $resolvedVersion." -ForegroundColor Yellow
+    } elseif ($Task -eq "package-ofx") {
+        $buildDir = Join-Path $repoRoot ("build\" + $Preset)
+        $builtLabel = Get-CorridorKeyBuiltCliDisplayLabel -BuildDir $buildDir
+        if ([string]::IsNullOrWhiteSpace($builtLabel)) {
+            throw "Task 'package-ofx' could not read a built CLI label from $buildDir. Run scripts\windows.ps1 -Task build -Preset $Preset first."
+        }
+        if ($builtLabel -eq $resolvedVersion) {
+            throw "Task 'package-ofx' found a bare built CLI label '$builtLabel'. Rebuild through scripts\windows.ps1 -Task build -Preset $Preset so the panel and installer name carry a build reference."
+        }
+        $DisplayVersionLabel = $builtLabel
+        Write-Host "[windows] Reusing display version label from built CLI: $DisplayVersionLabel" -ForegroundColor Yellow
+    } else {
+        $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
+        if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
+            $DisplayVersionLabel = $derivedLabel
+            Write-Host "[windows] Derived display version label from git/build: $DisplayVersionLabel" -ForegroundColor Yellow
+        }
     }
 }
 

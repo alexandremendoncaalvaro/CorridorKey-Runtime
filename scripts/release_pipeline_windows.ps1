@@ -148,6 +148,13 @@ try {
     if ($PublishGithub -and $Flavor -ne "online") {
         throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
     }
+    if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel) -and -not $PublishGithub) {
+        $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
+        if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
+            $DisplayVersionLabel = $derivedLabel
+            Write-Host "Using local build display label: $DisplayVersionLabel" -ForegroundColor Yellow
+        }
+    }
 
     $needsRtxTrack = $Track -in @("rtx", "all")
     $needsDirectMlTrack = $Track -in @("dml", "all")

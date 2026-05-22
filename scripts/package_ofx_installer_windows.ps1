@@ -154,13 +154,12 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseSuffix)) {
     $normalizedSuffix = "_" + $ReleaseSuffix.Trim("_")
 }
 
-# When a `-DisplayVersionLabel` (e.g. `0.8.2-win.1`) is supplied the
-# packaged artifact filenames use it instead of the base version. This
-# keeps the installed build identity visible directly in the filename
-# (`CorridorKey_OFX_v0.8.2-win.1_Windows_RTX_Install.exe`) so operators
-# downloading a pre-release candidate never have to guess which cycle
-# they are installing. Public releases leave `-DisplayVersionLabel`
-# empty and filenames fall back to the base CMake version.
+# When a `-DisplayVersionLabel` is supplied, packaged artifact filenames
+# use it instead of the base version. This keeps the installed build
+# identity visible directly in the filename, including local build
+# references such as `-bYYYYMMDDTHHMMSSfffZ`. Stable public releases
+# leave `-DisplayVersionLabel` empty and filenames fall back to the base
+# CMake version.
 $artifactVersionTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
 $releaseBasename = "CorridorKey_OFX_v${artifactVersionTag}_Windows${normalizedSuffix}"
 $releaseDir = Join-Path $repoRoot ("dist\" + $releaseBasename)

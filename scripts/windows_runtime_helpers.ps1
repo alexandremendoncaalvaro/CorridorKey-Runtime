@@ -885,6 +885,70 @@ function Sync-CorridorKeyGuiVersionMetadata {
     return $Version
 }
 
+function Test-CorridorKeyBuildReference {
+    param(
+        [string]$BuildReference
+    )
+
+    return -not [string]::IsNullOrWhiteSpace($BuildReference) -and
+        $BuildReference -match '^b\d{8}T\d{9}Z$'
+}
+
+function New-CorridorKeyBuildReference {
+    param(
+        [DateTime]$UtcNow = [DateTime]::UtcNow
+    )
+
+    return "b" + $UtcNow.ToUniversalTime().ToString(
+        "yyyyMMddTHHmmssfff'Z'",
+        [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Add-CorridorKeyBuildReferenceToLabel {
+    param(
+        [string]$DisplayLabel,
+        [string]$BuildReference = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DisplayLabel)) {
+        return ""
+    }
+    if ([string]::IsNullOrWhiteSpace($BuildReference)) {
+        $BuildReference = New-CorridorKeyBuildReference
+    }
+    if (-not (Test-CorridorKeyBuildReference -BuildReference $BuildReference)) {
+        throw "Build reference '$BuildReference' is invalid. Expected bYYYYMMDDTHHMMSSfffZ."
+    }
+    if ($DisplayLabel -match "-$([regex]::Escape($BuildReference))$") {
+        return $DisplayLabel
+    }
+    return "$DisplayLabel-$BuildReference"
+}
+
+function Get-CorridorKeyBuiltCliDisplayLabel {
+    param(
+        [string]$BuildDir
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BuildDir)) {
+        return ""
+    }
+    $cliPath = Join-Path $BuildDir "src\cli\corridorkey.exe"
+    if (-not (Test-Path $cliPath)) {
+        return ""
+    }
+    $versionLines = & $cliPath --version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Built CLI version probe failed at $cliPath."
+    }
+    $versionText = ($versionLines | Out-String).Trim()
+    $match = [regex]::Match($versionText, '^CorridorKey Runtime v(?<label>\S+)$')
+    if (-not $match.Success) {
+        throw "Built CLI version output has unexpected format: $versionText"
+    }
+    return $match.Groups["label"].Value
+}
+
 function Get-CorridorKeyDerivedDisplayLabel {
     <#
     .SYNOPSIS
@@ -893,23 +957,22 @@ function Get-CorridorKeyDerivedDisplayLabel {
         Release Label Plumbing", priority mechanism #3.
 
     .DESCRIPTION
-        For builds produced without `-DisplayVersionLabel` and without
-        `-PublishGithub`, the canonical local label comes from
-        `git describe --tags --dirty --match "v*-win.*"` with the leading
-        `v` stripped. The derived label naturally encodes:
+        For local builds produced without `-DisplayVersionLabel`, the
+        canonical label starts with `git describe --tags --dirty --match
+        "v*-win.*"` with the leading `v` stripped, then appends a per-build
+        reference. The source-derived part naturally encodes:
 
         - The closest published prerelease tag in HEAD's ancestry (e.g.
           `v0.8.2-win.2`).
         - The number of commits HEAD is past that tag (e.g. `-82-`).
         - The short SHA of HEAD (e.g. `g4a75ef2`).
         - A `-dirty` suffix when the working tree has uncommitted changes.
+        - A `-bYYYYMMDDTHHMMSSfffZ` suffix unique to this build invocation.
 
-        Two builds at the same commit produce the same label (because the
-        same git state derives the same description); two builds at
-        different commits differ at minimum in the SHA. This is what the
-        OFX panel and CLI `--version` should report so the operator
-        always knows exactly which source produced the build they are
-        loading.
+        Two builds at the same commit keep the same source prefix but differ
+        in the build reference. This is what the OFX panel and CLI
+        `--version` should report so the operator always knows exactly which
+        source and build attempt they are loading.
 
         Returns an empty string when no matching tag exists in HEAD's
         ancestry. The caller is expected to fall back to the CMakeLists
@@ -925,10 +988,15 @@ function Get-CorridorKeyDerivedDisplayLabel {
         which is the Windows prerelease tag shape per
         docs/RELEASE_GUIDELINES.md section 1. macOS/Linux callers can
         pass their own platform glob.
+
+    .PARAMETER BuildReference
+        Optional deterministic build reference for tests. Production callers
+        omit it so the helper stamps the current UTC build time.
     #>
     param(
         [string]$RepoRoot,
-        [string]$PlatformMatch = "v*-win.*"
+        [string]$PlatformMatch = "v*-win.*",
+        [string]$BuildReference = ""
     )
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot) -or -not (Test-Path $RepoRoot)) {
@@ -940,7 +1008,10 @@ function Get-CorridorKeyDerivedDisplayLabel {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($rawLabel)) {
         return ""
     }
-    return ($rawLabel | Select-Object -First 1).ToString().Trim() -replace '^v', ''
+    $sourceLabel = ($rawLabel | Select-Object -First 1).ToString().Trim() -replace '^v', ''
+    return Add-CorridorKeyBuildReferenceToLabel `
+        -DisplayLabel $sourceLabel `
+        -BuildReference $BuildReference
 }
 
 function Initialize-CorridorKeyVersion {

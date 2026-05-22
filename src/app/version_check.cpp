@@ -112,14 +112,42 @@ bool is_numeric_identifier(std::string_view value) {
                        [](unsigned char c) { return std::isdigit(c) != 0; });
 }
 
-// Strip the trailing `-<N>-g<SHA>[-dirty]` appended by `git describe` so a
-// locally built binary compares against published tags as if it were the
-// tag it was derived from. Without this, a dev build like
-// `win.1-3-gabc1234` would sort above the published `win.2` because the
-// non-numeric identifier `1-3-gabc1234` outranks the numeric `2` under
-// SemVer 2.0.0 precedence.
+bool is_local_build_reference(std::string_view value) {
+    constexpr size_t kReferenceLength = 20;
+    if (value.size() != kReferenceLength || value.front() != 'b' || value[9] != 'T' ||
+        value.back() != 'Z') {
+        return false;
+    }
+    for (size_t index = 1; index < value.size() - 1; ++index) {
+        if (index == 9) {
+            continue;
+        }
+        if (std::isdigit(static_cast<unsigned char>(value[index])) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string_view strip_local_build_reference_suffix(std::string_view value) {
+    const auto build_pos = value.rfind("-b");
+    if (build_pos == std::string_view::npos) {
+        return value;
+    }
+    const auto reference = value.substr(build_pos + 1);
+    if (!is_local_build_reference(reference)) {
+        return value;
+    }
+    return value.substr(0, build_pos);
+}
+
+// Strip local-only suffixes appended after a published prerelease tag so a
+// locally built binary compares against published tags as if it were the tag
+// it was derived from. Without this, a dev build like `win.1-3-gabc1234`
+// would sort above the published `win.2` because the non-numeric identifier
+// `1-3-gabc1234` outranks the numeric `2` under SemVer 2.0.0 precedence.
 std::string strip_git_describe_suffix(std::string_view prerelease) {
-    std::string_view remaining = prerelease;
+    std::string_view remaining = strip_local_build_reference_suffix(prerelease);
     constexpr std::string_view kDirty = "-dirty";
     if (remaining.size() >= kDirty.size() &&
         remaining.compare(remaining.size() - kDirty.size(), kDirty.size(), kDirty) == 0) {
@@ -128,7 +156,7 @@ std::string strip_git_describe_suffix(std::string_view prerelease) {
 
     const auto g_pos = remaining.rfind("-g");
     if (g_pos == std::string_view::npos) {
-        return std::string(prerelease);
+        return std::string(remaining);
     }
     const auto sha = remaining.substr(g_pos + 2);
     if (sha.size() < 7 || !std::all_of(sha.begin(), sha.end(),

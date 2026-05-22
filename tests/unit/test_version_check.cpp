@@ -104,8 +104,18 @@ TEST_CASE("is_newer_version normalizes git-describe labels before comparing",
     REQUIRE(parsed_dirty.has_value());
     REQUIRE(parsed_dirty->pre_release == "win.1");
 
+    auto parsed_build = parse_semver("0.7.6-win.1-3-gabc1234-dirty-b20260522T010203004Z");
+    REQUIRE(parsed_build.has_value());
+    REQUIRE(parsed_build->pre_release == "win.1");
+
+    auto parsed_prerelease_build = parse_semver("0.7.6-win.1-b20260522T010203004Z");
+    REQUIRE(parsed_prerelease_build.has_value());
+    REQUIRE(parsed_prerelease_build->pre_release == "win.1");
+
     REQUIRE(is_newer_version("0.7.6-win.2", "0.7.6-win.1-3-gabc1234"));
     REQUIRE(is_newer_version("0.7.6-win.2", "0.7.6-win.1-3-gabc1234-dirty"));
+    REQUIRE(is_newer_version("0.7.6-win.2",
+                             "0.7.6-win.1-3-gabc1234-dirty-b20260522T010203004Z"));
     REQUIRE_FALSE(is_newer_version("0.7.6-win.1-3-gabc1234", "0.7.6-win.1"));
 
     // Arbitrary non-describe suffix must not be mistaken for a describe tail.

@@ -80,9 +80,9 @@ $env:VCPKG_ROOT = "C:\tools\vcpkg"
 ### 2.3 Pre-release
 
 ```powershell
-# Pre-release candidate. Bakes the label into the runtime, the panel, and the
-# log filename without bumping the root CMakeLists.txt version.
-.\scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-10
+# Published pre-release candidate. Local unpublished builds normally omit
+# -DisplayVersionLabel so the pipeline appends a per-build reference.
+.\scripts\windows.ps1 -Task release -Version 0.7.5 -DisplayVersionLabel 0.7.5-win.10
 ```
 
 See [RELEASE_GUIDELINES.md](RELEASE_GUIDELINES.md) section "Pre-release labels" for the numbering policy.
