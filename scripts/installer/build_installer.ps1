@@ -612,13 +612,13 @@ function Build-PackCachePrepareProcedure {
 }
 
 function Build-PackMigrationProcedure {
-    # Runs from InitializeWizard, before any gate. For each non-archive
-    # pack, if the marker file is absent but every manifest file is
-    # already on disk with the expected size, write the marker now so
-    # the subsequent CorridorKeyPackCacheValid check short-circuits to
-    # "cache valid" and the install skips downloads. Conservative — any
-    # missing file or size mismatch leaves the marker absent and the
-    # normal download flow fires.
+    # Runs from NextButtonClick(wpReady), after {app} is initialized and
+    # before the download queue is planned. For each non-archive pack, if
+    # the marker file is absent but every manifest file is already on disk
+    # with the expected size, write the marker now so the subsequent
+    # CorridorKeyPackCacheValid check short-circuits to "cache valid" and
+    # the install skips downloads. Conservative: any missing file or size
+    # mismatch leaves the marker absent and the normal download flow fires.
     #
     # Size-only validation here mirrors CorridorKeyBlueRuntimeFilesMatch
     # (corridorkey.iss.template), which has been in production for the

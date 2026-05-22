@@ -536,17 +536,6 @@ begin
     'Downloading selected packs from Hugging Face. SHA-256 is verified for every file.',
     @CorridorKeyOnDownloadProgress);
   DownloadPage.ShowBaseNameInsteadOfUrl := True;
-  // Legacy-cache backfill. Pre-marker installers (anything before the
-  // pack cache marker pattern landed) never wrote
-  // <dest_subdir>\.cache.<packname>.sha256, so on an upgrade install
-  // the cache predicate would always miss and the wizard would
-  // re-download every pack even when the local files were valid. Run
-  // a size+presence pass now — before the wpReady gate — and back-fill
-  // the marker for any pack whose files already match the manifest.
-  // Mirrors CorridorKeyBlueRuntimeFilesMatch (already in production
-  // for the 3 GB blue-runtime pack), which uses the same size-only
-  // validation strategy.
-  CorridorKeyMigrateLegacyPackMarkers;
 end;
 
 @@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@
@@ -556,6 +545,11 @@ var
   ErrorMessage: String;
 begin
   if CurPageID = wpReady then begin
+    // Legacy-cache backfill. Pre-marker installers never wrote
+    // <dest_subdir>\.cache.<packname>.sha256, so upgrade installs would
+    // re-download packs even when local files were valid. Run this after
+    // {app} is initialized by wpReady and before planning downloads.
+    CorridorKeyMigrateLegacyPackMarkers;
     DownloadPage.Clear;
     CorridorKeyResetDownloadPlan;
     CorridorKeyEnqueueDownloads(DownloadPage);
