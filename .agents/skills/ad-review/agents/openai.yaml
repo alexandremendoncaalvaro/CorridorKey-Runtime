@@ -1,5 +1,5 @@
 interface:
   display_name: ad-review
-  short_description: Fresh-context code review per WORKFLOW §10 — assemble handoff, /clear, return adversarial findings.
+  short_description: Writes 2 fresh-context handoff `.md` files (Standards-axis + Spec-axis) to `.agentic/reviews/` and stops. User runs `/clear` + paste twice in fresh sessions. No Task tool, no subagent — handoff files replace the primitive Codex lacks. WORKFLOW §10.
 policy:
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true
