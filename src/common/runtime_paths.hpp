@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <corridorkey/types.hpp>
 #include <corridorkey/version.hpp>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #ifdef __APPLE__
@@ -59,6 +61,17 @@ inline std::uint64_t fnv1a_64(std::string_view text) {
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+inline std::optional<std::uint16_t> parse_port_override(std::string_view value) {
+    int parsed = 0;
+    const auto* begin = value.data();
+    const auto* end = begin + value.size();
+    const auto result = std::from_chars(begin, end, parsed);
+    if (result.ec != std::errc{} || result.ptr != end || parsed < 1 || parsed > 65535) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint16_t>(parsed);
 }
 
 inline std::string backend_token(Backend backend) {
@@ -434,7 +447,10 @@ inline std::filesystem::path host_plugin_runtime_server_log_path() {
 inline std::uint16_t default_host_plugin_runtime_port_for_family(std::string_view family_id) {
     if (auto override_port = environment_variable_copy("CORRIDORKEY_HOST_PLUGIN_RUNTIME_PORT");
         override_port.has_value()) {
-        return static_cast<std::uint16_t>(std::stoi(*override_port));
+        if (auto parsed_port = detail::parse_port_override(*override_port);
+            parsed_port.has_value()) {
+            return *parsed_port;
+        }
     }
 
     auto cache_root = host_plugin_runtime_root().string();

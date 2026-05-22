@@ -1,5 +1,7 @@
 #include <catch2/catch_all.hpp>
+#include <cstdlib>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unordered_set>
 
@@ -33,6 +35,53 @@ extern const char* last_action;
 // live.
 //
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+
+namespace {
+
+class ScopedEnvVar {
+   public:
+    ScopedEnvVar(const char* name, std::optional<std::string> value)
+        : m_name(name), m_previous(corridorkey::common::environment_variable_copy(name)) {
+        if (value.has_value()) {
+            set(*value);
+        } else {
+            clear();
+        }
+    }
+
+    ~ScopedEnvVar() {
+        if (m_previous.has_value()) {
+            set(*m_previous);
+        } else {
+            clear();
+        }
+    }
+
+    ScopedEnvVar(const ScopedEnvVar&) = delete;
+    ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+   private:
+    void set(const std::string& value) const {
+#if defined(_WIN32)
+        _putenv_s(m_name.c_str(), value.c_str());
+#else
+        setenv(m_name.c_str(), value.c_str(), 1);
+#endif
+    }
+
+    void clear() const {
+#if defined(_WIN32)
+        _putenv_s(m_name.c_str(), "");
+#else
+        unsetenv(m_name.c_str());
+#endif
+    }
+
+    std::string m_name;
+    std::optional<std::string> m_previous;
+};
+
+}  // namespace
 
 TEST_CASE("OFX bundle exposes two descriptors", "[unit][ofx][descriptor]") {
     REQUIRE(descriptor_count() == 2);
@@ -124,6 +173,8 @@ TEST_CASE("is_blue_node_identifier classifies descriptor identities correctly",
 
 TEST_CASE("Sidecar ports are distinct per node-family identifier",
           "[unit][ofx][descriptor][runtime]") {
+    ScopedEnvVar absent_override("CORRIDORKEY_HOST_PLUGIN_RUNTIME_PORT", std::nullopt);
+
     // Spec 0002 task 0010 follow-up: Green and Blue must compute different
     // sidecar ports so they get separate runtime-server processes. Same
     // family converges on one port; the empty-family hash matches the
@@ -142,6 +193,32 @@ TEST_CASE("Sidecar ports are distinct per node-family identifier",
     const auto empty_family_port =
         corridorkey::common::default_host_plugin_runtime_port_for_family({});
     REQUIRE(legacy_port == empty_family_port);
+}
+
+TEST_CASE("Sidecar port override is validated before narrowing",
+          "[unit][ofx][descriptor][runtime][regression]") {
+    ScopedEnvVar absent_override("CORRIDORKEY_HOST_PLUGIN_RUNTIME_PORT", std::nullopt);
+    const auto derived_port =
+        corridorkey::common::default_host_plugin_runtime_port_for_family(kPluginIdentifierGreen);
+
+    {
+        ScopedEnvVar valid_override("CORRIDORKEY_HOST_PLUGIN_RUNTIME_PORT",
+                                    std::optional<std::string>{"65000"});
+        REQUIRE(corridorkey::common::default_host_plugin_runtime_port_for_family(
+                    kPluginIdentifierGreen) == 65000);
+    }
+    {
+        ScopedEnvVar invalid_override("CORRIDORKEY_HOST_PLUGIN_RUNTIME_PORT",
+                                      std::optional<std::string>{"70000"});
+        REQUIRE(corridorkey::common::default_host_plugin_runtime_port_for_family(
+                    kPluginIdentifierGreen) == derived_port);
+    }
+    {
+        ScopedEnvVar invalid_override("CORRIDORKEY_HOST_PLUGIN_RUNTIME_PORT",
+                                      std::optional<std::string>{"not-a-port"});
+        REQUIRE(corridorkey::common::default_host_plugin_runtime_port_for_family(
+                    kPluginIdentifierGreen) == derived_port);
+    }
 }
 
 TEST_CASE("Identifier strings have stable storage across descriptor lookups",
