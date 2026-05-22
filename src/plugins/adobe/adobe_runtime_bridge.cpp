@@ -1,13 +1,44 @@
 #include "adobe_bridge.hpp"
 
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace corridorkey::adobe {
 namespace {
 
+constexpr int kMinAdobeQualityMode = 0;
+constexpr int kMaxAdobeQualityMode = 4;
+constexpr int kMaxAdobePrepareResolution = 2048;
+constexpr int kMaxAdobePrepareTimeoutMs = 600000;
+
+std::string encode_identity_component(std::string_view value) {
+    std::string encoded;
+    encoded.reserve(value.size());
+    for (const char character : value) {
+        if (character == '%') {
+            encoded += "%25";
+        } else if (character == ':') {
+            encoded += "%3A";
+        } else {
+            encoded.push_back(character);
+        }
+    }
+    return encoded;
+}
+
 std::string adobe_session_identity(const AdobePrepareSessionOptions& options) {
-    return "adobe:" + options.host_surface + ":" + options.effect_identity;
+    return "adobe:" + encode_identity_component(options.host_surface) + ":" +
+           encode_identity_component(options.effect_identity);
+}
+
+Result<void> validate_range(int value, int minimum, int maximum, std::string_view label) {
+    if (value < minimum || value > maximum) {
+        return Unexpected<Error>(
+            Error{.code = ErrorCode::InvalidParameters,
+                  .message = "Adobe " + std::string(label) + " is out of range."});
+    }
+    return {};
 }
 
 Result<void> validate_prepare_options(const AdobePrepareSessionOptions& options) {
@@ -22,6 +53,28 @@ Result<void> validate_prepare_options(const AdobePrepareSessionOptions& options)
     if (options.model_path.empty()) {
         return Unexpected<Error>(
             Error{ErrorCode::InvalidParameters, "Adobe model path is required."});
+    }
+    auto quality = validate_range(options.requested_quality_mode, kMinAdobeQualityMode,
+                                  kMaxAdobeQualityMode, "quality mode");
+    if (!quality) {
+        return Unexpected<Error>(quality.error());
+    }
+    auto requested_resolution = validate_range(options.requested_resolution, 0,
+                                               kMaxAdobePrepareResolution,
+                                               "requested resolution");
+    if (!requested_resolution) {
+        return Unexpected<Error>(requested_resolution.error());
+    }
+    auto effective_resolution = validate_range(options.effective_resolution, 0,
+                                               kMaxAdobePrepareResolution,
+                                               "effective resolution");
+    if (!effective_resolution) {
+        return Unexpected<Error>(effective_resolution.error());
+    }
+    auto prepare_timeout =
+        validate_range(options.prepare_timeout_ms, 0, kMaxAdobePrepareTimeoutMs, "prepare timeout");
+    if (!prepare_timeout) {
+        return Unexpected<Error>(prepare_timeout.error());
     }
     return {};
 }
@@ -45,7 +98,7 @@ Result<app::HostPluginRuntimePrepareSessionRequest> build_adobe_prepare_session_
     app::HostPluginRuntimePrepareSessionRequest request;
     request.client_instance_id = identity;
     if (!options.client_instance_id.empty()) {
-        request.client_instance_id += ":" + options.client_instance_id;
+        request.client_instance_id += ":" + encode_identity_component(options.client_instance_id);
     }
     request.model_path = options.model_path;
     request.artifact_name = options.model_path.filename().string();

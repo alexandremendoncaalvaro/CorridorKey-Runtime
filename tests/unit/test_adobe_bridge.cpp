@@ -8,6 +8,22 @@
 using namespace corridorkey;
 using namespace corridorkey::adobe;
 
+namespace {
+
+AdobePrepareSessionOptions make_prepare_options() {
+    AdobePrepareSessionOptions options;
+    options.host_surface = "after_effects";
+    options.effect_identity = "com.corridorkey.effect";
+    options.model_path = "models/corridorkey_dynamic_blue_fp16.ts";
+    options.requested_quality_mode = 3;
+    options.requested_resolution = 2048;
+    options.effective_resolution = 1536;
+    options.prepare_timeout_ms = 45000;
+    return options;
+}
+
+}  // namespace
+
 TEST_CASE("adobe bridge copies ARGB32 frames with row padding into runtime buffers",
           "[unit][adobe][runtime]") {
     constexpr int width = 2;
@@ -178,20 +194,44 @@ TEST_CASE("adobe bridge rejects unsupported pixel formats and undersized views",
     CHECK(short_buffer.error().message.find("buffer") != std::string::npos);
 }
 
+TEST_CASE("adobe bridge rejects oversized host frames before allocation",
+          "[unit][adobe][runtime][regression]") {
+    std::array<std::uint8_t, 4> pixels{};
+
+    auto converted = copy_adobe_frame_to_runtime(AdobeFrameView{
+        .data = pixels.data(),
+        .data_size_bytes = 0,
+        .width = 8193,
+        .height = 1,
+        .row_bytes = 8193 * 4,
+        .pixel_format = AdobePixelFormat::Argb32,
+    });
+
+    REQUIRE_FALSE(converted.has_value());
+    CHECK(converted.error().code == ErrorCode::InvalidParameters);
+    CHECK(converted.error().message.find("dimensions") != std::string::npos);
+
+    converted = copy_adobe_frame_to_runtime(AdobeFrameView{
+        .data = pixels.data(),
+        .data_size_bytes = 0,
+        .width = 8192,
+        .height = 4321,
+        .row_bytes = 8192 * 4,
+        .pixel_format = AdobePixelFormat::Argb32,
+    });
+
+    REQUIRE_FALSE(converted.has_value());
+    CHECK(converted.error().code == ErrorCode::InvalidParameters);
+    CHECK(converted.error().message.find("pixel count") != std::string::npos);
+}
+
 TEST_CASE("adobe bridge builds prepare requests with Adobe-scoped session identity",
           "[unit][adobe][runtime]") {
-    AdobePrepareSessionOptions options;
-    options.host_surface = "after_effects";
-    options.effect_identity = "com.corridorkey.effect";
+    auto options = make_prepare_options();
     options.client_instance_id = "layer-7";
-    options.model_path = "models/corridorkey_dynamic_blue_fp16.ts";
     options.requested_device = DeviceInfo{"RTX 4090", 24576, Backend::TorchTRT};
     options.engine_options.allow_cpu_fallback = false;
     options.engine_options.disable_cpu_ep_fallback = true;
-    options.requested_quality_mode = 3;
-    options.requested_resolution = 2048;
-    options.effective_resolution = 1536;
-    options.prepare_timeout_ms = 45000;
 
     auto request = build_adobe_prepare_session_request(options);
 
@@ -208,6 +248,55 @@ TEST_CASE("adobe bridge builds prepare requests with Adobe-scoped session identi
     CHECK(request->requested_resolution == 2048);
     CHECK(request->effective_resolution == 1536);
     CHECK(request->prepare_timeout_ms == 45000);
+}
+
+TEST_CASE("adobe bridge escapes prepare identity components", "[unit][adobe][runtime]") {
+    auto options = make_prepare_options();
+    options.host_surface = "after:effects";
+    options.effect_identity = "com%corridorkey:effect";
+    options.client_instance_id = "layer:7";
+
+    auto request = build_adobe_prepare_session_request(options);
+
+    REQUIRE(request.has_value());
+    CHECK(request->node_identity == "adobe:after%3Aeffects:com%25corridorkey%3Aeffect");
+    CHECK(request->client_instance_id ==
+          "adobe:after%3Aeffects:com%25corridorkey%3Aeffect:layer%3A7");
+}
+
+TEST_CASE("adobe bridge rejects invalid prepare option ranges",
+          "[unit][adobe][runtime][regression]") {
+    const auto expect_invalid = [](AdobePrepareSessionOptions options,
+                                   const std::string& expected_message) {
+        auto request = build_adobe_prepare_session_request(options);
+        REQUIRE_FALSE(request.has_value());
+        CHECK(request.error().code == ErrorCode::InvalidParameters);
+        CHECK(request.error().message.find(expected_message) != std::string::npos);
+    };
+
+    auto options = make_prepare_options();
+    options.requested_quality_mode = -1;
+    expect_invalid(options, "quality");
+
+    options = make_prepare_options();
+    options.requested_quality_mode = 5;
+    expect_invalid(options, "quality");
+
+    options = make_prepare_options();
+    options.requested_resolution = -1;
+    expect_invalid(options, "resolution");
+
+    options = make_prepare_options();
+    options.effective_resolution = 2049;
+    expect_invalid(options, "resolution");
+
+    options = make_prepare_options();
+    options.prepare_timeout_ms = -1;
+    expect_invalid(options, "timeout");
+
+    options = make_prepare_options();
+    options.prepare_timeout_ms = 600001;
+    expect_invalid(options, "timeout");
 }
 
 TEST_CASE("adobe runtime bridge operations return Result errors without a client",

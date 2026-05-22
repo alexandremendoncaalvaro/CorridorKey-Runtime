@@ -169,7 +169,33 @@ int main(int argc, char** argv) {
         throw "dumpbin dependent inspection failed."
     }
     $dependentText = $dependents -join "`n"
-    foreach ($forbidden in @("onnxruntime", "cudart", "nvinfer", "torch")) {
+    $forbiddenDependents = @(
+        "onnxruntime",
+        "cudart",
+        "cuda",
+        "nvcuda",
+        "nvrtc",
+        "nvToolsExt",
+        "cublas",
+        "cudnn",
+        "nppc",
+        "nppial",
+        "nppicc",
+        "nppidei",
+        "nppif",
+        "nppig",
+        "nppim",
+        "nppist",
+        "nppisu",
+        "nppitc",
+        "npps",
+        "nvinfer",
+        "nvonnxparser",
+        "torch",
+        "torch_cuda",
+        "c10"
+    )
+    foreach ($forbidden in $forbiddenDependents) {
         if ($dependentText -match $forbidden) {
             throw "Adobe plugin module must not depend on $forbidden."
         }

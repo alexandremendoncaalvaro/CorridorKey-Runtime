@@ -11,6 +11,8 @@ namespace {
 
 constexpr float kAdobeArgb8White = 255.0F;
 constexpr float kAdobeArgb16White = 32768.0F;
+constexpr int kMaxAdobeFrameLongEdge = 8192;
+constexpr std::size_t kMaxAdobeFramePixels = 8192ULL * 4320ULL;
 
 struct Argb8Pixel {
     std::uint8_t alpha = 0;
@@ -71,6 +73,10 @@ Result<void> validate_frame_view(const AdobeFrameView& frame, std::size_t pixel_
         return Unexpected<Error>(
             invalid_adobe_frame_error("Adobe frame dimensions must be positive."));
     }
+    if (frame.width > kMaxAdobeFrameLongEdge || frame.height > kMaxAdobeFrameLongEdge) {
+        return Unexpected<Error>(
+            invalid_adobe_frame_error("Adobe frame dimensions exceed the supported maximum."));
+    }
     if (frame.row_bytes <= 0) {
         return Unexpected<Error>(
             invalid_adobe_frame_error("Adobe frame row bytes must be positive."));
@@ -78,6 +84,10 @@ Result<void> validate_frame_view(const AdobeFrameView& frame, std::size_t pixel_
 
     const auto width = static_cast<std::size_t>(frame.width);
     const auto height = static_cast<std::size_t>(frame.height);
+    if (height > 0 && width > (kMaxAdobeFramePixels / height)) {
+        return Unexpected<Error>(
+            invalid_adobe_frame_error("Adobe frame dimensions exceed the supported pixel count."));
+    }
     if (width > (std::numeric_limits<std::size_t>::max() / pixel_size)) {
         return Unexpected<Error>(
             invalid_adobe_frame_error("Adobe frame width overflows row size."));
@@ -126,17 +136,11 @@ Result<AdobeRuntimeFrame> make_runtime_frame(int width, int height) {
     return frame;
 }
 
-float normalize_argb8(std::uint8_t value) {
-    return static_cast<float>(value) / kAdobeArgb8White;
-}
+float normalize_argb8(std::uint8_t value) { return static_cast<float>(value) / kAdobeArgb8White; }
 
-float normalize_argb16(std::uint16_t value) {
-    return static_cast<float>(value) / kAdobeArgb16White;
-}
+float normalize_argb16(std::uint16_t value) { return static_cast<float>(value) / kAdobeArgb16White; }
 
-float normalize_argb_float(float value) {
-    return value;
-}
+float normalize_argb_float(float value) { return value; }
 
 template <typename Pixel, typename Normalizer>
 void copy_pixel_rows(const AdobeFrameView& frame, AdobeRuntimeFrame& output,
