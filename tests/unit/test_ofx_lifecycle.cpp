@@ -755,7 +755,7 @@ TEST_CASE("destroy_instance does not clear persistent message on Resolve teardow
     CHECK(props.instance_data == nullptr);
 }
 
-TEST_CASE("destroy_instance clears persistent message on non-Resolve hosts",
+TEST_CASE("destroy_instance does not clear persistent message on Nuke teardown",
           "[unit][ofx][regression]") {
     OfxPropertySuiteV1 property_suite{};
     property_suite.propGetPointer = fake_prop_get_pointer;
@@ -773,6 +773,39 @@ TEST_CASE("destroy_instance clears persistent message on non-Resolve hosts",
     g_suites.image_effect = &image_suite;
     g_suites.message = &message_suite;
     g_host_name = kHostNameNuke;
+    g_clear_persistent_message_count = 0;
+
+    auto* data = new InstanceData();
+    FakeEffectProps props{.instance_data = data};
+    REQUIRE(destroy_instance(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_suites.message = previous_message;
+    g_host_name = previous_host_name;
+
+    CHECK(g_clear_persistent_message_count == 0);
+    CHECK(props.instance_data == nullptr);
+}
+
+TEST_CASE("destroy_instance clears persistent message on generic hosts",
+          "[unit][ofx][regression]") {
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxMessageSuiteV2 message_suite{};
+    message_suite.clearPersistentMessage = fake_clear_persistent_message;
+
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    auto* previous_message = g_suites.message;
+    auto previous_host_name = g_host_name;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.message = &message_suite;
+    g_host_name = "com.example.generic-ofx-host";
     g_clear_persistent_message_count = 0;
 
     auto* data = new InstanceData();
