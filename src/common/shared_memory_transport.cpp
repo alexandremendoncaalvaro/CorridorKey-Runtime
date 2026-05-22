@@ -458,8 +458,8 @@ Image SharedFrameTransport::foreground_view() {
                                              static_cast<int>(m_header->foreground_channels)))};
 }
 
-std::filesystem::path next_ofx_shared_frame_path() {
-    auto root = ofx_runtime_shared_frames_root();
+std::filesystem::path next_host_plugin_shared_frame_path() {
+    auto root = host_plugin_runtime_shared_frames_root();
     std::error_code error;
     std::filesystem::create_directories(root, error);
     const auto time_seed = std::chrono::steady_clock::now().time_since_epoch().count();

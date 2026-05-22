@@ -15,7 +15,7 @@
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
-#include "ofx_runtime_client.hpp"
+#include "app/host_plugin_runtime_client.hpp"
 #include "ofx_screen_color.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"

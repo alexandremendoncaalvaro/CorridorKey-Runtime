@@ -167,7 +167,7 @@ Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (
 [Files]
 ; Plugin base payload. Always installed. Path layout matches the
 ; OFX bundle convention plus the existing CMake POST_BUILD layout
-; (CorridorKey.ofx + corridorkey.exe + corridorkey_ofx_runtime_server.exe
+; (CorridorKey.ofx + corridorkey.exe + corridorkey_host_plugin_runtime_server.exe
 ; + ORT/CUDA/MSVC redist DLLs co-located in Contents\Win64).
 Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
     DestDir: "{app}\Contents\Win64"; \
@@ -271,7 +271,7 @@ procedure StopCorridorKeyAndHosts;
 begin
   StopProcessByImageName('Resolve.exe');
   StopProcessByImageName('Nuke*.exe');
-  StopProcessByImageName('corridorkey_ofx_runtime_server.exe');
+  StopProcessByImageName('corridorkey_host_plugin_runtime_server.exe');
   StopProcessByImageName('corridorkey.exe');
 end;
 

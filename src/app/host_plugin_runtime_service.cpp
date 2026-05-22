@@ -1,4 +1,4 @@
-#include "ofx_runtime_service.hpp"
+#include "host_plugin_runtime_service.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -28,10 +28,10 @@
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,modernize-use-ranges,modernize-loop-convert,modernize-return-braced-init-list,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,readability-implicit-bool-conversion,cert-err33-c,performance-unnecessary-value-param,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
-// ofx_runtime_service.cpp tidy-suppression rationale.
+// host_plugin_runtime_service.cpp tidy-suppression rationale.
 //
-// This translation unit is the OFX runtime IPC server: it parses
-// OfxRuntime* JSON envelopes, dispatches them to the OfxSessionBroker,
+// This translation unit is the host plugin runtime IPC server: it parses
+// HostPluginRuntime* JSON envelopes, dispatches them to the HostPluginSessionBroker,
 // and emits a single-line key=value diagnostic log. It is NOT on the
 // per-pixel render hot path, but a linter-driven rewrite of the
 // suppressed categories would force a large mechanical churn of the
@@ -53,7 +53,7 @@
 //     elapsed_ms are intentional and stable.
 //
 //   * readability-function-cognitive-complexity / readability-function-
-//     size: OfxRuntimeService::run is the canonical IPC dispatch loop
+//     size: HostPluginRuntimeService::run is the canonical IPC dispatch loop
 //     (Health / PrepareSession / RenderFrame / ReleaseSession /
 //     Shutdown branches with per-branch logging). Splitting it would
 //     scatter the request_start / response / broker state across
@@ -63,7 +63,7 @@
 //     (32 / 64 / 128 / 160 / 80), the top-N stage cut (5), and MB
 //     conversion (1024.0 * 1024.0) are documented at every use site.
 //
-//   * modernize-use-designated-initializers: OfxRuntimeResponseEnvelope
+//   * modernize-use-designated-initializers: HostPluginRuntimeResponseEnvelope
 //     and Error are constructed at every dispatch branch; positional
 //     init keeps the dispatch loop compact and matches the surrounding
 //     codebase style.
@@ -124,16 +124,16 @@ int current_process_id() {
 #endif
 }
 
-OfxRuntimeResponseEnvelope ok_response(const nlohmann::json& payload) {
-    return OfxRuntimeResponseEnvelope{kOfxRuntimeProtocolVersion, true, "", payload};
+HostPluginRuntimeResponseEnvelope ok_response(const nlohmann::json& payload) {
+    return HostPluginRuntimeResponseEnvelope{kHostPluginRuntimeProtocolVersion, true, "", payload};
 }
 
-OfxRuntimeResponseEnvelope error_response(const Error& error) {
-    return OfxRuntimeResponseEnvelope{kOfxRuntimeProtocolVersion, false, error.message,
+HostPluginRuntimeResponseEnvelope error_response(const Error& error) {
+    return HostPluginRuntimeResponseEnvelope{kHostPluginRuntimeProtocolVersion, false, error.message,
                                       nlohmann::json::object()};
 }
 
-std::string response_detail(const OfxRuntimeResponseEnvelope& response) {
+std::string response_detail(const HostPluginRuntimeResponseEnvelope& response) {
     return response.success ? "ok" : response.error;
 }
 
@@ -444,8 +444,8 @@ class MemoryPressureMonitor {
 
 }  // namespace
 
-Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
-    RuntimeLogger logger(options.log_path.empty() ? common::ofx_runtime_server_log_path()
+Result<void> HostPluginRuntimeService::run(const HostPluginRuntimeServiceOptions& options) {
+    RuntimeLogger logger(options.log_path.empty() ? common::host_plugin_runtime_server_log_path()
                                                   : options.log_path);
     // The version banner lets the log reader know which build emitted the events.
     // display_version carries the optimization checkpoint label (e.g. 0.7.5-2); it
@@ -497,7 +497,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         return Unexpected<Error>(server.error());
     }
 
-    OfxSessionBroker broker(options.broker);
+    HostPluginSessionBroker broker(options.broker);
     bool should_exit = false;
 
     while (!should_exit) {
@@ -521,7 +521,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
             continue;
         }
 
-        auto request = ofx_runtime_request_from_json(*request_json);
+        auto request = host_plugin_runtime_request_from_json(*request_json);
         if (!request) {
             auto response = error_response(request.error());
             logger.log("event=request_failed stage=parse detail=" + request.error().message);
@@ -530,26 +530,26 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         }
 
         logger.log(
-            "event=request_received command=" + ofx_runtime_command_to_string(request->command) +
+            "event=request_received command=" + host_plugin_runtime_command_to_string(request->command) +
             " protocol_version=" + std::to_string(request->protocol_version));
 
-        OfxRuntimeResponseEnvelope response =
-            error_response(Error{ErrorCode::InvalidParameters, "Unsupported OFX runtime command."});
+        HostPluginRuntimeResponseEnvelope response =
+            error_response(Error{ErrorCode::InvalidParameters, "Unsupported host plugin runtime command."});
 
         // Capturing a per-request start timestamp lets us emit duration_ms at completion.
         // This is the single most useful signal for the "is it slow, and where?" question.
         const auto request_start = std::chrono::steady_clock::now();
 
         switch (request->command) {
-            case OfxRuntimeCommand::Health: {
-                OfxRuntimeHealthResponse health;
+            case HostPluginRuntimeCommand::Health: {
+                HostPluginRuntimeHealthResponse health;
                 health.server_pid = current_process_id();
                 health.session_count = broker.session_count();
                 health.active_session_count = broker.active_session_count();
                 response = ok_response(to_json(health));
                 break;
             }
-            case OfxRuntimeCommand::PrepareSession: {
+            case HostPluginRuntimeCommand::PrepareSession: {
                 auto prepare_request = prepare_session_request_from_json(request->payload);
                 if (!prepare_request) {
                     response = error_response(prepare_request.error());
@@ -585,7 +585,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                                             : error_response(prepare_response.error());
                 break;
             }
-            case OfxRuntimeCommand::RenderFrame: {
+            case HostPluginRuntimeCommand::RenderFrame: {
                 auto render_request = render_frame_request_from_json(request->payload);
                 if (!render_request) {
                     response = error_response(render_request.error());
@@ -640,7 +640,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                                            : error_response(render_response.error());
                 break;
             }
-            case OfxRuntimeCommand::ReleaseSession: {
+            case HostPluginRuntimeCommand::ReleaseSession: {
                 auto release_request = release_session_request_from_json(request->payload);
                 if (!release_request) {
                     response = error_response(release_request.error());
@@ -665,7 +665,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
                                           : error_response(release_result.error());
                 break;
             }
-            case OfxRuntimeCommand::Shutdown: {
+            case HostPluginRuntimeCommand::Shutdown: {
                 auto shutdown_request = shutdown_request_from_json(request->payload);
                 if (!shutdown_request) {
                     response = error_response(shutdown_request.error());
@@ -682,7 +682,7 @@ Result<void> OfxRuntimeService::run(const OfxRuntimeServiceOptions& options) {
         (void)(*client)->write_json(to_json(response));
         const auto request_end = std::chrono::steady_clock::now();
         logger.log(
-            "event=request_completed command=" + ofx_runtime_command_to_string(request->command) +
+            "event=request_completed command=" + host_plugin_runtime_command_to_string(request->command) +
             " success=" + std::to_string(response.success) +
             " duration_ms=" + format_ms(elapsed_ms(request_start, request_end)) +
             " detail=" + sanitize_log_token(response_detail(response)));

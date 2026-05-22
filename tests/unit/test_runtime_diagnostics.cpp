@@ -137,7 +137,7 @@ TEST_CASE("doctor bundle inspection recognizes Windows OFX DirectML layout",
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+         {"corridorkey.exe", "corridorkey_host_plugin_runtime_server.exe", "CorridorKey.ofx",
           "onnxruntime.dll", "onnxruntime_providers_shared.dll", "DirectML.dll"}) {
         touch_file(win64_dir / filename);
     }
@@ -175,7 +175,7 @@ TEST_CASE("doctor bundle inspection recognizes Windows OFX DirectML layout",
     REQUIRE(report["models_dir_matches_bundle"].get<bool>());
     REQUIRE(report["bundle_track"] == "dml");
     REQUIRE(report["cli_binary_found"].get<bool>());
-    REQUIRE(report["ofx_runtime_server_found"].get<bool>());
+    REQUIRE(report["host_plugin_runtime_server_found"].get<bool>());
     REQUIRE(report["directml_runtime_found"].get<bool>());
     REQUIRE(report["runtime_backend_bundle_ready"].get<bool>());
     REQUIRE(report["healthy"].get<bool>());
@@ -183,10 +183,10 @@ TEST_CASE("doctor bundle inspection recognizes Windows OFX DirectML layout",
     std::filesystem::remove_all(temp_dir);
 }
 
-TEST_CASE("doctor bundle inspection requires the dedicated OFX runtime server on Windows",
+TEST_CASE("doctor bundle inspection requires the dedicated host plugin runtime server on Windows",
           "[unit][doctor][regression]") {
     auto temp_dir =
-        std::filesystem::temp_directory_path() / "corridorkey-doctor-ofx-runtime-server";
+        std::filesystem::temp_directory_path() / "corridorkey-doctor-host-plugin-runtime-server";
     std::filesystem::remove_all(temp_dir);
 
     const auto win64_dir = temp_dir / "Contents" / "Win64";
@@ -202,7 +202,7 @@ TEST_CASE("doctor bundle inspection requires the dedicated OFX runtime server on
     const auto report = inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
 
     REQUIRE(report["cli_binary_found"].get<bool>());
-    REQUIRE_FALSE(report["ofx_runtime_server_found"].get<bool>());
+    REQUIRE_FALSE(report["host_plugin_runtime_server_found"].get<bool>());
     REQUIRE_FALSE(report["packaged_layout_detected"].get<bool>());
     REQUIRE_FALSE(report["healthy"].get<bool>());
 
@@ -225,7 +225,7 @@ TEST_CASE("doctor bundle inspection reports packaged TensorRT context models",
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+         {"corridorkey.exe", "corridorkey_host_plugin_runtime_server.exe", "CorridorKey.ofx",
           "onnxruntime.dll", "onnxruntime_providers_shared.dll",
           "onnxruntime_providers_nv_tensorrt_rtx.dll"}) {
         touch_file(win64_dir / filename);
@@ -263,7 +263,7 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+         {"corridorkey.exe", "corridorkey_host_plugin_runtime_server.exe", "CorridorKey.ofx",
           "onnxruntime.dll", "onnxruntime_providers_shared.dll",
           "onnxruntime_providers_nv_tensorrt_rtx.dll", "cudart64_12.dll", "tensorrt_rtx_1_2.dll",
           "tensorrt_onnxparser_rtx_1_2.dll"}) {
@@ -308,7 +308,7 @@ TEST_CASE("doctor bundle inspection honors packaged model inventory for Windows 
     REQUIRE(report["bundle_track"] == "rtx");
     REQUIRE(report["model_profile"] == "windows-rtx");
     REQUIRE(report["cli_binary_found"].get<bool>());
-    REQUIRE(report["ofx_runtime_server_found"].get<bool>());
+    REQUIRE(report["host_plugin_runtime_server_found"].get<bool>());
     REQUIRE(report["model_inventory_contract_complete"].get<bool>());
     REQUIRE(report["optimization_profile_id"] == "windows-rtx");
     REQUIRE(report["healthy"].get<bool>());
@@ -338,7 +338,7 @@ TEST_CASE("doctor bundle inspection marks RTX bundles unhealthy when compiled co
     }
 
     for (const auto& filename :
-         {"corridorkey.exe", "corridorkey_ofx_runtime_server.exe", "CorridorKey.ofx",
+         {"corridorkey.exe", "corridorkey_host_plugin_runtime_server.exe", "CorridorKey.ofx",
           "onnxruntime.dll", "onnxruntime_providers_shared.dll",
           "onnxruntime_providers_nv_tensorrt_rtx.dll", "cudart64_12.dll", "tensorrt_rtx_1_2.dll",
           "tensorrt_onnxparser_rtx_1_2.dll"}) {
@@ -401,7 +401,7 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
     const auto models_dir = bundle_root / "Contents" / "Resources" / "models";
 
     touch_file(win64_dir / "corridorkey.exe");
-    touch_file(win64_dir / "corridorkey_ofx_runtime_server.exe");
+    touch_file(win64_dir / "corridorkey_host_plugin_runtime_server.exe");
     touch_file(win64_dir / "CorridorKey.ofx");
     touch_file(win64_dir / "onnxruntime.dll");
     touch_file(win64_dir / "onnxruntime_providers_shared.dll");

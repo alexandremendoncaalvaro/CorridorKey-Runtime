@@ -1,4 +1,4 @@
-#include "ofx_runtime_client.hpp"
+#include "app/host_plugin_runtime_client.hpp"
 
 #include <cerrno>
 #include <chrono>
@@ -7,8 +7,7 @@
 
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
-#include "ofx_logging.hpp"
-#include "ofx_runtime_family.hpp"
+#include "app/host_plugin_runtime_family.hpp"
 
 #ifdef __APPLE__
 #include <pthread.h>
@@ -26,24 +25,24 @@ extern char** environ;
 extern char** environ;
 #endif
 
-namespace corridorkey::ofx {
+namespace corridorkey::app {
 
 // NOLINTBEGIN(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
-// ofx_runtime_client.cpp tidy-suppression rationale.
+// host_plugin_runtime_client.cpp tidy-suppression rationale.
 //
 // The Error{} aggregate is the engine-wide failure form across every
 // transport, prepare, and render path; rewriting them as designated
 // initialisers would obscure the uniform structure. The 5000 ms
 // terminate wait, the 90% (* 9 / 10) prepare-budget shortening, and the
-// 150 ms server-ready poll cadence are tuned to the OFX runtime's
+// 150 ms server-ready poll cadence are tuned to the host plugin runtime's
 // transport-and-prewarm contract, not arbitrary magic numbers. Render /
 // prepare / ensure_server_running are intentionally large because they
 // orchestrate the full connect, recover, restart, retry contract, with
 // branching that mirrors the protocol state machine. StageTimingCallback
 // is the engine-wide std::function signature passed by value across the
 // async boundary. The (`ms`) parameter name mirrors the public
-// ofx-runtime-client API and matches header signatures. The std::copy
+// host plugin runtime client API and matches header signatures. The std::copy
 // calls operate on Image span begin/end pairs whose ranges form would
 // require span->range adapters across the SharedFrameTransport bridge.
 namespace {
@@ -58,8 +57,8 @@ bool same_engine_options(const EngineCreateOptions& lhs, const EngineCreateOptio
            lhs.disable_cpu_ep_fallback == rhs.disable_cpu_ep_fallback;
 }
 
-bool same_prepare_request(const app::OfxRuntimePrepareSessionRequest& lhs,
-                          const app::OfxRuntimePrepareSessionRequest& rhs) {
+bool same_prepare_request(const HostPluginRuntimePrepareSessionRequest& lhs,
+                          const HostPluginRuntimePrepareSessionRequest& rhs) {
     return lhs.client_instance_id == rhs.client_instance_id && lhs.model_path == rhs.model_path &&
            lhs.artifact_name == rhs.artifact_name &&
            same_device_info(lhs.requested_device, rhs.requested_device) &&
@@ -69,8 +68,8 @@ bool same_prepare_request(const app::OfxRuntimePrepareSessionRequest& lhs,
            lhs.effective_resolution == rhs.effective_resolution;
 }
 
-app::OfxRuntimeSessionSnapshot with_prepare_request_metadata(
-    app::OfxRuntimeSessionSnapshot snapshot, const app::OfxRuntimePrepareSessionRequest& request) {
+HostPluginRuntimeSessionSnapshot with_prepare_request_metadata(
+    HostPluginRuntimeSessionSnapshot snapshot, const HostPluginRuntimePrepareSessionRequest& request) {
     snapshot.model_path = request.model_path;
     snapshot.artifact_name = request.artifact_name;
     snapshot.requested_device = request.requested_device;
@@ -81,7 +80,7 @@ app::OfxRuntimeSessionSnapshot with_prepare_request_metadata(
 }
 
 Result<nlohmann::json> unwrap_response(const nlohmann::json& json) {
-    auto envelope = app::ofx_runtime_response_from_json(json);
+    auto envelope = host_plugin_runtime_response_from_json(json);
     if (!envelope) {
         return Unexpected<Error>(envelope.error());
     }
@@ -110,7 +109,7 @@ bool is_timeout_error(const Error& error) {
 
 bool is_protocol_mismatch_error(const Error& error) {
     return error.code == ErrorCode::InvalidParameters &&
-           error.message.find("Unsupported OFX runtime protocol version") != std::string::npos;
+           error.message.find("Unsupported host plugin runtime protocol version") != std::string::npos;
 }
 
 bool is_restartable_server_error(const Error& error) {
@@ -132,7 +131,7 @@ Result<void> terminate_server_process(int server_pid) {
     if (TerminateProcess(process, 0) == 0) {
         CloseHandle(process);
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to terminate the stale OFX runtime server."});
+            Error{ErrorCode::IoError, "Failed to terminate the stale host plugin runtime server."});
     }
 
     WaitForSingleObject(process, 5000);
@@ -141,7 +140,7 @@ Result<void> terminate_server_process(int server_pid) {
 #else
     if (kill(server_pid, SIGTERM) != 0 && errno != ESRCH) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to terminate the stale OFX runtime server."});
+            Error{ErrorCode::IoError, "Failed to terminate the stale host plugin runtime server."});
     }
     return {};
 #endif
@@ -201,7 +200,7 @@ std::string compose_launch_failure_message(const std::string& reason,
     message += ", timeout=";
     message += std::to_string(timeout_ms);
     message += "ms, server_log=";
-    message += common::ofx_runtime_server_log_path().string();
+    message += common::host_plugin_runtime_server_log_path().string();
     message += ", server_binary=";
     message += server_binary.string();
     message += ").";
@@ -219,21 +218,21 @@ void replay_stage_timings(const std::vector<StageTiming>& timings, StageTimingCa
 
 }  // namespace
 
-std::filesystem::path resolve_ofx_runtime_server_binary(
+std::filesystem::path resolve_host_plugin_runtime_server_binary(
     const std::filesystem::path& plugin_module_path) {
-    if (auto override_path = common::environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_SERVER");
+    if (auto override_path = common::environment_variable_copy("CORRIDORKEY_HOST_PLUGIN_RUNTIME_SERVER");
         override_path.has_value()) {
         return std::filesystem::path(*override_path);
     }
 
 #ifdef _WIN32
     auto win64_dir = plugin_module_path.parent_path();
-    return win64_dir / "corridorkey_ofx_runtime_server.exe";
+    return win64_dir / "corridorkey_host_plugin_runtime_server.exe";
 #elif defined(__linux__)
-    // Linux OFX bundle layout places the plugin binary and the CLI side by
-    // side under Contents/Linux-x86_64/, per the OpenFX portable bundle
-    // convention. The CLI exposes an `ofx-runtime-server` subcommand so we
-    // do not ship a separate server binary.
+    // Linux host plugin bundle layout places the plugin binary and the CLI
+    // side by side under the platform bundle content directory. The CLI exposes
+    // a `host-plugin-runtime-server` subcommand so we do not ship a separate
+    // server binary.
     auto linux_dir = plugin_module_path.parent_path();
     return linux_dir / "corridorkey";
 #else
@@ -242,20 +241,20 @@ std::filesystem::path resolve_ofx_runtime_server_binary(
 #endif
 }
 
-Result<std::unique_ptr<OfxRuntimeClient>> OfxRuntimeClient::create(
-    OfxRuntimeClientOptions options) {
-    auto client = std::unique_ptr<OfxRuntimeClient>(new OfxRuntimeClient(std::move(options)));
+Result<std::unique_ptr<HostPluginRuntimeClient>> HostPluginRuntimeClient::create(
+    HostPluginRuntimeClientOptions options) {
+    auto client = std::unique_ptr<HostPluginRuntimeClient>(new HostPluginRuntimeClient(std::move(options)));
     return client;
 }
 
-OfxRuntimeClient::OfxRuntimeClient(OfxRuntimeClientOptions options)
+HostPluginRuntimeClient::HostPluginRuntimeClient(HostPluginRuntimeClientOptions options)
     : m_options(std::move(options)) {}
 
-OfxRuntimeClient::~OfxRuntimeClient() {
+HostPluginRuntimeClient::~HostPluginRuntimeClient() {
     try {
         auto release_result = release_session();
         if (!release_result) {
-            log_message("ofx_runtime_client",
+            log_message("host_plugin_runtime_client",
                         "release_session_failed detail=" + release_result.error().message);
         }
     } catch (...) {  // NOLINT(bugprone-empty-catch)
@@ -265,12 +264,12 @@ OfxRuntimeClient::~OfxRuntimeClient() {
     }
 }
 
-Result<app::OfxRuntimeHealthResponse> OfxRuntimeClient::health() {
-    auto response = send_command(app::OfxRuntimeCommand::Health, nlohmann::json::object());
+Result<HostPluginRuntimeHealthResponse> HostPluginRuntimeClient::health() {
+    auto response = send_command(HostPluginRuntimeCommand::Health, nlohmann::json::object());
     if (!response) {
         return Unexpected<Error>(response.error());
     }
-    auto parsed = app::health_response_from_json(*response);
+    auto parsed = health_response_from_json(*response);
     if (!parsed) {
         return Unexpected<Error>(parsed.error());
     }
@@ -278,12 +277,12 @@ Result<app::OfxRuntimeHealthResponse> OfxRuntimeClient::health() {
     return parsed;
 }
 
-Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
-    const app::OfxRuntimePrepareSessionRequest& request, StageTimingCallback on_stage) {
+Result<HostPluginRuntimePrepareSessionResponse> HostPluginRuntimeClient::prepare_session(
+    const HostPluginRuntimePrepareSessionRequest& request, StageTimingCallback on_stage) {
     if (!m_session.session_id.empty() && m_last_prepare_request.has_value() &&
         same_prepare_request(*m_last_prepare_request, request)) {
         if (session_belongs_to_current_server()) {
-            return app::OfxRuntimePrepareSessionResponse{
+            return HostPluginRuntimePrepareSessionResponse{
                 with_prepare_request_metadata(m_session, request), {}};
         }
         invalidate_session("event=prepare_cached_session_invalidated detail=server_pid_changed");
@@ -291,13 +290,13 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
 
     if (!m_session.session_id.empty()) {
         bool requires_family_restart = false;
-        OfxRuntimeFamily current_family = OfxRuntimeFamily::Other;
-        OfxRuntimeFamily next_family = OfxRuntimeFamily::Other;
+        HostPluginRuntimeFamily current_family = HostPluginRuntimeFamily::Other;
+        HostPluginRuntimeFamily next_family = HostPluginRuntimeFamily::Other;
         if (m_last_prepare_request.has_value()) {
-            current_family = ofx_runtime_family_for_prepare_request(*m_last_prepare_request);
-            next_family = ofx_runtime_family_for_prepare_request(request);
+            current_family = host_plugin_runtime_family_for_prepare_request(*m_last_prepare_request);
+            next_family = host_plugin_runtime_family_for_prepare_request(request);
             requires_family_restart =
-                should_restart_for_ofx_runtime_family_switch(current_family, next_family);
+                should_restart_for_host_plugin_runtime_family_switch(current_family, next_family);
         }
 
         auto release_result = release_session();
@@ -306,9 +305,9 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
         }
         if (requires_family_restart) {
             const std::string reason = std::string("runtime_family_switch from=") +
-                                       ofx_runtime_family_label(current_family) + " to=" +
-                                       ofx_runtime_family_label(next_family);
-            log_message("ofx_runtime_client", "event=runtime_family_switch_restart " + reason);
+                                       host_plugin_runtime_family_label(current_family) + " to=" +
+                                       host_plugin_runtime_family_label(next_family);
+            log_message("host_plugin_runtime_client", "event=runtime_family_switch_restart " + reason);
             auto restart_result = restart_server(reason);
             if (!restart_result) {
                 return Unexpected<Error>(restart_result.error());
@@ -323,22 +322,22 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
     // slightly shorter value (90% of the client RPC budget) so the server
     // has time to return an error or timeout-status response before the
     // client transport gives up.
-    app::OfxRuntimePrepareSessionRequest outgoing = request;
+    HostPluginRuntimePrepareSessionRequest outgoing = request;
     if (outgoing.prepare_timeout_ms <= 0) {
         outgoing.prepare_timeout_ms = (m_options.prepare_timeout_ms * 9) / 10;
     }
-    auto payload = app::to_json(outgoing);
+    auto payload = to_json(outgoing);
     auto ensure_result = ensure_server_running();
     if (!ensure_result) {
         return Unexpected<Error>(ensure_result.error());
     }
-    auto response = send_command_without_launch(app::OfxRuntimeCommand::PrepareSession, payload,
+    auto response = send_command_without_launch(HostPluginRuntimeCommand::PrepareSession, payload,
                                                 m_options.prepare_timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
 
-    auto parsed = app::prepare_session_response_from_json(*response);
+    auto parsed = prepare_session_response_from_json(*response);
     if (!parsed) {
         return Unexpected<Error>(parsed.error());
     }
@@ -350,13 +349,13 @@ Result<app::OfxRuntimePrepareSessionResponse> OfxRuntimeClient::prepare_session(
     return parsed;
 }
 
-Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Image& alpha_hint,
+Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb, const Image& alpha_hint,
                                                     const InferenceParams& params,
                                                     std::uint64_t render_index,
                                                     StageTimingCallback on_stage) {
     if (m_session.session_id.empty()) {
         return Unexpected<Error>(
-            Error{ErrorCode::InvalidParameters, "OFX runtime session is not prepared."});
+            Error{ErrorCode::InvalidParameters, "host plugin runtime session is not prepared."});
     }
 
     auto ensure_result = ensure_server_running();
@@ -364,7 +363,7 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         return Unexpected<Error>(ensure_result.error());
     }
     if (!session_belongs_to_current_server()) {
-        log_message("ofx_runtime_client",
+        log_message("host_plugin_runtime_client",
                     "event=render_session_recover_after_server_change session_pid=" +
                         std::to_string(m_session_server_pid) +
                         " server_pid=" + std::to_string(m_server_pid));
@@ -374,7 +373,7 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         }
     }
 
-    const auto transport_path = common::next_ofx_shared_frame_path();
+    const auto transport_path = common::next_host_plugin_shared_frame_path();
     auto render_result = [&]() -> Result<FrameResult> {
         auto transport =
             common::SharedFrameTransport::create(transport_path, rgb.width, rgb.height);
@@ -386,7 +385,7 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         std::copy(alpha_hint.data.begin(), alpha_hint.data.end(),
                   transport->hint_view().data.begin());
 
-        app::OfxRuntimeRenderFrameRequest request;
+        HostPluginRuntimeRenderFrameRequest request;
         request.session_id = m_session.session_id;
         request.shared_frame_path = transport_path;
         request.width = rgb.width;
@@ -395,12 +394,12 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         request.render_index = render_index;
 
         auto send_render_request = [&]() {
-            return send_command(app::OfxRuntimeCommand::RenderFrame, app::to_json(request));
+            return send_command(HostPluginRuntimeCommand::RenderFrame, to_json(request));
         };
 
         auto response = send_render_request();
         if (!response && is_timeout_error(response.error())) {
-            log_message("ofx_runtime_client",
+            log_message("host_plugin_runtime_client",
                         "event=render_timeout reason=" + response.error().message);
             auto restart_result = restart_server(response.error().message);
             if (!restart_result) {
@@ -415,7 +414,7 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
         }
         if (!response &&
             (is_transport_error(response.error()) || is_session_missing_error(response.error()))) {
-            log_message("ofx_runtime_client",
+            log_message("host_plugin_runtime_client",
                         "event=render_frame_recover reason=" + response.error().message);
             auto recover_result = recover_runtime_session(on_stage);
             if (!recover_result) {
@@ -432,7 +431,7 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
             return Unexpected<Error>(response.error());
         }
 
-        auto parsed = app::render_frame_response_from_json(*response);
+        auto parsed = render_frame_response_from_json(*response);
         if (!parsed) {
             return Unexpected<Error>(parsed.error());
         }
@@ -457,31 +456,31 @@ Result<FrameResult> OfxRuntimeClient::process_frame(const Image& rgb, const Imag
     std::filesystem::remove(transport_path, cleanup_error);
     if (!render_result) {
         if (cleanup_error) {
-            log_message("ofx_runtime_client",
+            log_message("host_plugin_runtime_client",
                         "event=shared_frame_cleanup_failed path=" + transport_path.string() +
                             " detail=" + cleanup_error.message());
         }
         return Unexpected<Error>(render_result.error());
     }
     if (cleanup_error) {
-        log_message("ofx_runtime_client",
+        log_message("host_plugin_runtime_client",
                     "event=shared_frame_cleanup_failed path=" + transport_path.string() +
                         " detail=" + cleanup_error.message());
     }
     return render_result;
 }
 
-Result<void> OfxRuntimeClient::release_session() {
+Result<void> HostPluginRuntimeClient::release_session() {
     if (m_session.session_id.empty()) {
         m_last_prepare_request = std::nullopt;
         m_session_server_pid = 0;
         return {};
     }
 
-    app::OfxRuntimeReleaseSessionRequest request;
+    HostPluginRuntimeReleaseSessionRequest request;
     request.session_id = m_session.session_id;
     auto response =
-        send_command_without_launch(app::OfxRuntimeCommand::ReleaseSession, app::to_json(request));
+        send_command_without_launch(HostPluginRuntimeCommand::ReleaseSession, to_json(request));
     m_session = {};
     m_session_server_pid = 0;
     m_last_prepare_request = std::nullopt;
@@ -491,31 +490,37 @@ Result<void> OfxRuntimeClient::release_session() {
     return {};
 }
 
-DeviceInfo OfxRuntimeClient::current_device() const {
+DeviceInfo HostPluginRuntimeClient::current_device() const {
     return m_session.effective_device;
 }
 
-std::optional<BackendFallbackInfo> OfxRuntimeClient::backend_fallback() const {
+std::optional<BackendFallbackInfo> HostPluginRuntimeClient::backend_fallback() const {
     return m_session.backend_fallback;
 }
 
-bool OfxRuntimeClient::has_session() const {
+bool HostPluginRuntimeClient::has_session() const {
     return !m_session.session_id.empty();
 }
 
-std::uint64_t OfxRuntimeClient::session_ref_count() const {
+std::uint64_t HostPluginRuntimeClient::session_ref_count() const {
     return m_session.ref_count;
 }
 
-void OfxRuntimeClient::set_request_timeout_ms(int timeout_ms) {
+void HostPluginRuntimeClient::set_request_timeout_ms(int timeout_ms) {
     m_options.request_timeout_ms = timeout_ms;
 }
 
-void OfxRuntimeClient::set_prepare_timeout_ms(int timeout_ms) {
+void HostPluginRuntimeClient::set_prepare_timeout_ms(int timeout_ms) {
     m_options.prepare_timeout_ms = timeout_ms;
 }
 
-Result<void> OfxRuntimeClient::ensure_server_running() {
+void HostPluginRuntimeClient::log_message(std::string_view scope, std::string_view message) const {
+    if (m_options.log_callback) {
+        m_options.log_callback(scope, message);
+    }
+}
+
+Result<void> HostPluginRuntimeClient::ensure_server_running() {
     const auto wait_for_server_ready = [&]() -> Result<void> {
         const auto start_time = std::chrono::steady_clock::now();
         while (std::chrono::steady_clock::now() - start_time <
@@ -530,10 +535,10 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
             // process object first turns the dead-sidecar case into a
             // sub-millisecond return.
             if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
-                const std::string reason = "OFX runtime server process (pid=" +
+                const std::string reason = "host plugin runtime server process (pid=" +
                                            std::to_string(m_server_pid) +
                                            ") exited during startup";
-                log_message("ofx_runtime_client", "event=server_exited_during_startup pid=" +
+                log_message("host_plugin_runtime_client", "event=server_exited_during_startup pid=" +
                                                       std::to_string(m_server_pid));
                 return Unexpected<Error>(Error{
                     ErrorCode::IoError,
@@ -542,13 +547,13 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
                                                    m_options.server_binary),
                 });
             }
-            auto poll = send_command_without_launch(app::OfxRuntimeCommand::Health,
+            auto poll = send_command_without_launch(HostPluginRuntimeCommand::Health,
                                                     nlohmann::json::object());
             if (poll) {
-                auto health = app::health_response_from_json(*poll);
+                auto health = health_response_from_json(*poll);
                 if (health) {
                     update_server_health(*health);
-                    log_message("ofx_runtime_client",
+                    log_message("host_plugin_runtime_client",
                                 "event=server_ready pid=" + std::to_string(m_server_pid));
                     return {};
                 }
@@ -559,16 +564,16 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
 
         return Unexpected<Error>(Error{
             ErrorCode::IoError,
-            compose_launch_failure_message("Timed out waiting for the OFX runtime server to start",
+            compose_launch_failure_message("Timed out waiting for the host plugin runtime server to start",
                                            m_options.endpoint, m_options.launch_timeout_ms,
                                            m_options.server_binary),
         });
     };
 
     auto health_response =
-        send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
+        send_command_without_launch(HostPluginRuntimeCommand::Health, nlohmann::json::object());
     if (health_response) {
-        auto health = app::health_response_from_json(*health_response);
+        auto health = health_response_from_json(*health_response);
         if (!health) {
             return Unexpected<Error>(health.error());
         }
@@ -600,7 +605,7 @@ Result<void> OfxRuntimeClient::ensure_server_running() {
     return wait_for_server_ready();
 }
 
-Result<nlohmann::json> OfxRuntimeClient::send_command(app::OfxRuntimeCommand command,
+Result<nlohmann::json> HostPluginRuntimeClient::send_command(HostPluginRuntimeCommand command,
                                                       const nlohmann::json& payload) {
     auto ensure_result = ensure_server_running();
     if (!ensure_result) {
@@ -610,33 +615,33 @@ Result<nlohmann::json> OfxRuntimeClient::send_command(app::OfxRuntimeCommand com
     return send_command_without_launch(command, payload);
 }
 
-Result<nlohmann::json> OfxRuntimeClient::send_command_without_launch(
-    app::OfxRuntimeCommand command, const nlohmann::json& payload) const {
+Result<nlohmann::json> HostPluginRuntimeClient::send_command_without_launch(
+    HostPluginRuntimeCommand command, const nlohmann::json& payload) const {
     return send_command_without_launch(command, payload, m_options.request_timeout_ms);
 }
 
-Result<nlohmann::json> OfxRuntimeClient::send_command_without_launch(app::OfxRuntimeCommand command,
+Result<nlohmann::json> HostPluginRuntimeClient::send_command_without_launch(HostPluginRuntimeCommand command,
                                                                      const nlohmann::json& payload,
                                                                      int timeout_ms) const {
-    app::OfxRuntimeRequestEnvelope envelope;
+    HostPluginRuntimeRequestEnvelope envelope;
     envelope.command = command;
     envelope.payload = payload;
 
     auto response =
-        common::send_json_request(m_options.endpoint, app::to_json(envelope), timeout_ms);
+        common::send_json_request(m_options.endpoint, to_json(envelope), timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
     return unwrap_response(*response);
 }
 
-Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_stage) {
+Result<void> HostPluginRuntimeClient::recover_runtime_session(StageTimingCallback on_stage) {
     if (!m_last_prepare_request.has_value()) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "The OFX runtime session was lost and cannot be recovered."});
+            Error{ErrorCode::IoError, "The host plugin runtime session was lost and cannot be recovered."});
     }
 
-    log_message("ofx_runtime_client", "event=recover_session_begin");
+    log_message("host_plugin_runtime_client", "event=recover_session_begin");
     m_session = {};
     m_session_server_pid = 0;
 
@@ -644,36 +649,36 @@ Result<void> OfxRuntimeClient::recover_runtime_session(StageTimingCallback on_st
     if (!ensure_result) {
         return Unexpected<Error>(ensure_result.error());
     }
-    // Same reasoning as OfxRuntimeClient::prepare_session(): propagate a
+    // Same reasoning as HostPluginRuntimeClient::prepare_session(): propagate a
     // shorter server-side prewarm budget so the server cannot consume the
     // full RPC budget inside MLX JIT compile.
-    app::OfxRuntimePrepareSessionRequest outgoing = *m_last_prepare_request;
+    HostPluginRuntimePrepareSessionRequest outgoing = *m_last_prepare_request;
     if (outgoing.prepare_timeout_ms <= 0) {
         outgoing.prepare_timeout_ms = (m_options.prepare_timeout_ms * 9) / 10;
     }
     auto response =
-        send_command_without_launch(app::OfxRuntimeCommand::PrepareSession, app::to_json(outgoing),
+        send_command_without_launch(HostPluginRuntimeCommand::PrepareSession, to_json(outgoing),
                                     m_options.prepare_timeout_ms);
     if (!response) {
         return Unexpected<Error>(response.error());
     }
 
-    auto parsed = app::prepare_session_response_from_json(*response);
+    auto parsed = prepare_session_response_from_json(*response);
     if (!parsed) {
         return Unexpected<Error>(parsed.error());
     }
 
     update_session_snapshot(parsed->session);
     replay_stage_timings(parsed->timings, on_stage);
-    log_message("ofx_runtime_client",
+    log_message("host_plugin_runtime_client",
                 "event=recover_session_result reused_existing_session=" +
                     std::to_string(static_cast<int>(parsed->session.reused_existing_session)) +
                     " session_id=" + parsed->session.session_id);
     return {};
 }
 
-Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
-    log_message("ofx_runtime_client", "event=restart_server_begin pid=" +
+Result<void> HostPluginRuntimeClient::restart_server(const std::string& reason) {
+    log_message("host_plugin_runtime_client", "event=restart_server_begin pid=" +
                                           std::to_string(m_server_pid) + " reason=" + reason);
     auto terminate_result = terminate_server_process(m_server_pid);
     if (!terminate_result) {
@@ -697,10 +702,10 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
         // connect-refused TCP retry cost on every iteration after the
         // restarted sidecar has already exited.
         if (m_server_pid > 0 && !is_process_alive(m_server_pid)) {
-            const std::string exit_reason = "Restarted OFX runtime server process (pid=" +
+            const std::string exit_reason = "Restarted host plugin runtime server process (pid=" +
                                             std::to_string(m_server_pid) +
                                             ") exited during startup";
-            log_message("ofx_runtime_client", "event=restart_server_exited pid=" +
+            log_message("host_plugin_runtime_client", "event=restart_server_exited pid=" +
                                                   std::to_string(m_server_pid));
             return Unexpected<Error>(Error{
                 ErrorCode::IoError,
@@ -710,12 +715,12 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
             });
         }
         auto poll =
-            send_command_without_launch(app::OfxRuntimeCommand::Health, nlohmann::json::object());
+            send_command_without_launch(HostPluginRuntimeCommand::Health, nlohmann::json::object());
         if (poll) {
-            auto health = app::health_response_from_json(*poll);
+            auto health = health_response_from_json(*poll);
             if (health) {
                 update_server_health(*health);
-                log_message("ofx_runtime_client",
+                log_message("host_plugin_runtime_client",
                             "event=restart_server_result pid=" + std::to_string(m_server_pid));
                 return {};
             }
@@ -726,25 +731,25 @@ Result<void> OfxRuntimeClient::restart_server(const std::string& reason) {
 
     return Unexpected<Error>(Error{
         ErrorCode::IoError,
-        compose_launch_failure_message("Timed out waiting for the restarted OFX runtime server",
+        compose_launch_failure_message("Timed out waiting for the restarted host plugin runtime server",
                                        m_options.endpoint, m_options.launch_timeout_ms,
                                        m_options.server_binary),
     });
 }
 
-Result<void> OfxRuntimeClient::launch_server() {
+Result<void> HostPluginRuntimeClient::launch_server() {
     if (m_options.server_binary.empty() || !std::filesystem::exists(m_options.server_binary)) {
         return Unexpected<Error>(
             Error{ErrorCode::IoError,
-                  "OFX runtime server binary was not found: " + m_options.server_binary.string()});
+                  "host plugin runtime server binary was not found: " + m_options.server_binary.string()});
     }
 
-    log_message("ofx_runtime_client",
+    log_message("host_plugin_runtime_client",
                 "event=launch_server path=" + m_options.server_binary.string());
 
 #ifdef _WIN32
     std::wstring command_line = L"\"" + m_options.server_binary.wstring() +
-                                L"\" ofx-runtime-server --endpoint-port " +
+                                L"\" host-plugin-runtime-server --endpoint-port " +
                                 std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
                                 std::to_wstring(m_options.idle_timeout_ms);
 
@@ -757,7 +762,7 @@ Result<void> OfxRuntimeClient::launch_server() {
                        DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &startup_info,
                        &process_info) == 0) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
+            Error{ErrorCode::IoError, "Failed to launch the host plugin runtime server process."});
     }
 
     // Capture the spawned PID before closing the handles so the wait loop
@@ -768,7 +773,7 @@ Result<void> OfxRuntimeClient::launch_server() {
     // full launch_timeout_ms. The handles themselves do not need to remain
     // open: is_process_alive() reopens by PID via OpenProcess(SYNCHRONIZE).
     m_server_pid = static_cast<int>(process_info.dwProcessId);
-    log_message("ofx_runtime_client",
+    log_message("host_plugin_runtime_client",
                 "event=launch_server_spawned pid=" + std::to_string(m_server_pid));
     CloseHandle(process_info.hThread);
     CloseHandle(process_info.hProcess);
@@ -776,7 +781,7 @@ Result<void> OfxRuntimeClient::launch_server() {
     std::string port = std::to_string(m_options.endpoint.port);
     std::string idle_timeout = std::to_string(m_options.idle_timeout_ms);
     std::vector<char*> argv = {const_cast<char*>(m_options.server_binary.c_str()),
-                               const_cast<char*>("ofx-runtime-server"),
+                               const_cast<char*>("host-plugin-runtime-server"),
                                const_cast<char*>("--endpoint-port"),
                                port.data(),
                                const_cast<char*>("--idle-timeout-ms"),
@@ -801,7 +806,7 @@ Result<void> OfxRuntimeClient::launch_server() {
     qos_class_t caller_qos = QOS_CLASS_UNSPECIFIED;
     int caller_relative = 0;
     pthread_get_qos_class_np(pthread_self(), &caller_qos, &caller_relative);
-    log_message("ofx_runtime_client", std::string("event=launch_server_parent_qos qos=") +
+    log_message("host_plugin_runtime_client", std::string("event=launch_server_parent_qos qos=") +
                                           std::to_string(static_cast<int>(caller_qos)));
     pthread_override_t qos_override =
         pthread_override_qos_class_start_np(pthread_self(), QOS_CLASS_USER_INITIATED, 0);
@@ -825,13 +830,13 @@ Result<void> OfxRuntimeClient::launch_server() {
 
     if (spawn_rc != 0) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
+            Error{ErrorCode::IoError, "Failed to launch the host plugin runtime server process."});
     }
 #else
     if (posix_spawn(&pid, m_options.server_binary.c_str(), nullptr, nullptr, argv.data(),
                     environ) != 0) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to launch the OFX runtime server process."});
+            Error{ErrorCode::IoError, "Failed to launch the host plugin runtime server process."});
     }
 #endif
     // Mirrors the Win32 branch above: capture the spawned PID before the
@@ -839,36 +844,36 @@ Result<void> OfxRuntimeClient::launch_server() {
     // detected and surfaced instead of polling a dead process for the full
     // launch_timeout_ms.
     m_server_pid = static_cast<int>(pid);
-    log_message("ofx_runtime_client",
+    log_message("host_plugin_runtime_client",
                 "event=launch_server_spawned pid=" + std::to_string(m_server_pid));
 #endif
 
     return {};
 }
 
-bool OfxRuntimeClient::session_belongs_to_current_server() const {
+bool HostPluginRuntimeClient::session_belongs_to_current_server() const {
     return !m_session.session_id.empty() && m_session_server_pid > 0 && m_server_pid > 0 &&
            m_session_server_pid == m_server_pid;
 }
 
-void OfxRuntimeClient::invalidate_session(const std::string& reason) {
+void HostPluginRuntimeClient::invalidate_session(const std::string& reason) {
     if (!m_session.session_id.empty()) {
-        log_message("ofx_runtime_client", reason + " session_id=" + m_session.session_id);
+        log_message("host_plugin_runtime_client", reason + " session_id=" + m_session.session_id);
     } else {
-        log_message("ofx_runtime_client", reason);
+        log_message("host_plugin_runtime_client", reason);
     }
     m_session = {};
     m_session_server_pid = 0;
 }
 
-void OfxRuntimeClient::update_session_snapshot(const app::OfxRuntimeSessionSnapshot& snapshot) {
+void HostPluginRuntimeClient::update_session_snapshot(const HostPluginRuntimeSessionSnapshot& snapshot) {
     m_session = snapshot;
     m_session_server_pid = m_server_pid;
 }
 
-void OfxRuntimeClient::update_server_health(const app::OfxRuntimeHealthResponse& health) {
+void HostPluginRuntimeClient::update_server_health(const HostPluginRuntimeHealthResponse& health) {
     m_server_pid = health.server_pid;
 }
 
-}  // namespace corridorkey::ofx
+}  // namespace corridorkey::app
 // NOLINTEND(modernize-use-designated-initializers,modernize-return-braced-init-list,modernize-use-ranges,cppcoreguidelines-avoid-magic-numbers,readability-function-size,readability-function-cognitive-complexity,performance-unnecessary-value-param,readability-identifier-length,readability-make-member-function-const,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

@@ -127,21 +127,21 @@ TEST_CASE("Sidecar ports are distinct per node-family identifier",
           "[unit][ofx][descriptor][runtime]") {
     // Spec 0002 task 0010 follow-up: Green and Blue must compute different
     // sidecar ports so they get separate runtime-server processes. Same
-    // family converges on one port; legacy empty-family hash matches the
-    // backwards-compat default_ofx_runtime_port.
+    // family converges on one port; the empty-family hash matches the
+    // familyless default_host_plugin_runtime_port.
     const auto green_port =
-        corridorkey::common::default_ofx_runtime_port_for_family(kPluginIdentifierGreen);
+        corridorkey::common::default_host_plugin_runtime_port_for_family(kPluginIdentifierGreen);
     const auto blue_port =
-        corridorkey::common::default_ofx_runtime_port_for_family(kPluginIdentifierBlue);
+        corridorkey::common::default_host_plugin_runtime_port_for_family(kPluginIdentifierBlue);
     REQUIRE(green_port != blue_port);
 
     const auto green_port_again =
-        corridorkey::common::default_ofx_runtime_port_for_family(kPluginIdentifierGreen);
+        corridorkey::common::default_host_plugin_runtime_port_for_family(kPluginIdentifierGreen);
     REQUIRE(green_port_again == green_port);
 
-    const auto legacy_port = corridorkey::common::default_ofx_runtime_port();
+    const auto legacy_port = corridorkey::common::default_host_plugin_runtime_port();
     const auto empty_family_port =
-        corridorkey::common::default_ofx_runtime_port_for_family({});
+        corridorkey::common::default_host_plugin_runtime_port_for_family({});
     REQUIRE(legacy_port == empty_family_port);
 }
 

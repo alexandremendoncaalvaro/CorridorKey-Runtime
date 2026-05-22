@@ -29,9 +29,13 @@
 #define CORRIDORKEY_OFX_EXPORT
 #endif
 
-namespace corridorkey::ofx {
+namespace corridorkey::app {
 
-class OfxRuntimeClient;
+class HostPluginRuntimeClient;
+
+}  // namespace corridorkey::app
+
+namespace corridorkey::ofx {
 
 // Per-descriptor identifiers and labels live in ofx_plugin_descriptors.hpp.
 // kPluginIdentifierGreen preserves the legacy reverse-DNS string that saved
@@ -202,10 +206,10 @@ struct InstanceData {
     OfxParamHandle include_pre_releases_param = nullptr;
     // No in-class = nullptr initializer for the unique_ptr below: clang/libc++
     // instantiates ~unique_ptr<T>() at the NSDMI site, which then requires
-    // complete OfxRuntimeClient and fails with "sizeof to an incomplete type"
+    // complete HostPluginRuntimeClient and fails with "sizeof to an incomplete type"
     // in TUs that don't include its full definition. unique_ptr default-
     // constructs to nullptr already.
-    std::unique_ptr<OfxRuntimeClient> runtime_client;
+    std::unique_ptr<app::HostPluginRuntimeClient> runtime_client;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     std::filesystem::path runtime_server_path = {};

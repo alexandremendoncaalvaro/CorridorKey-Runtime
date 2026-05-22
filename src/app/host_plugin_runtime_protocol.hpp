@@ -10,9 +10,9 @@
 
 namespace corridorkey::app {
 
-inline constexpr int kOfxRuntimeProtocolVersion = 1;
+inline constexpr int kHostPluginRuntimeProtocolVersion = 1;
 
-enum class OfxRuntimeCommand : std::uint8_t {
+enum class HostPluginRuntimeCommand : std::uint8_t {
     Health,
     PrepareSession,
     RenderFrame,
@@ -20,20 +20,20 @@ enum class OfxRuntimeCommand : std::uint8_t {
     Shutdown,
 };
 
-struct OfxRuntimeRequestEnvelope {
-    int protocol_version = kOfxRuntimeProtocolVersion;
-    OfxRuntimeCommand command = OfxRuntimeCommand::Health;
+struct HostPluginRuntimeRequestEnvelope {
+    int protocol_version = kHostPluginRuntimeProtocolVersion;
+    HostPluginRuntimeCommand command = HostPluginRuntimeCommand::Health;
     nlohmann::json payload = nlohmann::json::object();
 };
 
-struct OfxRuntimeResponseEnvelope {
-    int protocol_version = kOfxRuntimeProtocolVersion;
+struct HostPluginRuntimeResponseEnvelope {
+    int protocol_version = kHostPluginRuntimeProtocolVersion;
     bool success = false;
     std::string error;
     nlohmann::json payload = nlohmann::json::object();
 };
 
-struct OfxRuntimePrepareSessionRequest {
+struct HostPluginRuntimePrepareSessionRequest {
     std::string client_instance_id;
     std::filesystem::path model_path = {};
     std::string artifact_name;
@@ -56,7 +56,7 @@ struct OfxRuntimePrepareSessionRequest {
     std::string node_identity;
 };
 
-struct OfxRuntimeSessionSnapshot {
+struct HostPluginRuntimeSessionSnapshot {
     std::string session_id;
     std::filesystem::path model_path = {};
     std::string artifact_name;
@@ -71,12 +71,12 @@ struct OfxRuntimeSessionSnapshot {
     bool reused_existing_session = false;
 };
 
-struct OfxRuntimePrepareSessionResponse {
-    OfxRuntimeSessionSnapshot session = {};
+struct HostPluginRuntimePrepareSessionResponse {
+    HostPluginRuntimeSessionSnapshot session = {};
     std::vector<StageTiming> timings;
 };
 
-struct OfxRuntimeRenderFrameRequest {
+struct HostPluginRuntimeRenderFrameRequest {
     std::string session_id;
     std::filesystem::path shared_frame_path = {};
     int width = 0;
@@ -85,27 +85,27 @@ struct OfxRuntimeRenderFrameRequest {
     std::uint64_t render_index = 0;
 };
 
-struct OfxRuntimeRenderFrameResponse {
-    OfxRuntimeSessionSnapshot session = {};
+struct HostPluginRuntimeRenderFrameResponse {
+    HostPluginRuntimeSessionSnapshot session = {};
     std::vector<StageTiming> timings;
 };
 
-struct OfxRuntimeReleaseSessionRequest {
+struct HostPluginRuntimeReleaseSessionRequest {
     std::string session_id;
 };
 
-struct OfxRuntimeHealthResponse {
+struct HostPluginRuntimeHealthResponse {
     int server_pid = 0;
     std::uint64_t session_count = 0;
     std::uint64_t active_session_count = 0;
 };
 
-struct OfxRuntimeShutdownRequest {
+struct HostPluginRuntimeShutdownRequest {
     std::string reason;
 };
 
-CORRIDORKEY_API std::string ofx_runtime_command_to_string(OfxRuntimeCommand command);
-CORRIDORKEY_API Result<OfxRuntimeCommand> ofx_runtime_command_from_string(const std::string& value);
+CORRIDORKEY_API std::string host_plugin_runtime_command_to_string(HostPluginRuntimeCommand command);
+CORRIDORKEY_API Result<HostPluginRuntimeCommand> host_plugin_runtime_command_from_string(const std::string& value);
 
 CORRIDORKEY_API nlohmann::json to_json(const DeviceInfo& device);
 CORRIDORKEY_API Result<DeviceInfo> device_from_json(const nlohmann::json& json);
@@ -121,44 +121,44 @@ CORRIDORKEY_API Result<InferenceParams> inference_params_from_json(const nlohman
 
 CORRIDORKEY_API Result<StageTiming> stage_timing_from_json(const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeRequestEnvelope& envelope);
-CORRIDORKEY_API Result<OfxRuntimeRequestEnvelope> ofx_runtime_request_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeRequestEnvelope& envelope);
+CORRIDORKEY_API Result<HostPluginRuntimeRequestEnvelope> host_plugin_runtime_request_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeResponseEnvelope& envelope);
-CORRIDORKEY_API Result<OfxRuntimeResponseEnvelope> ofx_runtime_response_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeResponseEnvelope& envelope);
+CORRIDORKEY_API Result<HostPluginRuntimeResponseEnvelope> host_plugin_runtime_response_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimePrepareSessionRequest& request);
-CORRIDORKEY_API Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimePrepareSessionRequest& request);
+CORRIDORKEY_API Result<HostPluginRuntimePrepareSessionRequest> prepare_session_request_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeSessionSnapshot& snapshot);
-CORRIDORKEY_API Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeSessionSnapshot& snapshot);
+CORRIDORKEY_API Result<HostPluginRuntimeSessionSnapshot> session_snapshot_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimePrepareSessionResponse& response);
-CORRIDORKEY_API Result<OfxRuntimePrepareSessionResponse> prepare_session_response_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimePrepareSessionResponse& response);
+CORRIDORKEY_API Result<HostPluginRuntimePrepareSessionResponse> prepare_session_response_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeRenderFrameRequest& request);
-CORRIDORKEY_API Result<OfxRuntimeRenderFrameRequest> render_frame_request_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeRenderFrameRequest& request);
+CORRIDORKEY_API Result<HostPluginRuntimeRenderFrameRequest> render_frame_request_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeRenderFrameResponse& response);
-CORRIDORKEY_API Result<OfxRuntimeRenderFrameResponse> render_frame_response_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeRenderFrameResponse& response);
+CORRIDORKEY_API Result<HostPluginRuntimeRenderFrameResponse> render_frame_response_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeReleaseSessionRequest& request);
-CORRIDORKEY_API Result<OfxRuntimeReleaseSessionRequest> release_session_request_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeReleaseSessionRequest& request);
+CORRIDORKEY_API Result<HostPluginRuntimeReleaseSessionRequest> release_session_request_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeHealthResponse& response);
-CORRIDORKEY_API Result<OfxRuntimeHealthResponse> health_response_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeHealthResponse& response);
+CORRIDORKEY_API Result<HostPluginRuntimeHealthResponse> health_response_from_json(
     const nlohmann::json& json);
 
-CORRIDORKEY_API nlohmann::json to_json(const OfxRuntimeShutdownRequest& request);
-CORRIDORKEY_API Result<OfxRuntimeShutdownRequest> shutdown_request_from_json(
+CORRIDORKEY_API nlohmann::json to_json(const HostPluginRuntimeShutdownRequest& request);
+CORRIDORKEY_API Result<HostPluginRuntimeShutdownRequest> shutdown_request_from_json(
     const nlohmann::json& json);
 
 }  // namespace corridorkey::app

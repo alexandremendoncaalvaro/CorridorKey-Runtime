@@ -228,7 +228,7 @@ function Test-CorridorKeyExpectedRuntimeFilesPresent {
     )
 
     # Bundle layout requires every entry in the expected app-local Visual
-    # C++ Redistributable list to exist next to corridorkey_ofx_runtime_server.exe
+    # C++ Redistributable list to exist next to corridorkey_host_plugin_runtime_server.exe
     # before the bundle is considered releasable. See
     # CorridorKeyExpectedBundledRuntimeList for the per-DLL rationale.
     $missing = @()
@@ -382,10 +382,10 @@ if (-not (Test-Path $cliBinary)) {
     throw "CLI binary not found: corridorkey.exe"
 }
 
-$runtimeServer = Join-Path $win64Dir "corridorkey_ofx_runtime_server.exe"
+$runtimeServer = Join-Path $win64Dir "corridorkey_host_plugin_runtime_server.exe"
 if (-not (Test-Path $runtimeServer)) {
     Write-Host "[FAIL] Runtime server binary not found" -ForegroundColor Red
-    throw "Runtime server binary not found: corridorkey_ofx_runtime_server.exe"
+    throw "Runtime server binary not found: corridorkey_host_plugin_runtime_server.exe"
 }
 
 $directmlDll = Join-Path $win64Dir "DirectML.dll"

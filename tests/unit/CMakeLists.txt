@@ -8,7 +8,6 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_plugin_descriptors.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
-    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
     test_alpha_edge.cpp
     test_color_utils.cpp
     test_coarse_to_fine_policy.cpp
@@ -36,10 +35,10 @@ add_executable(test_unit
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
     test_ofx_screen_color.cpp
-    test_ofx_runtime_client.cpp
+    test_host_plugin_runtime_client.cpp
     test_ofx_runtime_panel.cpp
-    test_ofx_runtime_protocol.cpp
-    test_ofx_session_policy.cpp
+    test_host_plugin_runtime_protocol.cpp
+    test_host_plugin_session_policy.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
     test_runtime_diagnostics.cpp

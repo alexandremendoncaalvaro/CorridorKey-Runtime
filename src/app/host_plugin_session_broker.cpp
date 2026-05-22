@@ -1,4 +1,4 @@
-#include "ofx_session_broker.hpp"
+#include "host_plugin_session_broker.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -15,15 +15,15 @@
 #include "../core/engine_internal.hpp"
 #include "../core/mlx_memory_governor.hpp"
 #include "../core/ort_process_context.hpp"
-#include "ofx_session_policy.hpp"
+#include "host_plugin_session_policy.hpp"
 
 // NOLINTBEGIN(modernize-use-designated-initializers,readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
-// ofx_session_broker.cpp tidy-suppression rationale.
+// host_plugin_session_broker.cpp tidy-suppression rationale.
 //
 // The broker stitches together OFX RPC envelopes, MLX memory telemetry,
 // the engine-prewarm gate, and the shared-frame transport. Aggregate
-// returns of OfxRuntime*Response use the project-wide positional style
+// returns of HostPluginRuntime*Response use the project-wide positional style
 // shared by the rest of src/app/. prepare_session() is intentionally
 // long because it sequences admission, prewarm, and entry construction
 // in one transaction; splitting it would scatter the rollback ordering
@@ -32,13 +32,13 @@ namespace corridorkey::app {
 
 namespace {
 
-void refresh_engine_snapshot(OfxRuntimeSessionSnapshot& snapshot, const Engine& engine) {
+void refresh_engine_snapshot(HostPluginRuntimeSessionSnapshot& snapshot, const Engine& engine) {
     snapshot.effective_device = engine.current_device();
     snapshot.backend_fallback = engine.backend_fallback();
     snapshot.recommended_resolution = engine.recommended_resolution();
 }
 
-OfxRuntimeSessionSnapshot response_snapshot(const OfxRuntimeSessionSnapshot& snapshot,
+HostPluginRuntimeSessionSnapshot response_snapshot(const HostPluginRuntimeSessionSnapshot& snapshot,
                                             bool reused_existing_session) {
     auto response = snapshot;
     response.reused_existing_session = reused_existing_session;
@@ -162,12 +162,12 @@ void copy_image_rows(Image source, Image destination) {
 
 }  // namespace
 
-OfxSessionBroker::OfxSessionBroker(OfxSessionBrokerOptions options)
+HostPluginSessionBroker::HostPluginSessionBroker(HostPluginSessionBrokerOptions options)
     : m_options(options),
       m_ort_process_context(std::make_shared<corridorkey::core::OrtProcessContext>()) {}
 
-Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
-    const OfxRuntimePrepareSessionRequest& request) {
+Result<HostPluginRuntimePrepareSessionResponse> HostPluginSessionBroker::prepare_session(
+    const HostPluginRuntimePrepareSessionRequest& request) {
     (void)cleanup_idle_sessions();
     auto eviction_result = evict_idle_sessions_if_needed();
     if (!eviction_result) {
@@ -179,7 +179,7 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
         refresh_engine_snapshot(existing->second.snapshot, *existing->second.engine);
         existing->second.snapshot.ref_count += 1;
         existing->second.last_used_at = now();
-        return OfxRuntimePrepareSessionResponse{response_snapshot(existing->second.snapshot, true),
+        return HostPluginRuntimePrepareSessionResponse{response_snapshot(existing->second.snapshot, true),
                                                 {}};
     }
 
@@ -232,7 +232,7 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     entry.last_used_at = now();
     entry.snapshot.session_id = key;
     entry.snapshot.model_path = request.model_path;
-    entry.snapshot.artifact_name = detail::canonical_ofx_artifact_name(request.model_path);
+    entry.snapshot.artifact_name = detail::canonical_host_plugin_artifact_name(request.model_path);
     entry.snapshot.requested_device = request.requested_device;
     entry.snapshot.requested_quality_mode = request.requested_quality_mode;
     entry.snapshot.requested_resolution = request.requested_resolution;
@@ -268,13 +268,13 @@ Result<OfxRuntimePrepareSessionResponse> OfxSessionBroker::prepare_session(
     }
 
     auto response =
-        OfxRuntimePrepareSessionResponse{response_snapshot(entry.snapshot, false), timings};
+        HostPluginRuntimePrepareSessionResponse{response_snapshot(entry.snapshot, false), timings};
     m_sessions.emplace(key, std::move(entry));
     return response;
 }
 
-Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
-    const OfxRuntimeRenderFrameRequest& request) {
+Result<HostPluginRuntimeRenderFrameResponse> HostPluginSessionBroker::render_frame(
+    const HostPluginRuntimeRenderFrameRequest& request) {
     auto session = m_sessions.find(request.session_id);
     if (session == m_sessions.end()) {
         return Unexpected<Error>(
@@ -318,7 +318,7 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
     auto foreground = transport->foreground_view();
     auto result_alpha = result->alpha.const_view();
     common::measure_stage(
-        on_stage, "ofx_broker_writeback",
+        on_stage, "host_plugin_broker_writeback",
         [&]() {
             copy_image_rows(result_alpha, alpha);
             if (!request.params.output_alpha_only) {
@@ -330,11 +330,11 @@ Result<OfxRuntimeRenderFrameResponse> OfxSessionBroker::render_frame(
 
     refresh_engine_snapshot(session->second.snapshot, *session->second.engine);
     session->second.last_used_at = now();
-    return OfxRuntimeRenderFrameResponse{response_snapshot(session->second.snapshot, false),
+    return HostPluginRuntimeRenderFrameResponse{response_snapshot(session->second.snapshot, false),
                                          timings};
 }
 
-Result<void> OfxSessionBroker::release_session(const OfxRuntimeReleaseSessionRequest& request) {
+Result<void> HostPluginSessionBroker::release_session(const HostPluginRuntimeReleaseSessionRequest& request) {
     auto session = m_sessions.find(request.session_id);
     if (session == m_sessions.end()) {
         return {};
@@ -353,17 +353,17 @@ Result<void> OfxSessionBroker::release_session(const OfxRuntimeReleaseSessionReq
     return {};
 }
 
-std::size_t OfxSessionBroker::session_count() const {
+std::size_t HostPluginSessionBroker::session_count() const {
     return m_sessions.size();
 }
 
-std::size_t OfxSessionBroker::active_session_count() const {
+std::size_t HostPluginSessionBroker::active_session_count() const {
     return static_cast<std::size_t>(
         std::count_if(m_sessions.begin(), m_sessions.end(),
                       [](const auto& pair) { return pair.second.snapshot.ref_count > 0; }));
 }
 
-std::size_t OfxSessionBroker::cleanup_idle_sessions() {
+std::size_t HostPluginSessionBroker::cleanup_idle_sessions() {
     const auto threshold = now() - m_options.idle_session_ttl;
     std::size_t removed_sessions = 0;
     for (auto it = m_sessions.begin(); it != m_sessions.end();) {
@@ -377,7 +377,7 @@ std::size_t OfxSessionBroker::cleanup_idle_sessions() {
     return removed_sessions;
 }
 
-std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest& request) {
+std::string HostPluginSessionBroker::session_key(const HostPluginRuntimePrepareSessionRequest& request) {
     std::error_code error;
     auto canonical_model_path = std::filesystem::weakly_canonical(request.model_path, error);
     if (error) {
@@ -395,12 +395,12 @@ std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest&
         request.node_identity));
 }
 
-std::vector<StageTiming> OfxSessionBroker::collect_stage_timings(StageTimingCallback& callback) {
+std::vector<StageTiming> HostPluginSessionBroker::collect_stage_timings(StageTimingCallback& callback) {
     (void)callback;
     return {};
 }
 
-Result<void> OfxSessionBroker::evict_idle_sessions_if_needed() {
+Result<void> HostPluginSessionBroker::evict_idle_sessions_if_needed() {
     if (m_sessions.size() < m_options.max_cached_sessions) {
         return {};
     }

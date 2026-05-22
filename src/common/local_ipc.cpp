@@ -22,7 +22,7 @@
 //
 // local_ipc.cpp tidy-suppression rationale.
 //
-// This TU wraps the BSD/Winsock C socket API for the OFX runtime
+// This TU wraps the BSD/Winsock C socket API for the host plugin runtime
 // control channel. The reinterpret_cast<sockaddr*>(&sockaddr_in) and
 // reinterpret_cast<const char*>(&int) call sites are the documented
 // portable spelling for setsockopt/bind/connect; switching to bit_cast
@@ -263,8 +263,8 @@ void LocalJsonServer::close() {
     m_socket = static_cast<std::intptr_t>(kInvalidSocket);
 }
 
-LocalJsonEndpoint default_ofx_runtime_endpoint() {
-    return LocalJsonEndpoint{"127.0.0.1", default_ofx_runtime_port()};
+LocalJsonEndpoint default_host_plugin_runtime_endpoint() {
+    return LocalJsonEndpoint{"127.0.0.1", default_host_plugin_runtime_port()};
 }
 
 Result<nlohmann::json> send_json_request(const LocalJsonEndpoint& endpoint,

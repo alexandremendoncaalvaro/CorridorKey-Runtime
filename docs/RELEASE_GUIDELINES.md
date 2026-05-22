@@ -486,7 +486,7 @@ user-visible surface on Windows. It flows through CMake into
 `include/corridorkey/version.hpp`
 (`CORRIDORKEY_DISPLAY_VERSION_STRING`), which the OFX panel, the
 `corridorkey --version` CLI, and the runtime-server log filename
-(`ofx_runtime_server_v<label>.log`) all read. The packaging scripts
+(`host_plugin_runtime_server_v<label>.log`) all read. The packaging scripts
 also bake the label into the dist artifact names when present:
 `CorridorKey_v<label>_Windows_online_Setup.exe`,
 `CorridorKey_OFX_v<label>_Windows_RTX\\`.

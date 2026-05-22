@@ -4,7 +4,7 @@
 #include <system_error>
 
 #include "../test_model_artifact_utils.hpp"
-#include "app/ofx_session_broker.hpp"
+#include "app/host_plugin_session_broker.hpp"
 #include "common/shared_memory_transport.hpp"
 
 using namespace corridorkey;
@@ -43,9 +43,9 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
         SKIP(*reason);
     }
 
-    OfxSessionBroker broker;
+    HostPluginSessionBroker broker;
 
-    OfxRuntimePrepareSessionRequest first_request;
+    HostPluginRuntimePrepareSessionRequest first_request;
     first_request.client_instance_id = "bootstrap";
     first_request.model_path = model_path;
     first_request.artifact_name = "requested_alias.onnx";
@@ -86,13 +86,13 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
     CHECK(broker.active_session_count() == 1);
 
     auto first_release =
-        broker.release_session(OfxRuntimeReleaseSessionRequest{first_prepare->session.session_id});
+        broker.release_session(HostPluginRuntimeReleaseSessionRequest{first_prepare->session.session_id});
     REQUIRE(first_release.has_value());
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 1);
 
     auto second_release =
-        broker.release_session(OfxRuntimeReleaseSessionRequest{second_prepare->session.session_id});
+        broker.release_session(HostPluginRuntimeReleaseSessionRequest{second_prepare->session.session_id});
     REQUIRE(second_release.has_value());
     CHECK(broker.session_count() == 1);
     CHECK(broker.active_session_count() == 0);
@@ -107,9 +107,9 @@ TEST_CASE("OFX session broker records broker writeback timing on render",
         SKIP(*reason);
     }
 
-    OfxSessionBroker broker;
+    HostPluginSessionBroker broker;
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "render_test";
     prepare_request.model_path = model_path;
     prepare_request.artifact_name = model_path.filename().string();
@@ -124,7 +124,7 @@ TEST_CASE("OFX session broker records broker writeback timing on render",
     REQUIRE(prepare_res.has_value());
 
     const auto transport_path =
-        std::filesystem::temp_directory_path() / "corridorkey_ofx_broker_render_test.ckfx";
+        std::filesystem::temp_directory_path() / "corridorkey_host_plugin_broker_render_test.ckfx";
     std::error_code error;
     std::filesystem::remove(transport_path, error);
 
@@ -134,7 +134,7 @@ TEST_CASE("OFX session broker records broker writeback timing on render",
     std::fill(transport.rgb_view().data.begin(), transport.rgb_view().data.end(), 0.0F);
     std::fill(transport.hint_view().data.begin(), transport.hint_view().data.end(), 0.0F);
 
-    OfxRuntimeRenderFrameRequest render_request;
+    HostPluginRuntimeRenderFrameRequest render_request;
     render_request.session_id = prepare_res->session.session_id;
     render_request.shared_frame_path = transport_path;
     render_request.width = 96;
@@ -147,10 +147,10 @@ TEST_CASE("OFX session broker records broker writeback timing on render",
 
     REQUIRE(render_res.has_value());
     CHECK(has_stage(render_res->timings, "frame_prepare_inputs"));
-    CHECK(has_stage(render_res->timings, "ofx_broker_writeback"));
+    CHECK(has_stage(render_res->timings, "host_plugin_broker_writeback"));
 
     auto release_res =
-        broker.release_session(OfxRuntimeReleaseSessionRequest{prepare_res->session.session_id});
+        broker.release_session(HostPluginRuntimeReleaseSessionRequest{prepare_res->session.session_id});
     REQUIRE(release_res.has_value());
 }
 
@@ -163,9 +163,9 @@ TEST_CASE("OFX session broker keys sessions by node identity",
         SKIP(*reason);
     }
 
-    OfxSessionBroker broker;
+    HostPluginSessionBroker broker;
 
-    OfxRuntimePrepareSessionRequest green_request;
+    HostPluginRuntimePrepareSessionRequest green_request;
     green_request.client_instance_id = "green_instance";
     green_request.model_path = model_path;
     green_request.artifact_name = model_path.filename().string();
@@ -203,13 +203,13 @@ TEST_CASE("OFX session broker keys sessions by node identity",
     CHECK(green_again->session.session_id != blue_prepare->session.session_id);
 
     auto release_green =
-        broker.release_session(OfxRuntimeReleaseSessionRequest{green_prepare->session.session_id});
+        broker.release_session(HostPluginRuntimeReleaseSessionRequest{green_prepare->session.session_id});
     REQUIRE(release_green.has_value());
     auto release_green_again = broker.release_session(
-        OfxRuntimeReleaseSessionRequest{green_again->session.session_id});
+        HostPluginRuntimeReleaseSessionRequest{green_again->session.session_id});
     REQUIRE(release_green_again.has_value());
     auto release_blue =
-        broker.release_session(OfxRuntimeReleaseSessionRequest{blue_prepare->session.session_id});
+        broker.release_session(HostPluginRuntimeReleaseSessionRequest{blue_prepare->session.session_id});
     REQUIRE(release_blue.has_value());
 }
 

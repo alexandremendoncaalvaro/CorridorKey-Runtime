@@ -3,7 +3,7 @@
 #include <initializer_list>
 #include <vector>
 
-#include "common/ofx_runtime_defaults.hpp"
+#include "common/host_plugin_runtime_defaults.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
 
@@ -18,7 +18,7 @@
 // would force every call site in describe_in_context to wrap every
 // argument in a designated-init aggregate for negligible review
 // benefit. The numeric defaults / min / max values are the canonical
-// OFX panel ranges defined in common/ofx_runtime_defaults.hpp; magic-
+// OFX panel ranges defined in common/host_plugin_runtime_defaults.hpp; magic-
 // number warnings on the literals are noise once that header is
 // understood. The remaining c-arrays / function-size / sign-comparison
 // / unchecked-container-access suppressions are driven by the OFX
@@ -752,12 +752,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_processing_group");
 
     define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)",
-                     common::kDefaultOfxRenderTimeoutSeconds, 10, 300,
+                     common::kDefaultHostPluginRenderTimeoutSeconds, 10, 300,
                      "Maximum time in seconds to wait for a single frame render. "
                      "Increase for high-resolution modes on slower hardware.",
                      "advanced_runtime_group");
     define_int_param(param_set, kParamPrepareTimeout, "Prepare Timeout (s)",
-                     common::kDefaultOfxPrepareTimeoutSeconds, 30, 600,
+                     common::kDefaultHostPluginPrepareTimeoutSeconds, 30, 600,
                      "Maximum time in seconds to wait for model loading and bootstrap. "
                      "Increase if first-frame initialization times out.",
                      "advanced_runtime_group");

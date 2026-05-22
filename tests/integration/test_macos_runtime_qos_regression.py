@@ -13,9 +13,9 @@
 #
 # The fix has two layers:
 #   1. posix_spawnattr_set_qos_class_np(QOS_CLASS_USER_INITIATED) in
-#      src/plugins/ofx/ofx_runtime_client.cpp launch_server
+#      src/app/host_plugin_runtime_client.cpp launch_server
 #   2. pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED) at the top
-#      of the ofx-runtime-server subcommand in src/cli/main.cpp
+#      of the host-plugin-runtime-server subcommand in src/cli/main.cpp
 #
 # This test runs the ofx_rpc_benchmark_harness with --parent-qos-class
 # background and asserts steady-state latency stays within the budget.

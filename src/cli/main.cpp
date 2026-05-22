@@ -18,7 +18,7 @@
 #include "../app/hardware_profile.hpp"
 #include "../app/job_orchestrator.hpp"
 #include "../app/model_compiler.hpp"
-#include "../app/ofx_runtime_service.hpp"
+#include "../app/host_plugin_runtime_service.hpp"
 #include "../app/runtime_contracts.hpp"
 #include "../app/version_check.hpp"
 #include "../common/json_utils.hpp"
@@ -587,7 +587,7 @@ int main(int argc, char* argv[]) {
     options.add_options()(
         "command",
         "Sub-command to run (info, process, download, doctor, benchmark, models, presets, "
-        "compile-context, ofx-runtime-server)",
+        "compile-context, host-plugin-runtime-server)",
         cxxopts::value<std::string>())("args", "Positional arguments",
                                        cxxopts::value<std::vector<std::string>>())(
         "i,input", "Input video or directory of frames", cxxopts::value<std::string>())(
@@ -610,8 +610,8 @@ int main(int argc, char* argv[]) {
         cxxopts::value<std::string>()->default_value("0"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
-        "endpoint-port", "Local OFX runtime server control port", cxxopts::value<int>())(
-        "idle-timeout-ms", "Local OFX runtime server idle timeout in milliseconds",
+        "endpoint-port", "Local host plugin runtime server control port", cxxopts::value<int>())(
+        "idle-timeout-ms", "Local host plugin runtime server idle timeout in milliseconds",
         cxxopts::value<int>())("video-encode", "Video output encoding (lossless, balanced)",
                                cxxopts::value<std::string>()->default_value("lossless"))(
         "variant", "ONNX model variant for download only (int8, fp16, fp32)",
@@ -849,7 +849,7 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        if (cmd == "ofx-runtime-server") {
+        if (cmd == "host-plugin-runtime-server") {
 #ifdef __APPLE__
             // The OFX plugin spawns this subcommand from a Resolve render-action
             // thread whose QoS class is typically UTILITY or BACKGROUND. macOS
@@ -858,13 +858,13 @@ int main(int argc, char* argv[]) {
             // higher-QoS Metal workload, producing 10-70x per-frame slowdowns.
             // Elevate this main thread (and therefore the MLX worker threads
             // it goes on to create) to USER_INITIATED before any MLX/Metal
-            // work starts. See ofx_runtime_service.cpp server_start event which
+            // work starts. See host_plugin_runtime_service.cpp server_start event which
             // logs the resulting qos_class for diagnosability.
             pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
 #endif
-            app::OfxRuntimeServiceOptions service_options;
-            service_options.endpoint = common::default_ofx_runtime_endpoint();
-            service_options.log_path = common::ofx_runtime_server_log_path();
+            app::HostPluginRuntimeServiceOptions service_options;
+            service_options.endpoint = common::default_host_plugin_runtime_endpoint();
+            service_options.log_path = common::host_plugin_runtime_server_log_path();
             if (result.count("endpoint-port")) {
                 service_options.endpoint.port =
                     static_cast<std::uint16_t>(result["endpoint-port"].as<int>());
@@ -874,7 +874,7 @@ int main(int argc, char* argv[]) {
                     std::chrono::milliseconds(result["idle-timeout-ms"].as<int>());
             }
 
-            auto service_result = app::OfxRuntimeService::run(service_options);
+            auto service_result = app::HostPluginRuntimeService::run(service_options);
             if (!service_result) {
                 if (!use_json) {
                     std::cerr << "Error: " << service_result.error().message << "\n";

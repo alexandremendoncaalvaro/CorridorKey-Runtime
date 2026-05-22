@@ -178,7 +178,7 @@ try {
     }
 
     # Do NOT clear %LOCALAPPDATA%\CorridorKey\Logs here. The runtime server
-    # writes per-version log files (`ofx_runtime_server_v<X.Y.Z>.log`) that
+    # writes per-version log files (`host_plugin_runtime_server_v<X.Y.Z>.log`) that
     # the optimization measurement track consumes for cross-version
     # comparison. Wiping them on every release build destroys the history a
     # developer just captured from testing the previous installer.

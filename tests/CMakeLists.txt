@@ -33,7 +33,7 @@ function(corridorkey_stage_ort_runtime target_name)
     # Stage the same Visual C++ Redistributable DLLs the bundle ships
     # app-local (see Issue #56 and the rationale in the root CMakeLists.txt).
     # Tests run as standalone .exe files that go through the same Win32
-    # loader as the OFX runtime server; absent these DLLs in the test
+    # loader as the host plugin runtime server; absent these DLLs in the test
     # output directory, the tests are vulnerable to whichever MSVCP140
     # the host PATH happens to resolve to and would not catch a
     # regression that, for instance, stripped the bundle staging.

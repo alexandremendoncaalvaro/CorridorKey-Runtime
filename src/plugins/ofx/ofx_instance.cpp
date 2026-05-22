@@ -16,14 +16,14 @@
 
 #include "app/runtime_contracts.hpp"
 #include "app/version_check.hpp"
-#include "common/ofx_runtime_defaults.hpp"
+#include "common/host_plugin_runtime_defaults.hpp"
 #include "common/runtime_paths.hpp"
 #include "ofx_backend_matching.hpp"
 #include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
-#include "ofx_runtime_client.hpp"
+#include "app/host_plugin_runtime_client.hpp"
 #include "ofx_shared.hpp"
 
 #ifdef __APPLE__
@@ -1040,10 +1040,10 @@ std::filesystem::path resolve_models_root() {
     return fallback;
 }
 
-app::OfxRuntimePrepareSessionRequest build_prepare_request(
+app::HostPluginRuntimePrepareSessionRequest build_prepare_request(
     const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
     int requested_quality_mode, const char* node_identity) {
-    app::OfxRuntimePrepareSessionRequest request;
+    app::HostPluginRuntimePrepareSessionRequest request;
     request.client_instance_id = "quality_switch";
     request.model_path = selection.executable_model_path;
     request.artifact_name = selection.executable_model_path.filename().string();
@@ -1162,7 +1162,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
 
     if (data->runtime_server_path.empty()) {
         data->runtime_server_path =
-            resolve_ofx_runtime_server_binary(plugin_module_path().value_or(""));
+            app::resolve_host_plugin_runtime_server_binary(plugin_module_path().value_or(""));
     }
     if (!runtime_server_binary_present(data->runtime_server_path)) {
         // The .ofx is the host's address space; running ORT/TRT-RTX in it
@@ -1178,8 +1178,8 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         return false;
     }
 
-    int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
-    int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;
+    int render_timeout_s = common::kDefaultHostPluginRenderTimeoutSeconds;
+    int prepare_timeout_s = common::kDefaultHostPluginPrepareTimeoutSeconds;
     if (data->render_timeout_param != nullptr) {
         g_suites.parameter->paramGetValue(data->render_timeout_param, &render_timeout_s);
     }
@@ -1187,18 +1187,19 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         g_suites.parameter->paramGetValue(data->prepare_timeout_param, &prepare_timeout_s);
     }
 
-    OfxRuntimeClientOptions client_options;
-    client_options.endpoint = common::default_ofx_runtime_endpoint();
+    app::HostPluginRuntimeClientOptions client_options;
+    client_options.endpoint = common::default_host_plugin_runtime_endpoint();
     // Spec 0002 task 0010 follow-up: route Green and Blue descriptors to
     // distinct sidecar ports so each family owns its own server process.
     // Same-family instances still share a sidecar via the existing Health
-    // probe before launch_server in OfxRuntimeClient::ensure_server_running.
-    client_options.endpoint.port = common::default_ofx_runtime_port_for_family(
+    // probe before launch_server in HostPluginRuntimeClient::ensure_server_running.
+    client_options.endpoint.port = common::default_host_plugin_runtime_port_for_family(
         data->plugin_identifier != nullptr ? data->plugin_identifier : "");
     client_options.server_binary = data->runtime_server_path;
+    client_options.log_callback = log_message;
     client_options.request_timeout_ms = render_timeout_s * kMillisecondsPerSecondI;
     client_options.prepare_timeout_ms = prepare_timeout_s * kMillisecondsPerSecondI;
-    auto runtime_client = OfxRuntimeClient::create(std::move(client_options));
+    auto runtime_client = app::HostPluginRuntimeClient::create(std::move(client_options));
     if (!runtime_client) {
         data->last_error = runtime_client.error().message;
         log_message("ensure_runtime_client",
@@ -1207,7 +1208,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         return false;
     }
     data->runtime_client = std::move(*runtime_client);
-    log_message("ensure_runtime_client", "Using out-of-process OFX runtime.");
+    log_message("ensure_runtime_client", "Using out-of-process host plugin runtime.");
     return true;
 }
 
@@ -2104,8 +2105,8 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
             }
             if (changed_param == kParamRenderTimeout || changed_param == kParamPrepareTimeout) {
                 if (data->runtime_client != nullptr) {
-                    int render_t = common::kDefaultOfxRenderTimeoutSeconds;
-                    int prepare_t = common::kDefaultOfxPrepareTimeoutSeconds;
+                    int render_t = common::kDefaultHostPluginRenderTimeoutSeconds;
+                    int prepare_t = common::kDefaultHostPluginPrepareTimeoutSeconds;
                     if (data->render_timeout_param != nullptr) {
                         g_suites.parameter->paramGetValue(data->render_timeout_param, &render_t);
                     }

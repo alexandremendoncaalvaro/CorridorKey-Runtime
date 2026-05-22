@@ -13,14 +13,14 @@
 #include <string_view>
 #include <vector>
 
-#include "app/ofx_runtime_service.hpp"
+#include "app/host_plugin_runtime_service.hpp"
 #include "common/runtime_paths.hpp"
 
-namespace corridorkey::ofx {
+namespace corridorkey::app {
 
 // NOLINTBEGIN(modernize-use-designated-initializers,bugprone-easily-swappable-parameters,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
-// ofx_runtime_server_main.cpp tidy-suppression rationale.
+// host_plugin_runtime_server_main.cpp tidy-suppression rationale.
 //
 // The Error{} aggregate is the engine-wide failure form across every
 // command-line parsing path. parse_runtime_service_options is a flat
@@ -44,7 +44,7 @@ Result<std::string> wide_to_utf8(std::wstring_view value) {
                                          nullptr, 0, nullptr, nullptr);
     if (size <= 0) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to convert the OFX runtime arguments."});
+            Error{ErrorCode::IoError, "Failed to convert the host plugin runtime arguments."});
     }
 
     std::string utf8(static_cast<std::size_t>(size), '\0');
@@ -53,7 +53,7 @@ Result<std::string> wide_to_utf8(std::wstring_view value) {
                             size, nullptr, nullptr);
     if (written != size) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to convert the OFX runtime arguments."});
+            Error{ErrorCode::IoError, "Failed to convert the host plugin runtime arguments."});
     }
 
     return utf8;
@@ -64,7 +64,7 @@ Result<std::vector<std::string>> command_line_arguments() {
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv == nullptr) {
         return Unexpected<Error>(
-            Error{ErrorCode::IoError, "Failed to read the OFX runtime command line."});
+            Error{ErrorCode::IoError, "Failed to read the host plugin runtime command line."});
     }
 
     std::vector<std::string> args;
@@ -97,10 +97,10 @@ Result<int> parse_positive_int(std::string_view value, std::string_view option_n
 }
 
 Result<void> parse_runtime_service_options(const std::vector<std::string>& args,
-                                           app::OfxRuntimeServiceOptions& options) {
+                                           HostPluginRuntimeServiceOptions& options) {
     for (std::size_t index = 1; index < args.size(); ++index) {
         const std::string_view token(args[index]);
-        if (token == "ofx-runtime-server") {
+        if (token == "host-plugin-runtime-server") {
             continue;
         }
 
@@ -179,7 +179,7 @@ Result<void> parse_runtime_service_options(const std::vector<std::string>& args,
 
         return Unexpected<Error>(Error{
             ErrorCode::InvalidParameters,
-            "Unsupported OFX runtime server option: " + std::string(token),
+            "Unsupported host plugin runtime server option: " + std::string(token),
         });
     }
 
@@ -189,7 +189,7 @@ Result<void> parse_runtime_service_options(const std::vector<std::string>& args,
 }  // namespace
 
 int run_runtime_server() {
-    // Default I/O binding OFF in the OFX runtime server process.
+    // Default I/O binding OFF in the host plugin runtime server process.
     //
     // I/O binding reuses pinned host / device-resident output buffers
     // across frames to cut memcpy and allocator overhead. On a dedicated
@@ -211,7 +211,7 @@ int run_runtime_server() {
     // still opts back in for benchmark comparisons. The CLI and
     // `ofx_benchmark_harness` are unaffected because they do not run
     // this entrypoint.
-    // Default CUDA graph capture ON in the OFX runtime server process.
+    // Default CUDA graph capture ON in the host plugin runtime server process.
     //
     // Measured on v0.7.5-21 with the harness (60 frames Jordan4k, 4K
     // 2048) and a real DaVinci Resolve session (91 frames, ORT per-op
@@ -266,10 +266,10 @@ int run_runtime_server() {
         return 1;
     }
 
-    app::OfxRuntimeServiceOptions service_options;
-    service_options.endpoint = common::default_ofx_runtime_endpoint();
-    service_options.idle_timeout = common::kDefaultOfxIdleTimeout;
-    service_options.log_path = common::ofx_runtime_server_log_path();
+    HostPluginRuntimeServiceOptions service_options;
+    service_options.endpoint = common::default_host_plugin_runtime_endpoint();
+    service_options.idle_timeout = common::kDefaultHostPluginIdleTimeout;
+    service_options.log_path = common::host_plugin_runtime_server_log_path();
     service_options.broker.idle_session_ttl = service_options.idle_timeout;
 
     auto parse_result = parse_runtime_service_options(*args, service_options);
@@ -277,7 +277,7 @@ int run_runtime_server() {
         return 1;
     }
 
-    auto run_result = app::OfxRuntimeService::run(service_options);
+    auto run_result = HostPluginRuntimeService::run(service_options);
     if (!run_result) {
         return 1;
     }
@@ -285,10 +285,10 @@ int run_runtime_server() {
     return 0;
 }
 
-}  // namespace corridorkey::ofx
+}  // namespace corridorkey::app
 // NOLINTEND(modernize-use-designated-initializers,bugprone-easily-swappable-parameters,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-avoid-magic-numbers,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 int APIENTRY wWinMain(HINSTANCE /*instance*/, HINSTANCE /*prev_instance*/, PWSTR /*command_line*/,
                       int /*show_command*/) {
-    return corridorkey::ofx::run_runtime_server();
+    return corridorkey::app::run_runtime_server();
 }

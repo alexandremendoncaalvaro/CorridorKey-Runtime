@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "app/job_orchestrator.hpp"
-#include "app/ofx_session_broker.hpp"
+#include "app/host_plugin_session_broker.hpp"
 #include "app/runtime_contracts.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
@@ -341,7 +341,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    const auto transport_path = common::next_ofx_shared_frame_path();
+    const auto transport_path = common::next_host_plugin_shared_frame_path();
     std::error_code cleanup_error;
     std::filesystem::remove(transport_path, cleanup_error);
 
@@ -357,9 +357,9 @@ int main(int argc, char* argv[]) {
     std::fill(transport.hint_view().data.begin(), transport.hint_view().data.end(), 0.0f);
 
     common::StageProfiler profiler;
-    OfxSessionBroker broker;
+    HostPluginSessionBroker broker;
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "benchmark";
     prepare_request.model_path = options.model_path;
     prepare_request.artifact_name = options.model_path.filename().string();
@@ -412,7 +412,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        OfxRuntimeRenderFrameRequest render_request;
+        HostPluginRuntimeRenderFrameRequest render_request;
         render_request.session_id = session_id;
         render_request.shared_frame_path = transport_path;
         render_request.width = options.frame_width;
@@ -452,7 +452,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto release_start = std::chrono::steady_clock::now();
-    auto release_res = broker.release_session(OfxRuntimeReleaseSessionRequest{session_id});
+    auto release_res = broker.release_session(HostPluginRuntimeReleaseSessionRequest{session_id});
     auto release_end = std::chrono::steady_clock::now();
     std::filesystem::remove(transport_path, cleanup_error);
     if (!release_res) {

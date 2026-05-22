@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "core/windows_rtx_probe_internal.hpp"
-#include "plugins/ofx/ofx_runtime_client.hpp"
+#include "app/host_plugin_runtime_client.hpp"
 #include "plugins/ofx/ofx_shared.hpp"
 
 using namespace corridorkey;

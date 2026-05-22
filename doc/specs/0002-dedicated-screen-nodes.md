@@ -143,7 +143,7 @@ Given a package has the Green ONNX runtime and models but is missing the Blue To
 - `src/plugins/ofx/ofx_plugin.cpp`
 - `src/plugins/ofx/ofx_shared.hpp`
 - `src/plugins/ofx/ofx_model_selection.hpp`
-- `src/plugins/ofx/ofx_runtime_family.hpp`
+- `src/app/host_plugin_runtime_family.hpp`
 - `src/app/runtime_contracts.cpp`
 - `scripts/package_ofx.ps1`
 - `scripts/fetch_models.ps1`

@@ -199,12 +199,12 @@ via the shared `Resolve-CorridorKey*Path` helpers in
 version over an existing install) fails when replacing
 `CorridorKey.ofx.bundle`, complaining about locked files.
 
-**Root cause.** `corridorkey_ofx_runtime_server.exe` (and sometimes
+**Root cause.** `corridorkey_host_plugin_runtime_server.exe` (and sometimes
 `corridorkey.exe`) keep running in the background even after
 DaVinci Resolve closes, holding the bundle DLLs mapped.
 
 **Fix in-tree.** The NSIS install section now taskkills
-`corridorkey_ofx_runtime_server.exe` and `corridorkey.exe` in
+`corridorkey_host_plugin_runtime_server.exe` and `corridorkey.exe` in
 addition to `Resolve.exe` before replacing bundle files. The
 uninstall section does the same. Log output from `taskkill` exit
 code 128 (process not running) is expected and ignored.
@@ -212,7 +212,7 @@ code 128 (process not running) is expected and ignored.
 ### 3.7 Per-version logs missing after install
 
 **Symptom.** The
-`%LOCALAPPDATA%\CorridorKey\Logs\ofx_runtime_server_v<X.Y.Z>.log`
+`%LOCALAPPDATA%\CorridorKey\Logs\host_plugin_runtime_server_v<X.Y.Z>.log`
 files from a previous install are gone after running the installer.
 
 **Root cause.** Earlier installer revisions cleared the entire logs
@@ -225,14 +225,14 @@ embed the version — they never collide across installs.
 Logs accumulate across installs and can be compared version-over-
 version for the optimization ledger.
 
-### 3.8 OFX runtime server crashes pre-`event=server_start` in Foundry Nuke
+### 3.8 host plugin runtime server crashes pre-`event=server_start` in Foundry Nuke
 
 **Symptom.** The plugin panel shows
-`OFX runtime server process (pid=N) exited during startup` (the
+`host plugin runtime server process (pid=N) exited during startup` (the
 post-#56 diagnostic dialog). The corresponding
-`%LOCALAPPDATA%\CorridorKey\Logs\ofx_runtime_server_v<label>.log`
+`%LOCALAPPDATA%\CorridorKey\Logs\host_plugin_runtime_server_v<label>.log`
 contains no entries for the dead PID — the process exited before
-`OfxRuntimeService::run` opened the logger. Resolve sessions on the
+`HostPluginRuntimeService::run` opened the logger. Resolve sessions on the
 same bundle work normally. The Windows Application event log carries
 an `Application Error` (Event ID 1000) entry with
 `Faulting module: MSVCP140.dll` and a path under the host install
@@ -249,7 +249,7 @@ that this propagates to children:
 > the start of the current process."*
 
 The altered search order places the host install directory above
-`%WINDIR%\System32`. When `corridorkey_ofx_runtime_server.exe` is
+`%WINDIR%\System32`. When `corridorkey_host_plugin_runtime_server.exe` is
 spawned from Nuke and its Contents/Win64 dir does not provide
 `MSVCP140.dll`, the loader resolves to Nuke's app-local copy. Nuke
 ships an older redist (e.g. v14.36.32532.0) that is ABI-incompatible
@@ -291,7 +291,7 @@ families are shipped app-local.
 ## 4. Running the local benchmark
 
 `tests/integration/ofx_benchmark_harness.exe` drives the same
-`OfxSessionBroker` surface the OFX plugin uses to talk to the runtime,
+`HostPluginSessionBroker` surface the OFX plugin uses to talk to the runtime,
 so it exercises the prepare_session / render_frame / release_session
 lifecycle without needing DaVinci Resolve on the machine. This is the
 authoritative local reproduction tool for optimization measurements

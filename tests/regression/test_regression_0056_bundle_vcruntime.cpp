@@ -1,9 +1,9 @@
 // Regression test for Issue #56:
-// "Failed to prepare runtime session for ... OFX runtime server process exited
+// "Failed to prepare runtime session for ... host plugin runtime server process exited
 //  during startup" reported on Foundry Nuke 17.0v2 + Windows + RTX 3090 Ti
 //  against v0.8.2-win.2.
 //
-// The OFX runtime sidecar imported MSVCP140.dll from Foundry Nuke's install
+// The host plugin runtime sidecar imported MSVCP140.dll from Foundry Nuke's install
 // directory instead of from %WINDIR%\System32 because Nuke calls
 // SetDllDirectory on its own process — Microsoft documents at
 // https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order

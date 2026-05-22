@@ -20,8 +20,6 @@ if(WIN32)
         ofx_render.cpp
         ofx_image_utils.hpp
         ofx_logging.hpp
-        ofx_runtime_client.cpp
-        ofx_runtime_client.hpp
         ofx_shared.hpp
     )
 else()
@@ -38,69 +36,7 @@ else()
         ofx_render.cpp
         ofx_image_utils.hpp
         ofx_logging.hpp
-        ofx_runtime_client.cpp
-        ofx_runtime_client.hpp
         ofx_shared.hpp
-    )
-endif()
-
-if(WIN32)
-    add_executable(corridorkey_ofx_runtime_server WIN32
-        ofx_runtime_server_main.cpp
-    )
-
-    target_include_directories(corridorkey_ofx_runtime_server PRIVATE
-        ${CMAKE_SOURCE_DIR}/src
-    )
-
-    target_link_libraries(corridorkey_ofx_runtime_server PRIVATE corridorkey_core)
-    corridorkey_apply_windows_common_compile_defs(corridorkey_ofx_runtime_server)
-    corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx_runtime_server)
-
-    # Strategy C, Sprint 1 PR 1 follow-up: the runtime server links
-    # corridorkey_core which now references corridorkey_torchtrt SHARED.
-    # Delay-load that DLL so the green-only install does not pay the
-    # libtorch DLL load on startup (the OFX bundle Win64/ does not ship
-    # torch DLLs; they live in the blue model pack).
-    if(CORRIDORKEY_HAS_TORCHTRT)
-        corridorkey_apply_torchtrt_delayload(corridorkey_ofx_runtime_server)
-    endif()
-
-    if(MSVC)
-        target_compile_options(corridorkey_ofx_runtime_server PRIVATE /W4 /WX /permissive-)
-    else()
-        target_compile_options(corridorkey_ofx_runtime_server PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    endif()
-
-    set_target_properties(corridorkey_ofx_runtime_server PROPERTIES
-        OUTPUT_NAME "corridorkey_ofx_runtime_server"
-    )
-
-    set(_corridorkey_ofx_runtime_server_runtime_dlls "")
-    if(CORRIDORKEY_ORT_RUNTIME_DIR)
-        file(GLOB _corridorkey_ofx_runtime_server_ort_runtime_dlls
-            "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
-        list(APPEND _corridorkey_ofx_runtime_server_runtime_dlls
-            ${_corridorkey_ofx_runtime_server_ort_runtime_dlls})
-    endif()
-    # Stage the discovered Visual C++ Redistributable DLLs next to the
-    # runtime-server executable in the dev build dir so an out-of-bundle
-    # invocation (test_integration, ofx_rpc_benchmark_harness, manual repro
-    # from a CMD shell) resolves them via search-order step #1 instead of
-    # falling through to whatever VC++ Redist is currently registered on
-    # the host. The same DLLs are also staged into the OFX bundle below.
-    # Rationale + MS doc citations are in the root CMakeLists.txt.
-    if(WIN32 AND MSVC AND CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
-        list(APPEND _corridorkey_ofx_runtime_server_runtime_dlls
-            ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
-    endif()
-
-    add_custom_command(TARGET corridorkey_ofx_runtime_server POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:corridorkey_ofx_runtime_server>
-            ${_corridorkey_ofx_runtime_server_runtime_dlls}
-            $<TARGET_FILE_DIR:corridorkey_ofx_runtime_server>
-        COMMAND_EXPAND_LISTS
     )
 endif()
 
@@ -110,7 +46,7 @@ target_include_directories(corridorkey_ofx PRIVATE
 )
 
 # The .ofx links exclusively against corridorkey_common (no ONNX Runtime).
-# All inference work flows through corridorkey_ofx_runtime_server.exe over
+# All inference work flows through corridorkey_host_plugin_runtime_server.exe over
 # IPC, which has its own loader namespace and is therefore immune to the
 # host-process CUDA-stack collision that causes ERROR_DLL_INIT_FAILED (1114)
 # in Foundry Nuke. Validate via `dumpbin -imports CorridorKey.ofx` after
@@ -132,7 +68,7 @@ set_target_properties(corridorkey_ofx PROPERTIES
 
 if(WIN32)
     # The .ofx no longer references ONNX Runtime symbols directly: every
-    # inference call goes through corridorkey_ofx_runtime_server.exe over
+    # inference call goes through corridorkey_host_plugin_runtime_server.exe over
     # IPC, so the plugin DLL is intentionally ORT-import-free. Drop the
     # delay-load infrastructure (delayimp.lib + /DELAYLOAD:onnxruntime.dll)
     # along with the win_delayload_hook source. The bundle still ships
@@ -145,10 +81,10 @@ if(WIN32)
 endif()
 
 if(WIN32)
-    add_dependencies(corridorkey_ofx corridorkey_cli corridorkey_ofx_runtime_server)
+    add_dependencies(corridorkey_ofx corridorkey_cli corridorkey_host_plugin_runtime_server)
     # Package the OFX bundle
     set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey.ofx.bundle")
-    file(GLOB _corridorkey_ofx_runtime_dlls
+    file(GLOB _corridorkey_host_plugin_runtime_dlls
         "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
 
     # FindCUDAToolkit maps CUDA::nppc et al. to import libs, so
@@ -186,10 +122,10 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E true)
     endif()
 
-    if(_corridorkey_ofx_runtime_dlls)
+    if(_corridorkey_host_plugin_runtime_dlls)
         add_custom_command(TARGET corridorkey_ofx POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${_corridorkey_ofx_runtime_dlls}
+                ${_corridorkey_host_plugin_runtime_dlls}
                 ${_corridorkey_ofx_cuda_dlls}
                 $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
                 "$<TARGET_FILE_DIR:corridorkey_ofx>"
@@ -197,11 +133,13 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "${_ofx_bundle_dir}/Contents/Win64/corridorkey_ofx_runtime_server.exe"
 
             # Copy the plugin binary
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_host_plugin_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
             ${_corridorkey_ofx_copy_torchtrt_wrapper}
 
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs
@@ -233,11 +171,13 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin"
+            COMMAND ${CMAKE_COMMAND} -E rm -f
+                "${_ofx_bundle_dir}/Contents/Win64/corridorkey_ofx_runtime_server.exe"
 
             # Copy the plugin binary
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_dir}/Contents/Win64/"
             COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_dir}/Contents/Win64/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_host_plugin_runtime_server>" "${_ofx_bundle_dir}/Contents/Win64/"
             ${_corridorkey_ofx_copy_torchtrt_wrapper}
 
             # Copy all auxiliary ONNX Runtime and TensorRT DLLs

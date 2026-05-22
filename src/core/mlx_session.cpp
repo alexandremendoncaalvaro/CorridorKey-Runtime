@@ -176,7 +176,7 @@ Result<std::unique_ptr<MlxSession>> MlxSession::create(const std::filesystem::pa
 
     // Belt-and-suspenders: make sure the process-wide MLX memory limits are in
     // place before the bridge is imported. initialize_defaults() is idempotent
-    // via std::call_once, so paying for this here when the OFX runtime service
+    // via std::call_once, so paying for this here when the host plugin runtime service
     // has already called it costs one atomic check.
     common::measure_stage(
         on_stage, "mlx_memory_init", [&]() { (void)mlx_memory::initialize_defaults(); }, 1);

@@ -29,7 +29,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
 
 $pluginBinary = Join-Path $BuildDir "src\plugins\ofx\CorridorKey.ofx"
 $cliBinary = Join-Path $BuildDir "src\cli\corridorkey.exe"
-$runtimeServerBinary = Join-Path $BuildDir "src\plugins\ofx\corridorkey_ofx_runtime_server.exe"
+$runtimeServerBinary = Join-Path $BuildDir "src\app\corridorkey_host_plugin_runtime_server.exe"
 $win64Dir = Join-Path $OutputDir "Contents\Win64"
 $resourcesDir = Join-Path $OutputDir "Contents\Resources\models"
 $torchTrtRuntimeDir = Join-Path $OutputDir "Contents\Resources\torchtrt-runtime\bin"
@@ -388,7 +388,7 @@ if ($requiresCudaRuntime) {
 # the build-tree bundle), so without this step the dist bundle ships without
 # the app-local C++ runtime.
 #
-# Without these DLLs in Contents\Win64\, the spawned OFX runtime server
+# Without these DLLs in Contents\Win64\, the spawned host plugin runtime server
 # inherits Foundry Nuke's altered DLL search order (Nuke calls
 # SetDllDirectory on its own process; per Microsoft
 # https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order

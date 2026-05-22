@@ -398,54 +398,54 @@ inline std::filesystem::path default_cache_root() {
     return configured_cache_root();
 }
 
-inline std::filesystem::path ofx_runtime_root() {
-    if (auto override_path = environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_ROOT");
+inline std::filesystem::path host_plugin_runtime_root() {
+    if (auto override_path = environment_variable_copy("CORRIDORKEY_HOST_PLUGIN_RUNTIME_ROOT");
         override_path.has_value()) {
         return std::filesystem::path(*override_path);
     }
-    return default_cache_root() / "ofx_runtime" /
+    return default_cache_root() / "host_plugin_runtime" /
            ("v" + std::string(CORRIDORKEY_DISPLAY_VERSION_STRING));
 }
 
-inline std::filesystem::path ofx_runtime_shared_frames_root() {
-    return ofx_runtime_root() / "frames";
+inline std::filesystem::path host_plugin_runtime_shared_frames_root() {
+    return host_plugin_runtime_root() / "frames";
 }
 
-inline std::filesystem::path ofx_runtime_server_log_path() {
-    if (auto override_path = environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_LOG");
+inline std::filesystem::path host_plugin_runtime_server_log_path() {
+    if (auto override_path = environment_variable_copy("CORRIDORKEY_HOST_PLUGIN_RUNTIME_LOG");
         override_path.has_value()) {
         return std::filesystem::path(*override_path);
     }
     return default_logs_root() /
-           ("ofx_runtime_server_v" + std::string(CORRIDORKEY_DISPLAY_VERSION_STRING) + ".log");
+           ("host_plugin_runtime_server_v" + std::string(CORRIDORKEY_DISPLAY_VERSION_STRING) + ".log");
 }
 
 // Spec 0002 task 0010 follow-up: derive a stable sidecar port per node-family
 // identifier. Green and Blue instances compute distinct ports so each family
 // owns its own sidecar process. N instances of the same family converge on
 // one port (and one sidecar via the existing Health-probe-before-launch
-// logic in OfxRuntimeClient). Mixed Green + Blue end up on different
+// logic in HostPluginRuntimeClient). Mixed Green + Blue end up on different
 // processes, eliminating any in-process ONNX RT ↔ Torch-TensorRT loader
 // collision.
 //
-// The legacy `default_ofx_runtime_port()` (no family argument) stays as the
-// backward-compat entry point for callers that have not been threaded with
-// identity yet; it folds an empty family token into the same hash.
-inline std::uint16_t default_ofx_runtime_port_for_family(std::string_view family_id) {
-    if (auto override_port = environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_PORT");
+// The familyless `default_host_plugin_runtime_port()` folds an empty family
+// token into the same hash for callers that do not partition sidecars by node
+// identity.
+inline std::uint16_t default_host_plugin_runtime_port_for_family(std::string_view family_id) {
+    if (auto override_port = environment_variable_copy("CORRIDORKEY_HOST_PLUGIN_RUNTIME_PORT");
         override_port.has_value()) {
         return static_cast<std::uint16_t>(std::stoi(*override_port));
     }
 
-    auto cache_root = ofx_runtime_root().string();
+    auto cache_root = host_plugin_runtime_root().string();
     constexpr std::uint16_t kBasePort = 43000;
     constexpr std::uint16_t kPortSpan = 1000;
     auto seed = cache_root + "|" + std::string(family_id);
     return static_cast<std::uint16_t>(kBasePort + (detail::fnv1a_64(seed) % kPortSpan));
 }
 
-inline std::uint16_t default_ofx_runtime_port() {
-    return default_ofx_runtime_port_for_family({});
+inline std::uint16_t default_host_plugin_runtime_port() {
+    return default_host_plugin_runtime_port_for_family({});
 }
 
 inline std::optional<std::filesystem::path> optimized_model_cache_path(

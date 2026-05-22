@@ -312,7 +312,7 @@ Section "Install"
     Pop `$0
   `${EndIf}
 
-  nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey_host_plugin_runtime_server.exe'
   Pop `$0
   nsExec::ExecToStack 'taskkill /F /IM corridorkey.exe'
   Pop `$0
@@ -346,7 +346,7 @@ Section "Install"
   WriteRegDWORD HKLM "`${UNINSTALL_KEY}" "NoRepair" 1
 
   ; Intentionally do NOT clear %LOCALAPPDATA%\CorridorKey\Logs here. Runtime
-  ; server logs are already versioned (`ofx_runtime_server_v<X.Y.Z>.log`) so
+  ; server logs are already versioned (`host_plugin_runtime_server_v<X.Y.Z>.log`) so
   ; they do not collide across installs; wiping them on every install
   ; destroys the cross-version comparison data the optimization measurement
   ; track depends on.
@@ -384,7 +384,7 @@ Section "Uninstall"
   !insertmacro DetectInstalledHosts
 
   DetailPrint "Stopping any running CorridorKey processes..."
-  nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey_host_plugin_runtime_server.exe'
   Pop `$0
   nsExec::ExecToStack 'taskkill /F /IM corridorkey.exe'
   Pop `$0

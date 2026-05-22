@@ -1,10 +1,10 @@
-#include "ofx_runtime_protocol.hpp"
+#include "host_plugin_runtime_protocol.hpp"
 
 #include <array>
 
 // NOLINTBEGIN(modernize-use-designated-initializers,readability-function-size,readability-function-cognitive-complexity,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
-// ofx_runtime_protocol.cpp tidy-suppression rationale.
+// host_plugin_runtime_protocol.cpp tidy-suppression rationale.
 //
 // This TU is a pure JSON-marshalling layer between the OFX plugin and
 // the runtime broker. The struct constructions use the project-wide
@@ -28,10 +28,10 @@ Error invalid_protocol_error(const std::string& message) {
 }
 
 Result<void> validate_protocol_version(int protocol_version) {
-    if (protocol_version != kOfxRuntimeProtocolVersion) {
+    if (protocol_version != kHostPluginRuntimeProtocolVersion) {
         return Unexpected<Error>(invalid_protocol_error(
-            "Unsupported OFX runtime protocol version: " + std::to_string(protocol_version) +
-            ". Expected " + std::to_string(kOfxRuntimeProtocolVersion) + "."));
+            "Unsupported host plugin runtime protocol version: " + std::to_string(protocol_version) +
+            ". Expected " + std::to_string(kHostPluginRuntimeProtocolVersion) + "."));
     }
     return {};
 }
@@ -221,28 +221,28 @@ Json stage_timing_json(const StageTiming& timing) {
 
 }  // namespace
 
-std::string ofx_runtime_command_to_string(OfxRuntimeCommand command) {
+std::string host_plugin_runtime_command_to_string(HostPluginRuntimeCommand command) {
     switch (command) {
-        case OfxRuntimeCommand::Health:
+        case HostPluginRuntimeCommand::Health:
             return "health";
-        case OfxRuntimeCommand::PrepareSession:
+        case HostPluginRuntimeCommand::PrepareSession:
             return "prepare_session";
-        case OfxRuntimeCommand::RenderFrame:
+        case HostPluginRuntimeCommand::RenderFrame:
             return "render_frame";
-        case OfxRuntimeCommand::ReleaseSession:
+        case HostPluginRuntimeCommand::ReleaseSession:
             return "release_session";
-        case OfxRuntimeCommand::Shutdown:
+        case HostPluginRuntimeCommand::Shutdown:
             return "shutdown";
     }
     return "health";
 }
 
-Result<OfxRuntimeCommand> ofx_runtime_command_from_string(const std::string& value) {
-    if (value == "health") return OfxRuntimeCommand::Health;
-    if (value == "prepare_session") return OfxRuntimeCommand::PrepareSession;
-    if (value == "render_frame") return OfxRuntimeCommand::RenderFrame;
-    if (value == "release_session") return OfxRuntimeCommand::ReleaseSession;
-    if (value == "shutdown") return OfxRuntimeCommand::Shutdown;
+Result<HostPluginRuntimeCommand> host_plugin_runtime_command_from_string(const std::string& value) {
+    if (value == "health") return HostPluginRuntimeCommand::Health;
+    if (value == "prepare_session") return HostPluginRuntimeCommand::PrepareSession;
+    if (value == "render_frame") return HostPluginRuntimeCommand::RenderFrame;
+    if (value == "release_session") return HostPluginRuntimeCommand::ReleaseSession;
+    if (value == "shutdown") return HostPluginRuntimeCommand::Shutdown;
     return Unexpected<Error>(invalid_protocol_error("Unknown command: " + value));
 }
 
@@ -446,34 +446,34 @@ Result<StageTiming> stage_timing_from_json(const nlohmann::json& json) {
     return timing;
 }
 
-nlohmann::json to_json(const OfxRuntimeRequestEnvelope& envelope) {
+nlohmann::json to_json(const HostPluginRuntimeRequestEnvelope& envelope) {
     return Json{{"protocol_version", envelope.protocol_version},
-                {"command", ofx_runtime_command_to_string(envelope.command)},
+                {"command", host_plugin_runtime_command_to_string(envelope.command)},
                 {"payload", envelope.payload}};
 }
 
-Result<OfxRuntimeRequestEnvelope> ofx_runtime_request_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeRequestEnvelope> host_plugin_runtime_request_from_json(const nlohmann::json& json) {
     auto protocol_version = required_int(json, "protocol_version");
     if (!protocol_version) return Unexpected<Error>(protocol_version.error());
     auto protocol_valid = validate_protocol_version(*protocol_version);
     if (!protocol_valid) return Unexpected<Error>(protocol_valid.error());
     auto command_string = required_string(json, "command");
     if (!command_string) return Unexpected<Error>(command_string.error());
-    auto command = ofx_runtime_command_from_string(*command_string);
+    auto command = host_plugin_runtime_command_from_string(*command_string);
     if (!command) return Unexpected<Error>(command.error());
     auto payload = required_object(json, "payload");
     if (!payload) return Unexpected<Error>(payload.error());
-    return OfxRuntimeRequestEnvelope{*protocol_version, *command, *payload};
+    return HostPluginRuntimeRequestEnvelope{*protocol_version, *command, *payload};
 }
 
-nlohmann::json to_json(const OfxRuntimeResponseEnvelope& envelope) {
+nlohmann::json to_json(const HostPluginRuntimeResponseEnvelope& envelope) {
     return Json{{"protocol_version", envelope.protocol_version},
                 {"success", envelope.success},
                 {"error", envelope.error},
                 {"payload", envelope.payload}};
 }
 
-Result<OfxRuntimeResponseEnvelope> ofx_runtime_response_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeResponseEnvelope> host_plugin_runtime_response_from_json(const nlohmann::json& json) {
     auto protocol_version = required_int(json, "protocol_version");
     if (!protocol_version) return Unexpected<Error>(protocol_version.error());
     auto protocol_valid = validate_protocol_version(*protocol_version);
@@ -484,10 +484,10 @@ Result<OfxRuntimeResponseEnvelope> ofx_runtime_response_from_json(const nlohmann
     if (!error) return Unexpected<Error>(error.error());
     auto payload = required_object(json, "payload");
     if (!payload) return Unexpected<Error>(payload.error());
-    return OfxRuntimeResponseEnvelope{*protocol_version, *success, *error, *payload};
+    return HostPluginRuntimeResponseEnvelope{*protocol_version, *success, *error, *payload};
 }
 
-nlohmann::json to_json(const OfxRuntimePrepareSessionRequest& request) {
+nlohmann::json to_json(const HostPluginRuntimePrepareSessionRequest& request) {
     return Json{{"client_instance_id", request.client_instance_id},
                 {"model_path", request.model_path.string()},
                 {"artifact_name", request.artifact_name},
@@ -500,7 +500,7 @@ nlohmann::json to_json(const OfxRuntimePrepareSessionRequest& request) {
                 {"node_identity", request.node_identity}};
 }
 
-Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
+Result<HostPluginRuntimePrepareSessionRequest> prepare_session_request_from_json(
     const nlohmann::json& json) {
     auto client_instance_id = required_string(json, "client_instance_id");
     if (!client_instance_id) return Unexpected<Error>(client_instance_id.error());
@@ -536,7 +536,7 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
         node_identity = json.at("node_identity").get<std::string>();
     }
 
-    OfxRuntimePrepareSessionRequest request;
+    HostPluginRuntimePrepareSessionRequest request;
     request.client_instance_id = *client_instance_id;
     request.model_path = *model_path;
     request.artifact_name = *artifact_name;
@@ -550,7 +550,7 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
     return request;
 }
 
-nlohmann::json to_json(const OfxRuntimeSessionSnapshot& snapshot) {
+nlohmann::json to_json(const HostPluginRuntimeSessionSnapshot& snapshot) {
     Json json{{"session_id", snapshot.session_id},
               {"model_path", snapshot.model_path.string()},
               {"artifact_name", snapshot.artifact_name},
@@ -568,7 +568,7 @@ nlohmann::json to_json(const OfxRuntimeSessionSnapshot& snapshot) {
     return json;
 }
 
-Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::json& json) {
     auto session_id = required_string(json, "session_id");
     if (!session_id) return Unexpected<Error>(session_id.error());
     auto model_path = required_string(json, "model_path");
@@ -606,7 +606,7 @@ Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::jso
         backend_fallback = *fallback;
     }
 
-    OfxRuntimeSessionSnapshot snapshot;
+    HostPluginRuntimeSessionSnapshot snapshot;
     snapshot.session_id = *session_id;
     snapshot.model_path = *model_path;
     snapshot.artifact_name = *artifact_name;
@@ -622,7 +622,7 @@ Result<OfxRuntimeSessionSnapshot> session_snapshot_from_json(const nlohmann::jso
     return snapshot;
 }
 
-nlohmann::json to_json(const OfxRuntimePrepareSessionResponse& response) {
+nlohmann::json to_json(const HostPluginRuntimePrepareSessionResponse& response) {
     Json timings = Json::array();
     for (const auto& timing : response.timings) {
         timings.push_back(stage_timing_json(timing));
@@ -630,7 +630,7 @@ nlohmann::json to_json(const OfxRuntimePrepareSessionResponse& response) {
     return Json{{"session", to_json(response.session)}, {"timings", timings}};
 }
 
-Result<OfxRuntimePrepareSessionResponse> prepare_session_response_from_json(
+Result<HostPluginRuntimePrepareSessionResponse> prepare_session_response_from_json(
     const nlohmann::json& json) {
     auto session_json = required_object(json, "session");
     if (!session_json) return Unexpected<Error>(session_json.error());
@@ -639,10 +639,10 @@ Result<OfxRuntimePrepareSessionResponse> prepare_session_response_from_json(
     auto timings_json = json.contains("timings") ? json.at("timings") : Json::array();
     auto timings = stage_timings_from_json(timings_json);
     if (!timings) return Unexpected<Error>(timings.error());
-    return OfxRuntimePrepareSessionResponse{*session, *timings};
+    return HostPluginRuntimePrepareSessionResponse{*session, *timings};
 }
 
-nlohmann::json to_json(const OfxRuntimeRenderFrameRequest& request) {
+nlohmann::json to_json(const HostPluginRuntimeRenderFrameRequest& request) {
     return Json{{"session_id", request.session_id},
                 {"shared_frame_path", request.shared_frame_path.string()},
                 {"width", request.width},
@@ -651,7 +651,7 @@ nlohmann::json to_json(const OfxRuntimeRenderFrameRequest& request) {
                 {"render_index", request.render_index}};
 }
 
-Result<OfxRuntimeRenderFrameRequest> render_frame_request_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeRenderFrameRequest> render_frame_request_from_json(const nlohmann::json& json) {
     auto session_id = required_string(json, "session_id");
     if (!session_id) return Unexpected<Error>(session_id.error());
     auto shared_frame_path = required_string(json, "shared_frame_path");
@@ -667,7 +667,7 @@ Result<OfxRuntimeRenderFrameRequest> render_frame_request_from_json(const nlohma
     auto render_index = required_uint64(json, "render_index");
     if (!render_index) return Unexpected<Error>(render_index.error());
 
-    OfxRuntimeRenderFrameRequest request;
+    HostPluginRuntimeRenderFrameRequest request;
     request.session_id = *session_id;
     request.shared_frame_path = *shared_frame_path;
     request.width = *width;
@@ -677,7 +677,7 @@ Result<OfxRuntimeRenderFrameRequest> render_frame_request_from_json(const nlohma
     return request;
 }
 
-nlohmann::json to_json(const OfxRuntimeRenderFrameResponse& response) {
+nlohmann::json to_json(const HostPluginRuntimeRenderFrameResponse& response) {
     Json timings = Json::array();
     for (const auto& timing : response.timings) {
         timings.push_back(stage_timing_json(timing));
@@ -685,7 +685,7 @@ nlohmann::json to_json(const OfxRuntimeRenderFrameResponse& response) {
     return Json{{"session", to_json(response.session)}, {"timings", timings}};
 }
 
-Result<OfxRuntimeRenderFrameResponse> render_frame_response_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeRenderFrameResponse> render_frame_response_from_json(const nlohmann::json& json) {
     auto session_json = required_object(json, "session");
     if (!session_json) return Unexpected<Error>(session_json.error());
     auto session = session_snapshot_from_json(*session_json);
@@ -693,44 +693,44 @@ Result<OfxRuntimeRenderFrameResponse> render_frame_response_from_json(const nloh
     auto timings_json = json.contains("timings") ? json.at("timings") : Json::array();
     auto timings = stage_timings_from_json(timings_json);
     if (!timings) return Unexpected<Error>(timings.error());
-    return OfxRuntimeRenderFrameResponse{*session, *timings};
+    return HostPluginRuntimeRenderFrameResponse{*session, *timings};
 }
 
-nlohmann::json to_json(const OfxRuntimeReleaseSessionRequest& request) {
+nlohmann::json to_json(const HostPluginRuntimeReleaseSessionRequest& request) {
     return Json{{"session_id", request.session_id}};
 }
 
-Result<OfxRuntimeReleaseSessionRequest> release_session_request_from_json(
+Result<HostPluginRuntimeReleaseSessionRequest> release_session_request_from_json(
     const nlohmann::json& json) {
     auto session_id = required_string(json, "session_id");
     if (!session_id) return Unexpected<Error>(session_id.error());
-    return OfxRuntimeReleaseSessionRequest{*session_id};
+    return HostPluginRuntimeReleaseSessionRequest{*session_id};
 }
 
-nlohmann::json to_json(const OfxRuntimeHealthResponse& response) {
+nlohmann::json to_json(const HostPluginRuntimeHealthResponse& response) {
     return Json{{"server_pid", response.server_pid},
                 {"session_count", response.session_count},
                 {"active_session_count", response.active_session_count}};
 }
 
-Result<OfxRuntimeHealthResponse> health_response_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeHealthResponse> health_response_from_json(const nlohmann::json& json) {
     auto server_pid = required_int(json, "server_pid");
     if (!server_pid) return Unexpected<Error>(server_pid.error());
     auto session_count = required_uint64(json, "session_count");
     if (!session_count) return Unexpected<Error>(session_count.error());
     auto active_session_count = required_uint64(json, "active_session_count");
     if (!active_session_count) return Unexpected<Error>(active_session_count.error());
-    return OfxRuntimeHealthResponse{*server_pid, *session_count, *active_session_count};
+    return HostPluginRuntimeHealthResponse{*server_pid, *session_count, *active_session_count};
 }
 
-nlohmann::json to_json(const OfxRuntimeShutdownRequest& request) {
+nlohmann::json to_json(const HostPluginRuntimeShutdownRequest& request) {
     return Json{{"reason", request.reason}};
 }
 
-Result<OfxRuntimeShutdownRequest> shutdown_request_from_json(const nlohmann::json& json) {
+Result<HostPluginRuntimeShutdownRequest> shutdown_request_from_json(const nlohmann::json& json) {
     auto reason = required_string(json, "reason");
     if (!reason) return Unexpected<Error>(reason.error());
-    return OfxRuntimeShutdownRequest{*reason};
+    return HostPluginRuntimeShutdownRequest{*reason};
 }
 
 }  // namespace corridorkey::app

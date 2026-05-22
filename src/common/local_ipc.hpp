@@ -57,7 +57,7 @@ class CORRIDORKEY_API LocalJsonServer {
     std::intptr_t m_socket = -1;
 };
 
-CORRIDORKEY_API LocalJsonEndpoint default_ofx_runtime_endpoint();
+CORRIDORKEY_API LocalJsonEndpoint default_host_plugin_runtime_endpoint();
 
 CORRIDORKEY_API Result<nlohmann::json> send_json_request(const LocalJsonEndpoint& endpoint,
                                                          const nlohmann::json& request,

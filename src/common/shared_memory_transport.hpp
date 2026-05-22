@@ -91,7 +91,7 @@ class CORRIDORKEY_API SharedFrameTransport {
 #endif
 };
 
-CORRIDORKEY_API std::filesystem::path next_ofx_shared_frame_path();
+CORRIDORKEY_API std::filesystem::path next_host_plugin_shared_frame_path();
 
 }  // namespace corridorkey::common
 

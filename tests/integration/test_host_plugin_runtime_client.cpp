@@ -6,10 +6,10 @@
 #include <string>
 #include <thread>
 
-#include "app/ofx_runtime_protocol.hpp"
+#include "app/host_plugin_runtime_protocol.hpp"
 #include "common/local_ipc.hpp"
 #include "common/shared_memory_transport.hpp"
-#include "plugins/ofx/ofx_runtime_client.hpp"
+#include "app/host_plugin_runtime_client.hpp"
 
 //
 // Test-file tidy-suppression rationale.
@@ -42,7 +42,6 @@
 using namespace corridorkey;
 using namespace corridorkey::app;
 using namespace corridorkey::common;
-using namespace corridorkey::ofx;
 
 namespace {
 
@@ -78,15 +77,15 @@ std::uint16_t reserve_local_port() {
     return ntohs(bound_address.sin_port);
 }
 
-OfxRuntimeResponseEnvelope ok_response(const nlohmann::json& payload) {
-    OfxRuntimeResponseEnvelope response;
+HostPluginRuntimeResponseEnvelope ok_response(const nlohmann::json& payload) {
+    HostPluginRuntimeResponseEnvelope response;
     response.success = true;
     response.payload = payload;
     return response;
 }
 
-OfxRuntimeResponseEnvelope error_response(const std::string& message) {
-    OfxRuntimeResponseEnvelope response;
+HostPluginRuntimeResponseEnvelope error_response(const std::string& message) {
+    HostPluginRuntimeResponseEnvelope response;
     response.success = false;
     response.error = message;
     response.payload = nlohmann::json::object();
@@ -102,7 +101,7 @@ void fill_transport_result(SharedFrameTransport& transport, float alpha_value, f
 
 }  // namespace
 
-TEST_CASE("ofx runtime client recovers when the runtime loses the current session",
+TEST_CASE("host plugin runtime client recovers when the runtime loses the current session",
           "[integration][ofx][runtime][regression]") {
     const auto port = reserve_local_port();
     const LocalJsonEndpoint endpoint{"127.0.0.1", port};
@@ -136,22 +135,22 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
                 return;
             }
 
-            auto request = ofx_runtime_request_from_json(*request_json);
+            auto request = host_plugin_runtime_request_from_json(*request_json);
             if (!request) {
                 server_error = request.error();
                 return;
             }
 
             switch (request->command) {
-                case OfxRuntimeCommand::Health: {
-                    OfxRuntimeHealthResponse health;
+                case HostPluginRuntimeCommand::Health: {
+                    HostPluginRuntimeHealthResponse health;
                     health.server_pid = 4242;
                     health.session_count = 1;
                     health.active_session_count = 1;
                     (void)(*client)->write_json(to_json(ok_response(to_json(health))));
                     break;
                 }
-                case OfxRuntimeCommand::PrepareSession: {
+                case HostPluginRuntimeCommand::PrepareSession: {
                     auto parsed = prepare_session_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -159,7 +158,7 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
                     }
 
                     const int current_prepare = ++prepare_count;
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id =
                         current_prepare == 1 ? "session-initial" : "session-recovered";
                     snapshot.model_path = parsed->model_path;
@@ -173,12 +172,12 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
                     snapshot.ref_count = 1;
                     snapshot.reused_existing_session = current_prepare > 1;
 
-                    OfxRuntimePrepareSessionResponse response;
+                    HostPluginRuntimePrepareSessionResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::RenderFrame: {
+                case HostPluginRuntimeCommand::RenderFrame: {
                     auto parsed = render_frame_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -199,7 +198,7 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
                     }
                     fill_transport_result(*transport, 0.75F, 0.25F);
 
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id = "session-recovered";
                     snapshot.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
                     snapshot.effective_device = snapshot.requested_device;
@@ -208,17 +207,17 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
                     snapshot.recommended_resolution = parsed->params.target_resolution;
                     snapshot.ref_count = 1;
 
-                    OfxRuntimeRenderFrameResponse response;
+                    HostPluginRuntimeRenderFrameResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::ReleaseSession: {
+                case HostPluginRuntimeCommand::ReleaseSession: {
                     ++release_count;
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
                 }
-                case OfxRuntimeCommand::Shutdown: {
+                case HostPluginRuntimeCommand::Shutdown: {
                     stop_server = true;
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
@@ -231,7 +230,7 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
     for (int attempt = 0; attempt < 20; ++attempt) {
         auto health_response = send_json_request(
             endpoint,
-            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+            to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
                                               .payload = nlohmann::json::object()}),
             500);
         if (health_response) {
@@ -243,13 +242,13 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
 
     REQUIRE(ready);
 
-    OfxRuntimeClientOptions options;
+    HostPluginRuntimeClientOptions options;
     options.endpoint = endpoint;
     options.request_timeout_ms = 2000;
-    auto client = OfxRuntimeClient::create(options);
+    auto client = HostPluginRuntimeClient::create(options);
     REQUIRE(client.has_value());
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "client-a";
     prepare_request.model_path = "models/corridorkey_fp16_512.onnx";
     prepare_request.artifact_name = "corridorkey_fp16_512.onnx";
@@ -286,8 +285,8 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
 
     auto shutdown_response = send_json_request(
         endpoint,
-        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
-                                          .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
+        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
+                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
         2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
@@ -295,7 +294,7 @@ TEST_CASE("ofx runtime client recovers when the runtime loses the current sessio
     REQUIRE_FALSE(server_error.has_value());
 }
 
-TEST_CASE("ofx runtime client re-prepares before render when the server pid changes",
+TEST_CASE("host plugin runtime client re-prepares before render when the server pid changes",
           "[integration][ofx][runtime][regression]") {
     const auto port = reserve_local_port();
     const LocalJsonEndpoint endpoint{"127.0.0.1", port};
@@ -329,23 +328,23 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
                 return;
             }
 
-            auto request = ofx_runtime_request_from_json(*request_json);
+            auto request = host_plugin_runtime_request_from_json(*request_json);
             if (!request) {
                 server_error = request.error();
                 return;
             }
 
             switch (request->command) {
-                case OfxRuntimeCommand::Health: {
+                case HostPluginRuntimeCommand::Health: {
                     const int current_health = ++health_count;
-                    OfxRuntimeHealthResponse health;
+                    HostPluginRuntimeHealthResponse health;
                     health.server_pid = current_health >= 3 ? 5252 : 5151;
                     health.session_count = 1;
                     health.active_session_count = 1;
                     (void)(*client)->write_json(to_json(ok_response(to_json(health))));
                     break;
                 }
-                case OfxRuntimeCommand::PrepareSession: {
+                case HostPluginRuntimeCommand::PrepareSession: {
                     auto parsed = prepare_session_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -353,7 +352,7 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
                     }
 
                     const int current_prepare = ++prepare_count;
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id =
                         current_prepare == 1 ? "session-before-restart" : "session-after-restart";
                     snapshot.model_path = parsed->model_path;
@@ -367,12 +366,12 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
                     snapshot.ref_count = 1;
                     snapshot.reused_existing_session = current_prepare > 1;
 
-                    OfxRuntimePrepareSessionResponse response;
+                    HostPluginRuntimePrepareSessionResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::RenderFrame: {
+                case HostPluginRuntimeCommand::RenderFrame: {
                     auto parsed = render_frame_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -393,7 +392,7 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
                     }
                     fill_transport_result(*transport, 0.8F, 0.2F);
 
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id = parsed->session_id;
                     snapshot.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
                     snapshot.effective_device = snapshot.requested_device;
@@ -402,16 +401,16 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
                     snapshot.recommended_resolution = parsed->params.target_resolution;
                     snapshot.ref_count = 1;
 
-                    OfxRuntimeRenderFrameResponse response;
+                    HostPluginRuntimeRenderFrameResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::ReleaseSession: {
+                case HostPluginRuntimeCommand::ReleaseSession: {
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
                 }
-                case OfxRuntimeCommand::Shutdown: {
+                case HostPluginRuntimeCommand::Shutdown: {
                     stop_server = true;
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
@@ -424,7 +423,7 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
     for (int attempt = 0; attempt < 20; ++attempt) {
         auto probe = send_json_request(
             endpoint,
-            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+            to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
                                               .payload = nlohmann::json::object()}),
             500);
         if (probe) {
@@ -436,13 +435,13 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
 
     REQUIRE(ready);
 
-    OfxRuntimeClientOptions options;
+    HostPluginRuntimeClientOptions options;
     options.endpoint = endpoint;
     options.request_timeout_ms = 2000;
-    auto client = OfxRuntimeClient::create(options);
+    auto client = HostPluginRuntimeClient::create(options);
     REQUIRE(client.has_value());
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "client-pid-change";
     prepare_request.model_path = "models/corridorkey_fp16_512.onnx";
     prepare_request.artifact_name = "corridorkey_fp16_512.onnx";
@@ -473,7 +472,7 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
 
     auto shutdown_response = send_json_request(
         endpoint,
-        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
+        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
                                           .payload = nlohmann::json::object()}),
         500);
     REQUIRE(shutdown_response.has_value());
@@ -482,7 +481,7 @@ TEST_CASE("ofx runtime client re-prepares before render when the server pid chan
     REQUIRE_FALSE(server_error.has_value());
 }
 
-TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests",
+TEST_CASE("host plugin runtime client skips foreground hydration for alpha-only requests",
           "[integration][ofx][runtime][regression]") {
     const auto port = reserve_local_port();
     const LocalJsonEndpoint endpoint{"127.0.0.1", port};
@@ -513,29 +512,29 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
                 return;
             }
 
-            auto request = ofx_runtime_request_from_json(*request_json);
+            auto request = host_plugin_runtime_request_from_json(*request_json);
             if (!request) {
                 server_error = request.error();
                 return;
             }
 
             switch (request->command) {
-                case OfxRuntimeCommand::Health: {
-                    OfxRuntimeHealthResponse health;
+                case HostPluginRuntimeCommand::Health: {
+                    HostPluginRuntimeHealthResponse health;
                     health.server_pid = 4343;
                     health.session_count = 1;
                     health.active_session_count = 1;
                     (void)(*client)->write_json(to_json(ok_response(to_json(health))));
                     break;
                 }
-                case OfxRuntimeCommand::PrepareSession: {
+                case HostPluginRuntimeCommand::PrepareSession: {
                     auto parsed = prepare_session_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
                         return;
                     }
 
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id = "alpha-only-session";
                     snapshot.model_path = parsed->model_path;
                     snapshot.artifact_name = parsed->artifact_name;
@@ -547,12 +546,12 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
                     snapshot.recommended_resolution = parsed->effective_resolution;
                     snapshot.ref_count = 1;
 
-                    OfxRuntimePrepareSessionResponse response;
+                    HostPluginRuntimePrepareSessionResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::RenderFrame: {
+                case HostPluginRuntimeCommand::RenderFrame: {
                     auto parsed = render_frame_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -571,7 +570,7 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
                     }
                     fill_transport_result(*transport, 0.6F, 0.2F);
 
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id = "alpha-only-session";
                     snapshot.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
                     snapshot.effective_device = snapshot.requested_device;
@@ -580,16 +579,16 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
                     snapshot.recommended_resolution = parsed->params.target_resolution;
                     snapshot.ref_count = 1;
 
-                    OfxRuntimeRenderFrameResponse response;
+                    HostPluginRuntimeRenderFrameResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::ReleaseSession: {
+                case HostPluginRuntimeCommand::ReleaseSession: {
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
                 }
-                case OfxRuntimeCommand::Shutdown: {
+                case HostPluginRuntimeCommand::Shutdown: {
                     stop_server = true;
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
@@ -602,7 +601,7 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
     for (int attempt = 0; attempt < 20; ++attempt) {
         auto probe = send_json_request(
             endpoint,
-            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+            to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
                                               .payload = nlohmann::json::object()}),
             500);
         if (probe) {
@@ -614,13 +613,13 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
 
     REQUIRE(ready);
 
-    OfxRuntimeClientOptions options;
+    HostPluginRuntimeClientOptions options;
     options.endpoint = endpoint;
     options.request_timeout_ms = 2000;
-    auto client = OfxRuntimeClient::create(options);
+    auto client = HostPluginRuntimeClient::create(options);
     REQUIRE(client.has_value());
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "client-alpha-only";
     prepare_request.model_path = "models/corridorkey_fp16_512.onnx";
     prepare_request.artifact_name = "corridorkey_fp16_512.onnx";
@@ -654,8 +653,8 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
 
     auto shutdown_response = send_json_request(
         endpoint,
-        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
-                                          .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
+        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
+                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
         2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
@@ -663,7 +662,7 @@ TEST_CASE("ofx runtime client skips foreground hydration for alpha-only requests
     REQUIRE_FALSE(server_error.has_value());
 }
 
-TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the same model",
+TEST_CASE("host plugin runtime client re-prepares when quality metadata changes for the same model",
           "[integration][ofx][runtime][regression]") {
     const auto port = reserve_local_port();
     const LocalJsonEndpoint endpoint{"127.0.0.1", port};
@@ -696,22 +695,22 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
                 return;
             }
 
-            auto request = ofx_runtime_request_from_json(*request_json);
+            auto request = host_plugin_runtime_request_from_json(*request_json);
             if (!request) {
                 server_error = request.error();
                 return;
             }
 
             switch (request->command) {
-                case OfxRuntimeCommand::Health: {
-                    OfxRuntimeHealthResponse health;
+                case HostPluginRuntimeCommand::Health: {
+                    HostPluginRuntimeHealthResponse health;
                     health.server_pid = 4242;
                     health.session_count = 1;
                     health.active_session_count = 1;
                     (void)(*client)->write_json(to_json(ok_response(to_json(health))));
                     break;
                 }
-                case OfxRuntimeCommand::PrepareSession: {
+                case HostPluginRuntimeCommand::PrepareSession: {
                     auto parsed = prepare_session_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -719,7 +718,7 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
                     }
 
                     const int current_prepare = ++prepare_count;
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id = "session-" + std::to_string(current_prepare);
                     snapshot.model_path = parsed->model_path;
                     snapshot.artifact_name = parsed->artifact_name;
@@ -731,22 +730,22 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
                     snapshot.recommended_resolution = parsed->effective_resolution;
                     snapshot.ref_count = 1;
 
-                    OfxRuntimePrepareSessionResponse response;
+                    HostPluginRuntimePrepareSessionResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::ReleaseSession: {
+                case HostPluginRuntimeCommand::ReleaseSession: {
                     ++release_count;
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
                 }
-                case OfxRuntimeCommand::Shutdown: {
+                case HostPluginRuntimeCommand::Shutdown: {
                     stop_server = true;
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
                 }
-                case OfxRuntimeCommand::RenderFrame: {
+                case HostPluginRuntimeCommand::RenderFrame: {
                     server_error = Error{ErrorCode::InvalidParameters,
                                          "RenderFrame is not expected in the prepare-session cache "
                                          "regression test."};
@@ -760,7 +759,7 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
     for (int attempt = 0; attempt < 20; ++attempt) {
         auto probe = send_json_request(
             endpoint,
-            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+            to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
                                               .payload = nlohmann::json::object()}),
             500);
         if (probe) {
@@ -772,13 +771,13 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
 
     REQUIRE(ready);
 
-    OfxRuntimeClientOptions options;
+    HostPluginRuntimeClientOptions options;
     options.endpoint = endpoint;
     options.request_timeout_ms = 2000;
-    auto client = OfxRuntimeClient::create(options);
+    auto client = HostPluginRuntimeClient::create(options);
     REQUIRE(client.has_value());
 
-    OfxRuntimePrepareSessionRequest first_request;
+    HostPluginRuntimePrepareSessionRequest first_request;
     first_request.client_instance_id = "client-a";
     first_request.model_path = "models/corridorkey_fp16_1024.onnx";
     first_request.artifact_name = "corridorkey_fp16_1024.onnx";
@@ -814,8 +813,8 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
 
     auto shutdown_response = send_json_request(
         endpoint,
-        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
-                                          .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
+        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
+                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
         2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
@@ -823,7 +822,7 @@ TEST_CASE("ofx runtime client re-prepares when quality metadata changes for the 
     REQUIRE_FALSE(server_error.has_value());
 }
 
-TEST_CASE("ofx runtime client invalidates structural render failures until re-prepare",
+TEST_CASE("host plugin runtime client invalidates structural render failures until re-prepare",
           "[integration][ofx][runtime][regression]") {
     const auto port = reserve_local_port();
     const LocalJsonEndpoint endpoint{"127.0.0.1", port};
@@ -856,22 +855,22 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
                 return;
             }
 
-            auto request = ofx_runtime_request_from_json(*request_json);
+            auto request = host_plugin_runtime_request_from_json(*request_json);
             if (!request) {
                 server_error = request.error();
                 return;
             }
 
             switch (request->command) {
-                case OfxRuntimeCommand::Health: {
-                    OfxRuntimeHealthResponse health;
+                case HostPluginRuntimeCommand::Health: {
+                    HostPluginRuntimeHealthResponse health;
                     health.server_pid = 5252;
                     health.session_count = 1;
                     health.active_session_count = 1;
                     (void)(*client)->write_json(to_json(ok_response(to_json(health))));
                     break;
                 }
-                case OfxRuntimeCommand::PrepareSession: {
+                case HostPluginRuntimeCommand::PrepareSession: {
                     auto parsed = prepare_session_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -879,7 +878,7 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
                     }
 
                     const int current_prepare = ++prepare_count;
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id = "session-" + std::to_string(current_prepare);
                     snapshot.model_path = parsed->model_path;
                     snapshot.artifact_name = parsed->artifact_name;
@@ -891,12 +890,12 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
                     snapshot.recommended_resolution = parsed->effective_resolution;
                     snapshot.ref_count = 1;
 
-                    OfxRuntimePrepareSessionResponse response;
+                    HostPluginRuntimePrepareSessionResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::RenderFrame: {
+                case HostPluginRuntimeCommand::RenderFrame: {
                     auto parsed = render_frame_request_from_json(request->payload);
                     if (!parsed) {
                         server_error = parsed.error();
@@ -917,7 +916,7 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
                     }
                     fill_transport_result(*transport, 0.5F, 0.9F);
 
-                    OfxRuntimeSessionSnapshot snapshot;
+                    HostPluginRuntimeSessionSnapshot snapshot;
                     snapshot.session_id = "session-2";
                     snapshot.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
                     snapshot.effective_device = snapshot.requested_device;
@@ -926,16 +925,16 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
                     snapshot.recommended_resolution = parsed->params.target_resolution;
                     snapshot.ref_count = 1;
 
-                    OfxRuntimeRenderFrameResponse response;
+                    HostPluginRuntimeRenderFrameResponse response;
                     response.session = snapshot;
                     (void)(*client)->write_json(to_json(ok_response(to_json(response))));
                     break;
                 }
-                case OfxRuntimeCommand::ReleaseSession: {
+                case HostPluginRuntimeCommand::ReleaseSession: {
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
                 }
-                case OfxRuntimeCommand::Shutdown: {
+                case HostPluginRuntimeCommand::Shutdown: {
                     stop_server = true;
                     (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
                     break;
@@ -948,7 +947,7 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
     for (int attempt = 0; attempt < 20; ++attempt) {
         auto probe = send_json_request(
             endpoint,
-            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+            to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
                                               .payload = nlohmann::json::object()}),
             500);
         if (probe) {
@@ -960,13 +959,13 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
 
     REQUIRE(ready);
 
-    OfxRuntimeClientOptions options;
+    HostPluginRuntimeClientOptions options;
     options.endpoint = endpoint;
     options.request_timeout_ms = 2000;
-    auto client = OfxRuntimeClient::create(options);
+    auto client = HostPluginRuntimeClient::create(options);
     REQUIRE(client.has_value());
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "client-a";
     prepare_request.model_path = "models/corridorkey_fp16_1024.onnx";
     prepare_request.artifact_name = "corridorkey_fp16_1024.onnx";
@@ -1015,15 +1014,15 @@ TEST_CASE("ofx runtime client invalidates structural render failures until re-pr
 
     auto shutdown_response = send_json_request(
         endpoint,
-        to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Shutdown,
-                                          .payload = to_json(OfxRuntimeShutdownRequest{"test"})}),
+        to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Shutdown,
+                                          .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
         2000);
     REQUIRE(shutdown_response.has_value());
     stop_server = true;
     server_thread.join();
     REQUIRE_FALSE(server_error.has_value());
 }
-TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime server",
+TEST_CASE("host plugin runtime client surfaces protocol mismatches from a stale runtime server",
           "[integration][ofx][runtime][regression]") {
     const auto port = reserve_local_port();
     const LocalJsonEndpoint endpoint{"127.0.0.1", port};
@@ -1054,10 +1053,10 @@ TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime 
                 return;
             }
 
-            OfxRuntimeResponseEnvelope response;
-            response.protocol_version = kOfxRuntimeProtocolVersion + 1;
+            HostPluginRuntimeResponseEnvelope response;
+            response.protocol_version = kHostPluginRuntimeProtocolVersion + 1;
             response.success = true;
-            response.payload = to_json(OfxRuntimeHealthResponse{4242, 0, 0});
+            response.payload = to_json(HostPluginRuntimeHealthResponse{4242, 0, 0});
             (void)(*client)->write_json(to_json(response));
         }
     });
@@ -1066,7 +1065,7 @@ TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime 
     for (int attempt = 0; attempt < 20; ++attempt) {
         auto probe = send_json_request(
             endpoint,
-            to_json(OfxRuntimeRequestEnvelope{.command = OfxRuntimeCommand::Health,
+            to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
                                               .payload = nlohmann::json::object()}),
             500);
         if (probe) {
@@ -1078,15 +1077,15 @@ TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime 
 
     REQUIRE(ready);
 
-    OfxRuntimeClientOptions options;
+    HostPluginRuntimeClientOptions options;
     options.endpoint = endpoint;
     options.request_timeout_ms = 1000;
-    auto client = OfxRuntimeClient::create(options);
+    auto client = HostPluginRuntimeClient::create(options);
     REQUIRE(client.has_value());
 
     auto health = (*client)->health();
     REQUIRE_FALSE(health.has_value());
-    CHECK(health.error().message.find("Unsupported OFX runtime protocol version") !=
+    CHECK(health.error().message.find("Unsupported host plugin runtime protocol version") !=
           std::string::npos);
 
     stop_server = true;
@@ -1100,14 +1099,14 @@ TEST_CASE("ofx runtime client surfaces protocol mismatches from a stale runtime 
 // this guard the client polled Health for the full timeout and returned
 // only a generic "Timed out" string, leaving the user no pointer to the
 // server log path.
-TEST_CASE("ofx runtime client detects sidecar that exits during startup",
+TEST_CASE("host plugin runtime client detects sidecar that exits during startup",
           "[integration][ofx][runtime][regression]") {
-    const std::filesystem::path quick_exit_binary = OFX_RUNTIME_TEST_QUICK_EXIT_PATH;
+    const std::filesystem::path quick_exit_binary = HOST_PLUGIN_RUNTIME_TEST_QUICK_EXIT_PATH;
     REQUIRE(std::filesystem::exists(quick_exit_binary));
 
     const auto port = reserve_local_port();
 
-    OfxRuntimeClientOptions options;
+    HostPluginRuntimeClientOptions options;
     options.endpoint = LocalJsonEndpoint{"127.0.0.1", port};
     options.server_binary = quick_exit_binary;
     // The headline diagnostic claim is "early-exit detection short-circuits
@@ -1121,10 +1120,10 @@ TEST_CASE("ofx runtime client detects sidecar that exits during startup",
     options.request_timeout_ms = 500;
     options.prepare_timeout_ms = 1000;
 
-    auto client = OfxRuntimeClient::create(options);
+    auto client = HostPluginRuntimeClient::create(options);
     REQUIRE(client.has_value());
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "client-quick-exit";
     prepare_request.model_path = "models/corridorkey_fp16_512.onnx";
     prepare_request.artifact_name = "corridorkey_fp16_512.onnx";

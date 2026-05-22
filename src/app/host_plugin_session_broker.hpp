@@ -7,9 +7,9 @@
 #include <string>
 #include <unordered_map>
 
-#include "../common/ofx_runtime_defaults.hpp"
-#include "ofx_runtime_protocol.hpp"
-#include "ofx_session_policy.hpp"
+#include "../common/host_plugin_runtime_defaults.hpp"
+#include "host_plugin_runtime_protocol.hpp"
+#include "host_plugin_session_policy.hpp"
 
 namespace corridorkey::core {
 //
@@ -33,19 +33,20 @@ class OrtProcessContext;
 
 namespace corridorkey::app {
 
-struct OfxSessionBrokerOptions {
+struct HostPluginSessionBrokerOptions {
     std::size_t max_cached_sessions = 4;
-    std::chrono::milliseconds idle_session_ttl = common::kDefaultOfxIdleTimeout;
+    std::chrono::milliseconds idle_session_ttl = common::kDefaultHostPluginIdleTimeout;
 };
 
-class OfxSessionBroker {
+class HostPluginSessionBroker {
    public:
-    explicit OfxSessionBroker(OfxSessionBrokerOptions options = {});
+    explicit HostPluginSessionBroker(HostPluginSessionBrokerOptions options = {});
 
-    Result<OfxRuntimePrepareSessionResponse> prepare_session(
-        const OfxRuntimePrepareSessionRequest& request);
-    Result<OfxRuntimeRenderFrameResponse> render_frame(const OfxRuntimeRenderFrameRequest& request);
-    Result<void> release_session(const OfxRuntimeReleaseSessionRequest& request);
+    Result<HostPluginRuntimePrepareSessionResponse> prepare_session(
+        const HostPluginRuntimePrepareSessionRequest& request);
+    Result<HostPluginRuntimeRenderFrameResponse> render_frame(
+        const HostPluginRuntimeRenderFrameRequest& request);
+    Result<void> release_session(const HostPluginRuntimeReleaseSessionRequest& request);
 
     [[nodiscard]] std::size_t session_count() const;
     [[nodiscard]] std::size_t active_session_count() const;
@@ -53,7 +54,7 @@ class OfxSessionBroker {
 
    private:
     struct SessionEntry {
-        OfxRuntimeSessionSnapshot snapshot = {};
+        HostPluginRuntimeSessionSnapshot snapshot = {};
         // shared_ptr (not unique_ptr) so a background prewarm worker can
         // hold its own strong reference. If the broker evicts this entry
         // while prewarm is still compiling, the Engine outlives the map
@@ -69,12 +70,12 @@ class OfxSessionBroker {
         std::chrono::steady_clock::time_point last_used_at = {};
     };
 
-    static std::string session_key(const OfxRuntimePrepareSessionRequest& request);
+    static std::string session_key(const HostPluginRuntimePrepareSessionRequest& request);
     static std::vector<StageTiming> collect_stage_timings(StageTimingCallback& callback);
 
     Result<void> evict_idle_sessions_if_needed();
 
-    OfxSessionBrokerOptions m_options = {};
+    HostPluginSessionBrokerOptions m_options = {};
     std::unordered_map<std::string, SessionEntry> m_sessions = {};
     std::shared_ptr<corridorkey::core::OrtProcessContext> m_ort_process_context = nullptr;
 };

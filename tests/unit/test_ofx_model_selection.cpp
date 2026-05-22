@@ -641,7 +641,7 @@ TEST_CASE("ofx defaults open new instances with source passthrough enabled",
     REQUIRE(kDefaultInputColorSpace == kInputColorAutoHostManaged);
 }
 
-TEST_CASE("ofx runtime panel fields are read-only dynamic strings", "[unit][ofx][regression]") {
+TEST_CASE("host plugin runtime panel fields are read-only dynamic strings", "[unit][ofx][regression]") {
     REQUIRE(std::string_view{kRuntimeStatusStringMode} == kOfxParamStringIsSingleLine);
     REQUIRE(kRuntimeStatusEnabled == 0);
 }

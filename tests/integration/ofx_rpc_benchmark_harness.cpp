@@ -1,7 +1,7 @@
 // RPC-path benchmark: spawns the real runtime server binary the same way
-// the OFX plugin does (OfxRuntimeClient) and drives prepare_session +
+// the OFX plugin does (HostPluginRuntimeClient) and drives prepare_session +
 // render_frame over the JSON + shared-memory transport. Sister to
-// ofx_benchmark_harness.cpp, which exercises the OfxSessionBroker
+// ofx_benchmark_harness.cpp, which exercises the HostPluginSessionBroker
 // in-process. The gap between the two isolates regressions that live in
 // the IPC layer (spawn, JSON protocol, mmap transport) from regressions
 // that live in the broker/engine/session itself.
@@ -56,11 +56,11 @@
 #include <corridorkey/types.hpp>
 #include <nlohmann/json.hpp>
 
-#include "app/ofx_runtime_protocol.hpp"
+#include "app/host_plugin_runtime_protocol.hpp"
 #include "app/runtime_contracts.hpp"
 #include "common/local_ipc.hpp"
 #include "common/stage_profiler.hpp"
-#include "plugins/ofx/ofx_runtime_client.hpp"
+#include "app/host_plugin_runtime_client.hpp"
 
 using namespace corridorkey;
 
@@ -258,7 +258,7 @@ int main(int argc, char* argv[]) {
     HarnessOptions options = *options_res;
 
 #if defined(__APPLE__)
-    // Apply the requested parent QoS class BEFORE calling OfxRuntimeClient::create
+    // Apply the requested parent QoS class BEFORE calling HostPluginRuntimeClient::create
     // (which ultimately triggers posix_spawn of the server binary). With the
     // v0.7.6-mac.1 regression in place, a parent QoS of "utility" or
     // "background" forces the server to inherit that QoS and slows MLX
@@ -288,7 +288,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    ofx::OfxRuntimeClientOptions client_options;
+    app::HostPluginRuntimeClientOptions client_options;
     client_options.endpoint.host = "127.0.0.1";
     client_options.endpoint.port = options.endpoint_port;
     client_options.server_binary = options.server_binary;
@@ -297,14 +297,14 @@ int main(int argc, char* argv[]) {
     client_options.launch_timeout_ms = options.launch_timeout_ms;
     client_options.idle_timeout_ms = options.idle_timeout_ms;
 
-    auto client_res = ofx::OfxRuntimeClient::create(client_options);
+    auto client_res = app::HostPluginRuntimeClient::create(client_options);
     if (!client_res) {
         std::cout << failure_json(client_res.error().message).dump(4) << std::endl;
         return 1;
     }
     auto& client = *client_res;
 
-    app::OfxRuntimePrepareSessionRequest prepare;
+    app::HostPluginRuntimePrepareSessionRequest prepare;
     prepare.client_instance_id = "rpc_benchmark";
     prepare.model_path = options.model_path;
     prepare.artifact_name = options.model_path.filename().string();

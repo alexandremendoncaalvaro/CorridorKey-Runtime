@@ -1,7 +1,7 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
 
-#include "app/ofx_runtime_protocol.hpp"
+#include "app/host_plugin_runtime_protocol.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -21,8 +21,8 @@ using namespace corridorkey::app;
 //
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
-TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runtime]") {
-    OfxRuntimePrepareSessionRequest prepare_request;
+TEST_CASE("host plugin runtime protocol roundtrips session payloads", "[unit][ofx][runtime]") {
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "instance-a";
     prepare_request.model_path = "models/corridorkey_fp16_1024.onnx";
     prepare_request.artifact_name = "corridorkey_fp16_1024.onnx";
@@ -46,7 +46,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     CHECK(parsed_prepare->prepare_timeout_ms == 45000);
     CHECK(parsed_prepare->node_identity == "com.corridorkey.resolve.blue");
 
-    OfxRuntimeSessionSnapshot snapshot;
+    HostPluginRuntimeSessionSnapshot snapshot;
     snapshot.session_id = "session-1";
     snapshot.model_path = prepare_request.model_path;
     snapshot.artifact_name = prepare_request.artifact_name;
@@ -78,7 +78,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     timing.sample_count = 1;
     timing.work_units = 1;
 
-    OfxRuntimePrepareSessionResponse response;
+    HostPluginRuntimePrepareSessionResponse response;
     response.session = snapshot;
     response.timings = {timing};
 
@@ -91,7 +91,7 @@ TEST_CASE("ofx runtime protocol roundtrips session payloads", "[unit][ofx][runti
     CHECK(parsed_response->timings.front().total_ms == Catch::Approx(42.5));
 }
 
-TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runtime]") {
+TEST_CASE("host plugin runtime protocol roundtrips render envelopes", "[unit][ofx][runtime]") {
     InferenceParams params;
     params.target_resolution = 1024;
     params.requested_quality_resolution = 1536;
@@ -115,7 +115,7 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     params.sp_blur_px = 2;
     params.output_alpha_only = true;
 
-    OfxRuntimeRenderFrameRequest request;
+    HostPluginRuntimeRenderFrameRequest request;
     request.session_id = "session-1";
     request.shared_frame_path = "frames/frame_123.ckfx";
     request.width = 1920;
@@ -142,47 +142,47 @@ TEST_CASE("ofx runtime protocol roundtrips render envelopes", "[unit][ofx][runti
     CHECK(parsed_request->params.output_alpha_only);
     CHECK(parsed_request->render_index == 7);
 
-    OfxRuntimeRequestEnvelope envelope;
-    envelope.command = OfxRuntimeCommand::RenderFrame;
+    HostPluginRuntimeRequestEnvelope envelope;
+    envelope.command = HostPluginRuntimeCommand::RenderFrame;
     envelope.payload = request_json;
 
     auto envelope_json = to_json(envelope);
-    auto parsed_envelope = ofx_runtime_request_from_json(envelope_json);
+    auto parsed_envelope = host_plugin_runtime_request_from_json(envelope_json);
     REQUIRE(parsed_envelope.has_value());
-    CHECK(parsed_envelope->protocol_version == kOfxRuntimeProtocolVersion);
-    CHECK(parsed_envelope->command == OfxRuntimeCommand::RenderFrame);
+    CHECK(parsed_envelope->protocol_version == kHostPluginRuntimeProtocolVersion);
+    CHECK(parsed_envelope->command == HostPluginRuntimeCommand::RenderFrame);
 
-    OfxRuntimeResponseEnvelope ok_response;
+    HostPluginRuntimeResponseEnvelope ok_response;
     ok_response.success = true;
     ok_response.payload = nlohmann::json{{"accepted", true}};
 
     auto ok_json = to_json(ok_response);
-    auto parsed_ok = ofx_runtime_response_from_json(ok_json);
+    auto parsed_ok = host_plugin_runtime_response_from_json(ok_json);
     REQUIRE(parsed_ok.has_value());
     CHECK(parsed_ok->success);
     CHECK(parsed_ok->payload.at("accepted").get<bool>());
 }
 
-TEST_CASE("ofx runtime protocol rejects mismatched protocol versions",
+TEST_CASE("host plugin runtime protocol rejects mismatched protocol versions",
           "[unit][ofx][runtime][regression]") {
-    OfxRuntimeRequestEnvelope request;
-    request.protocol_version = kOfxRuntimeProtocolVersion + 1;
-    request.command = OfxRuntimeCommand::Health;
+    HostPluginRuntimeRequestEnvelope request;
+    request.protocol_version = kHostPluginRuntimeProtocolVersion + 1;
+    request.command = HostPluginRuntimeCommand::Health;
     request.payload = nlohmann::json::object();
 
-    auto parsed_request = ofx_runtime_request_from_json(to_json(request));
+    auto parsed_request = host_plugin_runtime_request_from_json(to_json(request));
     REQUIRE_FALSE(parsed_request.has_value());
-    CHECK(parsed_request.error().message.find("Unsupported OFX runtime protocol version") !=
+    CHECK(parsed_request.error().message.find("Unsupported host plugin runtime protocol version") !=
           std::string::npos);
 
-    OfxRuntimeResponseEnvelope response;
-    response.protocol_version = kOfxRuntimeProtocolVersion + 1;
+    HostPluginRuntimeResponseEnvelope response;
+    response.protocol_version = kHostPluginRuntimeProtocolVersion + 1;
     response.success = true;
     response.payload = nlohmann::json::object();
 
-    auto parsed_response = ofx_runtime_response_from_json(to_json(response));
+    auto parsed_response = host_plugin_runtime_response_from_json(to_json(response));
     REQUIRE_FALSE(parsed_response.has_value());
-    CHECK(parsed_response.error().message.find("Unsupported OFX runtime protocol version") !=
+    CHECK(parsed_response.error().message.find("Unsupported host plugin runtime protocol version") !=
           std::string::npos);
 }
 
