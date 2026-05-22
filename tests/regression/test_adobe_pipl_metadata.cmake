@@ -62,6 +62,25 @@ if(NOT _effect_text MATCHES "PF_Cmd_PARAMS_SETUP")
         "Effect source must handle PF_Cmd_PARAMS_SETUP for parameter counts.")
 endif()
 
+foreach(_selector
+        PF_Cmd_ABOUT
+        PF_Cmd_GLOBAL_SETDOWN
+        PF_Cmd_SEQUENCE_SETUP
+        PF_Cmd_SEQUENCE_SETDOWN
+        PF_Cmd_RENDER
+        PF_Cmd_SMART_PRE_RENDER
+        PF_Cmd_SMART_RENDER)
+    if(NOT _effect_text MATCHES "${_selector}")
+        message(FATAL_ERROR
+            "Effect source must handle ${_selector}.")
+    endif()
+endforeach()
+
+if(NOT _effect_text MATCHES "setup_effect_parameters")
+    message(FATAL_ERROR
+        "Effect source must delegate parameter registration to the Adobe parameter setup module.")
+endif()
+
 if(NOT _effect_text MATCHES "my_version[ \t\r\n]*=" OR
    NOT _effect_text MATCHES "PF_VERSION")
     message(FATAL_ERROR

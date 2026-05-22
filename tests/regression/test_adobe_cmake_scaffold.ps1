@@ -73,21 +73,97 @@ try {
     Set-Content -Path (Join-Path $fakeSdk "Headers\AE_Effect.h") -Value @"
 #pragma once
 using A_long = int;
+using A_short = short;
+using PF_Boolean = char;
 using PF_Cmd = int;
 using PF_Err = int;
+using PF_FpShort = double;
 using PF_OutFlags = int;
 using PF_OutFlags2 = int;
-constexpr PF_Cmd PF_Cmd_GLOBAL_SETUP = 0;
-constexpr PF_Cmd PF_Cmd_PARAMS_SETUP = 1;
+using PF_ParamFlags = int;
+using PF_ParamIndex = int;
+using PF_ParamType = int;
+using PF_ParamValue = int;
+using PF_Precision = int;
+using PF_ProgPtr = void*;
+constexpr PF_Cmd PF_Cmd_ABOUT = 0;
+constexpr PF_Cmd PF_Cmd_GLOBAL_SETUP = 1;
+constexpr PF_Cmd PF_Cmd_GLOBAL_SETDOWN = 2;
+constexpr PF_Cmd PF_Cmd_PARAMS_SETUP = 3;
+constexpr PF_Cmd PF_Cmd_SEQUENCE_SETUP = 4;
+constexpr PF_Cmd PF_Cmd_SEQUENCE_RESETUP = 5;
+constexpr PF_Cmd PF_Cmd_SEQUENCE_SETDOWN = 6;
+constexpr PF_Cmd PF_Cmd_RENDER = 7;
+constexpr PF_Cmd PF_Cmd_SMART_PRE_RENDER = 8;
+constexpr PF_Cmd PF_Cmd_SMART_RENDER = 9;
+constexpr PF_Err PF_Err_NONE = 0;
+constexpr PF_Err PF_Err_INTERNAL_STRUCT_DAMAGED = 1;
+constexpr PF_Err PF_Err_BAD_CALLBACK_PARAM = 2;
+constexpr PF_ParamFlags PF_ParamFlag_NONE = 0;
+constexpr PF_ParamFlags PF_ParamFlag_CANNOT_INTERP = 1 << 2;
+constexpr PF_ParamType PF_Param_POPUP = 1;
+constexpr PF_ParamType PF_Param_FLOAT_SLIDER = 2;
+constexpr PF_ParamType PF_Param_CHECKBOX = 3;
+constexpr PF_Precision PF_Precision_INTEGER = 0;
+constexpr PF_Precision PF_Precision_HUNDREDTHS = 2;
 #define PF_VERSION(vers, subvers, bugvers, stage, build) ((vers) + (subvers) + (bugvers) + (stage) + (build))
-struct PF_InData {};
+#define PF_DEF_NAME name_do_not_use_directly
+#define PF_DEF_NAMEPTR nameptr
+#define PF_DEF_NAMESPTR namesptr
+struct PF_PopupDef {
+    PF_ParamValue value;
+    A_short num_choices;
+    A_short dephault;
+    union {
+        const char* PF_DEF_NAMESPTR;
+    } u;
+};
+struct PF_FloatSliderDef {
+    PF_FpShort value;
+    PF_FpShort valid_min;
+    PF_FpShort valid_max;
+    PF_FpShort slider_min;
+    PF_FpShort slider_max;
+    PF_FpShort dephault;
+    PF_Precision precision;
+};
+struct PF_CheckBoxDef {
+    PF_ParamValue value;
+    PF_Boolean dephault;
+    union {
+        const char* PF_DEF_NAMEPTR;
+    } u;
+};
+union PF_ParamDefUnion {
+    PF_PopupDef pd;
+    PF_FloatSliderDef fs_d;
+    PF_CheckBoxDef bd;
+};
+struct PF_ParamDef {
+    union {
+        A_long id;
+    } uu;
+    PF_ParamType param_type;
+    char PF_DEF_NAME[64];
+    PF_ParamFlags flags;
+    PF_ParamDefUnion u;
+};
+using PF_ParamDefPtr = PF_ParamDef*;
+struct PF_InteractCallbacks {
+    PF_Err (*add_param)(PF_ProgPtr, PF_ParamIndex, PF_ParamDefPtr);
+};
+struct PF_InData {
+    PF_InteractCallbacks inter;
+    PF_ProgPtr effect_ref;
+};
+#define PF_ADD_PARAM(IN_DATA, INDEX, DEF) (*(IN_DATA)->inter.add_param)((IN_DATA)->effect_ref, (INDEX), (DEF))
 struct PF_OutData {
     A_long my_version;
     A_long num_params;
     PF_OutFlags out_flags;
     PF_OutFlags2 out_flags2;
+    char return_msg[256];
 };
-struct PF_ParamDef {};
 struct PF_LayerDef {};
 "@ -Encoding Ascii
     foreach ($header in @("AE_EffectCB.h", "AE_Macros.h", "entry.h")) {

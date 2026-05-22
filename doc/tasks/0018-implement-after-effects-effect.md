@@ -1,6 +1,6 @@
 # Task `0018`: Implement After Effects Effect
 
-**Status:** proposed
+**Status:** in_progress
 **Created:** 2026-05-22
 **Owner:** Runtime maintainers
 **Spec ref:**
@@ -53,7 +53,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 
 Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
 
-- [ ] Implement the Adobe effect entrypoint and selector dispatcher.
+- [x] Implement the thin Adobe entrypoint dispatcher with explicit render stubs.
 - [ ] Register PiPL metadata, stable match name, category, support URL, and
       effect display name.
 - [ ] Register CorridorKey effect parameters and map them into bridge requests.
@@ -86,6 +86,33 @@ Grounding highlights for the After Effects effect:
 - `bryful/F-s-PluginsProjects/_Skeleton/_Skeleton.cpp:827-932` shows a
   Skeleton-derived effect dispatching the same selector family while catching
   Adobe error exceptions inside the entrypoint.
+
+TDD slice completed for the thin After Effects entrypoint:
+
+- Added unit coverage that calls `EffectMain` through the SDK signature,
+  verifies `PF_Cmd_GLOBAL_SETUP` publishes the generated version and Deep Color
+  capability, and verifies SmartFX is not advertised until SmartFX render is
+  implemented.
+- Added unit coverage for `PF_Cmd_ABOUT`, global setdown, sequence setup,
+  sequence resetup, sequence setdown, and explicit Adobe errors for
+  unimplemented render and SmartFX render selectors.
+- Added unit coverage that drives `PF_Cmd_PARAMS_SETUP` through the SDK
+  `add_param` callback and captures stable disk IDs, names, types, defaults,
+  ranges, popup choices, and flags for the registered CorridorKey controls:
+  node identity, quality, screen color, alpha hint policy, despill, spill
+  method, recover-details, output mode, and host runtime timeouts.
+- Render and SmartFX still intentionally return `PF_Err_BAD_CALLBACK_PARAM`
+  with a visible message until the render path is implemented.
+
+Fresh-context review corrections applied in the same TDD slice:
+
+- SmartFX is no longer advertised in global out flags while the SmartFX
+  selectors remain explicit unsupported-render stubs.
+- `PF_Cmd_PARAMS_SETUP` now rejects missing `output_data`, missing `input_data`,
+  and missing `add_param` callback instead of reporting success without
+  registering controls.
+- `ARCHITECTURE.md` lists the Adobe parameter setup module so the directory map
+  remains the structural source of truth.
 
 ## Definition of Done
 

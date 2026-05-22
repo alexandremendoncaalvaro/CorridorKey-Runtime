@@ -1,6 +1,9 @@
 #include "adobe_effect_metadata.hpp"
+#include "adobe_effect_parameters.hpp"
 
 #include "AE_Effect.h"
+
+#include <cstdio>
 
 #if defined(_WIN32)
 #define CORRIDORKEY_ADOBE_EXPORT extern "C" __declspec(dllexport)
@@ -13,7 +16,8 @@ namespace {
 using AdobeStatus = PF_Err;
 
 constexpr AdobeStatus kAdobeStatusOk = static_cast<AdobeStatus>(0);
-constexpr AdobeStatus kAdobeStatusFailed = static_cast<AdobeStatus>(1);
+constexpr AdobeStatus kAdobeStatusFailed = PF_Err_INTERNAL_STRUCT_DAMAGED;
+constexpr AdobeStatus kAdobeStatusUnsupported = PF_Err_BAD_CALLBACK_PARAM;
 
 auto make_effect_version() noexcept -> A_long {
     return static_cast<A_long>(
@@ -32,30 +36,53 @@ void setup_global(PF_OutData& output_data) noexcept {
         static_cast<PF_OutFlags2>(corridorkey::adobe::kGlobalOutFlags2);
 }
 
-void setup_parameters(PF_OutData& output_data) noexcept {
-    output_data.num_params = corridorkey::adobe::kEffectParameterCount;
+bool is_render_selector(PF_Cmd command) noexcept {
+    return command == PF_Cmd_RENDER || command == PF_Cmd_SMART_PRE_RENDER ||
+           command == PF_Cmd_SMART_RENDER;
+}
+
+void set_return_message(PF_OutData& output_data, const char* message) noexcept {
+    std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
+}
+
+AdobeStatus reject_unimplemented_render(PF_OutData& output_data) noexcept {
+    set_return_message(output_data, "CorridorKey render path is not implemented.");
+    return kAdobeStatusUnsupported;
 }
 
 }  // namespace
 
 CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command,
-                                                PF_InData*,
+                                                PF_InData* input_data,
                                                 PF_OutData* output_data,
                                                 PF_ParamDef*[],
                                                 PF_LayerDef*,
                                                 void*) noexcept {
     try {
         if (output_data == nullptr) {
-            return kAdobeStatusOk;
+            return command == PF_Cmd_PARAMS_SETUP || is_render_selector(command)
+                       ? kAdobeStatusUnsupported
+                       : kAdobeStatusOk;
         }
 
         switch (command) {
+            case PF_Cmd_ABOUT:
+                set_return_message(*output_data, corridorkey::adobe::kEffectDisplayName);
+                break;
             case PF_Cmd_GLOBAL_SETUP:
                 setup_global(*output_data);
                 break;
-            case PF_Cmd_PARAMS_SETUP:
-                setup_parameters(*output_data);
+            case PF_Cmd_GLOBAL_SETDOWN:
+            case PF_Cmd_SEQUENCE_SETUP:
+            case PF_Cmd_SEQUENCE_RESETUP:
+            case PF_Cmd_SEQUENCE_SETDOWN:
                 break;
+            case PF_Cmd_PARAMS_SETUP:
+                return corridorkey::adobe::setup_effect_parameters(input_data, *output_data);
+            case PF_Cmd_RENDER:
+            case PF_Cmd_SMART_PRE_RENDER:
+            case PF_Cmd_SMART_RENDER:
+                return reject_unimplemented_render(*output_data);
             default:
                 break;
         }

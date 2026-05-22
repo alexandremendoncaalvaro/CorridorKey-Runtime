@@ -7,7 +7,7 @@ set(CORRIDORKEY_ADOBE_EFFECT_VERSION_MINOR "0")
 set(CORRIDORKEY_ADOBE_EFFECT_VERSION_BUG "0")
 set(CORRIDORKEY_ADOBE_EFFECT_VERSION_STAGE "0")
 set(CORRIDORKEY_ADOBE_EFFECT_VERSION_BUILD "1")
-set(CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS "0")
+set(CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS "(1 << 25)")
 set(CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS2 "0")
 
 configure_file(
@@ -26,6 +26,8 @@ add_library(corridorkey_adobe MODULE
     adobe_bridge.hpp
     adobe_runtime_bridge.cpp
     adobe_effect.cpp
+    adobe_effect_parameters.cpp
+    adobe_effect_parameters.hpp
 )
 
 set_target_properties(corridorkey_adobe PROPERTIES

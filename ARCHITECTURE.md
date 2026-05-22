@@ -188,6 +188,8 @@ src/
 |   |-- adobe/                  Adobe After Effects SDK effect plugin
 |   |   |-- CMakeLists.txt      Adobe plugin target and PiPL generation rules
 |   |   |-- adobe_effect.cpp    Adobe effect entry point and selector dispatch
+|   |   |-- adobe_effect_parameters.cpp Adobe effect parameter definitions
+|   |   |-- adobe_effect_parameters.hpp Adobe effect parameter setup API
 |   |   |-- adobe_effect_metadata.hpp.in Generated effect metadata constants
 |   |   `-- corridorkey_adobe.r.in PiPL resource definition template
 |   |

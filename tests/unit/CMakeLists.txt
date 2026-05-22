@@ -74,6 +74,21 @@ target_include_directories(test_unit
         ${PROJECT_SOURCE_DIR}/vendor/openfx/include
 )
 
+if(CORRIDORKEY_ADOBE_PLUGIN_AVAILABLE)
+    target_sources(test_unit
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect.cpp
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect_parameters.cpp
+            test_adobe_effect.cpp
+    )
+    target_include_directories(test_unit
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe
+            ${PROJECT_BINARY_DIR}/src/plugins/adobe/generated
+            ${CORRIDORKEY_ADOBE_SDK_INCLUDE_DIR}
+    )
+endif()
+
 target_compile_definitions(test_unit PRIVATE
     PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
 )
