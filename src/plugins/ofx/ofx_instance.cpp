@@ -2156,10 +2156,15 @@ OfxStatus sync_private_data(OfxImageEffectHandle instance) {
 OfxStatus destroy_instance(OfxImageEffectHandle instance) {
     // Clear the persistent node indicator before tearing down so the host
     // does not keep a stale "Last frame: ..." tooltip on a node whose
-    // backing instance no longer exists. Spec-allowed from any action
-    // (ofxMessage.h:145-157); helper no-ops on hosts that do not
-    // implement clearPersistentMessage.
-    clear_persistent_message(instance);
+    // backing instance no longer exists. Resolve has fail-fasted while
+    // closing a project from this optional host-suite call, so avoid extra
+    // message-suite traffic during its teardown path.
+    if (!is_resolve_host()) {
+        clear_persistent_message(instance);
+    } else {
+        log_message("destroy_instance",
+                    "skip persistent message clear reason=resolve_host_teardown");
+    }
     InstanceData* data = get_instance_data(instance);
     if (data != nullptr) {
         // OFX hosts own the instance data slot via kOfxPropInstanceData;

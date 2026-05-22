@@ -69,6 +69,13 @@ OfxStatus fake_get_property_set(OfxImageEffectHandle handle, OfxPropertySetHandl
     return kOfxStatOK;
 }
 
+int g_clear_persistent_message_count = 0;
+
+OfxStatus fake_clear_persistent_message(void*) {
+    ++g_clear_persistent_message_count;
+    return kOfxStatOK;
+}
+
 OfxStatus fake_prop_get_double_n(OfxPropertySetHandle handle, const char* name, int count,
                                  double* values) {
     if (handle == nullptr || name == nullptr || values == nullptr || count != 4) {
@@ -592,6 +599,77 @@ TEST_CASE("sync_private_data does not paramSetValue on Resolve hosts",
     // through the normal path.
     CHECK(g_param_set_value_count == 0);
     CHECK(data.runtime_panel_dirty);
+}
+
+// Regression: DaVinci Resolve 20.3.2 closed after project close with a BEX64
+// c0000409 / fail-fast 7 in CorridorKey.ofx while dispatching
+// OfxActionDestroyInstance. The OFX log stopped at the action entry before
+// the persistent-message clear returned, so Resolve teardown must not receive
+// that optional host-suite call.
+TEST_CASE("destroy_instance does not clear persistent message on Resolve teardown",
+          "[unit][ofx][regression]") {
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxMessageSuiteV2 message_suite{};
+    message_suite.clearPersistentMessage = fake_clear_persistent_message;
+
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    auto* previous_message = g_suites.message;
+    auto previous_host_name = g_host_name;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.message = &message_suite;
+    g_host_name = kHostNameResolve;
+    g_clear_persistent_message_count = 0;
+
+    auto* data = new InstanceData();
+    FakeEffectProps props{.instance_data = data};
+    REQUIRE(destroy_instance(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_suites.message = previous_message;
+    g_host_name = previous_host_name;
+
+    CHECK(g_clear_persistent_message_count == 0);
+    CHECK(props.instance_data == nullptr);
+}
+
+TEST_CASE("destroy_instance clears persistent message on non-Resolve hosts",
+          "[unit][ofx][regression]") {
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxMessageSuiteV2 message_suite{};
+    message_suite.clearPersistentMessage = fake_clear_persistent_message;
+
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    auto* previous_message = g_suites.message;
+    auto previous_host_name = g_host_name;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.message = &message_suite;
+    g_host_name = kHostNameNuke;
+    g_clear_persistent_message_count = 0;
+
+    auto* data = new InstanceData();
+    FakeEffectProps props{.instance_data = data};
+    REQUIRE(destroy_instance(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_suites.message = previous_message;
+    g_host_name = previous_host_name;
+
+    CHECK(g_clear_persistent_message_count == 1);
+    CHECK(props.instance_data == nullptr);
 }
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

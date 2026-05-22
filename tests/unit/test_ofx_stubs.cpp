@@ -50,7 +50,11 @@ void set_persistent_message(const char* message_type, const char* message_id,
 }
 
 void clear_persistent_message(OfxImageEffectHandle effect) {
-    (void)effect;
+    if (g_suites.message == nullptr || g_suites.message->clearPersistentMessage == nullptr ||
+        effect == nullptr) {
+        return;
+    }
+    (void)g_suites.message->clearPersistentMessage(effect);
 }
 
 // ProgressScope stub mirrors the production helper from ofx_plugin.cpp
