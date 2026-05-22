@@ -244,7 +244,10 @@ if (-not [string]::IsNullOrWhiteSpace($SinceLocalTime)) {
     }
 }
 
-$serverLog = Get-ChildItem -LiteralPath $LogDir -Filter "host_plugin_runtime_server*.log" |
+$serverLog = @(
+    Get-ChildItem -LiteralPath $LogDir -Filter "host_plugin_runtime_server*.log"
+    Get-ChildItem -LiteralPath $LogDir -Filter "ofx_runtime_server*.log"
+) |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 

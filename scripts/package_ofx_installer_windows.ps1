@@ -314,6 +314,8 @@ Section "Install"
 
   nsExec::ExecToStack 'taskkill /F /IM corridorkey_host_plugin_runtime_server.exe'
   Pop `$0
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
+  Pop `$0
   nsExec::ExecToStack 'taskkill /F /IM corridorkey.exe'
   Pop `$0
   Sleep 2000
@@ -385,6 +387,8 @@ Section "Uninstall"
 
   DetailPrint "Stopping any running CorridorKey processes..."
   nsExec::ExecToStack 'taskkill /F /IM corridorkey_host_plugin_runtime_server.exe'
+  Pop `$0
+  nsExec::ExecToStack 'taskkill /F /IM corridorkey_ofx_runtime_server.exe'
   Pop `$0
   nsExec::ExecToStack 'taskkill /F /IM corridorkey.exe'
   Pop `$0

@@ -272,6 +272,7 @@ begin
   StopProcessByImageName('Resolve.exe');
   StopProcessByImageName('Nuke*.exe');
   StopProcessByImageName('corridorkey_host_plugin_runtime_server.exe');
+  StopProcessByImageName('corridorkey_ofx_runtime_server.exe');
   StopProcessByImageName('corridorkey.exe');
 end;
 
