@@ -22,7 +22,7 @@ model. It exists to eliminate the Python dependency from model execution and
 to deliver a distributable, hardware-accelerated inference engine for
 professional video production workflows.
 
-The product currently provides three surfaces:
+The product currently provides three released surfaces:
 
 - An **OFX plugin** for DaVinci Resolve and Foundry Nuke on Windows and macOS,
   backed by an out-of-process runtime service. The plugin is host-agnostic at
@@ -38,8 +38,10 @@ The product currently provides three surfaces:
   installer that embeds its own copy of the runtime payload; it is not bundled
   into the OFX installer.
 
-All three surfaces consume the same underlying library. Logic is never
-duplicated between them.
+Adobe After Effects and Premiere plugins are an accepted implementation track,
+but they are not a supported release surface until the host plugin, package,
+and validation tasks pass. All surfaces consume the same underlying library.
+Logic is never duplicated between them.
 
 ### 1.2 What This Is Not
 
@@ -57,6 +59,8 @@ duplicated between them.
   environments.
 - **Color graders and compositors** using DaVinci Resolve or Foundry Nuke on
   officially supported hardware.
+- **Adobe video users** using After Effects or Premiere once the Adobe host
+  plugin track is packaged and validated.
 - **Pipeline integrators** who need a stable CLI or library surface for
   automated workflows.
 - **Desktop users** who prefer a graphical interface to the CLI for keying
@@ -92,8 +96,9 @@ The complete support table is in [Support Matrix](../help/SUPPORT_MATRIX.md).
 
 ### 3.1 Layer Overview
 
-- **Interface layer:** CLI, OFX plugin, and Tauri GUI
-- **Application layer:** job orchestration, OFX runtime service, diagnostics
+- **Interface layer:** CLI, OFX plugin, Adobe plugins, and Tauri GUI
+- **Application layer:** job orchestration, host-plugin runtime service,
+  diagnostics
 - **Core layer:** inference session management, device detection, frame I/O,
   post-process, and session policies
 
@@ -117,16 +122,17 @@ The current experimental product tracks are:
 Additional provider hooks may exist in the core runtime for diagnostics,
 bring-up, or future tracks. Those hooks are not support claims by themselves.
 
-### 3.3 OFX Out-of-Process Runtime
+### 3.3 Host Plugin Out-of-Process Runtime
 
-The OFX plugin runs the inference backend in a separate process managed by the
-App-layer OFX runtime service. The plugin is a thin IPC client; it does not
-load ONNX sessions or GPU backends directly.
+Interactive host plugins run the inference backend in a separate process
+managed by the App-layer runtime service. The plugin is a thin IPC client; it
+does not load ONNX sessions or GPU backends directly.
 
 This design isolates backend failures, TensorRT RTX compilation errors, and
-VRAM exhaustion from the host process (DaVinci Resolve or Foundry Nuke). The
-session broker in the service layer pools initialized sessions across multiple
-OFX node instances to avoid redundant GPU warmups.
+VRAM exhaustion from the host process (DaVinci Resolve, Foundry Nuke, After
+Effects, or Premiere). The session broker in the service layer pools
+initialized sessions across multiple host plugin instances to avoid redundant
+GPU warmups.
 
 Frame data moves between plugin and service over shared memory. The IPC
 protocol is versioned to ensure the plugin and service remain compatible
@@ -206,12 +212,14 @@ processing begins.
 - CLI surface (`corridorkey`) with stable JSON and NDJSON output contracts
 - OFX plugin for DaVinci Resolve 20 and Foundry Nuke 17 on Apple Silicon,
   Windows, and Linux
+- Adobe After Effects SDK effect plugin implementation for After Effects and
+  Premiere validation
 - Tauri desktop GUI distributed as an independent installer that embeds the
   runtime payload
 - Green and blue screen color model variants, distributed as independent
   selectable packs
 - Alpha hint ingestion and rough-matte fallback generation
-- OFX runtime/status reporting for guide source, safe quality ceiling, and the
+- host plugin runtime/status reporting for guide source, safe quality ceiling, and the
   actual runtime path used for the last render
 - Platform-specific model artifact packaging
 - `doctor`, `benchmark`, and `process` commands with structured diagnostics
@@ -224,18 +232,17 @@ shared between Resolve and Nuke at the OFX 1.4 contract level. Per-host
 adjustments live in dedicated branches that never regress the path the other
 host depends on.
 
-These four surfaces form the curated boundary for the current product line.
-Other hosts (for example Adobe Premiere Pro and Adobe After Effects) are not
-part of the current scope; see Non-Goals.
+These four surfaces form the currently supported boundary for the product
+line. Adobe After Effects and Premiere are accepted implementation targets, but
+they stay outside the supported release boundary until their host validation
+and packaging tasks pass.
 
 ### 4.2 Non-Goals
 
 - Training, fine-tuning, or exporting new model architectures
 - A generic plugin framework or SDK for third-party extension
-- Support for editing hosts beyond DaVinci Resolve and Foundry Nuke as part of
-  the current officially supported product line. Adobe Premiere Pro and Adobe
-  After Effects are out of the current scope and require dedicated host
-  integration work that has not been started
+- Support for editing hosts beyond DaVinci Resolve, Foundry Nuke, After
+  Effects, and Premiere as part of the current product line
 - Browser, cloud, or server-side deployment
 - Real-time preview at full resolution without hardware acceleration
 

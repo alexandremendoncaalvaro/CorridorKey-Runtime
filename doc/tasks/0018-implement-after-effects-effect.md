@@ -1,0 +1,97 @@
+# Task `0018`: Implement After Effects Effect
+
+**Status:** proposed
+**Created:** 2026-05-22
+**Owner:** Runtime maintainers
+**Spec ref:**
+**ADR ref:** doc/adr/0007-add-adobe-host-plugins.md
+**Board ref:**
+**Depends on:** doc/tasks/0017-build-adobe-runtime-bridge.md
+
+## Context
+
+After Effects communicates with effect plugins through one entrypoint selected
+by the PiPL resource. That entrypoint receives command selectors such as global
+setup, parameter setup, sequence setup, render, SmartFX pre-render, and SmartFX
+render. All effect plugins must support render, and SmartFX is the path for
+32-bit-per-channel support in After Effects.
+
+CorridorKey needs an After Effects effect that presents the same keying product
+behavior as the existing host surfaces while keeping the host process thin. The
+effect should register stable metadata and parameters, use the Adobe runtime
+bridge for inference, and return Adobe error codes/messages without allowing
+C++ exceptions to escape the SDK entrypoint.
+
+This task owns the After Effects host behavior only. Premiere-specific
+compatibility and packaging are separate tasks.
+
+## Acceptance Criteria
+
+Verifiable conditions. Each as a checkbox so progress is point-editable.
+
+- [ ] The effect entrypoint handles `PF_Cmd_ABOUT`, `PF_Cmd_GLOBAL_SETUP`,
+      `PF_Cmd_GLOBAL_SETDOWN`, `PF_Cmd_PARAMS_SETUP`, sequence setup/setdown,
+      `PF_Cmd_RENDER`, and the SmartFX selectors needed for supported
+      After Effects bit depths.
+- [ ] All supported bit depths and pixel layouts are explicitly documented in
+      code-level tests or host-smoke expectations; unsupported formats return a
+      visible Adobe error instead of producing output.
+- [ ] The effect registers CorridorKey controls needed to build a complete
+      prepare request, including model or node identity, quality, screen color,
+      alpha hint policy, and post-process controls that have OFX equivalents.
+- [ ] Per-instance and per-sequence state uses Adobe-managed handles or RAII
+      wrappers and contains no mutable static render state.
+- [ ] Multi-frame rendering safety is either enabled with focused concurrency
+      tests or explicitly disabled with a documented reason in the task Notes.
+- [ ] A local After Effects smoke applies the effect to a clip, renders at least
+      one frame through the runtime service, preserves alpha output, and closes
+      the project without a host crash.
+- [ ] A saved After Effects project with keyframed CorridorKey parameters
+      reopens with stable effect identity and parameter values.
+
+## Plan
+
+Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
+
+- [ ] Implement the Adobe effect entrypoint and selector dispatcher.
+- [ ] Register PiPL metadata, stable match name, category, support URL, and
+      effect display name.
+- [ ] Register CorridorKey effect parameters and map them into bridge requests.
+- [ ] Implement render and SmartFX paths for the supported After Effects pixel
+      formats.
+- [ ] Add unit tests for parameter mapping, selector dispatch, state lifetime,
+      and unsupported formats.
+- [ ] Run the Adobe-enabled build and focused unit tests.
+- [ ] Run manual After Effects smoke and record host version, project path, and
+      render result in Notes.
+
+## Notes
+
+Append-only log. Date each entry. Never rewrite past entries.
+
+### 2026-05-22
+
+Grounding highlights for the After Effects effect:
+
+- After Effects "Entry Point" defines the effect entrypoint signature and says
+  the host initiates communication by calling that one function.
+- After Effects "Command Selectors" defines the initial setup sequence and says
+  all effect plugins must respond to render.
+- After Effects "SmartFX" says SmartFX is the way to implement
+  32-bit-per-channel support in After Effects and describes the pre-render plus
+  render split.
+- `Wunkolo/Vulkanator:source/Vulkanator.cpp:1852-1885` dispatches one Adobe
+  effect entrypoint across global setup, sequence setup, params setup, and
+  SmartFX selectors.
+- `bryful/F-s-PluginsProjects/_Skeleton/_Skeleton.cpp:827-932` shows a
+  Skeleton-derived effect dispatching the same selector family while catching
+  Adobe error exceptions inside the entrypoint.
+
+## Definition of Done
+
+All Acceptance Criteria checked, plus:
+
+- [ ] Local tests pass (or N/A documented in Notes)
+- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
+- [ ] No orphan `TODO`/`FIXME` introduced
+- [ ] Status updated to `done` and Notes log closes the task

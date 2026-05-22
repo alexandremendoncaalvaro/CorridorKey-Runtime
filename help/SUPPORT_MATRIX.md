@@ -65,6 +65,27 @@ has accumulated a clean run history.
 
 ---
 
+## Adobe After Effects and Premiere - Host Version Support
+
+| Adobe Host | Plugin Support |
+|------------|----------------|
+| After Effects 2025 or newer | Unsupported - accepted implementation target, not packaged or validated |
+| Premiere Pro 2025 or newer | Unsupported - accepted implementation target, not packaged or validated |
+| Earlier After Effects versions | Unsupported |
+| Earlier Premiere Pro versions | Unsupported |
+
+Adobe host plugins use the After Effects SDK effect surface. The Premiere path
+is validated through the same Adobe effect plugin, with Premiere-specific pixel
+format and render-path behavior tested separately before any support
+designation can be raised.
+
+Designation escalates only after the Adobe plugin builds through the canonical
+pipeline, installs into a MediaCore scan path, renders through the
+out-of-process runtime service in both After Effects and Premiere, and closes
+both hosts without a crash.
+
+---
+
 ## macOS - Platform and Hardware Support
 
 | Configuration | Support |
@@ -187,20 +208,21 @@ the primary reason the Linux track is designated Experimental.
 
 ---
 
-## CLI vs OFX Plugin Support Scope
+## Surface Support Scope
 
-The CLI and OFX plugin share the same execution backends and hardware support
-designations above. The OFX plugin additionally depends on the host
-application support defined in the host version table above.
+The CLI, OFX plugin, Adobe plugins, and Tauri GUI share the same execution
+backends and hardware support designations above. Host plugins additionally
+depend on the host application support defined in the host version tables
+above.
 
 The CLI does not have a host application dependency and can be used
 independently of any NLE.
 
-CPU rendering has been retired. The OFX plugin and CLI both require a
-supported GPU (NVIDIA RTX 30 series or newer on Windows; Apple Silicon with
-MLX on macOS). Requesting `Backend::CPU` no longer resolves to a packaged
-artifact and surfaces a "no supported render backend" failure rather than
-falling back to a quality the renderer cannot ship.
+CPU rendering has been retired. The OFX plugin, Adobe plugins, and CLI all
+require a supported GPU (NVIDIA RTX 30 series or newer on Windows; Apple
+Silicon with MLX on macOS). Requesting `Backend::CPU` no longer resolves to a
+packaged artifact and surfaces a "no supported render backend" failure rather
+than falling back to a quality the renderer cannot ship.
 
 ---
 
@@ -220,12 +242,14 @@ remain experimental in the GUI.
 ## Host Application Coverage
 
 The current officially supported host applications are DaVinci Resolve and
-Foundry Nuke through the OFX plugin. The CLI is a host-independent surface.
-The Tauri GUI is an additional host-independent surface.
+Foundry Nuke through the OFX plugin. After Effects and Premiere are accepted
+Adobe plugin implementation targets, but their support designation remains
+Unsupported until the Adobe validation and packaging gates pass. The CLI is a
+host-independent surface. The Tauri GUI is an additional host-independent
+surface.
 
-Other editing applications, including Adobe Premiere Pro and Adobe After
-Effects, are not currently supported. They are not OFX hosts and require
-their own SDK integrations that have not been built.
+Other editing applications are not currently supported and require their own
+SDK integrations.
 
 ---
 

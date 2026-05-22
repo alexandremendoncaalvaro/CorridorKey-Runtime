@@ -16,17 +16,18 @@ PR before it happens.
 The project exists to ship CorridorKey inference as a native, distributable,
 and integrable runtime for real hardware. The architecture enforces strict
 separation between the Core (inference, math, I/O), the Application
-(orchestration, OFX service, diagnostics), and the Interfaces (CLI, OFX
-plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
+(orchestration, host-plugin services, diagnostics), and the Interfaces (CLI,
+OFX plugin for DaVinci Resolve and Foundry Nuke, Adobe plugins for After
+Effects and Premiere, and Tauri desktop GUI).
 
 **Key Principles:**
 
 1. **Library First.** The engine is the product boundary. CLI, OFX plugin,
-   and Tauri GUI all consume the same runtime rather than reimplementing
-   behavior.
-2. **Interface Segregation.** Each surface (CLI, OFX plugin, Tauri GUI) is
-   a thin client over the App/Core contracts. Business logic never lives in
-   an interface layer.
+   Adobe plugins, and Tauri GUI all consume the same runtime rather than
+   reimplementing behavior.
+2. **Interface Segregation.** Each surface (CLI, OFX plugin, Adobe plugins,
+   Tauri GUI) is a thin client over the App/Core contracts. Business logic
+   never lives in an interface layer.
 3. **Predictable Operations.** Diagnostics, fallback behavior, and error
    reporting are first-class concerns, not afterthoughts.
 4. **Curated Platform Tracks.** The official product tracks are Apple Silicon
@@ -71,12 +72,12 @@ Orchestration of Core capabilities into coherent jobs and services.
 - Preset management and strategy selection.
 - Progress tracking, stage timing, and benchmark reporting.
 - Structured diagnostics, capability reports, and model catalogs.
-- OFX runtime service: out-of-process session brokering, IPC protocol, and
-  session lifecycle management for the OFX plugin.
+- Host-plugin runtime service: out-of-process session brokering, IPC
+  protocol, and session lifecycle management for interactive host plugins.
 - Product-track policy: artifact selection, compatibility rules, and support
-  behavior shared by CLI, OFX, and the Tauri GUI.
+  behavior shared by CLI, OFX, Adobe plugins, and the Tauri GUI.
 
-### Layer 3: Interfaces (`src/cli`, `src/plugins/ofx`, `src/gui`)
+### Layer 3: Interfaces (`src/cli`, `src/plugins/ofx`, `src/plugins/adobe`, `src/gui`)
 
 User-facing surfaces. Each is a thin consumer of App/Core contracts.
 
@@ -86,10 +87,17 @@ User-facing surfaces. Each is a thin consumer of App/Core contracts.
   install. Also available standalone in the portable runtime bundle that
   feeds the Tauri GUI installer.
 - **OFX Plugin** (`src/plugins/ofx`): OpenFX host integration, render
-  callback, runtime client that communicates with the App-layer OFX service.
+  callback, and adapter code that communicates with the App-layer host plugin
+  runtime service.
   Host-agnostic at the OFX 1.4 contract level; Resolve and Nuke 17 are the
   validated hosts today, with per-host workarounds gated behind explicit
   branches that never regress the path the other host depends on.
+- **Adobe Plugins** (`src/plugins/adobe`): Adobe After Effects SDK effect
+  integration for After Effects and Premiere. Adobe SDK entrypoints,
+  PiPL/effect metadata, host parameter mapping, pixel-format handling, and
+  host logging live here. Shared inference, model selection, diagnostics,
+  runtime policy, and frame transport stay in App/Core or shared common
+  infrastructure.
 - **Tauri GUI** (`src/gui`): Tauri 2 + React desktop application. Distributed
   as a separate desktop installer that embeds its own copy of the runtime
   payload (the staged output of `package_windows.ps1`); does not require the
@@ -135,9 +143,10 @@ src/
 |-- app/                        Application orchestration layer
 |   |-- job_orchestrator.cpp
 |   |-- model_compiler.cpp
-|   |-- ofx_runtime_protocol.cpp    OFX IPC wire protocol
-|   |-- ofx_runtime_service.cpp     Out-of-process OFX runtime server
-|   |-- ofx_session_broker.cpp      Session pool management for OFX
+|   |-- host_plugin_runtime_client.cpp      IPC client used by host plugin adapters
+|   |-- host_plugin_runtime_protocol.cpp    Host plugin IPC wire protocol
+|   |-- host_plugin_runtime_service.cpp     Out-of-process host plugin runtime server
+|   |-- host_plugin_session_broker.cpp      Session pool management for host plugins
 |   |-- runtime_contracts.cpp
 |   |-- runtime_diagnostics.cpp
 |   `-- hardware_profile.hpp
@@ -176,12 +185,17 @@ src/
 |-- gui/                        Tauri GUI (in-development, not yet released)
 |
 |-- plugins/
+|   |-- adobe/                  Adobe After Effects SDK effect plugin
+|   |   |-- CMakeLists.txt      Adobe plugin target and PiPL generation rules
+|   |   |-- adobe_effect.cpp    Adobe effect entry point and selector dispatch
+|   |   |-- adobe_effect_metadata.hpp.in Generated effect metadata constants
+|   |   `-- corridorkey_adobe.r.in PiPL resource definition template
+|   |
 |   `-- ofx/                    OpenFX plugin
 |       |-- ofx_plugin.cpp      OFX entry point and descriptor
 |       |-- ofx_instance.cpp    Instance lifecycle
 |       |-- ofx_render.cpp      Render callback
 |       |-- ofx_actions.cpp     OFX action handlers
-|       |-- ofx_runtime_client.cpp  IPC client to the App-layer service
 |       |-- ofx_image_utils.cpp
 |       `-- ofx_logging.cpp
 |
@@ -237,26 +251,27 @@ scripts/installer/
 
 ---
 
-## 4. OFX Runtime Architecture
+## 4. Host Plugin Runtime Architecture
 
-The OFX plugin uses an out-of-process architecture to protect the host
-application (DaVinci Resolve) from backend and VRAM failures.
+Interactive host plugins use an out-of-process architecture to protect host
+applications from backend and VRAM failures.
 
-**Crash Containment.** The runtime service (`ofx_runtime_service`) runs in a
+**Crash Containment.** The runtime service (`host_plugin_runtime_service`) runs in a
 separate process. ONNX session failures, VRAM exhaustion, and TensorRT RTX
-compilation errors are isolated from the host.
+compilation errors are isolated from DaVinci Resolve, Foundry Nuke, After
+Effects, and Premiere.
 
-**Session Residency.** The session broker (`ofx_session_broker`) pools
-initialized sessions by backend and model. Multiple OFX node instances share
-a session pool rather than each triggering a full GPU warmup.
+**Session Residency.** The session broker (`host_plugin_session_broker`) pools
+initialized sessions by backend and model. Multiple host plugin instances
+share a session pool rather than each triggering a full GPU warmup.
 
 **Frame Transport.** High-bandwidth frames move between the plugin and service
 via shared memory (`shared_memory_transport`). The IPC wire protocol
-(`ofx_runtime_protocol`) is versioned and handles request/reply orchestration.
+(`host_plugin_runtime_protocol`) is versioned and handles request/reply orchestration.
 
 **Diagnostics Parity.** Fallback details, stage timings, and initialization
 logs from the service are surfaced back to the plugin client and are
-accessible through the host's log viewer.
+accessible through the host's log viewer or effect UI.
 
 ---
 
@@ -264,8 +279,8 @@ accessible through the host's log viewer.
 
 **Public API Surface.** Public headers live exclusively in
 `include/corridorkey/`. External library types (`OrtSession`, `Imf::*`,
-`AVFrame`, CUDA / NPP / LibTorch types, host-specific OFX types) never appear
-in public headers - they are wrapped in `src/`.
+`AVFrame`, CUDA / NPP / LibTorch types, host-specific OFX types, host-specific
+Adobe SDK types) never appear in public headers - they are wrapped in `src/`.
 
 **PIMPL for ABI Stability.** Main classes such as `Engine` use the PIMPL
 pattern so implementation details can change without breaking the public ABI.
@@ -280,9 +295,9 @@ between modules without copying. `ImageBuffer` owns allocations. Do not use
 **SIMD Alignment.** All image buffers are 64-byte aligned for AVX-512 and
 NEON compatibility.
 
-**No Exceptions in the OFX Surface.** All `extern "C"` OFX entry points are
-wrapped in a top-level `try/catch`. Exceptions are translated into OFX status
-codes; none may escape to the host.
+**No Exceptions in Host Plugin Surfaces.** All `extern "C"` OFX and Adobe SDK
+entry points are wrapped in a top-level `try/catch`. Exceptions are translated
+into host status codes or host-visible errors; none may escape to the host.
 
 **No Heap Allocation in Per-Frame Paths.** Per-frame and per-pixel functions
 in `src/post_process/` must not allocate. Scratch state is owned by the OFX
@@ -320,7 +335,11 @@ Is it OFX plugin logic?
   YES -> src/plugins/ofx/
   NO  v
 
-Is it application orchestration or OFX service logic?
+Is it Adobe host plugin logic?
+  YES -> src/plugins/adobe/
+  NO  v
+
+Is it application orchestration or host-plugin service logic?
   YES -> src/app/
   NO  v
 
@@ -360,4 +379,5 @@ Superseded or proposed ADRs are not listed here.
 | [ADR-0004](doc/adr/0004-own-torchtrt-work-stream.md) | TorchTRT owns a dedicated work stream guarded against host-side serialization. |
 | [ADR-0005](doc/adr/0005-default-ofx-torchtrt-cuda-graph-off.md) | OFX TorchTRT defaults to CUDA Graph capture off; graph capture is opt-in. |
 | [ADR-0006](doc/adr/0006-expose-dedicated-ofx-nodes.md) | One OFX bundle exposes two dedicated descriptors: legacy Green (`com.corridorkey.resolve`) and new Blue (`com.corridorkey.resolve.blue`, label `CorridorKey Blue`). Both identifier strings and the Blue label are persisted product contracts. |
+| [ADR-0007](doc/adr/0007-add-adobe-host-plugins.md) | Adobe After Effects and Premiere plugins are first-class Interface-layer adapters over shared App/Core runtime contracts. |
 
