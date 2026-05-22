@@ -24,6 +24,7 @@ resource 'PiPL' (16000) {
         AE_Effect_Global_OutFlags { @CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS@ },
         AE_Effect_Global_OutFlags_2 { @CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS2@ },
         AE_Effect_Match_Name { "@CORRIDORKEY_ADOBE_EFFECT_MATCH_NAME@" },
-        AE_Reserved_Info { 0 }
+        AE_Reserved_Info { 0 },
+        AE_Effect_Support_URL { "@CORRIDORKEY_ADOBE_EFFECT_SUPPORT_URL@" }
     }
 };

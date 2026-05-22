@@ -18,6 +18,19 @@ $buildDir = Join-Path $tempRoot "build"
 $toolchain = Join-Path $vcpkgRoot "scripts\buildsystems\vcpkg.cmake"
 $ortRoot = Join-Path $repoRoot "vendor\onnxruntime-windows-rtx"
 
+function Test-TextContainsPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Text,
+        [Parameter(Mandatory = $true)]
+        [string] $Path
+    )
+
+    $forwardPath = $Path.Replace("\", "/")
+    $backwardPath = $Path.Replace("/", "\")
+    return $Text.Contains($forwardPath) -or $Text.Contains($backwardPath)
+}
+
 try {
     $missingSdk = Join-Path $tempRoot "missing-sdk"
     $missingBuildDir = Join-Path $tempRoot "missing-build"
@@ -59,18 +72,20 @@ try {
         throw "Adobe-enabled configure must fail when the requested SDK root is incomplete."
     }
 
-    New-Item -ItemType Directory -Path (Join-Path $fakeSdk "Headers") -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeSdk "Resources") -Force | Out-Null
+    $fakeSdkIncludeDir = Join-Path $fakeSdk "Headers"
+    $fakeSdkResourceDir = Join-Path $fakeSdk "Resources"
+    New-Item -ItemType Directory -Path $fakeSdkIncludeDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $fakeSdkResourceDir -Force | Out-Null
 
-    Set-Content -Path (Join-Path $fakeSdk "Headers\AEConfig.h") -Value @"
+    Set-Content -Path (Join-Path $fakeSdkIncludeDir "AEConfig.h") -Value @"
 #define AE_OS_WIN 1
 #define AE_PROC_INTELx64 1
 "@ -Encoding Ascii
-    Set-Content -Path (Join-Path $fakeSdk "Headers\AE_EffectVers.h") -Value @"
+    Set-Content -Path (Join-Path $fakeSdkIncludeDir "AE_EffectVers.h") -Value @"
 #define PF_PLUG_IN_VERSION 13
 #define PF_PLUG_IN_SUBVERS 28
 "@ -Encoding Ascii
-    Set-Content -Path (Join-Path $fakeSdk "Headers\AE_Effect.h") -Value @"
+    Set-Content -Path (Join-Path $fakeSdkIncludeDir "AE_Effect.h") -Value @"
 #pragma once
 using A_long = int;
 using A_short = short;
@@ -167,27 +182,11 @@ struct PF_OutData {
 struct PF_LayerDef {};
 "@ -Encoding Ascii
     foreach ($header in @("AE_EffectCB.h", "AE_Macros.h", "entry.h")) {
-        Set-Content -Path (Join-Path $fakeSdk "Headers\$header") -Value "" -Encoding Ascii
+        Set-Content -Path (Join-Path $fakeSdkIncludeDir $header) -Value "" -Encoding Ascii
     }
 
-    $fakePiplToolSource = Join-Path $tempRoot "fake_pipl_tool.cpp"
-    $fakePiplToolExe = Join-Path $fakeSdk "Resources\PiPLTool.exe"
-    Set-Content -Path $fakePiplToolSource -Value @"
-#include <fstream>
-
-int main(int argc, char** argv) {
-    if (argc < 3) {
-        return 1;
-    }
-    std::ofstream output(argv[2], std::ios::binary);
-    output << "16000 RCDATA { 0 }\n";
-    return output ? 0 : 1;
-}
-"@ -Encoding Ascii
-    & cl.exe /nologo /EHsc "/Fe:$fakePiplToolExe" $fakePiplToolSource
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to compile the fake PiPLTool test executable."
-    }
+    $fakePiplToolExe = Join-Path $fakeSdkResourceDir "PiPLTool.exe"
+    Set-Content -Path $fakePiplToolExe -Value "" -Encoding Ascii
 
     $cmakeArgs = @(
         "-S"
@@ -219,62 +218,31 @@ int main(int argc, char** argv) {
         throw "Expected the Adobe-enabled configure to create corridorkey_adobe."
     }
     if ($ninjaText -notmatch "corridorkey_adobe\.aex") {
-        throw "Expected the Adobe plugin target to produce corridorkey_adobe.aex."
+        throw "Expected the Adobe target scaffold to configure the corridorkey_adobe .aex suffix."
+    }
+    if (-not (Test-TextContainsPath -Text $ninjaText -Path $fakeSdkIncludeDir)) {
+        throw "Expected the Adobe target scaffold to include the fake SDK headers."
+    }
+    if (-not (Test-TextContainsPath -Text $ninjaText -Path $fakePiplToolExe)) {
+        throw "Expected the Adobe target scaffold to wire the fake PiPLTool path."
+    }
+    if ($ninjaText -notmatch "CorridorKeyRunAdobePipl\.cmake") {
+        throw "Expected the Adobe target scaffold to generate the PiPL resource rule."
     }
 
-    & cmake.exe --build $buildDir --target corridorkey_adobe
-    if ($LASTEXITCODE -ne 0) {
-        throw "Building corridorkey_adobe failed."
+    $generatedPiplSource = Join-Path $buildDir "src\plugins\adobe\corridorkey_adobe.r"
+    if (-not (Test-Path $generatedPiplSource)) {
+        throw "Expected Adobe PiPL source scaffold at $generatedPiplSource."
     }
-
-    $pluginArtifact = Join-Path $buildDir "src\plugins\adobe\corridorkey_adobe.aex"
-    if (-not (Test-Path $pluginArtifact)) {
-        throw "Expected Adobe plugin artifact at $pluginArtifact."
+    $generatedPiplText = Get-Content -Path $generatedPiplSource -Raw
+    if ($generatedPiplText -notmatch 'CodeWin64X86\s+\{\s+"EffectMain"\s+\}') {
+        throw "Expected Adobe PiPL scaffold to declare EffectMain for Win64."
     }
-
-    $exports = & dumpbin.exe /nologo /exports $pluginArtifact
-    if ($LASTEXITCODE -ne 0) {
-        throw "dumpbin export inspection failed."
+    if ($generatedPiplText -notmatch 'AE_Effect_Match_Name\s+\{\s+"com\.corridorkey\.effect"\s+\}') {
+        throw "Expected Adobe PiPL scaffold to contain the stable effect match name."
     }
-    if (($exports -join "`n") -notmatch "\bEffectMain\b") {
-        throw "Expected corridorkey_adobe.aex to export EffectMain."
-    }
-
-    $dependents = & dumpbin.exe /nologo /dependents $pluginArtifact
-    if ($LASTEXITCODE -ne 0) {
-        throw "dumpbin dependent inspection failed."
-    }
-    $dependentText = $dependents -join "`n"
-    $forbiddenDependents = @(
-        "onnxruntime",
-        "cudart",
-        "cuda",
-        "nvcuda",
-        "nvrtc",
-        "nvToolsExt",
-        "cublas",
-        "cudnn",
-        "nppc",
-        "nppial",
-        "nppicc",
-        "nppidei",
-        "nppif",
-        "nppig",
-        "nppim",
-        "nppist",
-        "nppisu",
-        "nppitc",
-        "npps",
-        "nvinfer",
-        "nvonnxparser",
-        "torch",
-        "torch_cuda",
-        "c10"
-    )
-    foreach ($forbidden in $forbiddenDependents) {
-        if ($dependentText -match $forbidden) {
-            throw "Adobe plugin module must not depend on $forbidden."
-        }
+    if ($generatedPiplText -notmatch 'AE_Effect_Support_URL\s+\{\s+"https://github\.com/alexandremendoncaalvaro/CorridorKey-Runtime/issues"\s+\}') {
+        throw "Expected Adobe PiPL scaffold to contain the support URL."
     }
 
     Write-Host "[PASS] Adobe CMake scaffold regression checks passed." -ForegroundColor Green

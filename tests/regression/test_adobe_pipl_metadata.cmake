@@ -17,6 +17,7 @@ file(READ "${_effect_source}" _effect_text)
 
 foreach(_placeholder
         CORRIDORKEY_ADOBE_EFFECT_MATCH_NAME
+        CORRIDORKEY_ADOBE_EFFECT_SUPPORT_URL
         CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS
         CORRIDORKEY_ADOBE_GLOBAL_OUTFLAGS2)
     if(NOT _metadata_text MATCHES "@${_placeholder}@")
@@ -48,6 +49,11 @@ endif()
 if(NOT _pipl_text MATCHES
    "AE_Effect_Match_Name[ \t\r\n]*\\{[ \t\r\n]*\"@CORRIDORKEY_ADOBE_EFFECT_MATCH_NAME@\"[ \t\r\n]*\\}")
     message(FATAL_ERROR "PiPL template must use the generated stable match name.")
+endif()
+
+if(NOT _pipl_text MATCHES
+   "AE_Effect_Support_URL[ \t\r\n]*\\{[ \t\r\n]*\"@CORRIDORKEY_ADOBE_EFFECT_SUPPORT_URL@\"[ \t\r\n]*\\}")
+    message(FATAL_ERROR "PiPL template must use the generated support URL.")
 endif()
 
 foreach(_runtime_symbol kGlobalOutFlags kGlobalOutFlags2)
