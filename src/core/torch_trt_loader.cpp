@@ -36,6 +36,22 @@ std::atomic_bool& torchtrt_runtime_armed_flag() {
     static std::atomic_bool flag{false};
     return flag;
 }
+
+std::filesystem::path resolve_ofx_pack_win64_dir(const std::filesystem::path& runtime_bin) {
+    const auto torchtrt_dir = runtime_bin.parent_path();
+    const auto resources_dir = torchtrt_dir.parent_path();
+    const auto contents_dir = resources_dir.parent_path();
+    if (runtime_bin.filename() != "bin" || torchtrt_dir.filename() != "torchtrt-runtime" ||
+        resources_dir.filename() != "Resources") {
+        return {};
+    }
+
+    auto win64_dir = contents_dir / "Win64";
+    if (!std::filesystem::exists(win64_dir)) {
+        return {};
+    }
+    return win64_dir;
+}
 #endif
 
 }  // namespace
@@ -93,6 +109,16 @@ bool arm_torchtrt_runtime(const std::filesystem::path& bin_dir, std::string& out
         out_error = "AddDllDirectory failed for " + absolute.string() +
                     " (GetLastError=" + std::to_string(GetLastError()) + ")";
         return false;
+    }
+
+    const auto pack_win64_dir = resolve_ofx_pack_win64_dir(absolute);
+    if (!pack_win64_dir.empty()) {
+        auto* pack_cookie = AddDllDirectory(pack_win64_dir.wstring().c_str());
+        if (pack_cookie == nullptr) {
+            out_error = "AddDllDirectory failed for " + pack_win64_dir.string() +
+                        " (GetLastError=" + std::to_string(GetLastError()) + ")";
+            return false;
+        }
     }
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
 

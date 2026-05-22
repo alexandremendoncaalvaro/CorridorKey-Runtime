@@ -465,6 +465,8 @@ if ($null -eq $dumpbinPath) {
         $importScanTargets += [PSCustomObject]@{
             path = $torchTrtWrapperPath
             bundle_dir = $torchTrtRuntimeBinDir
+            # arm_torchtrt_runtime adds Contents\Win64 for OFX packs so
+            # the wrapper can reuse NPP DLLs staged beside the sidecar exe.
             additional_dirs = @($win64Dir)
             allowed_external = @("torch_cpu.dll", "torch_cuda.dll", "c10.dll", "c10_cuda.dll")
         }

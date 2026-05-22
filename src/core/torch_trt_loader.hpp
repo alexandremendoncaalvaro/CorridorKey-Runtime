@@ -23,6 +23,8 @@ namespace corridorkey::core {
 //
 //   - AddDllDirectory(<bin_dir>) so the OS loader honors blue-pack
 //     paths for any later LoadLibrary.
+//   - AddDllDirectory(<pack>/Contents/Win64) for OFX packs so wrapper
+//     imports can reuse CUDA/NPP DLLs staged beside the sidecar exe.
 //   - LoadLibraryEx("torchtrt.dll", LOAD_WITH_ALTERED_SEARCH_PATH) to
 //     pre-populate the loader cache so the delay-loaded
 //     corridorkey_torchtrt.dll can resolve its torch / torchtrt /
