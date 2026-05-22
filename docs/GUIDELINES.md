@@ -5,7 +5,7 @@ requirements, testing strategy, and documentation standards for this project.
 It is the reference for contributors and reviewers.
 
 **See also:**
-[ARCHITECTURE.md](ARCHITECTURE.md) — source structure and dependency rules |
+[ARCHITECTURE.md](../ARCHITECTURE.md) — source structure and dependency rules |
 [SPEC.md](SPEC.md) — product scope and support philosophy
 
 ---
