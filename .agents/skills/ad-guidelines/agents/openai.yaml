@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-guidelines
+  short_description: Lazy lifecycle owner of `GUIDELINES.md` per ADR-0029. Layer 1 Constitution trinity member alongside `WORKFLOW.md` and `AGENTS.md`. Full engineering reference — Clean Architecture, SOLID, Object Calisthenics (loose/moderate/strict), code standards, testing strategy, security. Scan-first; pre-suggested defaults from canon.
+policy:
+  allow_implicit_invocation: false

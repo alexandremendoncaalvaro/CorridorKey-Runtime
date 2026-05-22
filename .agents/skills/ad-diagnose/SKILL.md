@@ -23,7 +23,7 @@ Route elsewhere when:
 - The bug is one-line obvious (typo, off-by-one) — fix it directly.
 - The bug is a clean ground-truth-pair regression (test was passing, output unchanged, now failing) → `ad-tdg` (WORKFLOW §9).
 - The technique itself is uncertain across multiple plausible approaches → `ad-spike` (WORKFLOW §14).
-- The spec or expected behavior is unclear → `ad-grill` (ADR-0022).
+- The spec or expected behavior is unclear → `ad-grill`.
 
 Phase 1 — build a feedback loop. **This is the skill. Everything else is mechanical.** A fast, deterministic, agent-runnable pass/fail signal for the bug is what enables every later phase. Without a loop, no amount of staring at code finds the cause.
 
@@ -71,7 +71,7 @@ If you cannot state the prediction, the hypothesis is a vibe — discard or shar
 
 Show the ranked list to the user before testing. They often have domain knowledge that re-ranks instantly ("we just deployed a change to #3"), or know hypotheses they have already ruled out. Cheap checkpoint, big time saver. Don't block on it — proceed with your ranking if the user is AFK.
 
-Read `CONTEXT.md` if it exists (ADR-0019) and ADRs in `doc/adr/` covering the surface — domain vocabulary and prior decisions sharpen the hypotheses.
+Read `CONTEXT.md` if it exists and ADRs in `doc/adr/` covering the surface — domain vocabulary and prior decisions sharpen the hypotheses.
 
 Phase 4 — instrument. Each probe maps to a specific prediction from Phase 3. Change one variable at a time.
 

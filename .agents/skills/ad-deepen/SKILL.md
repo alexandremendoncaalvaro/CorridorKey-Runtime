@@ -24,13 +24,13 @@ Route elsewhere when:
 - The change is a one-line fix or mechanical refactor → no scaffold needed.
 - The codebase is `poc`-shaped (one-shot script, ≤200 lines, no callers): deepening is premature; ship the experiment first.
 - The friction is a *bug*, not a *shape* — `ad-diagnose` (WORKFLOW §15).
-- The friction is a *naming/vocabulary* drift — `ad-domain` (ADR-0019).
-- The friction is *missing context*, not module shape — `ad-grill` (ADR-0022).
+- The friction is a *naming/vocabulary* drift — `ad-domain`.
+- The friction is *missing context*, not module shape — `ad-grill`.
 
 Step 1 — explore organically. Before naming candidates, read.
 
-1. Read `CONTEXT.md` if it exists (ADR-0019). Anchor domain vocabulary; deepening proposals must use *Customer*, *Order*, *Triage role* — not *Service*, *Handler*, *Manager*.
-2. Read `ARCHITECTURE.md` if it exists (ADR-0006). Read accepted ADRs in `doc/adr/` covering the surface you are about to walk.
+1. Read `CONTEXT.md` if it exists. Anchor domain vocabulary; deepening proposals must use *Customer*, *Order*, *Triage role* — not *Service*, *Handler*, *Manager*.
+2. Read `ARCHITECTURE.md` if it exists. Read accepted ADRs in `doc/adr/` covering the surface you are about to walk.
 3. Walk the codebase noting *friction*:
    - Concepts bouncing between modules (locality fault).
    - Interfaces as wide as their implementations (shallow modules — apply the deletion test).
@@ -67,7 +67,7 @@ Step 3 — grilling loop on the chosen candidate. The user picks one candidate b
 
 1. Walk the design tree of the proposal branch by branch (one question per turn, recommendation included). Reuse the `ad-grill` discipline.
 2. Add new domain terms to `CONTEXT.md` lazily via `ad-domain` as the proposal surfaces them.
-3. Offer an ADR only when the three criteria pass (hard to reverse, surprising without context, real trade-off — per ADR-0022 §5). Most refactors do not need an ADR.
+3. Offer an ADR only when the three criteria pass (hard to reverse, surprising without context, real trade-off —' ' Most refactors do not need an ADR.
 4. When the proposal stabilizes: route to `ad-tdg` (WORKFLOW §9) for the implementation pass with ground-truth pair + TDM + criterion-based selection.
 
 Reject candidates the grilling loop reveals as wrong-shaped. Better to discard at this stage than to ship a deepening that doesn't deepen.

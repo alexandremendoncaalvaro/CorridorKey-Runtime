@@ -30,7 +30,7 @@ A well-scoped routine ask ("rename `foo` to `bar` everywhere") does not need gri
 Step 1 — codebase-first. Before asking a single question, look. Most "what does this do?" questions are answered by the code.
 
 Process:
-1. Read `CONTEXT.md` if it exists (ADR-0019). Anchor vocabulary first; nothing else makes sense without it.
+1. Read `CONTEXT.md` if it exists. Anchor vocabulary first; nothing else makes sense without it.
 2. Read `CONTEXT-MAP.md` if it exists; load the per-context glossaries that match the surface.
 3. `Glob` / `Grep` the surface the question touches — file names, function names, the user's nouns and their plausible aliases.
 4. Read the matched files in the order most likely to answer the surface question.
@@ -73,7 +73,7 @@ Step 4 — capture inline. When a term resolves or a decision crystallizes, capt
 
 Term resolved → `ad-domain`. Route to `ad-domain` with the canonical noun, the aliases to avoid, and the one-sentence definition. The skill writes to `CONTEXT.md`.
 
-Decision crystallized → maybe `ad-adr`. Offer an ADR only when **all three** are true (per ADR-0022 §5):
+Decision crystallized → maybe `ad-adr`. Offer an ADR only when **all three** are true:
 
 1. **Hard to reverse.** Changing the decision later costs meaningfully.
 2. **Surprising without context.** A future reader will wonder *why was it done this way?*

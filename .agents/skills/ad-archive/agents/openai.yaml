@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-archive
+  short_description: Hard-delete completed plan files (tasks done / specs shipped / PRDs superseded / ADRs superseded or deprecated) into git history.
+policy:
+  allow_implicit_invocation: false

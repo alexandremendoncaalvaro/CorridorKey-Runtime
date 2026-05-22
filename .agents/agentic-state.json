@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "kitVersion": "0.15.1-beta.1",
+  "kitVersion": "0.17.0-beta.1",
   "agent": "codex",
   "profile": "team",
   "skills": {
     "ad-adr": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-adr/agents/openai.yaml",
@@ -18,7 +18,7 @@
       ]
     },
     "ad-architecture": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-architecture/agents/openai.yaml",
@@ -26,12 +26,25 @@
         },
         {
           "path": ".agents/skills/ad-architecture/SKILL.md",
-          "sourceSha": "d7a77aebf216256bd236c11b40013b6658a5837dd6f2a80925b2f4f96278f51d"
+          "sourceSha": "710563e47d3c8d25dc5cb123c9563cd8b86203a1d72c0486f24deac03d54e264"
+        }
+      ]
+    },
+    "ad-archive": {
+      "version": "0.17.0-beta.1",
+      "files": [
+        {
+          "path": ".agents/skills/ad-archive/agents/openai.yaml",
+          "sourceSha": "a694ef8c1ce6d3b5f75f48491e9af9a4f7128f4b78acf0c964a0cc2008bc5c1c"
+        },
+        {
+          "path": ".agents/skills/ad-archive/SKILL.md",
+          "sourceSha": "708f9293f3b5ac2dd1a2e14575a9c20d64f69799f8858fcc36ccb71f6af5981f"
         }
       ]
     },
     "ad-audit": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-audit/agents/openai.yaml",
@@ -39,12 +52,12 @@
         },
         {
           "path": ".agents/skills/ad-audit/SKILL.md",
-          "sourceSha": "08f11d42a9083d8fab7dec44122ef8fda40b9390aeb2aa28ae0936b85da30d8c"
+          "sourceSha": "c9cc4d6f5430121cce0187c534fa1e703fd7234d92a26a7bb0ec307d3787d280"
         }
       ]
     },
     "ad-bootstrap": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-bootstrap/agents/openai.yaml",
@@ -52,12 +65,12 @@
         },
         {
           "path": ".agents/skills/ad-bootstrap/SKILL.md",
-          "sourceSha": "7a865acd58c65152061bf41830abf77fd9b039d24e4b188359c6f50b36fbfc27"
+          "sourceSha": "e6859e57d01d6aee1cb1918de2bf7524efc4fa5520337d71298f9a6393471d31"
         }
       ]
     },
     "ad-commit": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-commit/agents/openai.yaml",
@@ -65,12 +78,12 @@
         },
         {
           "path": ".agents/skills/ad-commit/SKILL.md",
-          "sourceSha": "04bc12930d84f42c063ee5cb60dbf52e916f57a676cb80523aaf3cbabfc73392"
+          "sourceSha": "6c299f41bd8be20c9614d9ec3040aecc994d7f2bdc04dad5ef5f9b8536c7deab"
         }
       ]
     },
     "ad-deepen": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-deepen/agents/openai.yaml",
@@ -78,12 +91,12 @@
         },
         {
           "path": ".agents/skills/ad-deepen/SKILL.md",
-          "sourceSha": "89b4a71f84857170e72b12d1afab622b62a7151b10228bd74b75275fffba86dc"
+          "sourceSha": "9110e98aeaef53ab85098513facbba4015d64c91f9a962f9e964276e3d76ec36"
         }
       ]
     },
     "ad-design": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-design/agents/openai.yaml",
@@ -96,7 +109,7 @@
       ]
     },
     "ad-diagnose": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-diagnose/agents/openai.yaml",
@@ -104,12 +117,12 @@
         },
         {
           "path": ".agents/skills/ad-diagnose/SKILL.md",
-          "sourceSha": "401181a717cf3df45fab7ccc3494de334ce84d920fac949e3ba5284a3d9783da"
+          "sourceSha": "a5fdd6d066399f42ba193406cb153f042e3dacb278e926792cc0af172796d92c"
         }
       ]
     },
     "ad-domain": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-domain/agents/openai.yaml",
@@ -117,12 +130,12 @@
         },
         {
           "path": ".agents/skills/ad-domain/SKILL.md",
-          "sourceSha": "ee1030c4f0871e3fba9927a2ae30d427af1236ac11498b521ae54966eda65255"
+          "sourceSha": "0ce022de77827c7a85f3191a8f4b5925638cd54176c8829d9ee6c753a8e86fc7"
         }
       ]
     },
     "ad-grill": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-grill/agents/openai.yaml",
@@ -130,12 +143,12 @@
         },
         {
           "path": ".agents/skills/ad-grill/SKILL.md",
-          "sourceSha": "c2f9cc0c35546a502afdbbb12d484f146a16c835580b636e086dc61958ee1047"
+          "sourceSha": "7bb9a87fae699f1e7f5e468f5419027560f84587a7bfefea8df7822438b8ca79"
         }
       ]
     },
     "ad-ground": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-ground/agents/openai.yaml",
@@ -143,12 +156,38 @@
         },
         {
           "path": ".agents/skills/ad-ground/SKILL.md",
-          "sourceSha": "955e28d6bbb5c84b0d100ba445db98315832b4b64a6661b609da6b62aa510258"
+          "sourceSha": "12c199eac2ac61d3e1cf8c6511307d4c2ea9caf2634ae68da84cb8f9151ba54f"
+        }
+      ]
+    },
+    "ad-guidelines": {
+      "version": "0.17.0-beta.1",
+      "files": [
+        {
+          "path": ".agents/skills/ad-guidelines/agents/openai.yaml",
+          "sourceSha": "bb04165b9fbfeaa203483d1de938b0a51c50a4d544238ad01c34a56f1559286d"
+        },
+        {
+          "path": ".agents/skills/ad-guidelines/SKILL.md",
+          "sourceSha": "d043540859607ab42c1d8624e08ad2c9da42629069d533e84698709561536b3a"
+        }
+      ]
+    },
+    "ad-handoff": {
+      "version": "0.17.0-beta.1",
+      "files": [
+        {
+          "path": ".agents/skills/ad-handoff/agents/openai.yaml",
+          "sourceSha": "03013e0e2c657e8e978d38567b2a8f8c1e61cba1b57c1e48648c41a002f1de93"
+        },
+        {
+          "path": ".agents/skills/ad-handoff/SKILL.md",
+          "sourceSha": "e1e4bdc9f938fa7b21c2269e7062d173325860a2c4c7264668276e28d2f50151"
         }
       ]
     },
     "ad-merge": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-merge/agents/openai.yaml",
@@ -156,12 +195,12 @@
         },
         {
           "path": ".agents/skills/ad-merge/SKILL.md",
-          "sourceSha": "3671c7c421c663952ac2525f5ec50a8a005718ff2663f22bbfae87932a07f7d0"
+          "sourceSha": "28bbb03596bf8f433fb4f37201d80ef46d8c2ce1854a529708db1cc2e8e5f4c3"
         }
       ]
     },
     "ad-next": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-next/agents/openai.yaml",
@@ -169,12 +208,12 @@
         },
         {
           "path": ".agents/skills/ad-next/SKILL.md",
-          "sourceSha": "1a50fdb2da5cc243bf7e087c53df1f153e42f9c5e289e9cea74621d8a628c0a2"
+          "sourceSha": "821f3727995ba5541bacae4de74af461c754fe5eef2185a0b7db2d91c68456bc"
         }
       ]
     },
     "ad-philosophy": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-philosophy/agents/openai.yaml",
@@ -182,12 +221,12 @@
         },
         {
           "path": ".agents/skills/ad-philosophy/SKILL.md",
-          "sourceSha": "c3f3a82ca0d065defd3b2edcf08671955e07959d08da2c5736499ce7b283f67e"
+          "sourceSha": "5cae460943832eb1e37b90117e1d673509fb9090071ad3e75a8654b7e7bc2203"
         }
       ]
     },
     "ad-pr": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-pr/agents/openai.yaml",
@@ -195,12 +234,25 @@
         },
         {
           "path": ".agents/skills/ad-pr/SKILL.md",
-          "sourceSha": "1db9419b62451d5e93d21c8580e380f48d33ceaead3f7e0309521aa92c48e688"
+          "sourceSha": "a2f962097ec31a8fcd98c19692e4d239603ba2971c9f42745ad336bad1f0b6af"
+        }
+      ]
+    },
+    "ad-prd": {
+      "version": "0.17.0-beta.1",
+      "files": [
+        {
+          "path": ".agents/skills/ad-prd/agents/openai.yaml",
+          "sourceSha": "2d95d47eda0bb22d23a86e39c9fa31671474d9194d7efd40f8d3863fe49cc42e"
+        },
+        {
+          "path": ".agents/skills/ad-prd/SKILL.md",
+          "sourceSha": "f1d46e742a437223b58f21d54fca5482924b0bc56ddb5b952c842882c26054d1"
         }
       ]
     },
     "ad-review": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-review/agents/openai.yaml",
@@ -208,12 +260,12 @@
         },
         {
           "path": ".agents/skills/ad-review/SKILL.md",
-          "sourceSha": "5b35bfc2d91cef3e32a0540bebc776bd8c9d25bb7b79ec81fbe9f2b77bfa14f6"
+          "sourceSha": "2e755d7a6d8788036d9e051f6f2e5c17533ce5b4256b40999e63cbe794ef2f10"
         }
       ]
     },
     "ad-spec": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-spec/agents/openai.yaml",
@@ -221,12 +273,12 @@
         },
         {
           "path": ".agents/skills/ad-spec/SKILL.md",
-          "sourceSha": "6270794c87c7647aeb46d9e9e917f72e529ec550209c51ae2c6ff6394aff09da"
+          "sourceSha": "dd58899527c8cc8cba43b84726af484cfd2b51d8b66aac0a3d5f6efce7925b85"
         }
       ]
     },
     "ad-spike": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-spike/agents/openai.yaml",
@@ -234,12 +286,12 @@
         },
         {
           "path": ".agents/skills/ad-spike/SKILL.md",
-          "sourceSha": "7620a86e9b55f7837f37e9eb5dbb0d3dbe78118063d969e479c2a06e424769f2"
+          "sourceSha": "0be06466fe3d6824b767975db234e8b6b4eb28e082feec05f3008ec783fbdbfe"
         }
       ]
     },
     "ad-task": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-task/agents/openai.yaml",
@@ -251,8 +303,21 @@
         }
       ]
     },
+    "ad-tdd": {
+      "version": "0.17.0-beta.1",
+      "files": [
+        {
+          "path": ".agents/skills/ad-tdd/agents/openai.yaml",
+          "sourceSha": "3be3d1c3676e7cc29ef8b2d4389e90b51ac6fc1e2589796bca5724402fd0e51d"
+        },
+        {
+          "path": ".agents/skills/ad-tdd/SKILL.md",
+          "sourceSha": "fc2715cf26505f263346a614c5753a2943cdfe9a30afb420c6f96cbd26b4cbdc"
+        }
+      ]
+    },
     "ad-tdg": {
-      "version": "0.15.1-beta.1",
+      "version": "0.17.0-beta.1",
       "files": [
         {
           "path": ".agents/skills/ad-tdg/agents/openai.yaml",

@@ -1,7 +1,7 @@
 ---
 name: ad-commit
-description: Atomic Conventional Commits with DCO `Signed-off-by` sign-off per ADR-0023. Four phases — scope intake, stage-split when concerns mix, draft message in Conventional Commits format, sign + write. Stage-split is interactive; identity comes from `git config user.name` / `user.email`. No `Co-Authored-By`. Helper posture, not blocker. Triggers on "commit this", "stage and commit", "atomic commit", "Conventional Commit", "sign off", "DCO", "split this commit", "/ad-commit".
-summary: Atomic Conventional Commits with DCO `Signed-off-by` sign-off per ADR-0023. Four phases — scope intake, stage-split when concerns mix, draft message in Conventional Commits format, sign + write. Helper posture, not blocker.
+description: Atomic Conventional Commits with DCO `Signed-off-by` sign-off. Four phases — scope intake, stage-split when concerns mix, draft message in Conventional Commits format, sign + write. Stage-split is interactive; identity comes from `git config user.name` / `user.email`. No `Co-Authored-By`. Helper posture, not blocker. Triggers on "commit this", "stage and commit", "atomic commit", "Conventional Commit", "sign off", "DCO", "split this commit", "/ad-commit".
+summary: Atomic Conventional Commits with DCO `Signed-off-by` sign-off. Four phases — scope intake, stage-split when concerns mix, draft message in Conventional Commits format, sign + write. Helper posture, not blocker.
 ---
 
 <background_information>
@@ -14,8 +14,8 @@ Codex auto-trigger on description keywords is less mature than Claude Code's. If
 Step 0 — confirm regime. Run when the user wants to land changes as commits and the working tree has staged or unstaged changes worth committing, or the user asks for "commit", "stage", "split this commit", "sign off".
 
 Route elsewhere when:
-- The user wants to open a PR after committing → continue with `ad-pr` (ADR-0024) after this skill finishes.
-- The user wants to merge an open PR → `ad-merge` (ADR-0025).
+- The user wants to open a PR after committing → continue with `ad-pr` after this skill finishes.
+- The user wants to merge an open PR → `ad-merge`.
 - The diff is unfinished work that should not land yet → say so; do not commit speculatively.
 
 Phase 1 — scope intake. Read the working tree:
@@ -117,6 +117,6 @@ The output is one or more atomic commits on the current branch. Each commit:
 
 ## Next
 
-- After commits land: `ad-pr` (ADR-0024) to open the PR.
-- After PR open and CI green: `ad-merge` (ADR-0025) to evaluate and merge.
+- After commits land: `ad-pr` to open the PR.
+- After PR open and CI green: `ad-merge` to evaluate and merge.
 - If a hook failure exposed recurring drift: `ad-audit`.

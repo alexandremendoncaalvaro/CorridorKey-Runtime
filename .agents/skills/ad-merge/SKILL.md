@@ -1,7 +1,7 @@
 ---
 name: ad-merge
-description: Evaluate and merge a GitHub pull request per ADR-0025. Four phases — preflight (`gh` auth + PR resolution), evaluate (CI / fresh-context review / linked task / unresolved comments / mergeability), decision (CI green = hard gate; others = warnings yielding to user), merge via `gh pr merge` with auto-detected mode (squash / rebase / merge) and `--delete-branch`. Helper posture per ADR-0025 §3 — surfaces warnings, does not block on the senior engineer's judgment. Triggers on "merge this PR", "evaluate the PR", "is it mergeable", "gh pr merge", "/ad-merge".
-summary: Evaluate and merge a GitHub pull request per ADR-0025. Four phases — preflight, evaluate (CI / fresh-context review / linked task / unresolved comments / mergeability), decision (CI green = hard gate; others = warnings), merge with auto-detected mode + `--delete-branch`.
+description: Evaluate and merge a GitHub pull request. Four phases — preflight (`gh` auth + PR resolution), evaluate (CI / fresh-context review / linked task / unresolved comments / mergeability), decision (CI green = hard gate; others = warnings yielding to user), merge via `gh pr merge` with auto-detected mode (squash / rebase / merge) and `--delete-branch`. Helper posture' ' — surfaces warnings, does not block on the senior engineer's judgment. Triggers on "merge this PR", "evaluate the PR", "is it mergeable", "gh pr merge", "/ad-merge".
+summary: Evaluate and merge a GitHub pull request. Four phases — preflight, evaluate (CI / fresh-context review / linked task / unresolved comments / mergeability), decision (CI green = hard gate; others = warnings), merge with auto-detected mode + `--delete-branch`.
 ---
 
 <background_information>
@@ -14,8 +14,8 @@ Codex auto-trigger on description keywords is less mature than Claude Code's. If
 Step 0 — confirm regime. Run when a PR is open against the repo and the user wants to land it, or the user asks "merge this PR", "evaluate the PR", "is it mergeable".
 
 Route elsewhere when:
-- No PR exists yet → `ad-pr` (ADR-0024) first.
-- Commits are not on the branch yet → `ad-commit` (ADR-0023) first.
+- No PR exists yet → `ad-pr` first.
+- Commits are not on the branch yet → `ad-commit` first.
 
 Phase 1 — preflight. Check `gh` is installed and authenticated:
 

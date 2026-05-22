@@ -1,13 +1,13 @@
 ---
 name: ad-spec
-description: Draft a feature-level specification at doc/specs/NNNN-<slug>.md following the five-layer artifact stack (Constitution → Domain → Spec → Plan/Decisions → Code). Adapts GitHub Spec Kit's mandatory sections (User Scenarios, Requirements, Success Criteria) to the kit's documentation discipline. Use when the user wants to write, draft, scaffold, or open a feature spec, PRD, product requirements, feature brief, user stories, or success criteria. Status starts at draft.
-summary: Draft a feature spec at `doc/specs/NNNN-<slug>.md` (Spec Kit-aligned mandatory sections). Layer 3 of the five-layer artifact stack.
+description: Draft a feature-level specification at doc/specs/NNNN-<slug>.md following the six-layer artifact stack (Constitution → Domain → Product → Spec → Plan/Decisions → Code). Adapts GitHub Spec Kit's mandatory sections (User Scenarios, Requirements, Success Criteria) to the kit's documentation discipline. Use when the user wants to write, draft, scaffold, or open a feature spec, feature brief, user stories, or success criteria for one feature. Product-level scoping (PRD, multi-feature roadmap, target user, product success metrics) belongs to `ad-prd` (Layer 3). Status starts at draft.
+summary: Draft a feature spec at `doc/specs/NNNN-<slug>.md` (Spec Kit-aligned mandatory sections). Layer 4 of the six-layer artifact stack. References parent PRD (`ad-prd`, Layer 3) for product-scope inheritance.
 ---
 
 <background_information>
-Drafts `doc/specs/<NNNN>-<short-slug>.md` for one feature. Status lifecycle: draft → accepted → shipped | superseded by SPEC-NNNN. Spec is the layer-3 artifact in the kit's five-layer stack — Constitution (`AGENTS.md` + `WORKFLOW.md`) → Domain (`CONTEXT.md`) → Spec (this skill) → Plan/Decisions (`ARCHITECTURE.md` + `doc/adr/` + `doc/tasks/`) → Code. Multiple tasks implement one spec; ADRs may be driven by spec constraints. The Domain layer (ubiquitous language per Evans 2003) is the source of canonical nouns the spec must use; if the spec introduces a new noun, resolve it through `CONTEXT.md` first.
+Drafts `doc/specs/<NNNN>-<short-slug>.md` for one feature. Status lifecycle: draft → accepted → shipped | superseded by SPEC-NNNN. Spec is the layer-4 artifact in the kit's six-layer stack — Constitution (`AGENTS.md` + `WORKFLOW.md`) → Domain (`CONTEXT.md`) → Product (`doc/product/PRD.md`) → Spec (this skill) → Plan/Decisions (`ARCHITECTURE.md` + `doc/adr/` + `doc/tasks/`) → Code. Multiple tasks implement one spec; ADRs may be driven by spec constraints. The Domain layer (ubiquitous language per Evans 2003) is the source of canonical nouns the spec must use; if the spec introduces a new noun, resolve it through `CONTEXT.md` first. The Product layer (PRD) is the source of target user, product-level success metrics, and cross-feature constraints the spec inherits from.
 
-Codex auto-trigger on description keywords is less mature than Claude Code's. If auto-invocation does not fire when the user asks to "draft a spec" or "write a PRD" on a non-trivial feature, invoke this skill manually.
+Codex auto-trigger on description keywords is less mature than Claude Code's. If auto-invocation does not fire when the user asks to "draft a spec" for a single feature, invoke this skill manually. If the user asks for a "PRD" or "product requirements" — route them to `ad-prd` instead; PRDs are Layer 3 (product-level), not feature-level.
 </background_information>
 
 <instructions>
@@ -18,9 +18,9 @@ Step 2 — confirm scope. The spec captures one feature. If the user's request i
 Step 3 — interview to fill. Ask one question per missing field, in this order:
 - Context: business context first per ADR-0008. Why the feature exists, the user / constraint / problem it addresses, the cost of not building it.
 - User Scenarios: Given-When-Then for the key flows. Each scenario independently testable.
-- Functional Requirements: testable statements. Each as a checkbox.
+- Functional Requirements: testable statements. Plain bullets (no checkbox — Spec is decision-record per ADR-0030 §1; implementation tracking lives in per-Spec tasks).
 - Non-functional Requirements: perf / security / a11y / observability — only when binding.
-- Success Criteria: measurable per WORKFLOW.md §1. Each as a checkbox; pass/fail observable, not aspirational.
+- Success Criteria: measurable per WORKFLOW.md §1. Plain bullets; pass/fail observable, not aspirational. Per-criterion progress tracking lives in per-Spec tasks.
 - Edge Cases: empty inputs, large inputs, concurrent access, missing prerequisites, permission errors.
 - Out of Scope: explicit non-goals.
 - Open Questions: deferred decisions. Each becomes an ADR or a documented punt.
@@ -32,7 +32,7 @@ Step 4 — write the file. Path: `doc/specs/<NNNN>-<short-slug>.md`. Use the tem
 
 Stop after writing. Do NOT flip status to accepted — that requires user review.
 
-Step 5 — editing guidance for later turns. Toggle Success Criteria checkboxes as feature lands. Append to Open Questions; close with resolution paragraphs, never delete. Flip Status to accepted on user sign-off, shipped after release, superseded when replaced. Add tasks to Related as they are created. Never rewrite existing prose — append rationale to Open Questions rather than mutating original requirement text.
+Step 5 — editing guidance for later turns. Append to Open Questions; close with resolution paragraphs, never delete. Flip Status to accepted on user sign-off; shipped once all per-Spec tasks complete; superseded when replaced. Add tasks to Related as they are created. Implementation tracking (per-criterion progress) lives in per-Spec tasks, not in the Spec. Never rewrite existing prose — append rationale to Open Questions rather than mutating original requirement text.
 </instructions>
 
 <template path="doc/specs/NNNN-<slug>.md">
@@ -59,19 +59,19 @@ Step 5 — editing guidance for later turns. Toggle Success Criteria checkboxes 
 
 ### Functional
 
-- [ ] `<R1: testable statement>`
-- [ ] `<R2>`
+- `<R1: testable statement>`
+- `<R2>`
 
 ### Non-functional
 
-- [ ] `<perf / security / a11y / observability — only when binding>`
+- `<perf / security / a11y / observability — only when binding>`
 
 ## Success Criteria
 
-Measurable conditions. Each as a checkbox; pass/fail observable, not aspirational.
+Definitional. Measurable conditions; pass/fail observable, not aspirational. Per-criterion progress tracking lives in per-Spec tasks.
 
-- [ ] `<criterion 1: measurable, observable>`
-- [ ] `<criterion 2>`
+- `<criterion 1: measurable, observable>`
+- `<criterion 2>`
 
 ## Edge Cases
 

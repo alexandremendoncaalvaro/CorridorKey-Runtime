@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-handoff
+  short_description: Compact the current session into a handoff document in the OS temp dir. Captures live state, references artifacts by path (no duplication), suggests next skills, redacts secrets. Ephemeral by design — never commits to the repo.
+policy:
+  allow_implicit_invocation: false

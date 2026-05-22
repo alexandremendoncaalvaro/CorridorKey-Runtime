@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-tdd
+  short_description: Test-Driven Development per WORKFLOW §16 (ADR-0028). Red-green-refactor as deterministic LLM guardrail. Tests verify behavior through public interfaces; horizontal slicing rejected. Distinct from `ad-tdg` (outcome-based prompting); routes to it for strategy selection inside the GREEN phase.
+policy:
+  allow_implicit_invocation: false

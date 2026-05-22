@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-prd
+  short_description: Lazy lifecycle owner of `doc/product/PRD.md` (or per-product files) per ADR-0027. Layer 3 — product-level scope (target user, problem, success metrics, multi-feature roadmap) feature specs inherit from. Distinct from `ad-spec` (feature-level).
+policy:
+  allow_implicit_invocation: false

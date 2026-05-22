@@ -1,7 +1,7 @@
 ---
 name: ad-ground
-description: Four-source pre-implementation research — official docs, validated open-source examples, in-repo patterns, and git history — then synthesize a happy path and gate any deviation with an irrefutable justification before code is written. Auto-invokes on non-trivial work, refactors, library or pattern selection, "research before coding", "before implementing", "which library", "which pattern", "how to approach", "ground before coding". Workflow-operational counterpart to WORKFLOW.md §4 (Find the Happy Path) and §5 (Ground in Real Patterns).
-summary: Four-source pre-implementation research (docs / OSS / in-repo / git history) + happy-path synthesis + deviation gate. WORKFLOW §4 + §5.
+description: Four-source pre-implementation research — official docs, validated implementation references (open-source repos, Stack Overflow / forum answers, blog posts, gists), in-repo patterns, and git history — then synthesize a happy path and gate any deviation with an irrefutable justification before code is written. Auto-invokes on non-trivial work, refactors, library or pattern selection, "research before coding", "before implementing", "which library", "which pattern", "how to approach", "ground before coding". Workflow-operational counterpart to WORKFLOW.md §4 (Find the Happy Path) and §5 (Ground in Real Patterns).
+summary: Four-source pre-implementation research (docs / impl-refs / in-repo / git history) + happy-path synthesis + deviation gate. WORKFLOW §4 + §5.
 ---
 
 <background_information>
@@ -17,7 +17,7 @@ Step 1 — four-source research pass, all four required:
 
 Source A — official documentation. For each language and library in scope, cite the canonical doc URL and version. Read the relevant section. Ask the user for a known-good link rather than fabricating one. Output: bulleted citations, one per language/library, each with URL plus a one-line summary.
 
-Source B — validated open-source examples. ≥1 (prefer 2–3) public repository solving the same technical research scope with similar techniques. Match is technical, not domain. Cite `<repo>:<path>:<line-range>` and quote the relevant block — never paraphrase from training memory. If search is inconclusive, ask the user for a known reference.
+Source B — validated implementation references. ≥1 (prefer 2–3) public reference (open-source repo, Stack Overflow / forum answer, blog post, gist) solving the same technical research scope with similar techniques. Match is technical, not domain. Cite `<source>:<locator>` — `<repo>:<path>:<line-range>` for repos, `<URL>` for Stack Overflow / forum / blog / gist — and quote the relevant block. Never paraphrase from training memory. If search is inconclusive, ask the user for a known reference.
 
 Source C — in-repo examples. Grep / glob for analogous patterns. Cite `<file>:<line>` plus a one-line description of how the existing example handles the same shape. If the codebase has no analog, state that explicitly.
 
@@ -29,7 +29,7 @@ Step 3 — deviation gate. If the implementation about to be written deviates fr
 
 Step 4 — confidence checkpoint. Soft verdict on:
 - A consulted (≥1 official-doc citation per language/library)
-- B consulted (≥1 OSS citation, with cite-and-fetched code)
+- B consulted (≥1 implementation-reference citation, with cite-and-fetched code)
 - C consulted (in-repo analog cited or "no analog found" stated)
 - D checked (commits / branches surveyed; hit cited or "no prior attempt found")
 - Happy path declared (Step 2)
@@ -48,8 +48,12 @@ A single message structured as:
 ## Source A — official documentation
 - <lang/lib>: <URL@version> — <one-line summary>
 
-## Source B — validated open-source examples
-- <repo>:<path>:<line-range> — <one-line summary>
+## Source B — validated implementation references
+- <repo>:<path>:<line-range> — <one-line summary>   # repo form
+  ```
+  <quoted code block>
+  ```
+- <URL> — <one-line summary>                         # Stack Overflow / forum / blog / gist
   ```
   <quoted code block>
   ```

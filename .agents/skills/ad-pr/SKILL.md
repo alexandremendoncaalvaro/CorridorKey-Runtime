@@ -1,7 +1,7 @@
 ---
 name: ad-pr
-description: Open a GitHub pull request with a uniform body shape per ADR-0024. Four phases — preflight (`gh` auth + branch pushed), scope assembly (commits + diff vs base), draft body (Summary / Test plan / Links), open + report URL. Title format = Conventional Commits, type inferred from the dominant commit type in the range. `gh` CLI soft-fail with install hint. Triggers on "open a PR", "create a pull request", "submit a PR", "gh pr create", "/ad-pr".
-summary: Open a GitHub pull request with a uniform body shape (Summary / Test plan / Links) per ADR-0024. Four phases — preflight (`gh` auth + branch pushed), scope assembly, draft body, open + report URL. Title format = Conventional Commits.
+description: Open a GitHub pull request with a uniform body shape. Four phases — preflight (`gh` auth + branch pushed), scope assembly (commits + diff vs base), draft body (Summary / Test plan / Links), open + report URL. Title format = Conventional Commits, type inferred from the dominant commit type in the range. `gh` CLI soft-fail with install hint. Triggers on "open a PR", "create a pull request", "submit a PR", "gh pr create", "/ad-pr".
+summary: Open a GitHub pull request with a uniform body shape (Summary / Test plan / Links). Four phases — preflight (`gh` auth + branch pushed), scope assembly, draft body, open + report URL. Title format = Conventional Commits.
 ---
 
 <background_information>
@@ -14,8 +14,8 @@ Codex auto-trigger on description keywords is less mature than Claude Code's. If
 Step 0 — confirm regime. Run when one or more atomic commits exist on the current branch ahead of the base, or the user asks to "open a PR", "submit a PR", "create a pull request".
 
 Route elsewhere when:
-- The branch has uncommitted or unsplit work → `ad-commit` first (ADR-0023).
-- The user wants to merge an already-open PR → `ad-merge` (ADR-0025).
+- The branch has uncommitted or unsplit work → `ad-commit` first.
+- The user wants to merge an already-open PR → `ad-merge`.
 
 Phase 1 — preflight. Check `gh` is installed and authenticated:
 
@@ -110,6 +110,6 @@ The output is an opened PR on GitHub. The skill returns the PR URL.
 ## Next
 
 - After PR opens and CI starts: monitor via `gh pr checks`.
-- When CI is green: `ad-merge` (ADR-0025) to evaluate and merge.
+- When CI is green: `ad-merge` to evaluate and merge.
 - If a fresh-context review is wanted before merge: `ad-review` (WORKFLOW §10).
 - If preflight surfaced "no CI workflow file": `ad-hooks` (when installed) covers local gates; remote CI is a separate concern outside this skill.

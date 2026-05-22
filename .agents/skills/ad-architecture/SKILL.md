@@ -22,7 +22,7 @@ Step 1 — scan the code. Read in this order, taking the first that exists for e
 - Config and env loading.
 - Observability hooks — logger setup, metrics export, tracing init.
 - Deploy config — `Dockerfile`, `docker-compose.yml`, `k8s/`, `terraform/`, `.github/workflows/`, `Procfile`, `serverless.yml`.
-- `doc/adr/` — read every ADR with `Status: accepted`. Currently-binding decisions belong in the Active ADRs section.
+- `doc/adr/` is the canonical ADR ledger. Read accepted ADRs to inform pattern descriptions; do not duplicate the index inside `ARCHITECTURE.md`.
 
 Build a model of: layers and boundaries, data access pattern, HTTP middleware chain, async/messaging, error and validation patterns, naming conventions, logging/metrics/tracing, deployment topology.
 
@@ -75,13 +75,6 @@ System-level patterns and boundaries. Pair with ADRs in `doc/adr/` for individua
 ## Deployment Topology
 
 `<how services run in prod: containers, orchestration, scaling rules>`
-
-## Active ADRs
-
-Currently-binding decisions. Link each to `doc/adr/`.
-
-* ADR-0001 — `<title>`
-* ADR-0002 — `<title>`
 </template>
 
 <output_contract>
