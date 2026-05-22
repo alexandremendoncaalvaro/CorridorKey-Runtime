@@ -362,7 +362,13 @@ if ($requiresCudaRuntime) {
         $cudaRoot = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\$cudaVersionTag"
     }
     $cudaBin = Join-Path $cudaRoot "bin"
-    $nppDllNames = @("nppc64_12.dll", "nppial64_12.dll", "nppidei64_12.dll", "nppig64_12.dll")
+    $nppDllNames = @(
+        "nppc64_12.dll",
+        "nppial64_12.dll",
+        "nppidei64_12.dll",
+        "nppif64_12.dll",
+        "nppig64_12.dll"
+    )
     foreach ($nppName in $nppDllNames) {
         $nppPath = Join-Path $cudaBin $nppName
         if (-not (Test-Path $nppPath)) {

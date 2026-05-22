@@ -177,13 +177,26 @@ function Test-CorridorKeyPeImportsResolvable {
     param(
         [string]$ImagePath,
         [string]$BundleDir,
-        [string]$DumpbinPath
+        [string]$DumpbinPath,
+        [string[]]$AdditionalBundleDirs = @(),
+        [string[]]$AllowedExternalDlls = @()
     )
 
     $missing = @()
     $imports = Get-CorridorKeyPeImports -DumpbinPath $DumpbinPath -ImagePath $ImagePath
+    $searchDirs = @($BundleDir) + @($AdditionalBundleDirs) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique
+    $allowedExternalSet = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($dll in $AllowedExternalDlls) {
+        [void]$allowedExternalSet.Add($dll)
+    }
     foreach ($import in $imports) {
         if ($script:CorridorKeySystemDllAllowlist.Contains($import)) {
+            continue
+        }
+        if ($allowedExternalSet.Contains($import)) {
             continue
         }
         # api-ms-win-*.dll family is large; match by prefix.
@@ -194,8 +207,15 @@ function Test-CorridorKeyPeImportsResolvable {
         # (see CorridorKeyExpectedBundledRuntimeList above for the rationale
         # and the Issue #56 backstory). Falls through to the same bundled-path
         # check below; not finding it surfaces the same "missing" report.
-        $bundledPath = Join-Path $BundleDir $import
-        if (-not (Test-Path $bundledPath)) {
+        $resolved = $false
+        foreach ($dir in $searchDirs) {
+            $bundledPath = Join-Path $dir $import
+            if (Test-Path $bundledPath) {
+                $resolved = $true
+                break
+            }
+        }
+        if (-not $resolved) {
             $missing += $import
         }
     }
@@ -420,11 +440,44 @@ $dumpbinPath = Resolve-CorridorKeyDumpbinPath
 if ($null -eq $dumpbinPath) {
     Write-Host "[WARN] dumpbin.exe not found; skipping PE import scan. Run from a VS developer shell to enable." -ForegroundColor Yellow
 } else {
-    $importScanTargets = @($plugin, $cliBinary, $runtimeServer)
+    $importScanTargets = @(
+        [PSCustomObject]@{
+            path = $plugin
+            bundle_dir = $win64Dir
+            additional_dirs = @()
+            allowed_external = @()
+        },
+        [PSCustomObject]@{
+            path = $cliBinary
+            bundle_dir = $win64Dir
+            additional_dirs = @()
+            allowed_external = @()
+        },
+        [PSCustomObject]@{
+            path = $runtimeServer
+            bundle_dir = $win64Dir
+            additional_dirs = @()
+            allowed_external = @()
+        }
+    )
+    if ($defaultModelProfile -eq "windows-rtx") {
+        $torchTrtRuntimeBinDir = Split-Path -Parent $torchTrtWrapperPath
+        $importScanTargets += [PSCustomObject]@{
+            path = $torchTrtWrapperPath
+            bundle_dir = $torchTrtRuntimeBinDir
+            additional_dirs = @($win64Dir)
+            allowed_external = @("torch_cpu.dll", "torch_cuda.dll", "c10.dll", "c10_cuda.dll")
+        }
+    }
     $importScanFailures = @()
     foreach ($imageTarget in $importScanTargets) {
-        $missing = Test-CorridorKeyPeImportsResolvable -ImagePath $imageTarget -BundleDir $win64Dir -DumpbinPath $dumpbinPath
-        $imageName = Split-Path $imageTarget -Leaf
+        $missing = Test-CorridorKeyPeImportsResolvable `
+            -ImagePath $imageTarget.path `
+            -BundleDir $imageTarget.bundle_dir `
+            -DumpbinPath $dumpbinPath `
+            -AdditionalBundleDirs $imageTarget.additional_dirs `
+            -AllowedExternalDlls $imageTarget.allowed_external
+        $imageName = Split-Path $imageTarget.path -Leaf
         if ($missing.Count -eq 0) {
             Write-Host "[PASS] PE imports for $imageName all resolvable within bundle" -ForegroundColor Green
         } else {
@@ -434,7 +487,7 @@ if ($null -eq $dumpbinPath) {
     }
     if ($importScanFailures.Count -gt 0) {
         $summary = ($importScanFailures | ForEach-Object { "$($_.image) -> $($_.missing -join ', ')" }) -join '; '
-        throw "PE import scan failed. Unbundled dependencies would prevent Resolve from loading the plugin: $summary"
+        throw "PE import scan failed. Unbundled dependencies would prevent Resolve from loading the plugin or Blue runtime: $summary"
     }
 }
 

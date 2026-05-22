@@ -22,7 +22,7 @@ function(corridorkey_stage_ort_runtime target_name)
     # dir happens to be on PATH. Tests must be environment-independent.
     set(_corridorkey_test_cuda_dlls)
     if(CORRIDORKEY_HAS_CUDA AND CUDAToolkit_BIN_DIR)
-        foreach(_npp_name nppc64_12 nppial64_12 nppidei64_12 nppig64_12)
+        foreach(_npp_name nppc64_12 nppial64_12 nppidei64_12 nppif64_12 nppig64_12)
             set(_npp_path "${CUDAToolkit_BIN_DIR}/${_npp_name}.dll")
             if(EXISTS "${_npp_path}")
                 list(APPEND _corridorkey_test_cuda_dlls "${_npp_path}")

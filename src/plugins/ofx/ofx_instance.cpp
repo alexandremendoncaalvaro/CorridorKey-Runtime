@@ -225,6 +225,24 @@ std::string processing_device_label(const DeviceInfo& device) {
     return processing_backend_label(device.backend);
 }
 
+bool is_runtime_bootstrap_failure(const InstanceData& data, bool has_session) {
+    return !has_session && !data.last_error.empty() && data.device.backend == Backend::Auto;
+}
+
+std::string runtime_panel_processing_label(const InstanceData& data, bool has_session) {
+    if (is_runtime_bootstrap_failure(data, has_session)) {
+        return "Unavailable";
+    }
+    return processing_backend_label(data.device.backend);
+}
+
+std::string runtime_panel_device_label(const InstanceData& data, bool has_session) {
+    if (is_runtime_bootstrap_failure(data, has_session)) {
+        return "Unavailable";
+    }
+    return processing_device_label(data.device);
+}
+
 bool runtime_server_binary_present(const std::filesystem::path& runtime_server_path) {
     return !runtime_server_path.empty() && std::filesystem::exists(runtime_server_path);
 }
@@ -915,8 +933,9 @@ void update_runtime_panel_values(InstanceData* data) {
         data->last_frame_ms > 0.0 || !data->last_render_stage_timings.empty();
 
     set_string_param_value(data->runtime_processing_param,
-                           processing_backend_label(data->device.backend));
-    set_string_param_value(data->runtime_device_param, processing_device_label(data->device));
+                           runtime_panel_processing_label(*data, has_session));
+    set_string_param_value(data->runtime_device_param,
+                           runtime_panel_device_label(*data, has_session));
     set_string_param_value(
         data->runtime_requested_quality_param,
         requested_quality_runtime_label(data->runtime_panel_state.requested_quality_mode,
