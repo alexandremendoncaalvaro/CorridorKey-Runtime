@@ -60,12 +60,54 @@ bool same_engine_options(const EngineCreateOptions& lhs, const EngineCreateOptio
 bool same_prepare_request(const HostPluginRuntimePrepareSessionRequest& lhs,
                           const HostPluginRuntimePrepareSessionRequest& rhs) {
     return lhs.client_instance_id == rhs.client_instance_id && lhs.model_path == rhs.model_path &&
-           lhs.artifact_name == rhs.artifact_name &&
+           lhs.artifact_name == rhs.artifact_name && lhs.node_identity == rhs.node_identity &&
            same_device_info(lhs.requested_device, rhs.requested_device) &&
            same_engine_options(lhs.engine_options, rhs.engine_options) &&
            lhs.requested_quality_mode == rhs.requested_quality_mode &&
            lhs.requested_resolution == rhs.requested_resolution &&
            lhs.effective_resolution == rhs.effective_resolution;
+}
+
+Result<void> validate_image_view_shape(const Image& image, std::string_view label,
+                                       int expected_width, int expected_height,
+                                       int expected_channels) {
+    if (image.width != expected_width || image.height != expected_height) {
+        return Unexpected<Error>(
+            Error{ErrorCode::InvalidParameters,
+                  std::string(label) + " dimensions do not match the runtime frame."});
+    }
+    if (image.channels != expected_channels) {
+        return Unexpected<Error>(
+            Error{ErrorCode::InvalidParameters,
+                  std::string(label) + " channel count does not match the runtime frame."});
+    }
+    if (image.width <= 0 || image.height <= 0) {
+        return Unexpected<Error>(Error{ErrorCode::InvalidParameters,
+                                       std::string(label) + " dimensions must be positive."});
+    }
+
+    const auto expected_size = static_cast<std::size_t>(image.width) *
+                               static_cast<std::size_t>(image.height) *
+                               static_cast<std::size_t>(image.channels);
+    if (image.data.size() != expected_size) {
+        return Unexpected<Error>(
+            Error{ErrorCode::InvalidParameters,
+                  std::string(label) + " data size does not match its dimensions."});
+    }
+    return {};
+}
+
+Result<void> validate_runtime_frame_views(const Image& rgb, const Image& alpha_hint) {
+    auto rgb_result = validate_image_view_shape(rgb, "RGB frame", rgb.width, rgb.height, 3);
+    if (!rgb_result) {
+        return Unexpected<Error>(rgb_result.error());
+    }
+    auto hint_result =
+        validate_image_view_shape(alpha_hint, "alpha hint", rgb.width, rgb.height, 1);
+    if (!hint_result) {
+        return Unexpected<Error>(hint_result.error());
+    }
+    return {};
 }
 
 HostPluginRuntimeSessionSnapshot with_prepare_request_metadata(
@@ -363,6 +405,10 @@ Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb,
     if (m_session.session_id.empty()) {
         return Unexpected<Error>(
             Error{ErrorCode::InvalidParameters, "host plugin runtime session is not prepared."});
+    }
+    auto frame_validation = validate_runtime_frame_views(rgb, alpha_hint);
+    if (!frame_validation) {
+        return Unexpected<Error>(frame_validation.error());
     }
 
     auto ensure_result = ensure_server_running();

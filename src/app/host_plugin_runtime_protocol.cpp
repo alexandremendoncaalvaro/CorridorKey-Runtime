@@ -250,7 +250,8 @@ Result<HostPluginRuntimeCommand> host_plugin_runtime_command_from_string(const s
 nlohmann::json to_json(const DeviceInfo& device) {
     return Json{{"name", device.name},
                 {"available_memory_mb", device.available_memory_mb},
-                {"backend", backend_to_string(device.backend)}};
+                {"backend", backend_to_string(device.backend)},
+                {"device_index", device.device_index}};
 }
 
 Result<DeviceInfo> device_from_json(const nlohmann::json& json) {
@@ -270,6 +271,12 @@ Result<DeviceInfo> device_from_json(const nlohmann::json& json) {
     device.name = *name;
     device.available_memory_mb = json.at("available_memory_mb").get<std::int64_t>();
     device.backend = *backend;
+    if (json.contains("device_index")) {
+        if (!json.at("device_index").is_number_integer()) {
+            return Unexpected<Error>(invalid_protocol_error("Missing integer field: device_index"));
+        }
+        device.device_index = json.at("device_index").get<int>();
+    }
     return device;
 }
 

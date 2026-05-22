@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -21,7 +22,7 @@
 //
 // host_plugin_session_broker.cpp tidy-suppression rationale.
 //
-// The broker stitches together OFX RPC envelopes, MLX memory telemetry,
+// The broker stitches together host-plugin RPC envelopes, MLX memory telemetry,
 // the engine-prewarm gate, and the shared-frame transport. Aggregate
 // returns of HostPluginRuntime*Response use the project-wide positional style
 // shared by the rest of src/app/. prepare_session() is intentionally
@@ -51,6 +52,27 @@ std::chrono::steady_clock::time_point now() {
 
 Error broker_error(ErrorCode code, const std::string& message) {
     return Error{code, message};
+}
+
+class SharedStageTimings {
+   public:
+    void append(const StageTiming& timing) {
+        const std::scoped_lock lock(m_mutex);
+        m_timings.push_back(timing);
+    }
+
+    [[nodiscard]] std::vector<StageTiming> snapshot() const {
+        const std::scoped_lock lock(m_mutex);
+        return m_timings;
+    }
+
+   private:
+    mutable std::mutex m_mutex;
+    std::vector<StageTiming> m_timings = {};
+};
+
+StageTimingCallback stage_timing_callback(const std::shared_ptr<SharedStageTimings>& timings) {
+    return [timings](const StageTiming& timing) { timings->append(timing); };
 }
 
 void append_timing(std::vector<StageTiming>& timings, const StageTiming& timing) {
@@ -212,10 +234,8 @@ Result<HostPluginRuntimePrepareSessionResponse> HostPluginSessionBroker::prepare
                          "Close other GPU-intensive apps or lower Target Resolution / Quality."));
     }
 
-    std::vector<StageTiming> timings;
-    StageTimingCallback on_stage = [&](const StageTiming& timing) {
-        append_timing(timings, timing);
-    };
+    auto timings = std::make_shared<SharedStageTimings>();
+    StageTimingCallback on_stage = stage_timing_callback(timings);
 
     auto engine_result = corridorkey::core::EngineFactory::create_with_ort_process_context(
         request.model_path, request.requested_device, m_ort_process_context, on_stage,
@@ -264,11 +284,11 @@ Result<HostPluginRuntimePrepareSessionResponse> HostPluginSessionBroker::prepare
         marker.total_ms = 0.0;
         marker.sample_count = 1;
         marker.work_units = 0;
-        append_timing(timings, marker);
+        timings->append(marker);
     }
 
-    auto response =
-        HostPluginRuntimePrepareSessionResponse{response_snapshot(entry.snapshot, false), timings};
+    auto response = HostPluginRuntimePrepareSessionResponse{
+        response_snapshot(entry.snapshot, false), timings->snapshot()};
     m_sessions.emplace(key, std::move(entry));
     return response;
 }
@@ -392,6 +412,7 @@ std::string HostPluginSessionBroker::session_key(
     return std::to_string(common::detail::fnv1a_64(
         canonical_model_path.string() + "|" +
         std::to_string(static_cast<int>(request.requested_device.backend)) + "|" +
+        std::to_string(request.requested_device.device_index) + "|" +
         std::to_string(static_cast<int>(request.engine_options.allow_cpu_fallback)) + "|" +
         std::to_string(static_cast<int>(request.engine_options.disable_cpu_ep_fallback)) + "|" +
         request.node_identity));
@@ -422,7 +443,8 @@ Result<void> HostPluginSessionBroker::evict_idle_sessions_if_needed() {
     if (eviction_candidate == m_sessions.end()) {
         return Unexpected<Error>(
             broker_error(ErrorCode::HardwareNotSupported,
-                         "All runtime sessions are active; refusing to evict a live OFX session."));
+                         "All runtime sessions are active; refusing to evict a live host-plugin "
+                         "session."));
     }
 
     m_sessions.erase(eviction_candidate);

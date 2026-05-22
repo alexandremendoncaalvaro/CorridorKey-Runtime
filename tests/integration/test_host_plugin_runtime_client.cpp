@@ -1,3 +1,4 @@
+#include <array>
 #include <atomic>
 #include <catch2/catch_all.hpp>
 #include <chrono>
@@ -100,6 +101,205 @@ void fill_transport_result(SharedFrameTransport& transport, float alpha_value, f
 }
 
 }  // namespace
+
+TEST_CASE("host plugin runtime client rejects malformed frame views before transport copy",
+          "[integration][ofx][runtime][regression]") {
+    const auto port = reserve_local_port();
+    const LocalJsonEndpoint endpoint{"127.0.0.1", port};
+
+    std::atomic<int> prepare_count = 0;
+    std::atomic<int> render_count = 0;
+    std::atomic<int> release_count = 0;
+    std::optional<Error> server_error;
+    std::atomic<bool> stop_server = false;
+
+    std::thread server_thread([&]() {
+        auto server = LocalJsonServer::listen(endpoint);
+        if (!server) {
+            server_error = server.error();
+            return;
+        }
+
+        while (!stop_server.load()) {
+            auto client = server->accept_one(500);
+            if (!client) {
+                server_error = client.error();
+                return;
+            }
+            if (!client->has_value()) {
+                continue;
+            }
+
+            auto request_json = (*client)->read_json(2000);
+            if (!request_json) {
+                server_error = request_json.error();
+                return;
+            }
+
+            auto request = host_plugin_runtime_request_from_json(*request_json);
+            if (!request) {
+                server_error = request.error();
+                return;
+            }
+
+            switch (request->command) {
+                case HostPluginRuntimeCommand::Health: {
+                    HostPluginRuntimeHealthResponse health;
+                    health.server_pid = 4242;
+                    health.session_count = 1;
+                    health.active_session_count = 1;
+                    (void)(*client)->write_json(to_json(ok_response(to_json(health))));
+                    break;
+                }
+                case HostPluginRuntimeCommand::PrepareSession: {
+                    auto parsed = prepare_session_request_from_json(request->payload);
+                    if (!parsed) {
+                        server_error = parsed.error();
+                        return;
+                    }
+
+                    ++prepare_count;
+                    HostPluginRuntimeSessionSnapshot snapshot;
+                    snapshot.session_id = "session-1";
+                    snapshot.model_path = parsed->model_path;
+                    snapshot.artifact_name = parsed->artifact_name;
+                    snapshot.requested_device = parsed->requested_device;
+                    snapshot.effective_device = parsed->requested_device;
+                    snapshot.requested_quality_mode = parsed->requested_quality_mode;
+                    snapshot.requested_resolution = parsed->requested_resolution;
+                    snapshot.effective_resolution = parsed->effective_resolution;
+                    snapshot.recommended_resolution = parsed->effective_resolution;
+                    snapshot.ref_count = 1;
+
+                    HostPluginRuntimePrepareSessionResponse response;
+                    response.session = snapshot;
+                    (void)(*client)->write_json(to_json(ok_response(to_json(response))));
+                    break;
+                }
+                case HostPluginRuntimeCommand::RenderFrame: {
+                    auto parsed = render_frame_request_from_json(request->payload);
+                    if (!parsed) {
+                        server_error = parsed.error();
+                        return;
+                    }
+
+                    ++render_count;
+                    auto transport = SharedFrameTransport::open(parsed->shared_frame_path);
+                    if (!transport) {
+                        server_error = transport.error();
+                        return;
+                    }
+                    fill_transport_result(*transport, 0.6F, 0.4F);
+
+                    HostPluginRuntimeRenderFrameResponse response;
+                    response.session.session_id = "session-1";
+                    response.session.requested_device =
+                        DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
+                    response.session.effective_device = response.session.requested_device;
+                    response.session.ref_count = 1;
+                    (void)(*client)->write_json(to_json(ok_response(to_json(response))));
+                    break;
+                }
+                case HostPluginRuntimeCommand::ReleaseSession: {
+                    ++release_count;
+                    (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
+                    break;
+                }
+                case HostPluginRuntimeCommand::Shutdown: {
+                    stop_server = true;
+                    (void)(*client)->write_json(to_json(ok_response(nlohmann::json::object())));
+                    break;
+                }
+            }
+        }
+    });
+
+    bool ready = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        auto health_response = send_json_request(
+            endpoint,
+            to_json(HostPluginRuntimeRequestEnvelope{.command = HostPluginRuntimeCommand::Health,
+                                                     .payload = nlohmann::json::object()}),
+            500);
+        if (health_response) {
+            ready = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    REQUIRE(ready);
+
+    HostPluginRuntimeClientOptions options;
+    options.endpoint = endpoint;
+    options.request_timeout_ms = 2000;
+    auto client = HostPluginRuntimeClient::create(options);
+    REQUIRE(client.has_value());
+
+    HostPluginRuntimePrepareSessionRequest prepare_request;
+    prepare_request.client_instance_id = "client-a";
+    prepare_request.model_path = "models/corridorkey_fp16_512.onnx";
+    prepare_request.artifact_name = "corridorkey_fp16_512.onnx";
+    prepare_request.requested_device = DeviceInfo{"RTX Test", 16384, Backend::TensorRT};
+    prepare_request.requested_quality_mode = 1;
+    prepare_request.requested_resolution = 512;
+    prepare_request.effective_resolution = 512;
+    prepare_request.engine_options.allow_cpu_fallback = false;
+    prepare_request.engine_options.disable_cpu_ep_fallback = true;
+
+    auto prepared = (*client)->prepare_session(prepare_request);
+    REQUIRE(prepared.has_value());
+    CHECK(prepare_count.load() == 1);
+
+    ImageBuffer rgb_buffer(4, 2, 3);
+    ImageBuffer hint_buffer(4, 2, 1);
+    std::fill(rgb_buffer.view().data.begin(), rgb_buffer.view().data.end(), 0.5F);
+    std::fill(hint_buffer.view().data.begin(), hint_buffer.view().data.end(), 1.0F);
+
+    InferenceParams params;
+    params.target_resolution = 512;
+    params.batch_size = 1;
+
+    auto malformed_rgb = rgb_buffer.view();
+    malformed_rgb.channels = 4;
+    auto rejected_rgb = (*client)->process_frame(malformed_rgb, hint_buffer.view(), params, 0);
+
+    std::array<float, 7> short_hint_data{};
+    Image short_hint{
+        .width = 4,
+        .height = 2,
+        .channels = 1,
+        .data = std::span<float>(short_hint_data.data(), short_hint_data.size()),
+    };
+    auto rejected_hint = (*client)->process_frame(rgb_buffer.view(), short_hint, params, 1);
+
+    auto released = (*client)->release_session();
+    REQUIRE(released.has_value());
+    CHECK(release_count.load() == 1);
+
+    auto shutdown_response =
+        send_json_request(endpoint,
+                          to_json(HostPluginRuntimeRequestEnvelope{
+                              .command = HostPluginRuntimeCommand::Shutdown,
+                              .payload = to_json(HostPluginRuntimeShutdownRequest{"test"})}),
+                          2000);
+    REQUIRE(shutdown_response.has_value());
+    stop_server = true;
+    server_thread.join();
+    REQUIRE_FALSE(server_error.has_value());
+
+    CHECK_FALSE(rejected_rgb.has_value());
+    if (!rejected_rgb) {
+        CHECK(rejected_rgb.error().code == ErrorCode::InvalidParameters);
+        CHECK(rejected_rgb.error().message.find("RGB frame") != std::string::npos);
+    }
+    CHECK_FALSE(rejected_hint.has_value());
+    if (!rejected_hint) {
+        CHECK(rejected_hint.error().code == ErrorCode::InvalidParameters);
+        CHECK(rejected_hint.error().message.find("alpha hint") != std::string::npos);
+    }
+    CHECK(render_count.load() == 0);
+}
 
 TEST_CASE("host plugin runtime client recovers when the runtime loses the current session",
           "[integration][ofx][runtime][regression]") {
@@ -809,9 +1009,18 @@ TEST_CASE("host plugin runtime client re-prepares when quality metadata changes 
     CHECK(second_prepare->session.requested_resolution == second_request.requested_resolution);
     CHECK(second_prepare->session.effective_resolution == second_request.effective_resolution);
 
+    auto third_request = second_request;
+    third_request.node_identity = "adobe:after_effects:com.corridorkey.effect";
+
+    auto third_prepare = (*client)->prepare_session(third_request);
+    REQUIRE(third_prepare.has_value());
+    CHECK(prepare_count.load() == 3);
+    CHECK(release_count.load() == 2);
+    CHECK(third_prepare->session.session_id == "session-3");
+
     auto released = (*client)->release_session();
     REQUIRE(released.has_value());
-    CHECK(release_count.load() == 2);
+    CHECK(release_count.load() == 3);
 
     auto shutdown_response =
         send_json_request(endpoint,

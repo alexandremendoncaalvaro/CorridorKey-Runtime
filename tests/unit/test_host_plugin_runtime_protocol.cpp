@@ -26,7 +26,7 @@ TEST_CASE("host plugin runtime protocol roundtrips session payloads", "[unit][of
     prepare_request.client_instance_id = "instance-a";
     prepare_request.model_path = "models/corridorkey_fp16_1024.onnx";
     prepare_request.artifact_name = "corridorkey_fp16_1024.onnx";
-    prepare_request.requested_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
+    prepare_request.requested_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT, 2};
     prepare_request.engine_options.allow_cpu_fallback = false;
     prepare_request.engine_options.disable_cpu_ep_fallback = true;
     prepare_request.requested_quality_mode = 2;
@@ -41,6 +41,7 @@ TEST_CASE("host plugin runtime protocol roundtrips session payloads", "[unit][of
     CHECK(parsed_prepare->client_instance_id == prepare_request.client_instance_id);
     CHECK(parsed_prepare->model_path == prepare_request.model_path);
     CHECK(parsed_prepare->requested_device.backend == Backend::TensorRT);
+    CHECK(parsed_prepare->requested_device.device_index == 2);
     CHECK_FALSE(parsed_prepare->engine_options.allow_cpu_fallback);
     CHECK(parsed_prepare->engine_options.disable_cpu_ep_fallback);
     CHECK(parsed_prepare->prepare_timeout_ms == 45000);
@@ -51,7 +52,7 @@ TEST_CASE("host plugin runtime protocol roundtrips session payloads", "[unit][of
     snapshot.model_path = prepare_request.model_path;
     snapshot.artifact_name = prepare_request.artifact_name;
     snapshot.requested_device = prepare_request.requested_device;
-    snapshot.effective_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT};
+    snapshot.effective_device = DeviceInfo{"RTX 4090", 24576, Backend::TensorRT, 3};
     snapshot.backend_fallback =
         BackendFallbackInfo{Backend::TensorRT, Backend::CPU, "GPU residency was not maintained"};
     snapshot.requested_quality_mode = prepare_request.requested_quality_mode;
@@ -65,6 +66,8 @@ TEST_CASE("host plugin runtime protocol roundtrips session payloads", "[unit][of
     auto parsed_snapshot = session_snapshot_from_json(snapshot_json);
     REQUIRE(parsed_snapshot.has_value());
     CHECK(parsed_snapshot->session_id == snapshot.session_id);
+    CHECK(parsed_snapshot->requested_device.device_index == 2);
+    CHECK(parsed_snapshot->effective_device.device_index == 3);
     REQUIRE(parsed_snapshot->backend_fallback.has_value());
     CHECK(parsed_snapshot->backend_fallback->requested_backend == Backend::TensorRT);
     CHECK(parsed_snapshot->backend_fallback->selected_backend == Backend::CPU);
@@ -89,6 +92,11 @@ TEST_CASE("host plugin runtime protocol roundtrips session payloads", "[unit][of
     REQUIRE(parsed_response->timings.size() == 1);
     CHECK(parsed_response->timings.front().name == "ort_run");
     CHECK(parsed_response->timings.front().total_ms == Catch::Approx(42.5));
+
+    prepare_json["requested_device"].erase("device_index");
+    auto parsed_legacy_prepare = prepare_session_request_from_json(prepare_json);
+    REQUIRE(parsed_legacy_prepare.has_value());
+    CHECK(parsed_legacy_prepare->requested_device.device_index == 0);
 }
 
 TEST_CASE("host plugin runtime protocol roundtrips render envelopes", "[unit][ofx][runtime]") {
