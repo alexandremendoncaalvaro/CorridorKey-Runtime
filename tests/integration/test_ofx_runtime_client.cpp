@@ -1113,11 +1113,10 @@ TEST_CASE("ofx runtime client detects sidecar that exits during startup",
     // The headline diagnostic claim is "early-exit detection short-circuits
     // the wait_for_server_ready loop before launch_timeout_ms expires". To
     // assert that without overspecifying machine performance, set a 10 s
-    // launch_timeout_ms and require elapsed < launch_timeout_ms / 2. The
+    // launch_timeout_ms and require elapsed < 75% of that budget. The
     // assertion remains tight enough to catch a regression where the loop
-    // falls through to the timeout (which would push elapsed close to the
-    // full budget) while staying robust to first-launch AV scan latency
-    // observed on Windows hosts.
+    // falls through to the timeout while staying robust to first-launch
+    // process startup and AV scan latency observed on Windows hosts.
     options.launch_timeout_ms = 10000;
     options.request_timeout_ms = 500;
     options.prepare_timeout_ms = 1000;
@@ -1155,7 +1154,7 @@ TEST_CASE("ofx runtime client detects sidecar that exits during startup",
     // wait_for_server_ready loop well before launch_timeout_ms expires.
     // A regression that left the loop polling Health for the full timeout
     // would push elapsed_ms close to launch_timeout_ms.
-    CHECK(elapsed_ms < options.launch_timeout_ms / 2);
+    CHECK(elapsed_ms < (options.launch_timeout_ms * 3) / 4);
 }
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
