@@ -149,6 +149,74 @@ struct FakeSmartPreRenderHost {
     static inline FakeSmartPreRenderHost* active_host = nullptr;
 };
 
+struct FakeSmartRenderHost {
+    FakeSmartRenderHost() {
+        callbacks.checkout_layer_pixels = fake_checkout_layer_pixels;
+        callbacks.checkin_layer_pixels = fake_checkin_layer_pixels;
+        callbacks.checkout_output = fake_checkout_output;
+        active_host = this;
+    }
+
+    ~FakeSmartRenderHost() {
+        active_host = nullptr;
+    }
+
+    PF_SmartRenderCallbacks callbacks{};
+    PF_EffectWorld input_world{};
+    PF_EffectWorld output_world{};
+    PF_Err checkout_layer_pixels_status = PF_Err_NONE;
+    PF_Err checkout_output_status = PF_Err_NONE;
+    PF_ProgPtr checkout_effect_ref = nullptr;
+    PF_ProgPtr output_effect_ref = nullptr;
+    PF_ProgPtr checkin_effect_ref = nullptr;
+    A_long checkout_id = -1;
+    A_long checkin_id = -1;
+    int checkout_layer_pixels_count = 0;
+    int checkout_output_count = 0;
+    int checkin_layer_pixels_count = 0;
+
+    static PF_Err fake_checkout_layer_pixels(PF_ProgPtr effect_ref, A_long checkout_id,
+                                             PF_EffectWorld** pixels) {
+        if (active_host == nullptr) {
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
+        }
+
+        active_host->checkout_effect_ref = effect_ref;
+        active_host->checkout_id = checkout_id;
+        ++active_host->checkout_layer_pixels_count;
+        if (pixels != nullptr) {
+            *pixels = &active_host->input_world;
+        }
+        return active_host->checkout_layer_pixels_status;
+    }
+
+    static PF_Err fake_checkin_layer_pixels(PF_ProgPtr effect_ref, A_long checkout_id) {
+        if (active_host == nullptr) {
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
+        }
+
+        active_host->checkin_effect_ref = effect_ref;
+        active_host->checkin_id = checkout_id;
+        ++active_host->checkin_layer_pixels_count;
+        return PF_Err_NONE;
+    }
+
+    static PF_Err fake_checkout_output(PF_ProgPtr effect_ref, PF_EffectWorld** output) {
+        if (active_host == nullptr) {
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
+        }
+
+        active_host->output_effect_ref = effect_ref;
+        ++active_host->checkout_output_count;
+        if (output != nullptr) {
+            *output = &active_host->output_world;
+        }
+        return active_host->checkout_output_status;
+    }
+
+    static inline FakeSmartRenderHost* active_host = nullptr;
+};
+
 PF_Err capture_added_parameter(PF_ProgPtr effect_ref, PF_ParamIndex, PF_ParamDefPtr definition) {
     auto* captured = reinterpret_cast<CapturedAdobeParameters*>(effect_ref);
     captured->definitions.push_back(*definition);
@@ -328,6 +396,45 @@ TEST_CASE("After Effects SmartFX pre-render checks out the source layer",
     CHECK(pre_render_output.max_result_rect.right == host.checkout_result.max_result_rect.right);
     CHECK(pre_render_output.max_result_rect.bottom == host.checkout_result.max_result_rect.bottom);
     CHECK(pre_render_output.pre_render_data == nullptr);
+}
+
+TEST_CASE("After Effects SmartFX render checks pixels back in after render failure",
+          "[unit][adobe][effect][smartfx]") {
+    FakeSmartRenderHost host;
+    host.input_world.width = 2;
+    host.input_world.height = 2;
+    host.input_world.rowbytes = 8;
+    host.output_world.width = 2;
+    host.output_world.height = 2;
+    host.output_world.rowbytes = 8;
+
+    PF_SmartRenderInput smart_render_input{};
+    PF_SmartRenderExtra extra{.input = &smart_render_input, .cb = &host.callbacks};
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    PF_OutData output_data{};
+
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+    set_popup_value(storage[corridorkey::adobe::kParamOutputMode], 99);
+
+    const PF_Err status = EffectMain(PF_Cmd_SMART_RENDER, &input_data, &output_data,
+                                     parameters.data(), nullptr, &extra);
+
+    REQUIRE(status == PF_Err_BAD_CALLBACK_PARAM);
+    CHECK_THAT(std::string(output_data.return_msg),
+               Catch::Matchers::ContainsSubstring("output mode"));
+    CHECK(host.checkout_layer_pixels_count == 1);
+    CHECK(host.checkout_output_count == 1);
+    CHECK(host.checkin_layer_pixels_count == 1);
+    CHECK(host.checkout_effect_ref == input_data.effect_ref);
+    CHECK(host.output_effect_ref == input_data.effect_ref);
+    CHECK(host.checkin_effect_ref == input_data.effect_ref);
+    CHECK(host.checkout_id == corridorkey::adobe::kParamInputLayer);
+    CHECK(host.checkin_id == corridorkey::adobe::kParamInputLayer);
 }
 
 TEST_CASE("After Effects params setup rejects missing host callbacks", "[unit][adobe][effect]") {

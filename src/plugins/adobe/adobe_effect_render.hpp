@@ -9,4 +9,7 @@ PF_Err render_frame(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
 
 PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* extra);
 
+PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef* parameters[],
+                    void* extra);
+
 }  // namespace corridorkey::adobe

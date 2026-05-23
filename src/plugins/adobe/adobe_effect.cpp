@@ -155,8 +155,8 @@ CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command, PF_InData* input
             case PF_Cmd_SMART_PRE_RENDER:
                 return corridorkey::adobe::smart_pre_render(input_data, *output_data, extra);
             case PF_Cmd_SMART_RENDER:
-                return reject_render(*output_data,
-                                     "CorridorKey SmartFX render is not enabled for this build.");
+                return corridorkey::adobe::smart_render(input_data, *output_data, parameters,
+                                                        extra);
             default:
                 break;
         }

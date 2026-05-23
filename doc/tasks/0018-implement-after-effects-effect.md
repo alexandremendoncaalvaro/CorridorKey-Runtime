@@ -162,6 +162,12 @@ Fresh-context review corrections applied in the same TDD slice:
   result rectangles back to the host. `PF_Cmd_SMART_RENDER` remains a visible
   unsupported-render error and Smart Render remains unadvertised until the
   pixels checkout plus runtime-backed 32-bpc path is covered.
+- TDD SmartFX render checkout slice now accepts `PF_Cmd_SMART_RENDER` with valid
+  `PF_SmartRenderExtra` callbacks, checks out input pixels and output pixels
+  through the host, injects the checked-out source world into the existing
+  render path, and guarantees input pixel checkin when render validation fails.
+  Smart Render remains unadvertised until the 32-bpc runtime path and host smoke
+  coverage are complete.
 
 ## Definition of Done
 

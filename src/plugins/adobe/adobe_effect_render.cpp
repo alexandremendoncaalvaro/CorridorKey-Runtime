@@ -1,5 +1,6 @@
 #include "adobe_effect_render.hpp"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -117,6 +118,36 @@ bool has_valid_pre_render_callbacks(const PF_PreRenderExtra* extra) noexcept {
            extra->cb != nullptr && extra->cb->checkout_layer != nullptr;
 }
 
+bool has_valid_smart_render_callbacks(const PF_SmartRenderExtra* extra) noexcept {
+    return extra != nullptr && extra->input != nullptr && extra->cb != nullptr &&
+           extra->cb->checkout_layer_pixels != nullptr &&
+           extra->cb->checkin_layer_pixels != nullptr && extra->cb->checkout_output != nullptr;
+}
+
+class SmartLayerPixelsCheckout {
+   public:
+    SmartLayerPixelsCheckout(PF_SmartRenderCallbacks& callbacks, PF_ProgPtr effect_ref) noexcept
+        : m_callbacks(&callbacks), m_effect_ref(effect_ref) {}
+
+    SmartLayerPixelsCheckout(const SmartLayerPixelsCheckout&) = delete;
+    SmartLayerPixelsCheckout& operator=(const SmartLayerPixelsCheckout&) = delete;
+
+    ~SmartLayerPixelsCheckout() {
+        if (m_checked_out) {
+            m_callbacks->checkin_layer_pixels(m_effect_ref, corridorkey::adobe::kParamInputLayer);
+        }
+    }
+
+    void mark_checked_out() noexcept {
+        m_checked_out = true;
+    }
+
+   private:
+    PF_SmartRenderCallbacks* m_callbacks = nullptr;
+    PF_ProgPtr m_effect_ref = nullptr;
+    bool m_checked_out = false;
+};
+
 corridorkey::adobe::AdobeEffectRuntimeRequestContext render_context_for(PF_InData* input_data,
                                                                         const PF_LayerDef& source) {
     return corridorkey::adobe::AdobeEffectRuntimeRequestContext{
@@ -175,6 +206,51 @@ PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* ex
     pre_render->output->pre_render_data = nullptr;
     pre_render->output->delete_pre_render_data_func = nullptr;
     return kAdobeStatusOk;
+}
+
+PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef* parameters[],
+                    void* extra) {
+    const auto* const smart_render_input = static_cast<const PF_SmartRenderExtra*>(extra);
+    if (input_data == nullptr || !has_valid_smart_render_callbacks(smart_render_input)) {
+        return reject_render(output_data, "CorridorKey SmartFX render requires host callbacks.");
+    }
+
+    auto* smart_render_extra = static_cast<PF_SmartRenderExtra*>(extra);
+    PF_EffectWorld* input_world = nullptr;
+    PF_Err status = smart_render_extra->cb->checkout_layer_pixels(input_data->effect_ref,
+                                                                  kParamInputLayer, &input_world);
+    if (status != kAdobeStatusOk) {
+        set_return_message(output_data, "CorridorKey SmartFX render could not checkout source.");
+        return status;
+    }
+
+    SmartLayerPixelsCheckout input_checkout{*smart_render_extra->cb, input_data->effect_ref};
+    input_checkout.mark_checked_out();
+    if (input_world == nullptr) {
+        return reject_render(output_data, "CorridorKey SmartFX render source is null.");
+    }
+
+    PF_EffectWorld* output_world = nullptr;
+    status = smart_render_extra->cb->checkout_output(input_data->effect_ref, &output_world);
+    if (status != kAdobeStatusOk) {
+        set_return_message(output_data, "CorridorKey SmartFX render could not checkout output.");
+        return status;
+    }
+    if (output_world == nullptr) {
+        return reject_render(output_data, "CorridorKey SmartFX render output is null.");
+    }
+
+    std::array<PF_ParamDef*, kEffectParameterSlotCount> smart_parameters{};
+    if (parameters != nullptr) {
+        for (std::size_t index = 0; index < smart_parameters.size(); ++index) {
+            smart_parameters[index] = parameters[index];
+        }
+    }
+
+    PF_ParamDef source_parameter{};
+    source_parameter.u.ld = *input_world;
+    smart_parameters[kParamInputLayer] = &source_parameter;
+    return render_frame(input_data, output_data, smart_parameters.data(), output_world);
 }
 
 PF_Err render_frame(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef* parameters[],
