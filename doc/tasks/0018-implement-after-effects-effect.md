@@ -54,7 +54,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
 
 - [x] Implement the thin Adobe entrypoint dispatcher with explicit render stubs.
-- [ ] Register PiPL metadata, stable match name, category, support URL, and
+- [x] Register PiPL metadata, stable match name, category, support URL, and
       effect display name.
 - [x] Register CorridorKey effect parameters and map them into bridge requests.
 - [x] Implement render and SmartFX paths for the supported After Effects pixel
@@ -217,6 +217,17 @@ Fresh-context review corrections applied in the same TDD slice:
   `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`,
   `ctest --test-dir build\debug -R regression_adobe_cmake_scaffold --output-on-failure`,
   `scripts\verify_ci.ps1 -Mode Format`, and `git diff --check`.
+- PiPL metadata registration is complete in the in-repo slice. The generated
+  Adobe metadata now carries the stable match name, display name, category,
+  support URL, version fields, Smart Render flag, and Float Color Aware flag,
+  with coverage through public `EffectMain(PF_Cmd_GLOBAL_SETUP)` assertions and
+  `regression_adobe_cmake_scaffold`.
+- Local After Effects host smoke remains blocked on this workstation because no
+  After Effects installation is present. `AfterFX.exe` was not found under
+  `C:\Program Files\Adobe` or `C:\Program Files (x86)\Adobe`; the only Adobe
+  application directory found under `C:\Program Files\Adobe` is
+  `Adobe Photoshop (Beta)`. The two host-smoke acceptance criteria remain open
+  until an After Effects host is available.
 
 ## Definition of Done
 
