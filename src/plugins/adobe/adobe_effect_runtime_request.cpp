@@ -18,6 +18,8 @@ constexpr int kDefaultScreenColorGreen = 0;
 constexpr int kScreenColorBlue = 1;
 constexpr int kDefaultAlphaHintPolicy = 0;
 constexpr int kAlphaHintPolicyRequireExternal = 1;
+constexpr int kDefaultNodeIdentity = 0;
+constexpr int kNodeIdentityBlue = 1;
 constexpr double kDefaultDespillStrength = 0.5;
 constexpr double kMinimumDespillStrength = 0.0;
 constexpr double kMaximumDespillStrength = 1.0;
@@ -28,6 +30,7 @@ constexpr int kDefaultDetailsEdgeFeather = 7;
 constexpr int kDefaultOutputMode = 0;
 constexpr int kOutputMatteOnly = 1;
 constexpr int kOutputSourceMatte = 3;
+constexpr int kMaximumOutputMode = 4;
 constexpr int kDefaultPrepareTimeoutSeconds = 30;
 constexpr int kDefaultRenderTimeoutSeconds = 120;
 constexpr int kMinimumTimeoutSeconds = 10;
@@ -35,6 +38,7 @@ constexpr int kMaximumPrepareTimeoutSeconds = 600;
 constexpr int kMaximumRenderTimeoutSeconds = 300;
 constexpr int kMinimumEdgePixels = 0;
 constexpr int kMaximumEdgePixels = 100;
+constexpr const char* kDynamicBlueModelFilename = "corridorkey_dynamic_blue_fp16.ts";
 
 const PF_ParamDef* parameter_at(PF_ParamDef* const parameters[], PF_ParamIndex index) noexcept {
     if (parameters == nullptr || index < 0 ||
@@ -52,6 +56,21 @@ int popup_choice(PF_ParamDef* const parameters[], PF_ParamIndex index, int fallb
     }
     const int zero_based = static_cast<int>(parameter->u.pd.value) - kPopupZeroBasedOffset;
     return std::clamp(zero_based, 0, maximum_choice);
+}
+
+corridorkey::Result<int> strict_popup_choice(PF_ParamDef* const parameters[], PF_ParamIndex index,
+                                             int fallback, int maximum_choice, const char* label) {
+    const PF_ParamDef* parameter = parameter_at(parameters, index);
+    if (parameter == nullptr || parameter->param_type != PF_Param_POPUP) {
+        return fallback;
+    }
+    const int zero_based = static_cast<int>(parameter->u.pd.value) - kPopupZeroBasedOffset;
+    if (zero_based < 0 || zero_based > maximum_choice) {
+        return corridorkey::Unexpected<corridorkey::Error>(
+            corridorkey::Error{corridorkey::ErrorCode::InvalidParameters,
+                               "Adobe " + std::string(label) + " is out of range."});
+    }
+    return zero_based;
 }
 
 double slider_value(PF_ParamDef* const parameters[], PF_ParamIndex index,
@@ -120,15 +139,42 @@ corridorkey::AlphaHintPolicy alpha_hint_policy_for(int alpha_hint_policy) noexce
 }
 
 std::string node_identity_for(int node_identity) {
-    return node_identity == 1 ? "blue" : "green";
+    return node_identity == kNodeIdentityBlue ? "blue" : "green";
 }
 
 bool output_mode_requires_foreground(int output_mode) noexcept {
     return output_mode != kOutputMatteOnly && output_mode != kOutputSourceMatte;
 }
 
+corridorkey::DeviceInfo runtime_device_for_model_path(corridorkey::DeviceInfo requested_device,
+                                                      const std::filesystem::path& model_path) {
+    if (model_path.extension() == ".ts") {
+        requested_device.backend = corridorkey::Backend::TorchTRT;
+        if (requested_device.name.empty() || requested_device.name == "auto") {
+            requested_device.name = "TorchTRT";
+        }
+    }
+    return requested_device;
+}
+
+corridorkey::Result<std::filesystem::path> blue_model_path_for_request(
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext& context) {
+    auto blue_entry = corridorkey::app::find_model_by_filename(kDynamicBlueModelFilename);
+    if (!blue_entry.has_value() || blue_entry->screen_color != "blue") {
+        return corridorkey::Unexpected<corridorkey::Error>(
+            corridorkey::Error{corridorkey::ErrorCode::InvalidParameters,
+                               "Adobe Blue node could not resolve a blue model artifact."});
+    }
+    return context.models_root / blue_entry->filename;
+}
+
 corridorkey::Result<std::filesystem::path> model_path_for_request(
-    const corridorkey::adobe::AdobeEffectRuntimeRequestContext& context, int requested_resolution) {
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext& context, int requested_resolution,
+    int node_identity) {
+    if (node_identity == kNodeIdentityBlue) {
+        return blue_model_path_for_request(context);
+    }
+
     auto expected_paths = corridorkey::app::expected_artifact_paths_for_request(
         context.models_root, context.requested_device, requested_resolution, false,
         corridorkey::QualityFallbackMode::Direct);
@@ -210,22 +256,32 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
         return Unexpected<Error>(validation.error());
     }
 
-    const int node_identity = popup_choice(parameters, kParamNodeIdentity, 0, 1);
+    auto node_identity = strict_popup_choice(parameters, kParamNodeIdentity, kDefaultNodeIdentity,
+                                             1, "node identity");
+    if (!node_identity) {
+        return Unexpected<Error>(node_identity.error());
+    }
     const int quality_mode = popup_choice(parameters, kParamQuality, kDefaultQualityMode, 4);
     const int requested_resolution = requested_resolution_for_quality(quality_mode);
-    auto model_path = model_path_for_request(context, requested_resolution);
+    auto model_path = model_path_for_request(context, requested_resolution, *node_identity);
     if (!model_path) {
         return Unexpected<Error>(model_path.error());
     }
 
-    const int output_mode = popup_choice(parameters, kParamOutputMode, kDefaultOutputMode, 4);
+    auto output_mode = strict_popup_choice(parameters, kParamOutputMode, kDefaultOutputMode,
+                                           kMaximumOutputMode, "output mode");
+    if (!output_mode) {
+        return Unexpected<Error>(output_mode.error());
+    }
+
     AdobeEffectRuntimeRequest request;
     request.prepare_options.host_surface = context.host_surface;
     request.prepare_options.effect_identity = context.effect_identity;
-    request.prepare_options.node_identity = node_identity_for(node_identity);
+    request.prepare_options.node_identity = node_identity_for(*node_identity);
     request.prepare_options.client_instance_id = context.client_instance_id;
     request.prepare_options.model_path = *model_path;
-    request.prepare_options.requested_device = context.requested_device;
+    request.prepare_options.requested_device =
+        runtime_device_for_model_path(context.requested_device, *model_path);
     request.prepare_options.engine_options = context.engine_options;
     request.prepare_options.requested_quality_mode = quality_mode;
     request.prepare_options.requested_resolution = requested_resolution;
@@ -234,8 +290,8 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
         timeout_milliseconds(parameters, kParamPrepareTimeoutSeconds, kDefaultPrepareTimeoutSeconds,
                              kMaximumPrepareTimeoutSeconds);
     request.inference_params =
-        build_inference_params(parameters, requested_resolution, output_mode);
-    request.output_mode = output_mode;
+        build_inference_params(parameters, requested_resolution, *output_mode);
+    request.output_mode = *output_mode;
     request.render_timeout_ms =
         timeout_milliseconds(parameters, kParamRenderTimeoutSeconds, kDefaultRenderTimeoutSeconds,
                              kMaximumRenderTimeoutSeconds);

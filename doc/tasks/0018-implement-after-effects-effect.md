@@ -140,10 +140,10 @@ Fresh-context review corrections applied in the same TDD slice:
   `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`,
   and `ctest --test-dir build\debug -R regression_adobe_cmake_scaffold --output-on-failure`.
 - Fresh-context review follow-up keeps SmartFX unchecked until implemented,
-  maps the Green/Blue node identity into the prepare request, clamps corrupted
-  host slider values to the declared UI ranges, rejects unknown output modes,
-  detects truncated Windows module paths before resolving the sidecar, and adds
-  output writer coverage for ARGB128 and BGRA32.
+  maps Green to the ONNX quality ladder and Blue to the dynamic blue TorchTRT
+  artifact, clamps corrupted host slider values to the declared UI ranges,
+  rejects unknown output modes, detects truncated Windows module paths before
+  resolving the sidecar, and adds output writer coverage for ARGB128 and BGRA32.
 
 ## Definition of Done
 

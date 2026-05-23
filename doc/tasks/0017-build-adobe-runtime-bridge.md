@@ -137,6 +137,9 @@ Deepening follow-up for the reusable runtime seam:
   identity to `node_identity` while keeping `client_instance_id` scoped to the
   host/effect/caller instance. This preserves session cache separation without
   adding Adobe-specific runtime protocol fields.
+- Adobe Blue node requests resolve to the catalogued dynamic blue TorchScript
+  artifact and request the TorchTRT runtime backend; Green node requests remain
+  on the App-layer ONNX quality ladder.
 - Verification passed:
   `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
   `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and
