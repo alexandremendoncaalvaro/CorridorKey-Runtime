@@ -154,6 +154,15 @@ Fresh-context review corrections applied in the same TDD slice:
   `EffectMain` with fake host callbacks, so the effect has per-sequence state
   without mutable static render state.
 
+### 2026-05-23
+
+- TDD SmartFX pre-render slice now accepts `PF_Cmd_SMART_PRE_RENDER` with valid
+  Adobe `PF_PreRenderExtra` callbacks, checks out the source layer through the
+  host `checkout_layer` callback, and propagates the source result and maximum
+  result rectangles back to the host. `PF_Cmd_SMART_RENDER` remains a visible
+  unsupported-render error and Smart Render remains unadvertised until the
+  pixels checkout plus runtime-backed 32-bpc path is covered.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:

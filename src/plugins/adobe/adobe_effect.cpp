@@ -124,7 +124,7 @@ AdobeStatus resetup_sequence(PF_InData* input_data, PF_OutData& output_data) noe
 
 CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command, PF_InData* input_data,
                                                 PF_OutData* output_data, PF_ParamDef* parameters[],
-                                                PF_LayerDef* output, void*) noexcept {
+                                                PF_LayerDef* output, void* extra) noexcept {
     try {
         if (output_data == nullptr) {
             return command == PF_Cmd_PARAMS_SETUP || is_render_selector(command)
@@ -153,6 +153,7 @@ CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command, PF_InData* input
                 return corridorkey::adobe::render_frame(input_data, *output_data, parameters,
                                                         output);
             case PF_Cmd_SMART_PRE_RENDER:
+                return corridorkey::adobe::smart_pre_render(input_data, *output_data, extra);
             case PF_Cmd_SMART_RENDER:
                 return reject_render(*output_data,
                                      "CorridorKey SmartFX render is not enabled for this build.");

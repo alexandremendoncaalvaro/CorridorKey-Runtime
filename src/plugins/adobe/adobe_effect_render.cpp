@@ -112,6 +112,11 @@ std::uint64_t render_index_for(PF_InData* input_data) noexcept {
     return static_cast<std::uint64_t>(input_data->current_time);
 }
 
+bool has_valid_pre_render_callbacks(const PF_PreRenderExtra* extra) noexcept {
+    return extra != nullptr && extra->input != nullptr && extra->output != nullptr &&
+           extra->cb != nullptr && extra->cb->checkout_layer != nullptr;
+}
+
 corridorkey::adobe::AdobeEffectRuntimeRequestContext render_context_for(PF_InData* input_data,
                                                                         const PF_LayerDef& source) {
     return corridorkey::adobe::AdobeEffectRuntimeRequestContext{
@@ -143,6 +148,34 @@ corridorkey::app::HostPluginRuntimeClientOptions client_options_for(
 }  // namespace
 
 namespace corridorkey::adobe {
+
+PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* extra) {
+    const auto* const pre_render_input = static_cast<const PF_PreRenderExtra*>(extra);
+    if (input_data == nullptr || !has_valid_pre_render_callbacks(pre_render_input)) {
+        return reject_render(output_data,
+                             "CorridorKey SmartFX pre-render requires host callbacks.");
+    }
+
+    auto* pre_render = static_cast<PF_PreRenderExtra*>(extra);
+    PF_RenderRequest request = pre_render->input->output_request;
+    PF_CheckoutResult source_result{};
+    const PF_Err checkout_status = pre_render->cb->checkout_layer(
+        input_data->effect_ref, kParamInputLayer, kParamInputLayer, &request,
+        input_data->current_time, input_data->time_step, input_data->time_scale, &source_result);
+    if (checkout_status != kAdobeStatusOk) {
+        set_return_message(output_data,
+                           "CorridorKey SmartFX pre-render could not checkout source.");
+        return checkout_status;
+    }
+
+    pre_render->output->result_rect = source_result.result_rect;
+    pre_render->output->max_result_rect = source_result.max_result_rect;
+    pre_render->output->solid = FALSE;
+    pre_render->output->flags = 0;
+    pre_render->output->pre_render_data = nullptr;
+    pre_render->output->delete_pre_render_data_func = nullptr;
+    return kAdobeStatusOk;
+}
 
 PF_Err render_frame(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef* parameters[],
                     PF_LayerDef* output) {

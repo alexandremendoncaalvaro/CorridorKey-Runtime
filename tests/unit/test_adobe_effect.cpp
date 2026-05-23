@@ -94,6 +94,61 @@ struct FakeAdobeHandleHost {
     static inline FakeAdobeHandleHost* active_host = nullptr;
 };
 
+struct FakeSmartPreRenderHost {
+    FakeSmartPreRenderHost() {
+        callbacks.checkout_layer = fake_checkout_layer;
+        callbacks.GuidMixInPtr = fake_guid_mix_in;
+        active_host = this;
+    }
+
+    ~FakeSmartPreRenderHost() {
+        active_host = nullptr;
+    }
+
+    PF_PreRenderCallbacks callbacks{};
+    PF_CheckoutResult checkout_result{};
+    PF_RenderRequest checkout_request{};
+    PF_Err checkout_status = PF_Err_NONE;
+    PF_ProgPtr effect_ref = nullptr;
+    PF_ParamIndex index = -1;
+    A_long checkout_id = -1;
+    A_long what_time = 0;
+    A_long time_step = 0;
+    A_u_long time_scale = 0;
+    int checkout_count = 0;
+
+    static PF_Err fake_checkout_layer(PF_ProgPtr effect_ref, PF_ParamIndex index,
+                                      A_long checkout_id, const PF_RenderRequest* request,
+                                      A_long what_time, A_long time_step, A_u_long time_scale,
+                                      PF_CheckoutResult* checkout_result) {
+        if (active_host == nullptr) {
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
+        }
+
+        active_host->effect_ref = effect_ref;
+        active_host->index = index;
+        active_host->checkout_id = checkout_id;
+        active_host->what_time = what_time;
+        active_host->time_step = time_step;
+        active_host->time_scale = time_scale;
+        ++active_host->checkout_count;
+
+        if (request != nullptr) {
+            active_host->checkout_request = *request;
+        }
+        if (checkout_result != nullptr) {
+            *checkout_result = active_host->checkout_result;
+        }
+        return active_host->checkout_status;
+    }
+
+    static PF_Err fake_guid_mix_in(PF_ProgPtr, A_u_long, const void*) {
+        return PF_Err_NONE;
+    }
+
+    static inline FakeSmartPreRenderHost* active_host = nullptr;
+};
+
 PF_Err capture_added_parameter(PF_ProgPtr effect_ref, PF_ParamIndex, PF_ParamDefPtr definition) {
     auto* captured = reinterpret_cast<CapturedAdobeParameters*>(effect_ref);
     captured->definitions.push_back(*definition);
@@ -225,6 +280,54 @@ TEST_CASE("After Effects sequence lifecycle owns host-managed sequence state",
     CHECK(setdown_status == PF_Err_NONE);
     CHECK(output_data.sequence_data == nullptr);
     CHECK(host.dispose_count == 1);
+}
+
+TEST_CASE("After Effects SmartFX pre-render checks out the source layer",
+          "[unit][adobe][effect][smartfx]") {
+    FakeSmartPreRenderHost host;
+    host.checkout_result.result_rect = PF_LRect{.left = 10, .top = 20, .right = 110, .bottom = 120};
+    host.checkout_result.max_result_rect =
+        PF_LRect{.left = 0, .top = 0, .right = 1920, .bottom = 1080};
+
+    PF_PreRenderInput pre_render_input{};
+    pre_render_input.output_request.rect =
+        PF_LRect{.left = 4, .top = 8, .right = 104, .bottom = 208};
+    pre_render_input.output_request.channel_mask = PF_ChannelMask_ARGB;
+    PF_PreRenderOutput pre_render_output{};
+    PF_PreRenderExtra extra{
+        .input = &pre_render_input, .output = &pre_render_output, .cb = &host.callbacks};
+
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    input_data.current_time = 42;
+    input_data.time_step = 1;
+    input_data.time_scale = 24;
+    PF_OutData output_data{};
+
+    const PF_Err status =
+        EffectMain(PF_Cmd_SMART_PRE_RENDER, &input_data, &output_data, nullptr, nullptr, &extra);
+
+    REQUIRE(status == PF_Err_NONE);
+    CHECK(host.checkout_count == 1);
+    CHECK(host.effect_ref == input_data.effect_ref);
+    CHECK(host.index == corridorkey::adobe::kParamInputLayer);
+    CHECK(host.checkout_id == corridorkey::adobe::kParamInputLayer);
+    CHECK(host.what_time == input_data.current_time);
+    CHECK(host.time_step == input_data.time_step);
+    CHECK(host.time_scale == input_data.time_scale);
+    CHECK(host.checkout_request.rect.left == pre_render_input.output_request.rect.left);
+    CHECK(host.checkout_request.rect.top == pre_render_input.output_request.rect.top);
+    CHECK(host.checkout_request.rect.right == pre_render_input.output_request.rect.right);
+    CHECK(host.checkout_request.rect.bottom == pre_render_input.output_request.rect.bottom);
+    CHECK(pre_render_output.result_rect.left == host.checkout_result.result_rect.left);
+    CHECK(pre_render_output.result_rect.top == host.checkout_result.result_rect.top);
+    CHECK(pre_render_output.result_rect.right == host.checkout_result.result_rect.right);
+    CHECK(pre_render_output.result_rect.bottom == host.checkout_result.result_rect.bottom);
+    CHECK(pre_render_output.max_result_rect.left == host.checkout_result.max_result_rect.left);
+    CHECK(pre_render_output.max_result_rect.top == host.checkout_result.max_result_rect.top);
+    CHECK(pre_render_output.max_result_rect.right == host.checkout_result.max_result_rect.right);
+    CHECK(pre_render_output.max_result_rect.bottom == host.checkout_result.max_result_rect.bottom);
+    CHECK(pre_render_output.pre_render_data == nullptr);
 }
 
 TEST_CASE("After Effects params setup rejects missing host callbacks", "[unit][adobe][effect]") {
