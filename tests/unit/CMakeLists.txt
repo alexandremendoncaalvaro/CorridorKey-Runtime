@@ -9,6 +9,7 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_plugin_descriptors.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_frame_output.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_bridge.cpp
     test_alpha_edge.cpp
     test_adobe_bridge.cpp
@@ -78,6 +79,8 @@ if(CORRIDORKEY_ADOBE_PLUGIN_AVAILABLE)
     target_sources(test_unit
         PRIVATE
             ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect.cpp
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect_render.cpp
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect_runtime_request.cpp
             ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect_parameters.cpp
             test_adobe_effect.cpp
     )

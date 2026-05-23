@@ -220,6 +220,63 @@ TEST_CASE("adobe bridge rejects oversized host frames before allocation",
     CHECK(converted.error().message.find("pixel count") != std::string::npos);
 }
 
+TEST_CASE("adobe bridge writes runtime processed output into ARGB32 frames",
+          "[unit][adobe][runtime]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(2, 1, 1);
+    result.foreground = ImageBuffer(2, 1, 3);
+    auto alpha = result.alpha.view();
+    auto foreground = result.foreground.view();
+    alpha(0, 0) = 0.5F;
+    alpha(0, 1) = 1.0F;
+    foreground(0, 0, 0) = 1.0F;
+    foreground(0, 0, 1) = 0.5F;
+    foreground(0, 0, 2) = 0.0F;
+    foreground(0, 1, 0) = 0.25F;
+    foreground(0, 1, 1) = 0.75F;
+    foreground(0, 1, 2) = 1.0F;
+
+    std::array<std::uint8_t, 8> output{};
+    auto write_status =
+        copy_runtime_result_to_adobe_frame(result,
+                                           AdobeMutableFrameView{
+                                               .data = output.data(),
+                                               .data_size_bytes = output.size(),
+                                               .width = 2,
+                                               .height = 1,
+                                               .row_bytes = 8,
+                                               .pixel_format = AdobePixelFormat::Argb32,
+                                           },
+                                           0);
+
+    REQUIRE(write_status.has_value());
+    CHECK(output == std::array<std::uint8_t, 8>{128, 128, 64, 0, 255, 64, 191, 255});
+}
+
+TEST_CASE("adobe bridge writes matte-only output without foreground buffers",
+          "[unit][adobe][runtime]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(1, 1, 1);
+    auto alpha = result.alpha.view();
+    alpha(0, 0) = 0.25F;
+
+    std::array<std::uint16_t, 4> output{};
+    auto write_status = copy_runtime_result_to_adobe_frame(
+        result,
+        AdobeMutableFrameView{
+            .data = output.data(),
+            .data_size_bytes = output.size() * sizeof(std::uint16_t),
+            .width = 1,
+            .height = 1,
+            .row_bytes = 8,
+            .pixel_format = AdobePixelFormat::Argb64,
+        },
+        1);
+
+    REQUIRE(write_status.has_value());
+    CHECK(output == std::array<std::uint16_t, 4>{32768, 8192, 8192, 8192});
+}
+
 TEST_CASE("adobe bridge builds prepare requests with Adobe-scoped session identity",
           "[unit][adobe][runtime]") {
     auto options = make_prepare_options();

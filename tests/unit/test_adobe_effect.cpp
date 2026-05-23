@@ -1,10 +1,14 @@
+#include <array>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "AE_Effect.h"
 #include "adobe_effect_metadata.hpp"
+#include "plugins/adobe/adobe_effect_parameters.hpp"
 
 extern "C" PF_Err EffectMain(PF_Cmd command, PF_InData* input_data, PF_OutData* output_data,
                              PF_ParamDef* parameters[], PF_LayerDef* output, void* extra) noexcept;
@@ -19,6 +23,21 @@ PF_Err capture_added_parameter(PF_ProgPtr effect_ref, PF_ParamIndex, PF_ParamDef
     auto* captured = reinterpret_cast<CapturedAdobeParameters*>(effect_ref);
     captured->definitions.push_back(*definition);
     return PF_Err_NONE;
+}
+
+void set_popup_value(PF_ParamDef& definition, PF_ParamValue value) {
+    definition.param_type = PF_Param_POPUP;
+    definition.u.pd.value = value;
+}
+
+void set_slider_value(PF_ParamDef& definition, PF_FpShort value) {
+    definition.param_type = PF_Param_FLOAT_SLIDER;
+    definition.u.fs_d.value = value;
+}
+
+void set_checkbox_value(PF_ParamDef& definition, PF_Boolean value) {
+    definition.param_type = PF_Param_CHECKBOX;
+    definition.u.bd.value = value;
 }
 
 void check_popup_parameter(const PF_ParamDef& definition, A_long disk_id, const char* name,
@@ -79,7 +98,7 @@ TEST_CASE("After Effects global setup publishes version and declared capabilitie
     CHECK((output_data.out_flags2 & PF_OutFlag2_SUPPORTS_SMART_RENDER) == 0);
 }
 
-TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects render paths",
+TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects invalid render inputs",
           "[unit][adobe][effect]") {
     PF_OutData output_data{};
 
@@ -100,10 +119,11 @@ TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects rend
     CHECK(EffectMain(PF_Cmd_RENDER, nullptr, &output_data, nullptr, nullptr, nullptr) ==
           PF_Err_BAD_CALLBACK_PARAM);
     CHECK_THAT(std::string(output_data.return_msg),
-               Catch::Matchers::ContainsSubstring("not implemented"));
+               Catch::Matchers::ContainsSubstring("requires source"));
 
     CHECK(EffectMain(PF_Cmd_SMART_PRE_RENDER, nullptr, &output_data, nullptr, nullptr, nullptr) ==
           PF_Err_BAD_CALLBACK_PARAM);
+    CHECK_THAT(std::string(output_data.return_msg), Catch::Matchers::ContainsSubstring("SmartFX"));
     CHECK(EffectMain(PF_Cmd_SMART_RENDER, nullptr, &output_data, nullptr, nullptr, nullptr) ==
           PF_Err_BAD_CALLBACK_PARAM);
 }
@@ -158,4 +178,64 @@ TEST_CASE("After Effects params setup registers CorridorKey controls", "[unit][a
                            PF_Precision_INTEGER);
     check_slider_parameter(captured.definitions[11], 1012, "Render Timeout (s)", 10.0, 300.0, 120.0,
                            PF_Precision_INTEGER);
+}
+
+TEST_CASE("After Effects render parameters build runtime request values",
+          "[unit][adobe][effect][runtime]") {
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    set_popup_value(storage[corridorkey::adobe::kParamNodeIdentity], 1);
+    set_popup_value(storage[corridorkey::adobe::kParamQuality], 3);
+    set_popup_value(storage[corridorkey::adobe::kParamScreenColor], 1);
+    set_popup_value(storage[corridorkey::adobe::kParamAlphaHintPolicy], 2);
+    set_slider_value(storage[corridorkey::adobe::kParamDespillStrength], 0.7F);
+    set_popup_value(storage[corridorkey::adobe::kParamSpillMethod], 2);
+    set_checkbox_value(storage[corridorkey::adobe::kParamRecoverOriginalDetails], 1);
+    set_slider_value(storage[corridorkey::adobe::kParamDetailsEdgeShrink], 5.0F);
+    set_slider_value(storage[corridorkey::adobe::kParamDetailsEdgeFeather], 9.0F);
+    set_popup_value(storage[corridorkey::adobe::kParamOutputMode], 2);
+    set_slider_value(storage[corridorkey::adobe::kParamPrepareTimeoutSeconds], 45.0F);
+    set_slider_value(storage[corridorkey::adobe::kParamRenderTimeoutSeconds], 90.0F);
+
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext context{
+        .models_root = "models",
+        .host_surface = "after_effects",
+        .effect_identity = corridorkey::adobe::kEffectMatchName,
+        .client_instance_id = "sequence-1",
+        .width = 1920,
+        .height = 1080,
+        .requested_device = corridorkey::DeviceInfo{"auto", 0, corridorkey::Backend::Auto},
+        .engine_options = corridorkey::EngineCreateOptions{.allow_cpu_fallback = false,
+                                                           .disable_cpu_ep_fallback = true},
+    };
+
+    auto request = corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+
+    REQUIRE(request.has_value());
+    CHECK(request->prepare_options.host_surface == "after_effects");
+    CHECK(request->prepare_options.effect_identity == corridorkey::adobe::kEffectMatchName);
+    CHECK(request->prepare_options.client_instance_id == "sequence-1");
+    CHECK(request->prepare_options.model_path ==
+          std::filesystem::path{"models"} / "corridorkey_fp16_1024.onnx");
+    CHECK(request->prepare_options.requested_quality_mode == 2);
+    CHECK(request->prepare_options.requested_resolution == 1024);
+    CHECK(request->prepare_options.effective_resolution == 1024);
+    CHECK(request->prepare_options.prepare_timeout_ms == 45000);
+    CHECK_FALSE(request->prepare_options.engine_options.allow_cpu_fallback);
+    CHECK(request->prepare_options.engine_options.disable_cpu_ep_fallback);
+    CHECK(request->inference_params.target_resolution == 1024);
+    CHECK(request->inference_params.requested_quality_resolution == 1024);
+    CHECK(request->inference_params.alpha_hint_policy ==
+          corridorkey::AlphaHintPolicy::RequireExternalHint);
+    CHECK(request->inference_params.despill_strength == Catch::Approx(0.7F));
+    CHECK(request->inference_params.spill_method == 1);
+    CHECK(request->inference_params.sp_erode_px == 5);
+    CHECK(request->inference_params.sp_blur_px == 9);
+    CHECK(request->inference_params.output_alpha_only);
+    CHECK(request->output_mode == 1);
+    CHECK(request->render_timeout_ms == 90000);
 }

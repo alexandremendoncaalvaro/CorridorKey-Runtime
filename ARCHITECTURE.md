@@ -187,9 +187,14 @@ src/
 |-- plugins/
 |   |-- adobe/                  Adobe After Effects SDK effect plugin
 |   |   |-- CMakeLists.txt      Adobe plugin target and PiPL generation rules
+|   |   |-- adobe_bridge.cpp    Adobe host frame conversion and runtime bridge input helpers
+|   |   |-- adobe_bridge.hpp    Adobe runtime bridge API
 |   |   |-- adobe_effect.cpp    Adobe effect entry point and selector dispatch
+|   |   |-- adobe_effect_render.cpp Adobe direct render adapter
+|   |   |-- adobe_effect_runtime_request.cpp Adobe parameter-to-runtime request mapping
 |   |   |-- adobe_effect_parameters.cpp Adobe effect parameter definitions
 |   |   |-- adobe_effect_parameters.hpp Adobe effect parameter setup API
+|   |   |-- adobe_frame_output.cpp Adobe runtime result to host frame writer
 |   |   |-- adobe_effect_metadata.hpp.in Generated effect metadata constants
 |   |   `-- corridorkey_adobe.r.in PiPL resource definition template
 |   |

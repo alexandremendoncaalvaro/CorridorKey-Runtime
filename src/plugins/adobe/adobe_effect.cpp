@@ -1,8 +1,10 @@
 #include <cstdio>
+#include <string>
 
 #include "AE_Effect.h"
 #include "adobe_effect_metadata.hpp"
 #include "adobe_effect_parameters.hpp"
+#include "adobe_effect_render.hpp"
 
 #if defined(_WIN32)
 #define CORRIDORKEY_ADOBE_EXPORT extern "C" __declspec(dllexport)
@@ -40,16 +42,16 @@ void set_return_message(PF_OutData& output_data, const char* message) noexcept {
     std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
 }
 
-AdobeStatus reject_unimplemented_render(PF_OutData& output_data) noexcept {
-    set_return_message(output_data, "CorridorKey render path is not implemented.");
+AdobeStatus reject_render(PF_OutData& output_data, const std::string& message) noexcept {
+    set_return_message(output_data, message.c_str());
     return kAdobeStatusUnsupported;
 }
 
 }  // namespace
 
 CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command, PF_InData* input_data,
-                                                PF_OutData* output_data, PF_ParamDef*[],
-                                                PF_LayerDef*, void*) noexcept {
+                                                PF_OutData* output_data, PF_ParamDef* parameters[],
+                                                PF_LayerDef* output, void*) noexcept {
     try {
         if (output_data == nullptr) {
             return command == PF_Cmd_PARAMS_SETUP || is_render_selector(command)
@@ -72,9 +74,12 @@ CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command, PF_InData* input
             case PF_Cmd_PARAMS_SETUP:
                 return corridorkey::adobe::setup_effect_parameters(input_data, *output_data);
             case PF_Cmd_RENDER:
+                return corridorkey::adobe::render_frame(input_data, *output_data, parameters,
+                                                        output);
             case PF_Cmd_SMART_PRE_RENDER:
             case PF_Cmd_SMART_RENDER:
-                return reject_unimplemented_render(*output_data);
+                return reject_render(*output_data,
+                                     "CorridorKey SmartFX render is not enabled for this build.");
             default:
                 break;
         }

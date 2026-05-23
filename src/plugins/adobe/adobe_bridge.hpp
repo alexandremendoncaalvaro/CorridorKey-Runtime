@@ -29,6 +29,15 @@ struct AdobeFrameView {
     AdobePixelFormat pixel_format = AdobePixelFormat::Argb32;
 };
 
+struct AdobeMutableFrameView {
+    void* data = nullptr;
+    std::size_t data_size_bytes = 0;
+    int width = 0;
+    int height = 0;
+    int row_bytes = 0;
+    AdobePixelFormat pixel_format = AdobePixelFormat::Argb32;
+};
+
 struct AdobeRuntimeFrame {
     ImageBuffer rgb;
     ImageBuffer alpha_hint;
@@ -48,6 +57,10 @@ struct AdobePrepareSessionOptions {
 };
 
 Result<AdobeRuntimeFrame> copy_adobe_frame_to_runtime(const AdobeFrameView& frame);
+Result<void> copy_runtime_result_to_adobe_frame(const FrameResult& result,
+                                                const AdobeMutableFrameView& output_frame,
+                                                int output_mode,
+                                                const AdobeRuntimeFrame* source_frame = nullptr);
 
 Result<app::HostPluginRuntimePrepareSessionRequest> build_adobe_prepare_session_request(
     const AdobePrepareSessionOptions& options);

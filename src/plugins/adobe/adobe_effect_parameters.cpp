@@ -58,6 +58,9 @@ constexpr std::array<ParameterDefinition, 12> kParameterDefinitions{{
      PF_Precision_INTEGER, 0, ""},
 }};
 
+static_assert(kInputParameterCount + static_cast<A_long>(kParameterDefinitions.size()) ==
+              static_cast<A_long>(corridorkey::adobe::kEffectParameterSlotCount));
+
 void copy_parameter_name(PF_ParamDef& definition, const char* name) noexcept {
     std::snprintf(definition.PF_DEF_NAME, sizeof(definition.PF_DEF_NAME), "%s", name);
 }

@@ -29,19 +29,19 @@ compatibility and packaging are separate tasks.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] The effect entrypoint handles `PF_Cmd_ABOUT`, `PF_Cmd_GLOBAL_SETUP`,
+- [x] The effect entrypoint handles `PF_Cmd_ABOUT`, `PF_Cmd_GLOBAL_SETUP`,
       `PF_Cmd_GLOBAL_SETDOWN`, `PF_Cmd_PARAMS_SETUP`, sequence setup/setdown,
       `PF_Cmd_RENDER`, and the SmartFX selectors needed for supported
       After Effects bit depths.
-- [ ] All supported bit depths and pixel layouts are explicitly documented in
+- [x] All supported bit depths and pixel layouts are explicitly documented in
       code-level tests or host-smoke expectations; unsupported formats return a
       visible Adobe error instead of producing output.
-- [ ] The effect registers CorridorKey controls needed to build a complete
+- [x] The effect registers CorridorKey controls needed to build a complete
       prepare request, including model or node identity, quality, screen color,
       alpha hint policy, and post-process controls that have OFX equivalents.
 - [ ] Per-instance and per-sequence state uses Adobe-managed handles or RAII
       wrappers and contains no mutable static render state.
-- [ ] Multi-frame rendering safety is either enabled with focused concurrency
+- [x] Multi-frame rendering safety is either enabled with focused concurrency
       tests or explicitly disabled with a documented reason in the task Notes.
 - [ ] A local After Effects smoke applies the effect to a clip, renders at least
       one frame through the runtime service, preserves alpha output, and closes
@@ -56,12 +56,12 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Implement the thin Adobe entrypoint dispatcher with explicit render stubs.
 - [ ] Register PiPL metadata, stable match name, category, support URL, and
       effect display name.
-- [ ] Register CorridorKey effect parameters and map them into bridge requests.
+- [x] Register CorridorKey effect parameters and map them into bridge requests.
 - [ ] Implement render and SmartFX paths for the supported After Effects pixel
       formats.
 - [ ] Add unit tests for parameter mapping, selector dispatch, state lifetime,
       and unsupported formats.
-- [ ] Run the Adobe-enabled build and focused unit tests.
+- [x] Run the Adobe-enabled build and focused unit tests.
 - [ ] Run manual After Effects smoke and record host version, project path, and
       render result in Notes.
 
@@ -113,6 +113,32 @@ Fresh-context review corrections applied in the same TDD slice:
   registering controls.
 - `ARCHITECTURE.md` lists the Adobe parameter setup module so the directory map
   remains the structural source of truth.
+- Multi-frame rendering stays disabled in this slice. The effect advertises no
+  Smart Render or MFR capability until the runtime-backed render path has
+  focused concurrency coverage; After Effects may still call the SmartFX
+  selectors, but they remain visible unsupported-render errors until that
+  coverage exists.
+- Added the parameter-to-runtime request mapper used by render. Unit coverage
+  verifies model path resolution, host/effect/client identity, quality
+  resolution, CPU fallback policy, alpha hint policy, despill, spill method,
+  recover-details, edge shrink/feather, output mode, and host runtime timeouts.
+- `PF_Cmd_RENDER` now builds an Adobe runtime request, prepares a session
+  through `AdobeRuntimeBridge`, processes the source frame through the shared
+  host-plugin runtime service, and writes the result back into the Adobe output
+  world. The covered direct-render path supports ARGB32 and ARGB64 worlds;
+  SmartFX remains disabled and returns a visible unsupported message because
+  the effect does not advertise Smart Render in this slice.
+- The bridge now has SDK-agnostic output writing coverage for runtime
+  `FrameResult` data into Adobe mutable frame views, including processed
+  premultiplied output and matte-only output without foreground buffers.
+- Verification passed:
+  `scripts\verify_ci.ps1 -Mode Format`,
+  `git diff --check`,
+  `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
+  `build\debug\tests\unit\test_unit.exe "[unit][adobe][effect]"`,
+  `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`,
+  `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`,
+  and `ctest --test-dir build\debug -R regression_adobe_cmake_scaffold --output-on-failure`.
 
 ## Definition of Done
 

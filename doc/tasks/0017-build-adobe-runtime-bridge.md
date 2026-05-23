@@ -151,6 +151,13 @@ Deepening follow-up for the reusable runtime seam:
   `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`,
   `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`,
   and `ctest --test-dir build\debug -R regression_adobe_cmake_scaffold --output-on-failure`.
+- Hot-path benchmark gate passed for the branch changes touching
+  `src/plugins/ofx/`, `src/core/inference_session.cpp`,
+  `src/core/gpu_prep.cpp`, and `src/post_process/despeckle.cpp`.
+  `scripts/run_corpus.sh` plus `scripts/compare_benchmarks.py` compared the
+  branch against the `phase_8_gpu_prepare` baseline and reported
+  `avg_latency_ms` `-45.4%` and `ort_run` `-52.0%`, both below the 10%
+  regression threshold.
 
 ## Definition of Done
 

@@ -3,6 +3,7 @@
 add_executable(test_integration
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_frame_output.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_bridge.cpp
     test_adobe_runtime_bridge.cpp
     test_cache_fallback.cpp
