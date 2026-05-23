@@ -354,7 +354,11 @@ TEST_CASE("After Effects global setup publishes version and declared capabilitie
                                                corridorkey::adobe::kEffectVersionStage,
                                                corridorkey::adobe::kEffectVersionBuild));
     CHECK((output_data.out_flags & PF_OutFlag_DEEP_COLOR_AWARE) == PF_OutFlag_DEEP_COLOR_AWARE);
-    CHECK((output_data.out_flags2 & PF_OutFlag2_SUPPORTS_SMART_RENDER) == 0);
+    CHECK((output_data.out_flags2 & PF_OutFlag2_SUPPORTS_SMART_RENDER) ==
+          PF_OutFlag2_SUPPORTS_SMART_RENDER);
+    CHECK((output_data.out_flags2 & PF_OutFlag2_FLOAT_COLOR_AWARE) ==
+          PF_OutFlag2_FLOAT_COLOR_AWARE);
+    CHECK((output_data.out_flags2 & PF_OutFlag2_SUPPORTS_THREADED_RENDERING) == 0);
 }
 
 TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects invalid render inputs",

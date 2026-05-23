@@ -29,7 +29,7 @@ compatibility and packaging are separate tasks.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] The effect entrypoint handles `PF_Cmd_ABOUT`, `PF_Cmd_GLOBAL_SETUP`,
+- [x] The effect entrypoint handles `PF_Cmd_ABOUT`, `PF_Cmd_GLOBAL_SETUP`,
       `PF_Cmd_GLOBAL_SETDOWN`, `PF_Cmd_PARAMS_SETUP`, sequence setup/setdown,
       `PF_Cmd_RENDER`, and the SmartFX selectors needed for supported
       After Effects bit depths.
@@ -57,9 +57,9 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [ ] Register PiPL metadata, stable match name, category, support URL, and
       effect display name.
 - [x] Register CorridorKey effect parameters and map them into bridge requests.
-- [ ] Implement render and SmartFX paths for the supported After Effects pixel
+- [x] Implement render and SmartFX paths for the supported After Effects pixel
       formats.
-- [ ] Add unit tests for parameter mapping, selector dispatch, state lifetime,
+- [x] Add unit tests for parameter mapping, selector dispatch, state lifetime,
       and unsupported formats.
 - [x] Run the Adobe-enabled build and focused unit tests.
 - [ ] Run manual After Effects smoke and record host version, project path, and
@@ -205,6 +205,18 @@ Fresh-context review corrections applied in the same TDD slice:
   `build\debug\tests\unit\test_unit.exe "[unit][adobe][effect]"`,
   `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and
   `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`.
+- TDD global-capabilities slice now advertises Smart Render and Float Color
+  Aware through the generated Adobe metadata used by both `PF_Cmd_GLOBAL_SETUP`
+  and the PiPL resource. The same public `EffectMain(PF_Cmd_GLOBAL_SETUP)` test
+  keeps `PF_OutFlag2_SUPPORTS_THREADED_RENDERING` unset because Multi-Frame
+  Rendering still lacks focused concurrency coverage.
+- Verification passed for the global-capabilities slice:
+  `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
+  `build\debug\tests\unit\test_unit.exe "[unit][adobe][effect]"`,
+  `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`,
+  `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`,
+  `ctest --test-dir build\debug -R regression_adobe_cmake_scaffold --output-on-failure`,
+  `scripts\verify_ci.ps1 -Mode Format`, and `git diff --check`.
 
 ## Definition of Done
 
