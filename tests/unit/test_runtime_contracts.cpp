@@ -505,6 +505,13 @@ TEST_CASE("host plugin runtime artifact selection keeps color and backend policy
     CHECK(green->model_path == models_root / "corridorkey_fp16_1024.onnx");
     CHECK(green->requested_device.backend == Backend::Auto);
 
+    auto green_from_torchtrt = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"TorchTRT", 0, Backend::TorchTRT}, 1024, false,
+        QualityFallbackMode::Direct, "green");
+    REQUIRE(green_from_torchtrt.has_value());
+    CHECK(green_from_torchtrt->model_path == models_root / "corridorkey_fp16_1024.onnx");
+    CHECK(green_from_torchtrt->requested_device.backend == Backend::TensorRT);
+
     auto blue = host_plugin_runtime_artifact_selection_for_request(
         models_root, DeviceInfo{"auto", 0, Backend::Auto}, 1024, false, QualityFallbackMode::Direct,
         "blue");

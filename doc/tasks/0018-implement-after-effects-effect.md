@@ -143,8 +143,10 @@ Fresh-context review corrections applied in the same TDD slice:
   maps Green to the ONNX quality ladder and Blue to the dynamic blue TorchTRT
   artifact through the App-layer runtime contract, clamps corrupted host slider
   values to the declared UI ranges, rejects unknown output modes, detects
-  truncated Windows module paths before resolving the sidecar, and adds output
-  writer coverage for ARGB128 and BGRA32.
+  truncated Windows module paths before resolving the sidecar, adds output
+  writer coverage for ARGB128 and BGRA32, and makes `Node Identity` the single
+  source of Green/Blue domain for both artifact selection and
+  `InferenceParams.despill_screen_channel`.
 
 ## Definition of Done
 

@@ -141,7 +141,8 @@ Deepening follow-up for the reusable runtime seam:
   artifact and request the TorchTRT runtime backend; Green node requests remain
   on the App-layer ONNX quality ladder. The artifact/backend pairing is owned
   by the App-layer runtime contract so host adapters do not duplicate model
-  selection policy.
+  selection policy. The same App-layer helper normalizes ONNX artifacts selected
+  after a TorchTRT request back to the TensorRT runtime backend.
 - Verification passed:
   `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
   `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and

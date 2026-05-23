@@ -276,6 +276,9 @@ DeviceInfo runtime_device_for_host_plugin_artifact(DeviceInfo requested_device,
         if (requested_device.name.empty() || requested_device.name == "auto") {
             requested_device.name = "TorchTRT";
         }
+    } else if (artifact_path.extension() == ".onnx" &&
+               requested_device.backend == Backend::TorchTRT) {
+        requested_device.backend = Backend::TensorRT;
     }
     return requested_device;
 }

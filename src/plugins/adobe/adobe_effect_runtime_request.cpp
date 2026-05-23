@@ -14,8 +14,6 @@ constexpr int kQualityMaximumResolution = 2048;
 constexpr int kPopupZeroBasedOffset = 1;
 constexpr int kMillisecondsPerSecond = 1000;
 constexpr int kDefaultQualityMode = 1;
-constexpr int kDefaultScreenColorGreen = 0;
-constexpr int kScreenColorBlue = 1;
 constexpr int kDefaultAlphaHintPolicy = 0;
 constexpr int kAlphaHintPolicyRequireExternal = 1;
 constexpr int kDefaultNodeIdentity = 0;
@@ -126,8 +124,8 @@ int requested_resolution_for_quality(int quality_mode) noexcept {
     }
 }
 
-int despill_screen_channel_for(int screen_color) noexcept {
-    return screen_color == kScreenColorBlue ? 2 : 1;
+int despill_screen_channel_for_node_identity(int node_identity) noexcept {
+    return node_identity == kNodeIdentityBlue ? 2 : 1;
 }
 
 corridorkey::AlphaHintPolicy alpha_hint_policy_for(int alpha_hint_policy) noexcept {
@@ -167,9 +165,8 @@ corridorkey::Result<void> validate_runtime_request_context(
 }
 
 corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameters[],
-                                                    int requested_resolution, int output_mode) {
-    const int screen_color = popup_choice(parameters, corridorkey::adobe::kParamScreenColor,
-                                          kDefaultScreenColorGreen, 2);
+                                                    int requested_resolution, int output_mode,
+                                                    int node_identity) {
     const int alpha_hint_policy = popup_choice(
         parameters, corridorkey::adobe::kParamAlphaHintPolicy, kDefaultAlphaHintPolicy, 1);
 
@@ -183,7 +180,8 @@ corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameter
         kMinimumDespillStrength, kMaximumDespillStrength));
     inference_params.spill_method =
         popup_choice(parameters, corridorkey::adobe::kParamSpillMethod, kDefaultSpillMethod, 2);
-    inference_params.despill_screen_channel = despill_screen_channel_for(screen_color);
+    inference_params.despill_screen_channel =
+        despill_screen_channel_for_node_identity(node_identity);
     inference_params.alpha_hint_policy = alpha_hint_policy_for(alpha_hint_policy);
     inference_params.upscale_method = corridorkey::UpscaleMethod::Lanczos4;
     inference_params.enable_tiling = false;
@@ -248,7 +246,7 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
         timeout_milliseconds(parameters, kParamPrepareTimeoutSeconds, kDefaultPrepareTimeoutSeconds,
                              kMaximumPrepareTimeoutSeconds);
     request.inference_params =
-        build_inference_params(parameters, requested_resolution, *output_mode);
+        build_inference_params(parameters, requested_resolution, *output_mode, *node_identity);
     request.output_mode = *output_mode;
     request.render_timeout_ms =
         timeout_milliseconds(parameters, kParamRenderTimeoutSeconds, kDefaultRenderTimeoutSeconds,

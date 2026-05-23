@@ -242,6 +242,38 @@ TEST_CASE("After Effects render parameters build runtime request values",
     CHECK(request->render_timeout_ms == 90000);
 }
 
+TEST_CASE("After Effects blue node default drives runtime model and despill channel",
+          "[unit][adobe][effect][runtime][screen-color][regression]") {
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    set_popup_value(storage[corridorkey::adobe::kParamNodeIdentity], 2);
+    set_popup_value(storage[corridorkey::adobe::kParamQuality], 3);
+
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext context{
+        .models_root = "models",
+        .host_surface = "after_effects",
+        .effect_identity = corridorkey::adobe::kEffectMatchName,
+        .client_instance_id = "sequence-1",
+        .width = 1920,
+        .height = 1080,
+        .requested_device = corridorkey::DeviceInfo{"auto", 0, corridorkey::Backend::Auto},
+        .engine_options = corridorkey::EngineCreateOptions{},
+    };
+
+    auto request = corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+
+    REQUIRE(request.has_value());
+    CHECK(request->prepare_options.node_identity == "blue");
+    CHECK(request->prepare_options.model_path ==
+          std::filesystem::path{"models"} / "corridorkey_dynamic_blue_fp16.ts");
+    CHECK(request->prepare_options.requested_device.backend == corridorkey::Backend::TorchTRT);
+    CHECK(request->inference_params.despill_screen_channel == 2);
+}
+
 TEST_CASE("After Effects render parameters sanitize corrupted host slider values",
           "[unit][adobe][effect][runtime][regression]") {
     std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
