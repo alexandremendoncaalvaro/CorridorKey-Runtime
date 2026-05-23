@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -218,6 +219,7 @@ TEST_CASE("After Effects render parameters build runtime request values",
     REQUIRE(request.has_value());
     CHECK(request->prepare_options.host_surface == "after_effects");
     CHECK(request->prepare_options.effect_identity == corridorkey::adobe::kEffectMatchName);
+    CHECK(request->prepare_options.node_identity == "green");
     CHECK(request->prepare_options.client_instance_id == "sequence-1");
     CHECK(request->prepare_options.model_path ==
           std::filesystem::path{"models"} / "corridorkey_fp16_1024.onnx");
@@ -238,4 +240,43 @@ TEST_CASE("After Effects render parameters build runtime request values",
     CHECK(request->inference_params.output_alpha_only);
     CHECK(request->output_mode == 1);
     CHECK(request->render_timeout_ms == 90000);
+}
+
+TEST_CASE("After Effects render parameters sanitize corrupted host slider values",
+          "[unit][adobe][effect][runtime][regression]") {
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    set_popup_value(storage[corridorkey::adobe::kParamNodeIdentity], 2);
+    set_popup_value(storage[corridorkey::adobe::kParamQuality], 3);
+    set_slider_value(storage[corridorkey::adobe::kParamDespillStrength], 2.0F);
+    set_slider_value(storage[corridorkey::adobe::kParamDetailsEdgeShrink], -20.0F);
+    set_slider_value(storage[corridorkey::adobe::kParamDetailsEdgeFeather], 200.0F);
+    set_slider_value(storage[corridorkey::adobe::kParamPrepareTimeoutSeconds], -5.0F);
+    set_slider_value(storage[corridorkey::adobe::kParamRenderTimeoutSeconds],
+                     std::numeric_limits<PF_FpShort>::quiet_NaN());
+
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext context{
+        .models_root = "models",
+        .host_surface = "after_effects",
+        .effect_identity = corridorkey::adobe::kEffectMatchName,
+        .client_instance_id = "sequence-1",
+        .width = 1920,
+        .height = 1080,
+        .requested_device = corridorkey::DeviceInfo{"auto", 0, corridorkey::Backend::Auto},
+        .engine_options = corridorkey::EngineCreateOptions{},
+    };
+
+    auto request = corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+
+    REQUIRE(request.has_value());
+    CHECK(request->prepare_options.node_identity == "blue");
+    CHECK(request->prepare_options.prepare_timeout_ms == 10000);
+    CHECK(request->inference_params.despill_strength == Catch::Approx(1.0F));
+    CHECK(request->inference_params.sp_erode_px == 0);
+    CHECK(request->inference_params.sp_blur_px == 100);
+    CHECK(request->render_timeout_ms == 120000);
 }

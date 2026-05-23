@@ -1,10 +1,10 @@
 #include "adobe_effect_render.hpp"
 
-#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "adobe_bridge.hpp"
 #include "adobe_effect_metadata.hpp"
@@ -27,6 +27,7 @@ using AdobeStatus = PF_Err;
 
 constexpr AdobeStatus kAdobeStatusOk = PF_Err_NONE;
 constexpr AdobeStatus kAdobeStatusUnsupported = PF_Err_BAD_CALLBACK_PARAM;
+constexpr std::size_t kMaximumWindowsModulePath = 32768;
 
 void set_return_message(PF_OutData& output_data, const char* message) noexcept {
     std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
@@ -46,13 +47,23 @@ std::filesystem::path adobe_module_path() {
         return {};
     }
 
-    std::array<wchar_t, MAX_PATH> buffer{};
-    const DWORD length =
-        GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (length == 0) {
-        return {};
+    std::vector<wchar_t> buffer(MAX_PATH);
+    while (buffer.size() <= kMaximumWindowsModulePath) {
+        const DWORD length =
+            GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return {};
+        }
+        const auto used = static_cast<std::size_t>(length);
+        if (used < buffer.size()) {
+            return std::filesystem::path(std::wstring(buffer.data(), used));
+        }
+        if (buffer.size() > (kMaximumWindowsModulePath / 2U)) {
+            break;
+        }
+        buffer.resize(buffer.size() * 2U);
     }
-    return std::filesystem::path(std::wstring(buffer.data(), static_cast<std::size_t>(length)));
+    return {};
 #else
     return {};
 #endif

@@ -29,7 +29,7 @@ compatibility and packaging are separate tasks.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [x] The effect entrypoint handles `PF_Cmd_ABOUT`, `PF_Cmd_GLOBAL_SETUP`,
+- [ ] The effect entrypoint handles `PF_Cmd_ABOUT`, `PF_Cmd_GLOBAL_SETUP`,
       `PF_Cmd_GLOBAL_SETDOWN`, `PF_Cmd_PARAMS_SETUP`, sequence setup/setdown,
       `PF_Cmd_RENDER`, and the SmartFX selectors needed for supported
       After Effects bit depths.
@@ -139,6 +139,11 @@ Fresh-context review corrections applied in the same TDD slice:
   `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`,
   `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`,
   and `ctest --test-dir build\debug -R regression_adobe_cmake_scaffold --output-on-failure`.
+- Fresh-context review follow-up keeps SmartFX unchecked until implemented,
+  maps the Green/Blue node identity into the prepare request, clamps corrupted
+  host slider values to the declared UI ranges, rejects unknown output modes,
+  detects truncated Windows module paths before resolving the sidecar, and adds
+  output writer coverage for ARGB128 and BGRA32.
 
 ## Definition of Done
 

@@ -277,9 +277,93 @@ TEST_CASE("adobe bridge writes matte-only output without foreground buffers",
     CHECK(output == std::array<std::uint16_t, 4>{32768, 8192, 8192, 8192});
 }
 
+TEST_CASE("adobe bridge writes processed output into ARGB128 frames", "[unit][adobe][runtime]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(1, 1, 1);
+    result.foreground = ImageBuffer(1, 1, 3);
+    auto alpha = result.alpha.view();
+    auto foreground = result.foreground.view();
+    alpha(0, 0) = 0.25F;
+    foreground(0, 0, 0) = 1.0F;
+    foreground(0, 0, 1) = 0.5F;
+    foreground(0, 0, 2) = 0.0F;
+
+    std::array<float, 4> output{};
+    auto write_status =
+        copy_runtime_result_to_adobe_frame(result,
+                                           AdobeMutableFrameView{
+                                               .data = output.data(),
+                                               .data_size_bytes = output.size() * sizeof(float),
+                                               .width = 1,
+                                               .height = 1,
+                                               .row_bytes = 16,
+                                               .pixel_format = AdobePixelFormat::Argb128,
+                                           },
+                                           0);
+
+    REQUIRE(write_status.has_value());
+    CHECK(output[0] == Catch::Approx(0.25F));
+    CHECK(output[1] == Catch::Approx(0.25F));
+    CHECK(output[2] == Catch::Approx(0.125F));
+    CHECK(output[3] == Catch::Approx(0.0F));
+}
+
+TEST_CASE("adobe bridge writes foreground-only output into BGRA32 frames",
+          "[unit][adobe][runtime]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(1, 1, 1);
+    result.foreground = ImageBuffer(1, 1, 3);
+    auto alpha = result.alpha.view();
+    auto foreground = result.foreground.view();
+    alpha(0, 0) = 0.1F;
+    foreground(0, 0, 0) = 1.0F;
+    foreground(0, 0, 1) = 0.5F;
+    foreground(0, 0, 2) = 0.0F;
+
+    std::array<std::uint8_t, 4> output{};
+    auto write_status =
+        copy_runtime_result_to_adobe_frame(result,
+                                           AdobeMutableFrameView{
+                                               .data = output.data(),
+                                               .data_size_bytes = output.size(),
+                                               .width = 1,
+                                               .height = 1,
+                                               .row_bytes = 4,
+                                               .pixel_format = AdobePixelFormat::Bgra32,
+                                           },
+                                           2);
+
+    REQUIRE(write_status.has_value());
+    CHECK(output == std::array<std::uint8_t, 4>{0, 128, 255, 255});
+}
+
+TEST_CASE("adobe bridge rejects unknown output modes", "[unit][adobe][runtime][regression]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(1, 1, 1);
+    result.foreground = ImageBuffer(1, 1, 3);
+
+    std::array<std::uint8_t, 4> output{};
+    auto write_status =
+        copy_runtime_result_to_adobe_frame(result,
+                                           AdobeMutableFrameView{
+                                               .data = output.data(),
+                                               .data_size_bytes = output.size(),
+                                               .width = 1,
+                                               .height = 1,
+                                               .row_bytes = 4,
+                                               .pixel_format = AdobePixelFormat::Argb32,
+                                           },
+                                           99);
+
+    REQUIRE_FALSE(write_status.has_value());
+    CHECK(write_status.error().code == ErrorCode::InvalidParameters);
+    CHECK(write_status.error().message.find("output mode") != std::string::npos);
+}
+
 TEST_CASE("adobe bridge builds prepare requests with Adobe-scoped session identity",
           "[unit][adobe][runtime]") {
     auto options = make_prepare_options();
+    options.node_identity = "blue";
     options.client_instance_id = "layer-7";
     options.requested_device = DeviceInfo{"RTX 4090", 24576, Backend::TorchTRT};
     options.engine_options.allow_cpu_fallback = false;
@@ -289,7 +373,7 @@ TEST_CASE("adobe bridge builds prepare requests with Adobe-scoped session identi
 
     REQUIRE(request.has_value());
     CHECK(request->client_instance_id == "adobe:after_effects:com.corridorkey.effect:layer-7");
-    CHECK(request->node_identity == "adobe:after_effects:com.corridorkey.effect");
+    CHECK(request->node_identity == "adobe:after_effects:com.corridorkey.effect:blue");
     CHECK(request->model_path == options.model_path);
     CHECK(request->artifact_name == "corridorkey_dynamic_blue_fp16.ts");
     CHECK(request->requested_device.backend == Backend::TorchTRT);
@@ -303,6 +387,7 @@ TEST_CASE("adobe bridge builds prepare requests with Adobe-scoped session identi
 
 TEST_CASE("adobe bridge escapes prepare identity components", "[unit][adobe][runtime]") {
     auto options = make_prepare_options();
+    options.node_identity = "node:blue";
     options.host_surface = "after:effects";
     options.effect_identity = "com%corridorkey:effect";
     options.client_instance_id = "layer:7";
@@ -310,7 +395,7 @@ TEST_CASE("adobe bridge escapes prepare identity components", "[unit][adobe][run
     auto request = build_adobe_prepare_session_request(options);
 
     REQUIRE(request.has_value());
-    CHECK(request->node_identity == "adobe:after%3Aeffects:com%25corridorkey%3Aeffect");
+    CHECK(request->node_identity == "adobe:after%3Aeffects:com%25corridorkey%3Aeffect:node%3Ablue");
     CHECK(request->client_instance_id ==
           "adobe:after%3Aeffects:com%25corridorkey%3Aeffect:layer%3A7");
 }

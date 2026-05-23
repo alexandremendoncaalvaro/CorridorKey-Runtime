@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 #include "adobe_effect_parameters.hpp"
 #include "app/runtime_contracts.hpp"
@@ -18,6 +19,8 @@ constexpr int kScreenColorBlue = 1;
 constexpr int kDefaultAlphaHintPolicy = 0;
 constexpr int kAlphaHintPolicyRequireExternal = 1;
 constexpr double kDefaultDespillStrength = 0.5;
+constexpr double kMinimumDespillStrength = 0.0;
+constexpr double kMaximumDespillStrength = 1.0;
 constexpr int kDefaultSpillMethod = 0;
 constexpr bool kDefaultRecoverOriginalDetails = true;
 constexpr int kDefaultDetailsEdgeShrink = 3;
@@ -27,7 +30,7 @@ constexpr int kOutputMatteOnly = 1;
 constexpr int kOutputSourceMatte = 3;
 constexpr int kDefaultPrepareTimeoutSeconds = 30;
 constexpr int kDefaultRenderTimeoutSeconds = 120;
-constexpr int kMinimumTimeoutSeconds = 0;
+constexpr int kMinimumTimeoutSeconds = 10;
 constexpr int kMaximumPrepareTimeoutSeconds = 600;
 constexpr int kMaximumRenderTimeoutSeconds = 300;
 constexpr int kMinimumEdgePixels = 0;
@@ -60,6 +63,15 @@ double slider_value(PF_ParamDef* const parameters[], PF_ParamIndex index,
     return static_cast<double>(parameter->u.fs_d.value);
 }
 
+double bounded_slider_value(PF_ParamDef* const parameters[], PF_ParamIndex index, double fallback,
+                            double minimum_value, double maximum_value) noexcept {
+    const double value = slider_value(parameters, index, fallback);
+    if (!std::isfinite(value)) {
+        return fallback;
+    }
+    return std::clamp(value, minimum_value, maximum_value);
+}
+
 bool checkbox_value(PF_ParamDef* const parameters[], PF_ParamIndex index, bool fallback) noexcept {
     const PF_ParamDef* parameter = parameter_at(parameters, index);
     if (parameter == nullptr || parameter->param_type != PF_Param_CHECKBOX) {
@@ -70,7 +82,9 @@ bool checkbox_value(PF_ParamDef* const parameters[], PF_ParamIndex index, bool f
 
 int integer_slider_value(PF_ParamDef* const parameters[], PF_ParamIndex index, int fallback,
                          int minimum_value, int maximum_value) noexcept {
-    const auto value = static_cast<int>(std::lround(slider_value(parameters, index, fallback)));
+    const auto value = static_cast<int>(std::lround(
+        bounded_slider_value(parameters, index, fallback, static_cast<double>(minimum_value),
+                             static_cast<double>(maximum_value))));
     return std::clamp(value, minimum_value, maximum_value);
 }
 
@@ -103,6 +117,10 @@ corridorkey::AlphaHintPolicy alpha_hint_policy_for(int alpha_hint_policy) noexce
         return corridorkey::AlphaHintPolicy::RequireExternalHint;
     }
     return corridorkey::AlphaHintPolicy::AutoRoughFallback;
+}
+
+std::string node_identity_for(int node_identity) {
+    return node_identity == 1 ? "blue" : "green";
 }
 
 bool output_mode_requires_foreground(int output_mode) noexcept {
@@ -158,8 +176,9 @@ corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameter
     inference_params.requested_quality_resolution = requested_resolution;
     inference_params.quality_fallback_mode = corridorkey::QualityFallbackMode::Direct;
     inference_params.refinement_mode = corridorkey::RefinementMode::Auto;
-    inference_params.despill_strength = static_cast<float>(slider_value(
-        parameters, corridorkey::adobe::kParamDespillStrength, kDefaultDespillStrength));
+    inference_params.despill_strength = static_cast<float>(bounded_slider_value(
+        parameters, corridorkey::adobe::kParamDespillStrength, kDefaultDespillStrength,
+        kMinimumDespillStrength, kMaximumDespillStrength));
     inference_params.spill_method =
         popup_choice(parameters, corridorkey::adobe::kParamSpillMethod, kDefaultSpillMethod, 2);
     inference_params.despill_screen_channel = despill_screen_channel_for(screen_color);
@@ -191,6 +210,7 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
         return Unexpected<Error>(validation.error());
     }
 
+    const int node_identity = popup_choice(parameters, kParamNodeIdentity, 0, 1);
     const int quality_mode = popup_choice(parameters, kParamQuality, kDefaultQualityMode, 4);
     const int requested_resolution = requested_resolution_for_quality(quality_mode);
     auto model_path = model_path_for_request(context, requested_resolution);
@@ -202,6 +222,7 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
     AdobeEffectRuntimeRequest request;
     request.prepare_options.host_surface = context.host_surface;
     request.prepare_options.effect_identity = context.effect_identity;
+    request.prepare_options.node_identity = node_identity_for(node_identity);
     request.prepare_options.client_instance_id = context.client_instance_id;
     request.prepare_options.model_path = *model_path;
     request.prepare_options.requested_device = context.requested_device;

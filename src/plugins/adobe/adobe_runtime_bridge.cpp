@@ -32,6 +32,14 @@ std::string adobe_session_identity(const AdobePrepareSessionOptions& options) {
            encode_identity_component(options.effect_identity);
 }
 
+std::string adobe_node_identity(const AdobePrepareSessionOptions& options) {
+    std::string identity = adobe_session_identity(options);
+    if (!options.node_identity.empty()) {
+        identity += ":" + encode_identity_component(options.node_identity);
+    }
+    return identity;
+}
+
 Result<void> validate_range(int value, int minimum, int maximum, std::string_view label) {
     if (value < minimum || value > maximum) {
         return Unexpected<Error>(
@@ -106,7 +114,7 @@ Result<app::HostPluginRuntimePrepareSessionRequest> build_adobe_prepare_session_
     request.requested_resolution = options.requested_resolution;
     request.effective_resolution = options.effective_resolution;
     request.prepare_timeout_ms = options.prepare_timeout_ms;
-    request.node_identity = identity;
+    request.node_identity = adobe_node_identity(options);
     return request;
 }
 

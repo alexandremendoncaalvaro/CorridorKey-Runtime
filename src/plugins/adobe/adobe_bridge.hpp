@@ -46,6 +46,7 @@ struct AdobeRuntimeFrame {
 struct AdobePrepareSessionOptions {
     std::string host_surface;
     std::string effect_identity;
+    std::string node_identity;
     std::string client_instance_id;
     std::filesystem::path model_path = {};
     DeviceInfo requested_device = {};

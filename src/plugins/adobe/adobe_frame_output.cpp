@@ -13,9 +13,11 @@ constexpr float kAdobeArgb8White = 255.0F;
 constexpr float kAdobeArgb16White = 32768.0F;
 constexpr int kMaxAdobeFrameLongEdge = 8192;
 constexpr std::size_t kMaxAdobeFramePixels = 8192ULL * 4320ULL;
+constexpr int kOutputProcessed = 0;
 constexpr int kOutputMatteOnly = 1;
 constexpr int kOutputForegroundOnly = 2;
 constexpr int kOutputSourceMatte = 3;
+constexpr int kOutputForegroundMatte = 4;
 constexpr int kRgbChannelCount = 3;
 constexpr int kAlphaChannelCount = 1;
 constexpr float kOpaqueAlpha = 1.0F;
@@ -140,6 +142,10 @@ bool output_mode_requires_foreground(int output_mode) {
     return output_mode != kOutputMatteOnly && output_mode != kOutputSourceMatte;
 }
 
+bool is_supported_output_mode(int output_mode) {
+    return output_mode >= kOutputProcessed && output_mode <= kOutputForegroundMatte;
+}
+
 float clamp_unit(float value) {
     return std::clamp(value, 0.0F, 1.0F);
 }
@@ -215,6 +221,10 @@ Result<void> copy_runtime_result_to_adobe_frame(const FrameResult& result,
                                                 const AdobeMutableFrameView& output_frame,
                                                 int output_mode,
                                                 const AdobeRuntimeFrame* source_frame) {
+    if (!is_supported_output_mode(output_mode)) {
+        return Unexpected<Error>(invalid_adobe_output_error("Unsupported Adobe output mode."));
+    }
+
     const auto pixel_size = pixel_size_for(output_frame.pixel_format);
     if (!pixel_size.has_value()) {
         return Unexpected<Error>(invalid_adobe_output_error("Unsupported Adobe output format."));

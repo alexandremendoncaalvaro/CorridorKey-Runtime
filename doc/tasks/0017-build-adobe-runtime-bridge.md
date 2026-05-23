@@ -133,6 +133,10 @@ Deepening follow-up for the reusable runtime seam:
   is derived from the Adobe source alpha channel, and post-process controls stay
   in the `InferenceParams` passed through `process_frame`; the bridge preserves
   those existing App/Core contracts instead of adding Adobe-specific policy.
+- Adobe prepare-session construction can append the effect's Green/Blue node
+  identity to `node_identity` while keeping `client_instance_id` scoped to the
+  host/effect/caller instance. This preserves session cache separation without
+  adding Adobe-specific runtime protocol fields.
 - Verification passed:
   `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
   `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and
