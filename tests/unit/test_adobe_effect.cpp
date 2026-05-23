@@ -11,6 +11,9 @@
 
 #include "AE_Effect.h"
 #include "AE_EffectCB.h"
+#include "AE_EffectCBSuites.h"
+#include "AE_EffectPixelFormat.h"
+#include "SP/SPBasic.h"
 #include "adobe_effect_metadata.hpp"
 #include "plugins/adobe/adobe_effect_parameters.hpp"
 
@@ -217,6 +220,63 @@ struct FakeSmartRenderHost {
     static inline FakeSmartRenderHost* active_host = nullptr;
 };
 
+struct FakeWorldSuiteHost {
+    FakeWorldSuiteHost() {
+        basic.AcquireSuite = fake_acquire_suite;
+        basic.ReleaseSuite = fake_release_suite;
+        world_suite.PF_GetPixelFormat = fake_get_pixel_format;
+        active_host = this;
+    }
+
+    ~FakeWorldSuiteHost() {
+        active_host = nullptr;
+    }
+
+    SPBasicSuite basic{};
+    PF_WorldSuite2 world_suite{};
+    PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
+    int acquire_count = 0;
+    int release_count = 0;
+    int get_pixel_format_count = 0;
+
+    static SPErr fake_acquire_suite(const char* name, int32 version, const void** suite) {
+        if (active_host == nullptr || suite == nullptr || name == nullptr) {
+            return 1;
+        }
+        if (std::string(name) != kPFWorldSuite || version != kPFWorldSuiteVersion2) {
+            return 1;
+        }
+
+        ++active_host->acquire_count;
+        *suite = &active_host->world_suite;
+        return kSPNoError;
+    }
+
+    static SPErr fake_release_suite(const char* name, int32 version) {
+        if (active_host == nullptr || name == nullptr) {
+            return 1;
+        }
+        if (std::string(name) != kPFWorldSuite || version != kPFWorldSuiteVersion2) {
+            return 1;
+        }
+
+        ++active_host->release_count;
+        return kSPNoError;
+    }
+
+    static PF_Err fake_get_pixel_format(const PF_EffectWorld*, PF_PixelFormat* pixel_format) {
+        if (active_host == nullptr || pixel_format == nullptr) {
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
+        }
+
+        ++active_host->get_pixel_format_count;
+        *pixel_format = active_host->pixel_format;
+        return PF_Err_NONE;
+    }
+
+    static inline FakeWorldSuiteHost* active_host = nullptr;
+};
+
 PF_Err capture_added_parameter(PF_ProgPtr effect_ref, PF_ParamIndex, PF_ParamDefPtr definition) {
     auto* captured = reinterpret_cast<CapturedAdobeParameters*>(effect_ref);
     captured->definitions.push_back(*definition);
@@ -307,10 +367,6 @@ TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects inva
 
     CHECK(EffectMain(PF_Cmd_GLOBAL_SETDOWN, nullptr, &output_data, nullptr, nullptr, nullptr) ==
           PF_Err_NONE);
-    CHECK(EffectMain(PF_Cmd_SEQUENCE_SETUP, nullptr, &output_data, nullptr, nullptr, nullptr) ==
-          PF_Err_NONE);
-    CHECK(EffectMain(PF_Cmd_SEQUENCE_RESETUP, nullptr, &output_data, nullptr, nullptr, nullptr) ==
-          PF_Err_NONE);
     CHECK(EffectMain(PF_Cmd_SEQUENCE_SETDOWN, nullptr, &output_data, nullptr, nullptr, nullptr) ==
           PF_Err_NONE);
 
@@ -324,6 +380,19 @@ TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects inva
     CHECK_THAT(std::string(output_data.return_msg), Catch::Matchers::ContainsSubstring("SmartFX"));
     CHECK(EffectMain(PF_Cmd_SMART_RENDER, nullptr, &output_data, nullptr, nullptr, nullptr) ==
           PF_Err_BAD_CALLBACK_PARAM);
+}
+
+TEST_CASE("After Effects sequence setup rejects missing host handle callbacks",
+          "[unit][adobe][effect][state][regression]") {
+    PF_InData input_data{};
+    PF_OutData output_data{};
+
+    const PF_Err status =
+        EffectMain(PF_Cmd_SEQUENCE_SETUP, &input_data, &output_data, nullptr, nullptr, nullptr);
+
+    CHECK(status == PF_Err_BAD_CALLBACK_PARAM);
+    CHECK_THAT(std::string(output_data.return_msg),
+               Catch::Matchers::ContainsSubstring("sequence state"));
 }
 
 TEST_CASE("After Effects sequence lifecycle owns host-managed sequence state",
@@ -435,6 +504,50 @@ TEST_CASE("After Effects SmartFX render checks pixels back in after render failu
     CHECK(host.checkin_effect_ref == input_data.effect_ref);
     CHECK(host.checkout_id == corridorkey::adobe::kParamInputLayer);
     CHECK(host.checkin_id == corridorkey::adobe::kParamInputLayer);
+}
+
+TEST_CASE("After Effects SmartFX render treats 32 bpc worlds as ARGB128",
+          "[unit][adobe][effect][smartfx][regression]") {
+    FakeSmartRenderHost host;
+    std::array<std::uint16_t, 8> pixels{};
+    host.input_world.width = 2;
+    host.input_world.height = 1;
+    host.input_world.rowbytes = 16;
+    host.input_world.data = reinterpret_cast<PF_PixelPtr>(pixels.data());
+    host.input_world.world_flags = PF_WorldFlag_DEEP;
+    host.output_world.width = 2;
+    host.output_world.height = 1;
+    host.output_world.rowbytes = 16;
+    host.output_world.data = reinterpret_cast<PF_PixelPtr>(pixels.data());
+    host.output_world.world_flags = PF_WorldFlag_DEEP;
+
+    FakeWorldSuiteHost world_suite_host;
+    world_suite_host.pixel_format = PF_PixelFormat_ARGB128;
+
+    PF_SmartRenderInput smart_render_input{};
+    smart_render_input.bitdepth = 32;
+    PF_SmartRenderExtra extra{.input = &smart_render_input, .cb = &host.callbacks};
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    input_data.pica_basicP = &world_suite_host.basic;
+    PF_OutData output_data{};
+
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    const PF_Err status = EffectMain(PF_Cmd_SMART_RENDER, &input_data, &output_data,
+                                     parameters.data(), nullptr, &extra);
+
+    REQUIRE(status == PF_Err_BAD_CALLBACK_PARAM);
+    CHECK_THAT(std::string(output_data.return_msg),
+               Catch::Matchers::ContainsSubstring("row bytes"));
+    CHECK(world_suite_host.acquire_count == 1);
+    CHECK(world_suite_host.get_pixel_format_count == 1);
+    CHECK(world_suite_host.release_count == 1);
+    CHECK(host.checkin_layer_pixels_count == 1);
 }
 
 TEST_CASE("After Effects params setup rejects missing host callbacks", "[unit][adobe][effect]") {
@@ -576,6 +689,39 @@ TEST_CASE("After Effects blue node default drives runtime model and despill chan
 
     REQUIRE(request.has_value());
     CHECK(request->prepare_options.node_identity == "blue");
+    CHECK(request->prepare_options.model_path ==
+          std::filesystem::path{"models"} / "corridorkey_dynamic_blue_fp16.ts");
+    CHECK(request->prepare_options.requested_device.backend == corridorkey::Backend::TorchTRT);
+    CHECK(request->inference_params.despill_screen_channel == 2);
+}
+
+TEST_CASE("After Effects screen color drives runtime model independently of node identity",
+          "[unit][adobe][effect][runtime][screen-color][regression]") {
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    set_popup_value(storage[corridorkey::adobe::kParamNodeIdentity], 1);
+    set_popup_value(storage[corridorkey::adobe::kParamScreenColor], 2);
+    set_popup_value(storage[corridorkey::adobe::kParamQuality], 3);
+
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext context{
+        .models_root = "models",
+        .host_surface = "after_effects",
+        .effect_identity = corridorkey::adobe::kEffectMatchName,
+        .client_instance_id = "sequence-1",
+        .width = 1920,
+        .height = 1080,
+        .requested_device = corridorkey::DeviceInfo{"auto", 0, corridorkey::Backend::Auto},
+        .engine_options = corridorkey::EngineCreateOptions{},
+    };
+
+    auto request = corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+
+    REQUIRE(request.has_value());
+    CHECK(request->prepare_options.node_identity == "green");
     CHECK(request->prepare_options.model_path ==
           std::filesystem::path{"models"} / "corridorkey_dynamic_blue_fp16.ts");
     CHECK(request->prepare_options.requested_device.backend == corridorkey::Backend::TorchTRT);

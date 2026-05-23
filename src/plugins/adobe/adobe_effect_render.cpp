@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "AE_EffectCBSuites.h"
+#include "AE_EffectPixelFormat.h"
+#include "SP/SPBasic.h"
 #include "adobe_bridge.hpp"
 #include "adobe_effect_metadata.hpp"
 #include "adobe_effect_parameters.hpp"
@@ -70,31 +73,101 @@ std::filesystem::path adobe_module_path() {
 #endif
 }
 
-corridorkey::adobe::AdobePixelFormat pixel_format_for_world(const PF_LayerDef& world) noexcept {
+class WorldSuiteCheckout {
+   public:
+    explicit WorldSuiteCheckout(PF_InData* input_data) noexcept
+        : m_basic(input_data == nullptr ? nullptr : input_data->pica_basicP) {
+        if (m_basic == nullptr || m_basic->AcquireSuite == nullptr) {
+            return;
+        }
+
+        const void* suite = nullptr;
+        if (m_basic->AcquireSuite(kPFWorldSuite, kPFWorldSuiteVersion2, &suite) == kSPNoError &&
+            suite != nullptr) {
+            m_suite = static_cast<const PF_WorldSuite2*>(suite);
+        }
+    }
+
+    WorldSuiteCheckout(const WorldSuiteCheckout&) = delete;
+    WorldSuiteCheckout& operator=(const WorldSuiteCheckout&) = delete;
+
+    ~WorldSuiteCheckout() {
+        if (m_suite != nullptr && m_basic != nullptr && m_basic->ReleaseSuite != nullptr) {
+            m_basic->ReleaseSuite(kPFWorldSuite, kPFWorldSuiteVersion2);
+        }
+    }
+
+    const PF_WorldSuite2* get() const noexcept {
+        return m_suite;
+    }
+
+   private:
+    SPBasicSuite* m_basic = nullptr;
+    const PF_WorldSuite2* m_suite = nullptr;
+};
+
+corridorkey::Result<corridorkey::adobe::AdobePixelFormat> map_adobe_pixel_format(
+    PF_PixelFormat pixel_format) {
+    switch (pixel_format) {
+        case PF_PixelFormat_ARGB128:
+            return corridorkey::adobe::AdobePixelFormat::Argb128;
+        case PF_PixelFormat_ARGB64:
+            return corridorkey::adobe::AdobePixelFormat::Argb64;
+        case PF_PixelFormat_ARGB32:
+            return corridorkey::adobe::AdobePixelFormat::Argb32;
+        case PF_PixelFormat_BGRA32:
+            return corridorkey::adobe::AdobePixelFormat::Bgra32;
+        default:
+            return corridorkey::Unexpected<corridorkey::Error>(corridorkey::Error{
+                corridorkey::ErrorCode::InvalidParameters, "Unsupported Adobe pixel format."});
+    }
+}
+
+corridorkey::Result<corridorkey::adobe::AdobePixelFormat> pixel_format_for_world(
+    PF_InData* input_data, const PF_LayerDef& world) {
+    WorldSuiteCheckout world_suite{input_data};
+    const PF_WorldSuite2* suite = world_suite.get();
+    if (suite != nullptr && suite->PF_GetPixelFormat != nullptr) {
+        PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
+        const PF_Err status = suite->PF_GetPixelFormat(&world, &pixel_format);
+        if (status == kAdobeStatusOk) {
+            return map_adobe_pixel_format(pixel_format);
+        }
+    }
+
     return PF_WORLD_IS_DEEP(&world) ? corridorkey::adobe::AdobePixelFormat::Argb64
                                     : corridorkey::adobe::AdobePixelFormat::Argb32;
 }
 
-corridorkey::adobe::AdobeFrameView frame_view_for_world(const PF_LayerDef& world) noexcept {
+corridorkey::Result<corridorkey::adobe::AdobeFrameView> frame_view_for_world(
+    PF_InData* input_data, const PF_LayerDef& world) {
+    auto pixel_format = pixel_format_for_world(input_data, world);
+    if (!pixel_format) {
+        return corridorkey::Unexpected<corridorkey::Error>(pixel_format.error());
+    }
     return corridorkey::adobe::AdobeFrameView{
         .data = world.data,
         .data_size_bytes = 0,
         .width = static_cast<int>(world.width),
         .height = static_cast<int>(world.height),
         .row_bytes = static_cast<int>(world.rowbytes),
-        .pixel_format = pixel_format_for_world(world),
+        .pixel_format = *pixel_format,
     };
 }
 
-corridorkey::adobe::AdobeMutableFrameView mutable_frame_view_for_world(
-    PF_LayerDef& world) noexcept {
+corridorkey::Result<corridorkey::adobe::AdobeMutableFrameView> mutable_frame_view_for_world(
+    PF_InData* input_data, PF_LayerDef& world) {
+    auto pixel_format = pixel_format_for_world(input_data, world);
+    if (!pixel_format) {
+        return corridorkey::Unexpected<corridorkey::Error>(pixel_format.error());
+    }
     return corridorkey::adobe::AdobeMutableFrameView{
         .data = world.data,
         .data_size_bytes = 0,
         .width = static_cast<int>(world.width),
         .height = static_cast<int>(world.height),
         .row_bytes = static_cast<int>(world.rowbytes),
-        .pixel_format = pixel_format_for_world(world),
+        .pixel_format = *pixel_format,
     };
 }
 
@@ -265,6 +338,21 @@ PF_Err render_frame(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
         return reject_render(output_data, request.error().message);
     }
 
+    const auto source_frame = frame_view_for_world(input_data, source);
+    if (!source_frame) {
+        return reject_render(output_data, source_frame.error().message);
+    }
+
+    auto source_runtime_frame = copy_adobe_frame_to_runtime(*source_frame);
+    if (!source_runtime_frame) {
+        return reject_render(output_data, source_runtime_frame.error().message);
+    }
+
+    const auto output_frame = mutable_frame_view_for_world(input_data, *output);
+    if (!output_frame) {
+        return reject_render(output_data, output_frame.error().message);
+    }
+
     auto runtime_client = app::HostPluginRuntimeClient::create(client_options_for(*request));
     if (!runtime_client) {
         return reject_render(output_data, runtime_client.error().message);
@@ -276,19 +364,14 @@ PF_Err render_frame(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
         return reject_render(output_data, prepare_status.error().message);
     }
 
-    const auto source_frame = frame_view_for_world(source);
-    auto render_result =
-        bridge.process_frame(source_frame, request->inference_params, render_index_for(input_data));
+    auto render_result = bridge.process_frame(*source_frame, request->inference_params,
+                                              render_index_for(input_data));
     if (!render_result) {
         return reject_render(output_data, render_result.error().message);
     }
 
-    auto source_runtime_frame = copy_adobe_frame_to_runtime(source_frame);
-    const AdobeRuntimeFrame* source_runtime =
-        source_runtime_frame ? &*source_runtime_frame : nullptr;
-    auto write_status =
-        copy_runtime_result_to_adobe_frame(*render_result, mutable_frame_view_for_world(*output),
-                                           request->output_mode, source_runtime);
+    auto write_status = copy_runtime_result_to_adobe_frame(
+        *render_result, *output_frame, request->output_mode, &*source_runtime_frame);
     if (!write_status) {
         return reject_render(output_data, write_status.error().message);
     }

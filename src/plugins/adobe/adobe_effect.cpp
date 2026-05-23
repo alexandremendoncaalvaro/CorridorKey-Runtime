@@ -78,7 +78,9 @@ AdobeStatus setup_sequence(PF_InData* input_data, PF_OutData& output_data) noexc
     const auto callbacks = handle_callbacks_for(input_data);
     if (callbacks.new_handle == nullptr || callbacks.lock_handle == nullptr ||
         callbacks.unlock_handle == nullptr || callbacks.dispose_handle == nullptr) {
-        return kAdobeStatusOk;
+        set_return_message(output_data,
+                           "CorridorKey sequence state requires host handle callbacks.");
+        return kAdobeStatusUnsupported;
     }
 
     PF_Handle sequence_data = callbacks.new_handle(sizeof(AdobeSequenceState));

@@ -168,6 +168,26 @@ Fresh-context review corrections applied in the same TDD slice:
   render path, and guarantees input pixel checkin when render validation fails.
   Smart Render remains unadvertised until the 32-bpc runtime path and host smoke
   coverage are complete.
+- Fresh-context review blocker follow-up keeps `Node Identity` as the Adobe
+  session identity while making `Screen Color` drive the runtime screen domain
+  for artifact selection and `InferenceParams.despill_screen_channel` when the
+  parameter is present. If older host state omits `Screen Color`, `Node
+  Identity` remains the compatibility fallback.
+- TDD SmartFX 32-bpc format slice now acquires `PF_WorldSuite2` through PICA,
+  maps `PF_PixelFormat_ARGB128` to the Adobe bridge's ARGB128 frame format, and
+  prevalidates source/output worlds before launching the runtime sidecar. Unit
+  coverage proves a 32-bpc SmartFX world is no longer misread as ARGB64 and that
+  checked-out pixels are still checked in after validation failure.
+- TDD sequence-state hardening now rejects `PF_Cmd_SEQUENCE_SETUP` when the
+  Adobe host handle callbacks are unavailable, returning a visible message
+  instead of reporting successful lifecycle setup without owned sequence state.
+- Verification passed for the review fixes:
+  `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
+  `scripts\verify_ci.ps1 -Mode Format`,
+  `git diff --check`,
+  `build\debug\tests\unit\test_unit.exe "[unit][adobe][effect]"`,
+  `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and
+  `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`.
 
 ## Definition of Done
 

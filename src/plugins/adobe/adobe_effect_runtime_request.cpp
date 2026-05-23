@@ -18,6 +18,7 @@ constexpr int kDefaultAlphaHintPolicy = 0;
 constexpr int kAlphaHintPolicyRequireExternal = 1;
 constexpr int kDefaultNodeIdentity = 0;
 constexpr int kNodeIdentityBlue = 1;
+constexpr int kScreenColorBlue = 1;
 constexpr double kDefaultDespillStrength = 0.5;
 constexpr double kMinimumDespillStrength = 0.0;
 constexpr double kMaximumDespillStrength = 1.0;
@@ -124,8 +125,8 @@ int requested_resolution_for_quality(int quality_mode) noexcept {
     }
 }
 
-int despill_screen_channel_for_node_identity(int node_identity) noexcept {
-    return node_identity == kNodeIdentityBlue ? 2 : 1;
+int despill_screen_channel_for_screen_color(int screen_color) noexcept {
+    return screen_color == kScreenColorBlue ? 2 : 1;
 }
 
 corridorkey::AlphaHintPolicy alpha_hint_policy_for(int alpha_hint_policy) noexcept {
@@ -137,6 +138,10 @@ corridorkey::AlphaHintPolicy alpha_hint_policy_for(int alpha_hint_policy) noexce
 
 std::string node_identity_for(int node_identity) {
     return node_identity == kNodeIdentityBlue ? "blue" : "green";
+}
+
+std::string screen_color_domain_for(int screen_color) {
+    return screen_color == kScreenColorBlue ? "blue" : "green";
 }
 
 bool output_mode_requires_foreground(int output_mode) noexcept {
@@ -166,7 +171,7 @@ corridorkey::Result<void> validate_runtime_request_context(
 
 corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameters[],
                                                     int requested_resolution, int output_mode,
-                                                    int node_identity) {
+                                                    int screen_color) {
     const int alpha_hint_policy = popup_choice(
         parameters, corridorkey::adobe::kParamAlphaHintPolicy, kDefaultAlphaHintPolicy, 1);
 
@@ -180,8 +185,7 @@ corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameter
         kMinimumDespillStrength, kMaximumDespillStrength));
     inference_params.spill_method =
         popup_choice(parameters, corridorkey::adobe::kParamSpillMethod, kDefaultSpillMethod, 2);
-    inference_params.despill_screen_channel =
-        despill_screen_channel_for_node_identity(node_identity);
+    inference_params.despill_screen_channel = despill_screen_channel_for_screen_color(screen_color);
     inference_params.alpha_hint_policy = alpha_hint_policy_for(alpha_hint_policy);
     inference_params.upscale_method = corridorkey::UpscaleMethod::Lanczos4;
     inference_params.enable_tiling = false;
@@ -218,9 +222,11 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
     const int quality_mode = popup_choice(parameters, kParamQuality, kDefaultQualityMode, 4);
     const int requested_resolution = requested_resolution_for_quality(quality_mode);
     const std::string node_identity_label = node_identity_for(*node_identity);
+    const int screen_color = popup_choice(parameters, kParamScreenColor, *node_identity, 2);
+    const std::string screen_color_domain = screen_color_domain_for(screen_color);
     auto artifact_selection = app::host_plugin_runtime_artifact_selection_for_request(
         context.models_root, context.requested_device, requested_resolution, false,
-        QualityFallbackMode::Direct, node_identity_label);
+        QualityFallbackMode::Direct, screen_color_domain);
     if (!artifact_selection) {
         return Unexpected<Error>(artifact_selection.error());
     }
@@ -246,7 +252,7 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
         timeout_milliseconds(parameters, kParamPrepareTimeoutSeconds, kDefaultPrepareTimeoutSeconds,
                              kMaximumPrepareTimeoutSeconds);
     request.inference_params =
-        build_inference_params(parameters, requested_resolution, *output_mode, *node_identity);
+        build_inference_params(parameters, requested_resolution, *output_mode, screen_color);
     request.output_mode = *output_mode;
     request.render_timeout_ms =
         timeout_milliseconds(parameters, kParamRenderTimeoutSeconds, kDefaultRenderTimeoutSeconds,
