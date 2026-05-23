@@ -188,6 +188,23 @@ Fresh-context review corrections applied in the same TDD slice:
   `build\debug\tests\unit\test_unit.exe "[unit][adobe][effect]"`,
   `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and
   `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`.
+- Diagnose plus TDD follow-up for the fresh-review SmartFX blocker reproduced the
+  symptom with a public `EffectMain(PF_Cmd_SMART_RENDER)` unit test: without an
+  exact `PF_WorldSuite2` pixel format, a 32-bpc SmartFX world still reached Adobe
+  bridge row-byte validation through the `PF_WORLD_IS_DEEP` fallback. The winning
+  hypothesis was that pixel-format fallback lived in the shared render helper
+  without a SmartFX-specific exact-format policy. SmartFX render now requires an
+  exact host pixel format before runtime launch, while direct render keeps the
+  depth fallback for the classic render path. Regression coverage rejects both a
+  missing world suite and a failed `PF_GetPixelFormat` lookup, and confirms checked
+  out pixels are still checked in on rejection.
+- Verification passed for the SmartFX exact-format follow-up:
+  `scripts\verify_ci.ps1 -Mode Format`,
+  `git diff --check`,
+  `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
+  `build\debug\tests\unit\test_unit.exe "[unit][adobe][effect]"`,
+  `build\debug\tests\unit\test_unit.exe "[adobe][runtime]"`, and
+  `build\debug\tests\integration\test_integration.exe "[integration][adobe][runtime]"`.
 
 ## Definition of Done
 

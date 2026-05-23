@@ -235,6 +235,7 @@ struct FakeWorldSuiteHost {
     SPBasicSuite basic{};
     PF_WorldSuite2 world_suite{};
     PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
+    PF_Err get_pixel_format_status = PF_Err_NONE;
     int acquire_count = 0;
     int release_count = 0;
     int get_pixel_format_count = 0;
@@ -271,7 +272,7 @@ struct FakeWorldSuiteHost {
 
         ++active_host->get_pixel_format_count;
         *pixel_format = active_host->pixel_format;
-        return PF_Err_NONE;
+        return active_host->get_pixel_format_status;
     }
 
     static inline FakeWorldSuiteHost* active_host = nullptr;
@@ -544,6 +545,87 @@ TEST_CASE("After Effects SmartFX render treats 32 bpc worlds as ARGB128",
     REQUIRE(status == PF_Err_BAD_CALLBACK_PARAM);
     CHECK_THAT(std::string(output_data.return_msg),
                Catch::Matchers::ContainsSubstring("row bytes"));
+    CHECK(world_suite_host.acquire_count == 1);
+    CHECK(world_suite_host.get_pixel_format_count == 1);
+    CHECK(world_suite_host.release_count == 1);
+    CHECK(host.checkin_layer_pixels_count == 1);
+}
+
+TEST_CASE("After Effects SmartFX render rejects worlds without exact pixel format",
+          "[unit][adobe][effect][smartfx][regression]") {
+    FakeSmartRenderHost host;
+    std::array<std::uint16_t, 8> pixels{};
+    host.input_world.width = 2;
+    host.input_world.height = 1;
+    host.input_world.rowbytes = 8;
+    host.input_world.data = reinterpret_cast<PF_PixelPtr>(pixels.data());
+    host.input_world.world_flags = PF_WorldFlag_DEEP;
+    host.output_world.width = 2;
+    host.output_world.height = 1;
+    host.output_world.rowbytes = 8;
+    host.output_world.data = reinterpret_cast<PF_PixelPtr>(pixels.data());
+    host.output_world.world_flags = PF_WorldFlag_DEEP;
+
+    PF_SmartRenderInput smart_render_input{};
+    smart_render_input.bitdepth = 32;
+    PF_SmartRenderExtra extra{.input = &smart_render_input, .cb = &host.callbacks};
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    PF_OutData output_data{};
+
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    const PF_Err status = EffectMain(PF_Cmd_SMART_RENDER, &input_data, &output_data,
+                                     parameters.data(), nullptr, &extra);
+
+    REQUIRE(status == PF_Err_BAD_CALLBACK_PARAM);
+    CHECK_THAT(std::string(output_data.return_msg),
+               Catch::Matchers::ContainsSubstring("pixel format"));
+    CHECK(host.checkin_layer_pixels_count == 1);
+}
+
+TEST_CASE("After Effects SmartFX render rejects failed exact pixel format lookup",
+          "[unit][adobe][effect][smartfx][regression]") {
+    FakeSmartRenderHost host;
+    std::array<std::uint16_t, 8> pixels{};
+    host.input_world.width = 2;
+    host.input_world.height = 1;
+    host.input_world.rowbytes = 16;
+    host.input_world.data = reinterpret_cast<PF_PixelPtr>(pixels.data());
+    host.input_world.world_flags = PF_WorldFlag_DEEP;
+    host.output_world.width = 2;
+    host.output_world.height = 1;
+    host.output_world.rowbytes = 16;
+    host.output_world.data = reinterpret_cast<PF_PixelPtr>(pixels.data());
+    host.output_world.world_flags = PF_WorldFlag_DEEP;
+
+    FakeWorldSuiteHost world_suite_host;
+    world_suite_host.get_pixel_format_status = PF_Err_INTERNAL_STRUCT_DAMAGED;
+
+    PF_SmartRenderInput smart_render_input{};
+    smart_render_input.bitdepth = 32;
+    PF_SmartRenderExtra extra{.input = &smart_render_input, .cb = &host.callbacks};
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    input_data.pica_basicP = &world_suite_host.basic;
+    PF_OutData output_data{};
+
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    const PF_Err status = EffectMain(PF_Cmd_SMART_RENDER, &input_data, &output_data,
+                                     parameters.data(), nullptr, &extra);
+
+    REQUIRE(status == PF_Err_BAD_CALLBACK_PARAM);
+    CHECK_THAT(std::string(output_data.return_msg),
+               Catch::Matchers::ContainsSubstring("pixel format"));
     CHECK(world_suite_host.acquire_count == 1);
     CHECK(world_suite_host.get_pixel_format_count == 1);
     CHECK(world_suite_host.release_count == 1);

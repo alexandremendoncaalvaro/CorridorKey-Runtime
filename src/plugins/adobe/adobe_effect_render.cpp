@@ -33,6 +33,11 @@ constexpr AdobeStatus kAdobeStatusOk = PF_Err_NONE;
 constexpr AdobeStatus kAdobeStatusUnsupported = PF_Err_BAD_CALLBACK_PARAM;
 constexpr std::size_t kMaximumWindowsModulePath = 32768;
 
+enum class PixelFormatPolicy {
+    AllowDepthFallback,
+    RequireExactHostFormat,
+};
+
 void set_return_message(PF_OutData& output_data, const char* message) noexcept {
     std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
 }
@@ -124,7 +129,7 @@ corridorkey::Result<corridorkey::adobe::AdobePixelFormat> map_adobe_pixel_format
 }
 
 corridorkey::Result<corridorkey::adobe::AdobePixelFormat> pixel_format_for_world(
-    PF_InData* input_data, const PF_LayerDef& world) {
+    PF_InData* input_data, const PF_LayerDef& world, PixelFormatPolicy policy) {
     WorldSuiteCheckout world_suite{input_data};
     const PF_WorldSuite2* suite = world_suite.get();
     if (suite != nullptr && suite->PF_GetPixelFormat != nullptr) {
@@ -135,13 +140,19 @@ corridorkey::Result<corridorkey::adobe::AdobePixelFormat> pixel_format_for_world
         }
     }
 
+    if (policy == PixelFormatPolicy::RequireExactHostFormat) {
+        return corridorkey::Unexpected<corridorkey::Error>(
+            corridorkey::Error{corridorkey::ErrorCode::InvalidParameters,
+                               "SmartFX render requires an exact Adobe pixel format."});
+    }
+
     return PF_WORLD_IS_DEEP(&world) ? corridorkey::adobe::AdobePixelFormat::Argb64
                                     : corridorkey::adobe::AdobePixelFormat::Argb32;
 }
 
 corridorkey::Result<corridorkey::adobe::AdobeFrameView> frame_view_for_world(
-    PF_InData* input_data, const PF_LayerDef& world) {
-    auto pixel_format = pixel_format_for_world(input_data, world);
+    PF_InData* input_data, const PF_LayerDef& world, PixelFormatPolicy policy) {
+    auto pixel_format = pixel_format_for_world(input_data, world, policy);
     if (!pixel_format) {
         return corridorkey::Unexpected<corridorkey::Error>(pixel_format.error());
     }
@@ -156,8 +167,8 @@ corridorkey::Result<corridorkey::adobe::AdobeFrameView> frame_view_for_world(
 }
 
 corridorkey::Result<corridorkey::adobe::AdobeMutableFrameView> mutable_frame_view_for_world(
-    PF_InData* input_data, PF_LayerDef& world) {
-    auto pixel_format = pixel_format_for_world(input_data, world);
+    PF_InData* input_data, PF_LayerDef& world, PixelFormatPolicy policy) {
+    auto pixel_format = pixel_format_for_world(input_data, world, policy);
     if (!pixel_format) {
         return corridorkey::Unexpected<corridorkey::Error>(pixel_format.error());
     }
@@ -249,6 +260,64 @@ corridorkey::app::HostPluginRuntimeClientOptions client_options_for(
     return options;
 }
 
+PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& output_data,
+                                             PF_ParamDef* parameters[], PF_LayerDef* output,
+                                             PixelFormatPolicy pixel_format_policy) {
+    if (parameters == nullptr || parameters[corridorkey::adobe::kParamInputLayer] == nullptr ||
+        output == nullptr) {
+        return reject_render(output_data, "CorridorKey render requires source and output frames.");
+    }
+
+    const PF_LayerDef& source = parameters[corridorkey::adobe::kParamInputLayer]->u.ld;
+    auto request = corridorkey::adobe::build_effect_runtime_request(
+        parameters, render_context_for(input_data, source));
+    if (!request) {
+        return reject_render(output_data, request.error().message);
+    }
+
+    const auto source_frame = frame_view_for_world(input_data, source, pixel_format_policy);
+    if (!source_frame) {
+        return reject_render(output_data, source_frame.error().message);
+    }
+
+    auto source_runtime_frame = corridorkey::adobe::copy_adobe_frame_to_runtime(*source_frame);
+    if (!source_runtime_frame) {
+        return reject_render(output_data, source_runtime_frame.error().message);
+    }
+
+    const auto output_frame =
+        mutable_frame_view_for_world(input_data, *output, pixel_format_policy);
+    if (!output_frame) {
+        return reject_render(output_data, output_frame.error().message);
+    }
+
+    auto runtime_client =
+        corridorkey::app::HostPluginRuntimeClient::create(client_options_for(*request));
+    if (!runtime_client) {
+        return reject_render(output_data, runtime_client.error().message);
+    }
+
+    corridorkey::adobe::AdobeRuntimeBridge bridge(std::move(*runtime_client));
+    auto prepare_status = bridge.prepare_session(request->prepare_options);
+    if (!prepare_status) {
+        return reject_render(output_data, prepare_status.error().message);
+    }
+
+    auto render_result = bridge.process_frame(*source_frame, request->inference_params,
+                                              render_index_for(input_data));
+    if (!render_result) {
+        return reject_render(output_data, render_result.error().message);
+    }
+
+    auto write_status = corridorkey::adobe::copy_runtime_result_to_adobe_frame(
+        *render_result, *output_frame, request->output_mode, &*source_runtime_frame);
+    if (!write_status) {
+        return reject_render(output_data, write_status.error().message);
+    }
+
+    return kAdobeStatusOk;
+}
+
 }  // namespace
 
 namespace corridorkey::adobe {
@@ -323,60 +392,15 @@ PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
     PF_ParamDef source_parameter{};
     source_parameter.u.ld = *input_world;
     smart_parameters[kParamInputLayer] = &source_parameter;
-    return render_frame(input_data, output_data, smart_parameters.data(), output_world);
+    return render_frame_with_pixel_format_policy(input_data, output_data, smart_parameters.data(),
+                                                 output_world,
+                                                 PixelFormatPolicy::RequireExactHostFormat);
 }
 
 PF_Err render_frame(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef* parameters[],
                     PF_LayerDef* output) {
-    if (parameters == nullptr || parameters[kParamInputLayer] == nullptr || output == nullptr) {
-        return reject_render(output_data, "CorridorKey render requires source and output frames.");
-    }
-
-    const PF_LayerDef& source = parameters[kParamInputLayer]->u.ld;
-    auto request = build_effect_runtime_request(parameters, render_context_for(input_data, source));
-    if (!request) {
-        return reject_render(output_data, request.error().message);
-    }
-
-    const auto source_frame = frame_view_for_world(input_data, source);
-    if (!source_frame) {
-        return reject_render(output_data, source_frame.error().message);
-    }
-
-    auto source_runtime_frame = copy_adobe_frame_to_runtime(*source_frame);
-    if (!source_runtime_frame) {
-        return reject_render(output_data, source_runtime_frame.error().message);
-    }
-
-    const auto output_frame = mutable_frame_view_for_world(input_data, *output);
-    if (!output_frame) {
-        return reject_render(output_data, output_frame.error().message);
-    }
-
-    auto runtime_client = app::HostPluginRuntimeClient::create(client_options_for(*request));
-    if (!runtime_client) {
-        return reject_render(output_data, runtime_client.error().message);
-    }
-
-    AdobeRuntimeBridge bridge(std::move(*runtime_client));
-    auto prepare_status = bridge.prepare_session(request->prepare_options);
-    if (!prepare_status) {
-        return reject_render(output_data, prepare_status.error().message);
-    }
-
-    auto render_result = bridge.process_frame(*source_frame, request->inference_params,
-                                              render_index_for(input_data));
-    if (!render_result) {
-        return reject_render(output_data, render_result.error().message);
-    }
-
-    auto write_status = copy_runtime_result_to_adobe_frame(
-        *render_result, *output_frame, request->output_mode, &*source_runtime_frame);
-    if (!write_status) {
-        return reject_render(output_data, write_status.error().message);
-    }
-
-    return kAdobeStatusOk;
+    return render_frame_with_pixel_format_policy(input_data, output_data, parameters, output,
+                                                 PixelFormatPolicy::AllowDepthFallback);
 }
 
 }  // namespace corridorkey::adobe
