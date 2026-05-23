@@ -494,6 +494,26 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST_CASE("host plugin runtime artifact selection keeps color and backend policy in app layer",
+          "[unit][runtime][screen-color][regression]") {
+    const std::filesystem::path models_root{"models"};
+
+    auto green = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"auto", 0, Backend::Auto}, 1024, false, QualityFallbackMode::Direct,
+        "green");
+    REQUIRE(green.has_value());
+    CHECK(green->model_path == models_root / "corridorkey_fp16_1024.onnx");
+    CHECK(green->requested_device.backend == Backend::Auto);
+
+    auto blue = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"auto", 0, Backend::Auto}, 1024, false, QualityFallbackMode::Direct,
+        "blue");
+    REQUIRE(blue.has_value());
+    CHECK(blue->model_path == models_root / "corridorkey_dynamic_blue_fp16.ts");
+    CHECK(blue->requested_device.backend == Backend::TorchTRT);
+    CHECK(blue->requested_device.name == "TorchTRT");
+}
+
 TEST_CASE("packaged model resolution uses catalog entries for non-onnx artifacts",
           "[unit][runtime][regression]") {
     REQUIRE(packaged_model_resolution("corridorkey_mlx.safetensors") == 2048);

@@ -19,6 +19,11 @@ struct ArtifactSelection {
     bool coarse_to_fine = false;
 };
 
+struct HostPluginRuntimeArtifactSelection {
+    std::filesystem::path model_path = {};
+    DeviceInfo requested_device = {};
+};
+
 struct RuntimeOptimizationProfile {
     std::string id;
     std::string label;
@@ -81,6 +86,12 @@ CORRIDORKEY_API Result<std::vector<std::filesystem::path>> expected_artifact_pat
     int requested_resolution, bool allow_lower_resolution_fallback = false,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false);
+CORRIDORKEY_API Result<HostPluginRuntimeArtifactSelection>
+host_plugin_runtime_artifact_selection_for_request(
+    const std::filesystem::path& models_root, const DeviceInfo& requested_device,
+    int requested_resolution, bool allow_lower_resolution_fallback = false,
+    QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
+    std::string_view screen_color = "green");
 CORRIDORKEY_API Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback = false,

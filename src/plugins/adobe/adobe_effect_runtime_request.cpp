@@ -38,7 +38,6 @@ constexpr int kMaximumPrepareTimeoutSeconds = 600;
 constexpr int kMaximumRenderTimeoutSeconds = 300;
 constexpr int kMinimumEdgePixels = 0;
 constexpr int kMaximumEdgePixels = 100;
-constexpr const char* kDynamicBlueModelFilename = "corridorkey_dynamic_blue_fp16.ts";
 
 const PF_ParamDef* parameter_at(PF_ParamDef* const parameters[], PF_ParamIndex index) noexcept {
     if (parameters == nullptr || index < 0 ||
@@ -146,49 +145,6 @@ bool output_mode_requires_foreground(int output_mode) noexcept {
     return output_mode != kOutputMatteOnly && output_mode != kOutputSourceMatte;
 }
 
-corridorkey::DeviceInfo runtime_device_for_model_path(corridorkey::DeviceInfo requested_device,
-                                                      const std::filesystem::path& model_path) {
-    if (model_path.extension() == ".ts") {
-        requested_device.backend = corridorkey::Backend::TorchTRT;
-        if (requested_device.name.empty() || requested_device.name == "auto") {
-            requested_device.name = "TorchTRT";
-        }
-    }
-    return requested_device;
-}
-
-corridorkey::Result<std::filesystem::path> blue_model_path_for_request(
-    const corridorkey::adobe::AdobeEffectRuntimeRequestContext& context) {
-    auto blue_entry = corridorkey::app::find_model_by_filename(kDynamicBlueModelFilename);
-    if (!blue_entry.has_value() || blue_entry->screen_color != "blue") {
-        return corridorkey::Unexpected<corridorkey::Error>(
-            corridorkey::Error{corridorkey::ErrorCode::InvalidParameters,
-                               "Adobe Blue node could not resolve a blue model artifact."});
-    }
-    return context.models_root / blue_entry->filename;
-}
-
-corridorkey::Result<std::filesystem::path> model_path_for_request(
-    const corridorkey::adobe::AdobeEffectRuntimeRequestContext& context, int requested_resolution,
-    int node_identity) {
-    if (node_identity == kNodeIdentityBlue) {
-        return blue_model_path_for_request(context);
-    }
-
-    auto expected_paths = corridorkey::app::expected_artifact_paths_for_request(
-        context.models_root, context.requested_device, requested_resolution, false,
-        corridorkey::QualityFallbackMode::Direct);
-    if (!expected_paths) {
-        return corridorkey::Unexpected<corridorkey::Error>(expected_paths.error());
-    }
-    if (expected_paths->empty()) {
-        return corridorkey::Unexpected<corridorkey::Error>(
-            corridorkey::Error{corridorkey::ErrorCode::InvalidParameters,
-                               "Adobe runtime request could not resolve a model artifact path."});
-    }
-    return expected_paths->front();
-}
-
 corridorkey::Result<void> validate_runtime_request_context(
     const corridorkey::adobe::AdobeEffectRuntimeRequestContext& context) {
     if (context.models_root.empty()) {
@@ -263,9 +219,12 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
     }
     const int quality_mode = popup_choice(parameters, kParamQuality, kDefaultQualityMode, 4);
     const int requested_resolution = requested_resolution_for_quality(quality_mode);
-    auto model_path = model_path_for_request(context, requested_resolution, *node_identity);
-    if (!model_path) {
-        return Unexpected<Error>(model_path.error());
+    const std::string node_identity_label = node_identity_for(*node_identity);
+    auto artifact_selection = app::host_plugin_runtime_artifact_selection_for_request(
+        context.models_root, context.requested_device, requested_resolution, false,
+        QualityFallbackMode::Direct, node_identity_label);
+    if (!artifact_selection) {
+        return Unexpected<Error>(artifact_selection.error());
     }
 
     auto output_mode = strict_popup_choice(parameters, kParamOutputMode, kDefaultOutputMode,
@@ -277,11 +236,10 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
     AdobeEffectRuntimeRequest request;
     request.prepare_options.host_surface = context.host_surface;
     request.prepare_options.effect_identity = context.effect_identity;
-    request.prepare_options.node_identity = node_identity_for(*node_identity);
+    request.prepare_options.node_identity = node_identity_label;
     request.prepare_options.client_instance_id = context.client_instance_id;
-    request.prepare_options.model_path = *model_path;
-    request.prepare_options.requested_device =
-        runtime_device_for_model_path(context.requested_device, *model_path);
+    request.prepare_options.model_path = artifact_selection->model_path;
+    request.prepare_options.requested_device = artifact_selection->requested_device;
     request.prepare_options.engine_options = context.engine_options;
     request.prepare_options.requested_quality_mode = quality_mode;
     request.prepare_options.requested_resolution = requested_resolution;

@@ -269,6 +269,17 @@ std::vector<std::filesystem::path> candidate_artifact_paths_for_request(
     return {models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx")};
 }
 
+DeviceInfo runtime_device_for_host_plugin_artifact(DeviceInfo requested_device,
+                                                   const std::filesystem::path& artifact_path) {
+    if (artifact_path.extension() == ".ts") {
+        requested_device.backend = Backend::TorchTRT;
+        if (requested_device.name.empty() || requested_device.name == "auto") {
+            requested_device.name = "TorchTRT";
+        }
+    }
+    return requested_device;
+}
+
 Result<std::pair<int, bool>> search_resolution_for_request(
     const DeviceInfo& requested_device, int requested_resolution, QualityFallbackMode fallback_mode,
     int coarse_resolution_override, bool allow_unrestricted_quality_attempt) {
@@ -1140,6 +1151,44 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
     }
 
     return expected;
+}
+
+Result<HostPluginRuntimeArtifactSelection> host_plugin_runtime_artifact_selection_for_request(
+    const std::filesystem::path& models_root, const DeviceInfo& requested_device,
+    int requested_resolution, bool allow_lower_resolution_fallback,
+    QualityFallbackMode fallback_mode, std::string_view screen_color) {
+    if (screen_color == "blue") {
+        auto blue_entry = app::find_model_by_filename(std::string(kDynamicBlueModelFilename));
+        if (!blue_entry.has_value() || blue_entry->screen_color != "blue") {
+            return Unexpected<Error>(
+                Error{ErrorCode::InvalidParameters,
+                      "Host plugin runtime could not resolve a blue model artifact."});
+        }
+        const auto model_path = models_root / blue_entry->filename;
+        return HostPluginRuntimeArtifactSelection{
+            .model_path = model_path,
+            .requested_device =
+                runtime_device_for_host_plugin_artifact(requested_device, model_path),
+        };
+    }
+
+    auto expected_paths =
+        expected_artifact_paths_for_request(models_root, requested_device, requested_resolution,
+                                            allow_lower_resolution_fallback, fallback_mode);
+    if (!expected_paths) {
+        return Unexpected<Error>(expected_paths.error());
+    }
+    if (expected_paths->empty()) {
+        return Unexpected<Error>(
+            Error{ErrorCode::InvalidParameters,
+                  "Host plugin runtime could not resolve a model artifact path."});
+    }
+
+    const auto model_path = expected_paths->front();
+    return HostPluginRuntimeArtifactSelection{
+        .model_path = model_path,
+        .requested_device = runtime_device_for_host_plugin_artifact(requested_device, model_path),
+    };
 }
 
 namespace {
