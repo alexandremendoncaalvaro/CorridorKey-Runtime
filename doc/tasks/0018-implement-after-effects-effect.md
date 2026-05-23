@@ -39,7 +39,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [x] The effect registers CorridorKey controls needed to build a complete
       prepare request, including model or node identity, quality, screen color,
       alpha hint policy, and post-process controls that have OFX equivalents.
-- [ ] Per-instance and per-sequence state uses Adobe-managed handles or RAII
+- [x] Per-instance and per-sequence state uses Adobe-managed handles or RAII
       wrappers and contains no mutable static render state.
 - [x] Multi-frame rendering safety is either enabled with focused concurrency
       tests or explicitly disabled with a documented reason in the task Notes.
@@ -147,6 +147,12 @@ Fresh-context review corrections applied in the same TDD slice:
   writer coverage for ARGB128 and BGRA32, and makes `Node Identity` the single
   source of Green/Blue domain for both artifact selection and
   `InferenceParams.despill_screen_channel`.
+- TDD sequence-lifecycle slice now allocates sequence state through the Adobe
+  host handle callbacks during `PF_Cmd_SEQUENCE_SETUP`, unlocks it after
+  initialization, and disposes it during `PF_Cmd_SEQUENCE_SETDOWN` and
+  `PF_Cmd_SEQUENCE_RESETUP`. Unit coverage drives the behavior through
+  `EffectMain` with fake host callbacks, so the effect has per-sequence state
+  without mutable static render state.
 
 ## Definition of Done
 

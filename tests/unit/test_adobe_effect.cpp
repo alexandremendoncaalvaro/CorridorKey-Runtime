@@ -2,12 +2,15 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstddef>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "AE_Effect.h"
+#include "AE_EffectCB.h"
 #include "adobe_effect_metadata.hpp"
 #include "plugins/adobe/adobe_effect_parameters.hpp"
 
@@ -18,6 +21,77 @@ namespace {
 
 struct CapturedAdobeParameters {
     std::vector<PF_ParamDef> definitions;
+};
+
+struct FakeAdobeHandle {
+    explicit FakeAdobeHandle(std::size_t byte_count) : payload(byte_count), data(payload.data()) {}
+
+    std::vector<std::byte> payload;
+    void* data = nullptr;
+    bool disposed = false;
+};
+
+struct FakeAdobeHandleHost {
+    FakeAdobeHandleHost() {
+        callbacks.host_new_handle = fake_new_handle;
+        callbacks.host_lock_handle = fake_lock_handle;
+        callbacks.host_unlock_handle = fake_unlock_handle;
+        callbacks.host_dispose_handle = fake_dispose_handle;
+        active_host = this;
+    }
+
+    ~FakeAdobeHandleHost() {
+        active_host = nullptr;
+    }
+
+    PF_UtilCallbacks callbacks{};
+    std::vector<std::unique_ptr<FakeAdobeHandle>> handles;
+    int dispose_count = 0;
+    int unlock_count = 0;
+
+    PF_Handle new_handle(std::size_t byte_count) {
+        auto handle = std::make_unique<FakeAdobeHandle>(byte_count);
+        auto* data = &handle->data;
+        handles.push_back(std::move(handle));
+        return reinterpret_cast<PF_Handle>(data);
+    }
+
+    FakeAdobeHandle* record_for(PF_Handle handle) {
+        for (auto& record : handles) {
+            if (reinterpret_cast<PF_Handle>(&record->data) == handle) {
+                return record.get();
+            }
+        }
+        return nullptr;
+    }
+
+    static PF_Handle fake_new_handle(A_u_longlong byte_count) {
+        return active_host == nullptr
+                   ? nullptr
+                   : active_host->new_handle(static_cast<std::size_t>(byte_count));
+    }
+
+    static void* fake_lock_handle(PF_Handle handle) {
+        auto* record = active_host == nullptr ? nullptr : active_host->record_for(handle);
+        return record == nullptr || record->disposed ? nullptr : record->data;
+    }
+
+    static void fake_unlock_handle(PF_Handle) {
+        if (active_host != nullptr) {
+            ++active_host->unlock_count;
+        }
+    }
+
+    static void fake_dispose_handle(PF_Handle handle) {
+        auto* record = active_host == nullptr ? nullptr : active_host->record_for(handle);
+        if (record != nullptr && !record->disposed) {
+            record->disposed = true;
+            record->data = nullptr;
+            ++active_host->dispose_count;
+        }
+    }
+
+    static inline FakeAdobeHandleHost* active_host = nullptr;
 };
 
 PF_Err capture_added_parameter(PF_ProgPtr effect_ref, PF_ParamIndex, PF_ParamDefPtr definition) {
@@ -127,6 +201,30 @@ TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects inva
     CHECK_THAT(std::string(output_data.return_msg), Catch::Matchers::ContainsSubstring("SmartFX"));
     CHECK(EffectMain(PF_Cmd_SMART_RENDER, nullptr, &output_data, nullptr, nullptr, nullptr) ==
           PF_Err_BAD_CALLBACK_PARAM);
+}
+
+TEST_CASE("After Effects sequence lifecycle owns host-managed sequence state",
+          "[unit][adobe][effect][state]") {
+    FakeAdobeHandleHost host;
+    PF_InData input_data{};
+    input_data.utils = &host.callbacks;
+    PF_OutData output_data{};
+
+    const PF_Err setup_status =
+        EffectMain(PF_Cmd_SEQUENCE_SETUP, &input_data, &output_data, nullptr, nullptr, nullptr);
+
+    REQUIRE(setup_status == PF_Err_NONE);
+    REQUIRE(output_data.sequence_data != nullptr);
+    CHECK(host.record_for(output_data.sequence_data) != nullptr);
+    CHECK(host.unlock_count == 1);
+
+    input_data.sequence_data = output_data.sequence_data;
+    const PF_Err setdown_status =
+        EffectMain(PF_Cmd_SEQUENCE_SETDOWN, &input_data, &output_data, nullptr, nullptr, nullptr);
+
+    CHECK(setdown_status == PF_Err_NONE);
+    CHECK(output_data.sequence_data == nullptr);
+    CHECK(host.dispose_count == 1);
 }
 
 TEST_CASE("After Effects params setup rejects missing host callbacks", "[unit][adobe][effect]") {
