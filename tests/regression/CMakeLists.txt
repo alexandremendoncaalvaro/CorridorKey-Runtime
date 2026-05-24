@@ -87,6 +87,13 @@ if(WIN32)
     set_tests_properties(regression_adobe_install_smoke PROPERTIES LABELS "regression")
 
     add_test(
+        NAME regression_adobe_host_smoke_scaffold
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_adobe_host_smoke_scaffold.ps1
+    )
+    set_tests_properties(regression_adobe_host_smoke_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
         NAME regression_windows_doctor_missing_model_tolerance
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_doctor_missing_model_tolerance.ps1

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "package-runtime", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -127,7 +127,7 @@ Assert-CorridorKeyWindowsReleaseLabelFormat `
 if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     if ($stableGithubReleaseRequested) {
         Write-Host "[windows] Stable GitHub release requested; using clean version label $resolvedVersion." -ForegroundColor Yellow
-    } elseif ($Task -in @("package-ofx", "package-adobe")) {
+    } elseif ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host")) {
         $buildDir = Join-Path $repoRoot ("build\" + $Preset)
         $builtLabel = Get-CorridorKeyBuiltCliDisplayLabel -BuildDir $buildDir
         if ([string]::IsNullOrWhiteSpace($builtLabel)) {
@@ -163,7 +163,7 @@ Write-Host "[windows] Version: $resolvedVersion" -ForegroundColor Cyan
 if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     Write-Host "[windows] Display version label: $DisplayVersionLabel" -ForegroundColor Cyan
 }
-if ($Task -in @("package-ofx", "package-adobe", "package-runtime", "release")) {
+if ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release")) {
     Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
 }
 
@@ -308,6 +308,27 @@ switch ($Task) {
             Assert-CorridorKeyAdobePackageValidationHealthy `
                 -ValidationReportPath $validationPath `
                 -Label "Adobe $($variant.Suffix) package" | Out-Null
+        }
+        break
+    }
+    "smoke-adobe-host" {
+        foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $resolvedTrack) {
+            $stagedTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $resolvedVersion } else { $DisplayVersionLabel }
+            $packagePath = Join-Path $repoRoot ("dist\CorridorKey_Adobe_v${stagedTag}_Windows_$($variant.Suffix)")
+            if (-not (Test-Path -LiteralPath $packagePath)) {
+                throw "Adobe host smoke package path not found: $packagePath. Run scripts\windows.ps1 -Task package-adobe -Preset $Preset -Track $resolvedTrack first."
+            }
+
+            $reportPath = Join-Path $packagePath "adobe_after_effects_host_smoke_green.json"
+            $arguments = @(
+                "-PackagePath", $packagePath,
+                "-ExpectedDisplayVersionLabel", $stagedTag,
+                "-ReportPath", $reportPath
+            ) + $additionalArguments
+            Invoke-CorridorKeyScript -ScriptName "smoke_adobe_after_effects_host_win.ps1" -Arguments $arguments
+            Assert-CorridorKeyAdobeHostSmokeHealthy `
+                -ValidationReportPath $reportPath `
+                -Label "Adobe After Effects $($variant.Suffix) host smoke" | Out-Null
         }
         break
     }

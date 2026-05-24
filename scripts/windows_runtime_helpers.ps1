@@ -1882,6 +1882,72 @@ function Assert-CorridorKeyAdobePackageValidationHealthy {
     return $validation
 }
 
+function Read-CorridorKeyAdobeHostSmokeReport {
+    param([string]$ValidationReportPath)
+
+    if (-not (Test-Path -LiteralPath $ValidationReportPath)) {
+        throw "Adobe host smoke report not found: $ValidationReportPath"
+    }
+
+    return Get-Content -LiteralPath $ValidationReportPath -Raw -ErrorAction Stop | ConvertFrom-Json
+}
+
+function Get-CorridorKeyAdobeHostSmokeIssues {
+    param([object]$Validation)
+
+    $issues = @()
+    if ($null -eq $Validation) {
+        return @("Adobe host smoke payload is empty.")
+    }
+
+    if ((-not (Test-CorridorKeyPsProperty -Object $Validation -Name "validation_passed")) -or
+        (-not [bool]$Validation.validation_passed)) {
+        $issues += "Adobe host smoke did not pass."
+    }
+
+    foreach ($field in @("afterfx_path", "aerender_path", "fixture", "render", "pixel_probe")) {
+        if (-not (Test-CorridorKeyPsProperty -Object $Validation -Name $field)) {
+            $issues += "Adobe host smoke is missing the '$field' payload."
+        }
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $Validation -Name "fixture") -and
+        $null -ne $Validation.fixture -and
+        (Test-CorridorKeyPsProperty -Object $Validation.fixture -Name "status") -and
+        [string]$Validation.fixture.status -ne "ok") {
+        $issues += "Adobe host smoke fixture creation did not succeed."
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $Validation -Name "pixel_probe") -and
+        $null -ne $Validation.pixel_probe) {
+        $minimum = [double]$Validation.pixel_probe.output_luma_min
+        $maximum = [double]$Validation.pixel_probe.output_luma_max
+        if ($minimum -ge 250.0 -and $maximum -ge 250.0) {
+            $issues += "Adobe host smoke rendered matte is fully white."
+        }
+        if (($maximum - $minimum) -lt 16.0) {
+            $issues += "Adobe host smoke rendered matte has insufficient luminance variation."
+        }
+    }
+
+    return @($issues)
+}
+
+function Assert-CorridorKeyAdobeHostSmokeHealthy {
+    param(
+        [string]$ValidationReportPath,
+        [string]$Label = "Adobe host smoke"
+    )
+
+    $validation = Read-CorridorKeyAdobeHostSmokeReport -ValidationReportPath $ValidationReportPath
+    $issues = Get-CorridorKeyAdobeHostSmokeIssues -Validation $validation
+    if (@($issues).Count -gt 0) {
+        throw "$Label validation is not acceptable. Issues: $($issues -join ' | ')"
+    }
+
+    return $validation
+}
+
 function Get-CorridorKeyFileSha256 {
     param([string]$Path)
 
