@@ -1,5 +1,0 @@
-interface:
-  display_name: agentic-spike
-  short_description: Staged spike with golden fixtures per WORKFLOW §14. Discovery + fixture + pipeline-with-gates + two-layer evaluation. For unknown-technique uncertainty, not non-trivial work in general.
-policy:
-  allow_implicit_invocation: false

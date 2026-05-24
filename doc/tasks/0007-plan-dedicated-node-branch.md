@@ -25,27 +25,27 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 
 - [x] The new implementation branch base is recorded with evidence from `main`
   and the Green TorchTRT investigation branch.
-- [x] `agentic-ground` is run for the branch-base and port-classification
+- [x] `ad-ground` is run for the branch-base and port-classification
   decision before code changes begin.
 - [x] Candidate improvements from the archived branch are classified as port,
   discard, or rewrite.
 - [x] The `agentic` tooling is present on the new branch, including the
-  repository `.agents/skills/agentic-*` skills and the managed `AGENTS.md`
+  repository `.agents/skills/ad-*` skills and the managed `AGENTS.md`
   skill entries.
 - [x] Directly relevant planning artifacts are present on the new branch,
   including `doc/specs/0002-dedicated-screen-nodes.md` and this task.
 - [x] Any unresolved Blue OFX identifier or bundle-strategy decision is captured
-  through `agentic-adr` before implementation depends on it.
-- [x] Follow-up implementation work is split into `agentic-task` slices for OFX
+  through `ad-adr` before implementation depends on it.
+- [x] Follow-up implementation work is split into `ad-task` slices for OFX
   descriptors, model selection, runtime isolation, packaging, and validation.
 - [x] The task plan records that each implementation slice requires
-  `agentic-review` before being marked `done`.
+  `ad-review` before being marked `done`.
 
 ## Plan
 
 Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
 
-- [x] Run `agentic-ground` for the branch-base decision, using `main`, the
+- [x] Run `ad-ground` for the branch-base decision, using `main`, the
   current branch diff, in-repo OFX/runtime patterns, and git history.
 - [x] Create or switch to the implementation branch from `main` after the base
   decision is recorded.
@@ -61,10 +61,10 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
   cross-color shared-node coercion as discarded unless a later accepted ADR
   reopens them.
 - [x] Identify reusable changes for Blue Torch-TensorRT and mixed packaging,
-  then open separate `agentic-task` files for each implementation slice.
-- [x] Run or prepare `agentic-adr` for the Blue OFX identifier and one-bundle
+  then open separate `ad-task` files for each implementation slice.
+- [x] Run or prepare `ad-adr` for the Blue OFX identifier and one-bundle
   versus two-bundle decision if task context does not settle them.
-- [x] Record the required `agentic-review` gate in every follow-up task's
+- [x] Record the required `ad-review` gate in every follow-up task's
   Definition of Done before implementation begins.
 
 ## Notes

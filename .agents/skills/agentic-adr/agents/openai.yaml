@@ -1,5 +1,0 @@
-interface:
-  display_name: agentic-adr
-  short_description: Draft a new ADR at doc/adr/NNNN-<slug>.md from the current conversation only.
-policy:
-  allow_implicit_invocation: false

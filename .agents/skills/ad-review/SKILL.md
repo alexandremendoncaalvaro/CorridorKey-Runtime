@@ -1,55 +1,54 @@
 ---
 name: ad-review
 description: |
-  Run this skill whenever the user asks for a code review, diff review, branch review, PR review, "revisa esse diff", "faz code review", "review main..HEAD", or invokes /ad-review.
-  Mechanical shape: this session writes TWO handoff `.md` files to `.agentic/reviews/` (one Standards-axis, one Spec-axis) then STOPS. The user then runs `/clear` + paste twice — once per axis — in fresh Codex sessions, and collates the two reports by hand. NO sub-agents are spawned (Codex has no subagent primitive); NO Task tool is called; the current session does not produce findings. The two-axis split — Standards (does the diff conform to AGENTS.md / ARCHITECTURE.md / GUIDELINES.md / CONTEXT.md / accepted ADRs?) and Spec (does the diff match the originating task / spec / PRD?) — exists so neither axis can mask the other.
-summary: Writes 2 fresh-context handoff `.md` files (Standards-axis + Spec-axis) and stops. User runs `/clear` + paste twice in fresh sessions. No subagent primitive on Codex — handoff files replace it. Adapted from mattpocock/skills `review` per WORKFLOW §10.
+  Run this skill when the user explicitly invokes `/ad-review` or names it ("run ad-review", "use the ad-review skill"), or when the user asks for a code review with an explicit scope ("review this branch", "review main..HEAD", "revisa esse diff <range>"). Auto-trigger note: `allow_implicit_invocation: true` is set so review-language can fire the skill, but this also means broad review-adjacent conversation may auto-invoke a multi-step file-writing workflow. If a request is ambiguous, ask the user to confirm scope before invoking.
+  Mechanical shape: ONE pass in the current session. The skill assembles the diff plus the relevant context, then produces a single review with findings grouped under `## Standards Findings` and `## Spec Findings` — two axes, one session. Standards = does the diff conform to AGENTS.md / ARCHITECTURE.md / GUIDELINES.md / CONTEXT.md / accepted ADRs? Spec = does the diff match the originating task / spec / PRD? The two-axis structure exists so neither axis masks the other.
+  No `/clear`. No spawning subagents from the skill (Codex skills cannot spawn agents — only the user can, via natural language, and that is an optional escalation documented at the bottom). The skill writes a single audit-trail handoff file at `.agentic/reviews/<ISO>-<scope>.md` for the record, then performs the review inline.
+summary: Single-session two-axis code review per WORKFLOW §10 (Codex variant). Reads diff + binding docs + originating spec, returns findings under `## Standards Findings` and `## Spec Findings`. Writes audit trail to `.agentic/reviews/`. No `/clear`; user-initiated subagent escalation documented for §10 ideal.
 ---
 
 <how-this-runs-on-codex>
-Codex has no subagent primitive. The skill cannot spawn parallel reviewers; the user runs them manually as two sequential `/clear` passes.
+Codex skills run inline in the current session. Skills cannot spawn subagents — only the user can, via natural-language commands like `"spawn an agent to review X using <prompt>"`. So this skill does the review in one pass with disciplined axis-separated output.
 
-Mechanical shape — do not deviate:
+Mechanical shape:
 
 ```
 THIS SESSION:
   1. Scope the review (which range / PR / commit?).
-  2. Identify Standards sources (AGENTS.md, ARCHITECTURE.md, GUIDELINES.md, CONTEXT.md, accepted ADRs).
-  3. Identify Spec source (task Acceptance Criteria → spec → PRD → issue body).
-  4. Write TWO handoff files to .agentic/reviews/:
-       <ISO>-<scope>-standards.md
-       <ISO>-<scope>-spec.md
-  5. Print the two file paths + paste-and-/clear instructions.
-  6. STOP. Do not review the diff yourself in this session.
-
-THE USER THEN:
-  7. /clear → paste contents of *-standards.md → send. Capture the report.
-  8. /clear → paste contents of *-spec.md     → send. Capture the report.
-  9. Collate the two reports. Standards Blockers first; Spec Blockers second.
+  2. Read Standards sources (AGENTS.md, ARCHITECTURE.md, GUIDELINES.md, CONTEXT.md, accepted ADRs).
+  3. Read Spec source (task Acceptance Criteria → spec → PRD → issue body).
+  4. Write the assembled context to .agentic/reviews/<ISO>-<scope>.md (audit trail).
+  5. Perform the review in this session. Output findings under two headings:
+        ## Standards Findings   (bugs, coupling, edge cases, doc violations)
+        ## Spec Findings        (missing requirements, scope creep, wrong impl vs quoted spec line)
+  6. End with a one-line aggregate (counts per axis + worst finding).
 ```
 
-If the Spec source resolves to nothing, the Spec handoff is a single-line stub (`no spec source provided — skip this axis`) and the user runs only step 7.
+The two-axis split is structural rigor — same reviewer, but findings must be classified before mixing. A change that passes Spec can still fail Standards (and vice versa); reporting axes separately prevents one from masking the other.
 </how-this-runs-on-codex>
 
 <anti-patterns>
-- Do NOT call `Task`. Codex has no Task tool routing to subagents — the call will fail or hallucinate.
-- Do NOT spawn a "fresh-context-reviewer" agent. That subagent is a Claude Code primitive; on Codex the handoff files replace it.
-- Do NOT review the diff in this session. The whole point of the skill is to push the review into a fresh context — reviewing inline defeats §10.
-- Do NOT merge the two axes into one combined handoff. The split is the rigor; merging is the bias the skill exists to prevent.
-- Do NOT skip Step 4's write-to-disk and inline the handoff body instead. The user needs files they can `cat | pbcopy`.
+- Do NOT call `/clear` and ask the user to paste handoffs. `/clear` nukes the terminal + context together on Codex — the UX is heavy and unnecessary. Single-session review is the right shape on Codex.
+- Do NOT try to spawn subagents from inside this skill. Codex skills cannot programmatically spawn agents; only the user can, via natural language. The skill that tried to instruct "/clear + paste twice" was wrong — that workflow was inherited from a stale assumption (ADR-0007) when Codex had no subagents at all.
+- Do NOT merge the two axes into a single findings list. The split is the rigor; merging is the bias the skill exists to prevent.
+- Do NOT produce an "approve" verdict. WORKFLOW §10 frames the review as adversarial; approval is the senior engineer's call after weighing both axes.
+- Do NOT skip writing the audit-trail file at `.agentic/reviews/`. The file lets the user re-run the review later against an updated diff or share it with a teammate.
+- Do NOT begin Step 1 or any file I/O before printing the Step 0 announce line. The user must see the operational shape (one pass, one audit-trail file, axis-separated output) before the skill starts reading/writing — otherwise the agent silently drifts into work the user did not consent to.
 </anti-patterns>
 
 <background_information>
-Implements WORKFLOW §10 (Reviewer With Fresh Context). The current session is biased about the code it produced — the same reasoning that wrote it defends it. This skill assembles two clean handoffs (Standards-axis, Spec-axis); the user re-loads each into a fresh session via `/clear` + paste, then collates the two reports.
+Implements WORKFLOW §10 (Reviewer With Adversarial Discipline). On Claude Code, §10 is delivered via two parallel `Task` subagent calls with fresh context. Codex skills cannot spawn agents, so the Codex variant ships the next-best discipline: **structural axis separation inside a single review pass**. The reviewer cannot rationalize a Spec pass as covering Standards (or vice versa) because the output schema forces both lists to be produced separately.
 
-The two-axis split is borrowed from [mattpocock/skills/review](https://github.com/mattpocock/skills/blob/main/skills/in-progress/review/SKILL.md) and bound to this kit's six-layer artifact stack. A Spec pass can mask a Standards fail (and vice versa); reporting the axes separately prevents that.
+The two-axis dichotomy is borrowed from [mattpocock/skills/review](https://github.com/mattpocock/skills/blob/main/skills/in-progress/review/SKILL.md) and bound to this kit's six-layer artifact stack (Constitution → Domain → Product → Spec → Plan/Decisions → Code).
+
+For Codex users who want true fresh-context review (the §10 ideal), spawn a subagent manually after the skill writes the audit-trail file — see the "Optional escalation" block at the bottom of the instructions.
 </background_information>
 
 <instructions>
-Step 0 — announce. Before doing anything, print one line so the user knows what's about to happen:
+Step 0 — announce. Print one line so the user sees the shape before any work:
 
 ```
-Running ad-review. I will write 2 handoff files to .agentic/reviews/ and stop. You then /clear + paste each in a fresh Codex session. I will NOT review the diff in this session.
+Running ad-review (Codex single-pass two-axis). I will read the diff and binding context, write an audit trail to .agentic/reviews/, then report findings under ## Standards Findings and ## Spec Findings in this session.
 ```
 
 Step 1 — scope the review. Confirm what to review. Default scopes, in priority order:
@@ -61,50 +60,34 @@ If no diff exists, stop and tell the user — there's nothing to review.
 
 Capture the diff command once: `git diff <range>` (use `...` three-dot for ref-vs-ref so the comparison is against the merge-base). Note the commit list with `git log <range> --format=%B`.
 
-Step 2 — identify Standards sources. Read what exists; do not fabricate references.
+Size guard: if `git diff <range> --stat` reports >50 files, ask the user to narrow scope before continuing — reviewing a giant diff in one pass loses signal.
+
+Step 2 — read Standards sources. Read what exists; do not fabricate references.
 - `AGENTS.md` at the repo root.
 - `ARCHITECTURE.md` at the repo root.
 - `GUIDELINES.md` at the repo root.
 - `CONTEXT.md` at the repo root, or `CONTEXT-MAP.md` plus per-context `CONTEXT.md`s.
 - Every ADR under `doc/adr/` with `Status: accepted` whose subject is touched by the diff. When in doubt, include rather than skip.
 - `CONTRIBUTING.md` if present.
-- Machine-enforced standards (`.editorconfig`, `eslint.config.*`, `biome.json`, `prettier.config.*`, `tsconfig.json`) — note their presence so the Standards handoff instructs the fresh-context reader to skip what tooling already enforces.
+- Machine-enforced configs (`.editorconfig`, `eslint.config.*`, `biome.json`, `prettier.config.*`, `tsconfig.json`) — note their presence and skip re-checking what tooling already enforces.
 
-Step 3 — identify the Spec source. In this order, take the first that resolves:
+Step 3 — read Spec source. In this order, take the first that resolves:
 1. Task references in the diff or recent commit messages (`Task NNNN`, `0NNN-`, `Closes task-0042`) → read the file's Acceptance Criteria and Plan sections.
 2. An originating spec under `doc/specs/` whose filename matches the branch name or the dominant feature touched by the diff.
 3. A parent PRD under `doc/product/` referenced by the spec.
 4. Issue references in commit messages (`#123`, `Closes #45`) — fetch via `gh issue view` if available.
 
-If nothing resolves, the Spec handoff becomes a single-line stub (`no spec source provided`) and the user skips the second `/clear` pass.
+If nothing resolves, mark Spec as `no spec source provided`. The Spec axis output will say so explicitly and report no findings.
 
-Step 4 — build the two axis-bounded handoffs. Each handoff receives only the slice for its axis. Do not paste the Spec slice into the Standards handoff or vice versa — that is the bias the split exists to prevent.
+Step 4 — write the audit-trail handoff. Persist the assembled context at `.agentic/reviews/<ISO-timestamp>-<scope-slug>.md` (single file, not two). `<scope-slug>` encodes the review target (`branch-vs-main`, `pr-42`, `commit-abc1234`, `working-tree`). Create the directory if missing.
 
-Standards handoff body:
+File body:
 
 ```
-=== AGENTIC-REVIEW HANDOFF — STANDARDS AXIS ===
+=== AGENTIC-REVIEW HANDOFF (single-session, two-axis) ===
 
-You are a senior engineer reviewing a junior PR with no prior context. The
-diff and the Standards sources below are the only evidence. Do not infer
-history or trust the author's intent.
-
-Axis: Standards. Report only:
-- Bugs (null/undefined paths, off-by-one, race conditions, broken invariants).
-- Coupling (modules that shouldn't know about each other, leaked abstractions).
-- Edge cases (empty inputs, large inputs, concurrent access, permission errors).
-- Diff violations of any standards source below.
-Skip what tooling already enforces (lint, format, type-check) — listed under
-TOOLING NOTE. Skip Spec-axis findings (missing requirements, scope creep) —
-a separate handoff covers those.
-
-Output: group findings by severity (Blocker / Concern / Note). Each finding
-one line: `file:line: <severity>: <problem>. <fix>.` Severity is the literal
-word `Blocker`, `Concern`, or `Note` — no emoji.
-
-End with: `Standards: ship as-is`, `Standards: ship with the Concerns logged`,
-or `Standards: don't ship until Blockers resolved`. Do NOT synthesize an
-overall approval — that crosses axes.
+Range:   <git diff <range>>
+Commits: <git log <range> --format=%h\ %s>
 
 --- DIFF ---
 <git diff output>
@@ -113,88 +96,86 @@ overall approval — that crosses axes.
 <AGENTS.md, ARCHITECTURE.md, GUIDELINES.md, CONTEXT.md / CONTEXT-MAP.md,
 applicable accepted ADRs, CONTRIBUTING.md>
 
+--- SPEC SOURCES ---
+<task file Acceptance Criteria + Plan, originating spec, parent PRD,
+recent commit messages, originating issue body if fetched — or
+"no spec source provided">
+
 --- TOOLING NOTE ---
 <list of machine-enforced configs found — skip what they already check>
 
 === END HANDOFF ===
 ```
 
-Spec handoff body:
+Advise the user to add `.agentic/reviews/` to `.gitignore` if it isn't already — handoffs are ephemeral audit artifacts, not committed history.
+
+Step 5 — review. Apply the two axes with discipline. Read the diff once, classify each finding into exactly one axis before adding it to the report.
+
+**Standards axis — report only:**
+- Bugs (null/undefined paths, off-by-one, race conditions, broken invariants, wrong types, unhandled errors).
+- Coupling (modules that shouldn't know about each other, leaked abstractions, hidden globals).
+- Edge cases (empty inputs, large inputs, concurrent access, unicode, paths with spaces, missing files, permission errors).
+- Diff violations of any standards source from Step 2 (AGENTS.md / ARCHITECTURE.md / GUIDELINES.md / CONTEXT.md / accepted ADRs / CONTRIBUTING.md).
+- Vocabulary drift (paraphrasing canonical CONTEXT.md nouns).
+- Skip what tooling already enforces (lint, format, type-check) — listed under TOOLING NOTE.
+
+**Spec axis — report only:**
+- (a) Requirements the spec asked for that are missing or partial.
+- (b) Behaviour in the diff that wasn't asked for (scope creep).
+- (c) Requirements that look implemented but where the implementation looks wrong against the spec line.
+- Quote the spec line for each finding.
+- If Spec was marked `no spec source provided`, report exactly that and report no Spec findings.
+
+**Classification rule when a finding could belong to either axis:** route it to the axis whose source **defines** the constraint.
+- "function returns undefined on empty input" → Standards (a code-quality bug).
+- "function returns undefined on empty input, but the spec required `[]`" → Spec (the spec line is what's broken).
+
+When in genuine doubt, place it in Standards.
+
+Step 6 — output. Print findings under two headings, in this exact order:
 
 ```
-=== AGENTIC-REVIEW HANDOFF — SPEC AXIS ===
+## Standards Findings
 
-You are a senior engineer reviewing a junior PR with no prior context. The
-diff and the Spec sources below are the only evidence. Do not infer history
-or trust the author's intent.
+<one finding per line: `file:line: <severity>: <problem>. <fix>.`>
+<severity is the literal word `Blocker`, `Concern`, or `Note` — no emoji>
+<if no findings, write exactly: "no real issues found in this axis">
 
-Axis: Spec. Report only:
-  (a) requirements the spec asked for that are missing or partial;
-  (b) behaviour in the diff that wasn't asked for (scope creep);
-  (c) requirements that look implemented but where the implementation looks
-      wrong against the spec line.
-Quote the spec line for each finding. Skip Standards-axis findings (bugs,
-coupling, edge cases) — a separate handoff covers those.
+End axis line: `Standards: ship as-is` / `Standards: ship with the Concerns logged` / `Standards: don't ship until Blockers resolved`.
 
-Output: group findings by severity (Blocker / Concern / Note). Each finding
-one line: `file:line: <severity>: <problem> (spec: <quoted-line>). <fix>.`
-Severity is the literal word `Blocker`, `Concern`, or `Note` — no emoji.
+## Spec Findings
 
-End with: `Spec: ship as-is`, `Spec: ship with the Concerns logged`, or
-`Spec: don't ship until Blockers resolved`. Do NOT synthesize an overall
-approval — that crosses axes.
+<one finding per line: `file:line: <severity>: <problem> (spec: <quoted-line>). <fix>.`>
+<if Spec was skipped, write exactly: "Spec: skipped — no spec source provided" and produce no findings>
 
---- DIFF ---
-<git diff output>
-
---- SPEC SOURCES ---
-<task file Acceptance Criteria + Plan, originating spec, parent PRD,
-recent commit messages, originating issue body if fetched>
-
-=== END HANDOFF ===
+End axis line: `Spec: ship as-is` / `Spec: ship with the Concerns logged` / `Spec: don't ship until Blockers resolved` / `Spec: skipped — no spec source provided`.
 ```
 
-If Step 3 found no spec, write the Spec handoff as a single line: `no spec source provided — skip this axis`.
-
-Step 5 — write both handoffs to disk. Save them at:
-- `.agentic/reviews/<ISO-timestamp>-<scope-slug>-standards.md`
-- `.agentic/reviews/<ISO-timestamp>-<scope-slug>-spec.md`
-
-`<scope-slug>` encodes the review target (`branch-vs-main`, `pr-42`, `commit-abc1234`, `working-tree`). Create the directory if missing. Advise the user to add `.agentic/reviews/` to `.gitignore` — handoffs are ephemeral.
-
-If the combined diff spans >50 files, ask the user to narrow scope before continuing — running two passes on a giant diff is wasteful.
-
-Step 6 — instruct the user, then STOP. After writing both handoffs, output exactly this and do not continue:
+End the reply with a one-line aggregate summary:
 
 ```
-Handoffs saved:
-  Standards: <standards-path>
-  Spec:      <spec-path>   (or "skipped — no spec source provided")
-
-Run the Standards pass first:
-
-  cat <standards-path> | pbcopy        # macOS
-  xclip -selection clipboard < <standards-path>   # Linux
-
-In Codex: `/clear`, paste, send. Capture the report.
-
-Then run the Spec pass (if not skipped):
-
-  cat <spec-path> | pbcopy
-  xclip -selection clipboard < <spec-path>
-
-In Codex: `/clear`, paste, send. Capture the report.
-
-Collate the two reports yourself — they are deliberately separate so neither
-axis masks the other. Address Standards Blockers first (code-quality hard
-gate), then Spec Blockers (implementation-vs-spec drift).
+Aggregate: <N Standards Blockers, M Standards Concerns> / <P Spec Blockers, Q Spec Concerns>. Worst: <one-line quote of the highest-severity finding from either axis, or "none">. Audit trail: <path>.
 ```
 
-You MUST stop here. Do not proceed to review the diff in this session — the whole point of §10 is to push the review into a fresh context.
+Do NOT synthesize an overall "approve" verdict. §10 frames the review as adversarial; the senior engineer weighs the findings.
+
+**Optional escalation — true fresh-context review via subagent (user-initiated only).**
+If the user wants the §10 ideal (a reviewer with no inherited bias), tell them after Step 6:
+
+```
+For a fresh-context review, you can spawn a Codex subagent manually:
+  > spawn an agent to act as a senior code reviewer. Read <audit-path> and report findings under ## Standards Findings and ## Spec Findings only.
+The subagent loads only the handoff file, so it has no inherited context from this session. Requires Codex 2025+ with the `[agents]` block configured in ~/.codex/config.toml.
+```
+
+Do not spawn the agent yourself — Codex skills cannot. Only the user's natural-language command can.
 </instructions>
 
 <output_contract>
-Two handoff files at `.agentic/reviews/<ISO-timestamp>-<scope-slug>-standards.md` and `.agentic/reviews/<ISO-timestamp>-<scope-slug>-spec.md` (the latter may be a single-line stub when no spec source resolves), plus an instruction telling the user how to load each into a fresh Codex session via `/clear` and paste. The current session does NOT produce findings — the two fresh sessions do, after the user runs them. This honors WORKFLOW §10 by enforcing context isolation through `/clear` (Codex has no subagent primitive) and preserves the two-axis split that prevents one axis from masking the other.
+- One audit-trail file at `.agentic/reviews/<ISO-timestamp>-<scope-slug>.md` carrying the diff plus assembled Standards + Spec context.
+- One review reply in the current session with findings under `## Standards Findings` and `## Spec Findings`, each axis with its own end-line verdict (`ship as-is` / `ship with the Concerns logged` / `don't ship until Blockers resolved` / `skipped — no spec source provided`).
+- One aggregate summary line at the end with axis counts, worst finding, and audit-trail path.
+- No "approve" verdict. No `/clear` choreography. No skill-initiated subagent spawn (only documented as a user-initiated escalation).
 </output_contract>
 
 ## Next
@@ -204,4 +185,5 @@ Two handoff files at `.agentic/reviews/<ISO-timestamp>-<scope-slug>-standards.md
 - Each Concern (from either axis) becomes a follow-up `ad-task`; do not let them silently accumulate.
 - Notes are informational; close them out in the original task's `Notes` log if relevant.
 - If the Spec axis was skipped, decide whether an `ad-spec` is overdue — work without a spec means future reviews are Standards-only.
+- For maximum §10 fidelity on Codex, escalate to a user-spawned reviewer subagent against the persisted audit-trail file.
 - Once both axes are clear: merge per project conventions.

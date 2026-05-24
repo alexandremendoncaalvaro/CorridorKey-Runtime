@@ -1,5 +1,0 @@
-interface:
-  display_name: agentic-task
-  short_description: Draft a new task at doc/tasks/NNNN-<slug>.md via a one-question-per-gap interview.
-policy:
-  allow_implicit_invocation: false

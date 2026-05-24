@@ -1,5 +1,0 @@
-interface:
-  display_name: agentic-philosophy
-  short_description: Load universal agent guardrails (think, ground, simplify, surgical, goal-driven, verify) on non-trivial work.
-policy:
-  allow_implicit_invocation: true

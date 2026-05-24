@@ -16,20 +16,20 @@ Use root `ARCHITECTURE.md` for structural rules, root `DESIGN.md` for frontend
 design rules, and root `WORKFLOW.md` for the agent workflow proposition. Keep
 ADRs in `doc/adr/` and agentic task records in `doc/tasks/`.
 
-Store Claude Code skill targets under `.claude/skills/agentic-*`. Route
+Store Claude Code skill targets under `.claude/skills/ad-*`. Route
 manifest-declared Claude subagents to `.claude/agents/`, including
-`fresh-context-reviewer.md` for `agentic-review`. Keep `CLAUDE.md` as the
+`fresh-context-reviewer.md` for `ad-review`. Keep `CLAUDE.md` as the
 Claude Code import entry point for `AGENTS.md`.
 
-Store Codex skill targets under `.agents/skills/agentic-*`, with each installed
+Store Codex skill targets under `.agents/skills/ad-*`, with each installed
 skill carrying the upstream Codex `SKILL.md` and `agents/openai.yaml`. Codex
 targets are not mirrors of the Claude skill bodies; they use the Codex/XML-style
 prompt surface from the CLI branch.
 
 Install the upstream default skill set for this repository: seven required
-skills, `agentic-design` because the repository has a frontend, and
-`agentic-subagent` for Claude Code. Leave `agentic-skill` uninstalled unless it
-is explicitly opted in.
+skills, `ad-design` because the repository has a frontend, and
+`ad-subagent` for Claude Code. Leave optional skill-authoring skills uninstalled
+unless this repository explicitly opts into them.
 
 ## Consequences
 

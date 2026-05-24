@@ -19,7 +19,7 @@ production path.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [x] `agentic-ground` is run for model-selection and runtime-contract patterns
+- [x] `ad-ground` is run for model-selection and runtime-contract patterns
   before code changes. (See Notes — implementation grounded against
   `ofx_model_selection.hpp`, `ofx_runtime_family.hpp`, and the existing
   screen-color routing in `ofx_render.cpp`.)
@@ -69,7 +69,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Route Blue selection to the existing dynamic Blue Torch-TensorRT artifact.
 - [x] Add focused model-selection tests for both node identities.
 - [x] Run `git diff --check` and focused model-selection/runtime-contract tests.
-- [ ] Run `agentic-review` for this slice before marking done.
+- [ ] Run `ad-review` for this slice before marking done.
 
 ## Notes
 

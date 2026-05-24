@@ -19,7 +19,7 @@ instances into one screen or quality policy.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [x] `agentic-ground` is run for runtime-family, session-cache, and
+- [x] `ad-ground` is run for runtime-family, session-cache, and
   multi-instance policy patterns before code changes. (See Notes — grounded
   against `ofx_session_broker.{hpp,cpp}`, `ofx_runtime_family.hpp`,
   `ofx_runtime_protocol.hpp`, and the per-instance state in `ofx_shared.hpp`.)
@@ -67,7 +67,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Remove or scope shared-node policy behavior from the investigation branch.
 - [x] Add multi-instance tests for same-node and mixed-node graphs.
 - [x] Run `git diff --check` and focused runtime/cache/integration tests.
-- [ ] Run `agentic-review` for this slice before marking done.
+- [ ] Run `ad-review` for this slice before marking done.
 
 ## Notes
 

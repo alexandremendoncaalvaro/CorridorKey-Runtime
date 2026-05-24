@@ -68,10 +68,10 @@ Given a package has the Green ONNX runtime and models but is missing the Blue To
 ## Operational Requirements
 
 1. Planning and implementation MUST continue to use the repository `agentic` workflow.
-2. Before code is written for each non-trivial implementation slice, the slice MUST run through `agentic-ground` and record the grounding outcome in the relevant task Notes.
-3. Work MUST be decomposed through `agentic-task` into checkbox-tracked task files under `doc/tasks/`.
-4. A binding architecture or product-identity decision, including the Blue OFX identifier or bundle strategy, MUST be captured through `agentic-adr` before implementation depends on it.
-5. Each implementation task MUST run `agentic-review` before its status is changed to `done`.
+2. Before code is written for each non-trivial implementation slice, the slice MUST run through `ad-ground` and record the grounding outcome in the relevant task Notes.
+3. Work MUST be decomposed through `ad-task` into checkbox-tracked task files under `doc/tasks/`.
+4. A binding architecture or product-identity decision, including the Blue OFX identifier or bundle strategy, MUST be captured through `ad-adr` before implementation depends on it.
+5. Each implementation task MUST run `ad-review` before its status is changed to `done`.
 6. Branch improvements from the archived Green TorchTRT investigation MUST be classified in an `agentic` task before porting, with each item marked as port, discard, or rewrite.
 7. The new implementation branch MUST carry the repository `agentic` tooling and the accepted planning artifacts needed to resume this work from that branch.
 
@@ -80,10 +80,10 @@ Given a package has the Green ONNX runtime and models but is missing the Blue To
 1. Start from `main` so the legacy Green node inherits the ONNX Runtime TensorRT behavior and saved-project compatibility.
 2. Use the Green TorchTRT investigation branch only as a source for explicitly classified ports.
 3. Port the `agentic` tooling and directly relevant specs/tasks into the new branch before implementation changes.
-4. Open an `agentic-task` for branch setup and branch-diff classification before implementation changes.
-5. Resolve the Blue node identity and bundle strategy through `agentic-adr` if the answer is not already accepted in task context.
-6. Implement the node split, model selection, runtime isolation, packaging, and validation as separate `agentic-task` slices.
-7. Run `agentic-review` against each completed slice before merging.
+4. Open an `ad-task` for branch setup and branch-diff classification before implementation changes.
+5. Resolve the Blue node identity and bundle strategy through `ad-adr` if the answer is not already accepted in task context.
+6. Implement the node split, model selection, runtime isolation, packaging, and validation as separate `ad-task` slices.
+7. Run `ad-review` against each completed slice before merging.
 
 ## Success Criteria
 
@@ -96,7 +96,7 @@ Given a package has the Green ONNX runtime and models but is missing the Blue To
 7. A Blue node with missing Torch-TensorRT assets fails with a recoverable user-facing diagnostic.
 8. The canonical Windows release build succeeds through `scripts/windows.ps1 -Task build`.
 9. Focused unit, integration, packaging, and benchmark checks pass for the files touched by the node split.
-10. Relevant task files show `agentic-ground` evidence, accepted ADR references where needed, and fresh-context review completion before closure.
+10. Relevant task files show `ad-ground` evidence, accepted ADR references where needed, and fresh-context review completion before closure.
 
 ## Edge Cases
 
@@ -136,10 +136,10 @@ Given a package has the Green ONNX runtime and models but is missing the Blue To
 - `doc/tasks/0010-isolate-runtime-node-state.md`
 - `doc/tasks/0011-prepare-mixed-windows-package.md`
 - `doc/tasks/0012-validate-dedicated-node-release.md`
-- `.agents/skills/agentic-ground/SKILL.md`
-- `.agents/skills/agentic-task/SKILL.md`
-- `.agents/skills/agentic-adr/SKILL.md`
-- `.agents/skills/agentic-review/SKILL.md`
+- `.agents/skills/ad-ground/SKILL.md`
+- `.agents/skills/ad-task/SKILL.md`
+- `.agents/skills/ad-adr/SKILL.md`
+- `.agents/skills/ad-review/SKILL.md`
 - `src/plugins/ofx/ofx_plugin.cpp`
 - `src/plugins/ofx/ofx_shared.hpp`
 - `src/plugins/ofx/ofx_model_selection.hpp`

@@ -1,5 +1,5 @@
 interface:
   display_name: ad-review
-  short_description: Writes 2 fresh-context handoff `.md` files (Standards-axis + Spec-axis) to `.agentic/reviews/` and stops. User runs `/clear` + paste twice in fresh sessions. No Task tool, no subagent — handoff files replace the primitive Codex lacks. WORKFLOW §10.
+  short_description: Single-session two-axis code review (Codex variant of WORKFLOW §10). Reads diff + binding docs (AGENTS / ARCHITECTURE / GUIDELINES / CONTEXT / ADRs) + originating spec, writes audit trail to `.agentic/reviews/`, then reports findings inline under `## Standards Findings` and `## Spec Findings`. No `/clear`, no skill-spawned subagent. Optional user-initiated subagent escalation documented for §10 ideal.
 policy:
   allow_implicit_invocation: true

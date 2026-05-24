@@ -19,7 +19,7 @@ the split.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [x] `agentic-ground` is run for release validation scope before final gates.
+- [x] `ad-ground` is run for release validation scope before final gates.
   (Verification scope grounded against `RELEASE_GUIDELINES.md` §3 and the
   prior task Notes.)
 - [x] Canonical Windows release build succeeds through `scripts/windows.ps1`.
@@ -58,7 +58,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
   override in `ofx_render.cpp` (task 0009), and the broker session-key
   separation by `node_identity` (task 0010). `test_ofx_session_broker.cpp`
   exercises Green↔Blue cache isolation in both directions.)
-- [ ] `agentic-review` is run for the completed branch before merge or PR.
+- [ ] `ad-review` is run for the completed branch before merge or PR.
 
 ## Plan
 
@@ -80,7 +80,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
   above require `scripts/run_corpus.sh` + the `phase_8_gpu_prepare`
   baseline + Blue matrix fixtures, none of which are bundled in the
   ctest suite.)
-- [ ] Run `agentic-review main..HEAD` or the equivalent current branch scope.
+- [ ] Run `ad-review main..HEAD` or the equivalent current branch scope.
 - [ ] Close the validation task only after the review findings are addressed or
   recorded as follow-up tasks.
 

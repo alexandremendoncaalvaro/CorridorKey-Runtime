@@ -66,7 +66,7 @@ This task eliminates every visible skip from a default
   `tests/integration/test_ofx_session_broker.cpp` to the fp16 sibling.
 - [x] Re-run `scripts\windows.ps1 -Task build` and ctest; confirm zero
   skip lines and zero Catch2 `skipped:` output.
-- [x] Run `agentic-review` over the diff before marking done.
+- [x] Run `ad-review` over the diff before marking done.
 
 ## Notes
 

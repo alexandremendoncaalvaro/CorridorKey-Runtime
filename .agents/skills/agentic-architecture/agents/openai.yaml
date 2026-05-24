@@ -1,5 +1,0 @@
-interface:
-  display_name: agentic-architecture
-  short_description: Bootstrap ARCHITECTURE.md via scan-first, pre-fill, ask-only-gaps flow.
-policy:
-  allow_implicit_invocation: false

@@ -1,5 +1,0 @@
-interface:
-  display_name: agentic-audit
-  short_description: Read-only drift report — compare AGENTS.md, ARCHITECTURE.md, and ADR statuses against the code.
-policy:
-  allow_implicit_invocation: false

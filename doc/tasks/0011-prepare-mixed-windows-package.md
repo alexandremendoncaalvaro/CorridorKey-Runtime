@@ -19,7 +19,7 @@ absent.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [x] `agentic-ground` is run for package staging, model manifest, and
+- [x] `ad-ground` is run for package staging, model manifest, and
   validation patterns before script changes. (Grounded against
   `src/plugins/ofx/CMakeLists.txt` POST_BUILD copy_directory rule,
   `scripts/windows.ps1`, `scripts/package_ofx.ps1`, and the existing
@@ -82,7 +82,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
   (Deferred — see Acceptance Criteria above.)
 - [x] Run packaging regression tests and the canonical Windows package command
   through `scripts/windows.ps1` when prerequisites are available.
-- [ ] Run `agentic-review` for this slice before marking done.
+- [ ] Run `ad-review` for this slice before marking done.
 
 ## Notes
 
