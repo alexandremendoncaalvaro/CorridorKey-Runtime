@@ -53,6 +53,13 @@ AdobeStatus reject_render(PF_OutData& output_data, const std::string& message) n
     return kAdobeStatusUnsupported;
 }
 
+void set_return_message_for_host_error(PF_OutData& output_data, AdobeStatus status,
+                                       const char* message) noexcept {
+    if (status != PF_Interrupt_CANCEL) {
+        set_return_message(output_data, message);
+    }
+}
+
 std::filesystem::path adobe_module_path() {
 #if defined(_WIN32)
     HMODULE module = nullptr;
@@ -533,8 +540,9 @@ PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* ex
         input_data->effect_ref, kParamInputLayer, kParamInputLayer, &request,
         input_data->current_time, input_data->time_step, input_data->time_scale, &source_result);
     if (checkout_status != kAdobeStatusOk) {
-        set_return_message(output_data,
-                           "CorridorKey SmartFX pre-render could not checkout source.");
+        set_return_message_for_host_error(
+            output_data, checkout_status,
+            "CorridorKey SmartFX pre-render could not checkout source.");
         return checkout_status;
     }
 
@@ -577,7 +585,8 @@ PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
     status = smart_render_extra->cb->checkout_layer_pixels(input_data->effect_ref, kParamInputLayer,
                                                            &input_world);
     if (status != kAdobeStatusOk) {
-        set_return_message(output_data, "CorridorKey SmartFX render could not checkout source.");
+        set_return_message_for_host_error(output_data, status,
+                                          "CorridorKey SmartFX render could not checkout source.");
         return status;
     }
 
@@ -606,7 +615,8 @@ PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
     PF_EffectWorld* output_world = nullptr;
     status = smart_render_extra->cb->checkout_output(input_data->effect_ref, &output_world);
     if (status != kAdobeStatusOk) {
-        set_return_message(output_data, "CorridorKey SmartFX render could not checkout output.");
+        set_return_message_for_host_error(output_data, status,
+                                          "CorridorKey SmartFX render could not checkout output.");
         return status;
     }
     if (output_world == nullptr) {

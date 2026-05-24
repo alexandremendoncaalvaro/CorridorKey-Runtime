@@ -843,6 +843,81 @@ TEST_CASE(
     CHECK(host.checkin_layer_pixels_count == 0);
 }
 
+TEST_CASE("After Effects SmartFX pre-render propagates source checkout cancellation silently",
+          "[unit][adobe][effect][smartfx][regression]") {
+    FakeSmartPreRenderHost host;
+    host.checkout_status = PF_Interrupt_CANCEL;
+
+    PF_PreRenderInput pre_render_input{};
+    PF_PreRenderOutput pre_render_output{};
+    PF_PreRenderExtra extra{
+        .input = &pre_render_input,
+        .output = &pre_render_output,
+        .cb = &host.callbacks,
+    };
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    PF_OutData output_data{};
+
+    const PF_Err status =
+        EffectMain(PF_Cmd_SMART_PRE_RENDER, &input_data, &output_data, nullptr, nullptr, &extra);
+
+    REQUIRE(status == PF_Interrupt_CANCEL);
+    CHECK(std::string(output_data.return_msg).empty());
+    CHECK((output_data.out_flags & PF_OutFlag_DISPLAY_ERROR_MESSAGE) == 0);
+    CHECK(host.checkout_count == 1);
+    CHECK(pre_render_output.pre_render_data == nullptr);
+}
+
+TEST_CASE("After Effects SmartFX render propagates source checkout cancellation silently",
+          "[unit][adobe][effect][smartfx][regression]") {
+    FakeSmartRenderHost host;
+    host.checkout_layer_pixels_status = PF_Interrupt_CANCEL;
+
+    PF_SmartRenderInput smart_render_input{};
+    PF_SmartRenderExtra extra{.input = &smart_render_input, .cb = &host.callbacks};
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    host.install_parameter_callbacks(input_data);
+    PF_OutData output_data{};
+
+    const PF_Err status =
+        EffectMain(PF_Cmd_SMART_RENDER, &input_data, &output_data, nullptr, nullptr, &extra);
+
+    REQUIRE(status == PF_Interrupt_CANCEL);
+    CHECK(std::string(output_data.return_msg).empty());
+    CHECK((output_data.out_flags & PF_OutFlag_DISPLAY_ERROR_MESSAGE) == 0);
+    CHECK(host.checkout_layer_pixels_count == 1);
+    CHECK(host.checkout_output_count == 0);
+    CHECK(host.checkin_layer_pixels_count == 0);
+}
+
+TEST_CASE("After Effects SmartFX render propagates output checkout cancellation silently",
+          "[unit][adobe][effect][smartfx][regression]") {
+    FakeSmartRenderHost host;
+    host.input_world.width = 2;
+    host.input_world.height = 2;
+    host.input_world.rowbytes = 8;
+    host.checkout_output_status = PF_Interrupt_CANCEL;
+
+    PF_SmartRenderInput smart_render_input{};
+    PF_SmartRenderExtra extra{.input = &smart_render_input, .cb = &host.callbacks};
+    PF_InData input_data{};
+    input_data.effect_ref = reinterpret_cast<PF_ProgPtr>(&host);
+    host.install_parameter_callbacks(input_data);
+    PF_OutData output_data{};
+
+    const PF_Err status =
+        EffectMain(PF_Cmd_SMART_RENDER, &input_data, &output_data, nullptr, nullptr, &extra);
+
+    REQUIRE(status == PF_Interrupt_CANCEL);
+    CHECK(std::string(output_data.return_msg).empty());
+    CHECK((output_data.out_flags & PF_OutFlag_DISPLAY_ERROR_MESSAGE) == 0);
+    CHECK(host.checkout_layer_pixels_count == 1);
+    CHECK(host.checkout_output_count == 1);
+    CHECK(host.checkin_layer_pixels_count == 1);
+}
+
 TEST_CASE("After Effects SmartFX render treats 32 bpc worlds as ARGB128",
           "[unit][adobe][effect][smartfx][regression]") {
     FakeSmartRenderHost host;
