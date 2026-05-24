@@ -110,10 +110,32 @@ foreach ($model in $presentModels) {
 
 $supportedBackends = @()
 $runtimeInfoSucceeded = $false
+$cliDisplayVersion = ""
 $envPathOld = $env:PATH
 Push-Location $win64Dir
 try {
     $env:PATH = "$win64Dir;$envPathOld"
+    $versionLines = & ".\corridorkey.exe" --version 2>&1
+    $versionExitCode = $LASTEXITCODE
+    $cliVersionOutput = ($versionLines | Out-String).Trim()
+    if ($versionExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($cliVersionOutput)) {
+        throw "Packaged CLI version probe failed."
+    }
+
+    $versionMatch = [regex]::Match($cliVersionOutput, '^CorridorKey Runtime v(?<label>\S+)$')
+    if (-not $versionMatch.Success) {
+        throw "Packaged CLI version output has unexpected format: $cliVersionOutput"
+    }
+
+    $cliDisplayVersion = $versionMatch.Groups["label"].Value
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDisplayVersionLabel) -and
+        $cliDisplayVersion -ne $ExpectedDisplayVersionLabel) {
+        Write-Host "[FAIL] Packaged CLI display label mismatch. Expected $ExpectedDisplayVersionLabel, got $cliDisplayVersion" -ForegroundColor Red
+        throw "Packaged CLI display label mismatch. Rebuild with the same -DisplayVersionLabel before packaging."
+    }
+
+    Write-Host "[PASS] Packaged CLI display label: $cliDisplayVersion" -ForegroundColor Green
+
     $runtimeInfoJson = & ".\corridorkey.exe" info --json 2>$null
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($runtimeInfoJson)) {
         $runtimeInfo = $runtimeInfoJson | ConvertFrom-Json
@@ -228,6 +250,7 @@ $validationPayload = [ordered]@{
         supported_backends = @($supportedBackends)
         layout = "Contents\Win64"
         expected_display_version = $ExpectedDisplayVersionLabel
+        cli_display_version = $cliDisplayVersion
     }
     models = [ordered]@{
         expected_models = @($expectedModels)
