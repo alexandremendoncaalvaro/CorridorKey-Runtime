@@ -114,6 +114,27 @@ function Assert-SafeAdobePackageOutputPath {
     return $resolvedPath
 }
 
+function Assert-SafeAdobeInstallSmokeRoot {
+    param(
+        [string]$Path,
+        [string]$OutputDir
+    )
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $resolvedOutputDir = [System.IO.Path]::GetFullPath($OutputDir)
+    $pathSeparators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $normalizedPath = $resolvedPath.TrimEnd($pathSeparators)
+    $normalizedOutputDir = $resolvedOutputDir.TrimEnd($pathSeparators)
+    $outputPrefix = $normalizedOutputDir + [System.IO.Path]::DirectorySeparatorChar
+
+    if ($normalizedPath -eq $normalizedOutputDir -or
+        -not $normalizedPath.StartsWith($outputPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Adobe install smoke root must be a child of the package output directory: $resolvedPath"
+    }
+
+    return $resolvedPath
+}
+
 function Copy-OrtDllByPattern {
     param([string]$Root, [string]$Pattern, [string]$DestinationDir)
 
@@ -329,6 +350,8 @@ Files in this release:
 - install_adobe_plugin.ps1: administrator install helper for the staged payload
 - adobe_package_inventory.json: package inventory
 - adobe_package_validation.json: packaging-time validation report
+- adobe_install_smoke_clean.json: clean-install MediaCore discovery smoke report
+- adobe_install_smoke_upgrade.json: upgrade-install MediaCore discovery smoke report
 - doctor_report.json: packaged runtime diagnostic output when available
 
 Recommended install path:
@@ -385,7 +408,7 @@ if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     $blueEffectDisplayName = "CorridorKey Blue v$DisplayVersionLabel"
 }
 
-Write-Host "[1/5] Preparing Adobe package directory..." -ForegroundColor Cyan
+Write-Host "[1/6] Preparing Adobe package directory..." -ForegroundColor Cyan
 if (Test-Path $OutputDir) {
     Remove-Item -LiteralPath $OutputDir -Recurse -Force
 }
@@ -402,7 +425,7 @@ Assert-FileExists -Path $bluePluginBinary -Message "Adobe Blue plugin binary not
 Assert-FileExists -Path (Join-Path $BuildDir "src\cli\corridorkey.exe") -Message "CLI binary not found in $BuildDir."
 Assert-FileExists -Path (Join-Path $BuildDir "src\app\corridorkey_host_plugin_runtime_server.exe") -Message "Runtime server binary not found in $BuildDir."
 
-Write-Host "[2/5] Staging Adobe plugin and runtime payload..." -ForegroundColor Cyan
+Write-Host "[2/6] Staging Adobe plugin and runtime payload..." -ForegroundColor Cyan
 Copy-Item $greenPluginBinary $win64Dir -Force
 Copy-Item $bluePluginBinary $win64Dir -Force
 Copy-RuntimeSidecarDependencies -BuildDir $BuildDir -OrtRoot $OrtRoot -DestinationDir $win64Dir -RequireRtxProviders:($ModelProfile -eq "windows-rtx")
@@ -412,7 +435,7 @@ if (Test-Path $cmakeTorchTrtWrapper) {
     Copy-Item $cmakeTorchTrtWrapper $torchTrtRuntimeDir -Force
 }
 
-Write-Host "[3/5] Staging model inventory..." -ForegroundColor Cyan
+Write-Host "[3/6] Staging model inventory..." -ForegroundColor Cyan
 $targetModels = Get-AdobeTargetModels -ModelProfile $ModelProfile -Skip2048:$Skip2048.IsPresent
 $modelInventory = Get-CorridorKeyModelInventory -ModelsDir $ModelsDir -ExpectedModels $targetModels
 $compiledContextModels = @()
@@ -540,7 +563,7 @@ Write-ReleaseReadme -Path (Join-Path $OutputDir "README.txt") `
     -InstallerFileName ([System.IO.Path]::GetFileName($installerPath)) `
     -InstallerFlavor $installerFlavor
 
-Write-Host "[4/5] Validating Adobe package..." -ForegroundColor Cyan
+Write-Host "[4/6] Validating Adobe package..." -ForegroundColor Cyan
 $validateArgs = @(
     "-PackagePath", $OutputDir,
     "-ExpectedDisplayVersionLabel", $DisplayVersionLabel
@@ -550,7 +573,38 @@ if ($LASTEXITCODE -ne 0) {
     throw "Adobe package validation failed."
 }
 
-Write-Host "[5/5] Building Adobe installer..." -ForegroundColor Cyan
+Write-Host "[5/6] Running Adobe install smoke checks..." -ForegroundColor Cyan
+$installSmokeRoot = Assert-SafeAdobeInstallSmokeRoot `
+    -Path (Join-Path $OutputDir "_install_smoke") `
+    -OutputDir $OutputDir
+$installSmokeCommonRoot = Join-Path $installSmokeRoot "Adobe\Common\Plug-ins\7.0\MediaCore"
+$cleanInstallSmokeReportPath = Join-Path $OutputDir "adobe_install_smoke_clean.json"
+$upgradeInstallSmokeReportPath = Join-Path $OutputDir "adobe_install_smoke_upgrade.json"
+try {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "smoke_adobe_install_win.ps1") `
+        -PackagePath $OutputDir `
+        -CommonPluginInstallPath $installSmokeCommonRoot `
+        -Mode clean `
+        -ReportPath $cleanInstallSmokeReportPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Adobe clean-install smoke failed."
+    }
+
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "smoke_adobe_install_win.ps1") `
+        -PackagePath $OutputDir `
+        -CommonPluginInstallPath $installSmokeCommonRoot `
+        -Mode upgrade `
+        -ReportPath $upgradeInstallSmokeReportPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Adobe upgrade-install smoke failed."
+    }
+} finally {
+    if (Test-Path -LiteralPath $installSmokeRoot) {
+        Remove-Item -LiteralPath $installSmokeRoot -Recurse -Force
+    }
+}
+
+Write-Host "[6/6] Building Adobe installer..." -ForegroundColor Cyan
 $innoArgs = @(
     "-Flavor", $installerFlavor,
     "-Version", $Version,

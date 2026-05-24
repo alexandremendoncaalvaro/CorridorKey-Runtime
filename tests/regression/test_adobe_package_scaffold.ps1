@@ -5,6 +5,7 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $windowsWrapperPath = Join-Path $repoRoot "scripts\windows.ps1"
 $packageScriptPath = Join-Path $repoRoot "scripts\package_adobe_plugins_windows.ps1"
 $validateScriptPath = Join-Path $repoRoot "scripts\validate_adobe_package_win.ps1"
+$installSmokeScriptPath = Join-Path $repoRoot "scripts\smoke_adobe_install_win.ps1"
 $installerBuilderPath = Join-Path $repoRoot "scripts\installer\build_installer.ps1"
 $installerTemplatePath = Join-Path $repoRoot "scripts\installer\corridorkey.iss.template"
 $agentsPath = Join-Path $repoRoot "AGENTS.md"
@@ -27,7 +28,7 @@ if ($agentsDoc -notmatch "package-adobe" -or $claudeDoc -notmatch "package-adobe
     throw "AGENTS.md and CLAUDE.md must list package-adobe as a canonical Windows task."
 }
 
-foreach ($scriptPath in @($packageScriptPath, $validateScriptPath)) {
+foreach ($scriptPath in @($packageScriptPath, $validateScriptPath, $installSmokeScriptPath)) {
     if (-not (Test-Path $scriptPath)) {
         throw "Expected Adobe package script not found: $scriptPath"
     }
@@ -49,6 +50,9 @@ foreach ($requiredToken in @(
     "model_inventory.json",
     "adobe_package_inventory.json",
     "validate_adobe_package_win.ps1",
+    "smoke_adobe_install_win.ps1",
+    "adobe_install_smoke_clean.json",
+    "adobe_install_smoke_upgrade.json",
     "_Setup",
     "[ValidateSet(""online"", ""offline"")]",
     '$Flavor',
@@ -59,6 +63,7 @@ foreach ($requiredToken in @(
     "-OutputBaseFilename",
     "-ModelPayloadDir",
     "function Assert-SafeAdobePackageOutputPath",
+    "function Assert-SafeAdobeInstallSmokeRoot",
     '$OutputDir = Assert-SafeAdobePackageOutputPath',
     '[System.IO.Path]::GetFullPath($Path)',
     '[switch]$RequireRtxProviders',
@@ -124,6 +129,7 @@ foreach ($requiredToken in @(
     "nppig64_12.dll",
     'Remove-Item -LiteralPath $OutputDir -Recurse -Force',
     'Remove-Item -LiteralPath $installerPath -Force',
+    'Remove-Item -LiteralPath $installSmokeRoot -Recurse -Force',
     "function Assert-SafeAdobeInstallDestination",
     'Remove-Item -LiteralPath $destination -Recurse -Force',
     'Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force',

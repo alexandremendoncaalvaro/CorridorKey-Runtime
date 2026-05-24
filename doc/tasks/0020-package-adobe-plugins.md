@@ -45,7 +45,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       installer flow, including branded wizard assets, SHA256-verified online
       pack downloads, and selectable Green only, Blue only, or Green + Blue
       model packs.
-- [ ] Clean install and upgrade install both leave After Effects and Premiere
+- [x] Clean install and upgrade install both leave After Effects and Premiere
       able to discover the effect after host restart.
 - [ ] The support matrix, README, and user help are updated only to the support
       designation justified by the completed host validation evidence.
@@ -61,7 +61,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Extend package inventory and validation reporting for Adobe artifacts.
 - [x] Reuse the shared modern installer builder for Adobe instead of keeping a
       separate bare Inno Setup script.
-- [ ] Add clean-install and upgrade-install smoke checks for Adobe host plugin
+- [x] Add clean-install and upgrade-install smoke checks for Adobe host plugin
       discovery.
 - [x] Run the canonical Windows package task and record artifact paths, hashes,
       and validation reports in Notes.
@@ -282,6 +282,34 @@ Grounding and implementation notes for the first Windows Adobe package slice:
   `CorridorKey Green v0.8.5-win.1`, Blue effect
   `CorridorKey Blue v0.8.5-win.1`, five packaged models present, zero missing
   models. The regenerated installer is
+  `dist/CorridorKey_Adobe_v0.8.5-win.1_Windows_RTX_online_Setup.exe` with
+  SHA256 `e5e754047a47c118b1334f83b6f8ffdf0e3754cb1fb213bf5c9d82ecb41a5acc`.
+- TDD clean/upgrade install-smoke slice added
+  `scripts/smoke_adobe_install_win.ps1` and CTest coverage
+  `regression_adobe_install_smoke`. The smoke installs the staged Adobe package
+  into a controlled Adobe Common Plug-ins MediaCore root, validates that Green
+  and Blue `.aex` modules plus runtime entrypoints are discoverable, rejects the
+  retired single `corridorkey_adobe.aex`, covers literal-path handling for
+  Windows paths with bracket characters, and writes separate clean/upgrade
+  reports. The canonical `package-adobe` flow now runs both smokes before
+  building the installer and emits
+  `adobe_install_smoke_clean.json` plus
+  `adobe_install_smoke_upgrade.json`.
+- Verification passed:
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\regression\test_adobe_install_smoke.ps1`,
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\regression\test_adobe_package_scaffold.ps1`,
+  `scripts\windows.ps1 -Task build -Preset debug -EnableAdobePlugin -AdobeSdkRoot C:\Dev\CorridorKey-Runtime\vendor\adobe-after-effects-sdk`,
+  `ctest --test-dir build\debug -R "regression_adobe_(install_smoke|package_scaffold)" --output-on-failure`,
+  and
+  `scripts\windows.ps1 -Task package-adobe -Preset release -Track rtx -Flavor online -DisplayVersionLabel 0.8.5-win.1`.
+  The package validation report remains
+  `dist/CorridorKey_Adobe_v0.8.5-win.1_Windows_RTX/adobe_package_validation.json`
+  with `validation_passed=true`, `doctor.layout_kind=windows_adobe`, Green
+  effect `CorridorKey Green v0.8.5-win.1`, Blue effect
+  `CorridorKey Blue v0.8.5-win.1`, five packaged models present, and zero
+  missing models. Clean and upgrade smoke reports both recorded
+  `adobe_common_mediacore_payload_present` for After Effects and Premiere. The
+  regenerated installer is
   `dist/CorridorKey_Adobe_v0.8.5-win.1_Windows_RTX_online_Setup.exe` with
   SHA256 `e5e754047a47c118b1334f83b6f8ffdf0e3754cb1fb213bf5c9d82ecb41a5acc`.
 
