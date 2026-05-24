@@ -51,4 +51,57 @@ if (Test-CorridorKeyDoctorMissingModelProbeFailuresOnly `
     throw "Did not expect real execution failures to be tolerated as missing-model-only issues."
 }
 
+$doctorBundleMissingOnly = [pscustomobject]@{
+    bundle = [pscustomobject]@{
+        healthy = $false
+        packaged_layout_detected = $true
+        runtime_backend_bundle_ready = $true
+        packaged_models = @(
+            [pscustomobject]@{
+                filename = "corridorkey_fp16_2048.onnx"
+                found = $false
+                usable = $false
+                artifact_status = "missing"
+                error = "Model not found"
+            },
+            [pscustomobject]@{
+                filename = "corridorkey_fp16_1536.onnx"
+                found = $true
+                usable = $true
+                artifact_status = "usable"
+                error = ""
+            }
+        )
+    }
+}
+
+if (-not (Test-CorridorKeyDoctorMissingModelBundleFailuresOnly `
+        -Doctor $doctorBundleMissingOnly `
+        -MissingModels @("corridorkey_fp16_2048.onnx"))) {
+    throw "Expected missing-model-only bundle failures to be tolerated."
+}
+
+$doctorBundleInvalidPresent = [pscustomobject]@{
+    bundle = [pscustomobject]@{
+        healthy = $false
+        packaged_layout_detected = $true
+        runtime_backend_bundle_ready = $true
+        packaged_models = @(
+            [pscustomobject]@{
+                filename = "corridorkey_fp16_1536.onnx"
+                found = $true
+                usable = $false
+                artifact_status = "invalid"
+                error = "Model output contains non-finite values"
+            }
+        )
+    }
+}
+
+if (Test-CorridorKeyDoctorMissingModelBundleFailuresOnly `
+        -Doctor $doctorBundleInvalidPresent `
+        -MissingModels @("corridorkey_fp16_2048.onnx")) {
+    throw "Did not expect invalid present bundle models to be tolerated as missing-model-only issues."
+}
+
 Write-Host "[PASS] Windows doctor missing-model tolerance regression checks passed." -ForegroundColor Green

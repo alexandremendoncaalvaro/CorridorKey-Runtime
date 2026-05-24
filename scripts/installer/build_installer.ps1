@@ -27,8 +27,8 @@
     whether files are downloaded at install time or pre-bundled.
 
 .PARAMETER Version
-    Base CMakeLists version (X.Y.Z). The Inno Setup AppVersion field
-    is set to this; the displayed wizard label uses the longer
+    Base CMakeLists version (X.Y.Z). Numeric Windows version resource
+    fields are set to this; the displayed wizard label uses the longer
     DisplayVersionLabel (typically derived from `git describe`).
 
 .PARAMETER DisplayVersionLabel
@@ -37,9 +37,18 @@
     Falls back to -Version when empty.
 
 .PARAMETER PluginPayloadDir
-    Path to the pre-staged OFX bundle layout, typically the
-    output of `package_ofx_installer_windows.ps1` Phase 1 staging
-    (Contents\Win64\* with all DLLs already laid out).
+    Path to the pre-staged host plugin payload layout, typically the
+    output of the host-specific package script (Contents\Win64\* with
+    all DLLs already laid out).
+
+.PARAMETER InstallerSurface
+    Host integration surface for installer metadata and target path.
+    "ofx" installs to the OpenFX common bundle location. "adobe"
+    installs to Adobe's shared Common Plug-ins MediaCore location.
+
+.PARAMETER OutputBaseFilename
+    Optional final installer basename without extension. When omitted,
+    the builder uses the selected surface's online/offline naming convention.
 
 .PARAMETER ModelPayloadDir
     For OFFLINE flavor only: path to a directory containing the per-
@@ -93,6 +102,11 @@ param(
 
     [Parameter(Mandatory)]
     [string]$PluginPayloadDir,
+
+    [ValidateSet("ofx", "adobe")]
+    [string]$InstallerSurface = "ofx",
+
+    [string]$OutputBaseFilename = "",
 
     [string]$ModelPayloadDir = "",
 
@@ -367,6 +381,70 @@ function Format-InstallerSizeLabel {
         return ("{0:0.0} GB" -f ($Bytes / 1000000000.0))
     }
     return ("{0:0} MB" -f ($Bytes / 1000000.0))
+}
+
+function Get-InstallerSurfaceConfig {
+    param(
+        [ValidateSet("ofx", "adobe")]
+        [string]$Surface
+    )
+
+    switch ($Surface) {
+        "adobe" {
+            $helperCode = @'
+function StripTrailingBackslash(Value: String): String;
+begin
+  Result := Value;
+  while (Length(Result) > 3) and (Copy(Result, Length(Result), 1) = '\') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function GetAdobeMediaCoreDir(Param: String): String;
+var
+  CommonPath: String;
+begin
+  if RegQueryStringValue(HKLM, 'SOFTWARE\Adobe\After Effects\26.0', 'CommonPluginInstallPath', CommonPath) then
+    Result := StripTrailingBackslash(CommonPath)
+  else if RegQueryStringValue(HKLM, 'SOFTWARE\Adobe\After Effects\25.0', 'CommonPluginInstallPath', CommonPath) then
+    Result := StripTrailingBackslash(CommonPath)
+  else
+    Result := ExpandConstant('{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore');
+end;
+'@
+            return [ordered]@{
+                app_id = "{{9F11F5D7-62CA-4350-B92A-C4B2C2B59A4D}}"
+                app_name = "CorridorKey Adobe"
+                version_info_description = "CorridorKey Adobe plugin installer"
+                default_dir_name = "{code:GetAdobeMediaCoreDir}\CorridorKey"
+                plugin_base_description = "Base Adobe plugin (AEX + CLI + ONNX runtime)"
+                host_stop_process_lines = @(
+                    "  StopProcessByImageName('AfterFX.exe');",
+                    "  StopProcessByImageName('Adobe Premiere Pro.exe');",
+                    "  StopProcessByImageName('Adobe Media Encoder.exe');"
+                ) -join "`r`n"
+                host_cache_clear_lines = ""
+                surface_helper_code = $helperCode.TrimEnd()
+            }
+        }
+        default {
+            return [ordered]@{
+                app_id = "{{8B8C9CF7-9C20-4D8E-9E36-C3A4F0F1E0B0}}"
+                app_name = "CorridorKey"
+                version_info_description = "CorridorKey OFX plugin installer"
+                default_dir_name = "{commoncf64}\OFX\Plugins\{#MyAppName}.ofx.bundle"
+                plugin_base_description = "Base OFX plugin (CLI + ONNX runtime)"
+                host_stop_process_lines = @(
+                    "  StopProcessByImageName('Resolve.exe');",
+                    "  StopProcessByImageName('Nuke*.exe');"
+                ) -join "`r`n"
+                host_cache_clear_lines = @(
+                    "  DeleteFile(ExpandConstant('{userappdata}\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml'));",
+                    "  DelTree(ExpandConstant('{localappdata}\Temp\nuke\ofxplugincache'), True, True, True);"
+                ) -join "`r`n"
+                surface_helper_code = ""
+            }
+        }
+    }
 }
 
 function Get-PackDownloadSizeBytes {
@@ -753,6 +831,7 @@ function Build-OnlineDownloadQueueProcedure {
 
 $manifest = Get-Content -Raw -Path $ManifestPath | ConvertFrom-Json
 $iscc = Resolve-IsccPath -Override $ISCCPath
+$surfaceConfig = Get-InstallerSurfaceConfig -Surface $InstallerSurface
 $greenComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "green"
 $blueComponentSizeLabel = Get-ComponentSizeLabel -Manifest $manifest -Component "blue"
 $blueRuntimePack = Get-PackByName -Manifest $manifest -PackName "blue-runtime"
@@ -775,7 +854,14 @@ if ($Flavor -eq "online") {
 }
 
 $flavorLower = $Flavor.ToLowerInvariant()
-$outputBaseFilename = "CorridorKey_v${DisplayVersionLabel}_Windows_${flavorLower}_Setup"
+if ([string]::IsNullOrWhiteSpace($OutputBaseFilename)) {
+    $OutputBaseFilename = if ($InstallerSurface -eq "adobe") {
+        "CorridorKey_Adobe_v${DisplayVersionLabel}_Windows_${flavorLower}_Setup"
+    } else {
+        "CorridorKey_v${DisplayVersionLabel}_Windows_${flavorLower}_Setup"
+    }
+}
+$appVersionField = if ($InstallerSurface -eq "adobe") { $DisplayVersionLabel } else { $Version }
 
 $tempIssDir = Join-Path $env:TEMP ("corridorkey_iss_" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempIssDir -Force | Out-Null
@@ -784,15 +870,22 @@ $wizardImagePath = (Resolve-Path -LiteralPath $InstallerWizardImage).ProviderPat
 
 $template = Get-Content -Raw -Path $templatePath
 $rendered = $template `
+    -replace '@@APP_ID@@', $surfaceConfig.app_id `
+    -replace '@@APP_NAME@@', $surfaceConfig.app_name `
+    -replace '@@VERSION_INFO_DESCRIPTION@@', $surfaceConfig.version_info_description `
+    -replace '@@DEFAULT_DIR_NAME@@', $surfaceConfig.default_dir_name `
+    -replace '@@PLUGIN_BASE_DESCRIPTION@@', $surfaceConfig.plugin_base_description `
     -replace '@@DISPLAY_LABEL@@', $DisplayVersionLabel `
     -replace '@@BASE_VERSION@@', $Version `
+    -replace '@@APP_VERSION@@', $appVersionField `
     -replace '@@PLUGIN_PAYLOAD_DIR@@', ($PluginPayloadDir -replace '/', '\') `
     -replace '@@MODEL_PAYLOAD_DIR@@', (($ModelPayloadDir -replace '/', '\')) `
     -replace '@@OUTPUT_DIR@@', ($OutputDir -replace '/', '\') `
-    -replace '@@OUTPUT_BASE_FILENAME@@', $outputBaseFilename `
+    -replace '@@OUTPUT_BASE_FILENAME@@', $OutputBaseFilename `
     -replace '@@INSTALLER_ICON@@', ($setupIcon.path -replace '/', '\') `
     -replace '@@WIZARD_IMAGE@@', ($wizardImagePath -replace '/', '\') `
     -replace '@@MANIFEST_PATH@@', ($ManifestPath -replace '/', '\') `
+    -replace '@@INSTALLER_SURFACE@@', $InstallerSurface `
     -replace '@@FLAVOR@@', $flavorLower `
     -replace '@@GREEN_COMPONENT_SIZE_LABEL@@', $greenComponentSizeLabel `
     -replace '@@BLUE_COMPONENT_SIZE_LABEL@@', $blueComponentSizeLabel `
@@ -809,11 +902,15 @@ $rendered = $rendered.Replace('@@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@', $downloadQu
 $rendered = $rendered.Replace('@@PACK_CACHE_PREPARE_PROCEDURE@@', $packCachePrepareProcedure)
 $rendered = $rendered.Replace('@@PACK_MARKER_WRITE_PROCEDURE@@', $packMarkerWriteProcedure)
 $rendered = $rendered.Replace('@@PACK_MIGRATION_PROCEDURE@@', $packMigrationProcedure)
+$rendered = $rendered.Replace('@@SURFACE_HELPER_CODE@@', $surfaceConfig.surface_helper_code)
+$rendered = $rendered.Replace('@@HOST_STOP_PROCESS_LINES@@', $surfaceConfig.host_stop_process_lines)
+$rendered = $rendered.Replace('@@HOST_CACHE_CLEAR_LINES@@', $surfaceConfig.host_cache_clear_lines)
 
 $tempIssPath = Join-Path $tempIssDir "corridorkey_setup.iss"
 Set-Content -Path $tempIssPath -Value $rendered -Encoding UTF8
 
 Write-Host "[installer] Flavor:        $Flavor" -ForegroundColor Cyan
+Write-Host "[installer] Surface:       $InstallerSurface" -ForegroundColor Cyan
 Write-Host "[installer] Display label: $DisplayVersionLabel" -ForegroundColor Cyan
 Write-Host "[installer] Plugin dir:    $PluginPayloadDir" -ForegroundColor Cyan
 Write-Host "[installer] Setup icon:    $($setupIcon.source)" -ForegroundColor Cyan
@@ -821,7 +918,7 @@ Write-Host "[installer] Wizard image:  $wizardImagePath" -ForegroundColor Cyan
 if ($Flavor -eq "offline") {
     Write-Host "[installer] Model dir:     $ModelPayloadDir" -ForegroundColor Cyan
 }
-Write-Host "[installer] Output:        $OutputDir\$outputBaseFilename.exe" -ForegroundColor Cyan
+Write-Host "[installer] Output:        $OutputDir\$OutputBaseFilename.exe" -ForegroundColor Cyan
 Write-Host "[installer] ISCC:          $iscc" -ForegroundColor Cyan
 Write-Host "[installer] Generated iss: $tempIssPath" -ForegroundColor DarkGray
 
@@ -834,7 +931,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "ISCC failed with exit code $LASTEXITCODE. Inspect $tempIssPath for diagnostics."
 }
 
-$producedInstaller = Join-Path $OutputDir ($outputBaseFilename + ".exe")
+$producedInstaller = Join-Path $OutputDir ($OutputBaseFilename + ".exe")
 if (-not (Test-Path $producedInstaller)) {
     throw "ISCC reported success but installer not found at $producedInstaller"
 }
@@ -848,6 +945,7 @@ Remove-Item -Path $tempIssDir -Recurse -Force -ErrorAction SilentlyContinue
 
 [ordered]@{
     flavor = $Flavor
+    surface = $InstallerSurface
     display_label = $DisplayVersionLabel
     base_version = $Version
     installer_path = $producedInstaller

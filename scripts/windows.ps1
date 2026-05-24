@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "package-runtime", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -126,14 +126,14 @@ Assert-CorridorKeyWindowsReleaseLabelFormat `
 if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     if ($stableGithubReleaseRequested) {
         Write-Host "[windows] Stable GitHub release requested; using clean version label $resolvedVersion." -ForegroundColor Yellow
-    } elseif ($Task -eq "package-ofx") {
+    } elseif ($Task -in @("package-ofx", "package-adobe")) {
         $buildDir = Join-Path $repoRoot ("build\" + $Preset)
         $builtLabel = Get-CorridorKeyBuiltCliDisplayLabel -BuildDir $buildDir
         if ([string]::IsNullOrWhiteSpace($builtLabel)) {
-            throw "Task 'package-ofx' could not read a built CLI label from $buildDir. Run scripts\windows.ps1 -Task build -Preset $Preset first."
+            throw "Task '$Task' could not read a built CLI label from $buildDir. Run scripts\windows.ps1 -Task build -Preset $Preset first."
         }
         if ($builtLabel -eq $resolvedVersion) {
-            throw "Task 'package-ofx' found a bare built CLI label '$builtLabel'. Rebuild through scripts\windows.ps1 -Task build -Preset $Preset so the panel and installer name carry a build reference."
+            throw "Task '$Task' found a bare built CLI label '$builtLabel'. Rebuild through scripts\windows.ps1 -Task build -Preset $Preset so the panel and installer name carry a build reference."
         }
         $DisplayVersionLabel = $builtLabel
         Write-Host "[windows] Reusing display version label from built CLI: $DisplayVersionLabel" -ForegroundColor Yellow
@@ -162,7 +162,7 @@ Write-Host "[windows] Version: $resolvedVersion" -ForegroundColor Cyan
 if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     Write-Host "[windows] Display version label: $DisplayVersionLabel" -ForegroundColor Cyan
 }
-if ($Task -in @("package-ofx", "package-runtime", "release")) {
+if ($Task -in @("package-ofx", "package-adobe", "package-runtime", "release")) {
     Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
 }
 
@@ -283,6 +283,30 @@ switch ($Task) {
                 }
                 Invoke-CorridorKeyScript -ScriptName "installer\build_installer.ps1" -Arguments $innoArgs
             }
+        }
+        break
+    }
+    "package-adobe" {
+        foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $resolvedTrack) {
+            $arguments = @(
+                "-Version", $resolvedVersion,
+                "-ReleaseSuffix", $variant.Suffix,
+                "-ModelProfile", $variant.ModelProfile
+            )
+            if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+                $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($Flavor)) {
+                $arguments += @("-Flavor", $Flavor)
+            }
+            $arguments += $additionalArguments
+            Invoke-CorridorKeyScript -ScriptName "package_adobe_plugins_windows.ps1" -Arguments $arguments
+
+            $stagedTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $resolvedVersion } else { $DisplayVersionLabel }
+            $validationPath = Join-Path $repoRoot ("dist\CorridorKey_Adobe_v${stagedTag}_Windows_$($variant.Suffix)\adobe_package_validation.json")
+            Assert-CorridorKeyAdobePackageValidationHealthy `
+                -ValidationReportPath $validationPath `
+                -Label "Adobe $($variant.Suffix) package" | Out-Null
         }
         break
     }

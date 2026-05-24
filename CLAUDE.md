@@ -57,7 +57,8 @@ rules here.
 - `scripts/windows.ps1` is the only Windows entrypoint. Every Windows
   build, package, certification, and release runs through it via
   `-Task build | prepare-rtx | certify-rtx-artifacts | package-ofx |
-  package-runtime | release | regen-rtx-release | sync-version`. Never
+  package-adobe | package-runtime | release | regen-rtx-release |
+  sync-version`. Never
   call `scripts/build.ps1`, `scripts/prepare_windows_rtx_release.ps1`,
   `scripts/release_pipeline_windows.ps1`, or any other sub-script
   directly; they are internal delegates and skip the version metadata

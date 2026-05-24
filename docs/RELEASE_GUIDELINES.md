@@ -338,6 +338,10 @@ The Windows wrapper tasks are intentionally different:
     `-Flavor online|offline`, the task emits the selected modern Inno Setup
     installer and skips the legacy NSIS wrapper; see "Modern installer
     (Inno Setup)" below for the flavor semantics.
+- `package-adobe`
+  - package the Adobe Common Plug-ins MediaCore payload from an Adobe-enabled
+    build. The task uses the modern Inno Setup installer flow and defaults to
+    the online flavor unless `-Flavor offline` is selected.
 - `release`
   - package the official Windows release tracks from the currently staged,
     validated inputs
@@ -351,8 +355,8 @@ The Windows wrapper tasks are intentionally different:
 Authoring lives under `scripts/installer/`:
 
 - `corridorkey.iss.template` - Inno Setup 6 source consumed by ISCC.
-  Online Components/Types, offline complete-pack behavior, and modern
-  Windows 11-themed wizard
+  Shared OFX/Adobe host-surface metadata, online Components/Types, offline
+  complete-pack behavior, and modern Windows 11-themed wizard
   (`WizardStyle=modern dynamic windows11`).
 - `build_installer.ps1` - PowerShell driver that expands the template and
   invokes ISCC.exe. Reads `distribution_manifest.json` for pack URLs and
@@ -377,11 +381,11 @@ GitHub releases publish the online flavor only; the release pipeline rejects
 `-PublishGithub` unless `-Flavor online` is selected.
 
 Component selection differs by transport. The online flavor keeps component
-selection so a green-only operator can avoid the blue runtime download, while
-the recommended setup downloads every currently available pack. The offline
-flavor is complete by construction: every available pack is bundled and fixed
-for install. The Tauri GUI is a separate desktop installer surface and is not
-an OFX installer component.
+selection so an operator can install Green only, Blue only, or Recommended
+(Green + Blue), while the offline flavor is complete by construction: every
+available pack is bundled and fixed for install. The same model-pack behavior
+applies to OFX and Adobe installers. The Tauri GUI is a separate desktop
+installer surface and is not an OFX or Adobe installer component.
 
 The modern installer treats selected model packs and the blue runtime DLL
 pack as immutable caches keyed by the manifest SHA256. When a selected
@@ -396,6 +400,9 @@ Producing local installer flavors:
 ```powershell
 # Online (small stub, downloads packs)
 .\scripts\windows.ps1 -Task package-ofx -Track rtx -Flavor online \
+    -DisplayVersionLabel <label>
+
+.\scripts\windows.ps1 -Task package-adobe -Track rtx -Flavor online \
     -DisplayVersionLabel <label>
 
 # Offline (self-contained)

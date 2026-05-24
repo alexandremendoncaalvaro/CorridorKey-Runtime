@@ -811,14 +811,23 @@ BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_di
                                     error) &&
             !error;
         error.clear();
-        const bool plugin_present =
+        const bool ofx_plugin_present =
             std::filesystem::exists(executable_dir / "CorridorKey.ofx", error) && !error;
+        error.clear();
+        const bool adobe_green_plugin_present =
+            std::filesystem::exists(executable_dir / "corridorkey_adobe_green.aex", error) &&
+            !error;
+        error.clear();
+        const bool adobe_blue_plugin_present =
+            std::filesystem::exists(executable_dir / "corridorkey_adobe_blue.aex", error) && !error;
+        const bool adobe_plugin_present = adobe_green_plugin_present || adobe_blue_plugin_present;
         error.clear();
         const bool models_present =
             std::filesystem::exists(layout.expected_models_dir, error) && !error;
-        layout.kind = "windows_ofx";
-        layout.packaged_layout_detected =
-            cli_present && runtime_server_present && plugin_present && models_present;
+        layout.kind = adobe_plugin_present && !ofx_plugin_present ? "windows_adobe" : "windows_ofx";
+        layout.packaged_layout_detected = cli_present && runtime_server_present &&
+                                          (ofx_plugin_present || adobe_plugin_present) &&
+                                          models_present;
         return layout;
     }
 
@@ -984,8 +993,11 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     // Linux RTX ships the same ORT/.onnx model set as Windows RTX, so the
     // packaged-models expectation uses the windows_platform catalog entries
     // for both layouts.
-    const auto expected_packaged_models = expected_packaged_models_for_platform(
-        models_dir, layout.kind == "windows_ofx" || layout.kind == "linux_ofx");
+    const bool uses_windows_model_catalog = layout.kind == "windows_ofx" ||
+                                            layout.kind == "windows_adobe" ||
+                                            layout.kind == "linux_ofx";
+    const auto expected_packaged_models =
+        expected_packaged_models_for_platform(models_dir, uses_windows_model_catalog);
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_ready = !expected_packaged_models.empty();
@@ -1032,6 +1044,8 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     }
 
     const bool windows_ofx_layout = layout.kind == "windows_ofx";
+    const bool windows_adobe_layout = layout.kind == "windows_adobe";
+    const bool windows_plugin_layout = windows_ofx_layout || windows_adobe_layout;
     const bool linux_ofx_layout = layout.kind == "linux_ofx";
     const bool packaged_layout_detected = layout.packaged_layout_detected;
     const bool windows_rtx_bundle =
@@ -1039,7 +1053,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
         !tensorrt_rtx_parser_libraries.empty() || !cuda_runtime_libraries.empty();
     const bool windows_directml_bundle = directml_library.has_value() && !windows_rtx_bundle;
     bool runtime_backend_bundle_ready = runtime_library.has_value();
-    if (windows_ofx_layout) {
+    if (windows_plugin_layout) {
         if (windows_rtx_bundle) {
             runtime_backend_bundle_ready =
                 !tensorrt_provider_libraries.empty() && !tensorrt_rtx_core_libraries.empty() &&
@@ -1057,16 +1071,26 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["models_dir_exists"] = std::filesystem::exists(models_dir);
     json["models_dir_matches_bundle"] = paths_equivalent(models_dir, expected_models_dir);
     const auto cli_binary_path =
-        windows_ofx_layout ? executable_dir / "corridorkey.exe" : executable_path;
+        windows_plugin_layout ? executable_dir / "corridorkey.exe" : executable_path;
     const auto host_plugin_runtime_server_path =
-        windows_ofx_layout ? executable_dir / "corridorkey_host_plugin_runtime_server.exe"
-                           : std::filesystem::path{};
+        windows_plugin_layout ? executable_dir / "corridorkey_host_plugin_runtime_server.exe"
+                              : std::filesystem::path{};
+    const auto plugin_binary_path =
+        windows_ofx_layout ? executable_dir / "CorridorKey.ofx"
+        : windows_adobe_layout
+            ? (std::filesystem::exists(executable_dir / "corridorkey_adobe_green.aex")
+                   ? executable_dir / "corridorkey_adobe_green.aex"
+                   : executable_dir / "corridorkey_adobe_blue.aex")
+            : std::filesystem::path{};
     json["cli_binary_found"] = !cli_binary_path.empty() && std::filesystem::exists(cli_binary_path);
     json["cli_binary_path"] = cli_binary_path.string();
     json["host_plugin_runtime_server_found"] =
         !host_plugin_runtime_server_path.empty() &&
         std::filesystem::exists(host_plugin_runtime_server_path);
     json["host_plugin_runtime_server_path"] = host_plugin_runtime_server_path.string();
+    json["plugin_binary_found"] =
+        !plugin_binary_path.empty() && std::filesystem::exists(plugin_binary_path);
+    json["plugin_binary_path"] = plugin_binary_path.string();
     json["runtime_library_found"] = runtime_library.has_value();
     json["runtime_library_path"] = runtime_library.has_value() ? runtime_library->string() : "";
     json["runtime_library_referenced"] = runtime_reference_found;
@@ -1161,15 +1185,14 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["core_dependency_references"] = core_references;
     json["packaged_models"] = packaged_models;
     json["signature"] = inspect_signature(executable_path);
-    if (windows_ofx_layout) {
+    if (windows_plugin_layout) {
         const bool compiled_contexts_ready =
             packaged_inventory.has_value()
                 ? packaged_inventory_compiled_contexts_ready(packaged_inventory)
                 : !windows_rtx_bundle;
         json["healthy"] = packaged_layout_detected && packaged_models_ready &&
                           json["model_inventory_contract_complete"].get<bool>() &&
-                          compiled_contexts_ready && runtime_backend_bundle_ready &&
-                          (windows_ofx_layout || core_library.has_value());
+                          compiled_contexts_ready && runtime_backend_bundle_ready;
     } else if (linux_ofx_layout) {
         // Linux RTX bundle uses ONNX Runtime CUDA EP loading .onnx models
         // directly. There are no precompiled TensorRT contexts to validate

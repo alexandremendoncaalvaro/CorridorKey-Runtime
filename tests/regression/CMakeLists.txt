@@ -71,4 +71,18 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_adobe_windows_wrapper_args.ps1
     )
     set_tests_properties(regression_adobe_windows_wrapper_args PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_adobe_package_scaffold
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_adobe_package_scaffold.ps1
+    )
+    set_tests_properties(regression_adobe_package_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_doctor_missing_model_tolerance
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_doctor_missing_model_tolerance.ps1
+    )
+    set_tests_properties(regression_windows_doctor_missing_model_tolerance PROPERTIES LABELS "regression")
 endif()

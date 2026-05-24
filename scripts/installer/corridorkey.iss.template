@@ -1,7 +1,7 @@
 ; CorridorKey Windows installer (Inno Setup 6.4+).
 ;
 ; This template is consumed by scripts/installer/build_installer.ps1,
-; which substitutes @@TOKEN@@ placeholders against a per-build context
+; which substitutes token placeholders against a per-build context
 ; (display label, pack manifest, build dir, flavor) and then invokes
 ; ISCC.exe to compile the resulting .iss into the final installer
 ; executable. The template is the single source of truth for installer
@@ -17,8 +17,8 @@
 ;   OFFLINE - large self-contained installer (~7 GB). All packs
 ;             bundled and installed; no network access during install.
 ;
-; ONLINE keeps component selection so a green-only operator can avoid
-; the blue runtime download. OFFLINE is complete by construction: all
+; ONLINE keeps component selection so an operator can install green only,
+; blue only, or both models. OFFLINE is complete by construction: all
 ; available packs are fixed and installed. arm_torchtrt_runtime in
 ; src/core/torch_trt_loader.cpp walks for blue runtime DLLs at
 ; <install>/Contents/Resources/torchtrt-runtime/bin/ regardless of
@@ -27,11 +27,16 @@
 ; Reference: docs/RELEASE_GUIDELINES.md "Windows installer (modern
 ; flow)".
 
-#define MyAppName "CorridorKey"
+#define MyAppName "@@APP_NAME@@"
 #define MyAppPublisher "CorridorKey"
 #define MyAppURL "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime"
 #define MyDisplayLabel "@@DISPLAY_LABEL@@"
 #define MyBaseVersion "@@BASE_VERSION@@"
+#define MyAppVersion "@@APP_VERSION@@"
+#define MyAppId "@@APP_ID@@"
+#define MyVersionInfoDescription "@@VERSION_INFO_DESCRIPTION@@"
+#define InstallDefaultDir "@@DEFAULT_DIR_NAME@@"
+#define PluginBaseDescription "@@PLUGIN_BASE_DESCRIPTION@@"
 #define PluginPayloadDir "@@PLUGIN_PAYLOAD_DIR@@"
 #define ModelPayloadDir "@@MODEL_PAYLOAD_DIR@@"
 #define OutputDir "@@OUTPUT_DIR@@"
@@ -39,13 +44,14 @@
 #define InstallerIcon "@@INSTALLER_ICON@@"
 #define InstallerWizardImage "@@WIZARD_IMAGE@@"
 #define ManifestPath "@@MANIFEST_PATH@@"
+#define InstallerSurface "@@INSTALLER_SURFACE@@"
 ; Flavor MUST be one of: "online" | "offline".
 #define Flavor "@@FLAVOR@@"
 
 [Setup]
-AppId={{8B8C9CF7-9C20-4D8E-9E36-C3A4F0F1E0B0}}
+AppId={#MyAppId}
 AppName={#MyAppName}
-AppVersion={#MyBaseVersion}
+AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyDisplayLabel}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
@@ -58,19 +64,16 @@ AppUpdatesURL={#MyAppURL}
 ; arbitrary strings.
 VersionInfoVersion={#MyBaseVersion}
 VersionInfoCompany={#MyAppPublisher}
-VersionInfoDescription={#MyAppName} OFX plugin installer
+VersionInfoDescription={#MyVersionInfoDescription}
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyBaseVersion}
 VersionInfoProductTextVersion={#MyDisplayLabel}
+VersionInfoTextVersion={#MyDisplayLabel}
 
-; OFX plugins MUST install under <CommonFiles>\OFX\Plugins\<bundle>.
-; The host (Resolve, Nuke, Fusion) discovers .ofx bundles by scanning
-; this directory at startup. Anything else means the plugin does not
-; load. {commoncf64} resolves to C:\Program Files\Common Files on a
-; standard 64-bit Windows install; passing /DIR=... at the command
-; line still works for unattended deployments that target a custom
-; OFX root.
-DefaultDirName={commoncf64}\OFX\Plugins\{#MyAppName}.ofx.bundle
+; Host plugins install under a surface-specific discovery root. The
+; PowerShell builder injects the canonical default for the selected
+; surface while still allowing /DIR=... for unattended deployments.
+DefaultDirName={#InstallDefaultDir}
 DisableWelcomePage=no
 DisableDirPage=auto
 DisableProgramGroupPage=yes
@@ -136,7 +139,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "complete"; Description: "Complete (Green + Blue)"
 #else
 Name: "recommended"; Description: "Recommended (Green + Blue)"
-Name: "minimum"; Description: "Minimum (Green only)"
+Name: "greenonly"; Description: "Green only"
+Name: "blueonly"; Description: "Blue only"
 Name: "custom"; Description: "Custom"; Flags: iscustom
 #endif
 
@@ -145,23 +149,23 @@ Name: "custom"; Description: "Custom"; Flags: iscustom
 ; loads, plus the green-track ONNX Runtime DLLs that ship in every
 ; flavor. The fixed flag prevents the user from unchecking it.
 #if Flavor == "offline"
-Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
+Name: "pluginbase"; Description: "{#PluginBaseDescription}"; \
     Types: complete; Flags: fixed
 
-Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+Name: "green"; Description: "Green pack - green-screen model files, including blue via channel swap (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
     Types: complete; Flags: fixed
 
-Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+Name: "blue"; Description: "Blue pack - dedicated blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
     Types: complete; Flags: fixed
 #else
-Name: "pluginbase"; Description: "Base OFX plugin (CLI + ONNX runtime)"; \
-    Types: minimum recommended custom; Flags: fixed
+Name: "pluginbase"; Description: "{#PluginBaseDescription}"; \
+    Types: greenonly blueonly recommended custom; Flags: fixed
 
-Name: "green"; Description: "Green pack - green-screen model files (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
-    Types: minimum recommended custom
+Name: "green"; Description: "Green pack - green-screen model files, including blue via channel swap (@@GREEN_COMPONENT_SIZE_LABEL@@)"; \
+    Types: greenonly recommended custom
 
-Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
-    Types: recommended custom
+Name: "blue"; Description: "Blue pack - dedicated blue-screen model and LibTorch runtime (@@BLUE_COMPONENT_SIZE_LABEL@@)"; \
+    Types: blueonly recommended custom
 #endif
 
 [Files]
@@ -172,7 +176,20 @@ Name: "blue"; Description: "Blue pack - blue-screen model and LibTorch runtime (
 Source: "{#PluginPayloadDir}\Contents\Win64\*"; \
     DestDir: "{app}\Contents\Win64"; \
     Components: pluginbase; \
-    Flags: ignoreversion recursesubdirs createallsubdirs
+    Flags: ignoreversion recursesubdirs createallsubdirs; \
+    Excludes: "corridorkey_adobe_green.aex,corridorkey_adobe_blue.aex"
+
+#if InstallerSurface == "adobe"
+Source: "{#PluginPayloadDir}\Contents\Win64\corridorkey_adobe_green.aex"; \
+    DestDir: "{app}\Contents\Win64"; \
+    Components: green; \
+    Flags: ignoreversion
+
+Source: "{#PluginPayloadDir}\Contents\Win64\corridorkey_adobe_blue.aex"; \
+    DestDir: "{app}\Contents\Win64"; \
+    Components: blue; \
+    Flags: ignoreversion
+#endif
 
 ; Per-build wrapper DLL (corridorkey_torchtrt.dll) ships next to the
 ; rest of the runtime DLLs of the blue pack. It is built from this
@@ -230,6 +247,13 @@ Name: "cleaninstall"; Description: "Clean install (delete cached models and runt
 Type: filesandordirs; Name: "{app}\Contents\Resources\models"
 Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
 
+[InstallDelete]
+#if InstallerSurface == "adobe"
+Type: files; Name: "{app}\Contents\Win64\corridorkey_adobe.aex"
+Type: files; Name: "{app}\Contents\Win64\corridorkey_adobe_green.aex"; Check: CorridorKeyGreenNotSelected
+Type: files; Name: "{app}\Contents\Win64\corridorkey_adobe_blue.aex"; Check: CorridorKeyBlueNotSelected
+#endif
+
 [Code]
 // CorridorKey installer code. Pascal Script `{ ... }` block comments
 // do NOT nest, so we use `//` line comments throughout to keep
@@ -255,10 +279,22 @@ Type: filesandordirs; Name: "{app}\Contents\Resources\torchtrt-runtime"
 // with Inno Setup; see
 // https://raw.githubusercontent.com/jrsoftware/issrc/main/Examples/CodeDownloadFiles.iss
 
+function CorridorKeyGreenNotSelected: Boolean;
+begin
+  Result := not IsComponentSelected('green');
+end;
+
+function CorridorKeyBlueNotSelected: Boolean;
+begin
+  Result := not IsComponentSelected('blue');
+end;
+
 const
   BLUE_RUNTIME_SHA256 = '@@BLUE_RUNTIME_SHA256@@';
   BLUE_RUNTIME_INSTALLED_SIZE_BYTES = @@BLUE_RUNTIME_INSTALLED_SIZE_BYTES@@;
   BLUE_RUNTIME_INSTALLED_FILE_COUNT = @@BLUE_RUNTIME_INSTALLED_FILE_COUNT@@;
+
+@@SURFACE_HELPER_CODE@@
 
 procedure StopProcessByImageName(const ImageName: String);
 var
@@ -269,17 +305,15 @@ end;
 
 procedure StopCorridorKeyAndHosts;
 begin
-  StopProcessByImageName('Resolve.exe');
-  StopProcessByImageName('Nuke*.exe');
+@@HOST_STOP_PROCESS_LINES@@
   StopProcessByImageName('corridorkey_host_plugin_runtime_server.exe');
   StopProcessByImageName('corridorkey_ofx_runtime_server.exe');
   StopProcessByImageName('corridorkey.exe');
 end;
 
-procedure ClearHostOfxCaches;
+procedure ClearHostCaches;
 begin
-  DeleteFile(ExpandConstant('{userappdata}\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml'));
-  DelTree(ExpandConstant('{localappdata}\Temp\nuke\ofxplugincache'), True, True, True);
+@@HOST_CACHE_CLEAR_LINES@@
 end;
 
 function CorridorKeyResourceFilePath(
@@ -455,7 +489,7 @@ begin
     UpdateCorridorKeyPath('Install');
     CorridorKeyWriteBlueRuntimeCacheMarker;
     CorridorKeyWriteSelectedPackMarkers;
-    ClearHostOfxCaches;
+    ClearHostCaches;
   end;
 end;
 
@@ -464,7 +498,7 @@ begin
   if CurUninstallStep = usUninstall then begin
     StopCorridorKeyAndHosts;
     UpdateCorridorKeyPath('Uninstall');
-    ClearHostOfxCaches;
+    ClearHostCaches;
   end;
 end;
 

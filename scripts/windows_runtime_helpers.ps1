@@ -1530,6 +1530,74 @@ function Test-CorridorKeyDoctorMissingModelProbeFailuresOnly {
     return $true
 }
 
+function Test-CorridorKeyDoctorMissingModelBundleFailuresOnly {
+    param(
+        [object]$Doctor,
+        [string[]]$MissingModels
+    )
+
+    if ($null -eq $Doctor -or @($MissingModels).Count -eq 0) {
+        return $false
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Doctor -Name "bundle")) {
+        return $false
+    }
+
+    $bundle = $Doctor.bundle
+    if ($null -eq $bundle -or -not (Test-CorridorKeyPsProperty -Object $bundle -Name "packaged_models")) {
+        return $false
+    }
+
+    foreach ($layoutProperty in @("packaged_layout_detected", "runtime_backend_bundle_ready")) {
+        if ((Test-CorridorKeyPsProperty -Object $bundle -Name $layoutProperty) -and
+            (-not [bool]$bundle.$layoutProperty)) {
+            return $false
+        }
+    }
+
+    $failedModels = @()
+    foreach ($modelEntry in @($bundle.packaged_models)) {
+        if ($null -eq $modelEntry -or -not (Test-CorridorKeyPsProperty -Object $modelEntry -Name "filename")) {
+            return $false
+        }
+
+        $found = $true
+        if (Test-CorridorKeyPsProperty -Object $modelEntry -Name "found") {
+            $found = [bool]$modelEntry.found
+        }
+        $usable = $found
+        if (Test-CorridorKeyPsProperty -Object $modelEntry -Name "usable") {
+            $usable = [bool]$modelEntry.usable
+        }
+        if ($found -and $usable) {
+            continue
+        }
+
+        $filename = [string]$modelEntry.filename
+        if ([string]::IsNullOrWhiteSpace($filename) -or @($MissingModels) -notcontains $filename) {
+            return $false
+        }
+        if ($found) {
+            return $false
+        }
+
+        $failedModels += $filename
+    }
+
+    if ($failedModels.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($missingModel in @($MissingModels)) {
+        if ($failedModels -notcontains $missingModel) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Read-CorridorKeyBundleValidationReport {
     param([string]$ValidationReportPath)
 
@@ -1660,6 +1728,92 @@ function Assert-CorridorKeyBundleValidationHealthy {
 
     $validation = Read-CorridorKeyBundleValidationReport -ValidationReportPath $ValidationReportPath
     $issues = Get-CorridorKeyBundleValidationIssues -Validation $validation
+    if (@($issues).Count -gt 0) {
+        throw "$Label validation is not acceptable. Issues: $($issues -join ' | ')"
+    }
+
+    return $validation
+}
+
+function Read-CorridorKeyAdobePackageValidationReport {
+    param([string]$ValidationReportPath)
+
+    if (-not (Test-Path $ValidationReportPath)) {
+        throw "Adobe package validation report not found: $ValidationReportPath"
+    }
+
+    return Get-Content -Path $ValidationReportPath -Raw -ErrorAction Stop | ConvertFrom-Json
+}
+
+function Get-CorridorKeyAdobePackageValidationIssues {
+    param([object]$Validation)
+
+    $issues = @()
+    if ($null -eq $Validation) {
+        return @("Adobe package validation payload is empty.")
+    }
+
+    if ((-not (Test-CorridorKeyPsProperty -Object $Validation -Name "validation_passed")) -or
+        (-not [bool]$Validation.validation_passed)) {
+        $issues += "Adobe package validation did not pass."
+    }
+
+    foreach ($field in @("install", "effects", "runtime", "models", "doctor")) {
+        if (-not (Test-CorridorKeyPsProperty -Object $Validation -Name $field)) {
+            $issues += "Adobe package validation is missing the '$field' payload."
+        }
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $Validation -Name "effects") -and
+        $null -ne $Validation.effects) {
+        $effects = @($Validation.effects)
+        foreach ($expectedMatchName in @("com.corridorkey.effect", "com.corridorkey.effect.blue")) {
+            $matchingEffects = @($effects | Where-Object { [string]$_.match_name -eq $expectedMatchName })
+            if ($matchingEffects.Count -eq 0) {
+                $issues += "Adobe package validation is missing effect '$expectedMatchName'."
+                continue
+            }
+            $effect = $matchingEffects[0]
+            if (-not (Test-CorridorKeyPsProperty -Object $effect -Name "pipl_capabilities") -or
+                (@($effect.pipl_capabilities) -notcontains "PF_OutFlag2_SUPPORTS_SMART_RENDER")) {
+                $issues += "Adobe package validation does not report SmartFX PiPL support for '$expectedMatchName'."
+            }
+        }
+    }
+
+    $missingModelCount = 0
+    if ((Test-CorridorKeyPsProperty -Object $Validation -Name "models") -and
+        $null -ne $Validation.models -and
+        (Test-CorridorKeyPsProperty -Object $Validation.models -Name "missing_count")) {
+        $missingModelCount = [int]$Validation.models.missing_count
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $Validation -Name "doctor") -and
+        $null -ne $Validation.doctor) {
+        $doctorSucceeded = (Test-CorridorKeyPsProperty -Object $Validation.doctor -Name "succeeded") -and
+            [bool]$Validation.doctor.succeeded
+        $doctorFailureTolerated =
+            (Test-CorridorKeyPsProperty -Object $Validation.doctor -Name "failure_tolerated") -and
+            [bool]$Validation.doctor.failure_tolerated
+        if (-not $doctorSucceeded -and -not $doctorFailureTolerated) {
+            $issues += "Adobe package doctor did not succeed."
+        }
+        if ($doctorFailureTolerated -and $missingModelCount -le 0) {
+            $issues += "Adobe package doctor failure was tolerated without missing model state."
+        }
+    }
+
+    return @($issues)
+}
+
+function Assert-CorridorKeyAdobePackageValidationHealthy {
+    param(
+        [string]$ValidationReportPath,
+        [string]$Label = "Adobe package"
+    )
+
+    $validation = Read-CorridorKeyAdobePackageValidationReport -ValidationReportPath $ValidationReportPath
+    $issues = Get-CorridorKeyAdobePackageValidationIssues -Validation $validation
     if (@($issues).Count -gt 0) {
         throw "$Label validation is not acceptable. Issues: $($issues -join ' | ')"
     }
