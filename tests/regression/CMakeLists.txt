@@ -92,4 +92,11 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_doctor_missing_model_tolerance.ps1
     )
     set_tests_properties(regression_windows_doctor_missing_model_tolerance PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_build_label_reference
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_build_label_reference.ps1
+    )
+    set_tests_properties(regression_windows_build_label_reference PROPERTIES LABELS "regression")
 endif()

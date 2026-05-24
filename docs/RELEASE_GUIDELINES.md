@@ -33,7 +33,7 @@ counter file.
 | Kind | Who sees it | How it is produced | When it changes |
 |---|---|---|---|
 | **Published tag** | GitHub Releases consumers, auto-updater | `vX.Y.Z-<platform>.N`, written by the publishing pipeline | Only when a release is published to GitHub |
-| **Local build label** | OFX panel, CLI `--version`, runtime-server log filename, dist artifact filenames | Output of `git describe --tags --dirty --match "v*-<platform>.*"` plus `-bYYYYMMDDTHHMMSSfffZ` | Every build invocation; the source prefix also changes every commit and flips to `-dirty` on uncommitted changes |
+| **Local build label** | OFX panel, CLI `--version`, runtime-server log filename, dist artifact filenames | Current `PROJECT_VERSION` plus platform/source identity from `git describe --tags --dirty --match "v*-<platform>.*"`, plus `-bYYYYMMDDTHHMMSSfffZ` | Every build invocation; the source suffix also changes every commit and flips to `-dirty` on uncommitted changes |
 
 This split follows the pattern used by the Linux kernel, Go, Rust
 nightly, Kubernetes, and most projects that ship a binary carrying a
@@ -66,25 +66,31 @@ never incremented by a local build, so it grows slowly and predictably
 Python number their RCs).
 
 **Local build label format**. When a build is produced without
-`-DisplayVersionLabel`, the pipeline derives the source prefix from
-`git describe --tags --dirty --match "v*-<platform>.*"`, stripping the
-leading `v`, then appends `-bYYYYMMDDTHHMMSSfffZ`. Concrete examples for a
-Windows build:
+`-DisplayVersionLabel`, the pipeline anchors the visible label to the current
+`PROJECT_VERSION`, then appends source identity from
+`git describe --tags --dirty --match "v*-<platform>.*"` and
+`-bYYYYMMDDTHHMMSSfffZ`. If the closest published prerelease tag belongs to
+the same `X.Y.Z`, the local label keeps that tag counter. If the project has
+already moved to a new `X.Y.Z` before the first published prerelease for that
+cycle, the local label uses `<platform>.0` to mean "unpublished local build
+for this project version"; it never shows the previous `X.Y.Z` as its visible
+version. Concrete examples for a Windows build:
 
 | Git state | Derived label |
 |---|---|
-| Clean checkout at exactly the tag `v0.8.1-win.1` | `0.8.1-win.1-b20260522T010203004Z` |
-| 3 commits past `v0.8.1-win.1`, at commit `abc1234`, clean | `0.8.1-win.1-3-gabc1234-b20260522T010203004Z` |
-| Same as above, with uncommitted changes | `0.8.1-win.1-3-gabc1234-dirty-b20260522T010203004Z` |
-| Before the first prerelease of this `X.Y.Z` cycle | `0.0.0-win.0-<n>-g<sha>-bYYYYMMDDTHHMMSSfffZ` |
+| `PROJECT_VERSION=0.8.1`, clean checkout at exactly `v0.8.1-win.1` | `0.8.1-win.1-b20260522T010203004Z` |
+| `PROJECT_VERSION=0.8.1`, 3 commits past `v0.8.1-win.1`, clean | `0.8.1-win.1-3-gabc1234-b20260522T010203004Z` |
+| `PROJECT_VERSION=0.8.1`, same as above, with uncommitted changes | `0.8.1-win.1-3-gabc1234-dirty-b20260522T010203004Z` |
+| `PROJECT_VERSION=0.8.2`, 3 commits past previous tag `v0.8.1-win.1`, clean | `0.8.2-win.0-3-gabc1234-b20260522T010203004Z` |
 
-The label reads directly as a statement about the repo state and the build
-attempt: `0.8.1-win.1-3-gabc1234-b20260522T010203004Z` means "three commits
-past the `v0.8.1-win.1` prerelease, at commit `abc1234`, built at
+The label reads directly as a statement about product version, repo state, and
+build attempt: `0.8.2-win.0-3-gabc1234-b20260522T010203004Z` means "a local
+unpublished Windows build for project version `0.8.2`, three commits past the
+nearest Windows prerelease tag, at commit `abc1234`, built at
 `20260522T010203004Z`". Two rebuilds of the same commit share the same source
-prefix but must produce different labels. The label identifies both the source
-and the build attempt, so the installer filename and the OFX panel can be
-matched without relying on file hashes.
+identity but must produce different labels. The label identifies both the
+source and the build attempt, so the installer filename and the host panel can
+be matched without relying on file hashes.
 
 **Counter advancement rule (absolute)**. `N` advances only inside the
 `-PublishGithub` code path of the canonical release pipeline. There is
@@ -509,9 +515,12 @@ The label is produced by these mechanisms, in priority order:
    computes the next canonical tag `vX.Y.Z-win.N` and uses that, after
    enforcing the dirty-tree rule.
 3. Default local build flow (every local `build` or unpublished `release`
-   without `-DisplayVersionLabel`). Derived from
-   `git describe --tags --dirty --match "v*-win.*"` with the leading
-   `v` stripped, then suffixed with `-bYYYYMMDDTHHMMSSfffZ`.
+   without `-DisplayVersionLabel`). Anchored to the current
+   `PROJECT_VERSION`, then suffixed with Windows source identity from
+   `git describe --tags --dirty --match "v*-win.*"` and a
+   `-bYYYYMMDDTHHMMSSfffZ` build reference. Before the first published
+   prerelease of a new `X.Y.Z` cycle, local builds use `X.Y.Z-win.0-...`
+   so they cannot look like the previous product version.
 4. Local `package-ofx` without `-DisplayVersionLabel`. Reuses the display
    label already embedded in the built CLI. Packaging an existing build must
    not mint a new label, because the installer filename must match the panel
@@ -521,8 +530,9 @@ The full derivation rules, dirty-tree rejection, and counter advancement
 semantics are documented in section 1 "Pre-release labels". On Windows,
 published prerelease labels must be of the form `X.Y.Z-win.N`; published
 stable labels are the clean `X.Y.Z` form. Local labels are free to be the
-longer `git describe` form ending in `-bYYYYMMDDTHHMMSSfffZ`, including
-the source suffixes `-<count>-g<sha>` and `-dirty` when present.
+longer project-version-plus-source form ending in
+`-bYYYYMMDDTHHMMSSfffZ`, including `win.0`, `-<count>-g<sha>`, and
+`-dirty` when present.
 
 When a label override is used for a local installer, the binaries and the
 installer must carry the same label. Build with that label first, then package

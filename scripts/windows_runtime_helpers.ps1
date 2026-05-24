@@ -952,15 +952,21 @@ function Get-CorridorKeyBuiltCliDisplayLabel {
 function Get-CorridorKeyDerivedDisplayLabel {
     <#
     .SYNOPSIS
-        Derives the local-build display label from `git describe` per the
+        Derives the local-build display label from the project version plus
+        `git describe` source identity per the
         rule documented in docs/RELEASE_GUIDELINES.md section "Windows
         Release Label Plumbing", priority mechanism #3.
 
     .DESCRIPTION
         For local builds produced without `-DisplayVersionLabel`, the
-        canonical label starts with `git describe --tags --dirty --match
-        "v*-win.*"` with the leading `v` stripped, then appends a per-build
-        reference. The source-derived part naturally encodes:
+        canonical label starts with the current CMake `PROJECT_VERSION`, not
+        necessarily the closest published prerelease tag. If the closest
+        Windows prerelease tag belongs to the current project version, the
+        label keeps that tag counter. If the project version has moved past
+        the latest Windows prerelease tag, the local label uses `win.0` to
+        mean "unpublished local build for this project version", then appends
+        the source suffix from `git describe`. The source-derived suffix
+        naturally encodes:
 
         - The closest published prerelease tag in HEAD's ancestry (e.g.
           `v0.8.2-win.2`).
@@ -975,9 +981,7 @@ function Get-CorridorKeyDerivedDisplayLabel {
         source and build attempt they are loading.
 
         Returns an empty string when no matching tag exists in HEAD's
-        ancestry. The caller is expected to fall back to the CMakeLists
-        `PROJECT_VERSION` in that case (preserving the historical
-        behaviour for very early branches).
+        ancestry and no current project version can be resolved.
 
     .PARAMETER RepoRoot
         Repository root passed to `git -C` so the helper works regardless
@@ -989,6 +993,14 @@ function Get-CorridorKeyDerivedDisplayLabel {
         docs/RELEASE_GUIDELINES.md section 1. macOS/Linux callers can
         pass their own platform glob.
 
+    .PARAMETER Version
+        Current CMake `PROJECT_VERSION`. When omitted, the helper reads it
+        from CMakeLists.txt under RepoRoot.
+
+    .PARAMETER Platform
+        Platform identifier inserted into local labels when the current
+        project version has no published prerelease tag yet.
+
     .PARAMETER BuildReference
         Optional deterministic build reference for tests. Production callers
         omit it so the helper stamps the current UTC build time.
@@ -996,6 +1008,8 @@ function Get-CorridorKeyDerivedDisplayLabel {
     param(
         [string]$RepoRoot,
         [string]$PlatformMatch = "v*-win.*",
+        [string]$Version = "",
+        [string]$Platform = "win",
         [string]$BuildReference = ""
     )
 
@@ -1003,12 +1017,59 @@ function Get-CorridorKeyDerivedDisplayLabel {
         return ""
     }
 
+    $resolvedVersion = $Version
+    if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
+        try {
+            $resolvedVersion = Get-CorridorKeyProjectVersion -RepoRoot $RepoRoot
+        } catch {
+            $resolvedVersion = ""
+        }
+    }
+
     $gitArgs = @("-C", $RepoRoot, "describe", "--tags", "--dirty", "--match", $PlatformMatch)
     $rawLabel = & git @gitArgs 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($rawLabel)) {
-        return ""
+        if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
+            return ""
+        }
+        $shortHead = & git -C $RepoRoot rev-parse --short HEAD 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($shortHead)) {
+            return ""
+        }
+        $dirtySuffix = ""
+        $dirtyProbe = & git -C $RepoRoot status --porcelain 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($dirtyProbe | Out-String).Trim())) {
+            $dirtySuffix = "-dirty"
+        }
+        return Add-CorridorKeyBuildReferenceToLabel `
+            -DisplayLabel "$resolvedVersion-$Platform.0-0-g$(($shortHead | Select-Object -First 1).ToString().Trim())$dirtySuffix" `
+            -BuildReference $BuildReference
     }
+
     $sourceLabel = ($rawLabel | Select-Object -First 1).ToString().Trim() -replace '^v', ''
+    if (-not [string]::IsNullOrWhiteSpace($resolvedVersion)) {
+        $labelMatch = [regex]::Match(
+            $sourceLabel,
+            '^(?<tagCore>\d+\.\d+\.\d+)-(?<platform>[A-Za-z0-9]+)\.(?<counter>\d+)(?<suffix>(?:-\d+-g[0-9A-Fa-f]+)?(?:-dirty)?)$'
+        )
+        if ($labelMatch.Success -and $labelMatch.Groups["tagCore"].Value -ne $resolvedVersion) {
+            $sourcePlatform = $labelMatch.Groups["platform"].Value
+            $sourceSuffix = $labelMatch.Groups["suffix"].Value
+            $isDirty = $sourceSuffix.EndsWith("-dirty")
+            if ($sourceSuffix -notmatch '^-\d+-g[0-9A-Fa-f]+') {
+                $shortHead = & git -C $RepoRoot rev-parse --short HEAD 2>$null
+                if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($shortHead)) {
+                    return ""
+                }
+                $sourceSuffix = "-0-g$(($shortHead | Select-Object -First 1).ToString().Trim())"
+                if ($isDirty) {
+                    $sourceSuffix += "-dirty"
+                }
+            }
+            $sourceLabel = "$resolvedVersion-$sourcePlatform.0$sourceSuffix"
+        }
+    }
+
     return Add-CorridorKeyBuildReferenceToLabel `
         -DisplayLabel $sourceLabel `
         -BuildReference $BuildReference

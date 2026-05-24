@@ -70,10 +70,16 @@ try {
 
     $labelA = Get-CorridorKeyDerivedDisplayLabel `
         -RepoRoot $tempRoot `
+        -Version "9.8.7" `
         -BuildReference $buildReferenceA
     $labelB = Get-CorridorKeyDerivedDisplayLabel `
         -RepoRoot $tempRoot `
+        -Version "9.8.7" `
         -BuildReference $buildReferenceB
+    $nextCycleLabel = Get-CorridorKeyDerivedDisplayLabel `
+        -RepoRoot $tempRoot `
+        -Version "9.8.8" `
+        -BuildReference $buildReferenceA
 
     Assert-True `
         -Condition ($labelA -match '^9\.8\.7-win\.4-1-g[0-9a-f]+-dirty-b20260522T010203004Z$') `
@@ -84,6 +90,9 @@ try {
     Assert-True `
         -Condition ($labelA -ne $labelB) `
         -Message "Two build references for the same dirty commit must produce distinct labels."
+    Assert-True `
+        -Condition ($nextCycleLabel -match '^9\.8\.8-win\.0-1-g[0-9a-f]+-dirty-b20260522T010203004Z$') `
+        -Message "A local build for a project version without a published prerelease must not carry the previous version. Got '$nextCycleLabel'."
 
     Write-Host "[PASS] Windows build label reference regression checks passed." -ForegroundColor Green
 } finally {

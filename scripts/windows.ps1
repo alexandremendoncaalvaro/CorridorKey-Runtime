@@ -109,15 +109,16 @@ $stableGithubReleaseRequested = $Task -eq "release" -and $publishGithubRequested
 # label from git. The strict X.Y.Z-win.N format only applies when the
 # operator explicitly opts in to the published-prerelease label shape;
 # the derived form (mechanism #3 in docs/RELEASE_GUIDELINES.md
-# "Windows Release Label Plumbing") is the longer git-describe shape
-# `0.8.2-win.2-82-g4a75ef2[-dirty]` and is intentionally allowed to
-# bypass that strict format.
+# "Windows Release Label Plumbing") is the longer local-build shape
+# `0.8.5-win.0-82-g4a75ef2[-dirty]-b...` and is intentionally allowed
+# to bypass that strict format.
 Assert-CorridorKeyWindowsReleaseLabelFormat `
     -Version $resolvedVersion `
     -DisplayVersionLabel $DisplayVersionLabel
 
-# Mechanism #3: derive the local-build label from `git describe` plus a
-# per-build reference when the operator did not pass an explicit override.
+# Mechanism #3: derive the local-build label from the current project
+# version plus `git describe` source identity and a per-build reference
+# when the operator did not pass an explicit override.
 # Without the build reference, rebuilding the same dirty commit overwrites
 # an installer name that still looks identical in Resolve's OFX panel.
 # Stable GitHub releases are the only clean-label path: when publishing
@@ -138,7 +139,7 @@ if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
         $DisplayVersionLabel = $builtLabel
         Write-Host "[windows] Reusing display version label from built CLI: $DisplayVersionLabel" -ForegroundColor Yellow
     } else {
-        $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
+        $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot -Version $resolvedVersion
         if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
             $DisplayVersionLabel = $derivedLabel
             Write-Host "[windows] Derived display version label from git/build: $DisplayVersionLabel" -ForegroundColor Yellow
