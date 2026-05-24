@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "adobe_matte_params.hpp"
 #include "app/host_plugin_runtime_client.hpp"
@@ -25,7 +26,8 @@ enum class AdobePixelFormat : std::uint8_t {
 
 enum class AdobeAlphaHintSource : std::uint8_t {
     SourceAlpha,
-    ExternalLayer,
+    ExternalLayerAlpha,
+    ExternalLayerRed,
     RoughFallback,
 };
 
@@ -75,6 +77,7 @@ void apply_adobe_matte_params(FrameResult& result, const AdobeMatteParams& param
 Result<AdobeAlphaHintSource> resolve_alpha_hint_source(
     AdobeRuntimeFrame& frame, const AdobeFrameView* external_alpha_hint_frame,
     AlphaHintPolicy alpha_hint_policy);
+std::string_view adobe_alpha_hint_source_label(AdobeAlphaHintSource source) noexcept;
 Result<void> copy_runtime_result_to_adobe_frame(const FrameResult& result,
                                                 const AdobeMutableFrameView& output_frame,
                                                 int output_mode,

@@ -315,9 +315,73 @@ TEST_CASE("adobe bridge prefers an explicit Alpha Hint layer over source alpha",
     auto source = resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback);
 
     REQUIRE(source.has_value());
-    CHECK(*source == AdobeAlphaHintSource::ExternalLayer);
+    CHECK(*source == AdobeAlphaHintSource::ExternalLayerAlpha);
     CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(64.0F / 255.0F));
     CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(191.0F / 255.0F));
+}
+
+TEST_CASE("adobe bridge reads visible grayscale Alpha Hint layers with opaque alpha",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 1.0F);
+
+    std::array<std::uint8_t, 8> hint_pixels{
+        255, 64, 64, 64, 255, 191, 191, 191,
+    };
+    const AdobeFrameView hint_frame{
+        .data = hint_pixels.data(),
+        .data_size_bytes = hint_pixels.size(),
+        .width = 2,
+        .height = 1,
+        .row_bytes = 8,
+        .pixel_format = AdobePixelFormat::Argb32,
+    };
+
+    auto source = resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::ExternalLayerRed);
+    CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(64.0F / 255.0F));
+    CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(191.0F / 255.0F));
+}
+
+TEST_CASE("adobe bridge reads deep-color grayscale Alpha Hint layers with opaque alpha",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 1.0F);
+
+    std::array<std::uint16_t, 8> hint_pixels{
+        32768, 8192, 8192, 8192, 32768, 24576, 24576, 24576,
+    };
+    const AdobeFrameView hint_frame{
+        .data = hint_pixels.data(),
+        .data_size_bytes = hint_pixels.size() * sizeof(std::uint16_t),
+        .width = 2,
+        .height = 1,
+        .row_bytes = 16,
+        .pixel_format = AdobePixelFormat::Argb64,
+    };
+
+    auto source = resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::ExternalLayerRed);
+    CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(0.25F));
+    CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(0.75F));
+}
+
+TEST_CASE("adobe bridge labels alpha hint source decisions for diagnostics",
+          "[unit][adobe][runtime][alpha-hint]") {
+    CHECK(adobe_alpha_hint_source_label(AdobeAlphaHintSource::ExternalLayerAlpha) ==
+          "external_layer_alpha");
+    CHECK(adobe_alpha_hint_source_label(AdobeAlphaHintSource::ExternalLayerRed) ==
+          "external_layer_red");
+    CHECK(adobe_alpha_hint_source_label(AdobeAlphaHintSource::SourceAlpha) == "source_alpha");
+    CHECK(adobe_alpha_hint_source_label(AdobeAlphaHintSource::RoughFallback) == "rough_fallback");
 }
 
 TEST_CASE("adobe bridge falls back when an explicit Alpha Hint layer is fully opaque",

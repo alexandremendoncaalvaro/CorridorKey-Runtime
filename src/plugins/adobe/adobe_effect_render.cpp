@@ -1,10 +1,15 @@
 #include "adobe_effect_render.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "AE_EffectCBSuites.h"
@@ -38,6 +43,12 @@ enum class PixelFormatPolicy {
     RequireExactHostFormat,
 };
 
+struct ImageSampleStats {
+    bool valid = false;
+    float minimum = 0.0F;
+    float maximum = 0.0F;
+};
+
 void set_return_message(PF_OutData& output_data, const char* message) noexcept {
     std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
 }
@@ -51,6 +62,35 @@ void set_error_message(PF_OutData& output_data, const char* message) noexcept {
 AdobeStatus reject_render(PF_OutData& output_data, const std::string& message) noexcept {
     set_error_message(output_data, message.c_str());
     return kAdobeStatusUnsupported;
+}
+
+std::filesystem::path resolve_adobe_log_path() {
+    if (auto override_path =
+            corridorkey::common::environment_variable_copy("CORRIDORKEY_ADOBE_LOG");
+        override_path.has_value()) {
+        return std::filesystem::path(*override_path);
+    }
+
+    return corridorkey::common::default_logs_root() / "adobe.log";
+}
+
+void log_adobe_message(std::string_view scope, std::string_view message) noexcept {
+    try {
+        const auto path = resolve_adobe_log_path();
+        const auto parent = path.parent_path();
+        if (!parent.empty()) {
+            std::error_code error;
+            std::filesystem::create_directories(parent, error);
+        }
+
+        std::ofstream stream(path, std::ios::app);
+        if (!stream.good()) {
+            return;
+        }
+
+        stream << '[' << scope << "] " << message << '\n';
+    } catch (...) {
+    }
 }
 
 void set_return_message_for_host_error(PF_OutData& output_data, AdobeStatus status,
@@ -208,6 +248,53 @@ std::uint64_t render_index_for(PF_InData* input_data) noexcept {
         return 0;
     }
     return static_cast<std::uint64_t>(input_data->current_time);
+}
+
+std::string adobe_pixel_format_label(corridorkey::adobe::AdobePixelFormat pixel_format) {
+    switch (pixel_format) {
+        case corridorkey::adobe::AdobePixelFormat::Argb32:
+            return "argb32";
+        case corridorkey::adobe::AdobePixelFormat::Argb64:
+            return "argb64";
+        case corridorkey::adobe::AdobePixelFormat::Argb128:
+            return "argb128";
+        case corridorkey::adobe::AdobePixelFormat::Bgra32:
+            return "bgra32";
+    }
+    return "unknown";
+}
+
+ImageSampleStats sample_single_channel_stats(const corridorkey::Image& image) noexcept {
+    if (image.width <= 0 || image.height <= 0 || image.channels != 1) {
+        return {};
+    }
+
+    ImageSampleStats stats{
+        .valid = true,
+        .minimum = std::numeric_limits<float>::max(),
+        .maximum = std::numeric_limits<float>::lowest(),
+    };
+    const int y_step = std::max(1, image.height / 64);
+    const int x_step = std::max(1, image.width / 64);
+    for (int y_pos = 0; y_pos < image.height; y_pos += y_step) {
+        for (int x_pos = 0; x_pos < image.width; x_pos += x_step) {
+            const float value = image(y_pos, x_pos);
+            stats.minimum = std::min(stats.minimum, value);
+            stats.maximum = std::max(stats.maximum, value);
+        }
+    }
+
+    return stats;
+}
+
+std::string stats_fields(std::string_view prefix, const ImageSampleStats& stats) {
+    if (!stats.valid) {
+        return std::string(prefix) + "_valid=0";
+    }
+
+    return std::string(prefix) + "_valid=1 " + std::string(prefix) +
+           "_min=" + std::to_string(stats.minimum) + " " + std::string(prefix) +
+           "_max=" + std::to_string(stats.maximum);
 }
 
 bool has_valid_pre_render_callbacks(const PF_PreRenderExtra* extra) noexcept {
@@ -390,6 +477,7 @@ corridorkey::app::HostPluginRuntimeClientOptions client_options_for(
         request.prepare_options.effect_identity);
     options.server_binary =
         corridorkey::app::resolve_host_plugin_runtime_server_binary(adobe_module_path());
+    options.log_callback = log_adobe_message;
     options.request_timeout_ms = request.render_timeout_ms;
     options.prepare_timeout_ms = request.prepare_options.prepare_timeout_ms;
     return options;
@@ -456,12 +544,31 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
         runtime_input_frame = &screen_color_runtime_frame;
     }
 
+    const ImageSampleStats source_alpha_stats =
+        sample_single_channel_stats(runtime_input_frame->alpha_hint.const_view());
     auto alpha_hint_source = corridorkey::adobe::resolve_alpha_hint_source(
         *runtime_input_frame, external_alpha_hint_view,
         request->inference_params.alpha_hint_policy);
     if (!alpha_hint_source) {
         return reject_render(output_data, alpha_hint_source.error().message);
     }
+    const ImageSampleStats guide_alpha_stats =
+        sample_single_channel_stats(runtime_input_frame->alpha_hint.const_view());
+
+    std::string alpha_hint_message =
+        "event=alpha_hint_source source=" +
+        std::string(corridorkey::adobe::adobe_alpha_hint_source_label(*alpha_hint_source)) +
+        " external_layer=" + (external_alpha_hint_view == nullptr ? "0" : "1") + " " +
+        stats_fields("source_alpha_sample", source_alpha_stats) + " " +
+        stats_fields("guide_alpha_sample", guide_alpha_stats);
+    if (external_alpha_hint_view != nullptr) {
+        alpha_hint_message +=
+            " external_width=" + std::to_string(external_alpha_hint_view->width) +
+            " external_height=" + std::to_string(external_alpha_hint_view->height) +
+            " external_row_bytes=" + std::to_string(external_alpha_hint_view->row_bytes) +
+            " external_format=" + adobe_pixel_format_label(external_alpha_hint_view->pixel_format);
+    }
+    log_adobe_message("render", alpha_hint_message);
 
     const auto output_frame =
         mutable_frame_view_for_world(input_data, *output, pixel_format_policy);
@@ -535,6 +642,8 @@ PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* ex
 
     auto* pre_render = static_cast<PF_PreRenderExtra*>(extra);
     PF_RenderRequest request = pre_render->input->output_request;
+    request.channel_mask = PF_ChannelMask_ARGB;
+    request.preserve_rgb_of_zero_alpha = TRUE;
     PF_CheckoutResult source_result{};
     const PF_Err checkout_status = pre_render->cb->checkout_layer(
         input_data->effect_ref, kParamInputLayer, kParamInputLayer, &request,
@@ -553,6 +662,11 @@ PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* ex
         input_data->current_time, input_data->time_step, input_data->time_scale,
         &alpha_hint_result);
     pre_render_data->alpha_hint_layer_checked_out = alpha_hint_checkout_status == kAdobeStatusOk;
+    log_adobe_message(
+        "pre_render",
+        "event=alpha_hint_checkout status=" + std::to_string(alpha_hint_checkout_status) +
+            " checked_out=" + (pre_render_data->alpha_hint_layer_checked_out ? "1" : "0") +
+            " channel_mask=argb preserve_rgb_of_zero_alpha=1");
 
     pre_render->output->result_rect = source_result.result_rect;
     pre_render->output->max_result_rect = source_result.max_result_rect;
@@ -607,9 +721,15 @@ PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
             alpha_hint_checkout = std::make_unique<SmartLayerPixelsCheckout>(
                 *smart_render_extra->cb, input_data->effect_ref, kParamAlphaHintLayer);
             alpha_hint_checkout->mark_checked_out();
+            log_adobe_message("render", "event=alpha_hint_checkout_pixels status=" +
+                                            std::to_string(alpha_hint_status) + " checked_out=1");
         } else {
             alpha_hint_world = nullptr;
+            log_adobe_message("render", "event=alpha_hint_checkout_pixels status=" +
+                                            std::to_string(alpha_hint_status) + " checked_out=0");
         }
+    } else {
+        log_adobe_message("render", "event=alpha_hint_checkout_pixels skipped=1");
     }
 
     PF_EffectWorld* output_world = nullptr;

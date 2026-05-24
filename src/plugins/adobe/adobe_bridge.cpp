@@ -179,8 +179,43 @@ bool source_alpha_contains_hint(const AdobeRuntimeFrame& frame) noexcept {
     return alpha_view_contains_hint(frame.alpha_hint.const_view());
 }
 
-Result<bool> copy_external_alpha_hint(AdobeRuntimeFrame& frame,
-                                      const AdobeFrameView& external_alpha_hint_frame) {
+bool red_channel_view_contains_hint(const Image& rgb) noexcept {
+    if (rgb.width <= 0 || rgb.height <= 0 || rgb.channels != 3) {
+        return false;
+    }
+
+    float minimum_red = std::numeric_limits<float>::max();
+    float maximum_red = std::numeric_limits<float>::lowest();
+    for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
+            const float red = rgb(y_pos, x_pos, 0);
+            minimum_red = std::min(minimum_red, red);
+            maximum_red = std::max(maximum_red, red);
+        }
+    }
+
+    if (minimum_red >= kOpaqueAlphaHintThreshold) {
+        return false;
+    }
+
+    return minimum_red <= kMeaningfulAlphaHintThreshold &&
+           (maximum_red - minimum_red) >= kMeaningfulAlphaHintRange;
+}
+
+void copy_alpha_hint_from_single_channel(Image source, Image destination) {
+    std::copy(source.data.begin(), source.data.end(), destination.data.begin());
+}
+
+void copy_alpha_hint_from_red_channel(Image source_rgb, Image destination) {
+    for (int y_pos = 0; y_pos < source_rgb.height; ++y_pos) {
+        for (int x_pos = 0; x_pos < source_rgb.width; ++x_pos) {
+            destination(y_pos, x_pos) = source_rgb(y_pos, x_pos, 0);
+        }
+    }
+}
+
+Result<std::optional<AdobeAlphaHintSource>> copy_external_alpha_hint(
+    AdobeRuntimeFrame& frame, const AdobeFrameView& external_alpha_hint_frame) {
     auto alpha_hint_frame = copy_adobe_frame_to_runtime(external_alpha_hint_frame);
     if (!alpha_hint_frame) {
         return Unexpected<Error>(alpha_hint_frame.error());
@@ -192,13 +227,19 @@ Result<bool> copy_external_alpha_hint(AdobeRuntimeFrame& frame,
     }
 
     const auto source_alpha = alpha_hint_frame->alpha_hint.const_view();
-    if (!alpha_view_contains_hint(source_alpha)) {
-        return false;
+    auto destination_alpha = frame.alpha_hint.view();
+    if (alpha_view_contains_hint(source_alpha)) {
+        copy_alpha_hint_from_single_channel(source_alpha, destination_alpha);
+        return std::optional<AdobeAlphaHintSource>{AdobeAlphaHintSource::ExternalLayerAlpha};
     }
 
-    auto destination_alpha = frame.alpha_hint.view();
-    std::copy(source_alpha.data.begin(), source_alpha.data.end(), destination_alpha.data.begin());
-    return true;
+    const auto source_rgb = alpha_hint_frame->rgb.const_view();
+    if (red_channel_view_contains_hint(source_rgb)) {
+        copy_alpha_hint_from_red_channel(source_rgb, destination_alpha);
+        return std::optional<AdobeAlphaHintSource>{AdobeAlphaHintSource::ExternalLayerRed};
+    }
+
+    return Result<std::optional<AdobeAlphaHintSource>>{std::optional<AdobeAlphaHintSource>{}};
 }
 
 float normalize_argb8(std::uint8_t value) {
@@ -318,8 +359,8 @@ Result<AdobeAlphaHintSource> resolve_alpha_hint_source(
         if (!copy_status) {
             return Unexpected<Error>(copy_status.error());
         }
-        if (*copy_status) {
-            return AdobeAlphaHintSource::ExternalLayer;
+        if (copy_status->has_value()) {
+            return **copy_status;
         }
     }
 
@@ -334,6 +375,20 @@ Result<AdobeAlphaHintSource> resolve_alpha_hint_source(
 
     ColorUtils::generate_rough_matte(frame.rgb.view(), frame.alpha_hint.view());
     return AdobeAlphaHintSource::RoughFallback;
+}
+
+std::string_view adobe_alpha_hint_source_label(AdobeAlphaHintSource source) noexcept {
+    switch (source) {
+        case AdobeAlphaHintSource::SourceAlpha:
+            return "source_alpha";
+        case AdobeAlphaHintSource::ExternalLayerAlpha:
+            return "external_layer_alpha";
+        case AdobeAlphaHintSource::ExternalLayerRed:
+            return "external_layer_red";
+        case AdobeAlphaHintSource::RoughFallback:
+            return "rough_fallback";
+    }
+    return "unknown";
 }
 
 }  // namespace corridorkey::adobe
