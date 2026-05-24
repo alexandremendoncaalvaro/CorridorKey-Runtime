@@ -43,6 +43,7 @@ foreach ($requiredToken in @(
         'output_luma_min',
         'output_luma_max',
         'validation_passed'
+        'expected_host_effect_name'
     )) {
     if ($hostSmokeScript -notmatch [regex]::Escape($requiredToken)) {
         throw "scripts/smoke_adobe_after_effects_host_win.ps1 must provide '$requiredToken'."

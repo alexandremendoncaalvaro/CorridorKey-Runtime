@@ -19,6 +19,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$kAfterEffectsExposedEffectNameLength = 47
 
 function Resolve-FullPath {
     param([string]$Path)
@@ -168,6 +169,24 @@ function Read-ExpectedDisplayVersionLabel {
         return [string]$validation.runtime.expected_display_version
     }
     return ""
+}
+
+function Get-ExpectedHostEffectName {
+    param(
+        [string]$Component,
+        [string]$DisplayVersionLabel
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+        return ""
+    }
+
+    $componentName = if ($Component -eq "blue") { "Blue" } else { "Green" }
+    $effectName = "CorridorKey $componentName v$DisplayVersionLabel"
+    if ($effectName.Length -gt $kAfterEffectsExposedEffectNameLength) {
+        return $effectName.Substring(0, $kAfterEffectsExposedEffectNameLength)
+    }
+    return $effectName
 }
 
 function Install-PackagePayloadIfRequested {
@@ -352,6 +371,9 @@ if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {
 }
 
 $expectedLabel = Read-ExpectedDisplayVersionLabel -PackageRoot $packageRoot -ProvidedLabel $ExpectedDisplayVersionLabel
+$expectedHostEffectName = Get-ExpectedHostEffectName `
+    -Component $EffectComponent `
+    -DisplayVersionLabel $expectedLabel
 $commonPluginRoot = Resolve-CommonPluginInstallPath -Path $CommonPluginInstallPath
 $targetPath = Join-Path $commonPluginRoot "CorridorKey"
 
@@ -375,6 +397,7 @@ $report = [ordered]@{
     host_surface = "after_effects"
     effect_component = $EffectComponent
     expected_display_version = $expectedLabel
+    expected_host_effect_name = $expectedHostEffectName
     package_path = $packageRoot
     common_plugin_install_path = $commonPluginRoot
     target_path = $targetPath
@@ -496,9 +519,9 @@ try {
     if ([string]$fixtureReport.status -ne "ok") {
         throw "After Effects fixture creation failed: $($fixtureReport.message)"
     }
-    if (-not [string]::IsNullOrWhiteSpace($expectedLabel) -and
-        ([string]$fixtureReport.effect_name).IndexOf($expectedLabel, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
-        throw "After Effects loaded effect '$($fixtureReport.effect_name)', expected display label '$expectedLabel'."
+    if (-not [string]::IsNullOrWhiteSpace($expectedHostEffectName) -and
+        [string]$fixtureReport.effect_name -ne $expectedHostEffectName) {
+        throw "After Effects loaded effect '$($fixtureReport.effect_name)', expected host-visible effect name '$expectedHostEffectName' for display label '$expectedLabel'."
     }
 
     Invoke-Aerender -ExecutablePath $aerender `
