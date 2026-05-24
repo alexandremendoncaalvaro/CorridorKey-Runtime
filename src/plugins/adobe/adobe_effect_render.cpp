@@ -483,6 +483,47 @@ corridorkey::app::HostPluginRuntimeClientOptions client_options_for(
     return options;
 }
 
+std::string quality_fallback_mode_label(corridorkey::QualityFallbackMode mode) {
+    switch (mode) {
+        case corridorkey::QualityFallbackMode::Direct:
+            return "direct";
+        case corridorkey::QualityFallbackMode::CoarseToFine:
+            return "coarse_to_fine";
+        case corridorkey::QualityFallbackMode::Auto:
+        default:
+            return "auto";
+    }
+}
+
+void log_runtime_request(const corridorkey::adobe::AdobeEffectRuntimeRequest& request,
+                         const PF_LayerDef& source, const PF_LayerDef& output) {
+    log_adobe_message(
+        "render",
+        "event=runtime_request source_width=" + std::to_string(source.width) + " source_height=" +
+            std::to_string(source.height) + " output_width=" + std::to_string(output.width) +
+            " output_height=" + std::to_string(output.height) +
+            " quality_mode=" + std::to_string(request.prepare_options.requested_quality_mode) +
+            " requested_resolution=" +
+            std::to_string(request.prepare_options.requested_resolution) +
+            " effective_resolution=" +
+            std::to_string(request.prepare_options.effective_resolution) +
+            " model=" + request.prepare_options.model_path.filename().string() +
+            " target_resolution=" + std::to_string(request.inference_params.target_resolution) +
+            " requested_quality_resolution=" +
+            std::to_string(request.inference_params.requested_quality_resolution) +
+            " fallback_mode=" +
+            quality_fallback_mode_label(request.inference_params.quality_fallback_mode) +
+            " coarse_resolution_override=" +
+            std::to_string(request.inference_params.coarse_resolution_override) +
+            " tiling=" + (request.inference_params.enable_tiling ? "1" : "0") +
+            " tile_padding=" + std::to_string(request.inference_params.tile_padding) +
+            " source_passthrough=" + (request.inference_params.source_passthrough ? "1" : "0") +
+            " sp_erode_px=" + std::to_string(request.inference_params.sp_erode_px) +
+            " sp_blur_px=" + std::to_string(request.inference_params.sp_blur_px) +
+            " output_alpha_only=" + (request.inference_params.output_alpha_only ? "1" : "0") +
+            " output_mode=" + std::to_string(request.output_mode));
+}
+
 PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& output_data,
                                              PF_ParamDef* parameters[], PF_LayerDef* output,
                                              const PF_LayerDef* external_alpha_hint_layer,
@@ -498,6 +539,7 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
     if (!request) {
         return reject_render(output_data, request.error().message);
     }
+    log_runtime_request(*request, source, *output);
 
     const auto source_frame = frame_view_for_world(input_data, source, pixel_format_policy);
     if (!source_frame) {

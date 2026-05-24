@@ -179,6 +179,14 @@ int coarse_resolution_for_choice(int choice) noexcept {
     }
 }
 
+int scale_integer_pixels_to_source_long_edge(int pixels_at_baseline, int width,
+                                             int height) noexcept {
+    constexpr double kBaselineLongEdge = 1920.0;
+    const int long_edge = std::max(width, height);
+    const double scale = long_edge > 0 ? static_cast<double>(long_edge) / kBaselineLongEdge : 1.0;
+    return std::max(0, static_cast<int>(std::lround(pixels_at_baseline * scale)));
+}
+
 int recommended_coarse_resolution_for(int requested_resolution) noexcept {
     if (requested_resolution > kQualityHighResolution) {
         return kQualityHighResolution;
@@ -276,12 +284,10 @@ corridorkey::Result<void> validate_runtime_request_context(
     return {};
 }
 
-corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameters[],
-                                                    int requested_resolution, int output_mode,
-                                                    std::string_view effect_identity,
-                                                    corridorkey::QualityFallbackMode fallback_mode,
-                                                    int coarse_resolution_override,
-                                                    int effective_resolution) {
+corridorkey::InferenceParams build_inference_params(
+    PF_ParamDef* const parameters[], int requested_resolution, int output_mode,
+    std::string_view effect_identity, corridorkey::QualityFallbackMode fallback_mode,
+    int coarse_resolution_override, int effective_resolution, int source_width, int source_height) {
     corridorkey::InferenceParams inference_params;
     inference_params.target_resolution = effective_resolution;
     inference_params.requested_quality_resolution = requested_resolution;
@@ -316,12 +322,14 @@ corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameter
     inference_params.source_passthrough =
         checkbox_value(parameters, corridorkey::adobe::kParamRecoverOriginalDetails,
                        kDefaultRecoverOriginalDetails);
-    inference_params.sp_erode_px =
+    inference_params.sp_erode_px = scale_integer_pixels_to_source_long_edge(
         integer_slider_value(parameters, corridorkey::adobe::kParamDetailsEdgeShrink,
-                             kDefaultDetailsEdgeShrink, kMinimumEdgePixels, kMaximumEdgePixels);
-    inference_params.sp_blur_px =
+                             kDefaultDetailsEdgeShrink, kMinimumEdgePixels, kMaximumEdgePixels),
+        source_width, source_height);
+    inference_params.sp_blur_px = scale_integer_pixels_to_source_long_edge(
         integer_slider_value(parameters, corridorkey::adobe::kParamDetailsEdgeFeather,
-                             kDefaultDetailsEdgeFeather, kMinimumEdgePixels, kMaximumEdgePixels);
+                             kDefaultDetailsEdgeFeather, kMinimumEdgePixels, kMaximumEdgePixels),
+        source_width, source_height);
     inference_params.output_alpha_only = !output_mode_requires_foreground(output_mode);
     return inference_params;
 }
@@ -383,7 +391,7 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
                              kMaximumPrepareTimeoutSeconds);
     request.inference_params = build_inference_params(
         parameters, requested_resolution, *output_mode, context.effect_identity, fallback_mode,
-        coarse_resolution_override, effective_resolution);
+        coarse_resolution_override, effective_resolution, context.width, context.height);
     request.matte_params = build_matte_params(parameters);
     request.screen_color_mode = screen_color_mode_for(context.effect_identity, screen_color);
     request.output_mode = *output_mode;

@@ -1223,6 +1223,35 @@ TEST_CASE("After Effects render parameters map coarse-to-fine quality fallback",
     CHECK(request->inference_params.coarse_resolution_override == 1024);
 }
 
+TEST_CASE("After Effects source detail edge controls scale with source resolution",
+          "[unit][adobe][effect][runtime][regression]") {
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    set_slider_value(storage[corridorkey::adobe::kParamDetailsEdgeShrink], 3.0F);
+    set_slider_value(storage[corridorkey::adobe::kParamDetailsEdgeFeather], 7.0F);
+
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext context{
+        .models_root = "models",
+        .host_surface = "after_effects",
+        .effect_identity = corridorkey::adobe::kEffectMatchName,
+        .client_instance_id = "sequence-1",
+        .width = 3840,
+        .height = 2160,
+        .requested_device = corridorkey::DeviceInfo{"auto", 0, corridorkey::Backend::Auto},
+        .engine_options = corridorkey::EngineCreateOptions{},
+    };
+
+    auto request = corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+
+    REQUIRE(request.has_value());
+    CHECK(request->inference_params.sp_erode_px == 6);
+    CHECK(request->inference_params.sp_blur_px == 14);
+}
+
 TEST_CASE("After Effects linear input color space maps runtime request to linear input",
           "[unit][adobe][effect][runtime][color]") {
     std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
