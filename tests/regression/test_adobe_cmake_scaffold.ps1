@@ -214,11 +214,13 @@ struct PF_LayerDef {};
     }
 
     $ninjaText = Get-Content -Path $ninjaFile -Raw
-    if ($ninjaText -notmatch "corridorkey_adobe") {
-        throw "Expected the Adobe-enabled configure to create corridorkey_adobe."
+    if ($ninjaText -notmatch "corridorkey_adobe_green" -or
+        $ninjaText -notmatch "corridorkey_adobe_blue") {
+        throw "Expected the Adobe-enabled configure to create Green and Blue Adobe targets."
     }
-    if ($ninjaText -notmatch "corridorkey_adobe\.aex") {
-        throw "Expected the Adobe target scaffold to configure the corridorkey_adobe .aex suffix."
+    if ($ninjaText -notmatch "corridorkey_adobe_green\.aex" -or
+        $ninjaText -notmatch "corridorkey_adobe_blue\.aex") {
+        throw "Expected the Adobe target scaffold to configure Green and Blue .aex suffixes."
     }
     if (-not (Test-TextContainsPath -Text $ninjaText -Path $fakeSdkIncludeDir)) {
         throw "Expected the Adobe target scaffold to include the fake SDK headers."
@@ -230,19 +232,27 @@ struct PF_LayerDef {};
         throw "Expected the Adobe target scaffold to generate the PiPL resource rule."
     }
 
-    $generatedPiplSource = Join-Path $buildDir "src\plugins\adobe\corridorkey_adobe.r"
-    if (-not (Test-Path $generatedPiplSource)) {
-        throw "Expected Adobe PiPL source scaffold at $generatedPiplSource."
+    $generatedPiplSource = Join-Path $buildDir "src\plugins\adobe\corridorkey_adobe_green.r"
+    $generatedBluePiplSource = Join-Path $buildDir "src\plugins\adobe\corridorkey_adobe_blue.r"
+    if (-not (Test-Path $generatedPiplSource) -or -not (Test-Path $generatedBluePiplSource)) {
+        throw "Expected Adobe Green and Blue PiPL source scaffolds."
     }
     $generatedPiplText = Get-Content -Path $generatedPiplSource -Raw
+    $generatedBluePiplText = Get-Content -Path $generatedBluePiplSource -Raw
     if ($generatedPiplText -notmatch 'CodeWin64X86\s+\{\s+"EffectMain"\s+\}') {
         throw "Expected Adobe PiPL scaffold to declare EffectMain for Win64."
     }
     if ($generatedPiplText -notmatch 'AE_Effect_Match_Name\s+\{\s+"com\.corridorkey\.effect"\s+\}') {
         throw "Expected Adobe PiPL scaffold to contain the stable effect match name."
     }
+    if ($generatedBluePiplText -notmatch 'AE_Effect_Match_Name\s+\{\s+"com\.corridorkey\.effect\.blue"\s+\}') {
+        throw "Expected Adobe Blue PiPL scaffold to contain the stable Blue effect match name."
+    }
     if ($generatedPiplText -notmatch 'AE_Effect_Support_URL\s+\{\s+"https://github\.com/alexandremendoncaalvaro/CorridorKey-Runtime/issues"\s+\}') {
         throw "Expected Adobe PiPL scaffold to contain the support URL."
+    }
+    if ($generatedPiplText -notmatch 'AE_Effect_Version\s+\{\s+524289\s+\}') {
+        throw "Expected Adobe PiPL scaffold to use the PF_VERSION(1,0,0,0,1) encoded value."
     }
 
     Write-Host "[PASS] Adobe CMake scaffold regression checks passed." -ForegroundColor Green

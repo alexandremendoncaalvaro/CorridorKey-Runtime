@@ -521,6 +521,19 @@ TEST_CASE("host plugin runtime artifact selection keeps color and backend policy
     CHECK(blue->requested_device.name == "TorchTRT");
 }
 
+TEST_CASE("host plugin runtime artifact selection accepts explicit coarse quality override",
+          "[unit][runtime][quality][regression]") {
+    const std::filesystem::path models_root{"models"};
+
+    auto green = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"auto", 0, Backend::Auto}, 2048, false,
+        QualityFallbackMode::CoarseToFine, "green", 1024);
+
+    REQUIRE(green.has_value());
+    CHECK(green->model_path == models_root / "corridorkey_fp16_1024.onnx");
+    CHECK(green->requested_device.backend == Backend::Auto);
+}
+
 TEST_CASE("packaged model resolution uses catalog entries for non-onnx artifacts",
           "[unit][runtime][regression]") {
     REQUIRE(packaged_model_resolution("corridorkey_mlx.safetensors") == 2048);

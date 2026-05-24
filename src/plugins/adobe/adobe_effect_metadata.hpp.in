@@ -7,6 +7,8 @@ namespace corridorkey::adobe {
 inline constexpr char kEffectDisplayName[] = "@CORRIDORKEY_ADOBE_EFFECT_NAME@";
 inline constexpr char kEffectCategory[] = "@CORRIDORKEY_ADOBE_EFFECT_CATEGORY@";
 inline constexpr char kEffectMatchName[] = "@CORRIDORKEY_ADOBE_EFFECT_MATCH_NAME@";
+inline constexpr char kEffectNodeFamily[] = "@CORRIDORKEY_ADOBE_EFFECT_NODE_FAMILY@";
+inline constexpr bool kEffectNodeIsBlue = @CORRIDORKEY_ADOBE_EFFECT_NODE_IS_BLUE@;
 inline constexpr char kEffectSupportUrl[] = "@CORRIDORKEY_ADOBE_EFFECT_SUPPORT_URL@";
 inline constexpr std::int32_t kEffectVersionMajor = @CORRIDORKEY_ADOBE_EFFECT_VERSION_MAJOR@;
 inline constexpr std::int32_t kEffectVersionMinor = @CORRIDORKEY_ADOBE_EFFECT_VERSION_MINOR@;

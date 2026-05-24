@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <string_view>
 
 #include "adobe_effect_parameters.hpp"
 #include "app/runtime_contracts.hpp"
@@ -14,11 +15,10 @@ constexpr int kQualityMaximumResolution = 2048;
 constexpr int kPopupZeroBasedOffset = 1;
 constexpr int kMillisecondsPerSecond = 1000;
 constexpr int kDefaultQualityMode = 1;
-constexpr int kDefaultAlphaHintPolicy = 0;
-constexpr int kAlphaHintPolicyRequireExternal = 1;
-constexpr int kDefaultNodeIdentity = 0;
-constexpr int kNodeIdentityBlue = 1;
-constexpr int kScreenColorBlue = 1;
+constexpr int kDefaultInputColorSpace = 0;
+constexpr int kInputColorLinear = 1;
+constexpr int kScreenColorGreen = 0;
+constexpr int kScreenColorBlueGreen = 1;
 constexpr double kDefaultDespillStrength = 0.5;
 constexpr double kMinimumDespillStrength = 0.0;
 constexpr double kMaximumDespillStrength = 1.0;
@@ -26,10 +26,30 @@ constexpr int kDefaultSpillMethod = 0;
 constexpr bool kDefaultRecoverOriginalDetails = true;
 constexpr int kDefaultDetailsEdgeShrink = 3;
 constexpr int kDefaultDetailsEdgeFeather = 7;
+constexpr double kDefaultMatteClipBlack = 0.0;
+constexpr double kDefaultMatteClipWhite = 1.0;
+constexpr double kDefaultMatteShrinkGrow = 0.0;
+constexpr double kDefaultMatteEdgeBlur = 0.0;
+constexpr double kDefaultMatteGamma = 1.0;
 constexpr int kDefaultOutputMode = 0;
 constexpr int kOutputMatteOnly = 1;
 constexpr int kOutputSourceMatte = 3;
 constexpr int kMaximumOutputMode = 4;
+constexpr int kDefaultDespeckleSize = 400;
+constexpr int kMinimumDespeckleSize = 50;
+constexpr int kMaximumDespeckleSize = 2000;
+constexpr int kDefaultTileOverlap = 64;
+constexpr int kMinimumTileOverlap = 8;
+constexpr int kMaximumTileOverlap = 128;
+constexpr int kDefaultUpscaleMethod = 1;
+constexpr int kUpscaleMethodBilinear = 1;
+constexpr int kDefaultQualityFallbackMode = 0;
+constexpr int kQualityFallbackCoarseToFine = 2;
+constexpr int kDefaultCoarseResolutionOverride = 0;
+constexpr int kCoarseResolution512 = 1;
+constexpr int kCoarseResolution1024 = 2;
+constexpr int kCoarseResolution1536 = 3;
+constexpr int kCoarseResolution2048 = 4;
 constexpr int kDefaultPrepareTimeoutSeconds = 30;
 constexpr int kDefaultRenderTimeoutSeconds = 120;
 constexpr int kMinimumTimeoutSeconds = 10;
@@ -37,6 +57,15 @@ constexpr int kMaximumPrepareTimeoutSeconds = 600;
 constexpr int kMaximumRenderTimeoutSeconds = 300;
 constexpr int kMinimumEdgePixels = 0;
 constexpr int kMaximumEdgePixels = 100;
+constexpr double kMinimumMatteClip = 0.0;
+constexpr double kMaximumMatteClip = 1.0;
+constexpr double kMinimumMatteShrinkGrow = -10.0;
+constexpr double kMaximumMatteShrinkGrow = 10.0;
+constexpr double kMinimumMatteEdgeBlur = 0.0;
+constexpr double kMaximumMatteEdgeBlur = 5.0;
+constexpr double kMinimumMatteGamma = 0.1;
+constexpr double kMaximumMatteGamma = 10.0;
+constexpr std::string_view kAdobeBlueEffectMatchName = "com.corridorkey.effect.blue";
 
 const PF_ParamDef* parameter_at(PF_ParamDef* const parameters[], PF_ParamIndex index) noexcept {
     if (parameters == nullptr || index < 0 ||
@@ -125,27 +154,105 @@ int requested_resolution_for_quality(int quality_mode) noexcept {
     }
 }
 
-int despill_screen_channel_for_screen_color(int screen_color) noexcept {
-    return screen_color == kScreenColorBlue ? 2 : 1;
+corridorkey::QualityFallbackMode quality_fallback_mode_for_choice(int choice) noexcept {
+    return choice == kQualityFallbackCoarseToFine ? corridorkey::QualityFallbackMode::CoarseToFine
+                                                  : corridorkey::QualityFallbackMode::Direct;
 }
 
-corridorkey::AlphaHintPolicy alpha_hint_policy_for(int alpha_hint_policy) noexcept {
-    if (alpha_hint_policy == kAlphaHintPolicyRequireExternal) {
-        return corridorkey::AlphaHintPolicy::RequireExternalHint;
+corridorkey::UpscaleMethod upscale_method_for_choice(int choice) noexcept {
+    return choice == kUpscaleMethodBilinear ? corridorkey::UpscaleMethod::Bilinear
+                                            : corridorkey::UpscaleMethod::Lanczos4;
+}
+
+int coarse_resolution_for_choice(int choice) noexcept {
+    switch (choice) {
+        case kCoarseResolution512:
+            return kQualityDraftResolution;
+        case kCoarseResolution1024:
+            return kQualityHighResolution;
+        case kCoarseResolution1536:
+            return kQualityUltraResolution;
+        case kCoarseResolution2048:
+            return kQualityMaximumResolution;
+        default:
+            return 0;
     }
-    return corridorkey::AlphaHintPolicy::AutoRoughFallback;
 }
 
-std::string node_identity_for(int node_identity) {
-    return node_identity == kNodeIdentityBlue ? "blue" : "green";
+int recommended_coarse_resolution_for(int requested_resolution) noexcept {
+    if (requested_resolution > kQualityHighResolution) {
+        return kQualityHighResolution;
+    }
+    if (requested_resolution > kQualityDraftResolution) {
+        return kQualityDraftResolution;
+    }
+    return 0;
 }
 
-std::string screen_color_domain_for(int screen_color) {
-    return screen_color == kScreenColorBlue ? "blue" : "green";
+int effective_coarse_resolution_override(corridorkey::QualityFallbackMode fallback_mode,
+                                         int selected_resolution,
+                                         int requested_resolution) noexcept {
+    if (fallback_mode != corridorkey::QualityFallbackMode::CoarseToFine) {
+        return 0;
+    }
+    if (selected_resolution > 0) {
+        return selected_resolution;
+    }
+    return recommended_coarse_resolution_for(requested_resolution);
+}
+
+bool is_blue_effect_identity(std::string_view effect_identity) noexcept {
+    return effect_identity == kAdobeBlueEffectMatchName;
+}
+
+std::string node_identity_for_effect_identity(std::string_view effect_identity) {
+    return is_blue_effect_identity(effect_identity) ? "blue" : "green";
+}
+
+int despill_screen_channel_for_effect_identity(std::string_view effect_identity) noexcept {
+    return is_blue_effect_identity(effect_identity) ? 2 : 1;
+}
+
+int screen_color_maximum_choice_for_effect_identity(std::string_view effect_identity) noexcept {
+    return is_blue_effect_identity(effect_identity) ? 0 : kScreenColorBlueGreen;
+}
+
+std::string screen_color_domain_for(std::string_view effect_identity) {
+    return is_blue_effect_identity(effect_identity) ? "blue" : "green";
+}
+
+corridorkey::ScreenColorMode screen_color_mode_for(std::string_view effect_identity,
+                                                   int screen_color) noexcept {
+    if (is_blue_effect_identity(effect_identity)) {
+        return corridorkey::ScreenColorMode::Blue;
+    }
+    if (screen_color == kScreenColorBlueGreen) {
+        return corridorkey::ScreenColorMode::BlueGreen;
+    }
+    return corridorkey::ScreenColorMode::Green;
 }
 
 bool output_mode_requires_foreground(int output_mode) noexcept {
     return output_mode != kOutputMatteOnly && output_mode != kOutputSourceMatte;
+}
+
+corridorkey::adobe::AdobeMatteParams build_matte_params(PF_ParamDef* const parameters[]) noexcept {
+    return corridorkey::adobe::AdobeMatteParams{
+        .black_point =
+            bounded_slider_value(parameters, corridorkey::adobe::kParamMatteClipBlack,
+                                 kDefaultMatteClipBlack, kMinimumMatteClip, kMaximumMatteClip),
+        .white_point =
+            bounded_slider_value(parameters, corridorkey::adobe::kParamMatteClipWhite,
+                                 kDefaultMatteClipWhite, kMinimumMatteClip, kMaximumMatteClip),
+        .shrink_grow_pixels = bounded_slider_value(
+            parameters, corridorkey::adobe::kParamMatteShrinkGrow, kDefaultMatteShrinkGrow,
+            kMinimumMatteShrinkGrow, kMaximumMatteShrinkGrow),
+        .edge_blur_pixels = bounded_slider_value(
+            parameters, corridorkey::adobe::kParamMatteEdgeBlur, kDefaultMatteEdgeBlur,
+            kMinimumMatteEdgeBlur, kMaximumMatteEdgeBlur),
+        .gamma = bounded_slider_value(parameters, corridorkey::adobe::kParamMatteGamma,
+                                      kDefaultMatteGamma, kMinimumMatteGamma, kMaximumMatteGamma),
+    };
 }
 
 corridorkey::Result<void> validate_runtime_request_context(
@@ -171,25 +278,41 @@ corridorkey::Result<void> validate_runtime_request_context(
 
 corridorkey::InferenceParams build_inference_params(PF_ParamDef* const parameters[],
                                                     int requested_resolution, int output_mode,
-                                                    int screen_color) {
-    const int alpha_hint_policy = popup_choice(
-        parameters, corridorkey::adobe::kParamAlphaHintPolicy, kDefaultAlphaHintPolicy, 1);
-
+                                                    std::string_view effect_identity,
+                                                    corridorkey::QualityFallbackMode fallback_mode,
+                                                    int coarse_resolution_override,
+                                                    int effective_resolution) {
     corridorkey::InferenceParams inference_params;
-    inference_params.target_resolution = requested_resolution;
+    inference_params.target_resolution = effective_resolution;
     inference_params.requested_quality_resolution = requested_resolution;
-    inference_params.quality_fallback_mode = corridorkey::QualityFallbackMode::Direct;
+    inference_params.quality_fallback_mode = fallback_mode;
     inference_params.refinement_mode = corridorkey::RefinementMode::Auto;
+    inference_params.coarse_resolution_override = coarse_resolution_override;
     inference_params.despill_strength = static_cast<float>(bounded_slider_value(
         parameters, corridorkey::adobe::kParamDespillStrength, kDefaultDespillStrength,
         kMinimumDespillStrength, kMaximumDespillStrength));
     inference_params.spill_method =
         popup_choice(parameters, corridorkey::adobe::kParamSpillMethod, kDefaultSpillMethod, 2);
-    inference_params.despill_screen_channel = despill_screen_channel_for_screen_color(screen_color);
-    inference_params.alpha_hint_policy = alpha_hint_policy_for(alpha_hint_policy);
-    inference_params.upscale_method = corridorkey::UpscaleMethod::Lanczos4;
-    inference_params.enable_tiling = false;
-    inference_params.tile_padding = corridorkey::InferenceParams::kDefaultTilePaddingPx;
+    inference_params.despill_screen_channel =
+        despill_screen_channel_for_effect_identity(effect_identity);
+    inference_params.alpha_hint_policy = corridorkey::AlphaHintPolicy::AutoRoughFallback;
+    const int input_color_space =
+        popup_choice(parameters, corridorkey::adobe::kParamInputColorSpace, kDefaultInputColorSpace,
+                     kInputColorLinear);
+    inference_params.input_is_linear = input_color_space == kInputColorLinear;
+    const int upscale_method =
+        popup_choice(parameters, corridorkey::adobe::kParamUpscaleMethod, kDefaultUpscaleMethod, 1);
+    inference_params.upscale_method = upscale_method_for_choice(upscale_method);
+    inference_params.enable_tiling =
+        checkbox_value(parameters, corridorkey::adobe::kParamEnableTiling, false);
+    inference_params.tile_padding =
+        integer_slider_value(parameters, corridorkey::adobe::kParamTileOverlap, kDefaultTileOverlap,
+                             kMinimumTileOverlap, kMaximumTileOverlap);
+    inference_params.auto_despeckle =
+        checkbox_value(parameters, corridorkey::adobe::kParamAutoDespeckle, false);
+    inference_params.despeckle_size =
+        integer_slider_value(parameters, corridorkey::adobe::kParamDespeckleSize,
+                             kDefaultDespeckleSize, kMinimumDespeckleSize, kMaximumDespeckleSize);
     inference_params.source_passthrough =
         checkbox_value(parameters, corridorkey::adobe::kParamRecoverOriginalDetails,
                        kDefaultRecoverOriginalDetails);
@@ -214,22 +337,29 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
         return Unexpected<Error>(validation.error());
     }
 
-    auto node_identity = strict_popup_choice(parameters, kParamNodeIdentity, kDefaultNodeIdentity,
-                                             1, "node identity");
-    if (!node_identity) {
-        return Unexpected<Error>(node_identity.error());
-    }
     const int quality_mode = popup_choice(parameters, kParamQuality, kDefaultQualityMode, 4);
     const int requested_resolution = requested_resolution_for_quality(quality_mode);
-    const std::string node_identity_label = node_identity_for(*node_identity);
-    const int screen_color = popup_choice(parameters, kParamScreenColor, *node_identity, 2);
-    const std::string screen_color_domain = screen_color_domain_for(screen_color);
+    const std::string node_identity_label =
+        node_identity_for_effect_identity(context.effect_identity);
+    const int screen_color =
+        popup_choice(parameters, kParamScreenColor, kScreenColorGreen,
+                     screen_color_maximum_choice_for_effect_identity(context.effect_identity));
+    const std::string screen_color_domain = screen_color_domain_for(context.effect_identity);
+    const int fallback_choice =
+        popup_choice(parameters, kParamQualityFallbackMode, kDefaultQualityFallbackMode, 2);
+    const QualityFallbackMode fallback_mode = quality_fallback_mode_for_choice(fallback_choice);
+    const int selected_coarse_resolution = coarse_resolution_for_choice(popup_choice(
+        parameters, kParamCoarseResolutionOverride, kDefaultCoarseResolutionOverride, 4));
+    const int coarse_resolution_override = effective_coarse_resolution_override(
+        fallback_mode, selected_coarse_resolution, requested_resolution);
     auto artifact_selection = app::host_plugin_runtime_artifact_selection_for_request(
-        context.models_root, context.requested_device, requested_resolution, false,
-        QualityFallbackMode::Direct, screen_color_domain);
+        context.models_root, context.requested_device, requested_resolution, false, fallback_mode,
+        screen_color_domain, coarse_resolution_override);
     if (!artifact_selection) {
         return Unexpected<Error>(artifact_selection.error());
     }
+    const int effective_resolution = app::packaged_model_resolution(artifact_selection->model_path)
+                                         .value_or(requested_resolution);
 
     auto output_mode = strict_popup_choice(parameters, kParamOutputMode, kDefaultOutputMode,
                                            kMaximumOutputMode, "output mode");
@@ -247,12 +377,15 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
     request.prepare_options.engine_options = context.engine_options;
     request.prepare_options.requested_quality_mode = quality_mode;
     request.prepare_options.requested_resolution = requested_resolution;
-    request.prepare_options.effective_resolution = requested_resolution;
+    request.prepare_options.effective_resolution = effective_resolution;
     request.prepare_options.prepare_timeout_ms =
         timeout_milliseconds(parameters, kParamPrepareTimeoutSeconds, kDefaultPrepareTimeoutSeconds,
                              kMaximumPrepareTimeoutSeconds);
-    request.inference_params =
-        build_inference_params(parameters, requested_resolution, *output_mode, screen_color);
+    request.inference_params = build_inference_params(
+        parameters, requested_resolution, *output_mode, context.effect_identity, fallback_mode,
+        coarse_resolution_override, effective_resolution);
+    request.matte_params = build_matte_params(parameters);
+    request.screen_color_mode = screen_color_mode_for(context.effect_identity, screen_color);
     request.output_mode = *output_mode;
     request.render_timeout_ms =
         timeout_milliseconds(parameters, kParamRenderTimeoutSeconds, kDefaultRenderTimeoutSeconds,

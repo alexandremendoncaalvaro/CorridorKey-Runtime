@@ -7,23 +7,37 @@
 
 #include "AE_Effect.h"
 #include "adobe_bridge.hpp"
+#include "adobe_matte_params.hpp"
+#include "post_process/screen_color.hpp"
 
 namespace corridorkey::adobe {
 
-inline constexpr std::size_t kEffectParameterSlotCount = 13;
+inline constexpr std::size_t kEffectParameterSlotCount = 25;
 inline constexpr PF_ParamIndex kParamInputLayer = 0;
-inline constexpr PF_ParamIndex kParamNodeIdentity = 1;
-inline constexpr PF_ParamIndex kParamQuality = 2;
-inline constexpr PF_ParamIndex kParamScreenColor = 3;
-inline constexpr PF_ParamIndex kParamAlphaHintPolicy = 4;
-inline constexpr PF_ParamIndex kParamDespillStrength = 5;
-inline constexpr PF_ParamIndex kParamSpillMethod = 6;
-inline constexpr PF_ParamIndex kParamRecoverOriginalDetails = 7;
-inline constexpr PF_ParamIndex kParamDetailsEdgeShrink = 8;
-inline constexpr PF_ParamIndex kParamDetailsEdgeFeather = 9;
-inline constexpr PF_ParamIndex kParamOutputMode = 10;
-inline constexpr PF_ParamIndex kParamPrepareTimeoutSeconds = 11;
-inline constexpr PF_ParamIndex kParamRenderTimeoutSeconds = 12;
+inline constexpr PF_ParamIndex kParamQuality = 1;
+inline constexpr PF_ParamIndex kParamScreenColor = 2;
+inline constexpr PF_ParamIndex kParamInputColorSpace = 3;
+inline constexpr PF_ParamIndex kParamAlphaHintLayer = 4;
+inline constexpr PF_ParamIndex kParamMatteClipBlack = 5;
+inline constexpr PF_ParamIndex kParamMatteClipWhite = 6;
+inline constexpr PF_ParamIndex kParamMatteShrinkGrow = 7;
+inline constexpr PF_ParamIndex kParamMatteEdgeBlur = 8;
+inline constexpr PF_ParamIndex kParamDespillStrength = 9;
+inline constexpr PF_ParamIndex kParamSpillMethod = 10;
+inline constexpr PF_ParamIndex kParamRecoverOriginalDetails = 11;
+inline constexpr PF_ParamIndex kParamDetailsEdgeShrink = 12;
+inline constexpr PF_ParamIndex kParamDetailsEdgeFeather = 13;
+inline constexpr PF_ParamIndex kParamMatteGamma = 14;
+inline constexpr PF_ParamIndex kParamAutoDespeckle = 15;
+inline constexpr PF_ParamIndex kParamDespeckleSize = 16;
+inline constexpr PF_ParamIndex kParamOutputMode = 17;
+inline constexpr PF_ParamIndex kParamEnableTiling = 18;
+inline constexpr PF_ParamIndex kParamTileOverlap = 19;
+inline constexpr PF_ParamIndex kParamUpscaleMethod = 20;
+inline constexpr PF_ParamIndex kParamQualityFallbackMode = 21;
+inline constexpr PF_ParamIndex kParamCoarseResolutionOverride = 22;
+inline constexpr PF_ParamIndex kParamPrepareTimeoutSeconds = 23;
+inline constexpr PF_ParamIndex kParamRenderTimeoutSeconds = 24;
 
 struct AdobeEffectRuntimeRequestContext {
     std::filesystem::path models_root;
@@ -39,6 +53,8 @@ struct AdobeEffectRuntimeRequestContext {
 struct AdobeEffectRuntimeRequest {
     AdobePrepareSessionOptions prepare_options;
     InferenceParams inference_params;
+    AdobeMatteParams matte_params;
+    ScreenColorMode screen_color_mode = ScreenColorMode::Green;
     int output_mode = 0;
     int render_timeout_ms = 0;
 };

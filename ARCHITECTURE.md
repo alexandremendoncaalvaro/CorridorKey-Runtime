@@ -93,11 +93,11 @@ User-facing surfaces. Each is a thin consumer of App/Core contracts.
   validated hosts today, with per-host workarounds gated behind explicit
   branches that never regress the path the other host depends on.
 - **Adobe Plugins** (`src/plugins/adobe`): Adobe After Effects SDK effect
-  integration for After Effects and Premiere. Adobe SDK entrypoints,
-  PiPL/effect metadata, host parameter mapping, pixel-format handling, and
-  host logging live here. Shared inference, model selection, diagnostics,
-  runtime policy, and frame transport stay in App/Core or shared common
-  infrastructure.
+  integration for After Effects and Premiere. The build emits separate Green
+  and Blue `.aex` modules with distinct PiPL/effect identities while sharing
+  Adobe SDK entrypoints, host parameter mapping, pixel-format handling, and
+  host logging. Shared inference, model selection, diagnostics, runtime policy,
+  and frame transport stay in App/Core or shared common infrastructure.
 - **Tauri GUI** (`src/gui`): Tauri 2 + React desktop application. Distributed
   as a separate desktop installer that embeds its own copy of the runtime
   payload (the staged output of `package_windows.ps1`); does not require the
@@ -185,8 +185,8 @@ src/
 |-- gui/                        Tauri GUI (in-development, not yet released)
 |
 |-- plugins/
-|   |-- adobe/                  Adobe After Effects SDK effect plugin
-|   |   |-- CMakeLists.txt      Adobe plugin target and PiPL generation rules
+|   |-- adobe/                  Adobe After Effects SDK effect plugins
+|   |   |-- CMakeLists.txt      Adobe Green/Blue plugin targets and PiPL generation rules
 |   |   |-- adobe_bridge.cpp    Adobe host frame conversion and runtime bridge input helpers
 |   |   |-- adobe_bridge.hpp    Adobe runtime bridge API
 |   |   |-- adobe_effect.cpp    Adobe effect entry point and selector dispatch

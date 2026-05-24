@@ -31,6 +31,15 @@ foreach(_placeholder
 endforeach()
 
 foreach(_placeholder
+        CORRIDORKEY_ADOBE_EFFECT_NODE_FAMILY
+        CORRIDORKEY_ADOBE_EFFECT_NODE_IS_BLUE)
+    if(NOT _metadata_text MATCHES "@${_placeholder}@")
+        message(FATAL_ERROR
+            "Metadata template does not contain @${_placeholder}@.")
+    endif()
+endforeach()
+
+foreach(_placeholder
         CORRIDORKEY_ADOBE_EFFECT_VERSION_MAJOR
         CORRIDORKEY_ADOBE_EFFECT_VERSION_MINOR
         CORRIDORKEY_ADOBE_EFFECT_VERSION_BUG

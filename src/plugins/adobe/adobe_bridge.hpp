@@ -8,8 +8,11 @@
 #include <memory>
 #include <string>
 
+#include "adobe_matte_params.hpp"
 #include "app/host_plugin_runtime_client.hpp"
 #include "app/host_plugin_runtime_protocol.hpp"
+#include "post_process/alpha_edge.hpp"
+#include "post_process/screen_color.hpp"
 
 namespace corridorkey::adobe {
 
@@ -18,6 +21,12 @@ enum class AdobePixelFormat : std::uint8_t {
     Argb64,
     Argb128,
     Bgra32,
+};
+
+enum class AdobeAlphaHintSource : std::uint8_t {
+    SourceAlpha,
+    ExternalLayer,
+    RoughFallback,
 };
 
 struct AdobeFrameView {
@@ -58,6 +67,14 @@ struct AdobePrepareSessionOptions {
 };
 
 Result<AdobeRuntimeFrame> copy_adobe_frame_to_runtime(const AdobeFrameView& frame);
+void apply_adobe_input_color_space(AdobeRuntimeFrame& frame, bool input_is_linear);
+ScreenColorTransform canonicalize_adobe_runtime_frame_for_screen_color(AdobeRuntimeFrame& frame,
+                                                                       ScreenColorMode mode);
+void apply_adobe_matte_params(FrameResult& result, const AdobeMatteParams& params, int width,
+                              int height, AlphaEdgeState& state);
+Result<AdobeAlphaHintSource> resolve_alpha_hint_source(
+    AdobeRuntimeFrame& frame, const AdobeFrameView* external_alpha_hint_frame,
+    AlphaHintPolicy alpha_hint_policy);
 Result<void> copy_runtime_result_to_adobe_frame(const FrameResult& result,
                                                 const AdobeMutableFrameView& output_frame,
                                                 int output_mode,
@@ -74,6 +91,9 @@ class AdobeRuntimeBridge {
     Result<app::HostPluginRuntimePrepareSessionResponse> prepare_session(
         const AdobePrepareSessionOptions& options, StageTimingCallback on_stage = nullptr);
     Result<FrameResult> process_frame(const AdobeFrameView& frame, const InferenceParams& params,
+                                      std::uint64_t render_index,
+                                      StageTimingCallback on_stage = nullptr);
+    Result<FrameResult> process_frame(const AdobeRuntimeFrame& frame, const InferenceParams& params,
                                       std::uint64_t render_index,
                                       StageTimingCallback on_stage = nullptr);
     Result<void> release_session();

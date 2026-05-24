@@ -42,8 +42,14 @@ void set_return_message(PF_OutData& output_data, const char* message) noexcept {
     std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
 }
 
+void set_error_message(PF_OutData& output_data, const char* message) noexcept {
+    set_return_message(output_data, message);
+    output_data.out_flags =
+        static_cast<PF_OutFlags>(output_data.out_flags | PF_OutFlag_DISPLAY_ERROR_MESSAGE);
+}
+
 AdobeStatus reject_render(PF_OutData& output_data, const std::string& message) noexcept {
-    set_return_message(output_data, message.c_str());
+    set_error_message(output_data, message.c_str());
     return kAdobeStatusUnsupported;
 }
 
@@ -210,15 +216,16 @@ bool has_valid_smart_render_callbacks(const PF_SmartRenderExtra* extra) noexcept
 
 class SmartLayerPixelsCheckout {
    public:
-    SmartLayerPixelsCheckout(PF_SmartRenderCallbacks& callbacks, PF_ProgPtr effect_ref) noexcept
-        : m_callbacks(&callbacks), m_effect_ref(effect_ref) {}
+    SmartLayerPixelsCheckout(PF_SmartRenderCallbacks& callbacks, PF_ProgPtr effect_ref,
+                             A_long checkout_id) noexcept
+        : m_callbacks(&callbacks), m_effect_ref(effect_ref), m_checkout_id(checkout_id) {}
 
     SmartLayerPixelsCheckout(const SmartLayerPixelsCheckout&) = delete;
     SmartLayerPixelsCheckout& operator=(const SmartLayerPixelsCheckout&) = delete;
 
     ~SmartLayerPixelsCheckout() {
         if (m_checked_out) {
-            m_callbacks->checkin_layer_pixels(m_effect_ref, corridorkey::adobe::kParamInputLayer);
+            m_callbacks->checkin_layer_pixels(m_effect_ref, m_checkout_id);
         }
     }
 
@@ -229,13 +236,134 @@ class SmartLayerPixelsCheckout {
    private:
     PF_SmartRenderCallbacks* m_callbacks = nullptr;
     PF_ProgPtr m_effect_ref = nullptr;
+    A_long m_checkout_id = 0;
     bool m_checked_out = false;
+};
+
+struct SmartPreRenderData {
+    bool alpha_hint_layer_checked_out = false;
+};
+
+void delete_smart_pre_render_data(void* pre_render_data) noexcept {
+    std::unique_ptr<SmartPreRenderData> owned{static_cast<SmartPreRenderData*>(pre_render_data)};
+}
+
+const SmartPreRenderData* smart_pre_render_data_for(const PF_SmartRenderExtra* extra) noexcept {
+    if (extra == nullptr || extra->input == nullptr || extra->input->pre_render_data == nullptr) {
+        return nullptr;
+    }
+    return static_cast<const SmartPreRenderData*>(extra->input->pre_render_data);
+}
+
+class CheckedOutLayerParameter {
+   public:
+    CheckedOutLayerParameter(PF_InData* input_data, PF_ParamIndex index) noexcept
+        : m_input_data(input_data) {
+        if (m_input_data == nullptr || m_input_data->inter.checkout_param == nullptr ||
+            m_input_data->inter.checkin_param == nullptr) {
+            return;
+        }
+
+        m_status = m_input_data->inter.checkout_param(
+            m_input_data->effect_ref, index, m_input_data->current_time, m_input_data->time_step,
+            m_input_data->time_scale, &m_storage);
+        m_checked_out = m_status == kAdobeStatusOk;
+    }
+
+    CheckedOutLayerParameter(const CheckedOutLayerParameter&) = delete;
+    CheckedOutLayerParameter& operator=(const CheckedOutLayerParameter&) = delete;
+
+    ~CheckedOutLayerParameter() {
+        if (m_checked_out && m_input_data != nullptr &&
+            m_input_data->inter.checkin_param != nullptr) {
+            m_input_data->inter.checkin_param(m_input_data->effect_ref, &m_storage);
+        }
+    }
+
+    [[nodiscard]] PF_Err status() const noexcept {
+        return m_status;
+    }
+
+    [[nodiscard]] const PF_LayerDef* layer() const noexcept {
+        if (!m_checked_out || m_storage.u.ld.data == nullptr) {
+            return nullptr;
+        }
+        return &m_storage.u.ld;
+    }
+
+   private:
+    PF_InData* m_input_data = nullptr;
+    PF_ParamDef m_storage{};
+    PF_Err m_status = kAdobeStatusOk;
+    bool m_checked_out = false;
+};
+
+class CheckedOutEffectParameters {
+   public:
+    explicit CheckedOutEffectParameters(PF_InData& input_data) noexcept
+        : m_input_data(&input_data) {}
+
+    CheckedOutEffectParameters(const CheckedOutEffectParameters&) = delete;
+    CheckedOutEffectParameters& operator=(const CheckedOutEffectParameters&) = delete;
+
+    ~CheckedOutEffectParameters() {
+        if (m_input_data == nullptr || m_input_data->inter.checkin_param == nullptr) {
+            return;
+        }
+        for (std::size_t index = 0; index < m_checked_out.size(); ++index) {
+            if (m_checked_out[index]) {
+                m_input_data->inter.checkin_param(m_input_data->effect_ref, &m_storage[index]);
+            }
+        }
+    }
+
+    [[nodiscard]] bool can_checkout_non_layer_parameters() const noexcept {
+        return m_input_data != nullptr && m_input_data->inter.checkout_param != nullptr &&
+               m_input_data->inter.checkin_param != nullptr;
+    }
+
+    PF_Err checkout_non_layer_parameters() noexcept {
+        for (std::size_t index = 1; index < m_storage.size(); ++index) {
+            if (index == static_cast<std::size_t>(corridorkey::adobe::kParamAlphaHintLayer)) {
+                continue;
+            }
+
+            const PF_Err status = m_input_data->inter.checkout_param(
+                m_input_data->effect_ref, static_cast<PF_ParamIndex>(index),
+                m_input_data->current_time, m_input_data->time_step, m_input_data->time_scale,
+                &m_storage[index]);
+            if (status != kAdobeStatusOk) {
+                return status;
+            }
+            m_checked_out[index] = true;
+            m_parameters[index] = &m_storage[index];
+        }
+
+        return kAdobeStatusOk;
+    }
+
+    void set_source_world(const PF_EffectWorld& source) noexcept {
+        m_storage[corridorkey::adobe::kParamInputLayer].u.ld = source;
+        m_parameters[corridorkey::adobe::kParamInputLayer] =
+            &m_storage[corridorkey::adobe::kParamInputLayer];
+    }
+
+    PF_ParamDef** data() noexcept {
+        return m_parameters.data();
+    }
+
+   private:
+    PF_InData* m_input_data = nullptr;
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> m_storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> m_parameters{};
+    std::array<bool, corridorkey::adobe::kEffectParameterSlotCount> m_checked_out{};
 };
 
 corridorkey::adobe::AdobeEffectRuntimeRequestContext render_context_for(PF_InData* input_data,
                                                                         const PF_LayerDef& source) {
+    const auto module_path = adobe_module_path();
     return corridorkey::adobe::AdobeEffectRuntimeRequestContext{
-        .models_root = corridorkey::common::default_models_root(),
+        .models_root = corridorkey::adobe::resolve_adobe_models_root(module_path),
         .host_surface = "after_effects",
         .effect_identity = corridorkey::adobe::kEffectMatchName,
         .client_instance_id = client_instance_id_for(input_data),
@@ -262,6 +390,7 @@ corridorkey::app::HostPluginRuntimeClientOptions client_options_for(
 
 PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& output_data,
                                              PF_ParamDef* parameters[], PF_LayerDef* output,
+                                             const PF_LayerDef* external_alpha_hint_layer,
                                              PixelFormatPolicy pixel_format_policy) {
     if (parameters == nullptr || parameters[corridorkey::adobe::kParamInputLayer] == nullptr ||
         output == nullptr) {
@@ -284,6 +413,48 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
     if (!source_runtime_frame) {
         return reject_render(output_data, source_runtime_frame.error().message);
     }
+    corridorkey::adobe::apply_adobe_input_color_space(*source_runtime_frame,
+                                                      request->inference_params.input_is_linear);
+
+    corridorkey::Result<corridorkey::adobe::AdobeFrameView> external_alpha_hint_frame =
+        corridorkey::Unexpected<corridorkey::Error>(corridorkey::Error{
+            corridorkey::ErrorCode::InvalidParameters, "Alpha Hint Layer is not connected."});
+    const corridorkey::adobe::AdobeFrameView* external_alpha_hint_view = nullptr;
+    if (external_alpha_hint_layer != nullptr && external_alpha_hint_layer->data != nullptr) {
+        external_alpha_hint_frame =
+            frame_view_for_world(input_data, *external_alpha_hint_layer, pixel_format_policy);
+        if (!external_alpha_hint_frame) {
+            return reject_render(output_data, external_alpha_hint_frame.error().message);
+        }
+        external_alpha_hint_view = &*external_alpha_hint_frame;
+    }
+
+    corridorkey::ScreenColorTransform screen_color_transform;
+    corridorkey::adobe::AdobeRuntimeFrame* runtime_input_frame = &*source_runtime_frame;
+    corridorkey::adobe::AdobeRuntimeFrame screen_color_runtime_frame;
+    if (corridorkey::screen_color_requires_green_domain_canonicalization(
+            request->screen_color_mode)) {
+        auto transformed_runtime_frame =
+            corridorkey::adobe::copy_adobe_frame_to_runtime(*source_frame);
+        if (!transformed_runtime_frame) {
+            return reject_render(output_data, transformed_runtime_frame.error().message);
+        }
+        corridorkey::adobe::apply_adobe_input_color_space(
+            *transformed_runtime_frame, request->inference_params.input_is_linear);
+
+        screen_color_transform =
+            corridorkey::adobe::canonicalize_adobe_runtime_frame_for_screen_color(
+                *transformed_runtime_frame, request->screen_color_mode);
+        screen_color_runtime_frame = std::move(*transformed_runtime_frame);
+        runtime_input_frame = &screen_color_runtime_frame;
+    }
+
+    auto alpha_hint_source = corridorkey::adobe::resolve_alpha_hint_source(
+        *runtime_input_frame, external_alpha_hint_view,
+        request->inference_params.alpha_hint_policy);
+    if (!alpha_hint_source) {
+        return reject_render(output_data, alpha_hint_source.error().message);
+    }
 
     const auto output_frame =
         mutable_frame_view_for_world(input_data, *output, pixel_format_policy);
@@ -303,10 +474,17 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
         return reject_render(output_data, prepare_status.error().message);
     }
 
-    auto render_result = bridge.process_frame(*source_frame, request->inference_params,
+    auto render_result = bridge.process_frame(*runtime_input_frame, request->inference_params,
                                               render_index_for(input_data));
     if (!render_result) {
         return reject_render(output_data, render_result.error().message);
+    }
+    corridorkey::AlphaEdgeState alpha_edge_state;
+    corridorkey::adobe::apply_adobe_matte_params(*render_result, request->matte_params,
+                                                 source.width, source.height, alpha_edge_state);
+    if (!request->inference_params.output_alpha_only) {
+        corridorkey::restore_from_green_domain(render_result->foreground.view(),
+                                               screen_color_transform);
     }
 
     auto write_status = corridorkey::adobe::copy_runtime_result_to_adobe_frame(
@@ -321,6 +499,25 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
 }  // namespace
 
 namespace corridorkey::adobe {
+
+std::filesystem::path resolve_adobe_models_root(const std::filesystem::path& plugin_module_path) {
+    if (auto override_path = common::environment_variable_copy("CORRIDORKEY_MODELS_DIR");
+        override_path.has_value()) {
+        return std::filesystem::path(*override_path);
+    }
+
+    const auto plugin_dir = plugin_module_path.parent_path();
+    if (!plugin_module_path.empty() && !plugin_dir.empty()) {
+        const auto contents_dir = plugin_dir.parent_path();
+        if (plugin_dir.filename() == "Win64" && contents_dir.filename() == "Contents") {
+            return contents_dir / "Resources" / "models";
+        }
+
+        return plugin_dir / "models";
+    }
+
+    return common::default_models_root();
+}
 
 PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* extra) {
     const auto* const pre_render_input = static_cast<const PF_PreRenderExtra*>(extra);
@@ -341,35 +538,69 @@ PF_Err smart_pre_render(PF_InData* input_data, PF_OutData& output_data, void* ex
         return checkout_status;
     }
 
+    auto pre_render_data = std::make_unique<SmartPreRenderData>();
+    PF_CheckoutResult alpha_hint_result{};
+    const PF_Err alpha_hint_checkout_status = pre_render->cb->checkout_layer(
+        input_data->effect_ref, kParamAlphaHintLayer, kParamAlphaHintLayer, &request,
+        input_data->current_time, input_data->time_step, input_data->time_scale,
+        &alpha_hint_result);
+    pre_render_data->alpha_hint_layer_checked_out = alpha_hint_checkout_status == kAdobeStatusOk;
+
     pre_render->output->result_rect = source_result.result_rect;
     pre_render->output->max_result_rect = source_result.max_result_rect;
     pre_render->output->solid = FALSE;
     pre_render->output->flags = 0;
-    pre_render->output->pre_render_data = nullptr;
-    pre_render->output->delete_pre_render_data_func = nullptr;
+    pre_render->output->pre_render_data = pre_render_data.release();
+    pre_render->output->delete_pre_render_data_func = delete_smart_pre_render_data;
     return kAdobeStatusOk;
 }
 
-PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef* parameters[],
-                    void* extra) {
+PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*[], void* extra) {
     const auto* const smart_render_input = static_cast<const PF_SmartRenderExtra*>(extra);
     if (input_data == nullptr || !has_valid_smart_render_callbacks(smart_render_input)) {
         return reject_render(output_data, "CorridorKey SmartFX render requires host callbacks.");
     }
 
+    CheckedOutEffectParameters smart_parameters{*input_data};
+    if (!smart_parameters.can_checkout_non_layer_parameters()) {
+        return reject_render(output_data,
+                             "CorridorKey SmartFX render requires parameter checkout callbacks.");
+    }
+
+    PF_Err status = smart_parameters.checkout_non_layer_parameters();
+    if (status != kAdobeStatusOk) {
+        return status;
+    }
+
     auto* smart_render_extra = static_cast<PF_SmartRenderExtra*>(extra);
     PF_EffectWorld* input_world = nullptr;
-    PF_Err status = smart_render_extra->cb->checkout_layer_pixels(input_data->effect_ref,
-                                                                  kParamInputLayer, &input_world);
+    status = smart_render_extra->cb->checkout_layer_pixels(input_data->effect_ref, kParamInputLayer,
+                                                           &input_world);
     if (status != kAdobeStatusOk) {
         set_return_message(output_data, "CorridorKey SmartFX render could not checkout source.");
         return status;
     }
 
-    SmartLayerPixelsCheckout input_checkout{*smart_render_extra->cb, input_data->effect_ref};
+    SmartLayerPixelsCheckout input_checkout{*smart_render_extra->cb, input_data->effect_ref,
+                                            kParamInputLayer};
     input_checkout.mark_checked_out();
     if (input_world == nullptr) {
         return reject_render(output_data, "CorridorKey SmartFX render source is null.");
+    }
+
+    PF_EffectWorld* alpha_hint_world = nullptr;
+    std::unique_ptr<SmartLayerPixelsCheckout> alpha_hint_checkout;
+    const SmartPreRenderData* pre_render_data = smart_pre_render_data_for(smart_render_input);
+    if (pre_render_data != nullptr && pre_render_data->alpha_hint_layer_checked_out) {
+        const PF_Err alpha_hint_status = smart_render_extra->cb->checkout_layer_pixels(
+            input_data->effect_ref, kParamAlphaHintLayer, &alpha_hint_world);
+        if (alpha_hint_status == kAdobeStatusOk) {
+            alpha_hint_checkout = std::make_unique<SmartLayerPixelsCheckout>(
+                *smart_render_extra->cb, input_data->effect_ref, kParamAlphaHintLayer);
+            alpha_hint_checkout->mark_checked_out();
+        } else {
+            alpha_hint_world = nullptr;
+        }
     }
 
     PF_EffectWorld* output_world = nullptr;
@@ -382,24 +613,19 @@ PF_Err smart_render(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef*
         return reject_render(output_data, "CorridorKey SmartFX render output is null.");
     }
 
-    std::array<PF_ParamDef*, kEffectParameterSlotCount> smart_parameters{};
-    if (parameters != nullptr) {
-        for (std::size_t index = 0; index < smart_parameters.size(); ++index) {
-            smart_parameters[index] = parameters[index];
-        }
-    }
-
-    PF_ParamDef source_parameter{};
-    source_parameter.u.ld = *input_world;
-    smart_parameters[kParamInputLayer] = &source_parameter;
+    smart_parameters.set_source_world(*input_world);
     return render_frame_with_pixel_format_policy(input_data, output_data, smart_parameters.data(),
-                                                 output_world,
+                                                 output_world, alpha_hint_world,
                                                  PixelFormatPolicy::RequireExactHostFormat);
 }
 
 PF_Err render_frame(PF_InData* input_data, PF_OutData& output_data, PF_ParamDef* parameters[],
                     PF_LayerDef* output) {
+    CheckedOutLayerParameter alpha_hint_layer{input_data, kParamAlphaHintLayer};
+    const PF_LayerDef* alpha_hint_layer_view =
+        alpha_hint_layer.status() == kAdobeStatusOk ? alpha_hint_layer.layer() : nullptr;
     return render_frame_with_pixel_format_policy(input_data, output_data, parameters, output,
+                                                 alpha_hint_layer_view,
                                                  PixelFormatPolicy::AllowDepthFallback);
 }
 

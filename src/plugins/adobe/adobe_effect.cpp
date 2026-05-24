@@ -69,8 +69,14 @@ void set_return_message(PF_OutData& output_data, const char* message) noexcept {
     std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
 }
 
+void set_error_message(PF_OutData& output_data, const char* message) noexcept {
+    set_return_message(output_data, message);
+    output_data.out_flags =
+        static_cast<PF_OutFlags>(output_data.out_flags | PF_OutFlag_DISPLAY_ERROR_MESSAGE);
+}
+
 AdobeStatus reject_render(PF_OutData& output_data, const std::string& message) noexcept {
-    set_return_message(output_data, message.c_str());
+    set_error_message(output_data, message.c_str());
     return kAdobeStatusUnsupported;
 }
 
@@ -78,21 +84,21 @@ AdobeStatus setup_sequence(PF_InData* input_data, PF_OutData& output_data) noexc
     const auto callbacks = handle_callbacks_for(input_data);
     if (callbacks.new_handle == nullptr || callbacks.lock_handle == nullptr ||
         callbacks.unlock_handle == nullptr || callbacks.dispose_handle == nullptr) {
-        set_return_message(output_data,
-                           "CorridorKey sequence state requires host handle callbacks.");
+        set_error_message(output_data,
+                          "CorridorKey sequence state requires host handle callbacks.");
         return kAdobeStatusUnsupported;
     }
 
     PF_Handle sequence_data = callbacks.new_handle(sizeof(AdobeSequenceState));
     if (sequence_data == nullptr) {
-        set_return_message(output_data, "CorridorKey could not allocate sequence state.");
+        set_error_message(output_data, "CorridorKey could not allocate sequence state.");
         return PF_Err_OUT_OF_MEMORY;
     }
 
     auto* state = static_cast<AdobeSequenceState*>(callbacks.lock_handle(sequence_data));
     if (state == nullptr) {
         callbacks.dispose_handle(sequence_data);
-        set_return_message(output_data, "CorridorKey could not lock sequence state.");
+        set_error_message(output_data, "CorridorKey could not lock sequence state.");
         return kAdobeStatusFailed;
     }
 

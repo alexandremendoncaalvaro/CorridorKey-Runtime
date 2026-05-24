@@ -4,9 +4,11 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "adobe_effect_metadata.hpp"
+
 namespace {
 
-enum class ParameterKind : std::uint8_t { Popup, FloatSlider, Checkbox };
+enum class ParameterKind : std::uint8_t { Popup, FloatSlider, Checkbox, Layer };
 
 struct ParameterDefinition {
     const char* name;
@@ -29,16 +31,38 @@ constexpr PF_ParamFlags kPopupFlags = PF_ParamFlag_CANNOT_INTERP;
 constexpr PF_ParamFlags kCheckboxFlags = PF_ParamFlag_CANNOT_INTERP;
 constexpr PF_ParamFlags kSliderFlags = PF_ParamFlag_NONE;
 
-constexpr std::array<ParameterDefinition, 12> kParameterDefinitions{{
-    {"Node Identity", ParameterKind::Popup, 1001, 2, 1, "Green|Blue", 0.0, 0.0, 0.0,
-     PF_Precision_INTEGER, 0, ""},
+constexpr ParameterDefinition kScreenColorParameterDefinition{
+    "Screen Color",
+    ParameterKind::Popup,
+    1003,
+    corridorkey::adobe::kEffectNodeIsBlue ? static_cast<A_short>(1) : static_cast<A_short>(2),
+    1,
+    corridorkey::adobe::kEffectNodeIsBlue ? "Blue" : "Green|Blue-Green Channel Swap",
+    0.0,
+    0.0,
+    0.0,
+    PF_Precision_INTEGER,
+    0,
+    "",
+};
+
+constexpr std::array<ParameterDefinition, 24> kParameterDefinitions{{
     {"Quality", ParameterKind::Popup, 1002, 5, 2,
      "Default (Draft 512)|Draft (512)|High (1024)|Ultra (1536)|Maximum (2048)", 0.0, 0.0, 0.0,
      PF_Precision_INTEGER, 0, ""},
-    {"Screen Color", ParameterKind::Popup, 1003, 3, 1, "Green|Blue|Blue-Green Channel Swap", 0.0,
-     0.0, 0.0, PF_Precision_INTEGER, 0, ""},
-    {"Alpha Hint Policy", ParameterKind::Popup, 1004, 2, 1,
-     "Auto Rough Fallback|Require External Hint", 0.0, 0.0, 0.0, PF_Precision_INTEGER, 0, ""},
+    kScreenColorParameterDefinition,
+    {"Input Color Space", ParameterKind::Popup, 1026, 2, 1, "sRGB|Linear", 0.0, 0.0, 0.0,
+     PF_Precision_INTEGER, 0, ""},
+    {"Alpha Hint Layer", ParameterKind::Layer, 1013, 0, 0, "", 0.0, 0.0, 0.0, PF_Precision_INTEGER,
+     0, ""},
+    {"Matte Clip Black", ParameterKind::FloatSlider, 1014, 0, 0, "", 0.0, 1.0, 0.0,
+     PF_Precision_HUNDREDTHS, 0, ""},
+    {"Matte Clip White", ParameterKind::FloatSlider, 1015, 0, 0, "", 0.0, 1.0, 1.0,
+     PF_Precision_HUNDREDTHS, 0, ""},
+    {"Matte Shrink/Grow", ParameterKind::FloatSlider, 1016, 0, 0, "", -10.0, 10.0, 0.0,
+     PF_Precision_TENTHS, 0, ""},
+    {"Matte Edge Blur", ParameterKind::FloatSlider, 1017, 0, 0, "", 0.0, 5.0, 0.0,
+     PF_Precision_TENTHS, 0, ""},
     {"Despill Strength", ParameterKind::FloatSlider, 1005, 0, 0, "", 0.0, 1.0, 0.5,
      PF_Precision_HUNDREDTHS, 0, ""},
     {"Spill Method", ParameterKind::Popup, 1006, 3, 1, "Average|Double Limit|Neutral", 0.0, 0.0,
@@ -49,9 +73,25 @@ constexpr std::array<ParameterDefinition, 12> kParameterDefinitions{{
      PF_Precision_INTEGER, 0, ""},
     {"Details Edge Feather", ParameterKind::FloatSlider, 1009, 0, 0, "", 0.0, 100.0, 7.0,
      PF_Precision_INTEGER, 0, ""},
+    {"Matte Gamma", ParameterKind::FloatSlider, 1018, 0, 0, "", 0.1F, 10.0, 1.0,
+     PF_Precision_HUNDREDTHS, 0, ""},
+    {"Auto Despeckle", ParameterKind::Checkbox, 1019, 0, 0, "", 0.0, 0.0, 0.0, PF_Precision_INTEGER,
+     0, "Enabled"},
+    {"Min Region Size", ParameterKind::FloatSlider, 1020, 0, 0, "", 50.0, 2000.0, 400.0,
+     PF_Precision_INTEGER, 0, ""},
     {"Output Mode", ParameterKind::Popup, 1010, 5, 1,
      "Processed|Matte Only|Foreground Only|Source+Matte|FG+Matte", 0.0, 0.0, 0.0,
      PF_Precision_INTEGER, 0, ""},
+    {"Enable Tiling", ParameterKind::Checkbox, 1021, 0, 0, "", 0.0, 0.0, 0.0, PF_Precision_INTEGER,
+     0, "Enabled"},
+    {"Tile Overlap", ParameterKind::FloatSlider, 1022, 0, 0, "", 8.0, 128.0, 64.0,
+     PF_Precision_INTEGER, 0, ""},
+    {"Upscale Method", ParameterKind::Popup, 1023, 2, 2, "Lanczos4|Bilinear", 0.0, 0.0, 0.0,
+     PF_Precision_INTEGER, 0, ""},
+    {"Quality Fallback", ParameterKind::Popup, 1024, 3, 1, "Default (Direct)|Direct|Coarse to Fine",
+     0.0, 0.0, 0.0, PF_Precision_INTEGER, 0, ""},
+    {"Coarse Resolution Override", ParameterKind::Popup, 1025, 5, 1,
+     "Recommended|512|1024|1536|2048", 0.0, 0.0, 0.0, PF_Precision_INTEGER, 0, ""},
     {"Prepare Timeout (s)", ParameterKind::FloatSlider, 1011, 0, 0, "", 10.0, 600.0, 30.0,
      PF_Precision_INTEGER, 0, ""},
     {"Render Timeout (s)", ParameterKind::FloatSlider, 1012, 0, 0, "", 10.0, 300.0, 120.0,
@@ -95,6 +135,12 @@ void configure_checkbox(PF_ParamDef& definition, const ParameterDefinition& para
     definition.u.bd.u.PF_DEF_NAMEPTR = parameter.checkbox_label;
 }
 
+void configure_layer(PF_ParamDef& definition) noexcept {
+    definition.param_type = PF_Param_LAYER;
+    definition.flags = PF_ParamFlag_NONE;
+    definition.u.ld.dephault = PF_LayerDefault_NONE;
+}
+
 PF_Err configure_parameter(PF_ParamDef& definition, const ParameterDefinition& parameter) noexcept {
     copy_parameter_name(definition, parameter.name);
     definition.uu.id = parameter.disk_id;
@@ -108,6 +154,9 @@ PF_Err configure_parameter(PF_ParamDef& definition, const ParameterDefinition& p
             return PF_Err_NONE;
         case ParameterKind::Checkbox:
             configure_checkbox(definition, parameter);
+            return PF_Err_NONE;
+        case ParameterKind::Layer:
+            configure_layer(definition);
             return PF_Err_NONE;
     }
 

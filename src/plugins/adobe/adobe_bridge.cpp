@@ -1,16 +1,24 @@
 #include "adobe_bridge.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <optional>
 #include <string>
 #include <utility>
 
+#include "post_process/alpha_edge.hpp"
+#include "post_process/color_utils.hpp"
+
 namespace corridorkey::adobe {
 namespace {
 
 constexpr float kAdobeArgb8White = 255.0F;
 constexpr float kAdobeArgb16White = 32768.0F;
+constexpr float kOpaqueAlphaHintThreshold = 0.999F;
+constexpr float kMeaningfulAlphaHintThreshold = 0.98F;
+constexpr float kMeaningfulAlphaHintRange = 0.05F;
 constexpr int kMaxAdobeFrameLongEdge = 8192;
 constexpr std::size_t kMaxAdobeFramePixels = 8192ULL * 4320ULL;
 
@@ -135,6 +143,64 @@ Result<AdobeRuntimeFrame> make_runtime_frame(int width, int height) {
     return frame;
 }
 
+Result<void> validate_alpha_hint_frame_shape(const AdobeRuntimeFrame& frame,
+                                             const AdobeRuntimeFrame& alpha_hint_frame) {
+    const auto rgb = frame.rgb.const_view();
+    const auto alpha_hint = alpha_hint_frame.alpha_hint.const_view();
+    if (alpha_hint.width != rgb.width || alpha_hint.height != rgb.height ||
+        alpha_hint.channels != 1) {
+        return Unexpected<Error>(
+            invalid_adobe_frame_error("Alpha Hint Layer dimensions must match the source frame."));
+    }
+    return {};
+}
+
+bool alpha_view_contains_hint(const Image& alpha_hint) noexcept {
+    if (alpha_hint.width <= 0 || alpha_hint.height <= 0 || alpha_hint.channels != 1) {
+        return false;
+    }
+
+    const auto bounds = std::minmax_element(alpha_hint.data.begin(), alpha_hint.data.end());
+    if (bounds.first == alpha_hint.data.end() || bounds.second == alpha_hint.data.end()) {
+        return false;
+    }
+
+    const float minimum_alpha = *bounds.first;
+    const float maximum_alpha = *bounds.second;
+    if (minimum_alpha >= kOpaqueAlphaHintThreshold) {
+        return false;
+    }
+
+    return minimum_alpha <= kMeaningfulAlphaHintThreshold &&
+           (maximum_alpha - minimum_alpha) >= kMeaningfulAlphaHintRange;
+}
+
+bool source_alpha_contains_hint(const AdobeRuntimeFrame& frame) noexcept {
+    return alpha_view_contains_hint(frame.alpha_hint.const_view());
+}
+
+Result<bool> copy_external_alpha_hint(AdobeRuntimeFrame& frame,
+                                      const AdobeFrameView& external_alpha_hint_frame) {
+    auto alpha_hint_frame = copy_adobe_frame_to_runtime(external_alpha_hint_frame);
+    if (!alpha_hint_frame) {
+        return Unexpected<Error>(alpha_hint_frame.error());
+    }
+
+    auto shape_validation = validate_alpha_hint_frame_shape(frame, *alpha_hint_frame);
+    if (!shape_validation) {
+        return Unexpected<Error>(shape_validation.error());
+    }
+
+    const auto source_alpha = alpha_hint_frame->alpha_hint.const_view();
+    if (!alpha_view_contains_hint(source_alpha)) {
+        return false;
+    }
+
+    auto destination_alpha = frame.alpha_hint.view();
+    std::copy(source_alpha.data.begin(), source_alpha.data.end(), destination_alpha.data.begin());
+    return true;
+}
+
 float normalize_argb8(std::uint8_t value) {
     return static_cast<float>(value) / kAdobeArgb8White;
 }
@@ -199,6 +265,75 @@ Result<AdobeRuntimeFrame> copy_adobe_frame_to_runtime(const AdobeFrameView& fram
             break;
     }
     return std::move(*output);
+}
+
+void apply_adobe_input_color_space(AdobeRuntimeFrame& frame, bool input_is_linear) {
+    if (!input_is_linear) {
+        return;
+    }
+    ColorUtils::linear_to_srgb(frame.rgb.view());
+}
+
+void apply_adobe_matte_params(FrameResult& result, const AdobeMatteParams& params, int width,
+                              int height, AlphaEdgeState& state) {
+    Image alpha = result.alpha.view();
+    if (alpha.empty()) {
+        return;
+    }
+
+    constexpr double kBaselineLongEdge = 1920.0;
+    const int long_edge = std::max(width, height);
+    const double scale = long_edge > 0 ? static_cast<double>(long_edge) / kBaselineLongEdge : 1.0;
+    const double scaled_shrink_grow = params.shrink_grow_pixels * scale;
+    const double scaled_edge_blur = params.edge_blur_pixels * scale;
+
+    if (scaled_shrink_grow != 0.0) {
+        alpha_erode_dilate(alpha, static_cast<float>(scaled_shrink_grow), state);
+    }
+    if (scaled_edge_blur > 0.0) {
+        alpha_blur(alpha, static_cast<float>(scaled_edge_blur), state);
+    }
+    if (params.black_point > 0.0 || params.white_point < 1.0) {
+        alpha_levels(alpha, static_cast<float>(params.black_point),
+                     static_cast<float>(params.white_point));
+    }
+    if (std::abs(params.gamma - 1.0) > 1e-6) {
+        alpha_gamma_correct(alpha, static_cast<float>(params.gamma));
+    }
+}
+
+ScreenColorTransform canonicalize_adobe_runtime_frame_for_screen_color(AdobeRuntimeFrame& frame,
+                                                                       ScreenColorMode mode) {
+    auto rgb = frame.rgb.view();
+    ScreenColorTransform transform = make_screen_color_transform(rgb, mode);
+    canonicalize_to_green_domain(rgb, transform);
+    return transform;
+}
+
+Result<AdobeAlphaHintSource> resolve_alpha_hint_source(
+    AdobeRuntimeFrame& frame, const AdobeFrameView* external_alpha_hint_frame,
+    AlphaHintPolicy alpha_hint_policy) {
+    if (external_alpha_hint_frame != nullptr) {
+        auto copy_status = copy_external_alpha_hint(frame, *external_alpha_hint_frame);
+        if (!copy_status) {
+            return Unexpected<Error>(copy_status.error());
+        }
+        if (*copy_status) {
+            return AdobeAlphaHintSource::ExternalLayer;
+        }
+    }
+
+    if (source_alpha_contains_hint(frame)) {
+        return AdobeAlphaHintSource::SourceAlpha;
+    }
+
+    if (alpha_hint_policy == AlphaHintPolicy::RequireExternalHint) {
+        return Unexpected<Error>(
+            Error{ErrorCode::InvalidParameters, "Waiting for Alpha Hint Layer."});
+    }
+
+    ColorUtils::generate_rough_matte(frame.rgb.view(), frame.alpha_hint.view());
+    return AdobeAlphaHintSource::RoughFallback;
 }
 
 }  // namespace corridorkey::adobe

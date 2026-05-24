@@ -1159,7 +1159,8 @@ Result<std::vector<std::filesystem::path>> expected_artifact_paths_for_request(
 Result<HostPluginRuntimeArtifactSelection> host_plugin_runtime_artifact_selection_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback,
-    QualityFallbackMode fallback_mode, std::string_view screen_color) {
+    QualityFallbackMode fallback_mode, std::string_view screen_color,
+    int coarse_resolution_override) {
     if (screen_color == "blue") {
         auto blue_entry = app::find_model_by_filename(std::string(kDynamicBlueModelFilename));
         if (!blue_entry.has_value() || blue_entry->screen_color != "blue") {
@@ -1175,9 +1176,9 @@ Result<HostPluginRuntimeArtifactSelection> host_plugin_runtime_artifact_selectio
         };
     }
 
-    auto expected_paths =
-        expected_artifact_paths_for_request(models_root, requested_device, requested_resolution,
-                                            allow_lower_resolution_fallback, fallback_mode);
+    auto expected_paths = expected_artifact_paths_for_request(
+        models_root, requested_device, requested_resolution, allow_lower_resolution_fallback,
+        fallback_mode, coarse_resolution_override);
     if (!expected_paths) {
         return Unexpected<Error>(expected_paths.error());
     }

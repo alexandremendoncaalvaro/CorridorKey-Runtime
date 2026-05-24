@@ -91,7 +91,7 @@ host_plugin_runtime_artifact_selection_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback = false,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
-    std::string_view screen_color = "green");
+    std::string_view screen_color = "green", int coarse_resolution_override = 0);
 CORRIDORKEY_API Result<std::vector<ArtifactSelection>> quality_artifact_candidates_for_request(
     const std::filesystem::path& models_root, const DeviceInfo& requested_device,
     int requested_resolution, bool allow_lower_resolution_fallback = false,

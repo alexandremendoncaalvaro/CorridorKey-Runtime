@@ -1,8 +1,10 @@
+#include <algorithm>
 #include <array>
 #include <catch2/catch_all.hpp>
 #include <cstdint>
 #include <memory>
 
+#include "common/srgb_lut.hpp"
 #include "plugins/adobe/adobe_bridge.hpp"
 
 using namespace corridorkey;
@@ -20,6 +22,23 @@ AdobePrepareSessionOptions make_prepare_options() {
     options.effective_resolution = 1536;
     options.prepare_timeout_ms = 45000;
     return options;
+}
+
+ImageBuffer copy_image(Image source) {
+    ImageBuffer copy(source.width, source.height, source.channels);
+    std::copy(source.data.begin(), source.data.end(), copy.view().data.begin());
+    return copy;
+}
+
+void require_images_equal(Image actual, Image expected, float margin = 0.0001F) {
+    REQUIRE(actual.width == expected.width);
+    REQUIRE(actual.height == expected.height);
+    REQUIRE(actual.channels == expected.channels);
+    REQUIRE(actual.data.size() == expected.data.size());
+
+    for (std::size_t index = 0; index < actual.data.size(); ++index) {
+        CHECK(actual.data[index] == Catch::Approx(expected.data[index]).margin(margin));
+    }
 }
 
 }  // namespace
@@ -148,6 +167,265 @@ TEST_CASE("adobe bridge copies Premiere BGRA32 frames into runtime RGB order",
     CHECK(rgb(0, 1, 1) == Catch::Approx(150.0F / 255.0F));
     CHECK(rgb(0, 1, 2) == Catch::Approx(200.0F / 255.0F));
     CHECK(alpha_hint(0, 1) == Catch::Approx(1.0F));
+}
+
+TEST_CASE("adobe matte controls apply OFX-compatible alpha adjustments",
+          "[unit][adobe][runtime][matte]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(3, 1, 1);
+    result.foreground = ImageBuffer(3, 1, 3);
+    auto alpha = result.alpha.view();
+    alpha(0, 0) = 0.0F;
+    alpha(0, 1) = 0.5F;
+    alpha(0, 2) = 1.0F;
+
+    AdobeMatteParams params{
+        .black_point = 0.25,
+        .white_point = 0.75,
+        .shrink_grow_pixels = 0.0,
+        .edge_blur_pixels = 0.0,
+        .gamma = 1.0,
+    };
+    AlphaEdgeState state;
+
+    apply_adobe_matte_params(result, params, 1920, 1080, state);
+
+    CHECK(alpha(0, 0) == Catch::Approx(0.0F));
+    CHECK(alpha(0, 1) == Catch::Approx(0.5F));
+    CHECK(alpha(0, 2) == Catch::Approx(1.0F));
+}
+
+TEST_CASE("adobe matte controls scale pixel-radius controls from the OFX baseline",
+          "[unit][adobe][runtime][matte]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(5, 1, 1);
+    result.foreground = ImageBuffer(5, 1, 3);
+    auto alpha = result.alpha.view();
+    alpha(0, 2) = 1.0F;
+
+    AdobeMatteParams params{
+        .black_point = 0.0,
+        .white_point = 1.0,
+        .shrink_grow_pixels = 1.0,
+        .edge_blur_pixels = 0.0,
+        .gamma = 1.0,
+    };
+    AlphaEdgeState state;
+
+    apply_adobe_matte_params(result, params, 3840, 2160, state);
+
+    CHECK(alpha(0, 0) == Catch::Approx(1.0F));
+    CHECK(alpha(0, 1) == Catch::Approx(1.0F));
+    CHECK(alpha(0, 2) == Catch::Approx(1.0F));
+    CHECK(alpha(0, 3) == Catch::Approx(1.0F));
+    CHECK(alpha(0, 4) == Catch::Approx(1.0F));
+}
+
+TEST_CASE("adobe bridge canonicalizes blue-green runtime frames through the green domain",
+          "[unit][adobe][runtime][screen-color][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(3, 1, 3);
+    frame.alpha_hint = ImageBuffer(3, 1, 1);
+
+    auto rgb = frame.rgb.view();
+    rgb(0, 0, 0) = 1.0F;
+    rgb(0, 0, 1) = 0.0F;
+    rgb(0, 0, 2) = 0.0F;
+    rgb(0, 1, 0) = 1.0F;
+    rgb(0, 1, 1) = 1.0F;
+    rgb(0, 1, 2) = 1.0F;
+    rgb(0, 2, 0) = 0.12F;
+    rgb(0, 2, 1) = 0.24F;
+    rgb(0, 2, 2) = 0.84F;
+
+    auto alpha = frame.alpha_hint.view();
+    alpha(0, 0) = 0.25F;
+    alpha(0, 1) = 0.5F;
+    alpha(0, 2) = 0.75F;
+
+    ImageBuffer original_rgb = copy_image(frame.rgb.view());
+    ImageBuffer original_alpha = copy_image(frame.alpha_hint.view());
+
+    const ScreenColorTransform transform =
+        canonicalize_adobe_runtime_frame_for_screen_color(frame, ScreenColorMode::BlueGreen);
+
+    CHECK_FALSE(transform.is_identity);
+    CHECK(frame.rgb.view()(0, 0, 0) == Catch::Approx(1.0F).margin(0.0001F));
+    CHECK(frame.rgb.view()(0, 0, 1) == Catch::Approx(0.0F).margin(0.0001F));
+    CHECK(frame.rgb.view()(0, 0, 2) == Catch::Approx(0.0F).margin(0.0001F));
+    CHECK(frame.rgb.view()(0, 1, 0) == Catch::Approx(1.0F).margin(0.0001F));
+    CHECK(frame.rgb.view()(0, 1, 1) == Catch::Approx(1.0F).margin(0.0001F));
+    CHECK(frame.rgb.view()(0, 1, 2) == Catch::Approx(1.0F).margin(0.0001F));
+    CHECK(frame.rgb.view()(0, 2, 1) > frame.rgb.view()(0, 2, 2));
+    require_images_equal(frame.alpha_hint.view(), original_alpha.view());
+
+    restore_from_green_domain(frame.rgb.view(), transform);
+    require_images_equal(frame.rgb.view(), original_rgb.view(), 0.0002F);
+}
+
+TEST_CASE("adobe bridge converts linear source frames to the runtime sRGB domain",
+          "[unit][adobe][runtime][color]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+
+    auto rgb = frame.rgb.view();
+    rgb(0, 0, 0) = 0.0F;
+    rgb(0, 0, 1) = 0.18F;
+    rgb(0, 0, 2) = 1.0F;
+    rgb(0, 1, 0) = 0.25F;
+    rgb(0, 1, 1) = 0.5F;
+    rgb(0, 1, 2) = 0.75F;
+    auto alpha = frame.alpha_hint.view();
+    alpha(0, 0) = 0.25F;
+    alpha(0, 1) = 0.75F;
+
+    apply_adobe_input_color_space(frame, true);
+
+    const auto& lut = SrgbLut::instance();
+    CHECK(rgb(0, 0, 0) == Catch::Approx(lut.to_srgb(0.0F)));
+    CHECK(rgb(0, 0, 1) == Catch::Approx(lut.to_srgb(0.18F)));
+    CHECK(rgb(0, 0, 2) == Catch::Approx(lut.to_srgb(1.0F)));
+    CHECK(rgb(0, 1, 0) == Catch::Approx(lut.to_srgb(0.25F)));
+    CHECK(rgb(0, 1, 1) == Catch::Approx(lut.to_srgb(0.5F)));
+    CHECK(rgb(0, 1, 2) == Catch::Approx(lut.to_srgb(0.75F)));
+    CHECK(alpha(0, 0) == Catch::Approx(0.25F));
+    CHECK(alpha(0, 1) == Catch::Approx(0.75F));
+}
+
+TEST_CASE("adobe bridge prefers an explicit Alpha Hint layer over source alpha",
+          "[unit][adobe][runtime][alpha-hint]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 1.0F);
+
+    std::array<std::uint8_t, 8> hint_pixels{
+        64, 0, 0, 0, 191, 0, 0, 0,
+    };
+    const AdobeFrameView hint_frame{
+        .data = hint_pixels.data(),
+        .data_size_bytes = hint_pixels.size(),
+        .width = 2,
+        .height = 1,
+        .row_bytes = 8,
+        .pixel_format = AdobePixelFormat::Argb32,
+    };
+
+    auto source = resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::ExternalLayer);
+    CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(64.0F / 255.0F));
+    CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(191.0F / 255.0F));
+}
+
+TEST_CASE("adobe bridge falls back when an explicit Alpha Hint layer is fully opaque",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    auto rgb = frame.rgb.view();
+    rgb(0, 0, 0) = 0.0F;
+    rgb(0, 0, 1) = 1.0F;
+    rgb(0, 0, 2) = 0.0F;
+    rgb(0, 1, 0) = 1.0F;
+    rgb(0, 1, 1) = 0.0F;
+    rgb(0, 1, 2) = 0.0F;
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 1.0F);
+
+    std::array<std::uint8_t, 8> hint_pixels{
+        255, 0, 0, 0, 255, 0, 0, 0,
+    };
+    const AdobeFrameView hint_frame{
+        .data = hint_pixels.data(),
+        .data_size_bytes = hint_pixels.size(),
+        .width = 2,
+        .height = 1,
+        .row_bytes = 8,
+        .pixel_format = AdobePixelFormat::Argb32,
+    };
+
+    auto source = resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::RoughFallback);
+    CHECK(frame.alpha_hint.view()(0, 0) < frame.alpha_hint.view()(0, 1));
+}
+
+TEST_CASE("adobe bridge generates rough fallback when no external hint is readable",
+          "[unit][adobe][runtime][alpha-hint]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    auto rgb = frame.rgb.view();
+    rgb(0, 0, 0) = 0.0F;
+    rgb(0, 0, 1) = 1.0F;
+    rgb(0, 0, 2) = 0.0F;
+    rgb(0, 1, 0) = 1.0F;
+    rgb(0, 1, 1) = 0.0F;
+    rgb(0, 1, 2) = 0.0F;
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 1.0F);
+
+    auto source = resolve_alpha_hint_source(frame, nullptr, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::RoughFallback);
+    CHECK(frame.alpha_hint.view()(0, 0) < frame.alpha_hint.view()(0, 1));
+}
+
+TEST_CASE("adobe bridge ignores nearly opaque source alpha when resolving alpha hints",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    auto rgb = frame.rgb.view();
+    rgb(0, 0, 0) = 0.0F;
+    rgb(0, 0, 1) = 1.0F;
+    rgb(0, 0, 2) = 0.0F;
+    rgb(0, 1, 0) = 1.0F;
+    rgb(0, 1, 1) = 0.0F;
+    rgb(0, 1, 2) = 0.0F;
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 0.9985F);
+
+    auto source = resolve_alpha_hint_source(frame, nullptr, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::RoughFallback);
+    CHECK(frame.alpha_hint.view()(0, 0) < frame.alpha_hint.view()(0, 1));
+}
+
+TEST_CASE("adobe bridge accepts varied source alpha as an implicit alpha hint",
+          "[unit][adobe][runtime][alpha-hint]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(3, 1, 3);
+    frame.alpha_hint = ImageBuffer(3, 1, 1);
+    auto alpha = frame.alpha_hint.view();
+    alpha(0, 0) = 1.0F;
+    alpha(0, 1) = 0.0F;
+    alpha(0, 2) = 0.5F;
+
+    auto source = resolve_alpha_hint_source(frame, nullptr, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::SourceAlpha);
+    CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(1.0F));
+    CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(0.0F));
+    CHECK(frame.alpha_hint.view()(0, 2) == Catch::Approx(0.5F));
+}
+
+TEST_CASE("adobe bridge blocks Require External Hint when only opaque source alpha exists",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(1, 1, 3);
+    frame.alpha_hint = ImageBuffer(1, 1, 1);
+    frame.alpha_hint.view()(0, 0) = 1.0F;
+
+    auto source = resolve_alpha_hint_source(frame, nullptr, AlphaHintPolicy::RequireExternalHint);
+
+    REQUIRE_FALSE(source.has_value());
+    CHECK(source.error().code == ErrorCode::InvalidParameters);
+    CHECK(source.error().message.find("Alpha Hint Layer") != std::string::npos);
 }
 
 TEST_CASE("adobe bridge rejects unsupported pixel formats and undersized views",

@@ -144,15 +144,22 @@ Result<FrameResult> AdobeRuntimeBridge::process_frame(const AdobeFrameView& fram
                                                       const InferenceParams& params,
                                                       std::uint64_t render_index,
                                                       StageTimingCallback on_stage) {
-    if (m_runtime_client == nullptr) {
-        return missing_runtime_client_result<FrameResult>();
-    }
     auto runtime_frame = copy_adobe_frame_to_runtime(frame);
     if (!runtime_frame) {
         return Unexpected<Error>(runtime_frame.error());
     }
-    auto rgb = runtime_frame->rgb.view();
-    auto alpha_hint = runtime_frame->alpha_hint.view();
+    return process_frame(*runtime_frame, params, render_index, std::move(on_stage));
+}
+
+Result<FrameResult> AdobeRuntimeBridge::process_frame(const AdobeRuntimeFrame& frame,
+                                                      const InferenceParams& params,
+                                                      std::uint64_t render_index,
+                                                      StageTimingCallback on_stage) {
+    if (m_runtime_client == nullptr) {
+        return missing_runtime_client_result<FrameResult>();
+    }
+    auto rgb = frame.rgb.const_view();
+    auto alpha_hint = frame.alpha_hint.const_view();
     return m_runtime_client->process_frame(rgb, alpha_hint, params, render_index,
                                            std::move(on_stage));
 }
