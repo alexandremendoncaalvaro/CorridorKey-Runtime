@@ -85,8 +85,7 @@ AdobeStatus setup_sequence(PF_InData* input_data, PF_OutData& output_data) noexc
         return kAdobeStatusUnsupported;
     }
 
-    PF_Handle sequence_data =
-        callbacks.new_handle(sizeof(corridorkey::adobe::AdobeSequenceState));
+    PF_Handle sequence_data = callbacks.new_handle(sizeof(corridorkey::adobe::AdobeSequenceState));
     if (sequence_data == nullptr) {
         set_error_message(output_data, "CorridorKey could not allocate sequence state.");
         return PF_Err_OUT_OF_MEMORY;

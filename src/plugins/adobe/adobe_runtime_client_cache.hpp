@@ -1,9 +1,8 @@
 #pragma once
 
+#include <corridorkey/types.hpp>
 #include <cstdint>
 #include <memory>
-
-#include <corridorkey/types.hpp>
 
 #include "app/host_plugin_runtime_client.hpp"
 

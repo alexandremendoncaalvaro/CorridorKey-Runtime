@@ -16,9 +16,9 @@
 #include "AE_EffectPixelFormat.h"
 #include "SP/SPBasic.h"
 #include "adobe_effect_metadata.hpp"
-#include "plugins/adobe/adobe_runtime_client_cache.hpp"
 #include "plugins/adobe/adobe_effect_parameters.hpp"
 #include "plugins/adobe/adobe_effect_render.hpp"
+#include "plugins/adobe/adobe_runtime_client_cache.hpp"
 #include "plugins/adobe/adobe_sequence_state.hpp"
 
 extern "C" PF_Err EffectMain(PF_Cmd command, PF_InData* input_data, PF_OutData* output_data,

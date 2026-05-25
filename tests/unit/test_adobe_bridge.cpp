@@ -400,8 +400,8 @@ TEST_CASE("adobe bridge converts linear visible Alpha Hint layers to runtime sRG
         .pixel_format = AdobePixelFormat::Argb128,
     };
 
-    auto source = resolve_alpha_hint_source(frame, &hint_frame,
-                                            AlphaHintPolicy::AutoRoughFallback, true);
+    auto source =
+        resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback, true);
 
     const auto& lut = SrgbLut::instance();
     REQUIRE(source.has_value());
@@ -429,8 +429,8 @@ TEST_CASE("adobe bridge leaves real Alpha Hint layer alpha linear",
         .pixel_format = AdobePixelFormat::Argb128,
     };
 
-    auto source = resolve_alpha_hint_source(frame, &hint_frame,
-                                            AlphaHintPolicy::AutoRoughFallback, true);
+    auto source =
+        resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback, true);
 
     REQUIRE(source.has_value());
     CHECK(*source == AdobeAlphaHintSource::ExternalLayerAlpha);
@@ -479,6 +479,35 @@ TEST_CASE("adobe bridge falls back when an explicit Alpha Hint layer is fully op
     REQUIRE(source.has_value());
     CHECK(*source == AdobeAlphaHintSource::RoughFallback);
     CHECK(frame.alpha_hint.view()(0, 0) < frame.alpha_hint.view()(0, 1));
+}
+
+TEST_CASE("adobe bridge preserves source alpha when an external Alpha Hint layer is unreadable",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    auto alpha = frame.alpha_hint.view();
+    alpha(0, 0) = 0.0F;
+    alpha(0, 1) = 1.0F;
+
+    std::array<std::uint8_t, 8> hint_pixels{
+        255, 255, 255, 255, 255, 255, 255, 255,
+    };
+    const AdobeFrameView hint_frame{
+        .data = hint_pixels.data(),
+        .data_size_bytes = hint_pixels.size(),
+        .width = 2,
+        .height = 1,
+        .row_bytes = 8,
+        .pixel_format = AdobePixelFormat::Argb32,
+    };
+
+    auto source = resolve_alpha_hint_source(frame, &hint_frame, AlphaHintPolicy::AutoRoughFallback);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::SourceAlpha);
+    CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(0.0F));
+    CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(1.0F));
 }
 
 TEST_CASE("adobe bridge generates rough fallback when no external hint is readable",

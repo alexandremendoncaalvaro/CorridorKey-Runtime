@@ -5,6 +5,7 @@
 #include <string>
 
 #include "adobe_bridge.hpp"
+#include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
 
 namespace corridorkey::adobe {
@@ -269,14 +270,16 @@ Result<void> copy_runtime_result_to_adobe_frame(const FrameResult& result,
     auto* base = static_cast<std::byte*>(output_frame.data);
     const auto row_bytes = static_cast<std::size_t>(output_frame.row_bytes);
     const auto& lut = SrgbLut::instance();
-    for (int y_pos = 0; y_pos < output_frame.height; ++y_pos) {
-        auto* row = base + (row_bytes * y_pos);
-        for (int x_pos = 0; x_pos < output_frame.width; ++x_pos) {
-            write_selected_output_pixel(alpha, foreground, source, output_mode, y_pos, x_pos,
-                                        output_frame.pixel_format, lut,
-                                        row + (*pixel_size * static_cast<std::size_t>(x_pos)));
+    common::parallel_for_rows(output_frame.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            auto* row = base + (row_bytes * static_cast<std::size_t>(y_pos));
+            for (int x_pos = 0; x_pos < output_frame.width; ++x_pos) {
+                write_selected_output_pixel(alpha, foreground, source, output_mode, y_pos, x_pos,
+                                            output_frame.pixel_format, lut,
+                                            row + (*pixel_size * static_cast<std::size_t>(x_pos)));
+            }
         }
-    }
+    });
 
     return {};
 }

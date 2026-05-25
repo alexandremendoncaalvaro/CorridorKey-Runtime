@@ -4,10 +4,13 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
 
+#include "common/parallel_for.hpp"
+#include "common/srgb_lut.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 
@@ -21,6 +24,11 @@ constexpr float kMeaningfulAlphaHintThreshold = 0.98F;
 constexpr float kMeaningfulAlphaHintRange = 0.05F;
 constexpr int kMaxAdobeFrameLongEdge = 8192;
 constexpr std::size_t kMaxAdobeFramePixels = 8192ULL * 4320ULL;
+
+enum class AdobeFrameChannel : std::uint8_t {
+    Alpha,
+    Red,
+};
 
 struct Argb8Pixel {
     std::uint8_t alpha = 0;
@@ -48,6 +56,17 @@ struct ArgbFloatPixel {
     float red = 0.0F;
     float green = 0.0F;
     float blue = 0.0F;
+};
+
+struct ChannelBounds {
+    bool has_samples = false;
+    float minimum = 0.0F;
+    float maximum = 0.0F;
+};
+
+struct ChannelBuffer {
+    ImageBuffer buffer;
+    ChannelBounds bounds;
 };
 
 static_assert(sizeof(Argb8Pixel) == 4);
@@ -143,12 +162,10 @@ Result<AdobeRuntimeFrame> make_runtime_frame(int width, int height) {
     return frame;
 }
 
-Result<void> validate_alpha_hint_frame_shape(const AdobeRuntimeFrame& frame,
-                                             const AdobeRuntimeFrame& alpha_hint_frame) {
+Result<void> validate_alpha_hint_frame_view_shape(const AdobeRuntimeFrame& frame,
+                                                  const AdobeFrameView& alpha_hint_frame) {
     const auto rgb = frame.rgb.const_view();
-    const auto alpha_hint = alpha_hint_frame.alpha_hint.const_view();
-    if (alpha_hint.width != rgb.width || alpha_hint.height != rgb.height ||
-        alpha_hint.channels != 1) {
+    if (alpha_hint_frame.width != rgb.width || alpha_hint_frame.height != rgb.height) {
         return Unexpected<Error>(
             invalid_adobe_frame_error("Alpha Hint Layer dimensions must match the source frame."));
     }
@@ -175,76 +192,33 @@ bool alpha_view_contains_hint(const Image& alpha_hint) noexcept {
            (maximum_alpha - minimum_alpha) >= kMeaningfulAlphaHintRange;
 }
 
+bool alpha_bounds_contains_hint(const ChannelBounds& bounds) noexcept {
+    if (!bounds.has_samples || bounds.minimum >= kOpaqueAlphaHintThreshold) {
+        return false;
+    }
+    return bounds.minimum <= kMeaningfulAlphaHintThreshold &&
+           (bounds.maximum - bounds.minimum) >= kMeaningfulAlphaHintRange;
+}
+
 bool source_alpha_contains_hint(const AdobeRuntimeFrame& frame) noexcept {
     return alpha_view_contains_hint(frame.alpha_hint.const_view());
 }
 
-bool red_channel_view_contains_hint(const Image& rgb) noexcept {
-    if (rgb.width <= 0 || rgb.height <= 0 || rgb.channels != 3) {
-        return false;
+void linear_to_srgb_in_place(Image image) {
+    if (image.empty()) {
+        return;
     }
 
-    float minimum_red = std::numeric_limits<float>::max();
-    float maximum_red = std::numeric_limits<float>::lowest();
-    for (int y_pos = 0; y_pos < rgb.height; ++y_pos) {
-        for (int x_pos = 0; x_pos < rgb.width; ++x_pos) {
-            const float red = rgb(y_pos, x_pos, 0);
-            minimum_red = std::min(minimum_red, red);
-            maximum_red = std::max(maximum_red, red);
+    const auto& lut = SrgbLut::instance();
+    const auto row_value_count =
+        static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.channels);
+    common::parallel_for_rows(image.height, [&](int y_begin, int y_end) {
+        const auto begin_index = static_cast<std::size_t>(y_begin) * row_value_count;
+        const auto end_index = static_cast<std::size_t>(y_end) * row_value_count;
+        for (std::size_t index = begin_index; index < end_index; ++index) {
+            image.data[index] = lut.to_srgb(image.data[index]);
         }
-    }
-
-    if (minimum_red >= kOpaqueAlphaHintThreshold) {
-        return false;
-    }
-
-    return minimum_red <= kMeaningfulAlphaHintThreshold &&
-           (maximum_red - minimum_red) >= kMeaningfulAlphaHintRange;
-}
-
-void copy_alpha_hint_from_single_channel(Image source, Image destination) {
-    std::copy(source.data.begin(), source.data.end(), destination.data.begin());
-}
-
-void copy_alpha_hint_from_red_channel(Image source_rgb, Image destination) {
-    for (int y_pos = 0; y_pos < source_rgb.height; ++y_pos) {
-        for (int x_pos = 0; x_pos < source_rgb.width; ++x_pos) {
-            destination(y_pos, x_pos) = source_rgb(y_pos, x_pos, 0);
-        }
-    }
-}
-
-Result<std::optional<AdobeAlphaHintSource>> copy_external_alpha_hint(
-    AdobeRuntimeFrame& frame, const AdobeFrameView& external_alpha_hint_frame,
-    bool input_is_linear) {
-    auto alpha_hint_frame = copy_adobe_frame_to_runtime(external_alpha_hint_frame);
-    if (!alpha_hint_frame) {
-        return Unexpected<Error>(alpha_hint_frame.error());
-    }
-
-    auto shape_validation = validate_alpha_hint_frame_shape(frame, *alpha_hint_frame);
-    if (!shape_validation) {
-        return Unexpected<Error>(shape_validation.error());
-    }
-
-    const auto source_alpha = alpha_hint_frame->alpha_hint.const_view();
-    auto destination_alpha = frame.alpha_hint.view();
-    if (alpha_view_contains_hint(source_alpha)) {
-        copy_alpha_hint_from_single_channel(source_alpha, destination_alpha);
-        return std::optional<AdobeAlphaHintSource>{AdobeAlphaHintSource::ExternalLayerAlpha};
-    }
-
-    if (input_is_linear) {
-        apply_adobe_input_color_space(*alpha_hint_frame, true);
-    }
-
-    const auto source_rgb = alpha_hint_frame->rgb.const_view();
-    if (red_channel_view_contains_hint(source_rgb)) {
-        copy_alpha_hint_from_red_channel(source_rgb, destination_alpha);
-        return std::optional<AdobeAlphaHintSource>{AdobeAlphaHintSource::ExternalLayerRed};
-    }
-
-    return Result<std::optional<AdobeAlphaHintSource>>{std::optional<AdobeAlphaHintSource>{}};
+    });
 }
 
 float normalize_argb8(std::uint8_t value) {
@@ -265,17 +239,138 @@ void copy_pixel_rows(const AdobeFrameView& frame, AdobeRuntimeFrame& output, Nor
     auto rgb = output.rgb.view();
     auto alpha_hint = output.alpha_hint.view();
     const auto row_bytes = static_cast<std::size_t>(frame.row_bytes);
-    for (int y_pos = 0; y_pos < frame.height; ++y_pos) {
-        const auto* row = base + (row_bytes * y_pos);
-        for (int x_pos = 0; x_pos < frame.width; ++x_pos) {
-            Pixel pixel;
-            std::memcpy(&pixel, row + (sizeof(Pixel) * x_pos), sizeof(Pixel));
-            rgb(y_pos, x_pos, 0) = normalize(pixel.red);
-            rgb(y_pos, x_pos, 1) = normalize(pixel.green);
-            rgb(y_pos, x_pos, 2) = normalize(pixel.blue);
-            alpha_hint(y_pos, x_pos) = normalize(pixel.alpha);
+    common::parallel_for_rows(frame.height, [&](int y_begin, int y_end) {
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const auto* row = base + (row_bytes * static_cast<std::size_t>(y_pos));
+            for (int x_pos = 0; x_pos < frame.width; ++x_pos) {
+                Pixel pixel;
+                std::memcpy(&pixel, row + (sizeof(Pixel) * static_cast<std::size_t>(x_pos)),
+                            sizeof(Pixel));
+                rgb(y_pos, x_pos, 0) = normalize(pixel.red);
+                rgb(y_pos, x_pos, 1) = normalize(pixel.green);
+                rgb(y_pos, x_pos, 2) = normalize(pixel.blue);
+                alpha_hint(y_pos, x_pos) = normalize(pixel.alpha);
+            }
         }
+    });
+}
+
+template <typename Pixel, typename Normalizer>
+ChannelBounds copy_channel_rows_with_bounds(const AdobeFrameView& frame, Image output,
+                                            AdobeFrameChannel channel, Normalizer normalize,
+                                            bool convert_linear_to_srgb) {
+    const auto* base = static_cast<const std::byte*>(frame.data);
+    const auto row_bytes = static_cast<std::size_t>(frame.row_bytes);
+    const auto* srgb_lut = convert_linear_to_srgb ? &SrgbLut::instance() : nullptr;
+    std::mutex bounds_mutex;
+    ChannelBounds bounds;
+    common::parallel_for_rows(frame.height, [&](int y_begin, int y_end) {
+        ChannelBounds local_bounds;
+        for (int y_pos = y_begin; y_pos < y_end; ++y_pos) {
+            const auto* row = base + (row_bytes * static_cast<std::size_t>(y_pos));
+            for (int x_pos = 0; x_pos < frame.width; ++x_pos) {
+                Pixel pixel;
+                std::memcpy(&pixel, row + (sizeof(Pixel) * static_cast<std::size_t>(x_pos)),
+                            sizeof(Pixel));
+                float value =
+                    normalize(channel == AdobeFrameChannel::Alpha ? pixel.alpha : pixel.red);
+                if (srgb_lut != nullptr) {
+                    value = srgb_lut->to_srgb(value);
+                }
+                output(y_pos, x_pos) = value;
+                if (!local_bounds.has_samples) {
+                    local_bounds.has_samples = true;
+                    local_bounds.minimum = value;
+                    local_bounds.maximum = value;
+                    continue;
+                }
+                local_bounds.minimum = std::min(local_bounds.minimum, value);
+                local_bounds.maximum = std::max(local_bounds.maximum, value);
+            }
+        }
+        if (!local_bounds.has_samples) {
+            return;
+        }
+
+        std::lock_guard lock(bounds_mutex);
+        if (!bounds.has_samples) {
+            bounds = local_bounds;
+            return;
+        }
+        bounds.minimum = std::min(bounds.minimum, local_bounds.minimum);
+        bounds.maximum = std::max(bounds.maximum, local_bounds.maximum);
+    });
+    return bounds;
+}
+
+Result<ChannelBuffer> copy_adobe_channel_to_buffer_with_bounds(const AdobeFrameView& frame,
+                                                               AdobeFrameChannel channel,
+                                                               bool convert_linear_to_srgb) {
+    const auto pixel_size = pixel_size_for(frame.pixel_format);
+    if (!pixel_size.has_value()) {
+        return Unexpected<Error>(invalid_adobe_frame_error("Unsupported Adobe pixel format."));
     }
+
+    auto validation = validate_frame_view(frame, *pixel_size);
+    if (!validation) {
+        return Unexpected<Error>(validation.error());
+    }
+
+    ImageBuffer output(frame.width, frame.height, 1);
+    auto output_view = output.view();
+    ChannelBounds bounds;
+    switch (frame.pixel_format) {
+        case AdobePixelFormat::Argb32:
+            bounds = copy_channel_rows_with_bounds<Argb8Pixel>(
+                frame, output_view, channel, normalize_argb8, convert_linear_to_srgb);
+            break;
+        case AdobePixelFormat::Argb64:
+            bounds = copy_channel_rows_with_bounds<Argb16Pixel>(
+                frame, output_view, channel, normalize_argb16, convert_linear_to_srgb);
+            break;
+        case AdobePixelFormat::Argb128:
+            bounds = copy_channel_rows_with_bounds<ArgbFloatPixel>(
+                frame, output_view, channel, normalize_argb_float, convert_linear_to_srgb);
+            break;
+        case AdobePixelFormat::Bgra32:
+            bounds = copy_channel_rows_with_bounds<Bgra8Pixel>(
+                frame, output_view, channel, normalize_argb8, convert_linear_to_srgb);
+            break;
+    }
+
+    return ChannelBuffer{std::move(output), bounds};
+}
+
+Result<std::optional<AdobeAlphaHintSource>> copy_external_alpha_hint(
+    AdobeRuntimeFrame& frame, const AdobeFrameView& external_alpha_hint_frame,
+    bool input_is_linear) {
+    auto shape_validation = validate_alpha_hint_frame_view_shape(frame, external_alpha_hint_frame);
+    if (!shape_validation) {
+        return Unexpected<Error>(shape_validation.error());
+    }
+
+    auto source_alpha = copy_adobe_channel_to_buffer_with_bounds(external_alpha_hint_frame,
+                                                                 AdobeFrameChannel::Alpha, false);
+    if (!source_alpha) {
+        return Unexpected<Error>(source_alpha.error());
+    }
+    if (alpha_bounds_contains_hint(source_alpha->bounds)) {
+        frame.alpha_hint = std::move(source_alpha->buffer);
+        return std::optional<AdobeAlphaHintSource>{AdobeAlphaHintSource::ExternalLayerAlpha};
+    }
+
+    auto source_red = copy_adobe_channel_to_buffer_with_bounds(
+        external_alpha_hint_frame, AdobeFrameChannel::Red, input_is_linear);
+    if (!source_red) {
+        return Unexpected<Error>(source_red.error());
+    }
+
+    if (alpha_bounds_contains_hint(source_red->bounds)) {
+        frame.alpha_hint = std::move(source_red->buffer);
+        return std::optional<AdobeAlphaHintSource>{AdobeAlphaHintSource::ExternalLayerRed};
+    }
+
+    return Result<std::optional<AdobeAlphaHintSource>>{std::optional<AdobeAlphaHintSource>{}};
 }
 
 }  // namespace
@@ -317,7 +412,7 @@ void apply_adobe_input_color_space(AdobeRuntimeFrame& frame, bool input_is_linea
     if (!input_is_linear) {
         return;
     }
-    ColorUtils::linear_to_srgb(frame.rgb.view());
+    linear_to_srgb_in_place(frame.rgb.view());
 }
 
 void apply_adobe_matte_params(FrameResult& result, const AdobeMatteParams& params, int width,

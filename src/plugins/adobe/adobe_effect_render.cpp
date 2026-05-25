@@ -2,14 +2,18 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "AE_EffectCBSuites.h"
@@ -98,6 +102,222 @@ void log_adobe_message(std::string_view scope, std::string_view message) noexcep
     } catch (...) {
     }
 }
+
+std::string format_ms(double total_ms) {
+    char buffer[32] = {};
+    std::snprintf(buffer, sizeof(buffer), "%.2f", total_ms);
+    return std::string(buffer);
+}
+
+bool adobe_verbose_timings_enabled() noexcept {
+    try {
+        const auto value =
+            corridorkey::common::environment_variable_copy("CORRIDORKEY_ADOBE_VERBOSE_TIMINGS");
+        if (!value.has_value()) {
+            return false;
+        }
+        return !value->empty() && *value != "0" && *value != "false" && *value != "FALSE" &&
+               *value != "off" && *value != "OFF";
+    } catch (...) {
+        return false;
+    }
+}
+
+void log_host_stage(std::uint64_t render_index, std::string_view stage, double total_ms, int width,
+                    int height) noexcept {
+    try {
+        log_adobe_message(
+            "render", "event=host_stage render_index=" + std::to_string(render_index) +
+                          " stage=" + std::string(stage) + " total_ms=" + format_ms(total_ms) +
+                          " width=" + std::to_string(width) + " height=" + std::to_string(height));
+    } catch (...) {
+    }
+}
+
+void log_runtime_stage(std::uint64_t render_index,
+                       const corridorkey::StageTiming& timing) noexcept {
+    try {
+        log_adobe_message("render",
+                          "event=runtime_stage render_index=" + std::to_string(render_index) +
+                              " stage=" + timing.name + " total_ms=" + format_ms(timing.total_ms) +
+                              " samples=" + std::to_string(timing.sample_count) +
+                              " work_units=" + std::to_string(timing.work_units));
+    } catch (...) {
+    }
+}
+
+std::uint64_t pixel_work_units(int width, int height) noexcept {
+    if (width <= 0 || height <= 0) {
+        return 0;
+    }
+    return static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+}
+
+void add_or_accumulate(std::vector<corridorkey::StageTiming>& timings,
+                       const corridorkey::StageTiming& timing) {
+    auto existing = std::find_if(timings.begin(), timings.end(),
+                                 [&](const auto& item) { return item.name == timing.name; });
+    if (existing == timings.end()) {
+        timings.push_back(timing);
+        return;
+    }
+    existing->total_ms += timing.total_ms;
+    existing->sample_count += timing.sample_count;
+    existing->work_units += timing.work_units;
+}
+
+double stage_total_ms(const std::vector<corridorkey::StageTiming>& timings,
+                      std::string_view name) noexcept {
+    const auto stage = std::find_if(timings.begin(), timings.end(),
+                                    [&](const auto& timing) { return timing.name == name; });
+    return stage == timings.end() ? 0.0 : stage->total_ms;
+}
+
+double timing_sum_ms(const std::vector<corridorkey::StageTiming>& timings) noexcept {
+    double total_ms = 0.0;
+    for (const auto& timing : timings) {
+        total_ms += timing.total_ms;
+    }
+    return total_ms;
+}
+
+std::string format_timing_top(std::vector<corridorkey::StageTiming> timings,
+                              std::size_t limit = 6) {
+    if (timings.empty()) {
+        return "none";
+    }
+
+    std::sort(timings.begin(), timings.end(),
+              [](const auto& left, const auto& right) { return left.total_ms > right.total_ms; });
+    const std::size_t top_count = std::min(limit, timings.size());
+
+    std::string summary;
+    summary.reserve(160);
+    for (std::size_t index = 0; index < top_count; ++index) {
+        if (!summary.empty()) {
+            summary.push_back(',');
+        }
+        summary += timings[index].name;
+        summary.push_back(':');
+        summary += format_ms(timings[index].total_ms);
+    }
+    return summary;
+}
+
+void append_stage_ms_fields(std::string& message,
+                            const std::vector<corridorkey::StageTiming>& timings,
+                            std::initializer_list<std::string_view> stages) {
+    for (std::string_view stage : stages) {
+        message.push_back(' ');
+        message += std::string(stage);
+        message += "_ms=";
+        message += format_ms(stage_total_ms(timings, stage));
+    }
+}
+
+class AdobeRenderTimingCollector {
+   public:
+    AdobeRenderTimingCollector(std::uint64_t render_index, int width, int height,
+                               bool verbose_timings) noexcept
+        : m_render_index(render_index),
+          m_width(width),
+          m_height(height),
+          m_verbose_timings(verbose_timings),
+          m_started_at(std::chrono::steady_clock::now()) {}
+
+    AdobeRenderTimingCollector(const AdobeRenderTimingCollector&) = delete;
+    AdobeRenderTimingCollector& operator=(const AdobeRenderTimingCollector&) = delete;
+
+    void record_host(std::string_view stage, double total_ms) noexcept {
+        try {
+            add_or_accumulate(m_host_timings,
+                              corridorkey::StageTiming{std::string(stage), total_ms, 1,
+                                                       pixel_work_units(m_width, m_height)});
+            if (m_verbose_timings) {
+                log_host_stage(m_render_index, stage, total_ms, m_width, m_height);
+            }
+        } catch (...) {
+        }
+    }
+
+    void record_runtime(const corridorkey::StageTiming& timing) noexcept {
+        try {
+            add_or_accumulate(m_runtime_timings, timing);
+            if (m_verbose_timings) {
+                log_runtime_stage(m_render_index, timing);
+            }
+        } catch (...) {
+        }
+    }
+
+    void log_summaries() const noexcept {
+        try {
+            const auto elapsed = std::chrono::steady_clock::now() - m_started_at;
+            const auto visible_total_ms =
+                std::chrono::duration<double, std::milli>(elapsed).count();
+
+            std::string host_message =
+                "event=host_stage_summary render_index=" + std::to_string(m_render_index) +
+                " width=" + std::to_string(m_width) + " height=" + std::to_string(m_height) +
+                " host_visible_total_ms=" + format_ms(visible_total_ms) +
+                " host_stage_sum_ms=" + format_ms(timing_sum_ms(m_host_timings)) +
+                " top=" + format_timing_top(m_host_timings);
+            append_stage_ms_fields(
+                host_message, m_host_timings,
+                {"copy_source_to_runtime", "apply_input_color_space", "resolve_alpha_hint",
+                 "prepare_session", "process_frame", "copy_runtime_result_to_adobe"});
+            log_adobe_message("render", host_message);
+
+            std::string runtime_message =
+                "event=runtime_stage_summary render_index=" + std::to_string(m_render_index) +
+                " width=" + std::to_string(m_width) + " height=" + std::to_string(m_height) +
+                " runtime_stage_count=" + std::to_string(m_runtime_timings.size()) +
+                " runtime_stage_sum_ms=" + format_ms(timing_sum_ms(m_runtime_timings)) +
+                " top=" + format_timing_top(m_runtime_timings);
+            append_stage_ms_fields(
+                runtime_message, m_runtime_timings,
+                {"frame_prepare_inputs", "ort_run", "frame_extract_outputs",
+                 "frame_extract_outputs_resize", "post_source_passthrough", "post_premultiply",
+                 "post_composite", "host_plugin_broker_writeback"});
+            log_adobe_message("render", runtime_message);
+        } catch (...) {
+        }
+    }
+
+   private:
+    std::uint64_t m_render_index = 0;
+    int m_width = 0;
+    int m_height = 0;
+    bool m_verbose_timings = false;
+    std::chrono::steady_clock::time_point m_started_at;
+    std::vector<corridorkey::StageTiming> m_host_timings;
+    std::vector<corridorkey::StageTiming> m_runtime_timings;
+};
+
+class AdobeHostStageTimer {
+   public:
+    AdobeHostStageTimer(AdobeRenderTimingCollector& collector, std::string_view stage) noexcept
+        : m_collector(&collector), m_stage(stage), m_started_at(std::chrono::steady_clock::now()) {}
+
+    AdobeHostStageTimer(const AdobeHostStageTimer&) = delete;
+    AdobeHostStageTimer& operator=(const AdobeHostStageTimer&) = delete;
+
+    ~AdobeHostStageTimer() noexcept {
+        try {
+            const auto elapsed = std::chrono::steady_clock::now() - m_started_at;
+            const auto total_ms = std::chrono::duration<double, std::milli>(elapsed).count();
+            if (m_collector != nullptr) {
+                m_collector->record_host(m_stage, total_ms);
+            }
+        } catch (...) {
+        }
+    }
+
+   private:
+    AdobeRenderTimingCollector* m_collector = nullptr;
+    std::string_view m_stage;
+    std::chrono::steady_clock::time_point m_started_at;
+};
 
 void set_return_message_for_host_error(PF_OutData& output_data, AdobeStatus status,
                                        const char* message) noexcept {
@@ -491,8 +711,7 @@ corridorkey::app::HostPluginRuntimeClientOptions client_options_for(
 
 std::uint64_t runtime_client_key_for(PF_InData* input_data) noexcept {
     if (input_data == nullptr || input_data->sequence_data == nullptr ||
-        input_data->utils == nullptr ||
-        input_data->utils->host_lock_handle == nullptr ||
+        input_data->utils == nullptr || input_data->utils->host_lock_handle == nullptr ||
         input_data->utils->host_unlock_handle == nullptr) {
         return 0;
     }
@@ -503,10 +722,9 @@ std::uint64_t runtime_client_key_for(PF_InData* input_data) noexcept {
         return 0;
     }
 
-    const std::uint64_t key =
-        state->version == corridorkey::adobe::kAdobeSequenceStateVersion
-            ? state->runtime_client_key
-            : 0;
+    const std::uint64_t key = state->version == corridorkey::adobe::kAdobeSequenceStateVersion
+                                  ? state->runtime_client_key
+                                  : 0;
     input_data->utils->host_unlock_handle(input_data->sequence_data);
     return key;
 }
@@ -547,12 +765,14 @@ std::string quality_fallback_mode_label(corridorkey::QualityFallbackMode mode) {
     }
 }
 
-void log_runtime_request(const corridorkey::adobe::AdobeEffectRuntimeRequest& request,
+void log_runtime_request(std::uint64_t render_index,
+                         const corridorkey::adobe::AdobeEffectRuntimeRequest& request,
                          const PF_LayerDef& source, const PF_LayerDef& output) {
     log_adobe_message(
         "render",
-        "event=runtime_request source_width=" + std::to_string(source.width) + " source_height=" +
-            std::to_string(source.height) + " output_width=" + std::to_string(output.width) +
+        "event=runtime_request render_index=" + std::to_string(render_index) + " source_width=" +
+            std::to_string(source.width) + " source_height=" + std::to_string(source.height) +
+            " output_width=" + std::to_string(output.width) +
             " output_height=" + std::to_string(output.height) +
             " quality_mode=" + std::to_string(request.prepare_options.requested_quality_mode) +
             " requested_resolution=" +
@@ -592,19 +812,31 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
     if (!request) {
         return reject_render(output_data, request.error().message);
     }
-    log_runtime_request(*request, source, *output);
+    const std::uint64_t render_index = render_index_for(input_data);
+    log_runtime_request(render_index, *request, source, *output);
+    AdobeRenderTimingCollector render_timings(render_index, source.width, source.height,
+                                              adobe_verbose_timings_enabled());
+    const auto runtime_stage_logger = [&render_timings](const corridorkey::StageTiming& timing) {
+        render_timings.record_runtime(timing);
+    };
 
     const auto source_frame = frame_view_for_world(input_data, source, pixel_format_policy);
     if (!source_frame) {
         return reject_render(output_data, source_frame.error().message);
     }
 
-    auto source_runtime_frame = corridorkey::adobe::copy_adobe_frame_to_runtime(*source_frame);
+    auto source_runtime_frame = [&]() {
+        AdobeHostStageTimer timer(render_timings, "copy_source_to_runtime");
+        return corridorkey::adobe::copy_adobe_frame_to_runtime(*source_frame);
+    }();
     if (!source_runtime_frame) {
         return reject_render(output_data, source_runtime_frame.error().message);
     }
-    corridorkey::adobe::apply_adobe_input_color_space(*source_runtime_frame,
-                                                      request->inference_params.input_is_linear);
+    {
+        AdobeHostStageTimer timer(render_timings, "apply_input_color_space");
+        corridorkey::adobe::apply_adobe_input_color_space(
+            *source_runtime_frame, request->inference_params.input_is_linear);
+    }
 
     corridorkey::Result<corridorkey::adobe::AdobeFrameView> external_alpha_hint_frame =
         corridorkey::Unexpected<corridorkey::Error>(corridorkey::Error{
@@ -624,26 +856,37 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
     corridorkey::adobe::AdobeRuntimeFrame screen_color_runtime_frame;
     if (corridorkey::screen_color_requires_green_domain_canonicalization(
             request->screen_color_mode)) {
-        auto transformed_runtime_frame =
-            corridorkey::adobe::copy_adobe_frame_to_runtime(*source_frame);
+        auto transformed_runtime_frame = [&]() {
+            AdobeHostStageTimer timer(render_timings, "copy_screen_color_source");
+            return corridorkey::adobe::copy_adobe_frame_to_runtime(*source_frame);
+        }();
         if (!transformed_runtime_frame) {
             return reject_render(output_data, transformed_runtime_frame.error().message);
         }
-        corridorkey::adobe::apply_adobe_input_color_space(
-            *transformed_runtime_frame, request->inference_params.input_is_linear);
+        {
+            AdobeHostStageTimer timer(render_timings, "apply_screen_color_input_space");
+            corridorkey::adobe::apply_adobe_input_color_space(
+                *transformed_runtime_frame, request->inference_params.input_is_linear);
+        }
 
-        screen_color_transform =
-            corridorkey::adobe::canonicalize_adobe_runtime_frame_for_screen_color(
-                *transformed_runtime_frame, request->screen_color_mode);
+        {
+            AdobeHostStageTimer timer(render_timings, "canonicalize_screen_color");
+            screen_color_transform =
+                corridorkey::adobe::canonicalize_adobe_runtime_frame_for_screen_color(
+                    *transformed_runtime_frame, request->screen_color_mode);
+        }
         screen_color_runtime_frame = std::move(*transformed_runtime_frame);
         runtime_input_frame = &screen_color_runtime_frame;
     }
 
     const ImageSampleStats source_alpha_stats =
         sample_single_channel_stats(runtime_input_frame->alpha_hint.const_view());
-    auto alpha_hint_source = corridorkey::adobe::resolve_alpha_hint_source(
-        *runtime_input_frame, external_alpha_hint_view,
-        request->inference_params.alpha_hint_policy, request->inference_params.input_is_linear);
+    auto alpha_hint_source = [&]() {
+        AdobeHostStageTimer timer(render_timings, "resolve_alpha_hint");
+        return corridorkey::adobe::resolve_alpha_hint_source(
+            *runtime_input_frame, external_alpha_hint_view,
+            request->inference_params.alpha_hint_policy, request->inference_params.input_is_linear);
+    }();
     if (!alpha_hint_source) {
         return reject_render(output_data, alpha_hint_source.error().message);
     }
@@ -651,7 +894,9 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
         sample_single_channel_stats(runtime_input_frame->alpha_hint.const_view());
 
     std::string alpha_hint_message =
-        "event=alpha_hint_source source=" +
+        "event=alpha_hint_source render_index=" + std::to_string(render_index) +
+        " width=" + std::to_string(runtime_input_frame->rgb.const_view().width) +
+        " height=" + std::to_string(runtime_input_frame->rgb.const_view().height) + " source=" +
         std::string(corridorkey::adobe::adobe_alpha_hint_source_label(*alpha_hint_source)) +
         " external_layer=" + (external_alpha_hint_view == nullptr ? "0" : "1") + " " +
         stats_fields("source_alpha_sample", source_alpha_stats) + " " +
@@ -677,30 +922,46 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
     }
 
     corridorkey::adobe::AdobeRuntimeBridge bridge(*runtime_client);
-    auto prepare_status = bridge.prepare_session(request->prepare_options);
+    auto prepare_status = [&]() {
+        AdobeHostStageTimer timer(render_timings, "prepare_session");
+        return bridge.prepare_session(request->prepare_options, runtime_stage_logger);
+    }();
     if (!prepare_status) {
         return reject_render(output_data, prepare_status.error().message);
     }
 
-    auto render_result = bridge.process_frame(*runtime_input_frame, request->inference_params,
-                                              render_index_for(input_data));
+    auto render_result = [&]() {
+        AdobeHostStageTimer timer(render_timings, "process_frame");
+        return bridge.process_frame(*runtime_input_frame, request->inference_params, render_index,
+                                    runtime_stage_logger);
+    }();
     if (!render_result) {
         return reject_render(output_data, render_result.error().message);
     }
     corridorkey::AlphaEdgeState alpha_edge_state;
-    corridorkey::adobe::apply_adobe_matte_params(*render_result, request->matte_params,
-                                                 source.width, source.height, alpha_edge_state);
-    if (!request->inference_params.output_alpha_only) {
-        corridorkey::restore_from_green_domain(render_result->foreground.view(),
-                                               screen_color_transform);
+    {
+        AdobeHostStageTimer timer(render_timings, "apply_matte_params");
+        corridorkey::adobe::apply_adobe_matte_params(*render_result, request->matte_params,
+                                                     source.width, source.height, alpha_edge_state);
+    }
+    {
+        AdobeHostStageTimer timer(render_timings, "restore_foreground_domain");
+        if (!request->inference_params.output_alpha_only) {
+            corridorkey::restore_from_green_domain(render_result->foreground.view(),
+                                                   screen_color_transform);
+        }
     }
 
-    auto write_status = corridorkey::adobe::copy_runtime_result_to_adobe_frame(
-        *render_result, *output_frame, request->output_mode, &*source_runtime_frame);
+    auto write_status = [&]() {
+        AdobeHostStageTimer timer(render_timings, "copy_runtime_result_to_adobe");
+        return corridorkey::adobe::copy_runtime_result_to_adobe_frame(
+            *render_result, *output_frame, request->output_mode, &*source_runtime_frame);
+    }();
     if (!write_status) {
         return reject_render(output_data, write_status.error().message);
     }
 
+    render_timings.log_summaries();
     return kAdobeStatusOk;
 }
 
