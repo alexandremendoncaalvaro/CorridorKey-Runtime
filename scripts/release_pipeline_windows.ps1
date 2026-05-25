@@ -117,7 +117,7 @@ function Publish-CorridorKeyGithubRelease {
         if ($Flavor -ne "online") {
             throw "Adobe GitHub release assets are online-only. Re-run with -Flavor online."
         }
-        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_Adobe_v${tagLabel}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"))
+        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_Adobe_v${tagLabel}_Windows_RTX_$($Flavor.ToLowerInvariant())_Setup.exe"))
     }
     foreach ($asset in $assetGlobs) {
         if (-not (Test-Path $asset)) {
@@ -384,7 +384,7 @@ try {
             throw "Adobe packaging failed for variant: $($adobeVariant[0].Suffix)"
         }
 
-        $expectedAdobeInstaller = Join-Path $repoRoot "dist/CorridorKey_Adobe_v${artifactVersionTag}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"
+        $expectedAdobeInstaller = Join-Path $repoRoot "dist/CorridorKey_Adobe_v${artifactVersionTag}_Windows_$($adobeVariant[0].Suffix)_$($Flavor.ToLowerInvariant())_Setup.exe"
         if (-not (Test-Path $expectedAdobeInstaller)) {
             throw "CRITICAL: Adobe pipeline claimed success but installer was NOT found at: $expectedAdobeInstaller"
         }
