@@ -121,6 +121,9 @@ Result<app::HostPluginRuntimePrepareSessionRequest> build_adobe_prepare_session_
 AdobeRuntimeBridge::AdobeRuntimeBridge(std::unique_ptr<app::HostPluginRuntimeClient> runtime_client)
     : m_runtime_client(std::move(runtime_client)) {}
 
+AdobeRuntimeBridge::AdobeRuntimeBridge(std::shared_ptr<app::HostPluginRuntimeClient> runtime_client)
+    : m_runtime_client(std::move(runtime_client)) {}
+
 Result<app::HostPluginRuntimeHealthResponse> AdobeRuntimeBridge::health() {
     if (m_runtime_client == nullptr) {
         return missing_runtime_client_result<app::HostPluginRuntimeHealthResponse>();

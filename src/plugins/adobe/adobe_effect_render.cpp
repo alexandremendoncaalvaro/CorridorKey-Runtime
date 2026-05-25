@@ -18,6 +18,8 @@
 #include "adobe_bridge.hpp"
 #include "adobe_effect_metadata.hpp"
 #include "adobe_effect_parameters.hpp"
+#include "adobe_runtime_client_cache.hpp"
+#include "adobe_sequence_state.hpp"
 #include "app/host_plugin_runtime_client.hpp"
 #include "common/local_ipc.hpp"
 #include "common/runtime_paths.hpp"
@@ -483,6 +485,52 @@ corridorkey::app::HostPluginRuntimeClientOptions client_options_for(
     return options;
 }
 
+std::uint64_t runtime_client_key_for(PF_InData* input_data) noexcept {
+    if (input_data == nullptr || input_data->sequence_data == nullptr ||
+        input_data->utils == nullptr ||
+        input_data->utils->host_lock_handle == nullptr ||
+        input_data->utils->host_unlock_handle == nullptr) {
+        return 0;
+    }
+
+    auto* state = static_cast<corridorkey::adobe::AdobeSequenceState*>(
+        input_data->utils->host_lock_handle(input_data->sequence_data));
+    if (state == nullptr) {
+        return 0;
+    }
+
+    const std::uint64_t key =
+        state->version == corridorkey::adobe::kAdobeSequenceStateVersion
+            ? state->runtime_client_key
+            : 0;
+    input_data->utils->host_unlock_handle(input_data->sequence_data);
+    return key;
+}
+
+corridorkey::Result<std::shared_ptr<corridorkey::app::HostPluginRuntimeClient>>
+runtime_client_for_render(PF_InData* input_data,
+                          const corridorkey::adobe::AdobeEffectRuntimeRequest& request) {
+    auto options = client_options_for(request);
+    const std::uint64_t key = runtime_client_key_for(input_data);
+    if (key == 0) {
+        log_adobe_message("render",
+                          "event=runtime_client_cache unavailable fallback=per_frame_client");
+        auto client = corridorkey::app::HostPluginRuntimeClient::create(std::move(options));
+        if (!client) {
+            return corridorkey::Unexpected<corridorkey::Error>(client.error());
+        }
+        return std::shared_ptr<corridorkey::app::HostPluginRuntimeClient>(std::move(*client));
+    }
+
+    auto client = corridorkey::adobe::acquire_cached_adobe_runtime_client(key, std::move(options));
+    if (!client) {
+        return corridorkey::Unexpected<corridorkey::Error>(client.error());
+    }
+    (*client)->set_request_timeout_ms(request.render_timeout_ms);
+    (*client)->set_prepare_timeout_ms(request.prepare_options.prepare_timeout_ms);
+    return client;
+}
+
 std::string quality_fallback_mode_label(corridorkey::QualityFallbackMode mode) {
     switch (mode) {
         case corridorkey::QualityFallbackMode::Direct:
@@ -618,13 +666,12 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
         return reject_render(output_data, output_frame.error().message);
     }
 
-    auto runtime_client =
-        corridorkey::app::HostPluginRuntimeClient::create(client_options_for(*request));
+    auto runtime_client = runtime_client_for_render(input_data, *request);
     if (!runtime_client) {
         return reject_render(output_data, runtime_client.error().message);
     }
 
-    corridorkey::adobe::AdobeRuntimeBridge bridge(std::move(*runtime_client));
+    corridorkey::adobe::AdobeRuntimeBridge bridge(*runtime_client);
     auto prepare_status = bridge.prepare_session(request->prepare_options);
     if (!prepare_status) {
         return reject_render(output_data, prepare_status.error().message);

@@ -16,8 +16,10 @@
 #include "AE_EffectPixelFormat.h"
 #include "SP/SPBasic.h"
 #include "adobe_effect_metadata.hpp"
+#include "plugins/adobe/adobe_runtime_client_cache.hpp"
 #include "plugins/adobe/adobe_effect_parameters.hpp"
 #include "plugins/adobe/adobe_effect_render.hpp"
+#include "plugins/adobe/adobe_sequence_state.hpp"
 
 extern "C" PF_Err EffectMain(PF_Cmd command, PF_InData* input_data, PF_OutData* output_data,
                              PF_ParamDef* parameters[], PF_LayerDef* output, void* extra) noexcept;
@@ -547,6 +549,19 @@ TEST_CASE("After Effects sequence lifecycle owns host-managed sequence state",
     CHECK(host.record_for(output_data.sequence_data) != nullptr);
     CHECK(host.unlock_count == 1);
 
+    auto* state = static_cast<corridorkey::adobe::AdobeSequenceState*>(
+        host.callbacks.host_lock_handle(output_data.sequence_data));
+    REQUIRE(state != nullptr);
+    CHECK(state->version == corridorkey::adobe::kAdobeSequenceStateVersion);
+    const std::uint64_t runtime_client_key = state->runtime_client_key;
+    CHECK(runtime_client_key != 0);
+    host.callbacks.host_unlock_handle(output_data.sequence_data);
+
+    corridorkey::app::HostPluginRuntimeClientOptions options;
+    auto cached_client =
+        corridorkey::adobe::acquire_cached_adobe_runtime_client(runtime_client_key, options);
+    REQUIRE(cached_client.has_value());
+
     input_data.sequence_data = output_data.sequence_data;
     const PF_Err setdown_status =
         EffectMain(PF_Cmd_SEQUENCE_SETDOWN, &input_data, &output_data, nullptr, nullptr, nullptr);
@@ -554,6 +569,12 @@ TEST_CASE("After Effects sequence lifecycle owns host-managed sequence state",
     CHECK(setdown_status == PF_Err_NONE);
     CHECK(output_data.sequence_data == nullptr);
     CHECK(host.dispose_count == 1);
+
+    auto client_after_setdown =
+        corridorkey::adobe::acquire_cached_adobe_runtime_client(runtime_client_key, options);
+    REQUIRE(client_after_setdown.has_value());
+    CHECK(client_after_setdown->get() != cached_client->get());
+    corridorkey::adobe::release_cached_adobe_runtime_client(runtime_client_key);
 }
 
 TEST_CASE("After Effects SmartFX pre-render requests optional Alpha Hint Layer",

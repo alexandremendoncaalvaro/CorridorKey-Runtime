@@ -6,6 +6,7 @@
 
 #include "common/srgb_lut.hpp"
 #include "plugins/adobe/adobe_bridge.hpp"
+#include "plugins/adobe/adobe_runtime_client_cache.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::adobe;
@@ -795,4 +796,25 @@ TEST_CASE("adobe runtime bridge operations return Result errors without a client
     CHECK(health.error().message.find("runtime client") != std::string::npos);
     CHECK(prepare.error().message.find("runtime client") != std::string::npos);
     CHECK(release.error().message.find("runtime client") != std::string::npos);
+}
+
+TEST_CASE("adobe runtime client cache reuses one client for a sequence key",
+          "[unit][adobe][runtime][regression]") {
+    const std::uint64_t key = next_adobe_runtime_client_key();
+    app::HostPluginRuntimeClientOptions options;
+
+    auto first = acquire_cached_adobe_runtime_client(key, options);
+    auto second = acquire_cached_adobe_runtime_client(key, options);
+
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    CHECK(first->get() == second->get());
+
+    release_cached_adobe_runtime_client(key);
+
+    auto third = acquire_cached_adobe_runtime_client(key, options);
+    REQUIRE(third.has_value());
+    CHECK(third->get() != first->get());
+
+    release_cached_adobe_runtime_client(key);
 }

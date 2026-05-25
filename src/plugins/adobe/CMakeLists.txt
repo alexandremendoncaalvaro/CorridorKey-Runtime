@@ -25,7 +25,10 @@ set(_corridorkey_adobe_sources
     adobe_effect_runtime_request.cpp
     adobe_frame_output.cpp
     adobe_matte_params.hpp
+    adobe_runtime_client_cache.cpp
+    adobe_runtime_client_cache.hpp
     adobe_runtime_bridge.cpp
+    adobe_sequence_state.hpp
     adobe_effect.cpp
     adobe_effect_parameters.cpp
     adobe_effect_parameters.hpp

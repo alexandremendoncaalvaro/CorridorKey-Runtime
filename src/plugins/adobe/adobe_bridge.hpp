@@ -89,6 +89,7 @@ Result<app::HostPluginRuntimePrepareSessionRequest> build_adobe_prepare_session_
 class AdobeRuntimeBridge {
    public:
     explicit AdobeRuntimeBridge(std::unique_ptr<app::HostPluginRuntimeClient> runtime_client);
+    explicit AdobeRuntimeBridge(std::shared_ptr<app::HostPluginRuntimeClient> runtime_client);
 
     Result<app::HostPluginRuntimeHealthResponse> health();
     Result<app::HostPluginRuntimePrepareSessionResponse> prepare_session(
@@ -102,7 +103,7 @@ class AdobeRuntimeBridge {
     Result<void> release_session();
 
    private:
-    std::unique_ptr<app::HostPluginRuntimeClient> m_runtime_client;
+    std::shared_ptr<app::HostPluginRuntimeClient> m_runtime_client;
 };
 
 }  // namespace corridorkey::adobe

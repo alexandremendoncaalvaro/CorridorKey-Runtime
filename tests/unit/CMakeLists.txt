@@ -10,6 +10,7 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_frame_output.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_client_cache.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_bridge.cpp
     test_alpha_edge.cpp
     test_adobe_bridge.cpp

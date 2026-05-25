@@ -7,6 +7,8 @@
 #include "adobe_effect_metadata.hpp"
 #include "adobe_effect_parameters.hpp"
 #include "adobe_effect_render.hpp"
+#include "adobe_runtime_client_cache.hpp"
+#include "adobe_sequence_state.hpp"
 
 #if defined(_WIN32)
 #define CORRIDORKEY_ADOBE_EXPORT extern "C" __declspec(dllexport)
@@ -21,12 +23,6 @@ using AdobeStatus = PF_Err;
 constexpr AdobeStatus kAdobeStatusOk = static_cast<AdobeStatus>(0);
 constexpr AdobeStatus kAdobeStatusFailed = PF_Err_INTERNAL_STRUCT_DAMAGED;
 constexpr AdobeStatus kAdobeStatusUnsupported = PF_Err_BAD_CALLBACK_PARAM;
-constexpr std::uint32_t kSequenceStateVersion = 1;
-
-struct AdobeSequenceState {
-    std::uint32_t version = kSequenceStateVersion;
-    std::uint32_t reserved = 0;
-};
 
 struct HostHandleCallbacks {
     PF_Handle (*new_handle)(A_u_longlong) = nullptr;
@@ -89,23 +85,27 @@ AdobeStatus setup_sequence(PF_InData* input_data, PF_OutData& output_data) noexc
         return kAdobeStatusUnsupported;
     }
 
-    PF_Handle sequence_data = callbacks.new_handle(sizeof(AdobeSequenceState));
+    PF_Handle sequence_data =
+        callbacks.new_handle(sizeof(corridorkey::adobe::AdobeSequenceState));
     if (sequence_data == nullptr) {
         set_error_message(output_data, "CorridorKey could not allocate sequence state.");
         return PF_Err_OUT_OF_MEMORY;
     }
 
-    auto* state = static_cast<AdobeSequenceState*>(callbacks.lock_handle(sequence_data));
+    auto* state =
+        static_cast<corridorkey::adobe::AdobeSequenceState*>(callbacks.lock_handle(sequence_data));
     if (state == nullptr) {
         callbacks.dispose_handle(sequence_data);
         set_error_message(output_data, "CorridorKey could not lock sequence state.");
         return kAdobeStatusFailed;
     }
 
-    *state = AdobeSequenceState{};
+    *state = corridorkey::adobe::AdobeSequenceState{};
+    state->runtime_client_key = corridorkey::adobe::next_adobe_runtime_client_key();
     callbacks.unlock_handle(sequence_data);
     output_data.sequence_data = sequence_data;
-    output_data.flat_sdata_size = static_cast<A_long>(sizeof(AdobeSequenceState));
+    output_data.flat_sdata_size =
+        static_cast<A_long>(sizeof(corridorkey::adobe::AdobeSequenceState));
     return kAdobeStatusOk;
 }
 
@@ -113,6 +113,19 @@ AdobeStatus setdown_sequence(PF_InData* input_data, PF_OutData& output_data) noe
     const auto callbacks = handle_callbacks_for(input_data);
     if (input_data != nullptr && input_data->sequence_data != nullptr &&
         callbacks.dispose_handle != nullptr) {
+        std::uint64_t runtime_client_key = 0;
+        if (callbacks.lock_handle != nullptr && callbacks.unlock_handle != nullptr) {
+            auto* state = static_cast<corridorkey::adobe::AdobeSequenceState*>(
+                callbacks.lock_handle(input_data->sequence_data));
+            if (state != nullptr &&
+                state->version == corridorkey::adobe::kAdobeSequenceStateVersion) {
+                runtime_client_key = state->runtime_client_key;
+            }
+            if (state != nullptr) {
+                callbacks.unlock_handle(input_data->sequence_data);
+            }
+        }
+        corridorkey::adobe::release_cached_adobe_runtime_client(runtime_client_key);
         callbacks.dispose_handle(input_data->sequence_data);
         input_data->sequence_data = nullptr;
     }
@@ -148,6 +161,7 @@ CORRIDORKEY_ADOBE_EXPORT AdobeStatus EffectMain(PF_Cmd command, PF_InData* input
                 setup_global(*output_data);
                 break;
             case PF_Cmd_GLOBAL_SETDOWN:
+                corridorkey::adobe::release_all_cached_adobe_runtime_clients();
                 break;
             case PF_Cmd_SEQUENCE_SETUP:
                 return setup_sequence(input_data, *output_data);
