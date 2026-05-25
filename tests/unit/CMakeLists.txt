@@ -54,6 +54,7 @@ add_executable(test_unit
     test_fp16_convert.cpp
     test_pinned_buffer.cpp
     test_stage_profiler.cpp
+    test_synthetic_chroma_quality.cpp
     test_ofx_stubs.cpp
     test_tile_blend.cpp
     test_version_check.cpp
