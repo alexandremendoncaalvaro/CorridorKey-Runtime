@@ -27,10 +27,10 @@ TEST_CASE("host plugin session policy canonicalizes artifact names",
           "corridorkey_fp16_512.onnx");
 }
 
-TEST_CASE("host plugin session policy destroys zero-ref Windows RTX sessions",
+TEST_CASE("host plugin session policy keeps zero-ref TorchTRT sessions warm",
           "[unit][ofx][runtime][regression]") {
     CHECK(app::detail::should_destroy_zero_ref_session(Backend::TensorRT));
-    CHECK(app::detail::should_destroy_zero_ref_session(Backend::TorchTRT));
+    CHECK_FALSE(app::detail::should_destroy_zero_ref_session(Backend::TorchTRT));
     CHECK_FALSE(app::detail::should_destroy_zero_ref_session(Backend::CPU));
     CHECK_FALSE(app::detail::should_destroy_zero_ref_session(Backend::CUDA));
     CHECK_FALSE(app::detail::should_destroy_zero_ref_session(Backend::MLX));

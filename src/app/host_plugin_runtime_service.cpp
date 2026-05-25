@@ -165,7 +165,16 @@ std::string sanitize_log_token(const std::string& value) {
 // slots and hide the wait split that tells us whether we're Metal-queue-bound.
 bool is_pinned_stage(const std::string& name) {
     return name == "mlx_eval" || name == "mlx_wait_alpha" || name == "mlx_wait_fg" ||
-           name == "mlx_eval_tile" || name == "mlx_wait_alpha_tile" || name == "mlx_wait_fg_tile";
+           name == "mlx_eval_tile" || name == "mlx_wait_alpha_tile" || name == "mlx_wait_fg_tile" ||
+           name == "prewarm_wait" || name == "prewarm_completed" || name == "prewarm_detached" ||
+           name.starts_with("prewarm_skipped_") || name == "frame_prepare_inputs" ||
+           name == "gpu_prepare_device" || name == "torchtrt_forward_direct_gpu" ||
+           name == "torchtrt_forward_direct_queue_wait" ||
+           name == "torchtrt_forward_direct_event_sync_wait" ||
+           name == "torchtrt_output_d2h_direct" || name == "torchtrt_output_copy_sync" ||
+           name == "torchtrt_output_host_register" || name == "host_plugin_broker_writeback" ||
+           name == "host_plugin_client_render_rpc" || name == "host_plugin_client_alpha_readback" ||
+           name == "host_plugin_client_foreground_readback";
 }
 
 // Summarize stages into a compact "name:ms,name:ms" list. Returns the top-N by

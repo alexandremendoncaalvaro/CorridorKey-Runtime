@@ -79,6 +79,19 @@ void append_timing(std::vector<StageTiming>& timings, const StageTiming& timing)
     timings.push_back(timing);
 }
 
+void append_marker_stage(const std::shared_ptr<SharedStageTimings>& timings,
+                         const std::string& name) {
+    if (!timings) {
+        return;
+    }
+    StageTiming marker;
+    marker.name = name;
+    marker.total_ms = 0.0;
+    marker.sample_count = 1;
+    marker.work_units = 0;
+    timings->append(marker);
+}
+
 // Capture the current MLX / Metal memory state for admission and prewarm
 // gating. On non-Apple builds the snapshot is empty (all zeros) and the
 // policy helpers treat that as "telemetry unavailable -> allow."
@@ -276,15 +289,22 @@ Result<HostPluginRuntimePrepareSessionResponse> HostPluginSessionBroker::prepare
         const std::chrono::milliseconds timeout{std::max(0, request.prepare_timeout_ms)};
         auto prewarm_run = prewarm_with_timeout(entry.engine, target_shape, timeout, on_stage);
         entry.prewarm_ready = prewarm_run.ready;
+        switch (prewarm_run.status) {
+            case PrewarmRun::Status::Completed:
+                append_marker_stage(timings, "prewarm_completed");
+                break;
+            case PrewarmRun::Status::Detached:
+                append_marker_stage(timings, "prewarm_detached");
+                break;
+            case PrewarmRun::Status::Skipped:
+                append_marker_stage(timings, "prewarm_skipped_invalid_shape");
+                break;
+        }
     } else {
         // Emit a marker stage so the runtime log can correlate skipped
         // prewarm with steady-state first-frame latency.
-        StageTiming marker;
-        marker.name = std::string("prewarm_skipped_") + detail::prewarm_decision_label(decision);
-        marker.total_ms = 0.0;
-        marker.sample_count = 1;
-        marker.work_units = 0;
-        timings->append(marker);
+        append_marker_stage(
+            timings, std::string("prewarm_skipped_") + detail::prewarm_decision_label(decision));
     }
 
     auto response = HostPluginRuntimePrepareSessionResponse{
@@ -327,19 +347,28 @@ Result<HostPluginRuntimeRenderFrameResponse> HostPluginSessionBroker::render_fra
             on_stage, "prewarm_wait", [&]() { session->second.prewarm_ready.wait(); }, 1);
     }
 
-    auto result = session->second.engine->process_frame(
-        transport->rgb_view(), transport->hint_view(), request.params, on_stage);
+    auto alpha = transport->alpha_view();
+    auto foreground = transport->foreground_view();
+    FrameOutputViews output_views;
+    output_views.alpha = alpha;
+    if (!request.params.output_alpha_only) {
+        output_views.foreground = foreground;
+    }
+
+    auto result = session->second.engine->process_frame_into(
+        transport->rgb_view(), transport->hint_view(), output_views, request.params, on_stage);
     if (!result) {
         m_sessions.erase(session);
         return Unexpected<Error>(result.error());
     }
 
-    auto alpha = transport->alpha_view();
-    auto foreground = transport->foreground_view();
-    auto result_alpha = result->alpha.const_view();
     common::measure_stage(
         on_stage, "host_plugin_broker_writeback",
         [&]() {
+            if (result->external_output_written) {
+                return;
+            }
+            auto result_alpha = result->alpha.const_view();
             copy_image_rows(result_alpha, alpha);
             if (!request.params.output_alpha_only) {
                 auto result_foreground = result->foreground.const_view();

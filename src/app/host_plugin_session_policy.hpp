@@ -28,7 +28,7 @@ inline std::string canonical_host_plugin_artifact_name(const std::filesystem::pa
 }
 
 inline bool should_destroy_zero_ref_session(Backend backend) {
-    return backend == Backend::TensorRT || backend == Backend::TorchTRT;
+    return backend == Backend::TensorRT;
 }
 
 // --------------------------------------------------------------------------

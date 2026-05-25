@@ -1368,7 +1368,11 @@ TEST_CASE("After Effects Blue effect identity drives runtime model and despill c
     CHECK(request->prepare_options.model_path ==
           std::filesystem::path{"models"} / "corridorkey_dynamic_blue_fp16.ts");
     CHECK(request->prepare_options.requested_device.backend == corridorkey::Backend::TorchTRT);
+    CHECK(request->prepare_options.requested_resolution == 1024);
+    CHECK(request->prepare_options.effective_resolution == 1024);
+    CHECK(request->inference_params.target_resolution == 1024);
     CHECK(request->inference_params.despill_screen_channel == 2);
+    CHECK_FALSE(request->inference_params.source_passthrough);
 }
 
 TEST_CASE("After Effects Green effect maps legacy blue screen choice to channel swap",
@@ -1478,6 +1482,9 @@ TEST_CASE("After Effects render parameters sanitize corrupted host slider values
     CHECK(request->prepare_options.model_path ==
           std::filesystem::path{"models"} / "corridorkey_dynamic_blue_fp16.ts");
     CHECK(request->prepare_options.requested_device.backend == corridorkey::Backend::TorchTRT);
+    CHECK(request->prepare_options.requested_resolution == 1024);
+    CHECK(request->prepare_options.effective_resolution == 1024);
+    CHECK(request->inference_params.target_resolution == 1024);
     CHECK(request->prepare_options.prepare_timeout_ms == 10000);
     CHECK(request->matte_params.black_point == Catch::Approx(0.0));
     CHECK(request->matte_params.white_point == Catch::Approx(1.0));
@@ -1489,6 +1496,7 @@ TEST_CASE("After Effects render parameters sanitize corrupted host slider values
     CHECK(request->inference_params.sp_blur_px == 100);
     CHECK(request->inference_params.tile_padding == 128);
     CHECK(request->inference_params.despeckle_size == 50);
+    CHECK_FALSE(request->inference_params.source_passthrough);
     CHECK(request->render_timeout_ms == 120000);
 }
 

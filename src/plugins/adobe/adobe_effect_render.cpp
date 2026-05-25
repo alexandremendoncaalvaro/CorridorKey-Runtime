@@ -274,12 +274,31 @@ class AdobeRenderTimingCollector {
                 " runtime_stage_count=" + std::to_string(m_runtime_timings.size()) +
                 " runtime_stage_sum_ms=" + format_ms(timing_sum_ms(m_runtime_timings)) +
                 " top=" + format_timing_top(m_runtime_timings);
-            append_stage_ms_fields(
-                runtime_message, m_runtime_timings,
-                {"frame_prepare_inputs", "ort_run", "frame_extract_outputs",
-                 "frame_extract_outputs_tensor_materialize", "frame_extract_outputs_resize",
-                 "frame_extract_outputs_finalize", "post_source_passthrough", "post_despill",
-                 "post_premultiply", "post_composite", "host_plugin_broker_writeback"});
+            append_stage_ms_fields(runtime_message, m_runtime_timings,
+                                   {"frame_prepare_inputs",
+                                    "ort_run",
+                                    "frame_extract_outputs",
+                                    "frame_extract_outputs_tensor_materialize",
+                                    "frame_extract_outputs_resize",
+                                    "frame_extract_outputs_finalize",
+                                    "post_source_passthrough",
+                                    "post_despill",
+                                    "post_premultiply",
+                                    "post_composite",
+                                    "host_plugin_broker_writeback",
+                                    "prewarm_wait",
+                                    "prewarm_completed",
+                                    "prewarm_detached",
+                                    "host_plugin_client_transport_create",
+                                    "host_plugin_client_rgb_write",
+                                    "host_plugin_client_hint_write",
+                                    "host_plugin_client_render_rpc",
+                                    "host_plugin_client_alpha_readback",
+                                    "host_plugin_client_foreground_readback",
+                                    "torchtrt_forward_direct_gpu",
+                                    "torchtrt_output_copy_sync",
+                                    "torchtrt_output_d2h_direct",
+                                    "torchtrt_extract_outputs"});
             log_adobe_message("render", runtime_message);
         } catch (...) {
         }

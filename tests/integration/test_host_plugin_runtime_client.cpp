@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <catch2/catch_all.hpp>
@@ -6,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "app/host_plugin_runtime_client.hpp"
 #include "app/host_plugin_runtime_protocol.hpp"
@@ -98,6 +100,11 @@ void fill_transport_result(SharedFrameTransport& transport, float alpha_value, f
     auto foreground = transport.foreground_view();
     std::fill(alpha.data.begin(), alpha.data.end(), alpha_value);
     std::fill(foreground.data.begin(), foreground.data.end(), fg_value);
+}
+
+bool has_stage(const std::vector<StageTiming>& timings, const std::string& name) {
+    return std::any_of(timings.begin(), timings.end(),
+                       [&](const StageTiming& timing) { return timing.name == name; });
 }
 
 }  // namespace
@@ -472,12 +479,19 @@ TEST_CASE("host plugin runtime client recovers when the runtime loses the curren
     params.target_resolution = 512;
     params.batch_size = 1;
 
-    auto frame = (*client)->process_frame(rgb_buffer.view(), hint_buffer.view(), params, 0);
+    std::vector<StageTiming> timings;
+    auto frame =
+        (*client)->process_frame(rgb_buffer.view(), hint_buffer.view(), params, 0,
+                                 [&](const StageTiming& timing) { timings.push_back(timing); });
     REQUIRE(frame.has_value());
     CHECK(render_count.load() == 2);
     CHECK(prepare_count.load() == 2);
     CHECK(frame->alpha.const_view().data.front() == Catch::Approx(0.75F));
     CHECK(frame->foreground.const_view().data.front() == Catch::Approx(0.25F));
+    CHECK(has_stage(timings, "host_plugin_client_transport_create"));
+    CHECK(has_stage(timings, "host_plugin_client_render_rpc"));
+    CHECK(has_stage(timings, "host_plugin_client_alpha_readback"));
+    CHECK(has_stage(timings, "host_plugin_client_foreground_readback"));
 
     auto released = (*client)->release_session();
     REQUIRE(released.has_value());

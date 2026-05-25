@@ -8,6 +8,7 @@
 #include "app/host_plugin_runtime_family.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
+#include "common/stage_profiler.hpp"
 
 #ifdef __APPLE__
 #include <pthread.h>
@@ -426,17 +427,39 @@ Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb,
         }
     }
 
+    const std::uint64_t frame_pixels =
+        static_cast<std::uint64_t>(rgb.width) * static_cast<std::uint64_t>(rgb.height);
+    StageTimingCallback client_stage = [&](const StageTiming& timing) {
+        if (on_stage) {
+            on_stage(timing);
+        }
+    };
+
     const auto transport_path = common::next_host_plugin_shared_frame_path();
     auto render_result = [&]() -> Result<FrameResult> {
-        auto transport =
-            common::SharedFrameTransport::create(transport_path, rgb.width, rgb.height);
+        auto transport = common::measure_stage(
+            client_stage, "host_plugin_client_transport_create",
+            [&]() {
+                return common::SharedFrameTransport::create(transport_path, rgb.width, rgb.height);
+            },
+            frame_pixels);
         if (!transport) {
             return Unexpected<Error>(transport.error());
         }
 
-        std::copy(rgb.data.begin(), rgb.data.end(), transport->rgb_view().data.begin());
-        std::copy(alpha_hint.data.begin(), alpha_hint.data.end(),
-                  transport->hint_view().data.begin());
+        common::measure_stage(
+            client_stage, "host_plugin_client_rgb_write",
+            [&]() {
+                std::copy(rgb.data.begin(), rgb.data.end(), transport->rgb_view().data.begin());
+            },
+            frame_pixels);
+        common::measure_stage(
+            client_stage, "host_plugin_client_hint_write",
+            [&]() {
+                std::copy(alpha_hint.data.begin(), alpha_hint.data.end(),
+                          transport->hint_view().data.begin());
+            },
+            frame_pixels);
 
         HostPluginRuntimeRenderFrameRequest request;
         request.session_id = m_session.session_id;
@@ -450,7 +473,9 @@ Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb,
             return send_command(HostPluginRuntimeCommand::RenderFrame, to_json(request));
         };
 
-        auto response = send_render_request();
+        auto response = common::measure_stage(
+            client_stage, "host_plugin_client_render_rpc", [&]() { return send_render_request(); },
+            frame_pixels);
         if (!response && is_timeout_error(response.error())) {
             log_message("host_plugin_runtime_client",
                         "event=render_timeout reason=" + response.error().message);
@@ -463,7 +488,9 @@ Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb,
                 return Unexpected<Error>(recover_result.error());
             }
             request.session_id = m_session.session_id;
-            response = send_render_request();
+            response = common::measure_stage(
+                client_stage, "host_plugin_client_render_rpc_retry",
+                [&]() { return send_render_request(); }, frame_pixels);
         }
         if (!response &&
             (is_transport_error(response.error()) || is_session_missing_error(response.error()))) {
@@ -474,7 +501,9 @@ Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb,
                 return Unexpected<Error>(recover_result.error());
             }
             request.session_id = m_session.session_id;
-            response = send_render_request();
+            response = common::measure_stage(
+                client_stage, "host_plugin_client_render_rpc_recover",
+                [&]() { return send_render_request(); }, frame_pixels);
         }
         if (!response) {
             if (response.error().code == ErrorCode::InferenceFailed) {
@@ -493,14 +522,24 @@ Result<FrameResult> HostPluginRuntimeClient::process_frame(const Image& rgb,
         replay_stage_timings(parsed->timings, on_stage);
 
         FrameResult result;
-        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        std::copy(transport->alpha_view().data.begin(), transport->alpha_view().data.end(),
-                  result.alpha.view().data.begin());
+        common::measure_stage(
+            client_stage, "host_plugin_client_alpha_readback",
+            [&]() {
+                result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
+                std::copy(transport->alpha_view().data.begin(), transport->alpha_view().data.end(),
+                          result.alpha.view().data.begin());
+            },
+            frame_pixels);
         if (!params.output_alpha_only) {
-            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
-            std::copy(transport->foreground_view().data.begin(),
-                      transport->foreground_view().data.end(),
-                      result.foreground.view().data.begin());
+            common::measure_stage(
+                client_stage, "host_plugin_client_foreground_readback",
+                [&]() {
+                    result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+                    std::copy(transport->foreground_view().data.begin(),
+                              transport->foreground_view().data.end(),
+                              result.foreground.view().data.begin());
+                },
+                frame_pixels);
         }
         return result;
     }();

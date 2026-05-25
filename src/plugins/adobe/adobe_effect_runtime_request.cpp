@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -240,6 +241,15 @@ corridorkey::ScreenColorMode screen_color_mode_for(std::string_view effect_ident
     return corridorkey::ScreenColorMode::Green;
 }
 
+int effective_resolution_for_artifact(const std::filesystem::path& model_path,
+                                      int requested_resolution) {
+    const auto packaged_resolution = corridorkey::app::packaged_model_resolution(model_path);
+    if (packaged_resolution.has_value() && *packaged_resolution > 0) {
+        return *packaged_resolution;
+    }
+    return requested_resolution;
+}
+
 bool output_mode_requires_foreground(int output_mode) noexcept {
     return output_mode != kOutputMatteOnly && output_mode != kOutputSourceMatte;
 }
@@ -287,7 +297,8 @@ corridorkey::Result<void> validate_runtime_request_context(
 corridorkey::InferenceParams build_inference_params(
     PF_ParamDef* const parameters[], int requested_resolution, int output_mode,
     std::string_view effect_identity, corridorkey::QualityFallbackMode fallback_mode,
-    int coarse_resolution_override, int effective_resolution, int source_width, int source_height) {
+    corridorkey::ScreenColorMode screen_color_mode, int coarse_resolution_override,
+    int effective_resolution, int source_width, int source_height) {
     corridorkey::InferenceParams inference_params;
     inference_params.target_resolution = effective_resolution;
     inference_params.requested_quality_resolution = requested_resolution;
@@ -319,9 +330,12 @@ corridorkey::InferenceParams build_inference_params(
     inference_params.despeckle_size =
         integer_slider_value(parameters, corridorkey::adobe::kParamDespeckleSize,
                              kDefaultDespeckleSize, kMinimumDespeckleSize, kMaximumDespeckleSize);
-    inference_params.source_passthrough =
+    const bool source_passthrough_requested =
         checkbox_value(parameters, corridorkey::adobe::kParamRecoverOriginalDetails,
                        kDefaultRecoverOriginalDetails);
+    inference_params.source_passthrough =
+        source_passthrough_requested &&
+        corridorkey::screen_color_allows_source_passthrough(screen_color_mode);
     inference_params.sp_erode_px = scale_integer_pixels_to_source_long_edge(
         integer_slider_value(parameters, corridorkey::adobe::kParamDetailsEdgeShrink,
                              kDefaultDetailsEdgeShrink, kMinimumEdgePixels, kMaximumEdgePixels),
@@ -353,6 +367,8 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
         popup_choice(parameters, kParamScreenColor, kScreenColorGreen,
                      screen_color_maximum_choice_for_effect_identity(context.effect_identity));
     const std::string screen_color_domain = screen_color_domain_for(context.effect_identity);
+    const ScreenColorMode screen_color_mode =
+        screen_color_mode_for(context.effect_identity, screen_color);
     const int fallback_choice =
         popup_choice(parameters, kParamQualityFallbackMode, kDefaultQualityFallbackMode, 2);
     const QualityFallbackMode fallback_mode = quality_fallback_mode_for_choice(fallback_choice);
@@ -366,8 +382,8 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
     if (!artifact_selection) {
         return Unexpected<Error>(artifact_selection.error());
     }
-    const int effective_resolution = app::packaged_model_resolution(artifact_selection->model_path)
-                                         .value_or(requested_resolution);
+    const int effective_resolution =
+        effective_resolution_for_artifact(artifact_selection->model_path, requested_resolution);
 
     auto output_mode = strict_popup_choice(parameters, kParamOutputMode, kDefaultOutputMode,
                                            kMaximumOutputMode, "output mode");
@@ -391,9 +407,10 @@ Result<AdobeEffectRuntimeRequest> build_effect_runtime_request(
                              kMaximumPrepareTimeoutSeconds);
     request.inference_params = build_inference_params(
         parameters, requested_resolution, *output_mode, context.effect_identity, fallback_mode,
-        coarse_resolution_override, effective_resolution, context.width, context.height);
+        screen_color_mode, coarse_resolution_override, effective_resolution, context.width,
+        context.height);
     request.matte_params = build_matte_params(parameters);
-    request.screen_color_mode = screen_color_mode_for(context.effect_identity, screen_color);
+    request.screen_color_mode = screen_color_mode;
     request.output_mode = *output_mode;
     request.render_timeout_ms =
         timeout_milliseconds(parameters, kParamRenderTimeoutSeconds, kDefaultRenderTimeoutSeconds,
