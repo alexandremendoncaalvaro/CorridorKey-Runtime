@@ -58,4 +58,12 @@ if ($builder.Contains("Runs from InitializeWizard")) {
     throw "Build-PackMigrationProcedure must not document InitializeWizard as the migration call site."
 }
 
+if ($builder.Contains('default_dir_name = "{commoncf64}\OFX\Plugins\{#MyAppName}.ofx.bundle"')) {
+    throw "OFX DefaultDirName must not inject a preprocessor constant through another preprocessor constant."
+}
+
+if (-not $builder.Contains('default_dir_name = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle"')) {
+    throw "OFX DefaultDirName must render to a literal OpenFX bundle path before ISCC runs."
+}
+
 Write-Host "[PASS] Inno {app} initialization regression checks passed." -ForegroundColor Green

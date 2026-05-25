@@ -101,6 +101,13 @@ if(WIN32)
     set_tests_properties(regression_adobe_jordan_fixture_scaffold PROPERTIES LABELS "regression")
 
     add_test(
+        NAME regression_inno_app_constant_initialization
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_inno_app_constant_initialization.ps1
+    )
+    set_tests_properties(regression_inno_app_constant_initialization PROPERTIES LABELS "regression")
+
+    add_test(
         NAME regression_windows_doctor_missing_model_tolerance
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_doctor_missing_model_tolerance.ps1

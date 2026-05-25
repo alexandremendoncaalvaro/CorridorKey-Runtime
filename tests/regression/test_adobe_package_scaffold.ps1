@@ -127,6 +127,9 @@ foreach ($requiredToken in @(
     "nppidei64_12.dll",
     "nppif64_12.dll",
     "nppig64_12.dll",
+    "function Copy-VisualCppRedistributableDependencies",
+    '$expectedVcRedistNames',
+    'CorridorKey.ofx.bundle\Contents\Win64',
     'Remove-Item -LiteralPath $OutputDir -Recurse -Force',
     'Remove-Item -LiteralPath $installerPath -Force',
     'Remove-Item -LiteralPath $installSmokeRoot -Recurse -Force',
@@ -144,6 +147,7 @@ foreach ($forbiddenToken in @(
     'Remove-Item $OutputDir -Recurse -Force',
     'Remove-Item $installerPath -Force',
     'Remove-Item -Path $destination -Recurse -Force',
+    'Get-ChildItem -Path $runtimeServerDir -Filter "*.dll"',
     "can be discovered by After Effects and Premiere Pro"
 )) {
     if ($packageScript -match [regex]::Escape($forbiddenToken)) {
@@ -187,6 +191,8 @@ foreach ($requiredToken in @(
     "Packaged CLI display label mismatch",
     "cli_display_version",
     "Packaged runtime doctor failed before producing a JSON report.",
+    "Adobe base payload must not bundle Blue runtime DLL",
+    "blue-runtime pack",
     "Test-CorridorKeyDoctorMissingModelProbeFailuresOnly",
     "Test-CorridorKeyDoctorMissingModelBundleFailuresOnly",
     "Packaged runtime doctor reported failures only for missing model(s).",

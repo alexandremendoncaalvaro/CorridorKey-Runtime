@@ -79,6 +79,12 @@ foreach ($requiredRuntime in @("VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "MSVCP1
     Assert-PathExists -Path (Join-Path $win64Dir $requiredRuntime) -Message "Missing app-local Visual C++ runtime DLL: $requiredRuntime."
 }
 
+foreach ($forbiddenBaseRuntime in @("torch_cuda.dll", "torch_cpu.dll", "torchtrt.dll", "c10.dll", "c10_cuda.dll")) {
+    if (Test-Path -LiteralPath (Join-Path $win64Dir $forbiddenBaseRuntime)) {
+        throw "Adobe base payload must not bundle Blue runtime DLL '$forbiddenBaseRuntime'; it belongs in the downloadable blue-runtime pack."
+    }
+}
+
 $packageInventory = Get-Content -Path $packageInventoryPath -Raw | ConvertFrom-Json
 if (-not (Test-JsonProperty -Object $packageInventory -Name "effects") -or $null -eq $packageInventory.effects) {
     throw "Adobe package inventory is missing effect identities."

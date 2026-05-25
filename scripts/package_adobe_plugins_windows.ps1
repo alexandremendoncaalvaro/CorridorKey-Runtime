@@ -146,6 +146,37 @@ function Copy-OrtDllByPattern {
     return $resolved.Name
 }
 
+function Copy-VisualCppRedistributableDependencies {
+    param(
+        [string]$BuildDir,
+        [string]$DestinationDir
+    )
+
+    $cmakeBundleWin64 = Join-Path $BuildDir "CorridorKey.ofx.bundle\Contents\Win64"
+    $expectedVcRedistNames = @(
+        "VCRUNTIME140.dll", "VCRUNTIME140_1.dll",
+        "MSVCP140.dll", "MSVCP140_1.dll", "MSVCP140_2.dll",
+        "MSVCP140_atomic_wait.dll", "MSVCP140_codecvt_ids.dll"
+    )
+    $missingVcRedist = @()
+    foreach ($redistName in $expectedVcRedistNames) {
+        $redistSource = Join-Path $cmakeBundleWin64 $redistName
+        if (-not (Test-Path -LiteralPath $redistSource)) {
+            $missingVcRedist += $redistName
+            continue
+        }
+        Copy-Item -LiteralPath $redistSource -Destination $DestinationDir -Force
+    }
+    if ($missingVcRedist.Count -gt 0) {
+        throw "Visual C++ Redistributable DLLs missing from CMake-staged bundle at $cmakeBundleWin64. Missing: $($missingVcRedist -join ', '). Expected CMake's InstallRequiredSystemLibraries module to populate these via the corridorkey_ofx POST_BUILD step."
+    }
+
+    $concrtSource = Join-Path $cmakeBundleWin64 "concrt140.dll"
+    if (Test-Path -LiteralPath $concrtSource) {
+        Copy-Item -LiteralPath $concrtSource -Destination $DestinationDir -Force
+    }
+}
+
 function Copy-RuntimeSidecarDependencies {
     param(
         [string]$BuildDir,
@@ -161,10 +192,7 @@ function Copy-RuntimeSidecarDependencies {
 
     Copy-Item $runtimeServerBinary $DestinationDir -Force
     Copy-Item (Join-Path $BuildDir "src\cli\corridorkey.exe") $DestinationDir -Force
-
-    foreach ($runtimeDll in Get-ChildItem -Path $runtimeServerDir -Filter "*.dll" -File -ErrorAction SilentlyContinue) {
-        Copy-Item $runtimeDll.FullName $DestinationDir -Force
-    }
+    Copy-VisualCppRedistributableDependencies -BuildDir $BuildDir -DestinationDir $DestinationDir
 
     Copy-OrtDll -Root $OrtRoot -Name "onnxruntime.dll" -DestinationDir $DestinationDir
     Copy-OrtDll -Root $OrtRoot -Name "onnxruntime_providers_shared.dll" -DestinationDir $DestinationDir

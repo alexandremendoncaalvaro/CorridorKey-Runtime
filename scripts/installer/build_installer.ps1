@@ -431,7 +431,7 @@ end;
                 app_id = "{{8B8C9CF7-9C20-4D8E-9E36-C3A4F0F1E0B0}}"
                 app_name = "CorridorKey"
                 version_info_description = "CorridorKey OFX plugin installer"
-                default_dir_name = "{commoncf64}\OFX\Plugins\{#MyAppName}.ofx.bundle"
+                default_dir_name = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle"
                 plugin_base_description = "Base OFX plugin (CLI + ONNX runtime)"
                 host_stop_process_lines = @(
                     "  StopProcessByImageName('Resolve.exe');",
