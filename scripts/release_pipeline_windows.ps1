@@ -8,6 +8,8 @@ param(
     [switch]$SkipTests,
     [switch]$CleanOnly,
     [switch]$PublishGithub,
+    [switch]$PackageAdobe,
+    [string]$AdobeSdkRoot = "",
     [string]$GithubRepo = "alexandremendoncaalvaro/CorridorKey-Runtime",
     [string]$NotesFile = ""
 )
@@ -50,6 +52,7 @@ function Publish-CorridorKeyGithubRelease {
         [string]$DisplayVersionLabel,
         [string]$Track,
         [string]$Flavor,
+        [switch]$IncludeAdobeInstaller,
         [string]$GithubRepo,
         [string]$RepoRoot,
         [string]$NotesFile
@@ -110,6 +113,12 @@ function Publish-CorridorKeyGithubRelease {
             $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_OFX_v${tagLabel}_Windows_$($variant.Suffix)_Install.exe"))
         }
     }
+    if ($IncludeAdobeInstaller) {
+        if ($Flavor -ne "online") {
+            throw "Adobe GitHub release assets are online-only. Re-run with -Flavor online."
+        }
+        $assetGlobs += (Join-Path $RepoRoot ("dist\CorridorKey_Adobe_v${tagLabel}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"))
+    }
     foreach ($asset in $assetGlobs) {
         if (-not (Test-Path $asset)) {
             throw "Expected release asset missing: $asset"
@@ -123,7 +132,11 @@ function Publish-CorridorKeyGithubRelease {
     # title string. The space between "]" and "(" is intentional so the
     # title is not parsed as a Markdown [text](url) link by docs renderers
     # or by scripts/check_docs_consistency.py.
-    $title = "CorridorKey OFX v$tagLabel [Nuke & Resolve] (Windows)"
+    $title = if ($IncludeAdobeInstaller) {
+        "CorridorKey v$tagLabel [Nuke, Resolve & After Effects] (Windows)"
+    } else {
+        "CorridorKey OFX v$tagLabel [Nuke & Resolve] (Windows)"
+    }
 
     $ghArgs = @(
         "release", "create", $tagName,
@@ -167,6 +180,25 @@ try {
     $buildOrtRoot = $null
     $rtxOrtRoot = $null
     $directMlOrtRoot = $null
+    $resolvedAdobeSdkRoot = ""
+
+    if ($PackageAdobe) {
+        if ($Flavor -ne "online") {
+            throw "Adobe release packaging through this pipeline is online-only. Re-run with -Flavor online."
+        }
+        if (-not $needsRtxTrack) {
+            throw "Adobe release packaging requires the RTX track because the Adobe Blue payload depends on the RTX/TorchTRT package layout."
+        }
+        $candidateAdobeSdkRoot = $AdobeSdkRoot
+        if ([string]::IsNullOrWhiteSpace($candidateAdobeSdkRoot)) {
+            $candidateAdobeSdkRoot = Join-Path $repoRoot "vendor\adobe-after-effects-sdk"
+        }
+        if (-not (Test-Path -LiteralPath $candidateAdobeSdkRoot)) {
+            throw "Adobe release packaging requested, but Adobe SDK root was not found at $candidateAdobeSdkRoot. Pass -AdobeSdkRoot or stage vendor\adobe-after-effects-sdk."
+        }
+        $resolvedAdobeSdkRoot = (Resolve-Path -LiteralPath $candidateAdobeSdkRoot).Path
+        Write-Host "Adobe release packaging enabled with SDK: $resolvedAdobeSdkRoot" -ForegroundColor Yellow
+    }
 
     Write-Step "Sanitizing Environment"
     $dirsToClean = @("build/release", "dist", "temp")
@@ -228,7 +260,12 @@ try {
         Write-Host "Using display version label: $DisplayVersionLabel" -ForegroundColor Yellow
     }
 
-    & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --preset release -DCORRIDORKEY_WINDOWS_ORT_ROOT=`"$buildOrtRoot`" $displayVersionArg && cmake --build --preset release -j 8"
+    $adobeConfigureArgText = " -DCORRIDORKEY_ENABLE_ADOBE_PLUGIN=OFF"
+    if ($PackageAdobe) {
+        $adobeConfigureArgText = " -DCORRIDORKEY_ENABLE_ADOBE_PLUGIN=ON -DCORRIDORKEY_ADOBE_SDK_ROOT=`"$resolvedAdobeSdkRoot`""
+    }
+
+    & cmd /c "call `"$vcvars`" && set `"CORRIDORKEY_WINDOWS_ORT_ROOT=$buildOrtRoot`" && cmake --preset release -DCORRIDORKEY_WINDOWS_ORT_ROOT=`"$buildOrtRoot`" $displayVersionArg$adobeConfigureArgText && cmake --build --preset release -j 8"
     if ($LASTEXITCODE -ne 0) { throw "Build failed." }
     Write-Success "Build completed successfully."
 
@@ -325,6 +362,40 @@ try {
         }
     }
 
+    if ($PackageAdobe) {
+        $adobeVariant = @($variants | Where-Object { $_.Suffix -eq "RTX" } | Select-Object -First 1)
+        if ($adobeVariant.Count -ne 1) {
+            throw "Adobe release packaging could not find an RTX variant to stage."
+        }
+
+        Write-Host "--- Packaging Variant: Adobe $($adobeVariant[0].Label) ---" -ForegroundColor Yellow
+        $adobePackageArgs = @(
+            "-Version", $Version,
+            "-ReleaseSuffix", $adobeVariant[0].Suffix,
+            "-ModelProfile", $adobeVariant[0].ModelProfile,
+            "-OrtRoot", $adobeVariant[0].Root,
+            "-Flavor", $Flavor
+        )
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $adobePackageArgs += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        & powershell.exe -NoProfile -File "scripts/package_adobe_plugins_windows.ps1" @adobePackageArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "Adobe packaging failed for variant: $($adobeVariant[0].Suffix)"
+        }
+
+        $expectedAdobeInstaller = Join-Path $repoRoot "dist/CorridorKey_Adobe_v${artifactVersionTag}_Windows_$($Flavor.ToLowerInvariant())_Setup.exe"
+        if (-not (Test-Path $expectedAdobeInstaller)) {
+            throw "CRITICAL: Adobe pipeline claimed success but installer was NOT found at: $expectedAdobeInstaller"
+        }
+        $expectedAdobeValidationReport = Join-Path $repoRoot "dist/CorridorKey_Adobe_v${artifactVersionTag}_Windows_$($adobeVariant[0].Suffix)\adobe_package_validation.json"
+        Assert-CorridorKeyAdobePackageValidationHealthy `
+            -ValidationReportPath $expectedAdobeValidationReport `
+            -Label "Adobe $($adobeVariant[0].Suffix) package" | Out-Null
+        Write-Host "[VERIFIED] Adobe artifact created: $expectedAdobeInstaller" -ForegroundColor Green
+        Write-Host "[VERIFIED] Adobe validation report created: $expectedAdobeValidationReport" -ForegroundColor Green
+    }
+
     Write-Success "Selected installers generated, physically verified, and validated."
 
     Write-Step "Release v$Version is READY"
@@ -345,6 +416,7 @@ try {
             -DisplayVersionLabel $DisplayVersionLabel `
             -Track $Track `
             -Flavor $Flavor `
+            -IncludeAdobeInstaller:$PackageAdobe `
             -GithubRepo $GithubRepo `
             -RepoRoot $repoRoot `
             -NotesFile $resolvedNotesFile
