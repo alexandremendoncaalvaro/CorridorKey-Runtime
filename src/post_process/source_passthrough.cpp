@@ -61,8 +61,8 @@ void ensure_elliptical_offsets(int radius, ColorUtils::State& state) {
     state.sp_offsets_radius = radius;
 }
 
-void erode_elliptical(Image mask, int radius, Image temp_view, ColorUtils::State& state) {
-    if (radius <= 0) return;
+bool erode_elliptical(Image mask, int radius, Image temp_view, ColorUtils::State& state) {
+    if (radius <= 0) return false;
 
     int w = mask.width;
     int h = mask.height;
@@ -84,7 +84,7 @@ void erode_elliptical(Image mask, int radius, Image temp_view, ColorUtils::State
         }
     });
 
-    std::copy(temp_view.data.begin(), temp_view.data.end(), mask.data.begin());
+    return true;
 }
 
 void blend_source(Image source_rgb, Image model_fg, Image mask) {
@@ -130,7 +130,10 @@ void source_passthrough(Image source_rgb, Image model_fg, Image alpha, int erode
 
     // 2. Erode inward to create safety margin at edges
     Image temp_view = {alpha.width, alpha.height, 1, state.sp_temp};
-    erode_elliptical(mask, erode_px, temp_view, state);
+    if (erode_elliptical(mask, erode_px, temp_view, state)) {
+        state.sp_mask.swap(state.sp_temp);
+        mask = {alpha.width, alpha.height, 1, state.sp_mask};
+    }
 
     // 3. Gaussian blur for smooth transition band
     if (blur_px > 0) {

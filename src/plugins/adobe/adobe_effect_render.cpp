@@ -277,8 +277,9 @@ class AdobeRenderTimingCollector {
             append_stage_ms_fields(
                 runtime_message, m_runtime_timings,
                 {"frame_prepare_inputs", "ort_run", "frame_extract_outputs",
-                 "frame_extract_outputs_resize", "post_source_passthrough", "post_premultiply",
-                 "post_composite", "host_plugin_broker_writeback"});
+                 "frame_extract_outputs_tensor_materialize", "frame_extract_outputs_resize",
+                 "frame_extract_outputs_finalize", "post_source_passthrough", "post_despill",
+                 "post_premultiply", "post_composite", "host_plugin_broker_writeback"});
             log_adobe_message("render", runtime_message);
         } catch (...) {
         }

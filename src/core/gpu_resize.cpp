@@ -1,11 +1,14 @@
 #include "gpu_resize.hpp"
 
+#include <utility>
+
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
 #include <cuda_runtime_api.h>
 #include <npp.h>
 #include <nppi.h>
 
 #include "npp_stream_context.hpp"
+#include "pinned_buffer.hpp"
 #endif
 
 #include "post_process/color_utils.hpp"
@@ -69,6 +72,8 @@ struct GpuResizeState {
     float* src_fg_dev = nullptr;
     float* dst_alpha_dev = nullptr;
     float* dst_fg_planar_dev = nullptr;
+    PinnedBuffer<float> dst_fg_planar_host_pinned;
+    ImageBuffer dst_fg_planar_host;
 
     int current_src_width = 0;
     int current_src_height = 0;
@@ -115,6 +120,13 @@ struct GpuResizeState {
         src_fg_dev = nullptr;
         dst_alpha_dev = nullptr;
         dst_fg_planar_dev = nullptr;
+        dst_fg_planar_host_pinned = PinnedBuffer<float>{};
+        dst_fg_planar_host = ImageBuffer{};
+
+        current_src_width = 0;
+        current_src_height = 0;
+        current_dst_width = 0;
+        current_dst_height = 0;
     }
 
     bool ensure_buffers(int src_w, int src_h, int dst_w, int dst_h, bool has_fg) {
@@ -129,14 +141,24 @@ struct GpuResizeState {
         const size_t src_pixels = static_cast<size_t>(src_w) * src_h;
         const size_t dst_pixels = static_cast<size_t>(dst_w) * dst_h;
 
-        if (cudaMalloc(&src_alpha_dev, src_pixels * sizeof(float)) != cudaSuccess) return false;
-        if (cudaMalloc(&dst_alpha_dev, dst_pixels * sizeof(float)) != cudaSuccess) return false;
+        if (cudaMalloc(&src_alpha_dev, src_pixels * sizeof(float)) != cudaSuccess) {
+            release_buffers();
+            return false;
+        }
+        if (cudaMalloc(&dst_alpha_dev, dst_pixels * sizeof(float)) != cudaSuccess) {
+            release_buffers();
+            return false;
+        }
 
         if (has_fg) {
-            if (cudaMalloc(&src_fg_dev, 3 * src_pixels * sizeof(float)) != cudaSuccess)
+            if (cudaMalloc(&src_fg_dev, 3 * src_pixels * sizeof(float)) != cudaSuccess) {
+                release_buffers();
                 return false;
-            if (cudaMalloc(&dst_fg_planar_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess)
+            }
+            if (cudaMalloc(&dst_fg_planar_dev, 3 * dst_pixels * sizeof(float)) != cudaSuccess) {
+                release_buffers();
                 return false;
+            }
         }
 
         current_src_width = src_w;
@@ -144,6 +166,32 @@ struct GpuResizeState {
         current_dst_width = dst_w;
         current_dst_height = dst_h;
         return true;
+    }
+
+    float* ensure_foreground_host_buffer(int width, int height) {
+        const size_t element_count = 3 * static_cast<size_t>(width) * static_cast<size_t>(height);
+        if (dst_fg_planar_host_pinned.size() == element_count) {
+            return dst_fg_planar_host_pinned.data();
+        }
+
+        Image current_host = dst_fg_planar_host.view();
+        if (current_host.width == width && current_host.height == height &&
+            current_host.channels == 3) {
+            return current_host.data.data();
+        }
+
+        dst_fg_planar_host_pinned = PinnedBuffer<float>{};
+        dst_fg_planar_host = ImageBuffer{};
+
+        auto pinned_host = PinnedBuffer<float>::try_allocate(element_count);
+        if (pinned_host.has_value()) {
+            dst_fg_planar_host_pinned = std::move(*pinned_host);
+            return dst_fg_planar_host_pinned.data();
+        }
+
+        dst_fg_planar_host = ImageBuffer(width, height, 3);
+        current_host = dst_fg_planar_host.view();
+        return current_host.empty() ? nullptr : current_host.data.data();
     }
 };
 
@@ -237,9 +285,9 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
     }
 
     if (has_fg) {
-        ImageBuffer resized_fg_planar_host(dst_alpha.width, dst_alpha.height, 3);
-        Image resized_fg_planar_host_view = resized_fg_planar_host.view();
-        if (resized_fg_planar_host_view.empty()) {
+        float* resized_fg_planar_host =
+            m_state->ensure_foreground_host_buffer(dst_alpha.width, dst_alpha.height);
+        if (resized_fg_planar_host == nullptr) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
                                     "Failed to allocate host foreground resize buffer"});
         }
@@ -259,22 +307,18 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
                                    m_state->dst_fg_planar_dev + 2 * dst_pixels};
         const int plane_step = dst_alpha.width * static_cast<int>(sizeof(float));
 
-        for (int channel = 0; channel < 3; ++channel) {
-            status = nppiResize_32f_C1R_Ctx(src_fg_planes[channel], src_width * sizeof(float),
-                                            src_size, src_roi, dst_fg_planes[channel], plane_step,
-                                            dst_size, dst_roi, NPPI_INTER_LINEAR, npp_context);
-
-            if (status != NPP_SUCCESS) {
-                return Unexpected(Error{ErrorCode::InferenceFailed,
-                                        "NPP foreground resize failed on channel " +
-                                            std::to_string(channel) + " with status " +
-                                            std::to_string(status)});
-            }
+        status = nppiResize_32f_P3R_Ctx(src_fg_planes, src_width * sizeof(float), src_size, src_roi,
+                                        dst_fg_planes, plane_step, dst_size, dst_roi,
+                                        NPPI_INTER_LINEAR, npp_context);
+        if (status != NPP_SUCCESS) {
+            return Unexpected(
+                Error{ErrorCode::InferenceFailed,
+                      "NPP foreground resize failed with status " + std::to_string(status)});
         }
 
-        cuda_err = cudaMemcpyAsync(resized_fg_planar_host_view.data.data(),
-                                   m_state->dst_fg_planar_dev, dst_pixels * 3 * sizeof(float),
-                                   cudaMemcpyDeviceToHost, m_state->stream);
+        cuda_err = cudaMemcpyAsync(resized_fg_planar_host, m_state->dst_fg_planar_dev,
+                                   dst_pixels * 3 * sizeof(float), cudaMemcpyDeviceToHost,
+                                   m_state->stream);
         if (cuda_err != cudaSuccess) {
             return Unexpected(Error{ErrorCode::InferenceFailed,
                                     "Failed to download resized foreground from GPU"});
@@ -286,7 +330,7 @@ Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const flo
                 Error{ErrorCode::InferenceFailed, "GPU foreground resize synchronization failed"});
         }
 
-        ColorUtils::from_planar(resized_fg_planar_host_view.data.data(), dst_fg);
+        ColorUtils::from_planar(resized_fg_planar_host, dst_fg);
         return {};
     }
 

@@ -34,6 +34,7 @@ remain the source of truth for methodology and caveats.
 | `phase_8_gpu_prepare` | `0.7.4-12` | GPU-accelerated input preparation via NPP resizing, splitting, and normalization | full-frame `2048 -> 3840x2160` OFX-style harness `frame_prepare_inputs` improved by `~74%` | keep; effectively eliminates the final CPU bottleneck, achieving end-to-end device residence |
 | `phase_9_blue_dedicated_screen_color` | `0.8.3-win.1` (proposed) | dedicated CorridorKeyBlue catalog + screen-color OFX selection / render branching + despill `screen_channel` generalization | green-path bench gate within +1.5% (`avg_latency_ms`) and +4.3% (`ort_run`); blue dedicated baseline pending FP32-I/O wrapper re-export | gate passes; blue 512 measured; 1024 / 1536 / 2048 to be re-recorded after the in-flight re-export |
 | `phase_10_blue_dynamic_hybrid` | `0.8.3-win.1` | single dynamic blue TorchScript artifact with green kept on the optimized ONNX TensorRT RTX EP ladder | dynamic TorchScript loads and produces finite output at `512`, `1024`, and `2048`; dynamic green is `~40%` to `~54%` slower than the optimized green ONNX path | keep green on ONNX; use the dynamic artifact for blue |
+| `phase_11_adobe_output_staging` | `0.8.5` local | NPP planar foreground resize, persistent pinned foreground staging, source-passthrough erode copy elision, and Adobe timing fields | Jordan 4K `2048 -> 3840x2160` bilinear broker-video harness average latency improved `2.2%`; `frame_extract_outputs_resize` improved `19.9%` | keep; targeted resize win with no `ort_run` regression |
 
 Latest real OFX sample currently recorded in the workspace:
 
@@ -48,6 +49,40 @@ Current headline:
 - the next real hotspot is back to `ort_run` plus the resize-heavy extract path
 - the attempted lower-rung bound-path expansion and resize-map caching did not
   justify themselves and were discarded instead of being carried forward
+
+## `phase_11_adobe_output_staging`
+
+This checkpoint targets the Adobe-visible `2048` bilinear path exposed by the
+Jordan 4K sample and keeps the existing TensorRT RTX / ONNX Runtime execution
+path unchanged. The measured code changes are:
+
+- `GpuResizer` uses NPP planar `P3R` foreground resize instead of three
+  independent single-channel launches
+- the resized foreground staging buffer is reused and prefers pinned host memory
+  before falling back to `ImageBuffer`
+- `source_passthrough` swaps the eroded mask buffer into place instead of copying
+  the full mask back over itself
+- Adobe runtime summaries expose `frame_extract_outputs_tensor_materialize`,
+  `frame_extract_outputs_finalize`, and `post_despill`
+
+Jordan 4K broker-video harness:
+
+- command shape:
+  `ofx_benchmark_harness --model models/corridorkey_fp16_2048.onnx --device rtx --resolution 2048 --iterations 8 --upscale-method bilinear --input-video assets/video_samples/Jordan4k.mp4 --hint-video assets/video_samples/Jordan4k_alphahint.mp4`
+- `avg_latency_ms`: `797.974` -> `780.266` (`-2.2%`)
+- `fps`: `1.253` -> `1.282`
+- `frame_extract_outputs`: `952.655 ms` -> `853.105 ms` (`-10.4%`)
+- `frame_extract_outputs_resize`: `406.448 ms` -> `325.370 ms` (`-19.9%`)
+- median `frame_extract_outputs_resize`: `47.633 ms` -> `36.223 ms`
+- `post_source_passthrough`: `464.096 ms` -> `443.714 ms` (`-4.4%`)
+- `ort_run`: `3878.179 ms` -> `3841.745 ms` (`-0.9%`)
+
+`scripts/run_corpus.sh` smoke was also run with the same built harness and
+compared through `scripts/compare_benchmarks.py`. Its synthetic `512` OFX case
+showed `avg_latency_ms` `472.286` -> `477.205` (`+1.0%`) while
+`frame_extract_outputs_resize` still improved `27.725 ms` -> `26.265 ms`
+(`-5.3%`). The synthetic `512` case is retained as a regression smell check;
+the Jordan 4K `2048` video harness is the decision signal for this Adobe issue.
 
 ## Why The Matrix Must Stay Stable
 
