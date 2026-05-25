@@ -31,6 +31,11 @@ ImageBuffer copy_image(Image source) {
     return copy;
 }
 
+std::uint8_t quantize_adobe_argb8(float value) {
+    return static_cast<std::uint8_t>(
+        std::clamp((std::clamp(value, 0.0F, 1.0F) * 255.0F) + 0.5F, 0.0F, 255.0F));
+}
+
 void require_images_equal(Image actual, Image expected, float margin = 0.0001F) {
     REQUIRE(actual.width == expected.width);
     REQUIRE(actual.height == expected.height);
@@ -202,6 +207,7 @@ TEST_CASE("adobe matte controls scale pixel-radius controls from the OFX baselin
     result.alpha = ImageBuffer(5, 1, 1);
     result.foreground = ImageBuffer(5, 1, 3);
     auto alpha = result.alpha.view();
+    std::fill(alpha.data.begin(), alpha.data.end(), 0.0F);
     alpha(0, 2) = 1.0F;
 
     AdobeMatteParams params{
@@ -371,6 +377,63 @@ TEST_CASE("adobe bridge reads deep-color grayscale Alpha Hint layers with opaque
 
     REQUIRE(source.has_value());
     CHECK(*source == AdobeAlphaHintSource::ExternalLayerRed);
+    CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(0.25F));
+    CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(0.75F));
+}
+
+TEST_CASE("adobe bridge converts linear visible Alpha Hint layers to runtime sRGB",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 1.0F);
+
+    std::array<float, 8> hint_pixels{
+        1.0F, 0.25F, 0.25F, 0.25F, 1.0F, 0.5F, 0.5F, 0.5F,
+    };
+    const AdobeFrameView hint_frame{
+        .data = hint_pixels.data(),
+        .data_size_bytes = hint_pixels.size() * sizeof(float),
+        .width = 2,
+        .height = 1,
+        .row_bytes = 8 * static_cast<int>(sizeof(float)),
+        .pixel_format = AdobePixelFormat::Argb128,
+    };
+
+    auto source = resolve_alpha_hint_source(frame, &hint_frame,
+                                            AlphaHintPolicy::AutoRoughFallback, true);
+
+    const auto& lut = SrgbLut::instance();
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::ExternalLayerRed);
+    CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(lut.to_srgb(0.25F)));
+    CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(lut.to_srgb(0.5F)));
+}
+
+TEST_CASE("adobe bridge leaves real Alpha Hint layer alpha linear",
+          "[unit][adobe][runtime][alpha-hint][regression]") {
+    AdobeRuntimeFrame frame;
+    frame.rgb = ImageBuffer(2, 1, 3);
+    frame.alpha_hint = ImageBuffer(2, 1, 1);
+    std::fill(frame.alpha_hint.view().data.begin(), frame.alpha_hint.view().data.end(), 1.0F);
+
+    std::array<float, 8> hint_pixels{
+        0.25F, 0.9F, 0.9F, 0.9F, 0.75F, 0.1F, 0.1F, 0.1F,
+    };
+    const AdobeFrameView hint_frame{
+        .data = hint_pixels.data(),
+        .data_size_bytes = hint_pixels.size() * sizeof(float),
+        .width = 2,
+        .height = 1,
+        .row_bytes = 8 * static_cast<int>(sizeof(float)),
+        .pixel_format = AdobePixelFormat::Argb128,
+    };
+
+    auto source = resolve_alpha_hint_source(frame, &hint_frame,
+                                            AlphaHintPolicy::AutoRoughFallback, true);
+
+    REQUIRE(source.has_value());
+    CHECK(*source == AdobeAlphaHintSource::ExternalLayerAlpha);
     CHECK(frame.alpha_hint.view()(0, 0) == Catch::Approx(0.25F));
     CHECK(frame.alpha_hint.view()(0, 1) == Catch::Approx(0.75F));
 }
@@ -563,7 +626,7 @@ TEST_CASE("adobe bridge rejects oversized host frames before allocation",
     CHECK(converted.error().message.find("pixel count") != std::string::npos);
 }
 
-TEST_CASE("adobe bridge writes runtime processed output into ARGB32 frames",
+TEST_CASE("adobe bridge writes runtime processed output as linear straight-alpha ARGB32",
           "[unit][adobe][runtime]") {
     FrameResult result;
     result.alpha = ImageBuffer(2, 1, 1);
@@ -593,7 +656,17 @@ TEST_CASE("adobe bridge writes runtime processed output into ARGB32 frames",
                                            0);
 
     REQUIRE(write_status.has_value());
-    CHECK(output == std::array<std::uint8_t, 8>{128, 128, 64, 0, 255, 64, 191, 255});
+    const auto& lut = SrgbLut::instance();
+    CHECK(output == std::array<std::uint8_t, 8>{
+                        quantize_adobe_argb8(0.5F),
+                        quantize_adobe_argb8(lut.to_linear(1.0F)),
+                        quantize_adobe_argb8(lut.to_linear(0.5F)),
+                        quantize_adobe_argb8(lut.to_linear(0.0F)),
+                        quantize_adobe_argb8(1.0F),
+                        quantize_adobe_argb8(lut.to_linear(0.25F)),
+                        quantize_adobe_argb8(lut.to_linear(0.75F)),
+                        quantize_adobe_argb8(lut.to_linear(1.0F)),
+                    });
 }
 
 TEST_CASE("adobe bridge writes matte-only output without foreground buffers",
@@ -620,7 +693,8 @@ TEST_CASE("adobe bridge writes matte-only output without foreground buffers",
     CHECK(output == std::array<std::uint16_t, 4>{32768, 8192, 8192, 8192});
 }
 
-TEST_CASE("adobe bridge writes processed output into ARGB128 frames", "[unit][adobe][runtime]") {
+TEST_CASE("adobe bridge writes processed output as linear straight-alpha ARGB128",
+          "[unit][adobe][runtime]") {
     FrameResult result;
     result.alpha = ImageBuffer(1, 1, 1);
     result.foreground = ImageBuffer(1, 1, 3);
@@ -645,10 +719,46 @@ TEST_CASE("adobe bridge writes processed output into ARGB128 frames", "[unit][ad
                                            0);
 
     REQUIRE(write_status.has_value());
+    const auto& lut = SrgbLut::instance();
     CHECK(output[0] == Catch::Approx(0.25F));
-    CHECK(output[1] == Catch::Approx(0.25F));
-    CHECK(output[2] == Catch::Approx(0.125F));
+    CHECK(output[1] == Catch::Approx(lut.to_linear(1.0F)));
+    CHECK(output[2] == Catch::Approx(lut.to_linear(0.5F)));
     CHECK(output[3] == Catch::Approx(0.0F));
+}
+
+TEST_CASE("adobe bridge writes source matte output as linear straight-alpha ARGB128",
+          "[unit][adobe][runtime][regression]") {
+    FrameResult result;
+    result.alpha = ImageBuffer(1, 1, 1);
+    auto alpha = result.alpha.view();
+    alpha(0, 0) = 0.25F;
+
+    AdobeRuntimeFrame source_frame;
+    source_frame.rgb = ImageBuffer(1, 1, 3);
+    auto source = source_frame.rgb.view();
+    source(0, 0, 0) = 0.25F;
+    source(0, 0, 1) = 0.5F;
+    source(0, 0, 2) = 1.0F;
+
+    std::array<float, 4> output{};
+    auto write_status =
+        copy_runtime_result_to_adobe_frame(result,
+                                           AdobeMutableFrameView{
+                                               .data = output.data(),
+                                               .data_size_bytes = output.size() * sizeof(float),
+                                               .width = 1,
+                                               .height = 1,
+                                               .row_bytes = 16,
+                                               .pixel_format = AdobePixelFormat::Argb128,
+                                           },
+                                           3, &source_frame);
+
+    REQUIRE(write_status.has_value());
+    const auto& lut = SrgbLut::instance();
+    CHECK(output[0] == Catch::Approx(0.25F));
+    CHECK(output[1] == Catch::Approx(lut.to_linear(0.25F)));
+    CHECK(output[2] == Catch::Approx(lut.to_linear(0.5F)));
+    CHECK(output[3] == Catch::Approx(lut.to_linear(1.0F)));
 }
 
 TEST_CASE("adobe bridge writes foreground-only output into BGRA32 frames",

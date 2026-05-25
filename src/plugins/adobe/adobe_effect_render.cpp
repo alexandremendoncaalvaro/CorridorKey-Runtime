@@ -638,7 +638,7 @@ PF_Err render_frame_with_pixel_format_policy(PF_InData* input_data, PF_OutData& 
         sample_single_channel_stats(runtime_input_frame->alpha_hint.const_view());
     auto alpha_hint_source = corridorkey::adobe::resolve_alpha_hint_source(
         *runtime_input_frame, external_alpha_hint_view,
-        request->inference_params.alpha_hint_policy);
+        request->inference_params.alpha_hint_policy, request->inference_params.input_is_linear);
     if (!alpha_hint_source) {
         return reject_render(output_data, alpha_hint_source.error().message);
     }

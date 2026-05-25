@@ -76,7 +76,7 @@ void apply_adobe_matte_params(FrameResult& result, const AdobeMatteParams& param
                               int height, AlphaEdgeState& state);
 Result<AdobeAlphaHintSource> resolve_alpha_hint_source(
     AdobeRuntimeFrame& frame, const AdobeFrameView* external_alpha_hint_frame,
-    AlphaHintPolicy alpha_hint_policy);
+    AlphaHintPolicy alpha_hint_policy, bool input_is_linear = false);
 std::string_view adobe_alpha_hint_source_label(AdobeAlphaHintSource source) noexcept;
 Result<void> copy_runtime_result_to_adobe_frame(const FrameResult& result,
                                                 const AdobeMutableFrameView& output_frame,

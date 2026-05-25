@@ -215,7 +215,8 @@ void copy_alpha_hint_from_red_channel(Image source_rgb, Image destination) {
 }
 
 Result<std::optional<AdobeAlphaHintSource>> copy_external_alpha_hint(
-    AdobeRuntimeFrame& frame, const AdobeFrameView& external_alpha_hint_frame) {
+    AdobeRuntimeFrame& frame, const AdobeFrameView& external_alpha_hint_frame,
+    bool input_is_linear) {
     auto alpha_hint_frame = copy_adobe_frame_to_runtime(external_alpha_hint_frame);
     if (!alpha_hint_frame) {
         return Unexpected<Error>(alpha_hint_frame.error());
@@ -231,6 +232,10 @@ Result<std::optional<AdobeAlphaHintSource>> copy_external_alpha_hint(
     if (alpha_view_contains_hint(source_alpha)) {
         copy_alpha_hint_from_single_channel(source_alpha, destination_alpha);
         return std::optional<AdobeAlphaHintSource>{AdobeAlphaHintSource::ExternalLayerAlpha};
+    }
+
+    if (input_is_linear) {
+        apply_adobe_input_color_space(*alpha_hint_frame, true);
     }
 
     const auto source_rgb = alpha_hint_frame->rgb.const_view();
@@ -353,9 +358,10 @@ ScreenColorTransform canonicalize_adobe_runtime_frame_for_screen_color(AdobeRunt
 
 Result<AdobeAlphaHintSource> resolve_alpha_hint_source(
     AdobeRuntimeFrame& frame, const AdobeFrameView* external_alpha_hint_frame,
-    AlphaHintPolicy alpha_hint_policy) {
+    AlphaHintPolicy alpha_hint_policy, bool input_is_linear) {
     if (external_alpha_hint_frame != nullptr) {
-        auto copy_status = copy_external_alpha_hint(frame, *external_alpha_hint_frame);
+        auto copy_status =
+            copy_external_alpha_hint(frame, *external_alpha_hint_frame, input_is_linear);
         if (!copy_status) {
             return Unexpected<Error>(copy_status.error());
         }

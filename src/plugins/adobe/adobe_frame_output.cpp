@@ -5,6 +5,7 @@
 #include <string>
 
 #include "adobe_bridge.hpp"
+#include "common/srgb_lut.hpp"
 
 namespace corridorkey::adobe {
 namespace {
@@ -191,7 +192,7 @@ void store_output_pixel(AdobePixelFormat format, std::byte* destination, float r
 
 void write_selected_output_pixel(const Image& alpha, const Image& foreground, const Image& source,
                                  int output_mode, int y_pos, int x_pos, AdobePixelFormat format,
-                                 std::byte* destination) {
+                                 const SrgbLut& lut, std::byte* destination) {
     const float alpha_value = alpha(y_pos, x_pos);
     if (output_mode == kOutputMatteOnly) {
         store_output_pixel(format, destination, alpha_value, alpha_value, alpha_value,
@@ -204,15 +205,15 @@ void write_selected_output_pixel(const Image& alpha, const Image& foreground, co
         return;
     }
     if (output_mode == kOutputSourceMatte) {
-        store_output_pixel(format, destination, source(y_pos, x_pos, 0) * alpha_value,
-                           source(y_pos, x_pos, 1) * alpha_value,
-                           source(y_pos, x_pos, 2) * alpha_value, alpha_value);
+        store_output_pixel(format, destination, lut.to_linear(source(y_pos, x_pos, 0)),
+                           lut.to_linear(source(y_pos, x_pos, 1)),
+                           lut.to_linear(source(y_pos, x_pos, 2)), alpha_value);
         return;
     }
 
-    store_output_pixel(format, destination, foreground(y_pos, x_pos, 0) * alpha_value,
-                       foreground(y_pos, x_pos, 1) * alpha_value,
-                       foreground(y_pos, x_pos, 2) * alpha_value, alpha_value);
+    store_output_pixel(format, destination, lut.to_linear(foreground(y_pos, x_pos, 0)),
+                       lut.to_linear(foreground(y_pos, x_pos, 1)),
+                       lut.to_linear(foreground(y_pos, x_pos, 2)), alpha_value);
 }
 
 }  // namespace
@@ -267,11 +268,12 @@ Result<void> copy_runtime_result_to_adobe_frame(const FrameResult& result,
 
     auto* base = static_cast<std::byte*>(output_frame.data);
     const auto row_bytes = static_cast<std::size_t>(output_frame.row_bytes);
+    const auto& lut = SrgbLut::instance();
     for (int y_pos = 0; y_pos < output_frame.height; ++y_pos) {
         auto* row = base + (row_bytes * y_pos);
         for (int x_pos = 0; x_pos < output_frame.width; ++x_pos) {
             write_selected_output_pixel(alpha, foreground, source, output_mode, y_pos, x_pos,
-                                        output_frame.pixel_format,
+                                        output_frame.pixel_format, lut,
                                         row + (*pixel_size * static_cast<std::size_t>(x_pos)));
         }
     }
