@@ -7,6 +7,7 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "app/host_plugin_runtime_client.hpp"
 #include "common/accelerate_utils.hpp"
@@ -48,6 +49,10 @@ constexpr double kFrameTimeSmoothing = 0.2;
 // snprintf scratch buffer for the cache-stats log line. The format string
 // produces at most ~150 chars of payload; 256 is a comfortable margin.
 constexpr std::size_t kCacheStatsBufferBytes = 256;
+
+std::string_view upscale_method_label(UpscaleMethod method) noexcept {
+    return method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear";
+}
 
 std::string backend_label(Backend backend) {
     switch (backend) {
@@ -1059,6 +1064,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                     " effective_source_passthrough=" + (params.source_passthrough ? "1" : "0") +
                     " despill_screen_channel=" + std::to_string(params.despill_screen_channel) +
                     " spill_method=" + std::to_string(params.spill_method) +
+                    " upscale_method=" + std::string(upscale_method_label(params.upscale_method)) +
                     " sp_erode_px=" + std::to_string(params.sp_erode_px) +
                     " sp_blur_px=" + std::to_string(params.sp_blur_px));
 

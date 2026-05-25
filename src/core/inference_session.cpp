@@ -2389,7 +2389,8 @@ Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
                     on_stage, "frame_extract_outputs_resize",
                     [&]() -> Result<void> {
                         bool gpu_resized = false;
-                        if (bound_io_state != nullptr && m_gpu_resizer.available()) {
+                        if (bound_io_state != nullptr &&
+                            m_gpu_resizer.supports(params.upscale_method)) {
                             auto gpu_res = m_gpu_resizer.resize_planar_outputs(
                                 alpha_output.values,
                                 fg_output.has_value() ? fg_output->values : nullptr,

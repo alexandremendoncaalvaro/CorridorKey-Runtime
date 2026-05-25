@@ -51,6 +51,10 @@ struct ImageSampleStats {
     float maximum = 0.0F;
 };
 
+std::string_view upscale_method_label(corridorkey::UpscaleMethod method) noexcept {
+    return method == corridorkey::UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear";
+}
+
 void set_return_message(PF_OutData& output_data, const char* message) noexcept {
     std::snprintf(output_data.return_msg, sizeof(output_data.return_msg), "%s", message);
 }
@@ -563,8 +567,9 @@ void log_runtime_request(const corridorkey::adobe::AdobeEffectRuntimeRequest& re
             quality_fallback_mode_label(request.inference_params.quality_fallback_mode) +
             " coarse_resolution_override=" +
             std::to_string(request.inference_params.coarse_resolution_override) +
-            " tiling=" + (request.inference_params.enable_tiling ? "1" : "0") +
-            " tile_padding=" + std::to_string(request.inference_params.tile_padding) +
+            " tiling=" + (request.inference_params.enable_tiling ? "1" : "0") + " tile_padding=" +
+            std::to_string(request.inference_params.tile_padding) + " upscale_method=" +
+            std::string(upscale_method_label(request.inference_params.upscale_method)) +
             " source_passthrough=" + (request.inference_params.source_passthrough ? "1" : "0") +
             " sp_erode_px=" + std::to_string(request.inference_params.sp_erode_px) +
             " sp_blur_px=" + std::to_string(request.inference_params.sp_blur_px) +

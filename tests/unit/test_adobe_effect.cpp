@@ -1207,6 +1207,45 @@ TEST_CASE("After Effects render parameters build runtime request values",
     CHECK(request->render_timeout_ms == 90000);
 }
 
+TEST_CASE("After Effects upscale popup maps both runtime resize methods",
+          "[unit][adobe][effect][runtime][regression]") {
+    std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};
+    std::array<PF_ParamDef*, corridorkey::adobe::kEffectParameterSlotCount> parameters{};
+    for (std::size_t index = 0; index < storage.size(); ++index) {
+        parameters[index] = &storage[index];
+    }
+
+    const corridorkey::adobe::AdobeEffectRuntimeRequestContext context{
+        .models_root = "models",
+        .host_surface = "after_effects",
+        .effect_identity = corridorkey::adobe::kEffectMatchName,
+        .client_instance_id = "sequence-1",
+        .width = 3840,
+        .height = 2160,
+        .requested_device = corridorkey::DeviceInfo{"auto", 0, corridorkey::Backend::Auto},
+        .engine_options = corridorkey::EngineCreateOptions{},
+    };
+
+    set_popup_value(storage[corridorkey::adobe::kParamUpscaleMethod], 1);
+    auto lanczos_request =
+        corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+    REQUIRE(lanczos_request.has_value());
+    CHECK(lanczos_request->inference_params.upscale_method == corridorkey::UpscaleMethod::Lanczos4);
+
+    set_popup_value(storage[corridorkey::adobe::kParamUpscaleMethod], 2);
+    auto bilinear_request =
+        corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+    REQUIRE(bilinear_request.has_value());
+    CHECK(bilinear_request->inference_params.upscale_method ==
+          corridorkey::UpscaleMethod::Bilinear);
+
+    storage[corridorkey::adobe::kParamUpscaleMethod] = PF_ParamDef{};
+    auto default_request =
+        corridorkey::adobe::build_effect_runtime_request(parameters.data(), context);
+    REQUIRE(default_request.has_value());
+    CHECK(default_request->inference_params.upscale_method == corridorkey::UpscaleMethod::Bilinear);
+}
+
 TEST_CASE("After Effects render parameters map coarse-to-fine quality fallback",
           "[unit][adobe][effect][runtime][quality]") {
     std::array<PF_ParamDef, corridorkey::adobe::kEffectParameterSlotCount> storage{};

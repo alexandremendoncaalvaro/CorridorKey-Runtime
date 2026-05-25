@@ -133,6 +133,7 @@ TEST_CASE("host plugin runtime protocol roundtrips render envelopes", "[unit][of
 
     auto request_json = to_json(request);
     REQUIRE(request_json.at("params").at("despill_screen_channel").get<int>() == 2);
+    REQUIRE(request_json.at("params").at("upscale_method").get<std::string>() == "lanczos4");
     auto parsed_request = render_frame_request_from_json(request_json);
     REQUIRE(parsed_request.has_value());
     CHECK(parsed_request->session_id == request.session_id);
@@ -147,6 +148,7 @@ TEST_CASE("host plugin runtime protocol roundtrips render envelopes", "[unit][of
     CHECK(parsed_request->params.alpha_hint_policy == AlphaHintPolicy::RequireExternalHint);
     CHECK(parsed_request->params.spill_method == 1);
     CHECK(parsed_request->params.despill_screen_channel == 2);
+    CHECK(parsed_request->params.upscale_method == UpscaleMethod::Lanczos4);
     CHECK(parsed_request->params.output_alpha_only);
     CHECK(parsed_request->render_index == 7);
 
@@ -169,6 +171,34 @@ TEST_CASE("host plugin runtime protocol roundtrips render envelopes", "[unit][of
     REQUIRE(parsed_ok.has_value());
     CHECK(parsed_ok->success);
     CHECK(parsed_ok->payload.at("accepted").get<bool>());
+}
+
+TEST_CASE("host plugin runtime protocol roundtrips both upscale method choices",
+          "[unit][ofx][runtime][adobe][regression]") {
+    auto make_request = [](UpscaleMethod method) {
+        HostPluginRuntimeRenderFrameRequest request;
+        request.session_id = "session-upscale";
+        request.shared_frame_path = "frames/upscale.ckfx";
+        request.width = 3840;
+        request.height = 2160;
+        request.render_index = 42;
+        request.params.target_resolution = 2048;
+        request.params.requested_quality_resolution = 2048;
+        request.params.upscale_method = method;
+        return request;
+    };
+
+    const auto lanczos_json = to_json(make_request(UpscaleMethod::Lanczos4));
+    REQUIRE(lanczos_json.at("params").at("upscale_method").get<std::string>() == "lanczos4");
+    auto parsed_lanczos = render_frame_request_from_json(lanczos_json);
+    REQUIRE(parsed_lanczos.has_value());
+    CHECK(parsed_lanczos->params.upscale_method == UpscaleMethod::Lanczos4);
+
+    const auto bilinear_json = to_json(make_request(UpscaleMethod::Bilinear));
+    REQUIRE(bilinear_json.at("params").at("upscale_method").get<std::string>() == "bilinear");
+    auto parsed_bilinear = render_frame_request_from_json(bilinear_json);
+    REQUIRE(parsed_bilinear.has_value());
+    CHECK(parsed_bilinear->params.upscale_method == UpscaleMethod::Bilinear);
 }
 
 TEST_CASE("host plugin runtime protocol rejects mismatched protocol versions",

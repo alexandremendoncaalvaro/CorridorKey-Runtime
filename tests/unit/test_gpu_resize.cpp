@@ -28,6 +28,12 @@ TEST_CASE("GpuResizer Availability", "[unit][core]") {
     SUCCEED("Queried availability: " + std::to_string(avail));
 }
 
+TEST_CASE("GpuResizer only advertises bilinear output resize support", "[unit][core]") {
+    core::GpuResizer resizer;
+    CHECK(resizer.supports(UpscaleMethod::Bilinear) == resizer.available());
+    CHECK_FALSE(resizer.supports(UpscaleMethod::Lanczos4));
+}
+
 TEST_CASE("GpuResizer Correctness vs CPU reference", "[unit][core]") {
     core::GpuResizer resizer;
     if (!resizer.available()) {

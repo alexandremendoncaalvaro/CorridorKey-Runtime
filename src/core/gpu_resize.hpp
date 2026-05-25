@@ -18,6 +18,7 @@ class GpuResizer {
     GpuResizer& operator=(GpuResizer&&) noexcept;
 
     [[nodiscard]] bool available() const;
+    [[nodiscard]] bool supports(UpscaleMethod method) const;
 
     [[nodiscard]] Result<void> resize_planar_outputs(const float* src_alpha, const float* src_fg,
                                                      int src_width, int src_height, Image dst_alpha,

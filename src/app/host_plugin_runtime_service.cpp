@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <fstream>
 #include <mutex>
+#include <string_view>
 
 #include "../common/host_memory.hpp"
 #include "../common/runtime_paths.hpp"
@@ -91,6 +92,10 @@
 namespace corridorkey::app {
 
 namespace {
+
+std::string_view upscale_method_label(UpscaleMethod method) noexcept {
+    return method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear";
+}
 
 class RuntimeLogger {
    public:
@@ -620,8 +625,9 @@ Result<void> HostPluginRuntimeService::run(const HostPluginRuntimeServiceOptions
                         " height=" + std::to_string(render_request->height) +
                         " backend=" + backend_log_token(snapshot.effective_device.backend) +
                         " target_resolution=" +
-                        std::to_string(render_request->params.target_resolution) +
-                        " tiling=" + (render_request->params.enable_tiling ? "1" : "0") +
+                        std::to_string(render_request->params.target_resolution) + " tiling=" +
+                        (render_request->params.enable_tiling ? "1" : "0") + " upscale_method=" +
+                        std::string(upscale_method_label(render_request->params.upscale_method)) +
                         " source_passthrough=" +
                         (render_request->params.source_passthrough ? "1" : "0") +
                         " despill_screen_channel=" +

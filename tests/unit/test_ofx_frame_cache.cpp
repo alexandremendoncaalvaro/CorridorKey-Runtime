@@ -66,6 +66,21 @@ TEST_CASE("shared frame cache records hit and miss counters", "[unit][ofx][cache
     REQUIRE(cache.stats().misses == 1);
 }
 
+TEST_CASE("shared frame cache keys separate Bilinear and Lanczos upscale methods",
+          "[unit][ofx][cache][regression]") {
+    InferenceParams params;
+    params.target_resolution = 2048;
+    params.requested_quality_resolution = 2048;
+
+    params.upscale_method = UpscaleMethod::Lanczos4;
+    const auto lanczos_hash = inference_params_hash(params);
+
+    params.upscale_method = UpscaleMethod::Bilinear;
+    const auto bilinear_hash = inference_params_hash(params);
+
+    REQUIRE(lanczos_hash != bilinear_hash);
+}
+
 TEST_CASE("shared frame cache evicts least-recently-accessed entries under budget pressure",
           "[unit][ofx][cache]") {
     // Small budget forces eviction after storing a few entries of known size.

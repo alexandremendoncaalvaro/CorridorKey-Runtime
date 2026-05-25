@@ -171,6 +171,10 @@ bool GpuResizer::available() const {
 #endif
 }
 
+bool GpuResizer::supports(UpscaleMethod method) const {
+    return method == UpscaleMethod::Bilinear && available();
+}
+
 Result<void> GpuResizer::resize_planar_outputs(const float* src_alpha, const float* src_fg,
                                                int src_width, int src_height, Image dst_alpha,
                                                Image dst_fg) {
