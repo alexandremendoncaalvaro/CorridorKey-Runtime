@@ -315,6 +315,19 @@
         }
       ]
     },
+    "ad-skill": {
+      "version": "0.18.0-beta.5",
+      "files": [
+        {
+          "path": ".agents/skills/ad-skill/agents/openai.yaml",
+          "sourceSha": "9f7c80744d96c00a07d13d88c9ab695265584bf6df41e41075024ef87e39d02e"
+        },
+        {
+          "path": ".agents/skills/ad-skill/SKILL.md",
+          "sourceSha": "80fb44cc91d565caf98ba85083155b20d5f96c9ccaedf6861bbd1ae3950d77b7"
+        }
+      ]
+    },
     "ad-spec": {
       "version": "0.18.0-beta.5",
       "files": [
