@@ -5,7 +5,7 @@ summary: Atomic Conventional Commits with DCO `Signed-off-by` sign-off. Four pha
 ---
 
 <background_information>
-Implements ADR-0023 (`doc/adr/0023-agentic-commit-skill.md`). Drafts atomic Conventional Commits with DCO `Signed-off-by` sign-off. Helper, not blocker — the senior engineer keeps decision authority.
+Implements ADR-0023. Drafts atomic Conventional Commits with DCO `Signed-off-by` sign-off. Helper, not blocker — the senior engineer keeps decision authority.
 
 Codex auto-trigger on description keywords is less mature than Claude Code's. If auto-invocation does not fire when the user mentions committing, staging, or signing off, invoke this skill manually.
 </background_information>
@@ -119,4 +119,4 @@ The output is one or more atomic commits on the current branch. Each commit:
 
 - After commits land: `ad-pr` to open the PR.
 - After PR open and CI green: `ad-merge` to evaluate and merge.
-- If a hook failure exposed recurring drift: `ad-audit`.
+- If a hook failure exposed recurring drift: `ad-drift`.

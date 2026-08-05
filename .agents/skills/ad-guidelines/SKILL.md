@@ -7,7 +7,7 @@ summary: Lazy lifecycle owner of `GUIDELINES.md` (Layer 1 Constitution, full eng
 <background_information>
 Layer 1 Constitution trinity member. Lazy lifecycle owner of `GUIDELINES.md` at the repo root. Companion to `WORKFLOW.md` (universal philosophy, kit-shipped) and `AGENTS.md` (distilled non-negotiable rules read every session).
 
-`GUIDELINES.md` is the full reference; `AGENTS.md` is the distilled summary. Each AGENTS.md section that has detail points to the corresponding GUIDELINES.md section. The two never duplicate — `ad-audit` flags duplication as drift.
+`GUIDELINES.md` is the full reference; `AGENTS.md` is the distilled summary. Each AGENTS.md section that has detail points to the corresponding GUIDELINES.md section. The two never duplicate — `ad-drift` flags duplication as drift.
 
 Skill is excluded from `poc` profile. Universal at `solo` / `team` / `mature`.
 
@@ -47,6 +47,8 @@ Existing standards:
 - `doc/adr/` — binding decisions about error handling, naming, DI — carry forward.
 - `CONTEXT.md` — domain vocabulary the guidelines must respect.
 
+Canonical examples: for brownfield projects, identify candidate source files that future agents should imitate. Prefer one boundary example, one core/domain function, and one test. Record paths only, never pasted snippets. If no representative code exists, omit the section until the project has examples worth copying.
+
 Profile: read `.claude/agentic-state.json` / `.agents/agentic-state.json`. Profile shapes strictness defaults (mature → strict Object Calisthenics by default; solo → loose).
 
 Only after the scan produces no answer does the skill ask. Asking about something the repo already states wastes the user's attention.
@@ -55,6 +57,7 @@ Step 2 — pre-fill the template. Open `templates/guidelines.md`. Fill detected 
 
 - §2.1 naming conventions table per language idiom.
 - §2.2 error handling per language idiom.
+- §2.5 canonical examples table, when representative code exists: boundary code, core/domain logic, and tests. Confirm the picks with the user before writing; do not declare weak code canonical.
 - §6.1 toolchain + version + source-of-truth config file.
 - §6.2 dependency manager from detected manifest.
 - §7 static-analysis tools detected.
@@ -85,6 +88,8 @@ Step 3 — interview to fill preference questions. One question at a time. Skip 
 
 3.6 Documentation extensions. Default references WORKFLOW §2 + ad-philosophy. Ask only for project-specific extensions.
 
+3.7 Canonical examples confirmation. If Step 1 found candidate examples, present the paths and ask whether each should be treated as canonical. Keep at most one row per pattern unless two variants are genuinely necessary. If the user cannot endorse an example, omit the section; bad exemplars are worse than no exemplars.
+
 Codex has no `AskUserQuestion` primitive — use inline numbered text for the three-tier Object Calisthenics question and other multi-choice prompts.
 
 Step 4 — AGENTS.md reciprocity. After writing `GUIDELINES.md`, offer to refresh `AGENTS.md` engineering sections as pointer stubs:
@@ -102,7 +107,7 @@ User confirms before the AGENTS.md rewrite. Never modify AGENTS.md silently.
 
 Step 5 — write the file. Path: `GUIDELINES.md` at repo root. Use the template at `templates/guidelines.md`. Sections the user skipped do not land. Sections that were fully pre-filled land verbatim. Sections requiring preference land with the user's answer. Stop after writing; print a one-line summary.
 
-Step 6 — editing guidance for later turns. Tier change → update §3.1 checked rules; never delete the rule list (audit trail). New language → expand §2.1 table; do not rewrite existing rows. New static-analysis tool → add row to §7. Perf budget change → update §5; never delete previous without recording rationale. Documentation extensions → append to §11.1 table. Never rewrite existing prose — append rationale paragraphs.
+Step 6 — editing guidance for later turns. Tier change → update §3.1 checked rules; never delete the rule list (audit trail). New language → expand §2.1 table; do not rewrite existing rows. New static-analysis tool → add row to §7. Canonical example change → update §2.5 to point at the new source file; do not paste code into GUIDELINES.md. Perf budget change → update §5; never delete previous without recording rationale. Documentation extensions → append to §11.1 table. Never rewrite existing prose — append rationale paragraphs.
 </instructions>
 
 <output_contract>
@@ -110,5 +115,5 @@ Step 6 — editing guidance for later turns. Tier change → update §3.1 checke
 - Side-effect (optional, user-confirmed): `AGENTS.md` engineering sections rewritten as pointer stubs to `GUIDELINES.md`.
 - No dates inside narrative prose; the file is project-state, not a decision-record artifact.
 
-Next: invoke `ad-hooks` to wire the quality gates this file describes (team/mature); invoke `ad-bootstrap` to refresh AGENTS.md with pointer-style sections; invoke `ad-adr` when a binding decision arises the guidelines do not yet cover; periodic drift via `ad-audit`.
+Next: invoke `ad-hooks` to wire the quality gates this file describes (team/mature); invoke `ad-bootstrap` to refresh AGENTS.md with pointer-style sections; invoke `ad-adr` when a binding decision arises the guidelines do not yet cover; periodic drift via `ad-drift`.
 </output_contract>

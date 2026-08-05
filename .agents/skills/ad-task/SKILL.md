@@ -16,6 +16,7 @@ Step 2 — interview to fill. Ask one question per missing field, in this order:
 - Acceptance Criteria: measurable conditions. Each is a checkbox; pass/fail must be observable, not aspirational ("loads in under 2s", not "fast enough").
 - Plan: concrete sequential steps with file paths where applicable. Each is a checkbox.
 - Owner: ask.
+- Execution: `AFK` when the task is specified enough for an agent to execute with bounded context and disjoint write scope; `HITL` when it needs human judgment, taste, external access, or frequent back-and-forth.
 - Spec ref: ask; leave blank when no spec drives this task. When a feature spec exists at `doc/specs/NNNN-<slug>.md`, link it here so the spec's Related → Tasks list reciprocates.
 - Board ref: ask; leave blank if solo work.
 
@@ -30,7 +31,7 @@ Step 4 — editing guidance for later turns. When the user later works on the ta
 - appending to Notes (date each entry, `### YYYY-MM-DD`),
 - never rewriting existing sections.
 
-Status flips to done only when every Acceptance Criterion and every Definition of Done item is checked.
+Status flips to done only when every Acceptance Criterion and every Definition of Done item is checked. A checkbox is checked only after everything it names has actually happened — never in anticipation; split a bundled step (e.g. "open PR; merge on CI green") into separate items when its parts complete at different moments. A checked box claiming an unfinished step is a false record.
 </instructions>
 
 <template path="doc/tasks/NNNN-<slug>.md">
@@ -39,6 +40,7 @@ Status flips to done only when every Acceptance Criterion and every Definition o
 **Status:** `<proposed | in-progress | blocked | done>`
 **Created:** `<YYYY-MM-DD>`
 **Owner:** `<name or role>`
+**Execution:** `<AFK | HITL>`
 **Spec ref:** `<doc/specs/NNNN-<slug>.md or SPEC-NNNN — blank when no spec drives this task>`
 **Board ref:** `<external ticket URL or ID — blank for solo work>`
 

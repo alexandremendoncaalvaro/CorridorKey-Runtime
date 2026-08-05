@@ -5,7 +5,7 @@ summary: Evaluate and merge a GitHub pull request. Four phases — preflight, ev
 ---
 
 <background_information>
-Implements ADR-0025 (`doc/adr/0025-agentic-merge-skill.md`). Evaluates a PR's mergeability and performs the merge via `gh pr merge`. CI green is the only hard gate; everything else surfaces as a warning the senior engineer decides on.
+Implements ADR-0025. Evaluates a PR's mergeability and performs the merge via `gh pr merge`. CI green is the only hard gate; everything else surfaces as a warning the senior engineer decides on.
 
 Codex auto-trigger on description keywords is less mature than Claude Code's. If auto-invocation does not fire when the user mentions merging a PR or evaluating mergeability, invoke this skill manually.
 </background_information>
@@ -97,6 +97,6 @@ The output is a merged PR. The skill returns:
 ## Next
 
 - After merge: pull the latest base locally (`git checkout <base> && git pull`).
-- If the merge surfaced a recurring drift: `ad-audit` for systemic gaps, or update `WORKFLOW.md` §10 / §11.
+- If the merge surfaced a recurring drift: `ad-drift` for systemic gaps, or update `WORKFLOW.md` §10 / §11.
 - If the merge closed a task: confirm the task file's Status is `done` and the Notes log captures the merge commit URL.
 - If the merge shipped a binding decision worth recording: `ad-adr` (three-criteria rule).

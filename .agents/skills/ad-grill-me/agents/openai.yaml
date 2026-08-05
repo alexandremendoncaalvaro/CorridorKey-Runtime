@@ -1,5 +1,5 @@
 interface:
-  display_name: ad-grill
+  display_name: ad-grill-me
   short_description: Interview-before-research grilling per ADR-0022. One question at a time with recommendation, codebase-first, sharpens vocabulary against CONTEXT.md, captures terms via ad-domain and decisions via ad-adr (three-criteria rule). Upstream of ad-ground.
 policy:
   allow_implicit_invocation: false

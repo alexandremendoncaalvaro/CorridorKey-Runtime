@@ -5,13 +5,13 @@ summary: Lazy lifecycle owner of `CONTEXT.md` (Layer 2 — ubiquitous language p
 ---
 
 <background_information>
-Implements ADR-0019 (`doc/adr/0019-domain-language-layer.md`) — Layer 2 of the artifact stack. Lazy lifecycle owner of `CONTEXT.md`. Process scaffold for capturing the project's ubiquitous language.
+Implements ADR-0019 — Layer 2 of the artifact stack. Lazy lifecycle owner of `CONTEXT.md`. Process scaffold for capturing the project's ubiquitous language.
 
 The skill owns *capture* of vocabulary. The *trigger* for most updates lives in adjacent skills:
-- `ad-grill` resolves a term during interview → routes here.
+- `ad-grill-me` resolves a term during interview → routes here.
 - `ad-spec` introduces a new noun while drafting a spec → routes here.
 - `ad-architecture` names a domain-bound concept → routes here.
-- `ad-audit` detects code/glossary drift → routes here.
+- `ad-drift` detects code/glossary drift → routes here.
 - Direct `/ad-domain` invocation when the user wants to add a term explicitly.
 
 Codex auto-trigger on description keywords is less mature than Claude Code's. If auto-invocation does not fire when the user mentions a domain term, ubiquitous language, glossary, or naming drift, invoke this skill manually.
@@ -111,7 +111,7 @@ Step 4 — cross-reference adjacent layers. Per ADR-0019 §6 reciprocity rules:
 - Spec → Domain. If a spec under `doc/specs/` introduced this term without resolving it, the spec is now the term's first reference; consider updating spec prose to use the canonical noun.
 - ADR → Domain. If an ADR named the term, cite the ADR by number in the entry's prose.
 
-Cross-references are *suggestions*, not file edits — the skill does not modify specs or ADRs to chase drift. That work belongs to `ad-audit`.
+Cross-references are *suggestions*, not file edits — the skill does not modify specs or ADRs to chase drift. That work belongs to `ad-drift`.
 
 Step 5 — `AGENTS.md` pointer (one-time). When `CONTEXT.md` is created for the first time, the artifact stack reference in `AGENTS.md` should mention it. Per ADR-0019 §8, the `ad-bootstrap` skill inserts the pointer on its next run. This skill does not edit `AGENTS.md` directly; it announces the side-effect:
 
@@ -129,7 +129,7 @@ Then reports the change as a one-liner: file, term, section. No slash-command sp
 
 ## Next
 
-- After capture: route back to the calling skill (`ad-grill`, `ad-spec`, `ad-architecture`) to resume the original turn.
+- After capture: route back to the calling skill (`ad-grill-me`, `ad-spec`, `ad-architecture`) to resume the original turn.
 - If the resolution surfaced a binding decision (hard to reverse, surprising without context, real trade-off): `/ad-adr` to record it.
-- If the term is one of several pending resolutions: stay in `/ad-grill` to walk the next branch of the design tree.
-- For periodic drift sweeps: `/ad-audit` checks `CONTEXT.md` against current code.
+- If the term is one of several pending resolutions: stay in `/ad-grill-me` to walk the next branch of the decision tree.
+- For periodic drift sweeps: `/ad-drift` checks `CONTEXT.md` against current code.

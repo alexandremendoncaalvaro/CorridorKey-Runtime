@@ -1,5 +1,5 @@
 interface:
   display_name: ad-audit
-  short_description: Read-only drift report — compare AGENTS.md, ARCHITECTURE.md, and ADR statuses against the code.
+  short_description: Maximum-gate rules-anchored audit (Codex variant). Resolves the project's rule-set, walks every rule-group as a checklist with per-rule verdicts and a coverage matrix, gates teammate-visible claims on evidence, writes an audit trail to `.agentic/reviews/`, and ships an `audit-group-reviewer` subagent for user-initiated isolated + cross-model escalation. Never approves.
 policy:
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true

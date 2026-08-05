@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-rules
+  short_description: Load the host's global rules file (CLAUDE.md / AGENTS.md, symlinks resolved) and reinforce it by listing topics in the conversation, plus repo binding docs and kit rule-set layers by reference. Read-only.
+policy:
+  allow_implicit_invocation: false

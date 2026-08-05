@@ -1,5 +1,5 @@
 interface:
   display_name: ad-review
-  short_description: Single-session two-axis code review (Codex variant of WORKFLOW §10). Reads diff + binding docs (AGENTS / ARCHITECTURE / GUIDELINES / CONTEXT / ADRs) + originating spec, writes audit trail to `.agentic/reviews/`, then reports findings inline under `## Standards Findings` and `## Spec Findings`. No `/clear`, no skill-spawned subagent. Optional user-initiated subagent escalation documented for §10 ideal.
+  short_description: Single-session two-axis code review (Codex variant of WORKFLOW §10). Writes audit trail to `.agentic/reviews/`, reports findings inline by default, and ships a bundled `fresh-context-reviewer` subagent for explicit escalation.
 policy:
   allow_implicit_invocation: true

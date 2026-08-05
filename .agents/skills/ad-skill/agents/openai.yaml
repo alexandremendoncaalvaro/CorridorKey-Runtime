@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-skill
+  short_description: Draft a new Claude Code or Codex skill from a one-question-per-gap interview.
+policy:
+  allow_implicit_invocation: false
