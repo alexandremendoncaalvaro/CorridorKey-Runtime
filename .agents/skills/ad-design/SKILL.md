@@ -58,5 +58,5 @@ A single `DESIGN.md` at the repo root. YAML frontmatter uses W3C `$value`/`$type
 ## Next
 
 - `/ad-spec` for any feature whose scope touches the visual contract this document records.
-- `/ad-audit` (DESIGN.md drift category) periodically when tokens change in the source.
+- `/ad-drift` (DESIGN.md drift category) periodically when tokens change in the source.
 - `/ad-adr` for binding visual decisions worth recording as architectural commitments.

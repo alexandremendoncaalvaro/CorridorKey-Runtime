@@ -1,6 +1,6 @@
 ---
 name: ad-diagnose
-description: Disciplined diagnosis loop for hard bugs and performance regressions per WORKFLOW §15. Five phases — build a feedback loop, reproduce, hypothesise (3-5 ranked falsifiable), instrument, fix + regression-test. The feedback loop is the skill; everything else is mechanical. Triggers on "diagnose this", "debug this", "this is broken", "this is throwing", "performance regression", "find the bug", "build a repro", "feedback loop", "ranked hypotheses", "falsifiable", "/ad-diagnose". Routes to `ad-spike` when the technique is uncertain across approaches, `ad-grill` when the spec is unclear, `ad-tdg` when the bug is a clean ground-truth-pair regression.
+description: Disciplined diagnosis loop for hard bugs and performance regressions per WORKFLOW §15. Five phases — build a feedback loop, reproduce, hypothesise (3-5 ranked falsifiable), instrument, fix + regression-test. The feedback loop is the skill; everything else is mechanical. Triggers on "diagnose this", "debug this", "this is broken", "this is throwing", "performance regression", "find the bug", "build a repro", "feedback loop", "ranked hypotheses", "falsifiable", "/ad-diagnose". Routes to `ad-spike` when the technique is uncertain across approaches, `ad-grill-me` when the spec is unclear, `ad-tdg` when the bug is a clean ground-truth-pair regression.
 summary: Disciplined diagnosis loop for hard bugs and performance regressions per WORKFLOW §15. Five phases — build a feedback loop (the skill itself), reproduce, hypothesise (3-5 ranked falsifiable), instrument (one variable at a time), fix + regression-test.
 ---
 
@@ -23,7 +23,7 @@ Route elsewhere when:
 - The bug is one-line obvious (typo, off-by-one) — fix it directly.
 - The bug is a clean ground-truth-pair regression (test was passing, output unchanged, now failing) → `ad-tdg` (WORKFLOW §9).
 - The technique itself is uncertain across multiple plausible approaches → `ad-spike` (WORKFLOW §14).
-- The spec or expected behavior is unclear → `ad-grill`.
+- The spec or expected behavior is unclear → `ad-grill-me`.
 
 Phase 1 — build a feedback loop. **This is the skill. Everything else is mechanical.** A fast, deterministic, agent-runnable pass/fail signal for the bug is what enables every later phase. Without a loop, no amount of staring at code finds the cause.
 
@@ -128,5 +128,5 @@ Each session produces:
 - After fix + regression test land: `/ad-review main..HEAD` (or current scope) before merge — WORKFLOW §10.
 - If Phase 5 found no correct seam for the regression test and the profile is `team` / `mature`: `/ad-deepen` to surface the deepening opportunity that would create one. On `poc` / `solo`, capture the gap in the commit message and the task Notes — `ad-deepen` is not installed at those profiles.
 - If Phase 1 could not build a loop and the user provided a captured artifact: re-enter Phase 1 with the artifact as the loop seed.
-- If the bug turned out to be a vocabulary drift: `/ad-domain` to update `CONTEXT.md` and `/ad-audit` to scan for further drift.
+- If the bug turned out to be a vocabulary drift: `/ad-domain` to update `CONTEXT.md` and `/ad-drift` to scan for further drift.
 - If the bug is one of several in a related cluster: `/ad-task` to capture the cluster as a tracked task with this diagnose run cited in the Notes.

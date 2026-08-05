@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-drift
+  short_description: Read-only drift report — compare AGENTS.md, ARCHITECTURE.md, and ADR statuses against the code.
+policy:
+  allow_implicit_invocation: false

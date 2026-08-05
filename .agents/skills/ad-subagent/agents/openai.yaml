@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-subagent
+  short_description: Draft a new Codex custom subagent TOML file under .codex/agents/ or ~/.codex/agents/.
+policy:
+  allow_implicit_invocation: false

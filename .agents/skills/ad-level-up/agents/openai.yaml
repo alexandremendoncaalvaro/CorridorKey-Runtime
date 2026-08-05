@@ -1,0 +1,5 @@
+interface:
+  display_name: ad-level-up
+  short_description: Human-gated rule-set curation (Codex variant), companion to ad-audit. Runs four anti-overfitting gates + an effectiveness pass + an adversarial multi-lens review of each candidate, then presents a proposal and writes ONLY on explicit approval, one item at a time. Ships a rule-candidate-reviewer subagent for user-initiated lens escalation. Never writes unprompted.
+policy:
+  allow_implicit_invocation: false

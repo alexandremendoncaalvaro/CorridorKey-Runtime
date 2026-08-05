@@ -64,4 +64,4 @@ ADRs are decision-record artifacts and are exempt from the no-dates rule (Docume
 - Continue the work the ADR was scoped to support. Status starts `proposed`; the user flips to `accepted` after review (the agent does not).
 - If the ADR touches `ARCHITECTURE.md`'s Active ADRs list, add the entry there.
 - `/ad-task` for the work units that implement the decision.
-- `/ad-audit` periodically to confirm the decision still holds against the code.
+- `/ad-drift` periodically to confirm the decision still holds against the code.

@@ -92,4 +92,4 @@ A single `ARCHITECTURE.md` at the repo root. Every line locks a binding pattern.
 
 - `/ad-spec` when starting a feature whose scope spans the patterns this document records.
 - `/ad-adr` for any binding decision that surfaced while writing or auditing this file (one decision per ADR).
-- `/ad-audit` periodically to check pattern drift between this document and the code.
+- `/ad-drift` periodically to check pattern drift between this document and the code.

@@ -1,5 +1,5 @@
 interface:
   display_name: ad-deepen
-  short_description: Surface deepening opportunities using WORKFLOW §8 vocabulary (Module / Interface / Depth / Seam / Adapter / Leverage / Locality). Three phases — explore, present numbered candidates with deletion-test framing, grill the chosen one. Pairs with ad-audit. Implements ADR-0020. Profile-scoped to team and mature only.
+  short_description: Surface deepening opportunities using WORKFLOW §8 vocabulary (Module / Interface / Depth / Seam / Adapter / Leverage / Locality). Three phases — explore, present numbered candidates with deletion-test framing, grill the chosen one. Pairs with ad-drift. Implements ADR-0020. Profile-scoped to team and mature only.
 policy:
   allow_implicit_invocation: false

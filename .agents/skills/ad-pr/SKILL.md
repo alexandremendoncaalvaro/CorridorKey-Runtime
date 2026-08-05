@@ -5,7 +5,7 @@ summary: Open a GitHub pull request with a uniform body shape (Summary / Test pl
 ---
 
 <background_information>
-Implements ADR-0024 (`doc/adr/0024-agentic-pr-skill.md`). Opens a PR via `gh pr create` with a uniform body shape (Summary / Test plan / Links). Helper, not blocker — warnings surface but do not refuse when the user authorizes.
+Implements ADR-0024 and ADR-0032 (`doc/adr/0032-ci-failure-is-local-gate-gap.md`). Opens a PR via `gh pr create` with a uniform body shape (Summary / Test plan / Links). Helper posture on scope, links, and body drafting — warnings surface without refusing. Hard gate on local quality: the skill refuses to open a PR when pre-push / CI-mirror gates exit non-zero (WORKFLOW §11 — CI failure is a local gate gap). No `--no-verify` symmetric bypass; users who need to open a red draft invoke `gh pr create --draft` directly.
 
 Codex auto-trigger on description keywords is less mature than Claude Code's. If auto-invocation does not fire when the user mentions opening a PR or submitting changes for review, invoke this skill manually.
 </background_information>
@@ -44,6 +44,14 @@ gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
 ```
 
 Default to `main` if the call fails.
+
+Run local gates before opening the PR (WORKFLOW §11 — CI failure is a local gate gap). The gate check runs after `git push` has landed the branch (so the pre-push hook has already fired once) and before `gh pr create` — the goal is to catch the case where a developer skipped the pre-push hook, ran on a different matrix leg than CI, or wired the runner incompletely, and to refuse to open the PR against a red tree:
+1. Detect the pre-push tier — read `lefthook.yml`, `.husky/pre-push`, `.pre-commit-config.yaml` (pre-push stage), or `.git/hooks/pre-push`.
+2. Run the detected commands explicitly. If no hook runner is detected, fall back to reading `.github/workflows/*.yml` (or the detected CI surface) and run its test / lint / typecheck / build commands locally.
+3. Refuse on red. If any gate exits non-zero, surface: "Pre-push gate <name> failed: <output>. Fix locally before opening the PR — pushing red-CI diffs burns cloud minutes. Rerun ad-pr after fixing." Do not offer `--no-verify` or a bypass. WORKFLOW §11 binding.
+4. Warn on absent gates. If no hook runner and no CI config exist, surface: "No pre-push or CI config detected — opening PR without local gate check. Wire ad-hooks for coverage." Continue.
+
+Matrix awareness: if CI runs a multi-version matrix and local runs one version, note the gap but do not refuse — matrix mirroring belongs to ad-hooks. Refuse only on outright red.
 
 Phase 2 — scope assembly. Gather context:
 

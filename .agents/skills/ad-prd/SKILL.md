@@ -20,7 +20,7 @@ Route elsewhere when:
 - Scope is one feature → `ad-spec` (Layer 4).
 - Scope is a vocabulary question → `ad-domain` (Layer 2).
 - Scope is an architectural decision → `ad-adr`.
-- Scope is fuzzy and needs interview-before-research → `ad-grill`, which can route back here once the product framing is sharp.
+- Scope is fuzzy and needs interview-before-research → `ad-grill-me`, which can route back here once the product framing is sharp.
 
 A spike or PoC does not need a PRD — the skill is excluded from the `poc` profile. If the user is on `poc` profile and invokes `ad-prd`, ask explicitly whether the project has graduated to `solo` or `team` before writing.
 
@@ -37,9 +37,17 @@ Only after the scan produces no answer does the skill ask the user. Asking the u
 
 Step 2 — determine slug and target file. Single product (default): `doc/product/PRD.md`. Multi-product: ask whether this is a multi-product repo; if yes, file path is `doc/product/<product-slug>.md` and a `doc/product/PRODUCT-MAP.md` index lists each product. Slug: kebab-case, ≤4 words, derived from the product name.
 
-Status starts at `draft`. Created: today, ISO format. Owner: ask once — defaults to the repo's primary committer (from `git config user.name`) if unset.
+Status starts at `draft`. Created: today, ISO format. Updated: today, ISO format. Owner: ask once — defaults to the repo's primary committer (from `git config user.name`) if unset.
 
 Step 3 — interview to fill. Ask one question at a time, in this order. Skip questions whose answers are already obvious from the Step 1 scan; surface what the scan found and ask only for confirmation.
+
+If the product framing is vague ("improve efficiency", "build a dashboard", "use AI", "make it easier"), run a short sharpening pass before filling the PRD fields. Keep these as facilitation notes, not PRD sections:
+
+- Today statement. "Today, `<target user>` must `<painful workflow>` when `<trigger>`. They need a way to `<unmet need>`."
+- How Might We. Reframe the problem broad enough to allow multiple solutions, narrow enough to exclude generic improvement.
+- North Star. "Deploy `<what>` to change `<metric 1>` and `<metric 2>` so that `<ultimate outcome>`." Require baseline, target, and measurement source when available.
+
+If the user starts with a solution, validate it against the Today statement and North Star before accepting it into Roadmap. If it serves a different user, fails to move the named metrics, or prescribes implementation before the problem is clear, route back to `ad-grill-me`.
 
 - Product. Name and one-sentence positioning. *"X is a Y that does Z for W."*
 - Target User. Specific role / persona, not "developers" or "users". Cite the primary success-bearing user; secondary users go under Personas if they affect the product shape.
@@ -68,7 +76,7 @@ Step 6 — editing guidance for later turns. When the user later works on the PR
 - Add Roadmap lines as the product grows; mark superseded roadmap items with a strikethrough and a one-line note, do not delete them.
 - Add Related → Specs entries as `ad-spec` runs reference this PRD.
 
-Never rewrite existing prose — append rationale to Open Questions as a resolution paragraph rather than mutating the original requirement text. Append-only Notes discipline.
+Never rewrite existing prose — append rationale to Open Questions as a resolution paragraph rather than mutating the original requirement text. Open Questions is the append-only resolution surface.
 </instructions>
 
 <output_contract>
@@ -77,5 +85,5 @@ Never rewrite existing prose — append rationale to Open Questions as a resolut
 - Status starts `draft`; never flipped to `accepted` by the skill.
 - No dates inside narrative prose; the `Created` and `Updated` lifecycle fields are decision-record primitives, exempt from the no-dates rule.
 
-After writing the PRD: route to `ad-spec` for each `MVP` roadmap item. When the PRD surfaces an architectural commitment, route to `ad-adr`. When a roadmap item is technique-uncertain, route to `ad-spike` (WORKFLOW §14). When the PRD framing is fuzzy, route to `ad-grill` to sharpen and return. Periodic drift check: `ad-audit` flags feature specs whose target user or success metrics contradict the PRD.
+After writing the PRD: route to `ad-spec` for each `MVP` roadmap item. When the PRD surfaces an architectural commitment, route to `ad-adr`. When a roadmap item is technique-uncertain, route to `ad-spike` (WORKFLOW §14). When the PRD framing is fuzzy, route to `ad-grill-me` to sharpen and return. Periodic drift check: `ad-drift` flags feature specs whose target user or success metrics contradict the PRD.
 </output_contract>
